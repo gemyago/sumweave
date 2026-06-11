@@ -1,0 +1,31 @@
+.go/
+go/
+bin
+tmp
+.DS_Store
+.cover
+*test.log
+.venv
+tmp
+/data
+*.log
+
+# User configs
+**/internal/config/*-user.yaml
+
+# Want to figure-out how to make it nice and not bloat the repo
+# Ignoring for now.
+.cursor
+.opencode
+.codex
+
+# Node stuff
+node_modules
+
+
+.nx/cache
+.nx/workspace-data
+.cache/
+
+# Local ACP probe outputs (generated on demand, not committed)
+docs/implementation/opencode-acp-transcripts/*.jsonl
