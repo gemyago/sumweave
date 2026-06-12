@@ -73,6 +73,7 @@ The rules are:
 - OpenAPI JSON uses camelCase for property names or any other identifiers or keys; regenerate after spec edits.
 - Tests: Mock for [ProvidersConfigService](./agent/) is generated in [agent/mocks_providers_config.go](./agent/mocks_providers_config.go) (`//go:build !release`) so packages outside `agent` (e.g. `httpapi` tests) can use `agent.NewMockProvidersConfigService`; regenerate with `go run github.com/vektra/mockery/v3` from the `runtime/` module root.
 - Tests: Gorm models should always have explicit column names; we do not relay on gorm conventions.
+- Live-tagged venue smokes compile in regular checks via `make test-live-compile`; run them manually with `make test-live`.
 
 ## Task Completion Protocol
 

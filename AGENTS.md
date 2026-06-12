@@ -105,6 +105,7 @@ The rules are:
 - Natural-language approval completes OpenSpec review by default.
 - OpenSpec gates pass only with a clean relevant git status.
 - Archive OpenSpec changes before any final submission step.
+- Use `make test-live-compile` for regular live-lane build coverage.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

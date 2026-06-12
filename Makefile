@@ -75,6 +75,14 @@ lint:
 clean-lint-cache:
 	rm -r -f .cache/golangci-lint
 
+.PHONY: test-live-compile
+test-live-compile:
+	$(MAKE) -C runtime test-live-compile
+
+.PHONY: test-live
+test-live:
+	$(MAKE) -C runtime test-live
+
 # We will need to rework coverage collection once we have more than one module.
 .PHONY: test
 test: $(cover_dir)
