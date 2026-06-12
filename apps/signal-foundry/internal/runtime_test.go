@@ -26,7 +26,6 @@ func TestNewRuntime(t *testing.T) {
 	makeDeps := func(t *testing.T) RuntimeDeps {
 		t.Helper()
 		dataDir := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "agent-temp"), 0o700))
 		tablePrefix := strings.ReplaceAll("data_"+fake.Lorem().Word(), "-", "_") + "_"
 		dataLayerDSN := filepath.Join(t.TempDir(), fake.Lorem().Word()+".db")
 		dataStore, err := data.NewDatabaseStore(dataLayerDSN, data.DatabaseStoreOpts{
@@ -101,6 +100,22 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
 		assert.NotNil(t, runtime.HTTPHandler)
+	})
+
+	t.Run("creates missing workspacefs agent temp directory", func(t *testing.T) {
+		deps := makeDeps(t)
+		agentTempDir := filepath.Join(deps.DataDir, "agent-temp")
+
+		_, statErr := os.Stat(agentTempDir)
+		require.ErrorIs(t, statErr, os.ErrNotExist)
+
+		runtime, err := newRuntime(deps)
+		require.NoError(t, err)
+		require.NotNil(t, runtime)
+
+		info, statErr := os.Stat(agentTempDir)
+		require.NoError(t, statErr)
+		assert.True(t, info.IsDir())
 	})
 
 	t.Run("database storage - creates runtime with database backend and migrates profiles", func(t *testing.T) {

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
@@ -158,15 +160,18 @@ func registerRuntime(container *dig.Container) error {
 	)
 }
 
-func newRuntime(deps RuntimeDeps) (*Runtime, error) {
-	toolsRegistry := deps.ToolsRegistry
+func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOpt, error) {
+	agentTempDir := filepath.Join(deps.DataDir, "agent-temp")
+	if err := os.MkdirAll(agentTempDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create workspacefs agent temp directory: %w", err)
+	}
 
 	registerOpts := []workspacefs.RegisterToolsOpt{
 		workspacefs.WithWorkspaces([]workspacefs.WorkspaceConfig{
 			{
 				Identifier:  "agent-temp",
 				Description: "Agent can store temporary files here",
-				Path:        fmt.Sprintf("%s/agent-temp", deps.DataDir),
+				Path:        agentTempDir,
 			},
 		}),
 		workspacefs.WithLogger(deps.RootLogger),
@@ -179,8 +184,18 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 		}))
 	}
 
-	if err := workspacefs.RegisterTools(toolsRegistry, registerOpts...); err != nil {
-		return nil, fmt.Errorf("register workspacefs tools: %w", err)
+	return registerOpts, nil
+}
+
+func newRuntime(deps RuntimeDeps) (*Runtime, error) {
+	toolsRegistry := deps.ToolsRegistry
+	registerOpts, err := workspacefsRegisterOptions(deps)
+	if err != nil {
+		return nil, err
+	}
+
+	if registerErr := workspacefs.RegisterTools(toolsRegistry, registerOpts...); registerErr != nil {
+		return nil, fmt.Errorf("register workspacefs tools: %w", registerErr)
 	}
 
 	services, err := newRuntimeServices(deps)

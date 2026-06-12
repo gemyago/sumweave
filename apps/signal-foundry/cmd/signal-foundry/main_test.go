@@ -30,6 +30,7 @@ func TestMain(t *testing.T) {
 	fake := faker.New()
 	t.Run("start", func(t *testing.T) {
 		t.Run("should initialize app", func(t *testing.T) {
+			t.Setenv("APP_DATADIR", filepath.Join(t.TempDir(), "data"))
 			rootCmd := setupCommands()
 			rootCmd.SetArgs([]string{"start", "-e", "test", "--noop", "--logs-file", testLogFile(t)})
 			require.NoError(t, rootCmd.Execute())
