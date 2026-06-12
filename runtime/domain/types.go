@@ -90,6 +90,54 @@ type Trade struct {
 	Provenance SourceProvenance
 }
 
+// IndicatorKind identifies a supported deterministic analytics calculation.
+type IndicatorKind string
+
+const (
+	IndicatorKindMovingAverage IndicatorKind = "moving-average"
+	IndicatorKindPeriodReturn  IndicatorKind = "period-return"
+)
+
+// IndicatorParams holds canonical parameters for a supported indicator.
+type IndicatorParams struct {
+	Window   int
+	Lookback int
+}
+
+// AnalyticsSeriesIdentity identifies a canonical analytics series.
+type AnalyticsSeriesIdentity struct {
+	Instrument Instrument
+	Timeframe  Timeframe
+	Kind       IndicatorKind
+	Parameters IndicatorParams
+	TimeRange  TimeRange
+}
+
+// AnalyticsSeries holds a canonical analytics output series.
+type AnalyticsSeries struct {
+	Identity AnalyticsSeriesIdentity
+	Points   []AnalyticsPoint
+}
+
+// AnalyticsPointTime identifies a canonical analytics point timestamp.
+type AnalyticsPointTime time.Time
+
+// AnalyticsValueRange describes the half-open candle interval behind a point.
+type AnalyticsValueRange struct {
+	Start time.Time
+	End   time.Time
+}
+
+// AnalyticsPoint is a canonical analytics value derived from replay inputs.
+type AnalyticsPoint struct {
+	Time                 AnalyticsPointTime
+	ValueRange           AnalyticsValueRange
+	Value                float64
+	Quality              DataQuality
+	SourceReplayIdentity uint64
+	SourceProvenance     SourceProvenance
+}
+
 // InstrumentParams holds inputs for constructing a canonical instrument.
 type InstrumentParams struct {
 	Venue      Venue
@@ -120,6 +168,31 @@ type TradeParams struct {
 	Size       float64
 	Quality    DataQuality
 	Provenance SourceProvenance
+}
+
+// AnalyticsSeriesIdentityParams holds inputs for a series identity.
+type AnalyticsSeriesIdentityParams struct {
+	Instrument Instrument
+	Timeframe  Timeframe
+	Kind       IndicatorKind
+	Parameters IndicatorParams
+	TimeRange  TimeRange
+}
+
+// AnalyticsPointParams holds inputs for a canonical analytics point.
+type AnalyticsPointParams struct {
+	Time                 time.Time
+	ValueRange           AnalyticsValueRange
+	Value                float64
+	Quality              DataQuality
+	SourceReplayIdentity uint64
+	SourceProvenance     SourceProvenance
+}
+
+// AnalyticsSeriesParams holds inputs for a canonical analytics series.
+type AnalyticsSeriesParams struct {
+	Identity AnalyticsSeriesIdentity
+	Points   []AnalyticsPoint
 }
 
 // NewVenue validates and canonicalizes a venue identifier.
@@ -172,6 +245,16 @@ func NewDataQuality(value string) (DataQuality, error) {
 	return normalized, nil
 }
 
+// NewIndicatorKind validates and canonicalizes an indicator kind.
+func NewIndicatorKind(value string) (IndicatorKind, error) {
+	normalized := IndicatorKind(strings.ToLower(strings.TrimSpace(value)))
+	if !normalized.isValid() {
+		return "", fmt.Errorf("invalid indicator kind %q", value)
+	}
+
+	return normalized, nil
+}
+
 // NewInstrument validates and canonicalizes a canonical instrument record.
 func NewInstrument(params InstrumentParams) (Instrument, error) {
 	if params.Venue == "" {
@@ -218,6 +301,180 @@ func NewTimeRange(start, end time.Time) (TimeRange, error) {
 	return TimeRange{
 		Start: normalizedStart,
 		End:   normalizedEnd,
+	}, nil
+}
+
+// NewIndicatorParams validates and canonicalizes supported indicator parameters.
+func NewIndicatorParams(kind IndicatorKind, params IndicatorParams) (IndicatorParams, error) {
+	switch kind {
+	case IndicatorKindMovingAverage:
+		if params.Window <= 0 {
+			return IndicatorParams{}, errors.New("moving average window must be positive")
+		}
+		if params.Lookback != 0 {
+			return IndicatorParams{}, errors.New("moving average lookback must be zero")
+		}
+	case IndicatorKindPeriodReturn:
+		if params.Lookback <= 0 {
+			return IndicatorParams{}, errors.New("period return lookback must be positive")
+		}
+		if params.Window != 0 {
+			return IndicatorParams{}, errors.New("period return window must be zero")
+		}
+	default:
+		return IndicatorParams{}, errors.New("indicator kind is required")
+	}
+
+	return params, nil
+}
+
+// NewAnalyticsSeriesIdentity validates and canonicalizes a series identity.
+func NewAnalyticsSeriesIdentity(params AnalyticsSeriesIdentityParams) (AnalyticsSeriesIdentity, error) {
+	normalizedVenue, err := NewVenue(params.Instrument.Venue.String())
+	if err != nil {
+		return AnalyticsSeriesIdentity{}, errors.New("analytics instrument venue is required")
+	}
+
+	normalizedSymbol, err := NewSymbol(params.Instrument.Symbol.String())
+	if err != nil {
+		return AnalyticsSeriesIdentity{}, errors.New("analytics instrument symbol is required")
+	}
+
+	normalizedAssetClass, err := NewAssetClass(params.Instrument.AssetClass.String())
+	if err != nil {
+		return AnalyticsSeriesIdentity{}, fmt.Errorf("analytics instrument asset class: %w", err)
+	}
+
+	normalizedInstrument, err := NewInstrument(InstrumentParams{
+		Venue:      normalizedVenue,
+		Symbol:     normalizedSymbol,
+		AssetClass: normalizedAssetClass,
+		Active:     params.Instrument.Active,
+	})
+	if err != nil {
+		return AnalyticsSeriesIdentity{}, fmt.Errorf("analytics instrument: %w", err)
+	}
+
+	normalizedTimeframe, err := NewTimeframe(params.Timeframe.String())
+	if err != nil {
+		return AnalyticsSeriesIdentity{}, errors.New("analytics timeframe is required")
+	}
+
+	normalizedKind, err := NewIndicatorKind(params.Kind.String())
+	if err != nil {
+		return AnalyticsSeriesIdentity{}, errors.New("analytics indicator kind is required")
+	}
+
+	normalizedParams, err := NewIndicatorParams(normalizedKind, params.Parameters)
+	if err != nil {
+		return AnalyticsSeriesIdentity{}, err
+	}
+
+	normalizedRange, err := NewTimeRange(params.TimeRange.Start, params.TimeRange.End)
+	if err != nil {
+		return AnalyticsSeriesIdentity{}, fmt.Errorf("analytics time range: %w", err)
+	}
+
+	return AnalyticsSeriesIdentity{
+		Instrument: normalizedInstrument,
+		Timeframe:  normalizedTimeframe,
+		Kind:       normalizedKind,
+		Parameters: normalizedParams,
+		TimeRange:  normalizedRange,
+	}, nil
+}
+
+// NewAnalyticsPointTime validates and canonicalizes a point timestamp.
+func NewAnalyticsPointTime(value time.Time) (AnalyticsPointTime, error) {
+	if value.IsZero() {
+		return AnalyticsPointTime{}, errors.New("analytics point time is required")
+	}
+
+	return AnalyticsPointTime(canonicalUTC(value)), nil
+}
+
+// NewAnalyticsValueRange validates and canonicalizes a point value range.
+func NewAnalyticsValueRange(start, end time.Time) (AnalyticsValueRange, error) {
+	normalizedRange, err := NewTimeRange(start, end)
+	if err != nil {
+		return AnalyticsValueRange{}, fmt.Errorf("analytics value range: %w", err)
+	}
+
+	return AnalyticsValueRange(normalizedRange), nil
+}
+
+// NewAnalyticsPoint validates and canonicalizes a canonical analytics point.
+func NewAnalyticsPoint(params AnalyticsPointParams) (AnalyticsPoint, error) {
+	normalizedTime, err := NewAnalyticsPointTime(params.Time)
+	if err != nil {
+		return AnalyticsPoint{}, err
+	}
+
+	normalizedRange, err := NewAnalyticsValueRange(params.ValueRange.Start, params.ValueRange.End)
+	if err != nil {
+		return AnalyticsPoint{}, err
+	}
+
+	if !params.Quality.isValid() {
+		return AnalyticsPoint{}, errors.New("analytics point quality is required")
+	}
+	if params.SourceReplayIdentity == 0 {
+		return AnalyticsPoint{}, errors.New("analytics point source replay identity is required")
+	}
+
+	normalizedSource := strings.TrimSpace(params.SourceProvenance.Source)
+	if normalizedSource == "" {
+		return AnalyticsPoint{}, errors.New("analytics point provenance is required")
+	}
+	normalizedRecordID := strings.TrimSpace(params.SourceProvenance.RecordID)
+	if normalizedRecordID == "" {
+		return AnalyticsPoint{}, errors.New("analytics point provenance record id is required")
+	}
+
+	return AnalyticsPoint{
+		Time:                 normalizedTime,
+		ValueRange:           normalizedRange,
+		Value:                params.Value,
+		Quality:              params.Quality,
+		SourceReplayIdentity: params.SourceReplayIdentity,
+		SourceProvenance: SourceProvenance{
+			Source:   normalizedSource,
+			RecordID: normalizedRecordID,
+		},
+	}, nil
+}
+
+// NewAnalyticsSeries validates a canonical analytics series and point ordering.
+func NewAnalyticsSeries(params AnalyticsSeriesParams) (AnalyticsSeries, error) {
+	identity, err := NewAnalyticsSeriesIdentity(AnalyticsSeriesIdentityParams(params.Identity))
+	if err != nil {
+		return AnalyticsSeries{}, err
+	}
+
+	points := make([]AnalyticsPoint, len(params.Points))
+	for idx, point := range params.Points {
+		normalizedPoint, pointErr := NewAnalyticsPoint(AnalyticsPointParams{
+			Time:                 point.Time.Time(),
+			ValueRange:           point.ValueRange,
+			Value:                point.Value,
+			Quality:              point.Quality,
+			SourceReplayIdentity: point.SourceReplayIdentity,
+			SourceProvenance:     point.SourceProvenance,
+		})
+		if pointErr != nil {
+			return AnalyticsSeries{}, fmt.Errorf("analytics point %d: %w", idx, pointErr)
+		}
+
+		if idx > 0 && compareAnalyticsPointOrder(points[idx-1], normalizedPoint) > 0 {
+			return AnalyticsSeries{}, errors.New("analytics points must be ordered by point time and source identity")
+		}
+
+		points[idx] = normalizedPoint
+	}
+
+	return AnalyticsSeries{
+		Identity: identity,
+		Points:   points,
 	}, nil
 }
 
@@ -300,6 +557,35 @@ func (a AssetClass) isValid() bool {
 	}
 }
 
+func (k IndicatorKind) isValid() bool {
+	switch k {
+	case IndicatorKindMovingAverage, IndicatorKindPeriodReturn:
+		return true
+	default:
+		return false
+	}
+}
+
+func compareAnalyticsPointOrder(left, right AnalyticsPoint) int {
+	leftTime := left.Time.Time()
+	rightTime := right.Time.Time()
+	if leftTime.Before(rightTime) {
+		return -1
+	}
+	if leftTime.After(rightTime) {
+		return 1
+	}
+
+	if left.SourceReplayIdentity < right.SourceReplayIdentity {
+		return -1
+	}
+	if left.SourceReplayIdentity > right.SourceReplayIdentity {
+		return 1
+	}
+
+	return 0
+}
+
 func (v Venue) String() string {
 	return string(v)
 }
@@ -318,6 +604,15 @@ func (t Timeframe) String() string {
 
 func (q DataQuality) String() string {
 	return string(q)
+}
+
+func (k IndicatorKind) String() string {
+	return string(k)
+}
+
+// Time returns the time value for a canonical analytics point timestamp.
+func (t AnalyticsPointTime) Time() time.Time {
+	return time.Time(t)
 }
 
 func (t Timeframe) isValid() bool {

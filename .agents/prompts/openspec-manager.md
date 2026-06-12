@@ -121,6 +121,7 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 ### You must do
 
 - Use sub-agents for task-specific planning, implementation, fixing, comment-addressing, and review work.
+- Start sub-agents with fresh context - that's a **hard rule**. Forking is forbidden if your environment supports it.
 - Coordinate the phases in order.
 - Keep a TODO list for the current phase.
 - Keep `manager-status.md` current once the OpenSpec directory is known.
@@ -133,18 +134,20 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Pass relevant `AGENTS.md` constraints and artifact rules to every sub-agent.
 - Verify the git state yourself at every clean gate; untracked files count as pending changes.
 
-### You must not do
+### You must NOT do
 
-- Do task-specific planning yourself.
+- Do task-specific planning yourself, even if initial task seems unclear to you. This is a job of the planning sub-agent.
 - Implement the requested change yourself.
 - Run `/opsx-propose` or `/opsx-apply` yourself.
 - Perform task-specific code review yourself.
 - Skip or merge phases.
+- Invent additional phases, steps or random sub-agents.
 - Invent missing outputs.
 - Invent user intent that was not actually expressed.
 - Continue if a gate is missing a required verdict, completion protocol status, artifact cleanup status, or commit status.
 - Continue if `git status --short` still shows relevant tracked or untracked changes after a supposedly clean commit gate.
 - Allow ad-hoc journey files, scratch notes, or random investigation summaries to remain in the repository.
+- If your environment allows, fork sub-agents to inherit the context.
 
 ### You may do directly
 
@@ -152,16 +155,14 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Read `AGENTS.md` files and prompt configuration.
 - Decide which component instructions apply.
 - Create or update `manager-status.md` and review log files.
-- Spawn, retry, message, wait for, and coordinate sub-agents.
+- Spawn, retry, message, wait for, and coordinate sub-agents
+- Always start sub-agents with fresh context, do not fork the context if your environment allows.
 - Summarize sub-agent outputs for the user.
 - Archive the OpenSpec change/spec after the user confirms the workflow is complete.
 - Handle final commit or PR submission only after archive, and by default continue to submission after user approval unless the user explicitly says to stop before submission.
 
 ## Repository constraints to pass down
 
-- For `apps/crossdesk/` or Swift code: never run multiple coding sub-agents in parallel.
-- For `apps/sales-funnel/`: enforce website `AGENTS.md` constraints, especially browser verification requirements.
-- For `deploy/terraform/`: do not apply infrastructure changes without explicit user confirmation.
 - Prefer the nearest relevant `AGENTS.md` for the affected area.
 - Keep changes simple. Do not future-proof without an explicit task requirement.
 

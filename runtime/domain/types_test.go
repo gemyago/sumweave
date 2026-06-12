@@ -54,6 +54,43 @@ func TestDomain(t *testing.T) {
 		DataQualityValidated,
 		DataQualitySuspect,
 	}
+	validIndicatorKinds := []IndicatorKind{
+		IndicatorKindMovingAverage,
+		IndicatorKindPeriodReturn,
+	}
+
+	randomInstrument := func(t *testing.T) Instrument {
+		t.Helper()
+
+		venue, err := NewVenue(randomWord("venue"))
+		require.NoError(t, err)
+
+		symbol, err := NewSymbol(strings.ToUpper(randomWord("symbol")))
+		require.NoError(t, err)
+
+		instrument, err := NewInstrument(InstrumentParams{
+			Venue:      venue,
+			Symbol:     symbol,
+			AssetClass: validAssetClasses[fake.IntBetween(0, len(validAssetClasses)-1)],
+			Active:     fake.Bool(),
+		})
+		require.NoError(t, err)
+
+		return instrument
+	}
+
+	randomProvenance := func(t *testing.T) SourceProvenance {
+		t.Helper()
+
+		provenance, err := NewSourceProvenance(randomWord("source"), "  "+randomWord("record")+"  ")
+		require.NoError(t, err)
+
+		return provenance
+	}
+
+	randomReplayIdentity := func() uint64 {
+		return uint64(fake.IntBetween(1, 1_000_000))
+	}
 
 	t.Run("constructors validate canonical strings and enums", func(t *testing.T) {
 		t.Parallel()
@@ -90,11 +127,20 @@ func TestDomain(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, strings.ToLower(strings.TrimSpace(qualityText)), quality.String())
 
+		indicatorKindText := "  " + strings.ToUpper(
+			validIndicatorKinds[fake.IntBetween(0, len(validIndicatorKinds)-1)].String(),
+		) + "  "
+		indicatorKind, err := NewIndicatorKind(indicatorKindText)
+		require.NoError(t, err)
+		require.Equal(t, strings.ToLower(strings.TrimSpace(indicatorKindText)), indicatorKind.String())
+
 		_, err = NewAssetClass(randomWord("bad-asset-class"))
 		require.Error(t, err)
 		_, err = NewTimeframe(randomWord("bad-timeframe"))
 		require.Error(t, err)
 		_, err = NewDataQuality(randomWord("bad-quality"))
+		require.Error(t, err)
+		_, err = NewIndicatorKind(randomWord("bad-indicator-kind"))
 		require.Error(t, err)
 	})
 
@@ -202,6 +248,12 @@ func TestDomain(t *testing.T) {
 			reflect.TypeFor[TimeRange](),
 			reflect.TypeFor[Candle](),
 			reflect.TypeFor[Trade](),
+			reflect.TypeFor[IndicatorParams](),
+			reflect.TypeFor[AnalyticsSeriesIdentity](),
+			reflect.TypeFor[AnalyticsSeries](),
+			reflect.TypeFor[AnalyticsPointTime](),
+			reflect.TypeFor[AnalyticsValueRange](),
+			reflect.TypeFor[AnalyticsPoint](),
 		}
 
 		for _, typ := range structTypes {
@@ -218,5 +270,316 @@ func TestDomain(t *testing.T) {
 				require.False(t, forbidden, "%s.%s should not carry persistence-only fields", typ.Name(), field.Name)
 			}
 		}
+	})
+
+	t.Run("analytics identity canonicalizes embedded instrument and UTC timestamps", func(t *testing.T) {
+		t.Parallel()
+
+		start := randomLocationTime()
+		end := start.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+		venueText := "  " + randomWord("venue") + "  "
+		symbolText := "  " + strings.ToUpper(randomWord("symbol")) + "  "
+		timeframeText := "  " + strings.ToUpper(
+			validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)].String(),
+		) + "  "
+		kindText := "  " + strings.ToUpper(
+			validIndicatorKinds[fake.IntBetween(0, len(validIndicatorKinds)-1)].String(),
+		) + "  "
+		assetClassText := "  " + strings.ToUpper(
+			validAssetClasses[fake.IntBetween(0, len(validAssetClasses)-1)].String(),
+		) + "  "
+		active := fake.Bool()
+		kind, err := NewIndicatorKind(kindText)
+		require.NoError(t, err)
+
+		params := IndicatorParams{}
+		switch kind {
+		case IndicatorKindMovingAverage:
+			params.Window = fake.IntBetween(1, 64)
+		case IndicatorKindPeriodReturn:
+			params.Lookback = fake.IntBetween(1, 64)
+		}
+
+		identity, err := NewAnalyticsSeriesIdentity(AnalyticsSeriesIdentityParams{
+			Instrument: Instrument{
+				Venue:      Venue(venueText),
+				Symbol:     Symbol(symbolText),
+				AssetClass: AssetClass(assetClassText),
+				Active:     active,
+			},
+			Timeframe:  Timeframe(timeframeText),
+			Kind:       IndicatorKind(kindText),
+			Parameters: params,
+			TimeRange: TimeRange{
+				Start: start,
+				End:   end,
+			},
+		})
+		require.NoError(t, err)
+
+		expectedVenue, err := NewVenue(venueText)
+		require.NoError(t, err)
+		expectedSymbol, err := NewSymbol(symbolText)
+		require.NoError(t, err)
+		expectedAssetClass, err := NewAssetClass(assetClassText)
+		require.NoError(t, err)
+		expectedInstrument, err := NewInstrument(InstrumentParams{
+			Venue:      expectedVenue,
+			Symbol:     expectedSymbol,
+			AssetClass: expectedAssetClass,
+			Active:     active,
+		})
+		require.NoError(t, err)
+		expectedTimeframe, err := NewTimeframe(timeframeText)
+		require.NoError(t, err)
+
+		require.Equal(t, expectedInstrument, identity.Instrument)
+		require.Equal(t, expectedTimeframe, identity.Timeframe)
+		require.Equal(t, kind, identity.Kind)
+		require.Equal(t, time.UTC, identity.TimeRange.Start.Location())
+		require.Equal(t, time.UTC, identity.TimeRange.End.Location())
+		require.Equal(t, start.UTC(), identity.TimeRange.Start)
+		require.Equal(t, end.UTC(), identity.TimeRange.End)
+		require.Equal(t, params, identity.Parameters)
+	})
+
+	t.Run("analytics identity rejects invalid embedded instrument asset class", func(t *testing.T) {
+		t.Parallel()
+
+		start := randomLocationTime()
+		end := start.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+
+		_, err := NewAnalyticsSeriesIdentity(AnalyticsSeriesIdentityParams{
+			Instrument: Instrument{
+				Venue:      Venue(randomWord("venue")),
+				Symbol:     Symbol(strings.ToUpper(randomWord("symbol"))),
+				AssetClass: AssetClass("  " + randomWord("bad-asset-class") + "  "),
+				Active:     fake.Bool(),
+			},
+			Timeframe:  Timeframe1m,
+			Kind:       IndicatorKindMovingAverage,
+			Parameters: IndicatorParams{Window: fake.IntBetween(1, 64)},
+			TimeRange: TimeRange{
+				Start: start,
+				End:   end,
+			},
+		})
+		require.Error(t, err)
+		require.ErrorContains(t, err, "asset class")
+	})
+
+	t.Run("indicator parameter validation is kind specific", func(t *testing.T) {
+		t.Parallel()
+
+		window := fake.IntBetween(1, 64)
+		lookback := fake.IntBetween(1, 64)
+
+		movingAverageParams, err := NewIndicatorParams(IndicatorKindMovingAverage, IndicatorParams{
+			Window: window,
+		})
+		require.NoError(t, err)
+		require.Equal(t, IndicatorParams{Window: window}, movingAverageParams)
+
+		periodReturnParams, err := NewIndicatorParams(IndicatorKindPeriodReturn, IndicatorParams{
+			Lookback: lookback,
+		})
+		require.NoError(t, err)
+		require.Equal(t, IndicatorParams{Lookback: lookback}, periodReturnParams)
+
+		_, err = NewIndicatorParams(IndicatorKindMovingAverage, IndicatorParams{})
+		require.Error(t, err)
+		_, err = NewIndicatorParams(IndicatorKindMovingAverage, IndicatorParams{
+			Window:   window,
+			Lookback: 1,
+		})
+		require.Error(t, err)
+		_, err = NewIndicatorParams(IndicatorKindPeriodReturn, IndicatorParams{})
+		require.Error(t, err)
+		_, err = NewIndicatorParams(IndicatorKindPeriodReturn, IndicatorParams{
+			Window:   1,
+			Lookback: lookback,
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("analytics points canonicalize UTC value ranges and times", func(t *testing.T) {
+		t.Parallel()
+
+		start := randomLocationTime()
+		end := start.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+		pointTime := end.Add(time.Duration(fake.IntBetween(0, 10)) * time.Minute)
+		provenance := randomProvenance(t)
+		quality := validQualities[fake.IntBetween(0, len(validQualities)-1)]
+
+		point, err := NewAnalyticsPoint(AnalyticsPointParams{
+			Time: pointTime,
+			ValueRange: AnalyticsValueRange{
+				Start: start,
+				End:   end,
+			},
+			Value:                fake.Float64(4, 1, 99999),
+			Quality:              quality,
+			SourceReplayIdentity: randomReplayIdentity(),
+			SourceProvenance:     provenance,
+		})
+		require.NoError(t, err)
+
+		require.Equal(t, pointTime.UTC(), point.Time.Time())
+		require.Equal(t, time.UTC, point.Time.Time().Location())
+		require.Equal(t, start.UTC(), point.ValueRange.Start)
+		require.Equal(t, end.UTC(), point.ValueRange.End)
+		require.Equal(t, time.UTC, point.ValueRange.Start.Location())
+		require.Equal(t, time.UTC, point.ValueRange.End.Location())
+		require.NotZero(t, point.SourceReplayIdentity)
+		require.Equal(t, provenance.Source, point.SourceProvenance.Source)
+		require.Equal(t, strings.TrimSpace(provenance.RecordID), point.SourceProvenance.RecordID)
+	})
+
+	t.Run("analytics points reject whitespace-only provenance source after trimming", func(t *testing.T) {
+		t.Parallel()
+
+		start := randomLocationTime()
+		end := start.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+		pointTime := end.Add(time.Duration(fake.IntBetween(0, 10)) * time.Minute)
+
+		_, err := NewAnalyticsPoint(AnalyticsPointParams{
+			Time:                 pointTime,
+			ValueRange:           AnalyticsValueRange{Start: start, End: end},
+			Value:                fake.Float64(4, 1, 99999),
+			Quality:              validQualities[fake.IntBetween(0, len(validQualities)-1)],
+			SourceReplayIdentity: randomReplayIdentity(),
+			SourceProvenance: SourceProvenance{
+				Source:   " \t\n ",
+				RecordID: randomWord("record"),
+			},
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("analytics series requires point ordering by time then source identity", func(t *testing.T) {
+		t.Parallel()
+
+		start := randomLocationTime()
+		end := start.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+		window := fake.IntBetween(1, 64)
+		identity, err := NewAnalyticsSeriesIdentity(AnalyticsSeriesIdentityParams{
+			Instrument: randomInstrument(t),
+			Timeframe:  validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)],
+			Kind:       IndicatorKindMovingAverage,
+			Parameters: IndicatorParams{Window: window},
+			TimeRange: TimeRange{
+				Start: start,
+				End:   end,
+			},
+		})
+		require.NoError(t, err)
+
+		sharedPointTime := end.Add(time.Duration(fake.IntBetween(1, 10)) * time.Minute)
+		valueRange, err := NewAnalyticsValueRange(start, end)
+		require.NoError(t, err)
+
+		firstPoint, err := NewAnalyticsPoint(AnalyticsPointParams{
+			Time:                 sharedPointTime,
+			ValueRange:           valueRange,
+			Value:                fake.Float64(4, 1, 99999),
+			Quality:              DataQualityValidated,
+			SourceReplayIdentity: randomReplayIdentity(),
+			SourceProvenance: SourceProvenance{
+				Source:   randomWord("source-z"),
+				RecordID: "z-" + randomWord("record"),
+			},
+		})
+		require.NoError(t, err)
+
+		secondReplayIdentity := firstPoint.SourceReplayIdentity + uint64(fake.IntBetween(1, 100))
+		secondPoint, err := NewAnalyticsPoint(AnalyticsPointParams{
+			Time:                 sharedPointTime,
+			ValueRange:           valueRange,
+			Value:                fake.Float64(4, 1, 99999),
+			Quality:              DataQualityValidated,
+			SourceReplayIdentity: secondReplayIdentity,
+			SourceProvenance: SourceProvenance{
+				Source:   randomWord("source-a"),
+				RecordID: "a-" + randomWord("record"),
+			},
+		})
+		require.NoError(t, err)
+
+		series, err := NewAnalyticsSeries(AnalyticsSeriesParams{
+			Identity: identity,
+			Points:   []AnalyticsPoint{firstPoint, secondPoint},
+		})
+		require.NoError(t, err)
+		require.Equal(t, []AnalyticsPoint{firstPoint, secondPoint}, series.Points)
+
+		_, err = NewAnalyticsSeries(AnalyticsSeriesParams{
+			Identity: identity,
+			Points:   []AnalyticsPoint{secondPoint, firstPoint},
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("analytics points accept canonical quality values", func(t *testing.T) {
+		t.Parallel()
+
+		start := randomLocationTime()
+		end := start.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+		pointTime := end.Add(time.Duration(fake.IntBetween(1, 10)) * time.Minute)
+		provenance := randomProvenance(t)
+
+		for _, quality := range validQualities {
+			t.Run(quality.String(), func(t *testing.T) {
+				t.Parallel()
+
+				point, err := NewAnalyticsPoint(AnalyticsPointParams{
+					Time: pointTime,
+					ValueRange: AnalyticsValueRange{
+						Start: start,
+						End:   end,
+					},
+					Value:                fake.Float64(4, 1, 99999),
+					Quality:              quality,
+					SourceReplayIdentity: randomReplayIdentity(),
+					SourceProvenance:     provenance,
+				})
+				require.NoError(t, err)
+				require.Equal(t, quality, point.Quality)
+			})
+		}
+
+		_, err := NewAnalyticsPoint(AnalyticsPointParams{
+			Time: pointTime,
+			ValueRange: AnalyticsValueRange{
+				Start: start,
+				End:   end,
+			},
+			Value: fake.Float64(4, 1, 99999),
+			Quality: DataQuality(
+				randomWord("bad-quality"),
+			),
+			SourceReplayIdentity: randomReplayIdentity(),
+			SourceProvenance:     provenance,
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("analytics points require source replay identity", func(t *testing.T) {
+		t.Parallel()
+
+		start := randomLocationTime()
+		end := start.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+		pointTime := end.Add(time.Duration(fake.IntBetween(1, 10)) * time.Minute)
+
+		_, err := NewAnalyticsPoint(AnalyticsPointParams{
+			Time:       pointTime,
+			ValueRange: AnalyticsValueRange{Start: start, End: end},
+			Value:      fake.Float64(4, 1, 99999),
+			Quality:    DataQualityValidated,
+			SourceProvenance: SourceProvenance{
+				Source:   randomWord("source"),
+				RecordID: randomWord("record"),
+			},
+		})
+		require.Error(t, err)
 	})
 }

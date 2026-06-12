@@ -18,3 +18,11 @@ schema: spec-driven
 #       - Always include a "Non-goals" section
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
+
+rules:
+  tasks:
+    - Tests must be integral part of the task, do not split them
+    - Tasks must follow TDD flow (write test -> implement -> verify)
+    - Any manual step must be documented on design level only
+    - Any obligatory manual step must be considered as blocker and must be resolved by user interaction
+    - Do not add any separate task to do final verification. This is part of the task completion protocol.
