@@ -15,6 +15,14 @@ Read these first:
 - Retained docs index: [docs/README.md](./docs/README.md)
 - Domain vocabulary: [docs/domain-terminology.md](./docs/domain-terminology.md)
 
+##  AI Frameworks
+
+**Openspec**
+```bash
+npm install -D @fission-ai/openspec@latest
+openspec init
+```
+
 ## Typical Monorepo Tasks
 
 If not using direnv and nvm, make sure to have go and node of a correct version as per [.nvmrc](.nvmrc) and [go.work](go.work) files.

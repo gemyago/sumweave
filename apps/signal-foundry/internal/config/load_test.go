@@ -4,10 +4,13 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLoad(t *testing.T) {
+	fake := faker.New()
+
 	t.Run("should load local config with default opts", func(t *testing.T) {
 		cfg := New()
 		err := Load(cfg, NewLoadOpts())
@@ -36,10 +39,35 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, "INFO", cfg.GetString("defaultLogLevel"))
+		require.False(t, cfg.GetBool("dataLayer.database.autoMigrate"))
 	})
 	t.Run("should return error if config is not found", func(t *testing.T) {
 		cfg := New()
 		err := Load(cfg, NewLoadOpts().WithEnv("not-existing"))
 		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+	t.Run("should load data layer defaults", func(t *testing.T) {
+		cfg := New()
+		err := Load(cfg, NewLoadOpts().WithEnv("test"))
+		require.NoError(t, err)
+
+		require.Equal(t, ":memory:", cfg.GetString("dataLayer.database.dsn"))
+		require.Equal(t, "signal_foundry_data_", cfg.GetString("dataLayer.database.tablePrefix"))
+		require.True(t, cfg.GetBool("dataLayer.database.autoMigrate"))
+	})
+	t.Run("should allow env overrides for data layer config", func(t *testing.T) {
+		overrideDSN := fake.Lorem().Word() + ".db"
+		overridePrefix := fake.Lorem().Word() + "_"
+		t.Setenv("APP_DATALAYER_DATABASE_DSN", overrideDSN)
+		t.Setenv("APP_DATALAYER_DATABASE_TABLEPREFIX", overridePrefix)
+		t.Setenv("APP_DATALAYER_DATABASE_AUTOMIGRATE", "false")
+
+		cfg := New()
+		err := Load(cfg, NewLoadOpts().WithEnv("test"))
+		require.NoError(t, err)
+
+		require.Equal(t, overrideDSN, cfg.GetString("dataLayer.database.dsn"))
+		require.Equal(t, overridePrefix, cfg.GetString("dataLayer.database.tablePrefix"))
+		require.False(t, cfg.GetBool("dataLayer.database.autoMigrate"))
 	})
 }

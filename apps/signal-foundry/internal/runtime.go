@@ -8,6 +8,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
 	"github.com/gemyago/signal-foundry/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/httpapi"
 	"github.com/gemyago/signal-foundry/tools/skills"
 	"github.com/gemyago/signal-foundry/tools/workspacefs"
@@ -37,6 +38,11 @@ type RuntimeDeps struct {
 	AgentRuntimeDatabaseTablePrefix string `name:"config.agentRuntime.database.tablePrefix"`
 	AgentRuntimeDatabaseAutoMigrate bool   `name:"config.agentRuntime.database.autoMigrate"`
 
+	// Data-layer persistence (canonical instruments, candles, trades)
+	DataLayerDatabaseDSN         string `name:"config.dataLayer.database.dsn"`
+	DataLayerDatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	DataLayerDatabaseAutoMigrate bool   `name:"config.dataLayer.database.autoMigrate"`
+
 	// Skills configuration
 	SkillsEnabled           bool     `name:"config.skills.enabled"`
 	SkillsPaths             []string `name:"config.skills.paths"`
@@ -44,13 +50,19 @@ type RuntimeDeps struct {
 	SkillsMaxCatalogEntries int      `name:"config.skills.maxCatalogEntries"`
 
 	// Runtime dependencies
-	ToolsRegistry *agent.ToolsRegistry
+	ToolsRegistry        *agent.ToolsRegistry
+	DataStore            *data.DatabaseStore
+	DataIngestionService *data.IngestionService
+	DataReadService      *data.ReadService
 }
 
 type Runtime struct {
-	Runner        *agent.Runner
-	HTTPHandler   http.Handler
-	ToolsRegistry *agent.ToolsRegistry
+	Runner               *agent.Runner
+	HTTPHandler          http.Handler
+	ToolsRegistry        *agent.ToolsRegistry
+	DataStore            *data.DatabaseStore
+	DataIngestionService *data.IngestionService
+	DataReadService      *data.ReadService
 }
 
 type runtimeServices struct {
@@ -110,6 +122,14 @@ func autoMigrateRuntimeServices(
 	return nil
 }
 
+func autoMigrateDataLayerStore(store *data.DatabaseStore) error {
+	if err := store.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate data-layer database: %w", err)
+	}
+
+	return nil
+}
+
 func newRuntimeServices(deps RuntimeDeps) (*runtimeServices, error) {
 	providersSvc, err := newProvidersConfigService(deps)
 	if err != nil {
@@ -131,6 +151,9 @@ func registerRuntime(container *dig.Container) error {
 	return di.ProvideAll(
 		container,
 		agent.NewToolsRegistry,
+		newDataLayerStore,
+		newDataIngestionService,
+		newDataReadService,
 		newRuntime,
 	)
 }
@@ -209,6 +232,11 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 			return nil, err
 		}
 	}
+	if deps.DataLayerDatabaseAutoMigrate {
+		if err = autoMigrateDataLayerStore(deps.DataStore); err != nil {
+			return nil, err
+		}
+	}
 
 	httpHandler, err := httpapi.NewHandler(httpapi.HandlerArgs{
 		Runner:                 runner,
@@ -221,8 +249,11 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 	}
 
 	return &Runtime{
-		Runner:        runner,
-		HTTPHandler:   httpHandler,
-		ToolsRegistry: toolsRegistry,
+		Runner:               runner,
+		HTTPHandler:          httpHandler,
+		ToolsRegistry:        toolsRegistry,
+		DataStore:            deps.DataStore,
+		DataIngestionService: deps.DataIngestionService,
+		DataReadService:      deps.DataReadService,
 	}, nil
 }

@@ -120,6 +120,11 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "agentRuntime.database.tablePrefix").asString(),
 		provideConfigValue(cfg, "agentRuntime.database.autoMigrate").asBool(),
 
+		// data layer persistence config
+		provideConfigValue(cfg, "dataLayer.database.dsn").asString(),
+		provideConfigValue(cfg, "dataLayer.database.tablePrefix").asString(),
+		provideConfigValue(cfg, "dataLayer.database.autoMigrate").asBool(),
+
 		// skills config
 		provideConfigValue(cfg, "skills.enabled").asBool(),
 		provideConfigValue(cfg, "skills.paths").asStringSlice(),

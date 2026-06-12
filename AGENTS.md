@@ -102,6 +102,7 @@ The rules are:
 - Treat template-derived code as reference unless adopted.
 - Prefer core Go, Go app, and UI as real product scope.
 - Keep package/release pipeline code removed unless explicitly revived.
+- Archive OpenSpec changes before any final submission step.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

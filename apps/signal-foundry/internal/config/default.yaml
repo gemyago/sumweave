@@ -102,6 +102,15 @@ agentRuntime:
     # Set to false when migrations are managed externally.
     autoMigrate: true
 
+dataLayer:
+  database:
+    # Dedicated database for canonical market/reference data persistence.
+    dsn: "data/data-layer.db"
+    # Table name prefix for data-layer tables so they can share a database safely.
+    tablePrefix: "signal_foundry_data_"
+    # Local/test-friendly default; disable when migrations are managed externally.
+    autoMigrate: true
+
 skills:
   # Set to true to enable skill discovery and tool registration.
   enabled: false

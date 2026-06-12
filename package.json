@@ -9,7 +9,7 @@
     "url": "https://github.com/gemyago/signal-foundry.git"
   },
   "devDependencies": {
-    "@fission-ai/openspec": "^1.2.0",
+    "@fission-ai/openspec": "^1.4.1",
     "@nx-go/nx-go": "4.0.0-beta.0",
     "nx": "22.6.4"
   },

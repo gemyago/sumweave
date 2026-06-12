@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/gemyago/signal-foundry/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/data"
+	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,15 +27,40 @@ func TestNewRuntime(t *testing.T) {
 		t.Helper()
 		dataDir := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "agent-temp"), 0o700))
+		tablePrefix := strings.ReplaceAll("data_"+fake.Lorem().Word(), "-", "_") + "_"
+		dataLayerDSN := filepath.Join(t.TempDir(), fake.Lorem().Word()+".db")
+		dataStore, err := data.NewDatabaseStore(dataLayerDSN, data.DatabaseStoreOpts{
+			TablePrefix: tablePrefix,
+		})
+		require.NoError(t, err)
+		dataIngestionService, err := data.NewIngestionService(data.IngestionServiceDeps{
+			InstrumentStore: dataStore,
+			CandleStore:     dataStore,
+			TradeStore:      dataStore,
+		})
+		require.NoError(t, err)
+		dataReadService, err := data.NewReadService(data.ReadServiceDeps{
+			InstrumentStore: dataStore,
+			CandleStore:     dataStore,
+			TradeStore:      dataStore,
+		})
+		require.NoError(t, err)
+
 		return RuntimeDeps{
 			RootLogger:                      rootLogger,
 			DataDir:                         dataDir,
 			AgentRuntimeDatabaseAutoMigrate: true,
+			DataLayerDatabaseDSN:            dataLayerDSN,
+			DataLayerDatabaseTablePrefix:    tablePrefix,
+			DataLayerDatabaseAutoMigrate:    true,
 			SkillsEnabled:                   false,
 			SkillsPaths:                     []string{},
 			SkillsMaxSkillBytes:             65536,
 			SkillsMaxCatalogEntries:         500,
 			ToolsRegistry:                   agent.NewToolsRegistry(),
+			DataStore:                       dataStore,
+			DataIngestionService:            dataIngestionService,
+			DataReadService:                 dataReadService,
 		}
 	}
 
@@ -43,6 +71,15 @@ func TestNewRuntime(t *testing.T) {
 		deps.AgentRuntimeDatabaseDSN = filepath.Join(t.TempDir(), "runtime.db")
 		deps.AgentRuntimeDatabaseTablePrefix = "runtime_"
 		return deps
+	}
+
+	makeInstrumentIdentity := func(t *testing.T) (domain.Venue, domain.Symbol) {
+		t.Helper()
+		venue, err := domain.NewVenue("venue-" + fake.Lorem().Word())
+		require.NoError(t, err)
+		symbol, err := domain.NewSymbol("symbol-" + fake.Lorem().Word())
+		require.NoError(t, err)
+		return venue, symbol
 	}
 
 	// makeSkillDir creates a valid skill directory with a SKILL.md inside parentDir.
@@ -103,6 +140,41 @@ func TestNewRuntime(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = profilesSvc.List(t.Context())
+		require.Error(t, err)
+		require.ErrorContains(t, err, "no such table")
+	})
+
+	t.Run("data layer autoMigrate enabled migrates canonical tables", func(t *testing.T) {
+		deps := makeDeps(t)
+
+		runtime, err := newRuntime(deps)
+		require.NoError(t, err)
+		require.NotNil(t, runtime)
+		require.NotNil(t, runtime.DataStore)
+		require.NotNil(t, runtime.DataIngestionService)
+		require.NotNil(t, runtime.DataReadService)
+
+		store, err := data.NewDatabaseStore(deps.DataLayerDatabaseDSN, dataStoreOpts(deps))
+		require.NoError(t, err)
+
+		venue, symbol := makeInstrumentIdentity(t)
+		_, err = store.LookupInstrument(t.Context(), venue, symbol)
+		require.ErrorIs(t, err, data.ErrInstrumentNotFound)
+	})
+
+	t.Run("data layer autoMigrate disabled skips canonical table creation", func(t *testing.T) {
+		deps := makeDeps(t)
+		deps.DataLayerDatabaseAutoMigrate = false
+
+		runtime, err := newRuntime(deps)
+		require.NoError(t, err)
+		require.NotNil(t, runtime)
+
+		store, err := data.NewDatabaseStore(deps.DataLayerDatabaseDSN, dataStoreOpts(deps))
+		require.NoError(t, err)
+
+		venue, symbol := makeInstrumentIdentity(t)
+		_, err = store.LookupInstrument(t.Context(), venue, symbol)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "no such table")
 	})
@@ -225,4 +297,10 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
 	})
+}
+
+func dataStoreOpts(deps RuntimeDeps) data.DatabaseStoreOpts {
+	return data.DatabaseStoreOpts{
+		TablePrefix: deps.DataLayerDatabaseTablePrefix,
+	}
 }
