@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 )

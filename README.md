@@ -1,22 +1,22 @@
-# sonalmod
+# Signal Foundry
 
-[![Build](https://github.com/gemyago/sonalmod/actions/workflows/build-flow.yml/badge.svg)](https://github.com/gemyago/sonalmod/actions/workflows/build-flow.yml)
+[![Build](https://github.com/gemyago/signal-foundry/actions/workflows/build-flow.yml/badge.svg)](https://github.com/gemyago/signal-foundry/actions/workflows/build-flow.yml)
 
-This is a stealth project, does nothing for now, but has good enough test coverage!
+Signal Foundry is an early-stage trading platform project.
 
-## Installation
+The current product direction is defined in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md). Historical template and implementation-planning docs have been removed to keep the repository oriented around that architecture.
 
-Install globally and run as a command:
-```bash
-npm install -g @sonalmod/app
-sonalmod start
-```
+## Repository Shape
 
-Or run directly without installing:
-```bash
-npx @sonalmod/app start
-```
+- `runtime/` — core Go runtime foundation
+- `apps/signal-foundry/` — Go backend application
+- `apps/signal-ui/` — operator UI
 
-## Development
+Everything else should be treated as support or reference material unless explicitly adopted into product scope.
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for more details.
+## Start Here
+
+- Product direction: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- Retained project docs: [docs/README.md](./docs/README.md)
+- Contributor workflow: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Agent instructions: [AGENTS.md](./AGENTS.md)

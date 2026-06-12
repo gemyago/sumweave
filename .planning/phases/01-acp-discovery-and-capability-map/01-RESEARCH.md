@@ -40,24 +40,24 @@ What do we need to know to plan an ACP discovery phase well for OpenCode?
 
 ## Planning Implications
 
-### What Sonalmod should validate in Phase 1
+### What Signal Foundry should validate in Phase 1
 
-- The exact `initialize` response OpenCode returns, including capability flags Sonalmod can rely on.
-- The smallest end-to-end session lifecycle Sonalmod needs for an OpenCode-backed coding agent.
+- The exact `initialize` response OpenCode returns, including capability flags Signal Foundry can rely on.
+- The smallest end-to-end session lifecycle Signal Foundry needs for an OpenCode-backed coding agent.
 - How OpenCode emits progress and completion through `session/update`.
-- Whether cancellation works well enough for Sonalmod to expose it in later phases.
-- Whether session resume is available and usable for Sonalmod's future session model.
+- Whether cancellation works well enough for Signal Foundry to expose it in later phases.
+- Whether session resume is available and usable for Signal Foundry's future session model.
 - Which optional ACP features should remain out of scope because OpenCode does not advertise or reliably implement them.
 
 ### Repo-level design consequences
 
-- Sonalmod needs a probe client that preserves raw ACP envelopes, not just summarized output.
+- Signal Foundry needs a probe client that preserves raw ACP envelopes, not just summarized output.
 - The probe should treat capabilities as runtime data, not compile-time assumptions.
 - The future integration boundary should separate general agent configuration from ACP session wiring only after Phase 1 proves where that line actually holds.
 
 ## Risks And Unknowns
 
-- OpenCode documentation confirms ACP support, but not every optional ACP capability needed by Sonalmod's eventual design.
+- OpenCode documentation confirms ACP support, but not every optional ACP capability needed by Signal Foundry's eventual design.
 - `session/close` is not part of the stable baseline and may be absent even if useful.
 - OpenCode's note about unsupported slash commands is a reminder that "same as terminal" still has exceptions.
 - The repo currently has no ACP-specific path in `tests/agent/integration-cli`, so the first implementation needs to add one before deeper conclusions are possible.

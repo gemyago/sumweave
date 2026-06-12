@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
-	rt "github.com/gemyago/sonalmod/runtime/internal"
-	lp "github.com/gemyago/sonalmod/runtime/internal/llmproviders"
+	"github.com/gemyago/signal-foundry/runtime/agent"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -32,7 +31,7 @@ func TestProviderHandlers(t *testing.T) {
 		t.Helper()
 		srv := NewAgentAPIServer(ServerParams{
 			Runner:                 agent.NewMockAgentRunner(t),
-			Logger:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Logger:                 slog.New(slog.DiscardHandler),
 			IDGen:                  NewMockIDGen(),
 			RequestMapper:          NewAgentAPIRequestMapper(),
 			SSEWriter:              NewAgentAPISSEWriter(NewAgentAPIStreamEventMapper()),

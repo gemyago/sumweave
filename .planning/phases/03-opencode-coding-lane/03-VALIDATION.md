@@ -33,7 +33,7 @@ created: 2026-04-22
 | 3-02-01 | 03-02 | 2 | CODE-03 | `cd runtime && go test ./internal/codinglane -run TestOpenCodeACPLauncher` |
 | 3-02-02 | 03-02 | 2 | CODE-03 | `cd runtime && go test ./internal/codinglane ./internal/agentapi` |
 | 3-03-01 | 03-03 | 3 | CODE-02, CODE-04 | `cd runtime && go generate ./internal/agentapi && go test ./internal/agentapi ./httpapi` |
-| 3-03-02 | 03-03 | 3 | CODE-03 | `cd apps/sonalmod && go test ./internal -run TestNewRuntime` |
+| 3-03-02 | 03-03 | 3 | CODE-03 | `cd apps/signal-foundry && go test ./internal -run TestNewRuntime` |
 
 ## Source Coverage Audit
 

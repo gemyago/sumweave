@@ -18,6 +18,7 @@ import (
 
 const acpProcessWaitTimeout = 2 * time.Second
 const acpProtocolVersion = 1
+const acpSessionIDKey = "sessionId"
 
 type acpExecuteParams struct {
 	Prompt       string
@@ -145,7 +146,7 @@ func (c *acpClient) execute(ctx context.Context, params acpExecuteParams) (acpEx
 	}
 
 	promptID, sendPromptErr := c.sendRequest(ctx, "session/prompt", map[string]any{
-		"sessionId": result.SessionID,
+		acpSessionIDKey: result.SessionID,
 		"prompt": []map[string]string{
 			{
 				"type": "text",
@@ -175,7 +176,7 @@ func (c *acpClient) execute(ctx context.Context, params acpExecuteParams) (acpEx
 
 func (c *acpClient) loadSession(ctx context.Context, sessionID string) error {
 	_, loadErr := c.call(ctx, "session/load", map[string]any{
-		"sessionId": sessionID,
+		acpSessionIDKey: sessionID,
 	})
 	return loadErr
 }
@@ -203,7 +204,7 @@ func (c *acpClient) createSession(ctx context.Context, cwd string) (string, erro
 func (c *acpClient) cancelSession(ctx context.Context, sessionID string, delay time.Duration) error {
 	c.sleep(delay)
 	cancelID, cancelSendErr := c.sendRequest(ctx, "session/cancel", map[string]any{
-		"sessionId": sessionID,
+		acpSessionIDKey: sessionID,
 	})
 	if cancelSendErr != nil {
 		return cancelSendErr
@@ -394,7 +395,7 @@ func extractSessionID(raw json.RawMessage) (string, error) {
 	if unmarshalErr != nil {
 		return "", fmt.Errorf("decode result: %w", unmarshalErr)
 	}
-	for _, key := range []string{"sessionId", "session_id", "id"} {
+	for _, key := range []string{acpSessionIDKey, "session_id", "id"} {
 		value, ok := payload[key].(string)
 		if ok && value != "" {
 			return value, nil

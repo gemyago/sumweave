@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	rt "github.com/gemyago/sonalmod/runtime/internal"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
 )
 
 // ErrInvalidUserContent indicates the inbound [UserMessageContent] cannot be turned into [rt.MessageContent] (e.g. empty parts).

@@ -18,7 +18,7 @@ created: 2026-04-22
 | Property | Value |
 |----------|-------|
 | **Framework** | go test |
-| **Config file** | `runtime/.testcoverage.yaml`, `apps/sonalmod/.testcoverage.yaml` |
+| **Config file** | `runtime/.testcoverage.yaml`, `apps/signal-foundry/.testcoverage.yaml` |
 | **Quick run command** | `use the active task's module-scoped <verify> command` |
 | **Full suite command** | `make affected-lint-test` |
 | **Estimated runtime** | ~30 seconds |
@@ -42,7 +42,7 @@ created: 2026-04-22
 | 2-01-02 | 01 | 1 | PERS-01, PERS-02 | T-2-01-03 | File and DB services reload the same saved profile after restart-shaped reconstruction | unit | `cd runtime && go test ./internal/agentprofiles ./agent` | ✅ | pending |
 | 2-02-01 | 02 | 2 | AGNT-01 | T-2-02-02 | OpenAPI contract exposes only general profile fields in camelCase and keeps generated artifacts in sync with the spec | docs-check | `cd runtime && go generate ./internal/agentapi && rg -n "/agent-profiles|profileName|toolRefs|executionSettings" internal/agentapi/openapi.yaml internal/agentapi/api.gen.go` | ✅ | pending |
 | 2-02-02 | 02 | 2 | AGNT-02, PERS-02 | T-2-02-01 / T-2-02-03 | CRUD handlers reject malformed or conflicting profile writes and preserve runtime auth and wrapper boundaries | integration | `cd runtime && go generate ./internal/agentapi && go test ./internal/agentapi ./httpapi` | ✅ | pending |
-| 2-03-01 | 03 | 3 | PERS-01, PERS-02 | T-2-03-01 / T-2-03-02 | App startup wires profile persistence with the existing storage selector and migrates DB state safely | integration | `cd apps/sonalmod && go test ./internal -run TestNewRuntime` | ✅ | pending |
+| 2-03-01 | 03 | 3 | PERS-01, PERS-02 | T-2-03-01 / T-2-03-02 | App startup wires profile persistence with the existing storage selector and migrates DB state safely | integration | `cd apps/signal-foundry && go test ./internal -run TestNewRuntime` | ✅ | pending |
 | 2-03-02 | 03 | 3 | AGNT-03 | T-2-03-03 | Durable schema doc preserves the general profile vs deferred connection boundary | docs-check | `test -f docs/implementation/agent-profile-schema-boundary.md && rg -n "^## General Profile Data$|^## Deferred Connection Or Backend Data$|toolRefs|executionSettings|cwd|mcpServers|OpenCode|ACP" docs/implementation/agent-profile-schema-boundary.md` | ✅ | pending |
 
 *Status: pending / green / red / flaky*

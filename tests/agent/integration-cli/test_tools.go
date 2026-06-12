@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/agent"
 )
 
 // toolsRegistrar is satisfied by *agent.ToolsRegistry.
@@ -16,6 +16,7 @@ const (
 	testLocationLongitude = -74.0060
 	testWeatherTemp       = 22.5
 	testWeatherHumidity   = 65
+	testLocationCity      = "New York"
 )
 
 type locationResult struct {
@@ -43,7 +44,7 @@ func newGetLocationTool() agent.ToolDef[struct{}, locationResult] {
 		"Returns the current location. For testing purposes only.",
 		func(_ *agent.ToolContext, _ struct{}) (locationResult, error) {
 			return locationResult{
-				City:      "New York",
+				City:      testLocationCity,
 				Country:   "US",
 				Latitude:  testLocationLatitude,
 				Longitude: testLocationLongitude,

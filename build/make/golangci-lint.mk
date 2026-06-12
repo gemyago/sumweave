@@ -30,7 +30,7 @@ $(GOLANGCI_LINT_BIN): $(GOLANGCI_LINT_VERSION_FILE)
 	@set -eu; \
 	version="$$(cat "$(GOLANGCI_LINT_VERSION_FILE)")"; \
 	mkdir -p "$(GOLANGCI_LINT_BIN_DIR)"; \
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOLANGCI_LINT_BIN_DIR)" "$$version"
+	curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b "$(GOLANGCI_LINT_BIN_DIR)" "$$version"
 
 $(GOLANGCI_LINT_CACHE_DIR):
 	mkdir -p "$@"

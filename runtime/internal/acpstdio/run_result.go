@@ -8,7 +8,15 @@ import (
 	"iter"
 	"strings"
 
-	rt "github.com/gemyago/sonalmod/runtime/internal"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
+)
+
+const (
+	acpModelRole         = "model"
+	acpPayloadMessageKey = "message"
+	acpPayloadTextKey    = "text"
+	acpPayloadContentKey = "content"
+	acpPayloadResultKey  = "result"
 )
 
 // NewRunResult converts ACP stdio executor output into a runtime run result.
@@ -85,7 +93,7 @@ func mapACPStdioUpdateToSessionEvent(update Update) *rt.SessionEvent {
 		Partial:      !strings.EqualFold(update.Type, "final"),
 		TurnComplete: strings.EqualFold(update.Type, "final"),
 		Content: &rt.SessionEventContent{
-			Role: "model",
+			Role: acpModelRole,
 			Parts: []rt.SessionEventPart{{
 				Text: text,
 			}},
@@ -105,7 +113,7 @@ func mapPromptResultToSessionEvent(raw json.RawMessage) *rt.SessionEvent {
 	return &rt.SessionEvent{
 		TurnComplete: true,
 		Content: &rt.SessionEventContent{
-			Role: "model",
+			Role: acpModelRole,
 			Parts: []rt.SessionEventPart{{
 				Text: text,
 			}},
@@ -146,7 +154,12 @@ func extractACPValueText(value any) string {
 		}
 		return strings.Join(parts, "\n")
 	case map[string]any:
-		for _, key := range []string{"message", "text", "content", "result"} {
+		for _, key := range []string{
+			acpPayloadMessageKey,
+			acpPayloadTextKey,
+			acpPayloadContentKey,
+			acpPayloadResultKey,
+		} {
 			text := extractACPValueText(typed[key])
 			if text != "" {
 				return text

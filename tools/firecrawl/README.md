@@ -1,4 +1,4 @@
-# sonalmod
+# signal-foundry
 
 
 ## Project Setup

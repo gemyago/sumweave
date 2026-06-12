@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gemyago/sonalmod/apps/sonalmod"
+	signalfoundry "github.com/gemyago/signal-foundry/apps/signal-foundry"
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 )
@@ -14,16 +14,18 @@ type runCmdArgs struct {
 	params       cliParams
 }
 
-func buildEngine(rootArgsVals *rootArgs) (*sonalmod.Engine, error) {
-	opts := []sonalmod.EngineOpt{
-		sonalmod.WithEngineLogsFormatJSON(rootArgsVals.jsonLogs),
-		sonalmod.WithEngineLogsOutputFile(rootArgsVals.logsFile),
-		sonalmod.WithEngineDefaultLogLevel(rootArgsVals.logLevel),
+const runCommandName = "run"
+
+func buildEngine(rootArgsVals *rootArgs) (*signalfoundry.Engine, error) {
+	opts := []signalfoundry.EngineOpt{
+		signalfoundry.WithEngineLogsFormatJSON(rootArgsVals.jsonLogs),
+		signalfoundry.WithEngineLogsOutputFile(rootArgsVals.logsFile),
+		signalfoundry.WithEngineDefaultLogLevel(rootArgsVals.logLevel),
 	}
 	if rootArgsVals.env != "" {
-		opts = append(opts, sonalmod.WithEngineEnv(rootArgsVals.env))
+		opts = append(opts, signalfoundry.WithEngineEnv(rootArgsVals.env))
 	}
-	return sonalmod.NewEngine(opts...)
+	return signalfoundry.NewEngine(opts...)
 }
 
 func buildListModelsFunc(rootArgsVals *rootArgs) func(cmd *cobra.Command, _ []string) error {
@@ -85,7 +87,7 @@ func setupCommands() *cobra.Command {
 		rootArgsVals: &rootArgsVals,
 	}
 	cmd := &cobra.Command{
-		Use:   "run",
+		Use:   runCommandName,
 		Short: "Run the agent from the command line",
 		RunE:  buildRunFunc(cmdArgs),
 	}

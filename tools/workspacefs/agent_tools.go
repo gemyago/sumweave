@@ -3,8 +3,8 @@ package workspacefs
 import (
 	"log/slog"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
-	ifs "github.com/gemyago/sonalmod/tools/workspacefs/internal/workspacefs"
+	"github.com/gemyago/signal-foundry/runtime/agent"
+	ifs "github.com/gemyago/signal-foundry/tools/workspacefs/internal/workspacefs"
 )
 
 func workspacefsAgentTools(svc *ifs.Service, _ *slog.Logger) []agent.DefinedTool {

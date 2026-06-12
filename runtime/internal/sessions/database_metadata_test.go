@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/internal/gormsonal"
+	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +16,10 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 	// jaswdr/faker backs randomness with a mutex (threadSafeRand); one instance is fine across parallel subtests.
 	fake := faker.New()
 
-	newStore := func(t *testing.T, opts gormsonal.GormSonalmodTablesOpts) *DatabaseSessionMetadataStore {
+	newStore := func(
+		t *testing.T,
+		opts gormsignalfoundry.GormSignalFoundryTablesOpts,
+	) *DatabaseSessionMetadataStore {
 		t.Helper()
 		store, err := NewDatabaseSessionMetadataStore(":memory:", opts)
 		require.NoError(t, err)
@@ -31,7 +34,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Save creates new metadata entry", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 
 		app := fake.Lorem().Word() + fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -61,7 +64,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Save updates existing metadata entry (upsert)", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -102,7 +105,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List returns entries sorted by updatedAt desc", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -142,7 +145,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List returns empty slice when no sessions", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 
 		res, err := store.List(t.Context(), ListSessionMetadataParams{
 			AppName: fake.Lorem().Word(),
@@ -158,7 +161,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List with offset and limit returns correct slice and total", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -192,7 +195,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Delete removes entry", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -221,7 +224,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Delete of non-existent session does not error", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 
 		err := store.Delete(t.Context(), fake.Lorem().Word(), fake.UUID().V4(), fake.UUID().V4())
 		require.NoError(t, err)
@@ -242,12 +245,18 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 			UpdatedAt: now,
 		}
 
-		storeA, err := NewDatabaseSessionMetadataStore(":memory:", gormsonal.GormSonalmodTablesOpts{TablePrefix: "a_"})
+		storeA, err := NewDatabaseSessionMetadataStore(
+			":memory:",
+			gormsignalfoundry.GormSignalFoundryTablesOpts{TablePrefix: "a_"},
+		)
 		require.NoError(t, err)
 		require.NoError(t, storeA.AutoMigrate())
 		require.NoError(t, storeA.Save(t.Context(), meta))
 
-		storeB, err := NewDatabaseSessionMetadataStore(":memory:", gormsonal.GormSonalmodTablesOpts{TablePrefix: "b_"})
+		storeB, err := NewDatabaseSessionMetadataStore(
+			":memory:",
+			gormsignalfoundry.GormSignalFoundryTablesOpts{TablePrefix: "b_"},
+		)
 		require.NoError(t, err)
 		require.NoError(t, storeB.AutoMigrate())
 
@@ -263,7 +272,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Save returns context error when cancelled", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		now := randomTruncatedUTC(fake)
@@ -279,7 +288,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List returns context error when cancelled", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		_, err := store.List(ctx, ListSessionMetadataParams{
@@ -293,7 +302,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Delete returns context error when cancelled", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		err := store.Delete(ctx, fake.Lorem().Word(), fake.UUID().V4(), fake.UUID().V4())
@@ -302,13 +311,13 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("NewDatabaseSessionMetadataStore rejects empty dsn", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewDatabaseSessionMetadataStore("", gormsonal.GormSonalmodTablesOpts{})
+		_, err := NewDatabaseSessionMetadataStore("", gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		require.Error(t, err)
 	})
 
 	t.Run("Save validation errors", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		uid := fake.UUID().V4()
 		app := fake.Lorem().Word()
 		now := randomTruncatedUTC(fake)
@@ -343,7 +352,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List validation errors", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		uid := fake.UUID().V4()
 		app := fake.Lorem().Word()
 
@@ -361,7 +370,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Delete validation errors", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsonal.GormSonalmodTablesOpts{})
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		uid := fake.UUID().V4()
 		app := fake.Lorem().Word()
 		sid := fake.UUID().V4()
@@ -376,7 +385,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("operations fail after underlying DB closed", func(t *testing.T) {
 		t.Parallel()
-		store, err := NewDatabaseSessionMetadataStore(":memory:", gormsonal.GormSonalmodTablesOpts{})
+		store, err := NewDatabaseSessionMetadataStore(":memory:", gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		sqlDB, err := store.db.DB()

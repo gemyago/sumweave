@@ -10,7 +10,7 @@ provides:
   - General-purpose agent profile domain contract with validation and immutable technical name
   - File-backed and DB-backed profile persistence services with CRUD and restart coverage
   - Public runtime/agent aliases and constructors for profile services
-affects: [phase-02-plan-02, phase-03-opencode-coding-lane, apps/sonalmod-runtime-wiring]
+affects: [phase-02-plan-02, phase-03-opencode-coding-lane, apps/signal-foundry-runtime-wiring]
 tech-stack:
   added: []
   patterns:
@@ -27,12 +27,12 @@ key-files:
     - runtime/agent/agent_profiles_test.go
     - runtime/internal/agentrun.go
     - runtime/internal/models_locator.go
-    - runtime/internal/gormsonal/dialector.go
+    - runtime/internal/gormsignalfoundry/dialector.go
     - runtime/internal/sessions/factory.go
     - runtime/internal/sessions/file.go
 key-decisions:
   - "Profile Name is immutable and must match ^[a-z][a-z0-9-]*$."
-  - "ExecutionSettings stays Sonalmod-owned and minimal, starting with DefaultModel only."
+  - "ExecutionSettings stays Signal Foundry-owned and minimal, starting with DefaultModel only."
   - "Profile services expose AutoMigrate() for app-level migration orchestration."
 patterns-established:
   - "General profile schema excludes ACP/OpenCode connection details."
@@ -72,7 +72,7 @@ completed: 2026-04-22
 - `runtime/internal/agentprofiles/db_agent_profiles_service.go` - GORM-backed profile persistence + migration
 - `runtime/agent/agent_profiles.go` - public aliases and constructors
 - `runtime/internal/agentprofiles/*_test.go` - validation, CRUD, restart, and error-path coverage
-- `runtime/internal/agentrun.go`, `runtime/internal/models_locator.go`, `runtime/internal/gormsonal/dialector.go`, `runtime/internal/sessions/factory.go`, `runtime/internal/sessions/file.go` - lint gate alignment for existing interface-return signatures
+- `runtime/internal/agentrun.go`, `runtime/internal/models_locator.go`, `runtime/internal/gormsignalfoundry/dialector.go`, `runtime/internal/sessions/factory.go`, `runtime/internal/sessions/file.go` - lint gate alignment for existing interface-return signatures
 
 ## Decisions Made
 - Kept profile boundary general-purpose only: no `cwd`, `mcpServers`, capability flags, remote session IDs, or OpenCode-specific fields.

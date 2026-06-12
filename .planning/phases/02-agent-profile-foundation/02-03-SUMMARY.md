@@ -22,10 +22,10 @@ key-files:
   created:
     - docs/implementation/agent-profile-schema-boundary.md
   modified:
-    - apps/sonalmod/internal/runtime.go
-    - apps/sonalmod/internal/runtime_test.go
+    - apps/signal-foundry/internal/runtime.go
+    - apps/signal-foundry/internal/runtime_test.go
 key-decisions:
-  - "Profile persistence wiring in apps/sonalmod must use the same agentRuntime storage selector as runner/provider persistence."
+  - "Profile persistence wiring in apps/signal-foundry must use the same agentRuntime storage selector as runner/provider persistence."
   - "Profile DB migration runs in the same startup auto-migrate gate as runner migrations and is skipped when autoMigrate is false."
   - "Phase 2 profile schema explicitly excludes ACP/OpenCode connection details to preserve Agent vs Connection boundary."
 patterns-established:
@@ -59,8 +59,8 @@ completed: 2026-04-22
 2. **Task 2: Publish the durable Phase 2 profile schema and boundary contract** - `5163002` (docs)
 
 ## Files Created/Modified
-- `apps/sonalmod/internal/runtime.go` - runs `AgentProfilesService.AutoMigrate()` in DB startup auto-migrate flow and keeps profile service wiring on existing runtime storage config.
-- `apps/sonalmod/internal/runtime_test.go` - verifies DB startup migrates profile table when enabled and skips migration when disabled.
+- `apps/signal-foundry/internal/runtime.go` - runs `AgentProfilesService.AutoMigrate()` in DB startup auto-migrate flow and keeps profile service wiring on existing runtime storage config.
+- `apps/signal-foundry/internal/runtime_test.go` - verifies DB startup migrates profile table when enabled and skips migration when disabled.
 - `docs/implementation/agent-profile-schema-boundary.md` - durable contract for general profile data vs deferred backend/connection data.
 
 ## Decisions Made
@@ -69,8 +69,8 @@ completed: 2026-04-22
 - Declared ACP/OpenCode runtime binding data (`cwd`, `mcpServers`, capability/session specifics) as deferred `Connection` data, not Phase 2 profile schema.
 
 ## Verification
-- `cd apps/sonalmod && go test ./internal -run TestNewRuntime` -> PASS
-- `rg -n "AgentProfilesService|AutoMigrate" apps/sonalmod/internal/runtime.go` -> PASS
+- `cd apps/signal-foundry && go test ./internal -run TestNewRuntime` -> PASS
+- `rg -n "AgentProfilesService|AutoMigrate" apps/signal-foundry/internal/runtime.go` -> PASS
 - `rg -n "^## General Profile Data$|^## Deferred Connection Or Backend Data$|toolRefs|executionSettings|cwd|mcpServers|OpenCode|ACP" docs/implementation/agent-profile-schema-boundary.md` -> PASS
 - `make affected-lint-test` -> PASS
 - AGENTS updates -> no changes needed (no command/workflow/architecture guidance changes required)

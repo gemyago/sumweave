@@ -1,8 +1,16 @@
-# AI Agent foundational runtime
+# Runtime foundation
 
-The module is based on ADK with genkit as the LLM adapter. Module follows standard project structure and best practices.
+This module contains the current runtime foundation code. Product direction is defined in [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md); implementation details here should not be treated as a competing product spec.
 
 Language: Go (1.26.x)
+
+## Status In Product Direction
+
+This module is part of the intended long-term product path. Treat `runtime/` as the current foundation for the real system's core Go package/module, even if the final naming changes later.
+
+Some structure here may have started from foundation work, but this module is not reference-only template code. It is allowed to evolve directly into product code.
+
+High-level target shape for this module is tracked in [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md): a small shared `domain` plus product slices such as `data`, `analytics`, `strategy`, `governor`, and `execution`, with thin cross-slice orchestration and isolated venue integration.
 
 Key architectural decisions:
 - ADK/genkit related components are ONLY used internally and NOT exposed via public contract.
@@ -37,7 +45,7 @@ Rules for doc comments on public contract types and methods:
 
 ## Session persistence
 
-Session storage implementations (memory, file, database backends), listing-metadata sync, and `NewSessionsStorage` (returns concrete `*sessions.MetadataSyncStorage`, which implements `SessionsStorage`) live in [internal/sessions](./internal/sessions). Unified storage interfaces (`SessionsStorage`, `AutoMigratable`) are defined there; callers import `sessions` directly rather than via re-exports on [internal](./internal). LLM provider configuration types and storage (`ProvidersConfigService`, file/DB implementations) live in [internal/llmproviders](./internal/llmproviders). The `Summarizer` interface and implementations (`TruncatingSummarizer`, `LLMSummarizer`) live in [internal/summarize](./internal/summarize). Shared GORM DSN routing and table-prefix config used by session DB code and provider-config DB live in [internal/gormsonal](./internal/gormsonal). The [internal](./internal) package may keep type aliases for some session listing types and `llmproviders` types where needed for orchestration and tests.
+Session storage implementations (memory, file, database backends), listing-metadata sync, and `NewSessionsStorage` (returns concrete `*sessions.MetadataSyncStorage`, which implements `SessionsStorage`) live in [internal/sessions](./internal/sessions). Unified storage interfaces (`SessionsStorage`, `AutoMigratable`) are defined there; callers import `sessions` directly rather than via re-exports on [internal](./internal). LLM provider configuration types and storage (`ProvidersConfigService`, file/DB implementations) live in [internal/llmproviders](./internal/llmproviders). The `Summarizer` interface and implementations (`TruncatingSummarizer`, `LLMSummarizer`) live in [internal/summarize](./internal/summarize). Shared GORM DSN routing and table-prefix config used by session DB code and provider-config DB live in [internal/gormsignalfoundry](./internal/gormsignalfoundry). The [internal](./internal) package may keep type aliases for some session listing types and `llmproviders` types where needed for orchestration and tests.
 
 ## API Layer
 

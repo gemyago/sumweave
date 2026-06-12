@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	rt "github.com/gemyago/sonalmod/runtime/internal"
-	"github.com/gemyago/sonalmod/runtime/internal/sessions"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	"github.com/gemyago/signal-foundry/runtime/internal/sessions"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -5,7 +5,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/gemyago/sonalmod/runtime/internal"
+	"github.com/gemyago/signal-foundry/runtime/internal"
 	"github.com/stretchr/testify/require"
 )
 

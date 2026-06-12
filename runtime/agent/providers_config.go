@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/gemyago/sonalmod/runtime/internal"
-	lp "github.com/gemyago/sonalmod/runtime/internal/llmproviders"
+	"github.com/gemyago/signal-foundry/runtime/internal"
+	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
 )
 
 // ProvidersConfigService is the provider configuration management contract.

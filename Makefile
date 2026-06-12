@@ -66,8 +66,8 @@ endif
 lint:
 	$(MAKE) -C tools/firecrawl lint
 	$(MAKE) -C runtime lint
-	$(MAKE) -C apps/sonalmod lint
-	$(MAKE) -C apps/sonal-ui lint
+	$(MAKE) -C apps/signal-foundry lint
+	$(MAKE) -C apps/signal-ui lint
 	$(MAKE) -C tools/workspacefs lint
 	$(MAKE) -C tools/skills lint
 
@@ -83,12 +83,12 @@ test: $(cover_dir)
 	$(MAKE) -C tools/skills test
 	$(MAKE) -C tools/workspacefs test
 	$(MAKE) -C runtime test
-	$(MAKE) -C apps/sonalmod test
-	$(MAKE) -C apps/sonal-ui test
+	$(MAKE) -C apps/signal-foundry test
+	$(MAKE) -C apps/signal-ui test
 	cat tools/firecrawl/.cover/profile.out > $(cover_profile)
 	tail -n +2 tools/skills/.cover/profile.out >> $(cover_profile)
 	tail -n +2 tools/workspacefs/.cover/profile.out >> $(cover_profile)
 	tail -n +2 runtime/.cover/profile.out >> $(cover_profile)
-	tail -n +2 apps/sonalmod/.cover/profile.out >> $(cover_profile)
+	tail -n +2 apps/signal-foundry/.cover/profile.out >> $(cover_profile)
 	go tool cover -html=$(cover_profile) -o $(cover_dir)/coverage.html
 	$(go-test-coverage) --badge-file-name $(cover_dir)/coverage.svg --profile $(cover_profile)

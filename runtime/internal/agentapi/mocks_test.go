@@ -9,7 +9,7 @@ package agentapi
 import (
 	"context"
 
-	"github.com/gemyago/sonalmod/runtime/internal"
+	"github.com/gemyago/signal-foundry/runtime/internal"
 	mock "github.com/stretchr/testify/mock"
 )
 

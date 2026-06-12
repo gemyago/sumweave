@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/gemyago/sonalmod/runtime/internal/gormsonal"
-	"github.com/gemyago/sonalmod/runtime/internal/summarize"
+	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
+	"github.com/gemyago/signal-foundry/runtime/internal/summarize"
 )
 
 const (
@@ -45,7 +45,7 @@ func NewSessionsStorage(
 		err error
 	)
 	if deps.UseDatabaseStorage {
-		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsonal.GormSonalmodTablesOpts{
+		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsignalfoundry.GormSignalFoundryTablesOpts{
 			TablePrefix: deps.DatabaseTablePrefix,
 		})
 		if err != nil {
@@ -65,7 +65,7 @@ func NewSessionsStorage(
 	case "", sessionStorageTypeMemory:
 		raw = NewMemorySessionsStorage()
 	case sessionStorageTypeDatabase:
-		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsonal.GormSonalmodTablesOpts{
+		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsignalfoundry.GormSignalFoundryTablesOpts{
 			TablePrefix: deps.DatabaseTablePrefix,
 		})
 	case sessionStorageTypeFile:

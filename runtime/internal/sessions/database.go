@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/internal/gormsonal"
+	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/session/database"
 	"gorm.io/gorm"
@@ -47,7 +47,7 @@ func sessionMetadataFromModel(m sessionMetadataModel) SessionMetadata {
 }
 
 // DatabaseSessionMetadataStore persists session metadata in a relational database via GORM.
-// Table names use the same prefix as other Sonalmod-managed tables (see [gormsonal.GormSonalmodTablesOpts]).
+// Table names use the same prefix as other Signal Foundry-managed tables (see [gormsignalfoundry.GormSignalFoundryTablesOpts]).
 type DatabaseSessionMetadataStore struct {
 	db *gorm.DB
 }
@@ -60,16 +60,16 @@ var _ AutoMigratable = (*DatabaseSessionMetadataStore)(nil)
 // [NewDatabaseSessionsStorage] and provider config DB services.
 func NewDatabaseSessionMetadataStore(
 	dsn string,
-	opts gormsonal.GormSonalmodTablesOpts,
+	opts gormsignalfoundry.GormSignalFoundryTablesOpts,
 ) (*DatabaseSessionMetadataStore, error) {
 	if dsn == "" {
 		return nil, errors.New("dsn is required")
 	}
-	gormCfg := gormsonal.NewGormConfigForSonalmodTables(gormsonal.GormSonalmodTablesOpts{
+	gormCfg := gormsignalfoundry.NewGormConfigForSignalFoundryTables(gormsignalfoundry.GormSignalFoundryTablesOpts{
 		TablePrefix:    opts.TablePrefix,
 		TranslateError: true,
 	})
-	db, err := gorm.Open(gormsonal.NewGormDialector(dsn), gormCfg)
+	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), gormCfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -157,14 +157,17 @@ type DatabaseSessionsStorage struct {
 }
 
 // NewDatabaseSessionsStorage returns concrete *DatabaseSessionsStorage.
-func NewDatabaseSessionsStorage(dsn string, opts gormsonal.GormSonalmodTablesOpts) (*DatabaseSessionsStorage, error) {
+func NewDatabaseSessionsStorage(
+	dsn string,
+	opts gormsignalfoundry.GormSignalFoundryTablesOpts,
+) (*DatabaseSessionsStorage, error) {
 	if dsn == "" {
 		return nil, errors.New("dsn is required")
 	}
 	// database.NewSessionService returns [session.Service] only (no concrete type from ADK).
 	svc, err := database.NewSessionService(
-		gormsonal.NewGormDialector(dsn),
-		gormsonal.NewGormConfigForSonalmodTables(opts),
+		gormsignalfoundry.NewGormDialector(dsn),
+		gormsignalfoundry.NewGormConfigForSignalFoundryTables(opts),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create ADK session service: %w", err)

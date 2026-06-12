@@ -16,8 +16,8 @@ import (
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 
-	ap "github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
-	"github.com/gemyago/sonalmod/runtime/internal/sessions"
+	ap "github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
+	"github.com/gemyago/signal-foundry/runtime/internal/sessions"
 )
 
 // LLMAdapterFactory creates a model.LLM from a model name. Callers may pass an empty name

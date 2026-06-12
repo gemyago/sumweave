@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
-	ifs "github.com/gemyago/sonalmod/tools/workspacefs/internal/workspacefs"
+	"github.com/gemyago/signal-foundry/runtime/agent"
+	ifs "github.com/gemyago/signal-foundry/tools/workspacefs/internal/workspacefs"
 )
 
 // ExpectedToolCount is the number of workspace filesystem tools registered when RegisterTools succeeds

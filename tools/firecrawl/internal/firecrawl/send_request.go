@@ -54,7 +54,7 @@ func sendRequest[TBody any, TTarget any](
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := client.Do(req) //nolint:gosec // this sends requests to consumer configured endpoint
+	resp, err := client.Do(req)
 	if err != nil {
 		return httpTransportErr(req, err)
 	}

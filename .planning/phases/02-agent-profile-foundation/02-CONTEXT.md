@@ -18,7 +18,7 @@ The deliverable is a general profile schema, persistence support, and a control-
 
 ### Profile boundary
 - Agent profiles must stay general and backend-agnostic in this phase.
-- Store role, instructions, selected tool references, and Sonalmod-owned execution settings only.
+- Store role, instructions, selected tool references, and Signal Foundry-owned execution settings only.
 - Do not store ACP or OpenCode connection details in the general profile shape.
 
 ### Phase 1 carry-forward
@@ -29,7 +29,7 @@ The deliverable is a general profile schema, persistence support, and a control-
 - Keep durable agent-profile data in `runtime/internal`, parallel to provider config and session storage patterns.
 - Reuse the existing file-vs-database storage selector under `agentRuntime` instead of introducing a separate persistence switch.
 - Keep `runtime/httpapi` thin and extend the spec-first `runtime/internal/agentapi` layer if profile CRUD is exposed over HTTP.
-- Keep `apps/sonalmod` responsible for choosing implementations, wiring services, and mounting the runtime API, not for owning profile persistence logic.
+- Keep `apps/signal-foundry` responsible for choosing implementations, wiring services, and mounting the runtime API, not for owning profile persistence logic.
 
 ### The agent's Discretion
 - Exact profile field names and whether the primary identifier is immutable `name` or another stable key.
@@ -60,14 +60,14 @@ The deliverable is a general profile schema, persistence support, and a control-
 
 ### Existing runtime and app patterns
 - `runtime/AGENTS.md` - runtime public-contract and persistence boundaries
-- `apps/sonalmod/AGENTS.md` - app wiring and runtime persistence config guidance
+- `apps/signal-foundry/AGENTS.md` - app wiring and runtime persistence config guidance
 - `tests/AGENTS.md` - high-level integration expectations
 - `runtime/agent/providers_config.go` - public alias/factory pattern for durable config services
 - `runtime/internal/llmproviders/providers_config.go` - provider config domain/service shape
 - `runtime/internal/sessions/factory.go` - storage backend selection pattern
 - `runtime/httpapi/handler.go` - thin public HTTP wrapper pattern
 - `runtime/internal/agentapi/provider_handlers.go` - runtime CRUD handler pattern
-- `apps/sonalmod/internal/runtime.go` - service construction and runtime wiring pattern
+- `apps/signal-foundry/internal/runtime.go` - service construction and runtime wiring pattern
 
 ### Domain vocabulary
 - `docs/domain-terminology.md` - canonical distinction between Agent and Connection

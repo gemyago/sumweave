@@ -1,6 +1,12 @@
 # Skills tools (`tools/skills`)
 
-Go module that exposes a **skill discovery and activation toolset** for the Sonalmod agent runtime. Skills are discovered from configured directories containing `SKILL.md` files; agents receive compact metadata at startup and load full skill instructions on demand via tool calls.
+Go module that exposes a **skill discovery and activation toolset** for the Signal Foundry agent runtime. Skills are discovered from configured directories containing `SKILL.md` files; agents receive compact metadata at startup and load full skill instructions on demand via tool calls.
+
+## Template Origin And Boundary
+
+This module is template-derived support code and is not part of the intended core product path by default.
+
+Treat `tools/skills/` as reference-only unless the user explicitly decides to keep or evolve it as part of the real system.
 
 ## Registration contract
 

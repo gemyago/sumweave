@@ -7,11 +7,11 @@ import (
 	"log/slog"
 
 	"github.com/firebase/genkit/go/genkit"
-	"github.com/gemyago/sonalmod/runtime/internal"
-	"github.com/gemyago/sonalmod/runtime/internal/acpstdio"
-	lp "github.com/gemyago/sonalmod/runtime/internal/llmproviders"
-	"github.com/gemyago/sonalmod/runtime/internal/sessions"
-	"github.com/gemyago/sonalmod/runtime/internal/summarize"
+	"github.com/gemyago/signal-foundry/runtime/internal"
+	"github.com/gemyago/signal-foundry/runtime/internal/acpstdio"
+	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
+	"github.com/gemyago/signal-foundry/runtime/internal/sessions"
+	"github.com/gemyago/signal-foundry/runtime/internal/summarize"
 	"google.golang.org/adk/agent/llmagent"
 )
 
@@ -221,8 +221,8 @@ func NewRunner(args RunnerArgs, opts ...RunnerOpt) (*Runner, error) {
 }
 
 const (
-	defaultRunnerAppName   = "sonalmod-runtime"
-	defaultRunnerAgentName = "sonalmod"
+	defaultRunnerAppName   = "signal-foundry-runtime"
+	defaultRunnerAgentName = "signal-foundry"
 )
 
 // AutoMigrate runs schema migrations for database-backed session storage when configured.

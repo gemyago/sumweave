@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+const firecrawlMethodPost = "POST"
+
 type CrawlParams struct {
 	Request *CrawlRequest
 }
@@ -12,7 +14,7 @@ type CrawlParams struct {
 func (c *Client) Crawl(ctx context.Context, params CrawlParams) (*CrawlResponse, error) {
 	var response CrawlResponse
 	err := sendRequest(ctx, c.httpClient, sendRequestParams[CrawlRequest, CrawlResponse]{
-		Method: "POST",
+		Method: firecrawlMethodPost,
 		URL:    c.baseURL + "/crawl",
 		Body:   params.Request,
 		Target: &response,

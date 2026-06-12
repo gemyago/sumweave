@@ -27,7 +27,7 @@ completed: 2026-04-22
 
 ## Outcome
 
-OpenCode ACP probing is complete and Sonalmod now has a validated ACP subset grounded in reproducible local runs.
+OpenCode ACP probing is complete and Signal Foundry now has a validated ACP subset grounded in reproducible local runs.
 
 ## What Was Delivered
 

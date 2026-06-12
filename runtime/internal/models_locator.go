@@ -10,8 +10,8 @@ import (
 
 	"github.com/firebase/genkit/go/genkit"
 	oai "github.com/firebase/genkit/go/plugins/compat_oai"
-	lp "github.com/gemyago/sonalmod/runtime/internal/llmproviders"
-	"github.com/gemyago/sonalmod/runtime/internal/summarize"
+	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
+	"github.com/gemyago/signal-foundry/runtime/internal/summarize"
 	"google.golang.org/adk/model"
 )
 

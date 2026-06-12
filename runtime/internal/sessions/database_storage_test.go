@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/internal/gormsonal"
+	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/adk/session"
@@ -16,28 +16,28 @@ func TestNewDatabaseSessionsStorage(t *testing.T) {
 
 	t.Run(":memory: DSN returns storage without error", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsonal.GormSonalmodTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(":memory:", gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		require.NoError(t, err)
 		require.NotNil(t, s)
 	})
 
 	t.Run("empty DSN returns error", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage("", gormsonal.GormSonalmodTablesOpts{})
+		s, err := NewDatabaseSessionsStorage("", gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		require.Error(t, err)
 		require.Nil(t, s)
 	})
 
 	t.Run("AutoMigrate with :memory: succeeds", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsonal.GormSonalmodTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(":memory:", gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		require.NoError(t, err)
 		require.NoError(t, s.AutoMigrate())
 	})
 
 	t.Run("after AutoMigrate Create succeeds", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsonal.GormSonalmodTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(":memory:", gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		require.NoError(t, err)
 		require.NoError(t, s.AutoMigrate())
 
@@ -53,7 +53,7 @@ func TestNewDatabaseSessionsStorage(t *testing.T) {
 
 	t.Run("meta is DatabaseSessionMetadataStore", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsonal.GormSonalmodTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(":memory:", gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		require.NoError(t, err)
 		require.NotNil(t, s.meta)
 		_, ok := any(s.meta).(*DatabaseSessionMetadataStore)
@@ -63,7 +63,7 @@ func TestNewDatabaseSessionsStorage(t *testing.T) {
 	t.Run("SaveMetadata ListMetadata DeleteMetadata delegate to database store", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsonal.GormSonalmodTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(":memory:", gormsignalfoundry.GormSignalFoundryTablesOpts{})
 		require.NoError(t, err)
 		require.NoError(t, s.AutoMigrate())
 

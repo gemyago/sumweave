@@ -14,7 +14,7 @@ type ScrapeParams struct {
 func (c *Client) Scrape(ctx context.Context, params ScrapeParams) (*ScrapeResponse, error) {
 	var response ScrapeResponse
 	err := sendRequest(ctx, c.httpClient, sendRequestParams[ScrapeRequest, ScrapeResponse]{
-		Method: "POST",
+		Method: firecrawlMethodPost,
 		URL:    c.baseURL + "/scrape",
 		Body:   params.Request,
 		Target: &response,

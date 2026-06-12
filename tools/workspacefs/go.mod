@@ -1,4 +1,4 @@
-module github.com/gemyago/sonalmod/tools/workspacefs
+module github.com/gemyago/signal-foundry/tools/workspacefs
 
 go 1.26
 
@@ -8,7 +8,7 @@ tool (
 )
 
 require (
-	github.com/gemyago/sonalmod/runtime v0.0.0-20260331222213-0b60421e3a76
+	github.com/gemyago/signal-foundry/runtime v0.0.0-20260331222213-0b60421e3a76
 	github.com/google/uuid v1.6.0
 	github.com/jaswdr/faker/v2 v2.9.1
 	github.com/stretchr/testify v1.11.1
@@ -65,6 +65,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rjeczalik/notify v0.9.3 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
+	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
@@ -106,3 +107,5 @@ require (
 	rsc.io/omap v1.2.0 // indirect
 	rsc.io/ordered v1.1.1 // indirect
 )
+
+replace github.com/gemyago/signal-foundry/runtime => ../../runtime

@@ -1,9 +1,9 @@
 package agentapi
 
-import rt "github.com/gemyago/sonalmod/runtime/internal"
+import rt "github.com/gemyago/signal-foundry/runtime/internal"
 
 // Matches [agent.defaultRunnerAppName] — listing uses the same app scope as runs.
-const listSessionsAppName = "sonalmod-runtime"
+const listSessionsAppName = "signal-foundry-runtime"
 
 func mapListedSessionMetadata(m rt.SessionMetadata) SessionMetadata {
 	title := m.Title

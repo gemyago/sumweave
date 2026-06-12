@@ -7,18 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
-	rt "github.com/gemyago/sonalmod/runtime/internal"
-	ap "github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
-	"github.com/gemyago/sonalmod/runtime/internal/callerid"
-	"github.com/gemyago/sonalmod/runtime/internal/llmproviders"
+	"github.com/gemyago/signal-foundry/runtime/agent"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	ap "github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
+	"github.com/gemyago/signal-foundry/runtime/internal/callerid"
+	"github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -41,7 +40,7 @@ func TestAgentAPIServer(t *testing.T) {
 		profilesSvc *mockAgentProfilesService,
 	) *AgentAPIServer {
 		t.Helper()
-		log := slog.New(slog.NewTextHandler(io.Discard, nil))
+		log := slog.New(slog.DiscardHandler)
 		if profilesSvc == nil {
 			profilesSvc = &mockAgentProfilesService{}
 		}

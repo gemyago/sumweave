@@ -1,4 +1,4 @@
-module github.com/gemyago/sonalmod/runtime
+module github.com/gemyago/signal-foundry/runtime
 
 go 1.26
 
@@ -18,9 +18,9 @@ require (
 	github.com/oapi-codegen/runtime v1.3.1
 	github.com/openai/openai-go v1.12.0
 	github.com/stretchr/testify v1.11.1
-	gopkg.in/yaml.v3 v3.0.1
 	google.golang.org/adk v1.0.0
 	google.golang.org/genai v1.52.1
+	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )

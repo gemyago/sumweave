@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	lp "github.com/gemyago/sonalmod/runtime/internal/llmproviders"
+	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
 )

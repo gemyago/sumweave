@@ -1,6 +1,6 @@
 package internal
 
-import "github.com/gemyago/sonalmod/runtime/internal/sessions"
+import "github.com/gemyago/signal-foundry/runtime/internal/sessions"
 
 // SessionMetadata is an alias for sessions.SessionMetadata.
 type SessionMetadata = sessions.SessionMetadata

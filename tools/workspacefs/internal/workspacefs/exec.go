@@ -15,6 +15,12 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	blockedCommandCurl = "curl"
+	blockedCommandWget = "wget"
+	windowsGOOS        = "windows"
+)
+
 // ExecCommandRequest is the request model for workspacefs_exec_command.
 type ExecCommandRequest struct {
 	Workspace        string `json:"workspace"`
@@ -65,8 +71,8 @@ type ExecKillJobResponse struct {
 // It covers common network exfiltration and system-mutation tools.
 func builtinBlockedCommands() []string {
 	return []string{
-		"curl",
-		"wget",
+		blockedCommandCurl,
+		blockedCommandWget,
 		"nc",
 		"netcat",
 		"ncat",
@@ -346,7 +352,7 @@ func resolveWorkingDirectory(workspaceAbsPath, workingDir string) (string, error
 // A background [context.Context] is used to satisfy static checks; cancellation
 // and timeouts are enforced via [terminateCmdProcess] and explicit deadlines.
 func buildShellCommand(command string) *exec.Cmd {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsGOOS {
 		return exec.CommandContext(context.Background(), "cmd", "/c", command)
 	}
 	return exec.CommandContext(context.Background(), "sh", "-c", command)

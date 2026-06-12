@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	iskills "github.com/gemyago/sonalmod/tools/skills/internal/skills"
+	iskills "github.com/gemyago/signal-foundry/tools/skills/internal/skills"
 )
 
 func testToolContext(t *testing.T) *agent.ToolContext {

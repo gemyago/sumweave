@@ -2,6 +2,12 @@
 
 This module contains high level tests for the project, like e2e or integration tests.
 
+## Template Origin And Boundary
+
+This folder is template-derived test harness material unless the user explicitly promotes a test flow into the real system.
+
+Treat the current high-level agent harness, `integration-cli`, and scenario orchestration as reference-only examples and starting points, not as mandatory long-term product QA architecture.
+
 ## Agent tests
 
 Use this instruction when user requests to run agent e2e tests. User must do some manual setup which AI should not be concerned with. AI should assume that everything is configured and ready to run.
@@ -28,30 +34,6 @@ go run . run \
 ```
 
 Replace `'<provider/model>'` with a real name printed by `list-models`.
-
-## integration-cli ACP probe mode
-
-`tests/agent/integration-cli` also includes an `acp` subcommand for manual protocol probing against an ACP-capable agent.
-
-Prerequisites:
-- `opencode` is installed and available in `PATH`
-- the local `opencode acp` environment is authenticated and ready for interactive use
-
-Example command shape:
-
-```bash
-cd tests/agent/integration-cli
-go run . acp \
-  --agent-command opencode \
-  --agent-arg acp \
-  --prompt "hello from integration-cli" \
-  --transcript ../../docs/implementation/opencode-acp-transcripts/probe.jsonl
-```
-
-Optional flags:
-- `--cwd` to set the ACP agent working directory
-- `--load-session` to call `session/load` when advertised by agent capabilities
-- `--cancel-after` to issue `session/cancel` after a delay
 
 ### Run agent test scenarios via the master orchestrator
 

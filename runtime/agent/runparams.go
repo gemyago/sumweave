@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/gemyago/sonalmod/runtime/internal"
+import "github.com/gemyago/signal-foundry/runtime/internal"
 
 // RunParamsBuilder constructs [RunParams] for [Runner.Run] with required user identity and model.
 type RunParamsBuilder struct {

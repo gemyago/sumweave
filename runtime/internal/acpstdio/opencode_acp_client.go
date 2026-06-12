@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
+	"github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
 )
 
 const (
@@ -24,6 +24,12 @@ const (
 	openCodeACPUpdateBufferSize = 4
 	openCodeACPScannerBufSize   = 64 * 1024
 	openCodeACPScannerMaxSize   = 4 * 1024 * 1024
+	openCodeRPCVersion          = "2.0"
+	openCodeRPCVersionKey       = "jsonrpc"
+	openCodeSessionIDKey        = "sessionId"
+	openCodeTextKey             = "text"
+	openCodeTextType            = "text"
+	openCodeTypeKey             = "type"
 )
 
 // LaunchErrorKind classifies ACP stdio launch failure categories.
@@ -291,10 +297,10 @@ func promptACPSession(
 ) (json.RawMessage, []Update, error) {
 	updates := make([]Update, 0, openCodeACPUpdateBufferSize)
 	promptResp, err := client.call(ctx, "session/prompt", map[string]any{
-		"sessionId": sessionID,
+		openCodeSessionIDKey: sessionID,
 		"prompt": []map[string]string{{
-			"type": "text",
-			"text": prompt,
+			openCodeTypeKey: openCodeTextType,
+			openCodeTextKey: prompt,
 		}},
 	}, func(env openCodeACPEnvelope) error {
 		if env.Method != "session/update" {
@@ -407,10 +413,10 @@ func (c *openCodeACPWireClient) writeRequest(
 	}
 
 	request := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      requestID,
-		"method":  method,
-		"params":  params,
+		openCodeRPCVersionKey: openCodeRPCVersion,
+		"id":                  requestID,
+		"method":              method,
+		"params":              params,
 	}
 	raw, err := json.Marshal(request)
 	if err != nil {
@@ -471,10 +477,10 @@ func extractOpenCodeSessionID(result json.RawMessage) (string, error) {
 		return "", err
 	}
 
-	sessionID, _ := obj["sessionId"].(string)
+	sessionID, _ := obj[openCodeSessionIDKey].(string)
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return "", errors.New("session/new result missing sessionId")
+		return "", fmt.Errorf("session/new result missing %s", openCodeSessionIDKey)
 	}
 	return sessionID, nil
 }
@@ -485,10 +491,10 @@ func parseACPSessionUpdate(params json.RawMessage) (Update, error) {
 		return Update{}, err
 	}
 
-	sessionID, _ := paramsObj["sessionId"].(string)
+	sessionID, _ := paramsObj[openCodeSessionIDKey].(string)
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return Update{}, errors.New("session/update params missing sessionId")
+		return Update{}, fmt.Errorf("session/update params missing %s", openCodeSessionIDKey)
 	}
 
 	updateValue, ok := paramsObj["update"]

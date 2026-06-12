@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
+	"github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,8 +38,8 @@ func TestOpenCodeACPClient(t *testing.T) {
 
 	t.Run("performs initialize new prompt and consumes session update messages", func(t *testing.T) {
 		methodsLog := filepath.Join(t.TempDir(), "methods.log")
-		t.Setenv("SONALMOD_ACP_HELPER_MODE", "success")
-		t.Setenv("SONALMOD_ACP_HELPER_METHODS_LOG", methodsLog)
+		t.Setenv("SIGNAL_FOUNDRY_ACP_HELPER_MODE", "success")
+		t.Setenv("SIGNAL_FOUNDRY_ACP_HELPER_METHODS_LOG", methodsLog)
 
 		client := NewOpenCodeACPClient()
 		result, err := client.Launch(t.Context(), makeRequest())
@@ -54,8 +54,8 @@ func TestOpenCodeACPClient(t *testing.T) {
 
 	t.Run("does not call unsupported session methods", func(t *testing.T) {
 		methodsLog := filepath.Join(t.TempDir(), "methods.log")
-		t.Setenv("SONALMOD_ACP_HELPER_MODE", "success")
-		t.Setenv("SONALMOD_ACP_HELPER_METHODS_LOG", methodsLog)
+		t.Setenv("SIGNAL_FOUNDRY_ACP_HELPER_MODE", "success")
+		t.Setenv("SIGNAL_FOUNDRY_ACP_HELPER_METHODS_LOG", methodsLog)
 
 		client := NewOpenCodeACPClient()
 		_, err := client.Launch(t.Context(), makeRequest())
@@ -78,8 +78,8 @@ func TestOpenCodeACPClient(t *testing.T) {
 	})
 
 	t.Run("malformed responses return protocol errors", func(t *testing.T) {
-		t.Setenv("SONALMOD_ACP_HELPER_MODE", "bad-initialize")
-		t.Setenv("SONALMOD_ACP_HELPER_METHODS_LOG", filepath.Join(t.TempDir(), "methods.log"))
+		t.Setenv("SIGNAL_FOUNDRY_ACP_HELPER_MODE", "bad-initialize")
+		t.Setenv("SIGNAL_FOUNDRY_ACP_HELPER_METHODS_LOG", filepath.Join(t.TempDir(), "methods.log"))
 
 		client := NewOpenCodeACPClient()
 		_, err := client.Launch(t.Context(), makeRequest())
@@ -88,8 +88,8 @@ func TestOpenCodeACPClient(t *testing.T) {
 	})
 
 	t.Run("missing session id response returns protocol errors", func(t *testing.T) {
-		t.Setenv("SONALMOD_ACP_HELPER_MODE", "missing-session-id")
-		t.Setenv("SONALMOD_ACP_HELPER_METHODS_LOG", filepath.Join(t.TempDir(), "methods.log"))
+		t.Setenv("SIGNAL_FOUNDRY_ACP_HELPER_MODE", "missing-session-id")
+		t.Setenv("SIGNAL_FOUNDRY_ACP_HELPER_METHODS_LOG", filepath.Join(t.TempDir(), "methods.log"))
 
 		client := NewOpenCodeACPClient()
 		_, err := client.Launch(t.Context(), makeRequest())
@@ -124,12 +124,12 @@ func TestOpenCodeACPClient(t *testing.T) {
 }
 
 func TestOpenCodeACPClientHelperProcess(_ *testing.T) {
-	if os.Getenv("SONALMOD_ACP_HELPER_MODE") == "" {
+	if os.Getenv("SIGNAL_FOUNDRY_ACP_HELPER_MODE") == "" {
 		return
 	}
 
-	mode := os.Getenv("SONALMOD_ACP_HELPER_MODE")
-	methodsLog := os.Getenv("SONALMOD_ACP_HELPER_METHODS_LOG")
+	mode := os.Getenv("SIGNAL_FOUNDRY_ACP_HELPER_MODE")
+	methodsLog := os.Getenv("SIGNAL_FOUNDRY_ACP_HELPER_METHODS_LOG")
 	_ = os.WriteFile(methodsLog, []byte(""), 0600)
 
 	scanner := bufio.NewScanner(os.Stdin)

@@ -6,7 +6,7 @@ import (
 	"io"
 	"iter"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/agent"
 )
 
 // streamTextResult is implemented by *agent.RunResult for CLI streaming.

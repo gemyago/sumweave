@@ -4,6 +4,17 @@
 
 This project is early in development; breaking public API changes are not a concern.
 
+## Project Origin And Direction
+
+This repository was created from template and foundation code. Treat inherited template structure, copied boilerplate, and generic support modules as reference material unless this file or a module `AGENTS.md` explicitly says they are part of the intended product path.
+
+The intended long-term system shape is:
+- one core Go package/module (`runtime/` is the current foundation; naming may change)
+- one Go API/jobs application (`apps/signal-foundry/` is the current foundation; naming may change)
+- one UI (`apps/signal-ui/`)
+
+Unless explicitly promoted by the user, everything outside that core package, Go app, and UI should be treated as template-origin reference code and not as a product requirement.
+
 ## ⚠️ IMPORTANT: Read Module-Specific AGENTS.md Files First
 
 **Before performing ANY action** (running tests, editing files, debugging, etc.) in a specific module, **ALWAYS read the relevant module-specific AGENTS.md file first**. These files contain critical context, conventions, and requirements specific to each module. For high-level tests (integration/e2e, agent harness), read [tests/AGENTS.md](./tests/AGENTS.md) first.
@@ -11,12 +22,12 @@ This project is early in development; breaking public API changes are not a conc
 ```
 <project layout>/
 ├── AGENTS.md                     # root AGENTS.md
-├── runtime/                      # core agent and related infrastructure (go)
+├── runtime/                      # core runtime and related infrastructure (go)
 │   └── AGENTS.md
 ├── apps/
-│   ├── sonal-ui/                 # Svelte/Vite SPA (js)
+│   ├── signal-ui/                 # Svelte/Vite SPA (js)
 │   │   └── AGENTS.md
-│   └── sonalmod/                 # Bundled Sonalmod backend (go)
+│   └── signal-foundry/                 # Bundled Signal Foundry backend (go)
 │       └── AGENTS.md
 ├── build/
 │   ├── AGENTS.md
@@ -46,15 +57,19 @@ Tools/Frameworks:
 
 Go and Node.js are managed by direnv (in .envrc) and nvm respectively. All dependencies are project scoped (e.g no global node_modules e.t.c).
 
-AI Frameworks:
-- OpenSpec - note that it may be used but not currently committed to the repo. This was a conscious decision of the user.
+**Shell usage notes**
+- If shell is persistent (e.g human controlled terminal), then `direnv allow` and then run all commands directly in the shell.
+- If shell is ephemeral (most typical in AI agents), then run most commands via `direnv exec <working_dir> <command>`.
+- This mostly applies to project specific commands (like `make`, `go` e.t.c). Regular exploration related commands (like `ls`, `cd`, `pwd` e.t.c) can be run directly in the shell.
+- Keep in mind that `<working_dir>` doesn't change cwd, just loads the env from the specified working dir.
+- When documenting commands, do not add `direnv exec` prefix. This should be assumed after reading this section.
 
 ## Nx (monorepo tasks)
 
 This monorepo is managed by Nx. Most typical tasks are:
-- Run tests of specific module: `npx nx test sonalmod` (cached)
-- Run lint of specific module: `npx nx lint sonalmod` (cached)
-- Run test of specific module without caching: `npx nx test sonalmod --skipNxCache`
+- Run tests of specific module: `npx nx test signal-foundry` (cached)
+- Run lint of specific module: `npx nx lint signal-foundry` (cached)
+- Run test of specific module without caching: `npx nx test signal-foundry --skipNxCache`
 - Run lint of all affected modules without caching: `npx nx run-many -t lint --skipNxCache`
 
 To run all affected lint and tests, use `make affected-lint-test`
@@ -63,28 +78,18 @@ Any weird issues from golangci-linter (like invalid suppression directives or si
 
 > ⚠️ If golangci-lint reports findings that seem unrelated to your changes (e.g. stale suppression directives in untouched files), clean the cache first: `make clean-lint-cache`, then re-run
 
-## npm Release Build Pipeline
+## Distribution
 
-All release build logic lives in `build/npm/`. The pipeline is local-first: every step runs identically on developer machines and in CI.
-
-Key commands (run from repo root or with `-C build/npm`):
-- Full release build: `make -C build/npm release VERSION=1.2.3`
-- Build script self-tests: `make -C build/npm test` (also run by `npx nx test npm-build`)
-- Local combined mode (backend serves built UI): `make -C build/npm local-run`
-- Clean artifacts: `make -C build/npm clean`
-
-CI/CD release workflows (`.github/workflows/`):
-- `release-prepare.yml` — manual (`workflow_dispatch`): input **version**; creates a **draft** GitHub Release (`gh`, generated notes).
-- `release-publish.yml` — when a release is **published** (`released`) or manual **ref**; rebuilds tarballs, publishes to npm via **OIDC** (Trusted Publishing; no `NPM_TOKEN` in the repo), uploads assets. Does **not** re-run Nx lint/test (covered on `main`). Setup: [`.github/RELEASE-FLOW.md`](.github/RELEASE-FLOW.md).
-
-Releasing: run **Release Prepare**, review the draft on GitHub, then **publish** the release. Pre-releases (e.g. `v1.2.3-alpha.1`) publish to the `alpha` npm dist-tag and GitHub marks pre-releases accordingly.
+This repo does not maintain an npm/package distribution pipeline.
 
 ## Coding Guide
 - Always read [golang-coding-guide.md](./docs/golang-coding-guide.md) if planning to write golang code.
 
 ## Product Docs
 
-Canonical domain vocabulary for planning, design, and copy: [docs/domain-terminology.md](./docs/domain-terminology.md).
+- Active docs index: [docs/README.md](./docs/README.md)
+- Canonical domain vocabulary: [docs/domain-terminology.md](./docs/domain-terminology.md)
+- High-level product and runtime shape: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 
 ## Project Rules and Conventions
 
@@ -93,6 +98,10 @@ AI must always follow the rules and conventions defined in this section. This se
 The rules are:
 - Update project rules and conventions when user corrects the behavior of AI.
 - Each rule must aim to be a simple and clear one line (50-80 characters)
+- `docs/ARCHITECTURE.md` is the source of truth for product direction.
+- Treat template-derived code as reference unless adopted.
+- Prefer core Go, Go app, and UI as real product scope.
+- Keep package/release pipeline code removed unless explicitly revived.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

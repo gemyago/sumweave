@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
-	rt "github.com/gemyago/sonalmod/runtime/internal"
-	ap "github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
-	"github.com/gemyago/sonalmod/runtime/internal/callerid"
-	lp "github.com/gemyago/sonalmod/runtime/internal/llmproviders"
+	"github.com/gemyago/signal-foundry/runtime/agent"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	ap "github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
+	"github.com/gemyago/signal-foundry/runtime/internal/callerid"
+	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
 )
 
 var _ agent.AgentRunner = (*rt.BackgroundRunner)(nil)

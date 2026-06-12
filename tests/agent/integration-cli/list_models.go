@@ -8,7 +8,7 @@ import (
 	"io"
 	"slices"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/agent"
 )
 
 func runListModels(ctx context.Context, lister agent.ModelsLister, w io.Writer) error {

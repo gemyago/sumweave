@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
-	ap "github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
-	lp "github.com/gemyago/sonalmod/runtime/internal/llmproviders"
+	"github.com/gemyago/signal-foundry/runtime/agent"
+	ap "github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
+	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -82,7 +82,7 @@ func TestAgentProfileHandlers(t *testing.T) {
 		t.Helper()
 		srv := NewAgentAPIServer(ServerParams{
 			Runner:                 agent.NewMockAgentRunner(t),
-			Logger:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Logger:                 slog.New(slog.DiscardHandler),
 			IDGen:                  NewMockIDGen(),
 			RequestMapper:          NewAgentAPIRequestMapper(),
 			SSEWriter:              NewAgentAPISSEWriter(NewAgentAPIStreamEventMapper()),
@@ -94,7 +94,7 @@ func TestAgentProfileHandlers(t *testing.T) {
 
 	newFileProfilesService := func(t *testing.T) ap.AgentProfilesService {
 		t.Helper()
-		svc, err := ap.NewFileAgentProfilesService(t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+		svc, err := ap.NewFileAgentProfilesService(t.TempDir(), slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		return svc
 	}

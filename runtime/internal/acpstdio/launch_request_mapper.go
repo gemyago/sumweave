@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
+	"github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
 )
 
 // MapExecutorRequest composes ACP stdio executor input from profile defaults.

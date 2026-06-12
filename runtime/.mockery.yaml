@@ -15,20 +15,20 @@ packages:
           dir: internal/
           pkgname: internal
           filename: mock_session_service_test.go
-  github.com/gemyago/sonalmod/runtime/agent:
+  github.com/gemyago/signal-foundry/runtime/agent:
     interfaces:
       AgentRunner:
         config:
           # Allow this mock to be used by others
           filename: mocks_shared.go
       DefinedTool:
-  github.com/gemyago/sonalmod/runtime/internal:
+  github.com/gemyago/signal-foundry/runtime/internal:
     interfaces:
       LLMRunner:
-  github.com/gemyago/sonalmod/runtime/internal/agentapi:
+  github.com/gemyago/signal-foundry/runtime/internal/agentapi:
     interfaces:
       ModelsLister:
-  github.com/gemyago/sonalmod/runtime/internal/llmproviders:
+  github.com/gemyago/signal-foundry/runtime/internal/llmproviders:
     interfaces:
       ProvidersConfigService:
         config:

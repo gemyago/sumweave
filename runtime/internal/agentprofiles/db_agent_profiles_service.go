@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/internal/gormsonal"
+	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
 	"gorm.io/gorm"
 )
 
@@ -53,11 +53,11 @@ func NewDatabaseAgentProfilesService(
 	logger *slog.Logger,
 	tablePrefix string,
 ) (*DatabaseAgentProfilesService, error) {
-	cfg := gormsonal.NewGormConfigForSonalmodTables(gormsonal.GormSonalmodTablesOpts{
+	cfg := gormsignalfoundry.NewGormConfigForSignalFoundryTables(gormsignalfoundry.GormSignalFoundryTablesOpts{
 		TablePrefix:    tablePrefix,
 		TranslateError: true,
 	})
-	db, err := gorm.Open(gormsonal.NewGormDialector(dsn), cfg)
+	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}

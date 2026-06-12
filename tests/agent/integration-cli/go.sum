@@ -30,14 +30,6 @@ github.com/frankban/quicktest v1.14.6 h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHk
 github.com/frankban/quicktest v1.14.6/go.mod h1:4ptaffx2x8+WTWXmUCuVU6aPUX1/Mz7zb5vbUoiM6w0=
 github.com/fsnotify/fsnotify v1.9.0 h1:2Ml+OJNzbYCTzsxtv8vKSFD9PbJjmhYF14k/jKC7S9k=
 github.com/fsnotify/fsnotify v1.9.0/go.mod h1:8jBTzvmWwFyi3Pb8djgCCO5IBqzKJ/Jwo8TRcHyHii0=
-github.com/gemyago/sonalmod/apps/sonalmod v0.0.0-20260411074257-b5b84f975750 h1:gTtpwTFyI6oK0HvQmjLTOFapj/NB9Cq1DDjUsgIg4Io=
-github.com/gemyago/sonalmod/apps/sonalmod v0.0.0-20260411074257-b5b84f975750/go.mod h1:xofkdSee/SUvCJjZi+CUzxaLJyZafW1PeWEJEEmRvA4=
-github.com/gemyago/sonalmod/runtime v0.0.0-20260411074257-b5b84f975750 h1:Ifim6mCtFIXofvIhYvhOmu+2coLMx5u3LVIibLih9ik=
-github.com/gemyago/sonalmod/runtime v0.0.0-20260411074257-b5b84f975750/go.mod h1:Mi0xWvBgfeMmz5N7VbWjZ7OsxzkYz+uHQnbe5Q337cA=
-github.com/gemyago/sonalmod/tools/skills v0.0.0-20260406074131-aa6097596cbc h1:HDBMSDOFsw4/HbSd8yFnelzFYcnqqx6H5D+gsjHAtK0=
-github.com/gemyago/sonalmod/tools/skills v0.0.0-20260406074131-aa6097596cbc/go.mod h1:W3i4sAJTaFvxxiJCpfOTEeMv8cMs7txvB6DF5TsYNNQ=
-github.com/gemyago/sonalmod/tools/workspacefs v0.0.0-20260406074131-aa6097596cbc h1:7UmlCR5Rs56NVfpXAGILKSZ8RwxQ2Q1NLNHOxbmCPVQ=
-github.com/gemyago/sonalmod/tools/workspacefs v0.0.0-20260406074131-aa6097596cbc/go.mod h1:JYtzoVugvYJVl30tcgpUU1q9UTB5yzvebUYQZlRw9P8=
 github.com/getkin/kin-openapi v0.134.0 h1:/L5+1+kfe6dXh8Ot/wqiTgUkjOIEJiC0bbYVziHB8rU=
 github.com/getkin/kin-openapi v0.134.0/go.mod h1:wK6ZLG/VgoETO9pcLJ/VmAtIcl/DNlMayNTb716EUxE=
 github.com/glebarez/go-sqlite v1.22.0 h1:uAcMJhaA6r3LHMTFgP0SifzgXg46yJkgxqyuyec+ruQ=

@@ -1,12 +1,12 @@
 {
-  "name": "sonalmod-workspace",
+  "name": "signal-foundry-workspace",
   "version": "0.0.0",
   "description": "This is a stealth project, does nothing for now",
   "license": "MIT",
   "author": "https://github.com/gemyago",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gemyago/sonalmod.git"
+    "url": "https://github.com/gemyago/signal-foundry.git"
   },
   "devDependencies": {
     "@fission-ai/openspec": "^1.2.0",

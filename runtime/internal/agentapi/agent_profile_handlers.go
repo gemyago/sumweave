@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	ap "github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
+	ap "github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
 )
 
 // ListAgentProfiles implements [ServerInterface].

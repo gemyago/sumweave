@@ -1,6 +1,6 @@
 go 1.26.1
 
-use ./apps/sonalmod
+use ./apps/signal-foundry
 
 use ./runtime
 

@@ -18,7 +18,7 @@ This phase delivers backend binding, launch flow, and profile selection for Open
 - **D-01:** Scope is limited to `CODE-02`, `CODE-03`, and `CODE-04` for this phase.
 - **D-02:** OpenCode ACP integration must rely only on validated ACP behavior: `initialize`, `session/new`, `session/prompt`, and `session/update`.
 - **D-03:** Keep Phase 2 boundary intact: general agent profile data stays separate from backend-specific connection/binding data.
-- **D-04:** Reuse existing runtime/app architecture patterns (`runtime/internal` domain services, thin `runtime/httpapi`, app wiring in `apps/sonalmod`).
+- **D-04:** Reuse existing runtime/app architecture patterns (`runtime/internal` domain services, thin `runtime/httpapi`, app wiring in `apps/signal-foundry`).
 - **D-05:** Produce execute-phase-ready artifacts with wave/dependency frontmatter and automated verification per task.
 
 ## Claude's Discretion
@@ -54,7 +54,7 @@ This phase delivers backend binding, launch flow, and profile selection for Open
 - `docs/implementation/opencode-acp-capability-map.md`
 - `docs/implementation/agent-profile-schema-boundary.md`
 - `runtime/AGENTS.md`
-- `apps/sonalmod/AGENTS.md`
+- `apps/signal-foundry/AGENTS.md`
 - `tests/AGENTS.md`
 
 </canonical_refs>

@@ -7,7 +7,7 @@
 <domain>
 ## Phase Boundary
 
-This phase exists to learn what OpenCode actually exposes through ACP before Sonalmod freezes a higher-level integration model.
+This phase exists to learn what OpenCode actually exposes through ACP before Signal Foundry freezes a higher-level integration model.
 
 The deliverable is not a production-grade multi-backend abstraction. The deliverable is a validated capability map, a reusable probe harness, and an updated project direction based on observed ACP behavior.
 
@@ -27,7 +27,7 @@ The deliverable is not a production-grade multi-backend abstraction. The deliver
 - Use OpenCode findings to decide which parts of the future configuration model are general and which are ACP-specific.
 
 ### Discovery goals
-- Validate the ACP lifecycle Sonalmod needs most: initialize, session creation, prompt execution, progress updates, cancellation, and session resume if available.
+- Validate the ACP lifecycle Signal Foundry needs most: initialize, session creation, prompt execution, progress updates, cancellation, and session resume if available.
 - Capture actual OpenCode capabilities returned at runtime instead of assuming optional ACP features are supported.
 - Record unsupported or unclear features as explicit non-goals for the first implementation slice.
 
@@ -57,7 +57,7 @@ The deliverable is not a production-grade multi-backend abstraction. The deliver
 
 ### Existing runtime and testing patterns
 - `runtime/AGENTS.md` - runtime module boundaries and public contract rules
-- `apps/sonalmod/AGENTS.md` - embedded app/runtime wiring guidance
+- `apps/signal-foundry/AGENTS.md` - embedded app/runtime wiring guidance
 - `tests/AGENTS.md` - integration test expectations and manual setup stance
 - `tests/agent/integration-cli/main.go` - existing Go CLI pattern for agent testing
 - `tests/agent/integration-cli/cli.go` - existing runner invocation pattern
@@ -71,9 +71,9 @@ The deliverable is not a production-grade multi-backend abstraction. The deliver
 ## Specific Ideas
 
 - Probe OpenCode via `opencode acp` over JSON-RPC stdio.
-- Capture raw request/response and notification transcripts so Sonalmod can reason about exact protocol behavior later.
+- Capture raw request/response and notification transcripts so Signal Foundry can reason about exact protocol behavior later.
 - Check capability negotiation before assuming support for `session/load`, `session/list`, or `session/close`.
-- Focus on the smallest validated ACP subset Sonalmod needs for its first OpenCode integration.
+- Focus on the smallest validated ACP subset Signal Foundry needs for its first OpenCode integration.
 
 </specifics>
 

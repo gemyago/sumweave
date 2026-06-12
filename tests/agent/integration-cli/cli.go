@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/agent"
 	uuid "github.com/gofrs/uuid/v5"
 )
 
-// Default matches apps/sonal-ui/src/pages/Chat.svelte (import.meta.env.VITE_AGENT_USER_ID ?? 'dev-user').
+// Default matches apps/signal-ui/src/pages/Chat.svelte (import.meta.env.VITE_AGENT_USER_ID ?? 'dev-user').
 const agentUserID = "dev-user"
 
 type cliParams struct {

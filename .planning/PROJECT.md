@@ -1,8 +1,8 @@
-# Sonalmod
+# Signal Foundry
 
 ## What This Is
 
-Sonalmod is a solo-first harness for building other agent harnesses. The repo already has an embedded agent runtime, session storage, provider config, skills support, and workspace tools; the next step is to add a higher-level configuration layer for configurable agents and an OpenCode-backed coding-agent lane.
+Signal Foundry is a solo-first harness for building other agent harnesses. The repo already has an embedded agent runtime, session storage, provider config, skills support, and workspace tools; the next step is to add a higher-level configuration layer for configurable agents and an OpenCode-backed coding-agent lane.
 
 This is for one operator who wants to define agent roles, wire them to execution backends, and run them from a single control plane without hardcoding each special case.
 
@@ -21,7 +21,7 @@ One person can define, launch, and evolve multiple kinds of agents from the same
 
 ### Active
 
-- [ ] User can configure the first OpenCode-backed coding agent path around ACP capabilities Sonalmod has actually validated.
+- [ ] User can configure the first OpenCode-backed coding agent path around ACP capabilities Signal Foundry has actually validated.
 - [ ] User can define configurable agent profiles with a role, instructions, tools, and execution settings.
 - [ ] User can persist and reuse configurable agent profiles across runs.
 - [ ] User can define a coding agent profile that targets OpenCode through ACP.

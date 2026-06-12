@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
-	"github.com/gemyago/sonalmod/runtime/internal/callerid"
+	"github.com/gemyago/signal-foundry/runtime/agent"
+	"github.com/gemyago/signal-foundry/runtime/internal/callerid"
 )
 
 // ListSessions implements [ServerInterface].

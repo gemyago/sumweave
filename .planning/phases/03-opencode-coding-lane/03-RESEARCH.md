@@ -5,7 +5,7 @@
 
 ## Research Question
 
-How should Sonalmod add an OpenCode-backed coding lane that can be selected and launched from saved profiles without violating the validated ACP subset or the Agent-vs-Connection boundary?
+How should Signal Foundry add an OpenCode-backed coding lane that can be selected and launched from saved profiles without violating the validated ACP subset or the Agent-vs-Connection boundary?
 
 ## Primary Sources
 
@@ -14,7 +14,7 @@ How should Sonalmod add an OpenCode-backed coding lane that can be selected and 
 - `docs/implementation/opencode-acp-capability-map.md`
 - `docs/implementation/agent-profile-schema-boundary.md`
 - `runtime/AGENTS.md`
-- `apps/sonalmod/AGENTS.md`
+- `apps/signal-foundry/AGENTS.md`
 - `.planning/phases/01-acp-discovery-and-capability-map/01-02-SUMMARY.md`
 - `.planning/phases/02-agent-profile-foundation/02-01-SUMMARY.md`
 - `.planning/phases/02-agent-profile-foundation/02-02-SUMMARY.md`
@@ -33,7 +33,7 @@ How should Sonalmod add an OpenCode-backed coding lane that can be selected and 
 - General profile schema already exists and is durable (`runtime/internal/agentprofiles` + API + app wiring).
 - Phase 2 explicitly kept backend connection data out of the general profile contract.
 - Runtime API expansion pattern is spec-first in `runtime/internal/agentapi/openapi.yaml` with generated code and thin `runtime/httpapi` wrapper.
-- App wiring and migration control live in `apps/sonalmod/internal/runtime.go`.
+- App wiring and migration control live in `apps/signal-foundry/internal/runtime.go`.
 
 ## Planning Implications
 

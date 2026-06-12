@@ -263,7 +263,6 @@ func writeIndexAtomic(path string, sessions []SessionMetadata) error {
 		return fmt.Errorf("close temp index: %w", err)
 	}
 	// tmpPath is from CreateTemp under dir; path is the index under the same tree.
-	//nolint:gosec // G703: paths are confined to baseDir/session index layout (no user-controlled traversal).
 	if err = os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("rename index file: %w", err)
 	}

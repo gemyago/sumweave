@@ -1,0 +1,19 @@
+dir: '{{.InterfaceDirRelative}}'
+template: testify
+template-data:
+  mock-build-tags: '!release'
+  unroll-variadic: true
+
+packages:
+  github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth:
+    interfaces:
+      userStore:
+      jwtService:
+      refreshTokenStore:
+      passwordHasher:
+  github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware:
+    interfaces:
+      jwtValidator:
+  github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1controllers:
+    interfaces:
+      AuthenticatingService:

@@ -362,6 +362,7 @@ func (s *FileProvidersConfigService) writeProviderFile(path string, cfg Provider
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(yamlIndent)
+	//nolint:gosec // provider config payload includes APIKey field by design.
 	if err := enc.Encode(&stored); err != nil {
 		return fmt.Errorf("marshal provider config: %w", err)
 	}

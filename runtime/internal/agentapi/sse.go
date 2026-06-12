@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net/http"
 
-	rt "github.com/gemyago/sonalmod/runtime/internal"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
 )
+
+const streamErrorEventName = "error"
 
 // StreamEventMapper maps runtime session events to OpenAPI StreamEvent payloads (used by the SSE driver).
 type StreamEventMapper interface {
@@ -143,7 +145,7 @@ func (s *AgentAPISSEWriter) writeStreamError(w http.ResponseWriter, err error) e
 	if msg == "" {
 		msg = "stream error"
 	}
-	if e := se.FromStreamErrorEvent(StreamErrorEvent{Event: "error", Message: msg}); e != nil {
+	if e := se.FromStreamErrorEvent(StreamErrorEvent{Event: streamErrorEventName, Message: msg}); e != nil {
 		return e
 	}
 	_ = writeSSEEvent(w, se)

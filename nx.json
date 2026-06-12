@@ -15,15 +15,21 @@
   "targetDefaults": {
     "lint": {
       "cache": true,
-      "dependsOn": ["install-deps"]
+      "dependsOn": [
+        "install-deps"
+      ]
     },
     "test": {
       "cache": true,
-      "dependsOn": ["install-deps"]
+      "dependsOn": [
+        "install-deps"
+      ]
     },
     "build": {
       "cache": true,
-      "dependsOn": ["install-deps"]
+      "dependsOn": [
+        "install-deps"
+      ]
     },
     "dev": {
       "cache": false
@@ -43,5 +49,5 @@
   "tui": {
     "autoExit": true
   },
-  "nxCloudId": "69d5f5329469e713391ed5d5"
+  "nxCloudId": "6a2b36812a76a2b7e33a794c"
 }

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/internal/sessions"
-	"github.com/gemyago/sonalmod/runtime/internal/summarize"
+	"github.com/gemyago/signal-foundry/runtime/internal/sessions"
+	"github.com/gemyago/signal-foundry/runtime/internal/summarize"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

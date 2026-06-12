@@ -1,11 +1,11 @@
 # Phase 2: Agent Profile Foundation - Research
 
 **Created:** 2026-04-22
-**Scope:** Current Sonalmod runtime/app architecture and Phase 1 ACP findings relevant to agent profile planning
+**Scope:** Current Signal Foundry runtime/app architecture and Phase 1 ACP findings relevant to agent profile planning
 
 ## Research Question
 
-How should Sonalmod define and persist general agent profiles now that Phase 1 has validated only a narrow ACP subset?
+How should Signal Foundry define and persist general agent profiles now that Phase 1 has validated only a narrow ACP subset?
 
 ## Primary Sources
 
@@ -15,13 +15,13 @@ How should Sonalmod define and persist general agent profiles now that Phase 1 h
 - `docs/implementation/opencode-acp-capability-map.md`
 - `docs/domain-terminology.md`
 - `runtime/AGENTS.md`
-- `apps/sonalmod/AGENTS.md`
+- `apps/signal-foundry/AGENTS.md`
 - `runtime/agent/providers_config.go`
 - `runtime/internal/llmproviders/providers_config.go`
 - `runtime/internal/sessions/factory.go`
 - `runtime/internal/agentapi/provider_handlers.go`
 - `runtime/httpapi/handler.go`
-- `apps/sonalmod/internal/runtime.go`
+- `apps/signal-foundry/internal/runtime.go`
 
 ## Confirmed Facts
 
@@ -35,13 +35,13 @@ How should Sonalmod define and persist general agent profiles now that Phase 1 h
 
 - The validated ACP subset is limited to `initialize`, `session/new`, `session/prompt`, and `session/update`.
 - `session/cancel` is not advertised in the observed OpenCode runs.
-- `session/load` and `session/list` are advertised but were not validated for Sonalmod's first integration slice.
+- `session/load` and `session/list` are advertised but were not validated for Signal Foundry's first integration slice.
 - Phase 2 should not encode assumptions about unsupported or unvalidated ACP behavior into the general profile schema.
 
 ### Existing architecture patterns
 
 - Durable agent-adjacent data already lives inside `runtime/internal`, with thin public aliases and constructors exposed from `runtime/agent`.
-- `apps/sonalmod` chooses file vs database storage and wires services into the runtime handler, but it does not own persistence implementations.
+- `apps/signal-foundry` chooses file vs database storage and wires services into the runtime handler, but it does not own persistence implementations.
 - Runtime HTTP expansion follows a spec-first pattern through `runtime/internal/agentapi/openapi.yaml`, generated API bindings, hand-written server handlers, and a thin `runtime/httpapi` wrapper.
 - The existing provider-config feature already demonstrates the dominant project pattern for durable config entities with file storage, database storage, API exposure, and app wiring.
 
@@ -51,11 +51,11 @@ How should Sonalmod define and persist general agent profiles now that Phase 1 h
 
 - Create a new `runtime/internal/agentprofiles` package for the profile domain and storage implementations.
 - Add thin public aliases and constructors in `runtime/agent`, matching the provider-config pattern.
-- If this phase exposes CRUD over HTTP, extend `runtime/internal/agentapi` and `runtime/httpapi`, then wire the service from `apps/sonalmod/internal/runtime.go`.
+- If this phase exposes CRUD over HTTP, extend `runtime/internal/agentapi` and `runtime/httpapi`, then wire the service from `apps/signal-foundry/internal/runtime.go`.
 
 ### Recommended schema boundary
 
-- Keep `AgentProfile` general-only: role, instructions, selected tool references, and execution settings Sonalmod can interpret without ACP-specific knowledge.
+- Keep `AgentProfile` general-only: role, instructions, selected tool references, and execution settings Signal Foundry can interpret without ACP-specific knowledge.
 - Do not store `cwd`, `mcpServers`, ACP capability flags, remote session IDs, or OpenCode-specific connection settings in the general profile.
 - Keep the profile-vs-connection boundary explicit so Phase 3 can add OpenCode bindings without reshaping the Phase 2 schema.
 
@@ -75,14 +75,14 @@ How should Sonalmod define and persist general agent profiles now that Phase 1 h
 
 1. Build the `AgentProfile` domain and persistence layer in `runtime/internal/agentprofiles`, including file and database implementations plus tests.
 2. Expose profile CRUD through the runtime OpenAPI and HTTP stack, following provider-handler conventions and keeping the public HTTP wrapper thin.
-3. Wire the profile service in `apps/sonalmod`, add the missing profile-table migration path, and publish a durable schema/boundary doc to anchor Phase 3.
+3. Wire the profile service in `apps/signal-foundry`, add the missing profile-table migration path, and publish a durable schema/boundary doc to anchor Phase 3.
 
 ## Validation Architecture
 
 - Automated checks should be split by module boundary:
   - Runtime domain and storage tests in `runtime`
   - Runtime API and HTTP handler tests in `runtime`
-  - App wiring and migration orchestration tests in `apps/sonalmod`
+  - App wiring and migration orchestration tests in `apps/signal-foundry`
 - Fast feedback commands should stay module-scoped during execution, with repo-wide gating reserved for plan-wave and completion checks.
 - Persistence verification must include restart-shaped coverage: save a profile, construct a fresh service/runtime using the same backing storage, and confirm the profile loads back unchanged.
 - Edit flows must verify updates preserve unrelated fields and do not collapse the general-profile vs backend-binding boundary.

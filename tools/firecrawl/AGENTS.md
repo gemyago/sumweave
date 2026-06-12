@@ -2,6 +2,12 @@
 
 This module is a firecrawl tool.
 
+## Template Origin And Boundary
+
+This module is template-derived support code and is not part of the intended core product path by default.
+
+Treat `tools/firecrawl/` as reference-only unless the user explicitly decides to keep or evolve it as part of the real system.
+
 ## Module Rules and Conventions
 
 Project level rules and conventions must also be followed.

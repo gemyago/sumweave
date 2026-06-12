@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gemyago/sonalmod/runtime/internal/agentprofiles"
+	"github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
 )
 
 // ExecutorRequest defines profile-owned ACP stdio launch input.

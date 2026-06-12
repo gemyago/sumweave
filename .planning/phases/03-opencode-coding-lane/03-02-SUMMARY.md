@@ -10,7 +10,7 @@ provides:
   - Validated-subset ACP stdio launch transport for OpenCode
   - Launcher service resolving profile + binding into launch requests
   - Typed validation/not-found/launch-failed error mapping for CODE-03
-affects: [03-03, runtime/internal/agentapi, apps/sonalmod runtime wiring]
+affects: [03-03, runtime/internal/agentapi, apps/signal-foundry runtime wiring]
 tech-stack:
   added: []
   patterns:

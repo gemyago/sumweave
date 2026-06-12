@@ -5,8 +5,10 @@ import (
 	"maps"
 	"strings"
 
-	rt "github.com/gemyago/sonalmod/runtime/internal"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
 )
+
+const agentStreamEventName = "agent"
 
 // ErrNilSessionEvent is returned when ToStreamEvent is called with a nil *rt.SessionEvent.
 var ErrNilSessionEvent = errors.New("agentapi: nil session event")
@@ -42,7 +44,7 @@ func mapSessionEventToStreamError(ev *rt.SessionEvent) (StreamEvent, error) {
 		msg = "agent error"
 	}
 	se := StreamErrorEvent{
-		Event:   "error",
+		Event:   streamErrorEventName,
 		Message: msg,
 	}
 	if code := strings.TrimSpace(ev.ErrorCode); code != "" {
@@ -57,7 +59,7 @@ func mapSessionEventToStreamError(ev *rt.SessionEvent) (StreamEvent, error) {
 
 func mapSessionEventToAgentStreamEvent(ev *rt.SessionEvent) (StreamEvent, error) {
 	agent := AgentStreamEvent{
-		Event: "agent",
+		Event: agentStreamEventName,
 	}
 	if ev.Author != "" {
 		a := ev.Author

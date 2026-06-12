@@ -2,7 +2,17 @@
 
 ## Overview
 
-**Active.** This folder holds shared build infrastructure. The main release pipeline lives under **`npm/`** and shared make fragments live under **`make/`**; CI runs the same targets as developers.
+**Active.** This folder holds shared build infrastructure, currently centered on shared make fragments under **`make/`**.
+
+## Template Origin And Boundary
+
+This folder is template-derived support infrastructure, not part of the intended core product surface.
+
+Treat the following as reference-only template material unless the user explicitly adopts or edits it for the real system:
+- `build/make/`
+- release or packaging support revived from template boilerplate
+
+Do not infer product architecture or product commitments from this folder.
 
 ## Layout
 
@@ -12,33 +22,7 @@
 |------|------|
 | `golangci-lint.mk` | Shared repo-root pinned `golangci-lint` install/rule fragment reused by Go-module Makefiles; exports per-module cache paths under `.cache/golangci-lint/` |
 
-### `build/npm/`
-
-| Path | Role |
-|------|------|
-| `Makefile` | Release flow: cross-compile Go matrix, stage UI/app npm packages, pack, verify |
-| `build.cfg` | Platform matrix, npm scope, dev fallback semver (non-tag `VERSION`) |
-| `scripts/` | Pipeline scripts; support **`--self-test`** where documented |
-| `app/`, `ui/` | `@sonalmod/app` launcher and `@sonalmod/ui` package templates |
-| `project.json` | Nx project **`npm-build`** (test target → `make test`; **`npm-build:test` depends on `sonal-ui:test`** so `make verify` never runs concurrently with UI Vitest / `apps/sonal-ui` npm install) |
-
-Most scripts support `--self-test` for self-validation. Any updates to the script must be also update it's self-test section accordingly.
-
-Some `Makefile` targets are tested vi [test-makefile.sh](./scripts/test-makefile.sh) script.
-
-## Commands
-
-From repo root (or `make -C build/npm …`):
-
-- **`make release VERSION=1.2.3`** — full release build (use semver; pre-releases e.g. `1.2.3-alpha.1`)
-- **`make binaries`** — Go cross-compiles only (matrix from `build.cfg`)
-- **`make test`** — script self-tests + launcher/package checks (same as **`npx nx test npm-build`**)
-- **`make local-run`** — backend serves built UI for local smoke
-- **`make clean`** — remove `dist/`
-- **`make publish VERSION=… NPM_TAG=…`** — publish tarballs under `dist/tarballs/` (CI after artifact download; requires `NPM_TAG` for the npm dist-tag)
-- **`make unpublish VERSION=…`** — `npm unpublish` that semver for `@sonalmod/app`, `@sonalmod/ui`, and each `@sonalmod/app-<platform>` (reverse of publish order)
-
-Release CI: `.github/workflows/release-prepare.yml` (draft release), `release-publish.yml` (publish + assets; root `AGENTS.md` summarizes npm dist-tags).
+Package/release pipeline assets were intentionally removed. Do not reintroduce `build/npm` or npm distribution workflows unless the user explicitly asks for them.
 
 ## Debugging Makefiles
 
@@ -56,8 +40,8 @@ make -rR -p <target>
 
 Project-level rules in root `AGENTS.md` apply. For this module:
 
-- Prefer editing **`build/npm/Makefile`** and **`build/npm/scripts/`** over one-off CI-only logic; keep behavior identical locally and in CI.
-- After changing Makefile, `build.cfg`, or pipeline scripts, run **`npx nx test npm-build`** (or **`make -C build/npm test`**) before reporting done.
+- Prefer shared `build/make/` changes over duplicated per-module lint wiring.
+- Keep removed package/release pipeline paths out unless explicitly requested.
 - For Makefile targets prefer Makefile philosophy: targets are files but not just commands.
 
 ## Task Completion Protocol

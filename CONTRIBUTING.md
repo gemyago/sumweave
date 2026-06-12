@@ -1,28 +1,19 @@
-# Contributing to Sonalmod
+# Contributing to Signal Foundry
 
 ## Project Setup
 
-Please have the following tools installed: 
-* [direnv](https://github.com/direnv/direnv) 
-* [nvm](https://github.com/nvm-sh/nvm) - to setup node
-* Many modules are golang based, so have [gobrew](https://github.com/kevincobain2000/gobrew#install-or-update) installed.
-
-## AI Frameworks
-
-[OpenSpec](https://github.com/fission-ai/openspec) - good for structured flow. Use `openspec init`. Not committing to the repo for now.
-
-[GSD](https://github.com/gsd-build/get-shit-done) - not sure if it will stick around, but for now it is what we use:
-```sh
-# Use your agent if needed
-npx get-shit-done-cc@latest --local --codex --opencode
-```
-
-Also tried:
-- BMAD - very complex, so we skipped it for now.
+Please have the following tools installed:
+- [direnv](https://github.com/direnv/direnv)
+- [nvm](https://github.com/nvm-sh/nvm)
+- Go 1.26.x tooling compatible with the repo setup
 
 ## Product Docs
 
-Canonical domain vocabulary for planning, design, and copy: [docs/domain-terminology.md](./docs/domain-terminology.md).
+Read these first:
+
+- Product direction: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- Retained docs index: [docs/README.md](./docs/README.md)
+- Domain vocabulary: [docs/domain-terminology.md](./docs/domain-terminology.md)
 
 ## Typical Monorepo Tasks
 
@@ -40,10 +31,10 @@ npx nx run-many -t install-deps
 This project uses Nx, some quick cheat-sheet:
 ```bash
 # Run tests of specific module:
-npx nx test sonalmod
+npx nx test signal-foundry
 
 # Run tests bypassing cache:
-npx nx test sonalmod --skipNxCache
+npx nx test signal-foundry --skipNxCache
 
 # Run all tests
 npx nx run-many -t test
@@ -55,7 +46,7 @@ npx nx run-many -t lint
 npx nx affected --target=lint
 
 # To see all available tasks for a specific module, use:
-nx show project sonalmod --json
+nx show project signal-foundry --json
 ```
 
 To run all affected lint and tests, use `make affected-lint-test`
@@ -80,11 +71,11 @@ go get -u ./... && go mod tidy
 ```bash
 # Start backend in a separate terminal
 # Install deps as per above instructions for go modules
-cd apps/sonalmod
-go run ./cmd/sonalmod start
+cd apps/signal-foundry
+go run ./cmd/signal-foundry start
 
 # Start frontend in a separate terminal
-cd apps/sonal-ui
+cd apps/signal-ui
 npm i
 npm run dev
 
@@ -95,59 +86,9 @@ nx run-many -t dev
 Frontend host/port: http://localhost:5173
 Backend host/port: http://localhost:8080
 
-### Combined local mode (backend serves built UI)
+### Combined local mode
 
-To run the backend serving the built UI locally:
+The old package-oriented combined local mode was removed. Run the backend and frontend separately, or use:
 ```bash
-# Build UI and start backend with UI location (from repo root)
-make -C build/npm local-run
+nx run-many -t dev
 ```
-
-This builds the UI with Nx and starts the backend with `--ui-location apps/sonal-ui/dist`.
-
-## Release Build
-
-This is mostly to test the release build pipeline locally.
-
-### Run the full release pipeline locally
-
-```bash
-# Full release build (stable version)
-make -C build/npm release VERSION=1.2.3
-
-# Pre-release build
-make -C build/npm release VERSION=1.2.3-alpha.1
-
-# Development build (default version 0.0.0-dev)
-make -C build/npm release
-```
-
-This single command drives the full pipeline: UI build, cross-platform Go binary compilation, npm package staging, `npm pack`, and tarball verification. Tarballs are written to `build/npm/dist/tarballs/`.
-
-### Individual build steps
-
-```bash
-make -C build/npm binaries              # cross-compile Go binaries only
-make -C build/npm ui                    # build the UI only
-make -C build/npm stage-ui              # stage @sonalmod/ui package
-make -C build/npm stage-platform-packages  # stage per-platform binary packages
-make -C build/npm stage-app             # stage @sonalmod/app launcher package
-make -C build/npm pack                  # npm pack all staged packages -> tarballs
-make -C build/npm verify                # verify tarballs (contents + smoke tests)
-make -C build/npm test                  # run script self-tests and launcher tests
-make -C build/npm clean                 # remove build/npm/dist/
-```
-
-### Script self-tests
-
-Each build script supports `--self-test` for standalone validation:
-```bash
-build/npm/scripts/resolve-npm-platform.sh --self-test
-build/npm/scripts/parse-semver-tag.sh --self-test
-```
-
-### CI/CD release workflows
-
-Releases are triggered by creating a release in GitHub.
-
-Pre-release tags (e.g. `v1.2.3-alpha.1`) are published to the `alpha` dist-tag and marked as GitHub pre-releases.

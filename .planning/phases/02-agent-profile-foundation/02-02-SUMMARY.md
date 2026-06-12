@@ -11,7 +11,7 @@ provides:
   - Generated route/types for `/agent-profiles` endpoints
   - Internal profile CRUD handlers mapped to AgentProfilesService
   - Thin httpapi dependency wiring for profile service
-affects: [runtime-http-surface, harness-profile-management, sonalmod-runtime-wiring]
+affects: [runtime-http-surface, harness-profile-management, signal-foundry-runtime-wiring]
 tech-stack:
   added: []
   patterns: [generated-openapi-contract, internal-handler-mapping, thin-wrapper-di]
@@ -25,7 +25,7 @@ key-files:
     - runtime/internal/agentapi/api.gen.go
     - runtime/internal/agentapi/server.go
     - runtime/httpapi/handler.go
-    - apps/sonalmod/internal/runtime.go
+    - apps/signal-foundry/internal/runtime.go
 key-decisions:
   - "Profile API schema is limited to general profile fields and excludes runtime/ACP binding details."
   - "Profile CRUD business logic stays in internal agentapi handlers; httpapi remains dependency wiring only."
@@ -72,7 +72,7 @@ completed: 2026-04-22
 - `runtime/internal/agentapi/server.go` - Added required profile service dependency.
 - `runtime/httpapi/handler.go` - Added required profile service validation/wiring.
 - `runtime/httpapi/handler_test.go` - Added nil profile-service dependency test.
-- `apps/sonalmod/internal/runtime.go` - Wired profile service into app runtime handler construction.
+- `apps/signal-foundry/internal/runtime.go` - Wired profile service into app runtime handler construction.
 - `runtime/AGENTS.md` - Documented profile CRUD HTTP surface and required service dependency.
 
 ## Decisions Made
@@ -87,10 +87,10 @@ completed: 2026-04-22
 
 **1. [Rule 3 - Blocking] Added app runtime wiring for new required profile dependency**
 - **Found during:** Task 2 verification (`make affected-lint-test`)
-- **Issue:** `apps/sonalmod` runtime tests failed because `httpapi.NewHandler` now requires `AgentProfilesService`.
+- **Issue:** `apps/signal-foundry` runtime tests failed because `httpapi.NewHandler` now requires `AgentProfilesService`.
 - **Fix:** Added `newAgentProfilesService` in app runtime and passed service into `httpapi.HandlerArgs`.
-- **Files modified:** `apps/sonalmod/internal/runtime.go`
-- **Verification:** `apps/sonalmod` tests pass in `make affected-lint-test`.
+- **Files modified:** `apps/signal-foundry/internal/runtime.go`
+- **Verification:** `apps/signal-foundry` tests pass in `make affected-lint-test`.
 - **Committed in:** `03c1f7b`
 
 **2. [Rule 3 - Blocking] Raised handler coverage/formatting to satisfy runtime gates**
@@ -101,12 +101,12 @@ completed: 2026-04-22
 - **Verification:** `cd runtime && make lint && make test` pass.
 - **Committed in:** `03c1f7b`
 
-**3. [Rule 3 - Blocking] Adjusted sonalmod lint directives to clear affected lint gate**
+**3. [Rule 3 - Blocking] Adjusted signal-foundry lint directives to clear affected lint gate**
 - **Found during:** Repository completion verification
-- **Issue:** `sonalmod:lint` failed on `ireturn`/`nolintlint` directive placement conflicts in telemetry constructors.
+- **Issue:** `signal-foundry:lint` failed on `ireturn`/`nolintlint` directive placement conflicts in telemetry constructors.
 - **Fix:** Updated directive placement for multi-line signatures and synchronized DI helper directive usage.
-- **Files modified:** `apps/sonalmod/internal/telemetry/otel*.go`, `apps/sonalmod/internal/di/dig.go`
-- **Verification:** `cd apps/sonalmod && make lint` and full `make affected-lint-test` pass.
+- **Files modified:** `apps/signal-foundry/internal/telemetry/otel*.go`, `apps/signal-foundry/internal/di/dig.go`
+- **Verification:** `cd apps/signal-foundry && make lint` and full `make affected-lint-test` pass.
 - **Committed in:** `03c1f7b`
 
 ---

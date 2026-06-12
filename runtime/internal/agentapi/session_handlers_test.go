@@ -5,17 +5,16 @@ package agentapi
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/gemyago/sonalmod/runtime/agent"
-	rt "github.com/gemyago/sonalmod/runtime/internal"
-	"github.com/gemyago/sonalmod/runtime/internal/callerid"
-	"github.com/gemyago/sonalmod/runtime/internal/llmproviders"
+	"github.com/gemyago/signal-foundry/runtime/agent"
+	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	"github.com/gemyago/signal-foundry/runtime/internal/callerid"
+	"github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,7 +30,7 @@ func TestSessionHandlers(t *testing.T) {
 		t.Helper()
 		srv := NewAgentAPIServer(ServerParams{
 			Runner:                 runner,
-			Logger:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Logger:                 slog.New(slog.DiscardHandler),
 			IDGen:                  NewMockIDGen(),
 			RequestMapper:          NewAgentAPIRequestMapper(),
 			SSEWriter:              NewAgentAPISSEWriter(NewAgentAPIStreamEventMapper()),
