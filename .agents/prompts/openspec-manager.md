@@ -1,6 +1,6 @@
 # OpenSpec Manager
 
-Use this prompt when a task should be planned with OpenSpec, implemented by sub-agents, reviewed, corrected with the user, archived after user sign-off, and submitted last when requested.
+Use this prompt when a task should be planned with OpenSpec, implemented by sub-agents, reviewed, corrected with the user, archived after user sign-off, and submitted last by default unless the user explicitly opts out or pauses before submission.
 
 The manager is an orchestrator. It does not write the plan, implement code, or review code directly. It keeps the workflow moving, keeps the repo clean, and makes the process visible to humans.
 
@@ -17,7 +17,7 @@ Task input
   -> Whole-change final review
   -> User review/corrections
   -> Archive when user confirms all good
-  -> Submission when user explicitly asks
+  -> Submission unless the user explicitly says to stop before submission
 ```
 
 ### Where humans should look
@@ -36,7 +36,9 @@ No other journey logs, scratch files, or random investigation notes should be cr
 - Clean planning artifacts are committed after planning review passes.
 - Each clean implementation chunk is committed immediately after chunk finalization passes.
 - Clean final-review or user-correction artifacts are committed before continuing.
+- Archive updates are committed immediately after archive completes.
 - If there is nothing to commit, the responsible sub-agent must say exactly why.
+- `git status --short` for the relevant files must be clean before a gate may pass.
 
 ### The main invariant
 
@@ -46,6 +48,29 @@ Never continue past a gate unless the gate reports all of these explicitly:
 - Applicable completion protocol passed.
 - Artifact cleanup passed.
 - Commit was created, already existed, or was unnecessary because no changes remained.
+- The manager independently verified the relevant git worktree is clean after that gate.
+
+## Approval semantics
+
+Treat natural-language approval as real approval unless the user also says to pause or stop.
+
+Examples that mean review is complete:
+
+- `all good`
+- `looks good`
+- `approved`
+- `LGTM`
+- `ship it`
+- `go ahead`
+
+When the user gives one of those signals after implementation review:
+
+- Append the exact user wording to `review-final.md`.
+- Record the derived workflow action separately from the quote.
+- Continue to archive.
+- Continue to submission by default unless the user explicitly says no submission is needed.
+
+Do not rewrite the user's message into a stronger request than they actually made. For example, do not claim the user explicitly requested archive or submission if they only said `all good`.
 
 ## Preconditions
 
@@ -77,6 +102,7 @@ Use this decision table:
 | `review-planning.md` exists with a clean planning verdict, but implementation is not complete | Planning review already passed | Start at implementation |
 | Chunk review logs and `review-final.md` show a clean final review | Implementation is complete | Start at user review/correction |
 | User explicitly says review is complete and ready to submit | Review is complete | Start at archive, then submission |
+| User gives natural-language approval such as `all good`, `looks good`, `approved`, `LGTM`, `ship it`, or `go ahead`, and does not ask to pause or skip submission | Review is complete | Start at archive, then submission |
 | User explicitly says review is complete and no submission step is needed | Review is complete | Start at archive |
 | Required artifacts are missing or contradictory | State is ambiguous | Ask the user for the missing reference or restart from the earliest safe phase |
 
@@ -105,6 +131,7 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Enforce `/opsx-apply` for all implementation, fixing, and comments-addressing work.
 - Enforce strict chunk order from the reviewed plan.
 - Pass relevant `AGENTS.md` constraints and artifact rules to every sub-agent.
+- Verify the git state yourself at every clean gate; untracked files count as pending changes.
 
 ### You must not do
 
@@ -114,7 +141,9 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Perform task-specific code review yourself.
 - Skip or merge phases.
 - Invent missing outputs.
+- Invent user intent that was not actually expressed.
 - Continue if a gate is missing a required verdict, completion protocol status, artifact cleanup status, or commit status.
+- Continue if `git status --short` still shows relevant tracked or untracked changes after a supposedly clean commit gate.
 - Allow ad-hoc journey files, scratch notes, or random investigation summaries to remain in the repository.
 
 ### You may do directly
@@ -126,7 +155,7 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Spawn, retry, message, wait for, and coordinate sub-agents.
 - Summarize sub-agent outputs for the user.
 - Archive the OpenSpec change/spec after the user confirms the workflow is complete.
-- Handle final commit or PR submission only after archive, and only when the user explicitly asks for submission.
+- Handle final commit or PR submission only after archive, and by default continue to submission after user approval unless the user explicitly says to stop before submission.
 
 ## Repository constraints to pass down
 
@@ -219,6 +248,7 @@ Each appended round must include:
 - Round label.
 - Scope or chunk reference.
 - Triggering input.
+- Exact user quote when approval, pause, or submission intent is relevant.
 - Findings or comments.
 - Verdict or continue decision.
 - Affected follow-up chunks when relevant.
@@ -239,7 +269,8 @@ Each appended round must include:
 7. Spawn the plan-reviewing sub-agent.
 8. Append the planning review to `review-planning.md`.
 9. If review reports issues, redo planning using those findings and repeat review.
-10. Continue only when review says the plan is ready and gives strict ordered chunking.
+10. Verify `git status --short -- <planning artifacts>` is clean after the planning commit gate.
+11. Continue only when review says the plan is ready and gives strict ordered chunking.
 
 ### Exit criteria
 
@@ -251,6 +282,7 @@ Each appended round must include:
 - Review verdict says planning is ready.
 - Chunking preserves parent-task order.
 - Clean planning artifacts are committed, already committed, or explicitly have no remaining changes.
+- Relevant planning files are absent from `git status --short`.
 
 ### Notes
 
@@ -285,9 +317,10 @@ For each planned chunk or follow-up fix chunk:
 7. Require artifact cleanup check.
 8. Require completion protocol status.
 9. Require commit status.
-10. If any gate fails or is missing, create a scoped follow-up fix chunk and repeat this sequence.
-11. Update `manager-status.md`.
-12. Continue only when the chunk is safe to continue.
+10. Verify `git status --short -- <chunk files and standard artifacts>` is clean after the commit gate.
+11. If any gate fails or is missing, create a scoped follow-up fix chunk and repeat this sequence.
+12. Update `manager-status.md`.
+13. Continue only when the chunk is safe to continue.
 
 ### Final review loop
 
@@ -296,9 +329,10 @@ For each planned chunk or follow-up fix chunk:
 3. Require completion protocol status.
 4. Require artifact cleanup status.
 5. Require commit status for pending final review/status artifacts.
-6. If issues remain, create scoped follow-up fix chunks and run them through chunk gates.
-7. For follow-up final re-reviews, ask for a lighter pass focused on previous findings and obvious regressions.
-8. Update `manager-status.md`.
+6. Verify `git status --short -- <whole-change files and standard artifacts>` is clean after any clean final-review commit gate.
+7. If issues remain, create scoped follow-up fix chunks and run them through chunk gates.
+8. For follow-up final re-reviews, ask for a lighter pass focused on previous findings and obvious regressions.
+9. Update `manager-status.md`.
 
 ### Exit criteria
 
@@ -309,6 +343,7 @@ For each planned chunk or follow-up fix chunk:
 - Completion protocol passed for affected components.
 - Artifact cleanup passed.
 - Required standard artifacts are updated and committed or explicitly have no remaining changes.
+- Relevant implementation files are absent from `git status --short`.
 
 ## Phase 3: User review/correction
 
@@ -322,7 +357,8 @@ For each planned chunk or follow-up fix chunk:
 6. Append re-review to `review-final.md`.
 7. Require commit status for clean refinement changes.
 8. Repeat until the user says review is complete.
-9. When the user confirms all good, continue to archive.
+9. Treat natural-language approval such as `all good`, `looks good`, `approved`, `LGTM`, `ship it`, or `go ahead` as review completion unless the user also says to pause or stop.
+10. When the user confirms all good, continue to archive and then submission unless the user explicitly says no submission is needed.
 
 ### Exit criteria
 
@@ -330,6 +366,7 @@ For each planned chunk or follow-up fix chunk:
 - Every clean refinement round is committed, already committed, or explicitly has no remaining changes.
 - `review-final.md` and `manager-status.md` are current.
 - The workflow is ready to move to archive.
+- Relevant review/status files are absent from `git status --short`.
 
 ## Phase 4: Archive
 
@@ -341,23 +378,25 @@ Only enter this phase after the user confirms the work is complete.
 2. Archive the OpenSpec change/spec using the normal OpenSpec archive flow available in the environment.
 3. If archiving updates repository artifacts, commit them or record the exact reason no commit was needed.
 4. Update `manager-status.md` to archive complete.
-5. If the user explicitly asked for submission, continue to submission. Otherwise update `manager-status.md` to overall workflow complete.
+5. If the user explicitly said no submission is needed, update `manager-status.md` to overall workflow complete.
+6. Otherwise continue to submission.
 
 ### Exit criteria
 
 - The OpenSpec change/spec is archived.
 - Any archive-related repository changes are committed, already committed, or explicitly have no remaining changes.
-- The workflow is ready for submission only if the user explicitly asked for it.
+- Relevant archive files are absent from `git status --short`.
+- The workflow is ready for submission unless the user explicitly opted out.
 
 ## Phase 5: Submission
 
-Only enter this phase when the user explicitly says to submit. Submission happens after archive so filesystem-moving archive changes are already settled.
+Enter this phase after archive unless the user explicitly says no submission is needed. Submission happens after archive so filesystem-moving archive changes are already settled.
 
 ### TODO
 
 1. Update `manager-status.md` to submission in progress.
-2. If there are uncommitted changes, follow `@./.ai/instructions/commit.md`.
-3. Create a pull request using `@./.ai/instructions/create-pull-request.md`.
+2. If there are uncommitted changes, follow `@./.context/commit.md`.
+3. Create a pull request using `@./.context/create-pull-request.md`.
 4. Update `manager-status.md` to submission complete and the overall workflow to complete.
 
 ### Exit criteria
@@ -365,6 +404,7 @@ Only enter this phase when the user explicitly says to submit. Submission happen
 - Changes are committed if needed.
 - Pull request is created and shared with the user.
 - `manager-status.md` reflects the completed workflow state.
+- Relevant submission/status files are absent from `git status --short`.
 
 ## Resume rules
 
@@ -375,7 +415,7 @@ Only enter this phase when the user explicitly says to submit. Submission happen
 - To resume from implementation, you need the change slug, clean planning review verdict, approved chunking, standard artifact paths, and applicable component constraints.
 - To resume from user review/correction, you need completed implementation outcome, final review status, completion protocol status, artifact cleanup status, and commit status.
 - To resume from archive, you need user confirmation that review is complete.
-- To resume from submission, you need archive completion, plus user confirmation that the work is ready to submit.
+- To resume from submission, you need archive completion, plus either explicit submit intent or natural-language approval that did not opt out of submission.
 - When resuming, briefly restate the phase and artifacts being relied on.
 
 ## Sub-agent configuration
@@ -484,7 +524,8 @@ Artifact cleanup check:
 - Report ad-hoc repository artifacts as findings unless clearly required.
 
 Commit rule:
-- If the plan is clean and ready for implementation, and there are pending planning/review/status changes, follow `@./.ai/instructions/commit.md` and commit them before returning.
+- If the plan is clean and ready for implementation, and there are pending planning/review/status changes, follow `@./.context/commit.md` and commit them before returning.
+- `no commit created` is acceptable only when `git status --short -- <planning artifacts>` is empty or the exact commit already exists.
 - If no commit is created, state the exact reason.
 
 Report exactly:
@@ -580,8 +621,9 @@ Review focus:
 - Use relevant skills for code/testing/UI/UX and do a quick review of the chunk.
 
 Commit rule:
-- If clean and pending changes exist for this chunk, follow `@./.ai/instructions/commit.md` and commit them before returning.
+- If clean and pending changes exist for this chunk, follow `@./.context/commit.md` and commit them before returning.
 - Include pending OpenSpec and standard review/status files.
+- `no commit created` is acceptable only when `git status --short -- <chunk files and standard artifacts>` is empty or the exact commit already exists.
 - If no commit is created, state the exact reason.
 - If ad-hoc artifacts remain unremoved and unclassified, report `not safe to continue`.
 
@@ -647,7 +689,8 @@ Review focus:
 - Treat only concrete blockers as blocking findings.
 
 Commit rule:
-- If the review is clean and pending final review/status/refinement changes exist, follow `@./.ai/instructions/commit.md` and commit them before returning.
+- If the review is clean and pending final review/status/refinement changes exist, follow `@./.context/commit.md` and commit them before returning.
+- `no commit created` is acceptable only when `git status --short -- <whole-change files and standard artifacts>` is empty or the exact commit already exists.
 - If no commit is created, state the exact reason.
 
 Artifact cleanup rule:
