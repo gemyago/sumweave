@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -65,6 +66,26 @@ func TestDomain(t *testing.T) {
 		CandidateActionKindLong,
 		CandidateActionKindShort,
 	}
+	validGovernorDecisionStatuses := []GovernorDecisionStatus{
+		GovernorDecisionStatusApproved,
+		GovernorDecisionStatusRejected,
+		GovernorDecisionStatusBlocked,
+	}
+	validGovernorDecisionReasons := []GovernorDecisionReason{
+		GovernorDecisionReasonEligible,
+		GovernorDecisionReasonDisallowedActionKind,
+		GovernorDecisionReasonBelowMinimumQuality,
+		GovernorDecisionReasonApprovalLimitReached,
+	}
+	validExecutionCommandStatuses := []ExecutionCommandStatus{
+		ExecutionCommandStatusCreated,
+	}
+	validExecutionOrderStatuses := []ExecutionOrderStatus{
+		ExecutionOrderStatusOpen,
+		ExecutionOrderStatusPartiallyFilled,
+		ExecutionOrderStatusFilled,
+		ExecutionOrderStatusOverfilled,
+	}
 
 	randomInstrument := func(t *testing.T) Instrument {
 		t.Helper()
@@ -97,6 +118,48 @@ func TestDomain(t *testing.T) {
 
 	randomReplayIdentity := func() uint64 {
 		return uint64(fake.IntBetween(1, 1_000_000))
+	}
+
+	randomCandidateAction := func(t *testing.T) CandidateAction {
+		t.Helper()
+
+		decisionTime := randomLocationTime()
+		inputStart := randomLocationTime()
+		inputEnd := inputStart.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+		identity, err := NewStrategyIdentity(StrategyIdentityParams{
+			Instrument: randomInstrument(t),
+			Timeframe:  validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)],
+			Kind:       validStrategyKinds[fake.IntBetween(0, len(validStrategyKinds)-1)],
+		})
+		require.NoError(t, err)
+
+		action, err := NewCandidateAction(CandidateActionParams{
+			Strategy:     identity,
+			Kind:         validCandidateActionKinds[fake.IntBetween(0, len(validCandidateActionKinds)-1)],
+			DecisionTime: decisionTime,
+			InputRange: TimeRange{
+				Start: inputStart,
+				End:   inputEnd,
+			},
+			Quality: validQualities[fake.IntBetween(0, len(validQualities)-1)],
+		})
+		require.NoError(t, err)
+
+		return action
+	}
+
+	randomApprovedDecision := func(t *testing.T) GovernorDecision {
+		t.Helper()
+
+		decision, err := NewGovernorDecision(GovernorDecisionParams{
+			CandidateAction: randomCandidateAction(t),
+			Status:          GovernorDecisionStatusApproved,
+			Reason:          GovernorDecisionReasonEligible,
+			DecisionTime:    randomLocationTime(),
+		})
+		require.NoError(t, err)
+
+		return decision
 	}
 
 	t.Run("constructors validate canonical strings and enums", func(t *testing.T) {
@@ -263,6 +326,11 @@ func TestDomain(t *testing.T) {
 			reflect.TypeFor[AnalyticsPoint](),
 			reflect.TypeFor[StrategyIdentity](),
 			reflect.TypeFor[CandidateAction](),
+			reflect.TypeFor[GovernorDecision](),
+			reflect.TypeFor[ExecutionCommand](),
+			reflect.TypeFor[ExecutionOrder](),
+			reflect.TypeFor[ExecutionFill](),
+			reflect.TypeFor[ExecutionReconciliation](),
 		}
 
 		for _, typ := range structTypes {
@@ -713,5 +781,344 @@ func TestDomain(t *testing.T) {
 		})
 		require.Error(t, err)
 		require.ErrorContains(t, err, "input range")
+	})
+
+	t.Run("governor decisions canonicalize UTC time and retain candidate actions", func(t *testing.T) {
+		t.Parallel()
+
+		candidateAction := randomCandidateAction(t)
+		decisionTime := randomLocationTime()
+		status := validGovernorDecisionStatuses[fake.IntBetween(0, len(validGovernorDecisionStatuses)-1)]
+		reason := validGovernorDecisionReasons[fake.IntBetween(0, len(validGovernorDecisionReasons)-1)]
+
+		decision, err := NewGovernorDecision(GovernorDecisionParams{
+			CandidateAction: candidateAction,
+			Status:          status,
+			Reason:          reason,
+			DecisionTime:    decisionTime,
+		})
+		require.NoError(t, err)
+
+		expected := GovernorDecision{
+			CandidateAction: candidateAction,
+			Status:          status,
+			Reason:          reason,
+			DecisionTime:    GovernorDecisionTime(decisionTime.UTC()),
+		}
+		require.Equal(t, expected, decision)
+		require.Equal(t, time.UTC, decision.DecisionTime.Time().Location())
+	})
+
+	t.Run("governor decisions reject invalid values", func(t *testing.T) {
+		t.Parallel()
+
+		candidateAction := randomCandidateAction(t)
+
+		_, err := NewGovernorDecision(GovernorDecisionParams{
+			CandidateAction: candidateAction,
+			Status:          GovernorDecisionStatus(randomWord("bad-status")),
+			Reason:          GovernorDecisionReasonEligible,
+			DecisionTime:    randomLocationTime(),
+		})
+		require.Error(t, err)
+
+		_, err = NewGovernorDecision(GovernorDecisionParams{
+			CandidateAction: candidateAction,
+			Status:          GovernorDecisionStatusApproved,
+			Reason:          GovernorDecisionReason(randomWord("bad-reason")),
+			DecisionTime:    randomLocationTime(),
+		})
+		require.Error(t, err)
+
+		_, err = NewGovernorDecision(GovernorDecisionParams{
+			Status:       GovernorDecisionStatusApproved,
+			Reason:       GovernorDecisionReasonEligible,
+			DecisionTime: randomLocationTime(),
+		})
+		require.Error(t, err)
+
+		_, err = NewGovernorDecision(GovernorDecisionParams{
+			CandidateAction: candidateAction,
+			Status:          GovernorDecisionStatusApproved,
+			Reason:          GovernorDecisionReasonEligible,
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("execution records canonicalize identifiers statuses quantities prices and UTC times", func(t *testing.T) {
+		t.Parallel()
+
+		approvedDecision := randomApprovedDecision(t)
+		commandTime := randomLocationTime()
+		commandIDText := "  " + randomWord("command") + "  "
+		commandStatus := validExecutionCommandStatuses[fake.IntBetween(0, len(validExecutionCommandStatuses)-1)]
+		quantity := fake.Float64(4, 1, 99999)
+
+		command, err := NewExecutionCommand(ExecutionCommandParams{
+			CommandID:        commandIDText,
+			ApprovedDecision: approvedDecision,
+			Status:           commandStatus,
+			Quantity:         quantity,
+			EventTime:        commandTime,
+		})
+		require.NoError(t, err)
+
+		orderTime := randomLocationTime()
+		orderIDText := "  " + randomWord("order") + "  "
+		clientOrderIDText := "  " + randomWord("client-order") + "  "
+		venue, err := NewVenue(randomWord("venue"))
+		require.NoError(t, err)
+		orderStatus := validExecutionOrderStatuses[fake.IntBetween(0, len(validExecutionOrderStatuses)-1)]
+
+		order, err := NewExecutionOrder(ExecutionOrderParams{
+			OrderID:       orderIDText,
+			Command:       command,
+			Venue:         venue,
+			ClientOrderID: clientOrderIDText,
+			Status:        orderStatus,
+			Quantity:      quantity,
+			EventTime:     orderTime,
+		})
+		require.NoError(t, err)
+
+		fillTime := randomLocationTime()
+		fillIDText := "  " + randomWord("fill") + "  "
+		fillQuantity := fake.Float64(4, 1, 9999)
+		price := fake.Float64(4, 1, 99999)
+
+		fill, err := NewExecutionFill(ExecutionFillParams{
+			FillID:    fillIDText,
+			Order:     order,
+			Quantity:  fillQuantity,
+			Price:     price,
+			EventTime: fillTime,
+		})
+		require.NoError(t, err)
+
+		reconciliationTime := randomLocationTime()
+		reconciliation, err := NewExecutionReconciliation(ExecutionReconciliationParams{
+			Order:          order,
+			Fills:          []ExecutionFill{fill},
+			Status:         ExecutionOrderStatusFilled,
+			FilledQuantity: fillQuantity,
+			EventTime:      reconciliationTime,
+		})
+		require.NoError(t, err)
+
+		require.Equal(t, ExecutionCommand{
+			CommandID:        ExecutionCommandID(strings.TrimSpace(commandIDText)),
+			ApprovedDecision: approvedDecision,
+			Status:           commandStatus,
+			Quantity:         quantity,
+			EventTime:        ExecutionEventTime(commandTime.UTC()),
+		}, command)
+		require.Equal(t, approvedDecision, command.ApprovedDecision)
+		require.Equal(t, time.UTC, command.EventTime.Time().Location())
+
+		require.Equal(t, ExecutionOrder{
+			OrderID:       ExecutionOrderID(strings.TrimSpace(orderIDText)),
+			Command:       command,
+			Venue:         venue,
+			ClientOrderID: strings.TrimSpace(clientOrderIDText),
+			Status:        orderStatus,
+			Quantity:      quantity,
+			EventTime:     ExecutionEventTime(orderTime.UTC()),
+		}, order)
+		require.Equal(t, time.UTC, order.EventTime.Time().Location())
+
+		require.Equal(t, ExecutionFill{
+			FillID:    ExecutionFillID(strings.TrimSpace(fillIDText)),
+			Order:     order,
+			Quantity:  fillQuantity,
+			Price:     price,
+			EventTime: ExecutionEventTime(fillTime.UTC()),
+		}, fill)
+		require.Equal(t, command, fill.Order.Command)
+		require.Equal(t, time.UTC, fill.EventTime.Time().Location())
+
+		require.Equal(t, ExecutionReconciliation{
+			Order:          order,
+			Fills:          []ExecutionFill{fill},
+			Status:         ExecutionOrderStatusFilled,
+			FilledQuantity: fillQuantity,
+			EventTime:      ExecutionEventTime(reconciliationTime.UTC()),
+		}, reconciliation)
+		require.Equal(t, time.UTC, reconciliation.EventTime.Time().Location())
+	})
+
+	t.Run("execution records reject invalid values", func(t *testing.T) {
+		t.Parallel()
+
+		approvedDecision := randomApprovedDecision(t)
+		quantity := fake.Float64(4, 1, 99999)
+
+		_, err := NewExecutionCommand(ExecutionCommandParams{
+			CommandID: randomWord("command"),
+			Status:    ExecutionCommandStatusCreated,
+			Quantity:  quantity,
+			EventTime: randomLocationTime(),
+		})
+		require.Error(t, err)
+
+		_, err = NewExecutionCommand(ExecutionCommandParams{
+			CommandID:        randomWord("command"),
+			ApprovedDecision: approvedDecision,
+			Status:           ExecutionCommandStatus(randomWord("bad-command-status")),
+			Quantity:         quantity,
+			EventTime:        randomLocationTime(),
+		})
+		require.Error(t, err)
+
+		rejectedDecision, err := NewGovernorDecision(GovernorDecisionParams{
+			CandidateAction: randomCandidateAction(t),
+			Status:          GovernorDecisionStatusRejected,
+			Reason:          GovernorDecisionReasonDisallowedActionKind,
+			DecisionTime:    randomLocationTime(),
+		})
+		require.NoError(t, err)
+
+		_, err = NewExecutionCommand(ExecutionCommandParams{
+			CommandID:        randomWord("command"),
+			ApprovedDecision: rejectedDecision,
+			Status:           ExecutionCommandStatusCreated,
+			Quantity:         quantity,
+			EventTime:        randomLocationTime(),
+		})
+		require.ErrorContains(t, err, "execution approved decision must be approved")
+
+		_, err = NewExecutionCommand(ExecutionCommandParams{
+			CommandID:        randomWord("command"),
+			ApprovedDecision: approvedDecision,
+			Status:           ExecutionCommandStatusCreated,
+			Quantity:         math.NaN(),
+			EventTime:        randomLocationTime(),
+		})
+		require.ErrorContains(t, err, "execution command quantity must be finite")
+
+		_, err = NewExecutionCommand(ExecutionCommandParams{
+			CommandID:        randomWord("command"),
+			ApprovedDecision: approvedDecision,
+			Status:           ExecutionCommandStatusCreated,
+			Quantity:         math.Inf(1),
+			EventTime:        randomLocationTime(),
+		})
+		require.ErrorContains(t, err, "execution command quantity must be finite")
+
+		command, err := NewExecutionCommand(ExecutionCommandParams{
+			CommandID:        randomWord("command"),
+			ApprovedDecision: approvedDecision,
+			Status:           ExecutionCommandStatusCreated,
+			Quantity:         quantity,
+			EventTime:        randomLocationTime(),
+		})
+		require.NoError(t, err)
+
+		_, err = NewExecutionOrder(ExecutionOrderParams{
+			OrderID:       randomWord("order"),
+			Command:       command,
+			ClientOrderID: randomWord("client-order"),
+			Status:        ExecutionOrderStatusOpen,
+			Quantity:      quantity,
+			EventTime:     randomLocationTime(),
+		})
+		require.Error(t, err)
+
+		venue, err := NewVenue(randomWord("venue"))
+		require.NoError(t, err)
+		order, err := NewExecutionOrder(ExecutionOrderParams{
+			OrderID:       randomWord("order"),
+			Command:       command,
+			Venue:         venue,
+			ClientOrderID: randomWord("client-order"),
+			Status:        ExecutionOrderStatusOpen,
+			Quantity:      quantity,
+			EventTime:     randomLocationTime(),
+		})
+		require.NoError(t, err)
+
+		_, err = NewExecutionOrder(ExecutionOrderParams{
+			OrderID:       randomWord("order"),
+			Command:       command,
+			Venue:         venue,
+			ClientOrderID: randomWord("client-order"),
+			Status:        ExecutionOrderStatusOpen,
+			Quantity:      math.NaN(),
+			EventTime:     randomLocationTime(),
+		})
+		require.ErrorContains(t, err, "execution order quantity must be finite")
+
+		_, err = NewExecutionFill(ExecutionFillParams{
+			FillID:    randomWord("fill"),
+			Order:     order,
+			Quantity:  0,
+			Price:     fake.Float64(4, 1, 99999),
+			EventTime: randomLocationTime(),
+		})
+		require.Error(t, err)
+
+		_, err = NewExecutionFill(ExecutionFillParams{
+			FillID:    randomWord("fill"),
+			Order:     order,
+			Quantity:  math.Inf(1),
+			Price:     fake.Float64(4, 1, 99999),
+			EventTime: randomLocationTime(),
+		})
+		require.ErrorContains(t, err, "execution fill quantity must be finite")
+
+		_, err = NewExecutionFill(ExecutionFillParams{
+			FillID:    randomWord("fill"),
+			Order:     order,
+			Quantity:  fake.Float64(4, 1, 9999),
+			Price:     math.NaN(),
+			EventTime: randomLocationTime(),
+		})
+		require.ErrorContains(t, err, "execution fill price must be finite")
+
+		fill, err := NewExecutionFill(ExecutionFillParams{
+			FillID:    randomWord("fill"),
+			Order:     order,
+			Quantity:  fake.Float64(4, 1, 9999),
+			Price:     fake.Float64(4, 1, 99999),
+			EventTime: randomLocationTime(),
+		})
+		require.NoError(t, err)
+
+		_, err = NewExecutionReconciliation(ExecutionReconciliationParams{
+			Order:          order,
+			Fills:          []ExecutionFill{fill},
+			Status:         ExecutionOrderStatus(randomWord("bad-order-status")),
+			FilledQuantity: fill.Quantity,
+			EventTime:      randomLocationTime(),
+		})
+		require.Error(t, err)
+
+		_, err = NewExecutionReconciliation(ExecutionReconciliationParams{
+			Order:          order,
+			Fills:          []ExecutionFill{fill},
+			Status:         ExecutionOrderStatusFilled,
+			FilledQuantity: math.NaN(),
+			EventTime:      randomLocationTime(),
+		})
+		require.ErrorContains(t, err, "execution reconciliation filled quantity must be finite")
+	})
+
+	t.Run("candidate actions keep existing analytics and strategy contracts", func(t *testing.T) {
+		t.Parallel()
+
+		action := randomCandidateAction(t)
+		decision, err := NewGovernorDecision(GovernorDecisionParams{
+			CandidateAction: action,
+			Status:          GovernorDecisionStatusApproved,
+			Reason:          GovernorDecisionReasonEligible,
+			DecisionTime:    randomLocationTime(),
+		})
+		require.NoError(t, err)
+
+		require.Contains(t, validCandidateActionKinds, action.Kind)
+		require.Contains(t, validQualities, action.Quality)
+		require.Equal(t, action.Strategy, decision.CandidateAction.Strategy)
+		require.Equal(t, action.Kind, decision.CandidateAction.Kind)
+		require.Equal(t, action.Quality, decision.CandidateAction.Quality)
+		require.True(t, action.InputRange.End.After(action.InputRange.Start))
 	})
 }

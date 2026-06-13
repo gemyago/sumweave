@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -59,6 +60,42 @@ type CandidateActionKind string
 const (
 	CandidateActionKindLong  CandidateActionKind = "long"
 	CandidateActionKindShort CandidateActionKind = "short"
+)
+
+// GovernorDecisionStatus identifies a supported governor decision outcome.
+type GovernorDecisionStatus string
+
+const (
+	GovernorDecisionStatusApproved GovernorDecisionStatus = "approved"
+	GovernorDecisionStatusRejected GovernorDecisionStatus = "rejected"
+	GovernorDecisionStatusBlocked  GovernorDecisionStatus = "blocked"
+)
+
+// GovernorDecisionReason identifies a stable governor decision reason.
+type GovernorDecisionReason string
+
+const (
+	GovernorDecisionReasonEligible             GovernorDecisionReason = "eligible"
+	GovernorDecisionReasonDisallowedActionKind GovernorDecisionReason = "disallowed-action-kind"
+	GovernorDecisionReasonBelowMinimumQuality  GovernorDecisionReason = "below-minimum-quality"
+	GovernorDecisionReasonApprovalLimitReached GovernorDecisionReason = "approval-limit-reached"
+)
+
+// ExecutionCommandStatus identifies a supported execution command state.
+type ExecutionCommandStatus string
+
+const (
+	ExecutionCommandStatusCreated ExecutionCommandStatus = "created"
+)
+
+// ExecutionOrderStatus identifies a supported local execution order state.
+type ExecutionOrderStatus string
+
+const (
+	ExecutionOrderStatusOpen            ExecutionOrderStatus = "open"
+	ExecutionOrderStatusPartiallyFilled ExecutionOrderStatus = "partially-filled"
+	ExecutionOrderStatusFilled          ExecutionOrderStatus = "filled"
+	ExecutionOrderStatusOverfilled      ExecutionOrderStatus = "overfilled"
 )
 
 // Instrument is the canonical venue-scoped instrument reference record.
@@ -147,6 +184,21 @@ type AnalyticsPointTime time.Time
 // CandidateActionTime identifies a canonical strategy decision timestamp.
 type CandidateActionTime time.Time
 
+// GovernorDecisionTime identifies a canonical governor decision timestamp.
+type GovernorDecisionTime time.Time
+
+// ExecutionEventTime identifies a canonical execution event timestamp.
+type ExecutionEventTime time.Time
+
+// ExecutionCommandID identifies a canonical execution command.
+type ExecutionCommandID string
+
+// ExecutionOrderID identifies a canonical local execution order.
+type ExecutionOrderID string
+
+// ExecutionFillID identifies a canonical local execution fill.
+type ExecutionFillID string
+
 // AnalyticsValueRange describes the half-open candle interval behind a point.
 type AnalyticsValueRange struct {
 	Start time.Time
@@ -170,6 +222,52 @@ type CandidateAction struct {
 	DecisionTime CandidateActionTime
 	InputRange   TimeRange
 	Quality      DataQuality
+}
+
+// GovernorDecision is a canonical governor output record.
+type GovernorDecision struct {
+	CandidateAction CandidateAction
+	Status          GovernorDecisionStatus
+	Reason          GovernorDecisionReason
+	DecisionTime    GovernorDecisionTime
+}
+
+// ExecutionCommand is a canonical execution admission record.
+type ExecutionCommand struct {
+	CommandID        ExecutionCommandID
+	ApprovedDecision GovernorDecision
+	Status           ExecutionCommandStatus
+	Quantity         float64
+	EventTime        ExecutionEventTime
+}
+
+// ExecutionOrder is a canonical local execution order record.
+type ExecutionOrder struct {
+	OrderID       ExecutionOrderID
+	Command       ExecutionCommand
+	Venue         Venue
+	ClientOrderID string
+	Status        ExecutionOrderStatus
+	Quantity      float64
+	EventTime     ExecutionEventTime
+}
+
+// ExecutionFill is a canonical local execution fill record.
+type ExecutionFill struct {
+	FillID    ExecutionFillID
+	Order     ExecutionOrder
+	Quantity  float64
+	Price     float64
+	EventTime ExecutionEventTime
+}
+
+// ExecutionReconciliation is a canonical local execution reconciliation record.
+type ExecutionReconciliation struct {
+	Order          ExecutionOrder
+	Fills          []ExecutionFill
+	Status         ExecutionOrderStatus
+	FilledQuantity float64
+	EventTime      ExecutionEventTime
 }
 
 // InstrumentParams holds inputs for constructing a canonical instrument.
@@ -243,6 +341,52 @@ type CandidateActionParams struct {
 	DecisionTime time.Time
 	InputRange   TimeRange
 	Quality      DataQuality
+}
+
+// GovernorDecisionParams holds inputs for a canonical governor decision.
+type GovernorDecisionParams struct {
+	CandidateAction CandidateAction
+	Status          GovernorDecisionStatus
+	Reason          GovernorDecisionReason
+	DecisionTime    time.Time
+}
+
+// ExecutionCommandParams holds inputs for a canonical execution command.
+type ExecutionCommandParams struct {
+	CommandID        string
+	ApprovedDecision GovernorDecision
+	Status           ExecutionCommandStatus
+	Quantity         float64
+	EventTime        time.Time
+}
+
+// ExecutionOrderParams holds inputs for a canonical execution order.
+type ExecutionOrderParams struct {
+	OrderID       string
+	Command       ExecutionCommand
+	Venue         Venue
+	ClientOrderID string
+	Status        ExecutionOrderStatus
+	Quantity      float64
+	EventTime     time.Time
+}
+
+// ExecutionFillParams holds inputs for a canonical execution fill.
+type ExecutionFillParams struct {
+	FillID    string
+	Order     ExecutionOrder
+	Quantity  float64
+	Price     float64
+	EventTime time.Time
+}
+
+// ExecutionReconciliationParams holds inputs for a canonical reconciliation record.
+type ExecutionReconciliationParams struct {
+	Order          ExecutionOrder
+	Fills          []ExecutionFill
+	Status         ExecutionOrderStatus
+	FilledQuantity float64
+	EventTime      time.Time
 }
 
 // NewVenue validates and canonicalizes a venue identifier.
@@ -323,6 +467,76 @@ func NewCandidateActionKind(value string) (CandidateActionKind, error) {
 	}
 
 	return normalized, nil
+}
+
+// NewGovernorDecisionStatus validates and canonicalizes a governor decision status.
+func NewGovernorDecisionStatus(value string) (GovernorDecisionStatus, error) {
+	normalized := GovernorDecisionStatus(strings.ToLower(strings.TrimSpace(value)))
+	if !normalized.isValid() {
+		return "", fmt.Errorf("invalid governor decision status %q", value)
+	}
+
+	return normalized, nil
+}
+
+// NewGovernorDecisionReason validates and canonicalizes a governor decision reason.
+func NewGovernorDecisionReason(value string) (GovernorDecisionReason, error) {
+	normalized := GovernorDecisionReason(strings.ToLower(strings.TrimSpace(value)))
+	if !normalized.isValid() {
+		return "", fmt.Errorf("invalid governor decision reason %q", value)
+	}
+
+	return normalized, nil
+}
+
+// NewExecutionCommandStatus validates and canonicalizes an execution command status.
+func NewExecutionCommandStatus(value string) (ExecutionCommandStatus, error) {
+	normalized := ExecutionCommandStatus(strings.ToLower(strings.TrimSpace(value)))
+	if !normalized.isValid() {
+		return "", fmt.Errorf("invalid execution command status %q", value)
+	}
+
+	return normalized, nil
+}
+
+// NewExecutionOrderStatus validates and canonicalizes an execution order status.
+func NewExecutionOrderStatus(value string) (ExecutionOrderStatus, error) {
+	normalized := ExecutionOrderStatus(strings.ToLower(strings.TrimSpace(value)))
+	if !normalized.isValid() {
+		return "", fmt.Errorf("invalid execution order status %q", value)
+	}
+
+	return normalized, nil
+}
+
+// NewExecutionCommandID validates and canonicalizes an execution command identifier.
+func NewExecutionCommandID(value string) (ExecutionCommandID, error) {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return "", errors.New("execution command id is required")
+	}
+
+	return ExecutionCommandID(normalized), nil
+}
+
+// NewExecutionOrderID validates and canonicalizes an execution order identifier.
+func NewExecutionOrderID(value string) (ExecutionOrderID, error) {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return "", errors.New("execution order id is required")
+	}
+
+	return ExecutionOrderID(normalized), nil
+}
+
+// NewExecutionFillID validates and canonicalizes an execution fill identifier.
+func NewExecutionFillID(value string) (ExecutionFillID, error) {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return "", errors.New("execution fill id is required")
+	}
+
+	return ExecutionFillID(normalized), nil
 }
 
 // NewInstrument validates and canonicalizes a canonical instrument record.
@@ -516,6 +730,24 @@ func NewCandidateActionTime(value time.Time) (CandidateActionTime, error) {
 	return CandidateActionTime(canonicalUTC(value)), nil
 }
 
+// NewGovernorDecisionTime validates and canonicalizes a governor decision time.
+func NewGovernorDecisionTime(value time.Time) (GovernorDecisionTime, error) {
+	if value.IsZero() {
+		return GovernorDecisionTime{}, errors.New("governor decision time is required")
+	}
+
+	return GovernorDecisionTime(canonicalUTC(value)), nil
+}
+
+// NewExecutionEventTime validates and canonicalizes an execution event time.
+func NewExecutionEventTime(value time.Time) (ExecutionEventTime, error) {
+	if value.IsZero() {
+		return ExecutionEventTime{}, errors.New("execution event time is required")
+	}
+
+	return ExecutionEventTime(canonicalUTC(value)), nil
+}
+
 // NewAnalyticsValueRange validates and canonicalizes a point value range.
 func NewAnalyticsValueRange(start, end time.Time) (AnalyticsValueRange, error) {
 	normalizedRange, err := NewTimeRange(start, end)
@@ -636,6 +868,244 @@ func NewCandidateAction(params CandidateActionParams) (CandidateAction, error) {
 	}, nil
 }
 
+// NewGovernorDecision validates and canonicalizes a canonical governor decision.
+func NewGovernorDecision(params GovernorDecisionParams) (GovernorDecision, error) {
+	normalizedAction, err := NewCandidateAction(CandidateActionParams{
+		Strategy:     params.CandidateAction.Strategy,
+		Kind:         params.CandidateAction.Kind,
+		DecisionTime: params.CandidateAction.DecisionTime.Time(),
+		InputRange:   params.CandidateAction.InputRange,
+		Quality:      params.CandidateAction.Quality,
+	})
+	if err != nil {
+		return GovernorDecision{}, fmt.Errorf("governor candidate action: %w", err)
+	}
+
+	normalizedStatus, err := NewGovernorDecisionStatus(params.Status.String())
+	if err != nil {
+		return GovernorDecision{}, errors.New("governor decision status is required")
+	}
+
+	normalizedReason, err := NewGovernorDecisionReason(params.Reason.String())
+	if err != nil {
+		return GovernorDecision{}, errors.New("governor decision reason is required")
+	}
+
+	normalizedDecisionTime, err := NewGovernorDecisionTime(params.DecisionTime)
+	if err != nil {
+		return GovernorDecision{}, err
+	}
+
+	return GovernorDecision{
+		CandidateAction: normalizedAction,
+		Status:          normalizedStatus,
+		Reason:          normalizedReason,
+		DecisionTime:    normalizedDecisionTime,
+	}, nil
+}
+
+// NewExecutionCommand validates and canonicalizes a canonical execution command.
+func NewExecutionCommand(params ExecutionCommandParams) (ExecutionCommand, error) {
+	normalizedCommandID, err := NewExecutionCommandID(params.CommandID)
+	if err != nil {
+		return ExecutionCommand{}, err
+	}
+
+	normalizedDecision, err := NewGovernorDecision(GovernorDecisionParams{
+		CandidateAction: params.ApprovedDecision.CandidateAction,
+		Status:          params.ApprovedDecision.Status,
+		Reason:          params.ApprovedDecision.Reason,
+		DecisionTime:    params.ApprovedDecision.DecisionTime.Time(),
+	})
+	if err != nil {
+		return ExecutionCommand{}, fmt.Errorf("execution approved decision: %w", err)
+	}
+	if normalizedDecision.Status != GovernorDecisionStatusApproved {
+		return ExecutionCommand{}, errors.New("execution approved decision must be approved")
+	}
+
+	normalizedStatus, err := NewExecutionCommandStatus(params.Status.String())
+	if err != nil {
+		return ExecutionCommand{}, errors.New("execution command status is required")
+	}
+	if !isFiniteFloat64(params.Quantity) {
+		return ExecutionCommand{}, errors.New("execution command quantity must be finite")
+	}
+	if params.Quantity <= 0 {
+		return ExecutionCommand{}, errors.New("execution command quantity must be positive")
+	}
+
+	normalizedEventTime, err := NewExecutionEventTime(params.EventTime)
+	if err != nil {
+		return ExecutionCommand{}, err
+	}
+
+	return ExecutionCommand{
+		CommandID:        normalizedCommandID,
+		ApprovedDecision: normalizedDecision,
+		Status:           normalizedStatus,
+		Quantity:         params.Quantity,
+		EventTime:        normalizedEventTime,
+	}, nil
+}
+
+// NewExecutionOrder validates and canonicalizes a canonical execution order.
+func NewExecutionOrder(params ExecutionOrderParams) (ExecutionOrder, error) {
+	normalizedOrderID, err := NewExecutionOrderID(params.OrderID)
+	if err != nil {
+		return ExecutionOrder{}, err
+	}
+
+	normalizedCommand, err := NewExecutionCommand(ExecutionCommandParams{
+		CommandID:        string(params.Command.CommandID),
+		ApprovedDecision: params.Command.ApprovedDecision,
+		Status:           params.Command.Status,
+		Quantity:         params.Command.Quantity,
+		EventTime:        params.Command.EventTime.Time(),
+	})
+	if err != nil {
+		return ExecutionOrder{}, fmt.Errorf("execution order command: %w", err)
+	}
+
+	normalizedVenue, err := NewVenue(params.Venue.String())
+	if err != nil {
+		return ExecutionOrder{}, errors.New("execution order venue is required")
+	}
+
+	normalizedClientOrderID := strings.TrimSpace(params.ClientOrderID)
+	if normalizedClientOrderID == "" {
+		return ExecutionOrder{}, errors.New("execution order client order id is required")
+	}
+
+	normalizedStatus, err := NewExecutionOrderStatus(params.Status.String())
+	if err != nil {
+		return ExecutionOrder{}, errors.New("execution order status is required")
+	}
+	if !isFiniteFloat64(params.Quantity) {
+		return ExecutionOrder{}, errors.New("execution order quantity must be finite")
+	}
+	if params.Quantity <= 0 {
+		return ExecutionOrder{}, errors.New("execution order quantity must be positive")
+	}
+
+	normalizedEventTime, err := NewExecutionEventTime(params.EventTime)
+	if err != nil {
+		return ExecutionOrder{}, err
+	}
+
+	return ExecutionOrder{
+		OrderID:       normalizedOrderID,
+		Command:       normalizedCommand,
+		Venue:         normalizedVenue,
+		ClientOrderID: normalizedClientOrderID,
+		Status:        normalizedStatus,
+		Quantity:      params.Quantity,
+		EventTime:     normalizedEventTime,
+	}, nil
+}
+
+// NewExecutionFill validates and canonicalizes a canonical execution fill.
+func NewExecutionFill(params ExecutionFillParams) (ExecutionFill, error) {
+	normalizedFillID, err := NewExecutionFillID(params.FillID)
+	if err != nil {
+		return ExecutionFill{}, err
+	}
+
+	normalizedOrder, err := NewExecutionOrder(ExecutionOrderParams{
+		OrderID:       string(params.Order.OrderID),
+		Command:       params.Order.Command,
+		Venue:         params.Order.Venue,
+		ClientOrderID: params.Order.ClientOrderID,
+		Status:        params.Order.Status,
+		Quantity:      params.Order.Quantity,
+		EventTime:     params.Order.EventTime.Time(),
+	})
+	if err != nil {
+		return ExecutionFill{}, fmt.Errorf("execution fill order: %w", err)
+	}
+	if !isFiniteFloat64(params.Quantity) {
+		return ExecutionFill{}, errors.New("execution fill quantity must be finite")
+	}
+	if params.Quantity <= 0 {
+		return ExecutionFill{}, errors.New("execution fill quantity must be positive")
+	}
+	if !isFiniteFloat64(params.Price) {
+		return ExecutionFill{}, errors.New("execution fill price must be finite")
+	}
+	if params.Price <= 0 {
+		return ExecutionFill{}, errors.New("execution fill price must be positive")
+	}
+
+	normalizedEventTime, err := NewExecutionEventTime(params.EventTime)
+	if err != nil {
+		return ExecutionFill{}, err
+	}
+
+	return ExecutionFill{
+		FillID:    normalizedFillID,
+		Order:     normalizedOrder,
+		Quantity:  params.Quantity,
+		Price:     params.Price,
+		EventTime: normalizedEventTime,
+	}, nil
+}
+
+// NewExecutionReconciliation validates and canonicalizes a reconciliation record.
+func NewExecutionReconciliation(params ExecutionReconciliationParams) (ExecutionReconciliation, error) {
+	normalizedOrder, err := NewExecutionOrder(ExecutionOrderParams{
+		OrderID:       string(params.Order.OrderID),
+		Command:       params.Order.Command,
+		Venue:         params.Order.Venue,
+		ClientOrderID: params.Order.ClientOrderID,
+		Status:        params.Order.Status,
+		Quantity:      params.Order.Quantity,
+		EventTime:     params.Order.EventTime.Time(),
+	})
+	if err != nil {
+		return ExecutionReconciliation{}, fmt.Errorf("execution reconciliation order: %w", err)
+	}
+
+	normalizedFills := make([]ExecutionFill, len(params.Fills))
+	for idx, fill := range params.Fills {
+		normalizedFill, fillErr := NewExecutionFill(ExecutionFillParams{
+			FillID:    string(fill.FillID),
+			Order:     fill.Order,
+			Quantity:  fill.Quantity,
+			Price:     fill.Price,
+			EventTime: fill.EventTime.Time(),
+		})
+		if fillErr != nil {
+			return ExecutionReconciliation{}, fmt.Errorf("execution reconciliation fill %d: %w", idx, fillErr)
+		}
+
+		normalizedFills[idx] = normalizedFill
+	}
+
+	normalizedStatus, err := NewExecutionOrderStatus(params.Status.String())
+	if err != nil {
+		return ExecutionReconciliation{}, errors.New("execution reconciliation status is required")
+	}
+	if !isFiniteFloat64(params.FilledQuantity) {
+		return ExecutionReconciliation{}, errors.New("execution reconciliation filled quantity must be finite")
+	}
+	if params.FilledQuantity < 0 {
+		return ExecutionReconciliation{}, errors.New("execution reconciliation filled quantity must not be negative")
+	}
+
+	normalizedEventTime, err := NewExecutionEventTime(params.EventTime)
+	if err != nil {
+		return ExecutionReconciliation{}, err
+	}
+
+	return ExecutionReconciliation{
+		Order:          normalizedOrder,
+		Fills:          normalizedFills,
+		Status:         normalizedStatus,
+		FilledQuantity: params.FilledQuantity,
+		EventTime:      normalizedEventTime,
+	}, nil
+}
+
 // NewCandle validates and canonicalizes a canonical candle record.
 func NewCandle(params CandleParams) (Candle, error) {
 	if params.Instrument.Venue == "" {
@@ -706,6 +1176,10 @@ func canonicalUTC(value time.Time) time.Time {
 	return value.UTC()
 }
 
+func isFiniteFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
 func (a AssetClass) isValid() bool {
 	switch a {
 	case AssetClassCrypto, AssetClassEquity, AssetClassFX, AssetClassFuture, AssetClassIndex, AssetClassOption:
@@ -736,6 +1210,48 @@ func (k StrategyKind) isValid() bool {
 func (k CandidateActionKind) isValid() bool {
 	switch k {
 	case CandidateActionKindLong, CandidateActionKindShort:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s GovernorDecisionStatus) isValid() bool {
+	switch s {
+	case GovernorDecisionStatusApproved, GovernorDecisionStatusRejected, GovernorDecisionStatusBlocked:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r GovernorDecisionReason) isValid() bool {
+	switch r {
+	case GovernorDecisionReasonEligible,
+		GovernorDecisionReasonDisallowedActionKind,
+		GovernorDecisionReasonBelowMinimumQuality,
+		GovernorDecisionReasonApprovalLimitReached:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s ExecutionCommandStatus) isValid() bool {
+	switch s {
+	case ExecutionCommandStatusCreated:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s ExecutionOrderStatus) isValid() bool {
+	switch s {
+	case ExecutionOrderStatusOpen,
+		ExecutionOrderStatusPartiallyFilled,
+		ExecutionOrderStatusFilled,
+		ExecutionOrderStatusOverfilled:
 		return true
 	default:
 		return false
@@ -794,6 +1310,22 @@ func (k CandidateActionKind) String() string {
 	return string(k)
 }
 
+func (s GovernorDecisionStatus) String() string {
+	return string(s)
+}
+
+func (r GovernorDecisionReason) String() string {
+	return string(r)
+}
+
+func (s ExecutionCommandStatus) String() string {
+	return string(s)
+}
+
+func (s ExecutionOrderStatus) String() string {
+	return string(s)
+}
+
 // Time returns the time value for a canonical analytics point timestamp.
 func (t AnalyticsPointTime) Time() time.Time {
 	return time.Time(t)
@@ -801,6 +1333,16 @@ func (t AnalyticsPointTime) Time() time.Time {
 
 // Time returns the time value for a canonical candidate action timestamp.
 func (t CandidateActionTime) Time() time.Time {
+	return time.Time(t)
+}
+
+// Time returns the time value for a canonical governor decision timestamp.
+func (t GovernorDecisionTime) Time() time.Time {
+	return time.Time(t)
+}
+
+// Time returns the time value for a canonical execution event timestamp.
+func (t ExecutionEventTime) Time() time.Time {
 	return time.Time(t)
 }
 
