@@ -5,6 +5,7 @@ Use these documents as the active documentation set for this repository.
 ## Source Of Truth
 
 - Product direction: [ARCHITECTURE.md](./ARCHITECTURE.md)
+- Implementation snapshot: [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
 
 ## Retained Reference Docs
 
