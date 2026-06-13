@@ -23,6 +23,7 @@ rules:
   tasks:
     - Tests must be integral part of the task, do not split them
     - Tasks must follow TDD flow (write test -> implement -> verify)
+    - Task description must start with a summary of what to do and then mention that is must follow TDD flow
     - Any manual step must be documented on design level only
     - Any obligatory manual step must be considered as blocker and must be resolved by user interaction
     - Do not add any separate task to do final verification. This is part of the task completion protocol.

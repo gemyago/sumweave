@@ -46,6 +46,21 @@ const (
 	DataQualitySuspect   DataQuality = "suspect"
 )
 
+// StrategyKind identifies a supported deterministic strategy.
+type StrategyKind string
+
+const (
+	StrategyKindMovingAverageCrossover StrategyKind = "moving-average-crossover"
+)
+
+// CandidateActionKind identifies a supported strategy candidate action.
+type CandidateActionKind string
+
+const (
+	CandidateActionKindLong  CandidateActionKind = "long"
+	CandidateActionKindShort CandidateActionKind = "short"
+)
+
 // Instrument is the canonical venue-scoped instrument reference record.
 type Instrument struct {
 	Venue      Venue
@@ -119,8 +134,18 @@ type AnalyticsSeries struct {
 	Points   []AnalyticsPoint
 }
 
+// StrategyIdentity identifies a canonical strategy evaluation source.
+type StrategyIdentity struct {
+	Instrument Instrument
+	Timeframe  Timeframe
+	Kind       StrategyKind
+}
+
 // AnalyticsPointTime identifies a canonical analytics point timestamp.
 type AnalyticsPointTime time.Time
+
+// CandidateActionTime identifies a canonical strategy decision timestamp.
+type CandidateActionTime time.Time
 
 // AnalyticsValueRange describes the half-open candle interval behind a point.
 type AnalyticsValueRange struct {
@@ -136,6 +161,15 @@ type AnalyticsPoint struct {
 	Quality              DataQuality
 	SourceReplayIdentity uint64
 	SourceProvenance     SourceProvenance
+}
+
+// CandidateAction is a canonical strategy output record.
+type CandidateAction struct {
+	Strategy     StrategyIdentity
+	Kind         CandidateActionKind
+	DecisionTime CandidateActionTime
+	InputRange   TimeRange
+	Quality      DataQuality
 }
 
 // InstrumentParams holds inputs for constructing a canonical instrument.
@@ -179,6 +213,13 @@ type AnalyticsSeriesIdentityParams struct {
 	TimeRange  TimeRange
 }
 
+// StrategyIdentityParams holds inputs for a strategy identity.
+type StrategyIdentityParams struct {
+	Instrument Instrument
+	Timeframe  Timeframe
+	Kind       StrategyKind
+}
+
 // AnalyticsPointParams holds inputs for a canonical analytics point.
 type AnalyticsPointParams struct {
 	Time                 time.Time
@@ -193,6 +234,15 @@ type AnalyticsPointParams struct {
 type AnalyticsSeriesParams struct {
 	Identity AnalyticsSeriesIdentity
 	Points   []AnalyticsPoint
+}
+
+// CandidateActionParams holds inputs for a canonical candidate action.
+type CandidateActionParams struct {
+	Strategy     StrategyIdentity
+	Kind         CandidateActionKind
+	DecisionTime time.Time
+	InputRange   TimeRange
+	Quality      DataQuality
 }
 
 // NewVenue validates and canonicalizes a venue identifier.
@@ -250,6 +300,26 @@ func NewIndicatorKind(value string) (IndicatorKind, error) {
 	normalized := IndicatorKind(strings.ToLower(strings.TrimSpace(value)))
 	if !normalized.isValid() {
 		return "", fmt.Errorf("invalid indicator kind %q", value)
+	}
+
+	return normalized, nil
+}
+
+// NewStrategyKind validates and canonicalizes a strategy kind.
+func NewStrategyKind(value string) (StrategyKind, error) {
+	normalized := StrategyKind(strings.ToLower(strings.TrimSpace(value)))
+	if !normalized.isValid() {
+		return "", fmt.Errorf("invalid strategy kind %q", value)
+	}
+
+	return normalized, nil
+}
+
+// NewCandidateActionKind validates and canonicalizes a candidate action kind.
+func NewCandidateActionKind(value string) (CandidateActionKind, error) {
+	normalized := CandidateActionKind(strings.ToLower(strings.TrimSpace(value)))
+	if !normalized.isValid() {
+		return "", fmt.Errorf("invalid candidate action kind %q", value)
 	}
 
 	return normalized, nil
@@ -384,6 +454,50 @@ func NewAnalyticsSeriesIdentity(params AnalyticsSeriesIdentityParams) (Analytics
 	}, nil
 }
 
+// NewStrategyIdentity validates and canonicalizes a strategy identity.
+func NewStrategyIdentity(params StrategyIdentityParams) (StrategyIdentity, error) {
+	normalizedVenue, err := NewVenue(params.Instrument.Venue.String())
+	if err != nil {
+		return StrategyIdentity{}, errors.New("strategy instrument venue is required")
+	}
+
+	normalizedSymbol, err := NewSymbol(params.Instrument.Symbol.String())
+	if err != nil {
+		return StrategyIdentity{}, errors.New("strategy instrument symbol is required")
+	}
+
+	normalizedAssetClass, err := NewAssetClass(params.Instrument.AssetClass.String())
+	if err != nil {
+		return StrategyIdentity{}, fmt.Errorf("strategy instrument asset class: %w", err)
+	}
+
+	normalizedInstrument, err := NewInstrument(InstrumentParams{
+		Venue:      normalizedVenue,
+		Symbol:     normalizedSymbol,
+		AssetClass: normalizedAssetClass,
+		Active:     params.Instrument.Active,
+	})
+	if err != nil {
+		return StrategyIdentity{}, fmt.Errorf("strategy instrument: %w", err)
+	}
+
+	normalizedTimeframe, err := NewTimeframe(params.Timeframe.String())
+	if err != nil {
+		return StrategyIdentity{}, errors.New("strategy timeframe is required")
+	}
+
+	normalizedKind, err := NewStrategyKind(params.Kind.String())
+	if err != nil {
+		return StrategyIdentity{}, errors.New("strategy kind is required")
+	}
+
+	return StrategyIdentity{
+		Instrument: normalizedInstrument,
+		Timeframe:  normalizedTimeframe,
+		Kind:       normalizedKind,
+	}, nil
+}
+
 // NewAnalyticsPointTime validates and canonicalizes a point timestamp.
 func NewAnalyticsPointTime(value time.Time) (AnalyticsPointTime, error) {
 	if value.IsZero() {
@@ -391,6 +505,15 @@ func NewAnalyticsPointTime(value time.Time) (AnalyticsPointTime, error) {
 	}
 
 	return AnalyticsPointTime(canonicalUTC(value)), nil
+}
+
+// NewCandidateActionTime validates and canonicalizes a candidate action time.
+func NewCandidateActionTime(value time.Time) (CandidateActionTime, error) {
+	if value.IsZero() {
+		return CandidateActionTime{}, errors.New("candidate action decision time is required")
+	}
+
+	return CandidateActionTime(canonicalUTC(value)), nil
 }
 
 // NewAnalyticsValueRange validates and canonicalizes a point value range.
@@ -475,6 +598,41 @@ func NewAnalyticsSeries(params AnalyticsSeriesParams) (AnalyticsSeries, error) {
 	return AnalyticsSeries{
 		Identity: identity,
 		Points:   points,
+	}, nil
+}
+
+// NewCandidateAction validates and canonicalizes a canonical candidate action.
+func NewCandidateAction(params CandidateActionParams) (CandidateAction, error) {
+	normalizedStrategy, err := NewStrategyIdentity(StrategyIdentityParams(params.Strategy))
+	if err != nil {
+		return CandidateAction{}, err
+	}
+
+	normalizedKind, err := NewCandidateActionKind(params.Kind.String())
+	if err != nil {
+		return CandidateAction{}, errors.New("candidate action kind is required")
+	}
+
+	normalizedDecisionTime, err := NewCandidateActionTime(params.DecisionTime)
+	if err != nil {
+		return CandidateAction{}, err
+	}
+
+	normalizedInputRange, err := NewTimeRange(params.InputRange.Start, params.InputRange.End)
+	if err != nil {
+		return CandidateAction{}, fmt.Errorf("candidate action input range: %w", err)
+	}
+
+	if !params.Quality.isValid() {
+		return CandidateAction{}, errors.New("candidate action quality is required")
+	}
+
+	return CandidateAction{
+		Strategy:     normalizedStrategy,
+		Kind:         normalizedKind,
+		DecisionTime: normalizedDecisionTime,
+		InputRange:   normalizedInputRange,
+		Quality:      params.Quality,
 	}, nil
 }
 
@@ -566,6 +724,24 @@ func (k IndicatorKind) isValid() bool {
 	}
 }
 
+func (k StrategyKind) isValid() bool {
+	switch k {
+	case StrategyKindMovingAverageCrossover:
+		return true
+	default:
+		return false
+	}
+}
+
+func (k CandidateActionKind) isValid() bool {
+	switch k {
+	case CandidateActionKindLong, CandidateActionKindShort:
+		return true
+	default:
+		return false
+	}
+}
+
 func compareAnalyticsPointOrder(left, right AnalyticsPoint) int {
 	leftTime := left.Time.Time()
 	rightTime := right.Time.Time()
@@ -610,8 +786,21 @@ func (k IndicatorKind) String() string {
 	return string(k)
 }
 
+func (k StrategyKind) String() string {
+	return string(k)
+}
+
+func (k CandidateActionKind) String() string {
+	return string(k)
+}
+
 // Time returns the time value for a canonical analytics point timestamp.
 func (t AnalyticsPointTime) Time() time.Time {
+	return time.Time(t)
+}
+
+// Time returns the time value for a canonical candidate action timestamp.
+func (t CandidateActionTime) Time() time.Time {
 	return time.Time(t)
 }
 

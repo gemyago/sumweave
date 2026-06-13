@@ -58,6 +58,13 @@ func TestDomain(t *testing.T) {
 		IndicatorKindMovingAverage,
 		IndicatorKindPeriodReturn,
 	}
+	validStrategyKinds := []StrategyKind{
+		StrategyKindMovingAverageCrossover,
+	}
+	validCandidateActionKinds := []CandidateActionKind{
+		CandidateActionKindLong,
+		CandidateActionKindShort,
+	}
 
 	randomInstrument := func(t *testing.T) Instrument {
 		t.Helper()
@@ -254,6 +261,8 @@ func TestDomain(t *testing.T) {
 			reflect.TypeFor[AnalyticsPointTime](),
 			reflect.TypeFor[AnalyticsValueRange](),
 			reflect.TypeFor[AnalyticsPoint](),
+			reflect.TypeFor[StrategyIdentity](),
+			reflect.TypeFor[CandidateAction](),
 		}
 
 		for _, typ := range structTypes {
@@ -581,5 +590,128 @@ func TestDomain(t *testing.T) {
 			},
 		})
 		require.Error(t, err)
+	})
+
+	t.Run("strategy identity canonicalizes embedded instrument and kind", func(t *testing.T) {
+		t.Parallel()
+
+		venueText := "  " + randomWord("venue") + "  "
+		symbolText := "  " + strings.ToUpper(randomWord("symbol")) + "  "
+		assetClassText := "  " + strings.ToUpper(
+			validAssetClasses[fake.IntBetween(0, len(validAssetClasses)-1)].String(),
+		) + "  "
+		timeframeText := "  " + strings.ToUpper(
+			validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)].String(),
+		) + "  "
+		kindText := "  " + strings.ToUpper(
+			validStrategyKinds[fake.IntBetween(0, len(validStrategyKinds)-1)].String(),
+		) + "  "
+		active := fake.Bool()
+
+		identity, err := NewStrategyIdentity(StrategyIdentityParams{
+			Instrument: Instrument{
+				Venue:      Venue(venueText),
+				Symbol:     Symbol(symbolText),
+				AssetClass: AssetClass(assetClassText),
+				Active:     active,
+			},
+			Timeframe: Timeframe(timeframeText),
+			Kind:      StrategyKind(kindText),
+		})
+		require.NoError(t, err)
+
+		expectedVenue, err := NewVenue(venueText)
+		require.NoError(t, err)
+		expectedSymbol, err := NewSymbol(symbolText)
+		require.NoError(t, err)
+		expectedAssetClass, err := NewAssetClass(assetClassText)
+		require.NoError(t, err)
+		expectedInstrument, err := NewInstrument(InstrumentParams{
+			Venue:      expectedVenue,
+			Symbol:     expectedSymbol,
+			AssetClass: expectedAssetClass,
+			Active:     active,
+		})
+		require.NoError(t, err)
+		expectedTimeframe, err := NewTimeframe(timeframeText)
+		require.NoError(t, err)
+		expectedKind, err := NewStrategyKind(kindText)
+		require.NoError(t, err)
+
+		require.Equal(t, expectedInstrument, identity.Instrument)
+		require.Equal(t, expectedTimeframe, identity.Timeframe)
+		require.Equal(t, expectedKind, identity.Kind)
+	})
+
+	t.Run("strategy identity rejects invalid kind", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := NewStrategyIdentity(StrategyIdentityParams{
+			Instrument: randomInstrument(t),
+			Timeframe:  validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)],
+			Kind:       StrategyKind(randomWord("bad-strategy-kind")),
+		})
+		require.Error(t, err)
+		require.ErrorContains(t, err, "strategy kind")
+	})
+
+	t.Run("candidate actions canonicalize UTC decision time and input range", func(t *testing.T) {
+		t.Parallel()
+
+		decisionTime := randomLocationTime()
+		inputStart := randomLocationTime()
+		inputEnd := inputStart.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+		identity, err := NewStrategyIdentity(StrategyIdentityParams{
+			Instrument: randomInstrument(t),
+			Timeframe:  validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)],
+			Kind:       validStrategyKinds[fake.IntBetween(0, len(validStrategyKinds)-1)],
+		})
+		require.NoError(t, err)
+
+		action, err := NewCandidateAction(CandidateActionParams{
+			Strategy:     identity,
+			Kind:         validCandidateActionKinds[fake.IntBetween(0, len(validCandidateActionKinds)-1)],
+			DecisionTime: decisionTime,
+			InputRange: TimeRange{
+				Start: inputStart,
+				End:   inputEnd,
+			},
+			Quality: validQualities[fake.IntBetween(0, len(validQualities)-1)],
+		})
+		require.NoError(t, err)
+
+		require.Equal(t, decisionTime.UTC(), action.DecisionTime.Time())
+		require.Equal(t, time.UTC, action.DecisionTime.Time().Location())
+		require.Equal(t, inputStart.UTC(), action.InputRange.Start)
+		require.Equal(t, inputEnd.UTC(), action.InputRange.End)
+		require.Equal(t, time.UTC, action.InputRange.Start.Location())
+		require.Equal(t, time.UTC, action.InputRange.End.Location())
+		require.Equal(t, identity, action.Strategy)
+	})
+
+	t.Run("candidate actions reject invalid input range", func(t *testing.T) {
+		t.Parallel()
+
+		decisionTime := randomLocationTime()
+		inputStart := randomLocationTime()
+		identity, err := NewStrategyIdentity(StrategyIdentityParams{
+			Instrument: randomInstrument(t),
+			Timeframe:  validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)],
+			Kind:       validStrategyKinds[fake.IntBetween(0, len(validStrategyKinds)-1)],
+		})
+		require.NoError(t, err)
+
+		_, err = NewCandidateAction(CandidateActionParams{
+			Strategy:     identity,
+			Kind:         validCandidateActionKinds[fake.IntBetween(0, len(validCandidateActionKinds)-1)],
+			DecisionTime: decisionTime,
+			InputRange: TimeRange{
+				Start: inputStart,
+				End:   inputStart,
+			},
+			Quality: validQualities[fake.IntBetween(0, len(validQualities)-1)],
+		})
+		require.Error(t, err)
+		require.ErrorContains(t, err, "input range")
 	})
 }

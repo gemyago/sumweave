@@ -10,9 +10,9 @@ The manager is an orchestrator. It does not write the plan, implement code, or r
 
 ```text
 Task input
-  -> Planning with /opsx-propose
+  -> Planning with openspec propose
   -> Planning review
-  -> Implementation chunks with /opsx-apply
+  -> Implementation chunks with openspec apply
   -> Chunk finalization and commit after each clean chunk
   -> Whole-change final review
   -> User review/corrections
@@ -112,7 +112,7 @@ For the common command `openspec-manager work on <spec-change>`:
 2. Check whether proposal/design/tasks artifacts exist and appear ready enough for review.
 3. Check whether manager artifacts already exist.
 4. If the plan artifacts exist and manager artifacts do not exist, create `manager-status.md`, initialize standard review files as needed, and start with the plan-reviewing sub-agent.
-5. Do not rerun `/opsx-propose` unless the plan artifacts are missing, incomplete, or the user explicitly asks to redo planning.
+5. Do not rerun `openspec propose` unless the plan artifacts are missing, incomplete, or the user explicitly asks to redo planning.
 
 When auto-detecting, briefly tell the user what state was detected and which phase is starting.
 
@@ -129,7 +129,7 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Preserve configured model and reasoning settings on retries and resumes.
 - Resolve duplicate or still-running sub-agents before starting another run for the same chunk.
 - Close finished sub-agents when needed to free capacity.
-- Enforce `/opsx-apply` for all implementation, fixing, and comments-addressing work.
+- Enforce `openspec apply` for all implementation, fixing, and comments-addressing work.
 - Enforce strict chunk order from the reviewed plan.
 - Pass relevant `AGENTS.md` constraints and artifact rules to every sub-agent.
 - Verify the git state yourself at every clean gate; untracked files count as pending changes.
@@ -138,7 +138,7 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 
 - Do task-specific planning yourself, even if initial task seems unclear to you. This is a job of the planning sub-agent.
 - Implement the requested change yourself.
-- Run `/opsx-propose` or `/opsx-apply` yourself.
+- Run `openspec propose` or `openspec apply` yourself.
 - Perform task-specific code review yourself.
 - Skip or merge phases.
 - Invent additional phases, steps or random sub-agents.
@@ -179,7 +179,7 @@ Create these files under the relevant OpenSpec change/spec directory:
 
 ### Allowed repository artifacts
 
-- OpenSpec artifacts created or updated by `/opsx-propose` or `/opsx-apply`.
+- OpenSpec artifacts created or updated by `openspec propose` or `openspec apply`.
 - Source, tests, docs, config, or infrastructure files required by the task.
 - The standard manager/review files listed above.
 
@@ -264,7 +264,7 @@ Each appended round must include:
 1. Fetch task details or read the direct task description.
 2. Identify affected repo areas and read relevant `AGENTS.md` files.
 3. Read `openspec-manager.yaml` if it exists.
-4. If an existing change was provided and auto-detection says plan artifacts already exist, skip `/opsx-propose` and start at step 5.
+4. If an existing change was provided and auto-detection says plan artifacts already exist, skip `openspec propose` and start at step 5.
 5. Otherwise spawn the planning sub-agent.
 6. Once the OpenSpec directory is known, create/update `manager-status.md` and initialize standard review files as needed.
 7. Spawn the plan-reviewing sub-agent.
@@ -288,7 +288,7 @@ Each appended round must include:
 ### Notes
 
 - Tell the user when the workflow is still in planning.
-- If auto-detection starts from an existing externally-created plan, do not rerun `/opsx-propose` unless required plan artifacts are missing or incomplete.
+- If auto-detection starts from an existing externally-created plan, do not rerun `openspec propose` unless required plan artifacts are missing or incomplete.
 - If the user asked to pause after planning, pause.
 - Otherwise continue directly into implementation after clean planning review.
 - If the user comments on the plan, append those comments to `review-planning.md` and redo planning. Do not run another plan review unless the user asks or the revision needs it.
@@ -311,7 +311,7 @@ For each planned chunk or follow-up fix chunk:
 
 1. Resolve any still-running prior sub-agent for that chunk.
 2. Spawn the implementation sub-agent with exact configured settings when present.
-3. Require `/opsx-apply`.
+3. Require `openspec apply`.
 4. Wait for implementation to complete.
 5. Spawn the chunk-finalizing sub-agent.
 6. Append or capture the review in `review-chunk-<chunk-slug>.md`.
@@ -353,7 +353,7 @@ For each planned chunk or follow-up fix chunk:
 1. Wait for user comments.
 2. Append each comment round to `review-final.md`.
 3. Update `manager-status.md`.
-4. Spawn comments-addressing sub-agent with `/opsx-apply`.
+4. Spawn comments-addressing sub-agent with `openspec apply`.
 5. Spawn implementation-finalizing sub-agent in follow-up re-review mode.
 6. Append re-review to `review-final.md`.
 7. Require commit status for clean refinement changes.
@@ -458,7 +458,7 @@ Required result:
 - Blockers or assumptions.
 
 ```md
-Please follow `"/opsx-propose"` for the task below.
+Please follow `openspec propose` for the task below.
 
 Persisted planning review feedback file: <path to review-planning.md if this is a planning redo, otherwise `none`>
 Manager status file: <path to manager-status.md if known, otherwise `unknown until proposal creates/identifies spec directory`>
@@ -489,7 +489,7 @@ Required result:
 - `## Commit Status`
 
 ```md
-Please review the OpenSpec plan <change-slug> for the task below as proposed by `"/opsx-propose"`.
+Please review the OpenSpec plan <change-slug> for the task below as proposed by `openspec propose`.
 
 Task:
 <task details>
@@ -563,7 +563,7 @@ Required result:
 - Blockers.
 
 ```md
-Please apply the OpenSpec change <change-slug> using `"/opsx-apply"`.
+Please apply the OpenSpec change <change-slug> using `openspec apply`.
 
 Apply only this chunk: <parent task or consecutive parent tasks with exact task ranges>
 Chunk slug: <chunk-slug>
@@ -575,7 +575,7 @@ Chunk review file: <path to review-chunk-<chunk-slug>.md>
 
 Rules:
 - Own only this chunk.
-- `/opsx-apply` is mandatory.
+- `openspec apply` is mandatory.
 - Follow relevant `AGENTS.md` constraints.
 - Do not work outside this chunk.
 - Mark completed OpenSpec tasks for this chunk.
@@ -603,7 +603,7 @@ Required result:
 - `## Affected Follow-up Chunks`
 
 ```md
-Please do a quick, shallow review of the just-implemented chunk of the OpenSpec change applied using `"/opsx-apply"`.
+Please do a quick, shallow review of the just-implemented chunk of the OpenSpec change applied using `openspec apply`.
 
 Change reference: <change-slug>
 Applied chunk: <exact parent task range>
@@ -615,7 +615,7 @@ Review focus:
 - Confirm the chunk matches the requested tasks.
 - Confirm no obvious issue was introduced.
 - Confirm applicable completion protocol passed.
-- Confirm `/opsx-apply` was used.
+- Confirm `openspec apply` was used.
 - Confirm completed OpenSpec tasks were marked.
 - Confirm no disallowed ad-hoc repository artifacts remain.
 - Decide whether it is safe to continue.
@@ -667,7 +667,7 @@ Required result:
 - `## Non-Blocking Notes`
 
 ```md
-Please do the final whole-change review of the OpenSpec change applied using `"/opsx-apply"`.
+Please do the final whole-change review of the OpenSpec change applied using `openspec apply`.
 
 Change reference: <change-slug>
 Applied chunks: <list exact chunks>
@@ -749,7 +749,7 @@ Relevant artifacts:
 - Persisted final review: <path to review-final.md>
 - Manager status file: <path to manager-status.md>
 
-Use `"/opsx-apply"`. Do not refine the change outside that flow. Update OpenSpec artifacts and task status as needed.
+Use `openspec apply`. Do not refine the change outside that flow. Update OpenSpec artifacts and task status as needed.
 
 Rules:
 - Treat user comments as the scope boundary.
