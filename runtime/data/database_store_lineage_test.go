@@ -1,0 +1,1002 @@
+package data
+
+import (
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/jaswdr/faker/v2"
+	"github.com/stretchr/testify/require"
+)
+
+func TestDatabaseStoreLineage(t *testing.T) {
+	t.Parallel()
+
+	fake := faker.New()
+
+	makeStore := func(t *testing.T, tablePrefix string) *DatabaseStore {
+		t.Helper()
+
+		store, err := NewDatabaseStore(":memory:", DatabaseStoreOpts{TablePrefix: tablePrefix})
+		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
+
+		return store
+	}
+
+	randomWord := func(prefix string) string {
+		return prefix + "-" + strings.ToLower(fake.Lorem().Word())
+	}
+
+	randomTime := func() time.Time {
+		return time.Date(
+			fake.IntBetween(2020, 2035),
+			time.Month(fake.IntBetween(1, 12)),
+			fake.IntBetween(1, 28),
+			fake.IntBetween(0, 23),
+			fake.IntBetween(0, 59),
+			fake.IntBetween(0, 59),
+			fake.IntBetween(0, 999999999),
+			time.FixedZone(randomWord("zone"), fake.IntBetween(-11, 12)*3600),
+		)
+	}
+
+	readCount := func(t *testing.T, store *DatabaseStore, tableName string) int64 {
+		t.Helper()
+
+		var count int64
+		require.NoError(t, store.db.WithContext(t.Context()).Table(tableName).Count(&count).Error)
+
+		return count
+	}
+
+	hasUniqueIndexWithColumns := func(t *testing.T, store *DatabaseStore, tableName string, want []string) bool {
+		t.Helper()
+
+		var indexes []sqliteIndexListRow
+		require.NoError(t, store.db.Raw(fmt.Sprintf("PRAGMA index_list('%s')", tableName)).Scan(&indexes).Error)
+
+		for _, indexRow := range indexes {
+			if indexRow.Unique == 0 {
+				continue
+			}
+
+			var columns []sqliteIndexInfoRow
+			require.NoError(
+				t,
+				store.db.Raw(fmt.Sprintf("PRAGMA index_info('%s')", indexRow.Name)).Scan(&columns).Error,
+			)
+
+			got := make([]string, 0, len(columns))
+			for _, column := range columns {
+				got = append(got, column.Name)
+			}
+
+			if slices.Equal(got, want) {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	makeIngestionRun := func(t *testing.T) IngestionRun {
+		t.Helper()
+
+		run, err := NewIngestionRun(IngestionRunParams{
+			ID:          randomWord("ingestion-run"),
+			Source:      randomWord("source"),
+			Venue:       domain.Venue(randomWord("venue")),
+			Status:      IngestionRunStatusStarted,
+			StartedAt:   randomTime(),
+			RecordCount: fake.IntBetween(0, 1000),
+		})
+		require.NoError(t, err)
+
+		return run
+	}
+
+	makeRawVenuePayload := func(t *testing.T, ingestionRunID string) RawVenuePayload {
+		t.Helper()
+
+		payload, err := NewRawVenuePayload(RawVenuePayloadParams{
+			ID:             randomWord("raw-payload"),
+			IngestionRunID: ingestionRunID,
+			Source:         randomWord("source"),
+			Venue:          domain.Venue(randomWord("venue")),
+			ContentType:    "application/json",
+			Body: []byte(
+				`{"items":` + strconv.Itoa(fake.IntBetween(1, 99)) + `}`,
+			),
+			Checksum:       randomWord("checksum"),
+			ReceivedAt:     randomTime(),
+			RequestKey:     randomWord("request-key"),
+			SourceRecordID: randomWord("source-record"),
+			Metadata: map[string]string{
+				randomWord("safe-key"): randomWord("safe-value"),
+			},
+		})
+		require.NoError(t, err)
+
+		return payload
+	}
+
+	makeNormalizationRun := func(t *testing.T, rawPayloadIDs ...string) NormalizationRun {
+		t.Helper()
+
+		run, err := NewNormalizationRun(NormalizationRunParams{
+			ID:                   randomWord("normalization-run"),
+			RawPayloadIDs:        rawPayloadIDs,
+			Status:               NormalizationRunStatusStarted,
+			StartedAt:            randomTime(),
+			RecordKind:           LineageRecordKindTrade,
+			SourceRecordCount:    fake.IntBetween(0, 1000),
+			CanonicalRecordCount: fake.IntBetween(0, 1000),
+		})
+		require.NoError(t, err)
+
+		return run
+	}
+
+	makeDataBatch := func(t *testing.T, normalizationRunID string) DataBatch {
+		t.Helper()
+
+		start := randomTime()
+		timeRange, err := domain.NewTimeRange(
+			start,
+			start.Add(time.Duration(fake.IntBetween(1, 120))*time.Minute),
+		)
+		require.NoError(t, err)
+
+		batch, err := NewDataBatch(DataBatchParams{
+			ID:                 randomWord("data-batch"),
+			NormalizationRunID: normalizationRunID,
+			Venue:              domain.Venue(randomWord("venue")),
+			Instrument: &BatchInstrumentRef{
+				Symbol:     domain.Symbol(strings.ToUpper(randomWord("symbol"))),
+				AssetClass: domain.AssetClassCrypto,
+			},
+			RecordKind:  LineageRecordKindTrade,
+			TimeRange:   timeRange,
+			Quality:     domain.DataQualityValidated,
+			RecordCount: fake.IntBetween(0, 1000),
+			Summary:     randomWord("summary"),
+		})
+		require.NoError(t, err)
+
+		return batch
+	}
+
+	makeInstrument := func(t *testing.T, venue domain.Venue) domain.Instrument {
+		t.Helper()
+
+		instrument, err := domain.NewInstrument(domain.InstrumentParams{
+			Venue:      venue,
+			Symbol:     domain.Symbol(strings.ToUpper(randomWord("symbol"))),
+			AssetClass: domain.AssetClassCrypto,
+			Active:     true,
+		})
+		require.NoError(t, err)
+
+		return instrument
+	}
+
+	makeCandle := func(t *testing.T, instrument domain.Instrument, timeRange domain.TimeRange) domain.Candle {
+		t.Helper()
+
+		provenance, err := domain.NewSourceProvenance(randomWord("source"), randomWord("record"))
+		require.NoError(t, err)
+
+		candle, err := domain.NewCandle(domain.CandleParams{
+			Instrument: instrument,
+			Timeframe:  domain.Timeframe1m,
+			TimeRange:  timeRange,
+			Open:       fake.Float64(2, 1, 1000),
+			High:       fake.Float64(2, 1, 1000),
+			Low:        fake.Float64(2, 0, 1000),
+			Close:      fake.Float64(2, 1, 1000),
+			Volume:     fake.Float64(4, 0, 10000),
+			Quality:    domain.DataQualityValidated,
+			Provenance: provenance,
+		})
+		require.NoError(t, err)
+
+		return candle
+	}
+
+	makeTrade := func(t *testing.T, instrument domain.Instrument, eventTime time.Time) domain.Trade {
+		t.Helper()
+
+		provenance, err := domain.NewSourceProvenance(randomWord("source"), randomWord("record"))
+		require.NoError(t, err)
+
+		trade, err := domain.NewTrade(domain.TradeParams{
+			Instrument: instrument,
+			EventTime:  eventTime,
+			Price:      fake.Float64(4, 1, 100000),
+			Size:       fake.Float64(4, 0, 100000),
+			Quality:    domain.DataQualityRaw,
+			Provenance: provenance,
+		})
+		require.NoError(t, err)
+
+		return trade
+	}
+
+	t.Run("AutoMigrate creates explicit lineage schema", func(t *testing.T) {
+		t.Parallel()
+
+		tablePrefix := strings.ReplaceAll(randomWord("sf"), "-", "_") + "_"
+		store := makeStore(t, tablePrefix)
+
+		assertColumns := func(tableName string, want []string) {
+			t.Helper()
+
+			var columns []sqliteTableInfoRow
+			require.NoError(
+				t,
+				store.db.Raw(fmt.Sprintf("PRAGMA table_info('%s')", tableName)).Scan(&columns).Error,
+			)
+			require.Equal(t, want, columnNames(columns))
+		}
+
+		assertColumns(tablePrefix+"ingestion_runs", []string{
+			"id",
+			"source",
+			"venue",
+			"status",
+			"started_at",
+			"completed_at",
+			"record_count",
+			"error_summary",
+			"created_at",
+			"updated_at",
+		})
+		assertColumns(tablePrefix+"raw_venue_payloads", []string{
+			"id",
+			"ingestion_run_id",
+			"source",
+			"venue",
+			"content_type",
+			"body",
+			"checksum",
+			"received_at",
+			"request_key",
+			"source_record_id",
+			"metadata_json",
+			"created_at",
+			"updated_at",
+		})
+		assertColumns(tablePrefix+"normalization_runs", []string{
+			"id",
+			"status",
+			"started_at",
+			"completed_at",
+			"record_kind",
+			"source_record_count",
+			"canonical_record_count",
+			"error_summary",
+			"created_at",
+			"updated_at",
+		})
+		assertColumns(tablePrefix+"normalization_run_raw_payload_links", []string{
+			"normalization_run_id",
+			"raw_payload_id",
+			"created_at",
+		})
+		assertColumns(tablePrefix+"data_batches", []string{
+			"id",
+			"normalization_run_id",
+			"venue",
+			"instrument_symbol",
+			"instrument_asset_class",
+			"record_kind",
+			"start_at",
+			"end_at",
+			"quality",
+			"record_count",
+			"summary",
+			"created_at",
+			"updated_at",
+		})
+
+		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"ingestion_runs", []string{"id"}))
+		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"raw_venue_payloads", []string{"id"}))
+		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"normalization_runs", []string{"id"}))
+		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"data_batches", []string{"id"}))
+		require.True(
+			t,
+			hasUniqueIndexWithColumns(t, store, tablePrefix+"candles", []string{
+				"instrument_id",
+				"timeframe",
+				"start_at",
+				"end_at",
+				"provenance_source",
+				"provenance_identity_key",
+			}),
+		)
+		require.True(
+			t,
+			hasUniqueIndexWithColumns(t, store, tablePrefix+"trades", []string{
+				"instrument_id",
+				"provenance_source",
+				"provenance_identity_key",
+			}),
+		)
+		require.True(
+			t,
+			hasUniqueIndexWithColumns(
+				t,
+				store,
+				tablePrefix+"normalization_run_raw_payload_links",
+				[]string{"normalization_run_id", "raw_payload_id"},
+			),
+		)
+
+		assertColumns(tablePrefix+"candles", []string{
+			"id",
+			"instrument_id",
+			"timeframe",
+			"start_at",
+			"end_at",
+			"provenance_source",
+			"provenance_identity_key",
+			"open",
+			"high",
+			"low",
+			"close",
+			"volume",
+			"quality",
+			"provenance_record_id",
+			"data_batch_id",
+			"created_at",
+			"updated_at",
+		})
+		assertColumns(tablePrefix+"trades", []string{
+			"id",
+			"instrument_id",
+			"event_time",
+			"price",
+			"size",
+			"quality",
+			"provenance_source",
+			"provenance_identity_key",
+			"provenance_record_id",
+			"data_batch_id",
+			"created_at",
+			"updated_at",
+		})
+	})
+
+	t.Run("UpsertIngestionRun updates one row and normalizes UTC timestamps", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+
+		persisted, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+		require.Equal(t, time.UTC, persisted.StartedAt.Location())
+
+		updated, err := NewIngestionRun(IngestionRunParams{
+			ID:           run.ID,
+			Source:       run.Source,
+			Venue:        run.Venue,
+			Status:       IngestionRunStatusSucceeded,
+			StartedAt:    run.StartedAt,
+			CompletedAt:  run.StartedAt.Add(2 * time.Minute),
+			RecordCount:  run.RecordCount + 7,
+			ErrorSummary: randomWord("summary"),
+		})
+		require.NoError(t, err)
+
+		persistedUpdated, err := store.UpsertIngestionRun(t.Context(), updated)
+		require.NoError(t, err)
+		require.Equal(t, updated, persistedUpdated)
+		require.Equal(t, int64(1), readCount(t, store, "ingestion_runs"))
+	})
+
+	t.Run("UpsertRawVenuePayload rejects unknown parents and excludes secret metadata", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		unknownParentPayload := makeRawVenuePayload(t, randomWord("missing-run"))
+
+		_, err := store.UpsertRawVenuePayload(t.Context(), unknownParentPayload)
+		require.ErrorIs(t, err, ErrLineageParentNotFound)
+		require.Equal(t, int64(0), readCount(t, store, "raw_venue_payloads"))
+
+		run := makeIngestionRun(t)
+		_, err = store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		payload, err := NewRawVenuePayload(RawVenuePayloadParams{
+			ID:             randomWord("raw-payload"),
+			IngestionRunID: run.ID,
+			Source:         randomWord("source"),
+			Venue:          domain.Venue(randomWord("venue")),
+			ContentType:    "application/json",
+			Body:           []byte(`{"first":true}`),
+			Checksum:       randomWord("checksum"),
+			ReceivedAt:     randomTime(),
+			RequestKey:     randomWord("request-key"),
+			SourceRecordID: randomWord("source-record"),
+			Metadata: map[string]string{
+				"Authorization":         randomWord("auth"),
+				"cookie":                randomWord("cookie"),
+				"x-api-key":             randomWord("api-key"),
+				"response-signature":    randomWord("signature"),
+				"safe-request-id":       randomWord("request-id"),
+				"safe-response-version": randomWord("version"),
+			},
+		})
+		require.NoError(t, err)
+
+		persisted, err := store.UpsertRawVenuePayload(t.Context(), payload)
+		require.NoError(t, err)
+		require.Equal(t, time.UTC, persisted.ReceivedAt.Location())
+		require.Contains(t, persisted.Metadata, "safe-request-id")
+		require.NotContains(t, persisted.Metadata, "Authorization")
+		require.NotContains(t, persisted.Metadata, "cookie")
+		require.NotContains(t, persisted.Metadata, "x-api-key")
+		require.NotContains(t, persisted.Metadata, "response-signature")
+
+		updated, err := NewRawVenuePayload(RawVenuePayloadParams{
+			ID:             payload.ID,
+			IngestionRunID: payload.IngestionRunID,
+			Source:         payload.Source,
+			Venue:          payload.Venue,
+			ContentType:    payload.ContentType,
+			Body:           []byte(`{"first":false,"second":true}`),
+			Checksum:       randomWord("checksum"),
+			ReceivedAt:     payload.ReceivedAt.Add(time.Minute),
+			RequestKey:     payload.RequestKey,
+			SourceRecordID: payload.SourceRecordID,
+			Metadata: map[string]string{
+				"safe-request-id": payload.Metadata["safe-request-id"],
+			},
+		})
+		require.NoError(t, err)
+
+		persistedUpdated, err := store.UpsertRawVenuePayload(t.Context(), updated)
+		require.NoError(t, err)
+		require.Equal(t, updated, persistedUpdated)
+		require.Equal(t, int64(1), readCount(t, store, "raw_venue_payloads"))
+
+		var row struct {
+			MetadataJSON string `gorm:"column:metadata_json"`
+		}
+		require.NoError(
+			t,
+			store.db.WithContext(t.Context()).
+				Table("raw_venue_payloads").
+				Where("id = ?", payload.ID).
+				First(&row).Error,
+		)
+		require.Contains(t, row.MetadataJSON, "safe-request-id")
+		require.NotContains(t, row.MetadataJSON, "Authorization")
+		require.NotContains(t, row.MetadataJSON, "cookie")
+		require.NotContains(t, row.MetadataJSON, "api-key")
+		require.NotContains(t, row.MetadataJSON, "signature")
+	})
+
+	t.Run("UpsertNormalizationRun rejects unknown raw payloads and handles duplicate writes", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		missingParent := makeNormalizationRun(t, randomWord("missing-payload"))
+		_, err = store.UpsertNormalizationRun(t.Context(), missingParent)
+		require.ErrorIs(t, err, ErrLineageParentNotFound)
+		require.Equal(t, int64(0), readCount(t, store, "normalization_runs"))
+
+		payloadOne := makeRawVenuePayload(t, run.ID)
+		payloadTwo := makeRawVenuePayload(t, run.ID)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payloadOne)
+		require.NoError(t, err)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payloadTwo)
+		require.NoError(t, err)
+
+		normalizationRun := makeNormalizationRun(t, payloadOne.ID, payloadTwo.ID)
+		persisted, err := store.UpsertNormalizationRun(t.Context(), normalizationRun)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{payloadOne.ID, payloadTwo.ID}, persisted.RawPayloadIDs)
+		require.Equal(t, time.UTC, persisted.StartedAt.Location())
+
+		updated, err := NewNormalizationRun(NormalizationRunParams{
+			ID:                   normalizationRun.ID,
+			RawPayloadIDs:        []string{payloadTwo.ID, payloadOne.ID, payloadOne.ID},
+			Status:               NormalizationRunStatusFailed,
+			StartedAt:            normalizationRun.StartedAt,
+			CompletedAt:          normalizationRun.StartedAt.Add(3 * time.Minute),
+			RecordKind:           normalizationRun.RecordKind,
+			SourceRecordCount:    normalizationRun.SourceRecordCount + 1,
+			CanonicalRecordCount: normalizationRun.CanonicalRecordCount + 2,
+			ErrorSummary:         randomWord("error"),
+		})
+		require.NoError(t, err)
+
+		persistedUpdated, err := store.UpsertNormalizationRun(t.Context(), updated)
+		require.NoError(t, err)
+		require.Equal(t, updated.Status, persistedUpdated.Status)
+		require.ElementsMatch(t, []string{payloadOne.ID, payloadTwo.ID}, persistedUpdated.RawPayloadIDs)
+		require.Equal(t, int64(1), readCount(t, store, "normalization_runs"))
+		require.Equal(t, int64(2), readCount(t, store, "normalization_run_raw_payload_links"))
+	})
+
+	t.Run(
+		"UpsertDataBatch rejects unknown parents and returns batch audit in stable raw payload order",
+		func(t *testing.T) {
+			t.Parallel()
+
+			store := makeStore(t, "")
+			missingParent := makeDataBatch(t, randomWord("missing-normalization"))
+			_, err := store.UpsertDataBatch(t.Context(), missingParent)
+			require.ErrorIs(t, err, ErrLineageParentNotFound)
+			require.Equal(t, int64(0), readCount(t, store, "data_batches"))
+
+			runOne := makeIngestionRun(t)
+			runTwo := makeIngestionRun(t)
+			_, err = store.UpsertIngestionRun(t.Context(), runOne)
+			require.NoError(t, err)
+			_, err = store.UpsertIngestionRun(t.Context(), runTwo)
+			require.NoError(t, err)
+
+			receivedAt := randomTime()
+			laterReceivedAt := receivedAt.Add(2 * time.Minute)
+			if laterReceivedAt.Before(receivedAt) {
+				laterReceivedAt = receivedAt.Add(2 * time.Minute)
+			}
+
+			payloadLater, err := NewRawVenuePayload(RawVenuePayloadParams{
+				ID:             "z-" + randomWord("payload"),
+				IngestionRunID: runTwo.ID,
+				Source:         randomWord("source"),
+				Venue:          domain.Venue(randomWord("venue")),
+				ContentType:    "application/json",
+				Body:           []byte(`{"later":true}`),
+				Checksum:       randomWord("checksum"),
+				ReceivedAt:     laterReceivedAt,
+			})
+			require.NoError(t, err)
+
+			payloadSameTimeSecondID, err := NewRawVenuePayload(RawVenuePayloadParams{
+				ID:             "b-" + randomWord("payload"),
+				IngestionRunID: runOne.ID,
+				Source:         randomWord("source"),
+				Venue:          domain.Venue(randomWord("venue")),
+				ContentType:    "application/json",
+				Body:           []byte(`{"same_time_second_id":true}`),
+				Checksum:       randomWord("checksum"),
+				ReceivedAt:     receivedAt,
+			})
+			require.NoError(t, err)
+
+			payloadSameTimeFirstID, err := NewRawVenuePayload(RawVenuePayloadParams{
+				ID:             "a-" + randomWord("payload"),
+				IngestionRunID: runOne.ID,
+				Source:         randomWord("source"),
+				Venue:          domain.Venue(randomWord("venue")),
+				ContentType:    "application/json",
+				Body:           []byte(`{"same_time_first_id":true}`),
+				Checksum:       randomWord("checksum"),
+				ReceivedAt:     receivedAt,
+			})
+			require.NoError(t, err)
+
+			for _, payload := range []RawVenuePayload{payloadLater, payloadSameTimeSecondID, payloadSameTimeFirstID} {
+				_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+				require.NoError(t, err)
+			}
+
+			normalizationRun := makeNormalizationRun(
+				t,
+				payloadLater.ID,
+				payloadSameTimeSecondID.ID,
+				payloadSameTimeFirstID.ID,
+			)
+			_, err = store.UpsertNormalizationRun(t.Context(), normalizationRun)
+			require.NoError(t, err)
+
+			batch := makeDataBatch(t, normalizationRun.ID)
+			persistedBatch, err := store.UpsertDataBatch(t.Context(), batch)
+			require.NoError(t, err)
+
+			updatedBatch, err := NewDataBatch(DataBatchParams{
+				ID:                 batch.ID,
+				NormalizationRunID: batch.NormalizationRunID,
+				Venue:              batch.Venue,
+				Instrument:         batch.Instrument,
+				RecordKind:         batch.RecordKind,
+				TimeRange:          batch.TimeRange,
+				Quality:            domain.DataQualitySuspect,
+				RecordCount:        batch.RecordCount + 5,
+				Summary:            randomWord("summary"),
+			})
+			require.NoError(t, err)
+
+			persistedUpdatedBatch, err := store.UpsertDataBatch(t.Context(), updatedBatch)
+			require.NoError(t, err)
+			require.Equal(t, updatedBatch, persistedUpdatedBatch)
+			require.NotEqual(t, persistedBatch.Quality, persistedUpdatedBatch.Quality)
+			require.Equal(t, int64(1), readCount(t, store, "data_batches"))
+
+			audit, err := store.GetDataBatchAudit(t.Context(), batch.ID)
+			require.NoError(t, err)
+			require.Equal(t, updatedBatch, audit.Batch)
+			require.Equal(t, normalizationRun.ID, audit.NormalizationRun.ID)
+			require.Equal(
+				t,
+				[]string{payloadSameTimeFirstID.ID, payloadSameTimeSecondID.ID, payloadLater.ID},
+				[]string{
+					audit.RawPayloads[0].Payload.ID,
+					audit.RawPayloads[1].Payload.ID,
+					audit.RawPayloads[2].Payload.ID,
+				},
+			)
+			require.Equal(t, runOne.ID, audit.RawPayloads[0].IngestionRun.ID)
+			require.Equal(t, runOne.ID, audit.RawPayloads[1].IngestionRun.ID)
+			require.Equal(t, runTwo.ID, audit.RawPayloads[2].IngestionRun.ID)
+			require.Equal(t, time.UTC, audit.RawPayloads[0].Payload.ReceivedAt.Location())
+			require.Equal(t, time.UTC, audit.RawPayloads[2].IngestionRun.StartedAt.Location())
+		},
+	)
+
+	t.Run("batch-linked candle and trade writes keep optional batch linkage", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		payload := makeRawVenuePayload(t, run.ID)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+		require.NoError(t, err)
+
+		normalizationStartedAt := randomTime()
+		normalizationRun, err := NewNormalizationRun(NormalizationRunParams{
+			ID:                   randomWord("normalization-run"),
+			RawPayloadIDs:        []string{payload.ID},
+			Status:               NormalizationRunStatusSucceeded,
+			StartedAt:            normalizationStartedAt,
+			CompletedAt:          normalizationStartedAt.Add(time.Minute),
+			RecordKind:           LineageRecordKindCandle,
+			SourceRecordCount:    fake.IntBetween(1, 1000),
+			CanonicalRecordCount: fake.IntBetween(1, 1000),
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertNormalizationRun(t.Context(), normalizationRun)
+		require.NoError(t, err)
+
+		batch := makeDataBatch(t, normalizationRun.ID)
+		batch.RecordKind = LineageRecordKindCandle
+		instrument := makeInstrument(t, batch.Venue)
+		batch.Instrument = &BatchInstrumentRef{Symbol: instrument.Symbol, AssetClass: instrument.AssetClass}
+		batch, err = NewDataBatch(DataBatchParams(batch))
+		require.NoError(t, err)
+		_, err = store.UpsertDataBatch(t.Context(), batch)
+		require.NoError(t, err)
+
+		_, err = store.UpsertInstrument(t.Context(), instrument)
+		require.NoError(t, err)
+
+		candle := makeCandle(t, instrument, batch.TimeRange)
+		persistedCandle, err := store.UpsertCandleForDataBatch(t.Context(), batch.ID, candle)
+		require.NoError(t, err)
+		require.Equal(t, candle, persistedCandle)
+
+		var candleRow struct {
+			DataBatchID string `gorm:"column:data_batch_id"`
+		}
+		require.NoError(
+			t,
+			store.db.WithContext(t.Context()).
+				Table("candles").
+				Where("provenance_identity_key = ?", candle.Provenance.RecordID).
+				First(&candleRow).Error,
+		)
+		require.Equal(t, batch.ID, candleRow.DataBatchID)
+
+		persistedWithoutBatch, err := store.UpsertCandle(t.Context(), candle)
+		require.NoError(t, err)
+		require.Equal(t, candle, persistedWithoutBatch)
+		require.NoError(
+			t,
+			store.db.WithContext(t.Context()).
+				Table("candles").
+				Where("provenance_identity_key = ?", candle.Provenance.RecordID).
+				First(&candleRow).Error,
+		)
+		require.Equal(t, batch.ID, candleRow.DataBatchID)
+
+		tradeNormalizationStartedAt := randomTime()
+		tradeNormalizationRun, err := NewNormalizationRun(NormalizationRunParams{
+			ID:                   randomWord("normalization-run"),
+			RawPayloadIDs:        []string{payload.ID},
+			Status:               NormalizationRunStatusSucceeded,
+			StartedAt:            tradeNormalizationStartedAt,
+			CompletedAt:          tradeNormalizationStartedAt.Add(time.Minute),
+			RecordKind:           LineageRecordKindTrade,
+			SourceRecordCount:    fake.IntBetween(1, 1000),
+			CanonicalRecordCount: fake.IntBetween(1, 1000),
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertNormalizationRun(t.Context(), tradeNormalizationRun)
+		require.NoError(t, err)
+
+		tradeBatch := makeDataBatch(t, tradeNormalizationRun.ID)
+		tradeBatch.RecordKind = LineageRecordKindTrade
+		tradeBatch.Instrument = &BatchInstrumentRef{Symbol: instrument.Symbol, AssetClass: instrument.AssetClass}
+		tradeBatch, err = NewDataBatch(DataBatchParams(tradeBatch))
+		require.NoError(t, err)
+		_, err = store.UpsertDataBatch(t.Context(), tradeBatch)
+		require.NoError(t, err)
+
+		trade := makeTrade(t, instrument, batch.TimeRange.Start.Add(time.Second))
+		persistedTrade, err := store.UpsertTradeForDataBatch(t.Context(), tradeBatch.ID, trade)
+		require.NoError(t, err)
+		require.Equal(t, trade, persistedTrade)
+
+		var tradeRow struct {
+			DataBatchID string `gorm:"column:data_batch_id"`
+		}
+		require.NoError(
+			t,
+			store.db.WithContext(t.Context()).
+				Table("trades").
+				Where("provenance_identity_key = ?", trade.Provenance.RecordID).
+				First(&tradeRow).Error,
+		)
+		require.Equal(t, tradeBatch.ID, tradeRow.DataBatchID)
+
+		persistedTradeWithoutBatch, err := store.UpsertTrade(t.Context(), trade)
+		require.NoError(t, err)
+		require.Equal(t, trade, persistedTradeWithoutBatch)
+		require.NoError(
+			t,
+			store.db.WithContext(t.Context()).
+				Table("trades").
+				Where("provenance_identity_key = ?", trade.Provenance.RecordID).
+				First(&tradeRow).Error,
+		)
+		require.Equal(t, tradeBatch.ID, tradeRow.DataBatchID)
+	})
+
+	t.Run("rejects mismatched batch kinds before linking rows", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		payload := makeRawVenuePayload(t, run.ID)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+		require.NoError(t, err)
+
+		instrument := makeInstrument(t, run.Venue)
+		_, err = store.UpsertInstrument(t.Context(), instrument)
+		require.NoError(t, err)
+
+		candleNormalizationStartedAt := randomTime()
+		candleNormalizationRun, err := NewNormalizationRun(NormalizationRunParams{
+			ID:                   randomWord("normalization-run"),
+			RawPayloadIDs:        []string{payload.ID},
+			Status:               NormalizationRunStatusSucceeded,
+			StartedAt:            candleNormalizationStartedAt,
+			CompletedAt:          candleNormalizationStartedAt.Add(time.Minute),
+			RecordKind:           LineageRecordKindCandle,
+			SourceRecordCount:    1,
+			CanonicalRecordCount: 1,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertNormalizationRun(t.Context(), candleNormalizationRun)
+		require.NoError(t, err)
+
+		tradeNormalizationStartedAt := randomTime()
+		tradeNormalizationRun, err := NewNormalizationRun(NormalizationRunParams{
+			ID:                   randomWord("normalization-run"),
+			RawPayloadIDs:        []string{payload.ID},
+			Status:               NormalizationRunStatusSucceeded,
+			StartedAt:            tradeNormalizationStartedAt,
+			CompletedAt:          tradeNormalizationStartedAt.Add(time.Minute),
+			RecordKind:           LineageRecordKindTrade,
+			SourceRecordCount:    1,
+			CanonicalRecordCount: 1,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertNormalizationRun(t.Context(), tradeNormalizationRun)
+		require.NoError(t, err)
+
+		candleBatchStart := randomTime().UTC()
+		candleBatchTimeRange, err := domain.NewTimeRange(candleBatchStart, candleBatchStart.Add(time.Minute))
+		require.NoError(t, err)
+
+		candleBatch, err := NewDataBatch(DataBatchParams{
+			ID:                 randomWord("data-batch"),
+			NormalizationRunID: candleNormalizationRun.ID,
+			Venue:              instrument.Venue,
+			Instrument:         &BatchInstrumentRef{Symbol: instrument.Symbol, AssetClass: instrument.AssetClass},
+			RecordKind:         LineageRecordKindCandle,
+			TimeRange:          candleBatchTimeRange,
+			Quality:            domain.DataQualityValidated,
+			RecordCount:        1,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertDataBatch(t.Context(), candleBatch)
+		require.NoError(t, err)
+
+		tradeBatchStart := randomTime().UTC()
+		tradeBatchTimeRange, err := domain.NewTimeRange(tradeBatchStart, tradeBatchStart.Add(time.Minute))
+		require.NoError(t, err)
+
+		tradeBatch, err := NewDataBatch(DataBatchParams{
+			ID:                 randomWord("data-batch"),
+			NormalizationRunID: tradeNormalizationRun.ID,
+			Venue:              instrument.Venue,
+			Instrument:         &BatchInstrumentRef{Symbol: instrument.Symbol, AssetClass: instrument.AssetClass},
+			RecordKind:         LineageRecordKindTrade,
+			TimeRange:          tradeBatchTimeRange,
+			Quality:            domain.DataQualityValidated,
+			RecordCount:        1,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertDataBatch(t.Context(), tradeBatch)
+		require.NoError(t, err)
+
+		wrongCandle := makeCandle(t, instrument, candleBatch.TimeRange)
+		_, err = store.UpsertCandleForDataBatch(t.Context(), tradeBatch.ID, wrongCandle)
+		require.ErrorIs(t, err, ErrValidation)
+		require.ErrorContains(t, err, "data batch record kind")
+		var candleCount int64
+		candleCountQuery := store.db.WithContext(t.Context()).
+			Table("candles").
+			Where("provenance_identity_key = ?", wrongCandle.Provenance.RecordID)
+		require.NoError(t, candleCountQuery.Count(&candleCount).Error)
+		require.Zero(t, candleCount)
+
+		wrongTrade := makeTrade(t, instrument, tradeBatch.TimeRange.Start.Add(time.Second))
+		_, err = store.UpsertTradeForDataBatch(t.Context(), candleBatch.ID, wrongTrade)
+		require.ErrorIs(t, err, ErrValidation)
+		require.ErrorContains(t, err, "data batch record kind")
+		var tradeCount int64
+		tradeCountQuery := store.db.WithContext(t.Context()).
+			Table("trades").
+			Where("provenance_identity_key = ?", wrongTrade.Provenance.RecordID)
+		require.NoError(t, tradeCountQuery.Count(&tradeCount).Error)
+		require.Zero(t, tradeCount)
+	})
+
+	t.Run("replay by data batch returns stable canonical identities", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		payload := makeRawVenuePayload(t, run.ID)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+		require.NoError(t, err)
+
+		instrument := makeInstrument(t, run.Venue)
+		_, err = store.UpsertInstrument(t.Context(), instrument)
+		require.NoError(t, err)
+
+		candleNormalizationStartedAt := randomTime()
+		candleNormalizationRun, err := NewNormalizationRun(NormalizationRunParams{
+			ID:                   randomWord("normalization-run"),
+			RawPayloadIDs:        []string{payload.ID},
+			Status:               NormalizationRunStatusSucceeded,
+			StartedAt:            candleNormalizationStartedAt,
+			CompletedAt:          candleNormalizationStartedAt.Add(time.Minute),
+			RecordKind:           LineageRecordKindCandle,
+			SourceRecordCount:    2,
+			CanonicalRecordCount: 2,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertNormalizationRun(t.Context(), candleNormalizationRun)
+		require.NoError(t, err)
+
+		start := randomTime().UTC()
+		candleRange, err := domain.NewTimeRange(start, start.Add(3*time.Minute))
+		require.NoError(t, err)
+
+		candleBatch, err := NewDataBatch(DataBatchParams{
+			ID:                 randomWord("data-batch"),
+			NormalizationRunID: candleNormalizationRun.ID,
+			Venue:              instrument.Venue,
+			Instrument:         &BatchInstrumentRef{Symbol: instrument.Symbol, AssetClass: instrument.AssetClass},
+			RecordKind:         LineageRecordKindCandle,
+			TimeRange:          candleRange,
+			Quality:            domain.DataQualityValidated,
+			RecordCount:        2,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertDataBatch(t.Context(), candleBatch)
+		require.NoError(t, err)
+
+		firstCandleRange, err := domain.NewTimeRange(start, start.Add(time.Minute))
+		require.NoError(t, err)
+		secondCandleRange, err := domain.NewTimeRange(start.Add(time.Minute), start.Add(2*time.Minute))
+		require.NoError(t, err)
+		firstCandle := makeCandle(t, instrument, firstCandleRange)
+		secondCandle := makeCandle(t, instrument, secondCandleRange)
+		_, err = store.UpsertCandleForDataBatch(t.Context(), candleBatch.ID, secondCandle)
+		require.NoError(t, err)
+		_, err = store.UpsertCandleForDataBatch(t.Context(), candleBatch.ID, firstCandle)
+		require.NoError(t, err)
+
+		firstReplay, err := store.ReplayCandlesByDataBatch(t.Context(), candleBatch.ID)
+		require.NoError(t, err)
+		secondReplay, err := store.ReplayCandlesByDataBatch(t.Context(), candleBatch.ID)
+		require.NoError(t, err)
+		require.Equal(t, firstReplay, secondReplay)
+		require.Equal(
+			t,
+			[]domain.Candle{firstCandle, secondCandle},
+			[]domain.Candle{firstReplay[0].Candle, firstReplay[1].Candle},
+		)
+		require.NotZero(t, firstReplay[0].Identity)
+		require.NotZero(t, firstReplay[1].Identity)
+
+		tradeNormalizationStartedAt := randomTime()
+		tradeNormalizationRun, err := NewNormalizationRun(NormalizationRunParams{
+			ID:                   randomWord("normalization-run"),
+			RawPayloadIDs:        []string{payload.ID},
+			Status:               NormalizationRunStatusSucceeded,
+			StartedAt:            tradeNormalizationStartedAt,
+			CompletedAt:          tradeNormalizationStartedAt.Add(time.Minute),
+			RecordKind:           LineageRecordKindTrade,
+			SourceRecordCount:    2,
+			CanonicalRecordCount: 2,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertNormalizationRun(t.Context(), tradeNormalizationRun)
+		require.NoError(t, err)
+
+		tradeRange, err := domain.NewTimeRange(start, start.Add(3*time.Second))
+		require.NoError(t, err)
+		tradeBatch, err := NewDataBatch(DataBatchParams{
+			ID:                 randomWord("data-batch"),
+			NormalizationRunID: tradeNormalizationRun.ID,
+			Venue:              instrument.Venue,
+			Instrument:         &BatchInstrumentRef{Symbol: instrument.Symbol, AssetClass: instrument.AssetClass},
+			RecordKind:         LineageRecordKindTrade,
+			TimeRange:          tradeRange,
+			Quality:            domain.DataQualityValidated,
+			RecordCount:        2,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertDataBatch(t.Context(), tradeBatch)
+		require.NoError(t, err)
+
+		firstTrade := makeTrade(t, instrument, start.Add(time.Second))
+		secondTrade := makeTrade(t, instrument, start.Add(2*time.Second))
+		_, err = store.UpsertTradeForDataBatch(t.Context(), tradeBatch.ID, secondTrade)
+		require.NoError(t, err)
+		_, err = store.UpsertTradeForDataBatch(t.Context(), tradeBatch.ID, firstTrade)
+		require.NoError(t, err)
+
+		firstTradeReplay, err := store.ReplayTradesByDataBatch(t.Context(), tradeBatch.ID)
+		require.NoError(t, err)
+		secondTradeReplay, err := store.ReplayTradesByDataBatch(t.Context(), tradeBatch.ID)
+		require.NoError(t, err)
+		require.Equal(t, firstTradeReplay, secondTradeReplay)
+		require.Equal(
+			t,
+			[]domain.Trade{firstTrade, secondTrade},
+			[]domain.Trade{firstTradeReplay[0].Trade, firstTradeReplay[1].Trade},
+		)
+		require.NotZero(t, firstTradeReplay[0].Identity)
+		require.NotZero(t, firstTradeReplay[1].Identity)
+	})
+}

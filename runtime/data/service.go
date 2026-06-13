@@ -20,10 +20,20 @@ type instrumentUpsertStore interface {
 
 type candleUpsertStore interface {
 	UpsertCandle(ctx context.Context, candle domain.Candle) (domain.Candle, error)
+	UpsertCandleForDataBatch(
+		ctx context.Context,
+		batchID string,
+		candle domain.Candle,
+	) (domain.Candle, error)
 }
 
 type tradeUpsertStore interface {
 	UpsertTrade(ctx context.Context, trade domain.Trade) (domain.Trade, error)
+	UpsertTradeForDataBatch(
+		ctx context.Context,
+		batchID string,
+		trade domain.Trade,
+	) (domain.Trade, error)
 }
 
 type instrumentLookupStore interface {
@@ -176,6 +186,38 @@ func (s *IngestionService) IngestCandle(ctx context.Context, candle domain.Candl
 	return persistedCandle, nil
 }
 
+// IngestCandleForDataBatch validates a canonical candle, upserts its instrument,
+// and persists the candle linked to a lineage data batch.
+func (s *IngestionService) IngestCandleForDataBatch(
+	ctx context.Context,
+	batchID string,
+	candle domain.Candle,
+) (domain.Candle, error) {
+	canonicalBatchID, err := canonicalizeBatchID(batchID)
+	if err != nil {
+		return domain.Candle{}, err
+	}
+
+	canonicalCandle, err := canonicalizeCandle(candle)
+	if err != nil {
+		return domain.Candle{}, err
+	}
+
+	persistedInstrument, err := s.instrumentStore.UpsertInstrument(ctx, canonicalCandle.Instrument)
+	if err != nil {
+		return domain.Candle{}, fmt.Errorf("upsert candle instrument: %w", err)
+	}
+
+	canonicalCandle.Instrument = persistedInstrument
+
+	persistedCandle, err := s.candleStore.UpsertCandleForDataBatch(ctx, canonicalBatchID, canonicalCandle)
+	if err != nil {
+		return domain.Candle{}, fmt.Errorf("upsert candle for data batch: %w", err)
+	}
+
+	return persistedCandle, nil
+}
+
 // IngestTrade validates a canonical trade, upserts its instrument, and persists the trade.
 func (s *IngestionService) IngestTrade(ctx context.Context, trade domain.Trade) (domain.Trade, error) {
 	canonicalTrade, err := canonicalizeTrade(trade)
@@ -193,6 +235,38 @@ func (s *IngestionService) IngestTrade(ctx context.Context, trade domain.Trade) 
 	persistedTrade, err := s.tradeStore.UpsertTrade(ctx, canonicalTrade)
 	if err != nil {
 		return domain.Trade{}, fmt.Errorf("upsert trade: %w", err)
+	}
+
+	return persistedTrade, nil
+}
+
+// IngestTradeForDataBatch validates a canonical trade, upserts its instrument,
+// and persists the trade linked to a lineage data batch.
+func (s *IngestionService) IngestTradeForDataBatch(
+	ctx context.Context,
+	batchID string,
+	trade domain.Trade,
+) (domain.Trade, error) {
+	canonicalBatchID, err := canonicalizeBatchID(batchID)
+	if err != nil {
+		return domain.Trade{}, err
+	}
+
+	canonicalTrade, err := canonicalizeTrade(trade)
+	if err != nil {
+		return domain.Trade{}, err
+	}
+
+	persistedInstrument, err := s.instrumentStore.UpsertInstrument(ctx, canonicalTrade.Instrument)
+	if err != nil {
+		return domain.Trade{}, fmt.Errorf("upsert trade instrument: %w", err)
+	}
+
+	canonicalTrade.Instrument = persistedInstrument
+
+	persistedTrade, err := s.tradeStore.UpsertTradeForDataBatch(ctx, canonicalBatchID, canonicalTrade)
+	if err != nil {
+		return domain.Trade{}, fmt.Errorf("upsert trade for data batch: %w", err)
 	}
 
 	return persistedTrade, nil

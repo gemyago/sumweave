@@ -54,14 +54,15 @@ func (s *fakeInstrumentStore) LookupInstrument(
 }
 
 type fakeCandleStore struct {
-	upserted    []domain.Candle
-	queried     []candleQueryCall
-	replayed    []candleQueryCall
-	queryValue  []domain.Candle
-	replayValue []ReplayCandle
-	upsertErr   error
-	queryErr    error
-	replayErr   error
+	upserted     []domain.Candle
+	batchUpserts []batchCandleUpsertCall
+	queried      []candleQueryCall
+	replayed     []candleQueryCall
+	queryValue   []domain.Candle
+	replayValue  []ReplayCandle
+	upsertErr    error
+	queryErr     error
+	replayErr    error
 }
 
 func (s *fakeCandleStore) UpsertCandle(
@@ -69,6 +70,19 @@ func (s *fakeCandleStore) UpsertCandle(
 	candle domain.Candle,
 ) (domain.Candle, error) {
 	s.upserted = append(s.upserted, candle)
+	if s.upsertErr != nil {
+		return domain.Candle{}, s.upsertErr
+	}
+
+	return candle, nil
+}
+
+func (s *fakeCandleStore) UpsertCandleForDataBatch(
+	_ context.Context,
+	batchID string,
+	candle domain.Candle,
+) (domain.Candle, error) {
+	s.batchUpserts = append(s.batchUpserts, batchCandleUpsertCall{batchID: batchID, candle: candle})
 	if s.upsertErr != nil {
 		return domain.Candle{}, s.upsertErr
 	}
@@ -113,14 +127,15 @@ func (s *fakeCandleStore) ReplayCandles(
 }
 
 type fakeTradeStore struct {
-	upserted    []domain.Trade
-	queried     []tradeQueryCall
-	replayed    []tradeQueryCall
-	queryValue  []domain.Trade
-	replayValue []ReplayTrade
-	upsertErr   error
-	queryErr    error
-	replayErr   error
+	upserted     []domain.Trade
+	batchUpserts []batchTradeUpsertCall
+	queried      []tradeQueryCall
+	replayed     []tradeQueryCall
+	queryValue   []domain.Trade
+	replayValue  []ReplayTrade
+	upsertErr    error
+	queryErr     error
+	replayErr    error
 }
 
 func (s *fakeTradeStore) UpsertTrade(
@@ -128,6 +143,19 @@ func (s *fakeTradeStore) UpsertTrade(
 	trade domain.Trade,
 ) (domain.Trade, error) {
 	s.upserted = append(s.upserted, trade)
+	if s.upsertErr != nil {
+		return domain.Trade{}, s.upsertErr
+	}
+
+	return trade, nil
+}
+
+func (s *fakeTradeStore) UpsertTradeForDataBatch(
+	_ context.Context,
+	batchID string,
+	trade domain.Trade,
+) (domain.Trade, error) {
+	s.batchUpserts = append(s.batchUpserts, batchTradeUpsertCall{batchID: batchID, trade: trade})
 	if s.upsertErr != nil {
 		return domain.Trade{}, s.upsertErr
 	}
@@ -173,9 +201,19 @@ type candleQueryCall struct {
 	timeRange  domain.TimeRange
 }
 
+type batchCandleUpsertCall struct {
+	batchID string
+	candle  domain.Candle
+}
+
 type tradeQueryCall struct {
 	instrument domain.Instrument
 	timeRange  domain.TimeRange
+}
+
+type batchTradeUpsertCall struct {
+	batchID string
+	trade   domain.Trade
 }
 
 type mockDeps struct {
@@ -339,6 +377,28 @@ func TestServices(t *testing.T) {
 			require.Equal(t, strings.TrimSpace(candle.Provenance.RecordID), candle.Provenance.RecordID)
 		})
 
+		t.Run("persists a valid candle linked to a data batch", func(t *testing.T) {
+			t.Parallel()
+
+			deps := makeMockDeps()
+			svc, err := NewIngestionService(IngestionServiceDeps{
+				InstrumentStore: deps.instrumentStore,
+				CandleStore:     deps.candleStore,
+				TradeStore:      deps.tradeStore,
+			})
+			require.NoError(t, err)
+
+			batchID := "  " + randomWord("batch") + "  "
+			candle, err := svc.IngestCandleForDataBatch(t.Context(), batchID, makeCandle())
+			require.NoError(t, err)
+
+			require.Len(t, deps.instrumentStore.upserted, 1)
+			require.Empty(t, deps.candleStore.upserted)
+			require.Len(t, deps.candleStore.batchUpserts, 1)
+			require.Equal(t, strings.TrimSpace(batchID), deps.candleStore.batchUpserts[0].batchID)
+			require.Equal(t, deps.candleStore.batchUpserts[0].candle, candle)
+		})
+
 		t.Run("persists a valid trade with UTC normalization", func(t *testing.T) {
 			t.Parallel()
 
@@ -359,6 +419,28 @@ func TestServices(t *testing.T) {
 			require.Equal(t, deps.tradeStore.upserted[0], trade)
 			require.Equal(t, time.UTC, trade.EventTime.Location())
 			require.Equal(t, deps.instrumentStore.upserted[0], trade.Instrument)
+		})
+
+		t.Run("persists a valid trade linked to a data batch", func(t *testing.T) {
+			t.Parallel()
+
+			deps := makeMockDeps()
+			svc, err := NewIngestionService(IngestionServiceDeps{
+				InstrumentStore: deps.instrumentStore,
+				CandleStore:     deps.candleStore,
+				TradeStore:      deps.tradeStore,
+			})
+			require.NoError(t, err)
+
+			batchID := "  " + randomWord("batch") + "  "
+			trade, err := svc.IngestTradeForDataBatch(t.Context(), batchID, makeTrade())
+			require.NoError(t, err)
+
+			require.Len(t, deps.instrumentStore.upserted, 1)
+			require.Empty(t, deps.tradeStore.upserted)
+			require.Len(t, deps.tradeStore.batchUpserts, 1)
+			require.Equal(t, strings.TrimSpace(batchID), deps.tradeStore.batchUpserts[0].batchID)
+			require.Equal(t, deps.tradeStore.batchUpserts[0].trade, trade)
 		})
 
 		t.Run("rejects invalid inputs without persistence", func(t *testing.T) {

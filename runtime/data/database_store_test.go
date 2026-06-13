@@ -240,6 +240,7 @@ func TestDatabaseStore(t *testing.T) {
 			"volume",
 			"quality",
 			"provenance_record_id",
+			"data_batch_id",
 			"created_at",
 			"updated_at",
 		}, columnNames(candleColumns))
@@ -261,6 +262,7 @@ func TestDatabaseStore(t *testing.T) {
 			"provenance_source",
 			"provenance_identity_key",
 			"provenance_record_id",
+			"data_batch_id",
 			"created_at",
 			"updated_at",
 		}, columnNames(tradeColumns))
