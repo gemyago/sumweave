@@ -92,6 +92,9 @@ func (s *LineageService) RecordRawVenuePayload(
 		if storeErr != nil {
 			return RawVenuePayload{}, fmt.Errorf("store raw venue payload body: %w", storeErr)
 		}
+		if canonicalPayload.ResponseBodyHash != "" && canonicalPayload.ResponseBodyHash != storedBody.Hash {
+			return RawVenuePayload{}, validationError("raw payload response body hash does not match stored body")
+		}
 		canonicalPayload.PayloadBodyRef = storedBody.Ref
 		if canonicalPayload.ResponseBodyHash == "" {
 			canonicalPayload.ResponseBodyHash = storedBody.Hash

@@ -22,6 +22,7 @@ permission:
   bash:
     "*": deny
     openspec*: allow
+    git checkout*: allow
     git status*: allow
     git diff*: allow
     git log*: allow
@@ -32,6 +33,7 @@ permission:
     git ls-files*: allow
     git add*: allow
     git commit*: allow
+    git pull*: allow
     git push*: allow
     gh pr *: allow
     gh api *: allow

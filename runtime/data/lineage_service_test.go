@@ -379,6 +379,21 @@ func TestLineageService(t *testing.T) {
 		require.ErrorIs(t, err, ErrLineageParentNotFound)
 	})
 
+	t.Run("RecordRawVenuePayload rejects mismatched supplied body hash before persistence", func(t *testing.T) {
+		t.Parallel()
+		store := makeStore()
+		blobStore := makeBlobStore()
+		svc := makeService(t, store, blobStore)
+		payload := makeRawPayload()
+		payload.ResponseBodyHash = randomWord("different-hash")
+
+		_, err := svc.RecordRawVenuePayload(t.Context(), payload)
+
+		require.ErrorIs(t, err, ErrValidation)
+		require.ErrorContains(t, err, "raw payload response body hash does not match stored body")
+		require.Empty(t, store.upsertedRawPayloads)
+	})
+
 	t.Run("RecordNormalizationRun and RecordDataBatch delegate canonical values", func(t *testing.T) {
 		t.Parallel()
 		store := makeStore()
