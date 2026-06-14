@@ -19,6 +19,8 @@ const (
 	columnVenue              = "venue"
 	columnSymbol             = "symbol"
 	columnAssetClass         = "asset_class"
+	columnInstrumentSymbol   = "instrument_symbol"
+	columnInstrumentAssetCls = "instrument_asset_class"
 	columnUpdatedAt          = "updated_at"
 	columnInstrumentID       = "instrument_id"
 	columnTimeframe          = "timeframe"
@@ -41,6 +43,7 @@ const (
 	columnLow                = "low"
 	columnClose              = "close"
 	columnVolume             = "volume"
+	columnRawPayloadID       = "raw_payload_id"
 )
 
 type instrumentModel struct {
@@ -112,19 +115,28 @@ func (ingestionRunModel) TableName(namer schema.Namer) string {
 }
 
 type rawVenuePayloadModel struct {
-	ID             string    `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_raw_venue_payloads_id"`
-	IngestionRunID string    `gorm:"column:ingestion_run_id;size:255;not null;index"`
-	Source         string    `gorm:"column:source;size:255;not null"`
-	Venue          string    `gorm:"column:venue;size:255;not null"`
-	ContentType    string    `gorm:"column:content_type;size:255;not null"`
-	Body           []byte    `gorm:"column:body;not null"`
-	Checksum       string    `gorm:"column:checksum;size:255;not null"`
-	ReceivedAt     time.Time `gorm:"column:received_at;not null;index:idx_raw_venue_payloads_received_at_id,priority:1"`
-	RequestKey     string    `gorm:"column:request_key;size:255"`
-	SourceRecordID string    `gorm:"column:source_record_id;size:255"`
-	MetadataJSON   string    `gorm:"column:metadata_json;type:text"`
-	CreatedAt      time.Time `gorm:"column:created_at;not null;autoCreateTime"`
-	UpdatedAt      time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
+	ID                  string    `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_raw_venue_payloads_id"`
+	IngestionRunID      string    `gorm:"column:ingestion_run_id;size:255;index"`
+	Source              string    `gorm:"column:source;size:255;not null"`
+	Venue               string    `gorm:"column:venue;size:255;not null"`
+	Endpoint            string    `gorm:"column:endpoint;size:255;not null"`
+	RequestType         string    `gorm:"column:request_type;size:255;not null"`
+	RequestPayloadHash  string    `gorm:"column:request_payload_hash;size:255;not null;index"`
+	RequestMetadataJSON string    `gorm:"column:request_metadata_json;type:text"`
+	RequestAt           time.Time `gorm:"column:request_at;not null"`
+	ResponseAt          time.Time `gorm:"column:response_at;not null"`
+	HTTPStatus          int       `gorm:"column:http_status;not null"`
+	ResponseBodyHash    string    `gorm:"column:response_body_hash;size:255;not null"`
+	PayloadBodyRef      string    `gorm:"column:payload_body_ref;size:1024;not null"`
+	EntityHint          string    `gorm:"column:entity_hint;size:255"`
+	InstrumentSymbol    string    `gorm:"column:instrument_symbol;size:255"`
+	InstrumentAssetCls  string    `gorm:"column:instrument_asset_class;size:64"`
+	Timeframe           string    `gorm:"column:timeframe;size:32"`
+	StartAt             time.Time `gorm:"column:start_at"`
+	EndAt               time.Time `gorm:"column:end_at"`
+	ReceivedAt          time.Time `gorm:"column:received_at;not null;index:idx_raw_venue_payloads_received_at_id,priority:1"`
+	CreatedAt           time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+	UpdatedAt           time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
 }
 
 func (rawVenuePayloadModel) TableName(namer schema.Namer) string {
@@ -176,6 +188,36 @@ type dataBatchModel struct {
 
 func (dataBatchModel) TableName(namer schema.Namer) string { return namer.TableName("data_batches") }
 
+type rawPayloadInstrumentLinkModel struct {
+	RawPayloadID string    `gorm:"column:raw_payload_id;size:255;not null;primaryKey;uniqueIndex:idx_raw_payload_instrument_links,priority:1;index"`
+	InstrumentID uint      `gorm:"column:instrument_id;not null;primaryKey;uniqueIndex:idx_raw_payload_instrument_links,priority:2;index"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+}
+
+func (rawPayloadInstrumentLinkModel) TableName(namer schema.Namer) string {
+	return namer.TableName("raw_payload_instrument_links")
+}
+
+type rawPayloadCandleLinkModel struct {
+	RawPayloadID string    `gorm:"column:raw_payload_id;size:255;not null;primaryKey;uniqueIndex:idx_raw_payload_candle_links,priority:1;index"`
+	CandleID     uint      `gorm:"column:candle_id;not null;primaryKey;uniqueIndex:idx_raw_payload_candle_links,priority:2;index"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+}
+
+func (rawPayloadCandleLinkModel) TableName(namer schema.Namer) string {
+	return namer.TableName("raw_payload_candle_links")
+}
+
+type rawPayloadTradeLinkModel struct {
+	RawPayloadID string    `gorm:"column:raw_payload_id;size:255;not null;primaryKey;uniqueIndex:idx_raw_payload_trade_links,priority:1;index"`
+	TradeID      uint      `gorm:"column:trade_id;not null;primaryKey;uniqueIndex:idx_raw_payload_trade_links,priority:2;index"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+}
+
+func (rawPayloadTradeLinkModel) TableName(namer schema.Namer) string {
+	return namer.TableName("raw_payload_trade_links")
+}
+
 // DatabaseStore persists canonical data-layer records in SQLite or PostgreSQL via GORM.
 type DatabaseStore struct {
 	db *gorm.DB
@@ -222,6 +264,9 @@ func (s *DatabaseStore) AutoMigrate() error {
 		&normalizationRunModel{},
 		&normalizationRunRawPayloadLinkModel{},
 		&dataBatchModel{},
+		&rawPayloadInstrumentLinkModel{},
+		&rawPayloadCandleLinkModel{},
+		&rawPayloadTradeLinkModel{},
 	)
 }
 
@@ -684,13 +729,21 @@ func (s *DatabaseStore) UpsertRawVenuePayload(
 		if createErr := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"content_type",
-				"body",
-				"checksum",
+				"ingestion_run_id",
+				"endpoint",
+				"request_type",
+				"request_payload_hash",
+				"request_metadata_json",
+				"request_at",
+				"response_at",
+				"http_status",
 				"received_at",
-				"request_key",
-				"source_record_id",
-				"metadata_json",
+				"entity_hint",
+				columnInstrumentSymbol,
+				columnInstrumentAssetCls,
+				columnTimeframe,
+				columnStartAt,
+				columnEndAt,
 				columnUpdatedAt,
 			}),
 		}).Create(&model).Error; createErr != nil {
@@ -800,6 +853,159 @@ func (s *DatabaseStore) UpsertDataBatch(
 	return dataBatchModelToDomain(persisted)
 }
 
+// LinkRawPayloadToInstrument persists a raw-payload link to one canonical instrument.
+func (s *DatabaseStore) LinkRawPayloadToInstrument(
+	ctx context.Context,
+	rawPayloadID string,
+	instrument domain.Instrument,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureRawPayloadsExist(tx, []string{rawPayloadID}); err != nil {
+			return err
+		}
+		instrumentRow, err := findInstrumentModelByIdentity(tx, instrument.Venue, instrument.Symbol)
+		if err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rawPayloadInstrumentLinkModel{
+			RawPayloadID: rawPayloadID,
+			InstrumentID: instrumentRow.ID,
+		}).Error
+	})
+}
+
+// LinkRawPayloadToCandle persists a raw-payload link to one canonical candle.
+func (s *DatabaseStore) LinkRawPayloadToCandle(
+	ctx context.Context,
+	rawPayloadID string,
+	candle domain.Candle,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureRawPayloadsExist(tx, []string{rawPayloadID}); err != nil {
+			return err
+		}
+		instrumentRow, err := findInstrumentModelByIdentity(tx, candle.Instrument.Venue, candle.Instrument.Symbol)
+		if err != nil {
+			return err
+		}
+		candleRow, err := findCandleModelByNaturalKey(tx, candle, instrumentRow.ID)
+		if err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rawPayloadCandleLinkModel{
+			RawPayloadID: rawPayloadID,
+			CandleID:     candleRow.ID,
+		}).Error
+	})
+}
+
+// LinkRawPayloadToTrade persists a raw-payload link to one canonical trade.
+func (s *DatabaseStore) LinkRawPayloadToTrade(
+	ctx context.Context,
+	rawPayloadID string,
+	trade domain.Trade,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureRawPayloadsExist(tx, []string{rawPayloadID}); err != nil {
+			return err
+		}
+		instrumentRow, err := findInstrumentModelByIdentity(tx, trade.Instrument.Venue, trade.Instrument.Symbol)
+		if err != nil {
+			return err
+		}
+		tradeRow, err := findTradeModelByNaturalKey(tx, trade, instrumentRow.ID)
+		if err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rawPayloadTradeLinkModel{
+			RawPayloadID: rawPayloadID,
+			TradeID:      tradeRow.ID,
+		}).Error
+	})
+}
+
+// ListInstrumentRawPayloadIDs returns stable raw payload IDs linked to one instrument.
+func (s *DatabaseStore) ListInstrumentRawPayloadIDs(
+	ctx context.Context,
+	instrument domain.Instrument,
+) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	instrumentRow, err := findInstrumentModelByIdentity(s.db.WithContext(ctx), instrument.Venue, instrument.Symbol)
+	if err != nil {
+		return nil, err
+	}
+	return listRawPayloadIDsByLinkedColumn(
+		s.db.WithContext(ctx),
+		rawPayloadInstrumentLinkModel{},
+		"instrument_id",
+		instrumentRow.ID,
+	)
+}
+
+// ListCandleRawPayloadIDs returns stable raw payload IDs linked to one candle.
+func (s *DatabaseStore) ListCandleRawPayloadIDs(ctx context.Context, candle domain.Candle) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	instrumentRow, err := findInstrumentModelByIdentity(
+		s.db.WithContext(ctx),
+		candle.Instrument.Venue,
+		candle.Instrument.Symbol,
+	)
+	if err != nil {
+		return nil, err
+	}
+	candleRow, err := findCandleModelByNaturalKey(s.db.WithContext(ctx), candle, instrumentRow.ID)
+	if err != nil {
+		return nil, err
+	}
+	return listRawPayloadIDsByLinkedColumn(
+		s.db.WithContext(ctx),
+		rawPayloadCandleLinkModel{},
+		"candle_id",
+		candleRow.ID,
+	)
+}
+
+// ListTradeRawPayloadIDs returns stable raw payload IDs linked to one trade.
+func (s *DatabaseStore) ListTradeRawPayloadIDs(ctx context.Context, trade domain.Trade) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	instrumentRow, err := findInstrumentModelByIdentity(
+		s.db.WithContext(ctx),
+		trade.Instrument.Venue,
+		trade.Instrument.Symbol,
+	)
+	if err != nil {
+		return nil, err
+	}
+	tradeRow, err := findTradeModelByNaturalKey(s.db.WithContext(ctx), trade, instrumentRow.ID)
+	if err != nil {
+		return nil, err
+	}
+	return listRawPayloadIDsByLinkedColumn(
+		s.db.WithContext(ctx),
+		rawPayloadTradeLinkModel{},
+		"trade_id",
+		tradeRow.ID,
+	)
+}
+
 func (s *DatabaseStore) GetDataBatchAudit(ctx context.Context, batchID string) (DataBatchAudit, error) {
 	if err := ctx.Err(); err != nil {
 		return DataBatchAudit{}, err
@@ -818,10 +1024,16 @@ func (s *DatabaseStore) findInstrumentModel(
 	venue domain.Venue,
 	symbol domain.Symbol,
 ) (instrumentModel, error) {
+	return findInstrumentModelByIdentity(s.db.WithContext(ctx), venue, symbol)
+}
+
+func findInstrumentModelByIdentity(
+	db *gorm.DB,
+	venue domain.Venue,
+	symbol domain.Symbol,
+) (instrumentModel, error) {
 	var model instrumentModel
-	if err := s.db.WithContext(ctx).
-		Where("venue = ? AND symbol = ?", venue.String(), symbol.String()).
-		First(&model).Error; err != nil {
+	if err := db.Where("venue = ? AND symbol = ?", venue.String(), symbol.String()).First(&model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return instrumentModel{}, err
 		}
@@ -850,6 +1062,31 @@ func (s *DatabaseStore) findCandleModel(ctx context.Context, needle candleModel)
 	return model, nil
 }
 
+func findCandleModelByNaturalKey(
+	db *gorm.DB,
+	candle domain.Candle,
+	instrumentID uint,
+) (candleModel, error) {
+	target := candleToModel(candle, instrumentID, "")
+	var model candleModel
+	if err := db.Where(
+		"instrument_id = ? AND timeframe = ? AND start_at = ? AND end_at = ? AND provenance_source = ? AND provenance_identity_key = ?",
+		target.InstrumentID,
+		target.Timeframe,
+		target.StartAt.UTC(),
+		target.EndAt.UTC(),
+		target.ProvenanceSource,
+		target.ProvenanceIdentity,
+	).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return candleModel{}, fmt.Errorf("lookup candle row: %w", ErrLineageParentNotFound)
+		}
+		return candleModel{}, fmt.Errorf("lookup candle row: %w", err)
+	}
+
+	return model, nil
+}
+
 func (s *DatabaseStore) findTradeModel(ctx context.Context, needle tradeModel) (tradeModel, error) {
 	var model tradeModel
 	if err := s.db.WithContext(ctx).
@@ -860,6 +1097,28 @@ func (s *DatabaseStore) findTradeModel(ctx context.Context, needle tradeModel) (
 			needle.ProvenanceIdentity,
 		).
 		First(&model).Error; err != nil {
+		return tradeModel{}, fmt.Errorf("lookup trade row: %w", err)
+	}
+
+	return model, nil
+}
+
+func findTradeModelByNaturalKey(
+	db *gorm.DB,
+	trade domain.Trade,
+	instrumentID uint,
+) (tradeModel, error) {
+	target := tradeToModel(trade, instrumentID, "")
+	var model tradeModel
+	if err := db.Where(
+		"instrument_id = ? AND provenance_source = ? AND provenance_identity_key = ?",
+		target.InstrumentID,
+		target.ProvenanceSource,
+		target.ProvenanceIdentity,
+	).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return tradeModel{}, fmt.Errorf("lookup trade row: %w", ErrLineageParentNotFound)
+		}
 		return tradeModel{}, fmt.Errorf("lookup trade row: %w", err)
 	}
 
@@ -999,44 +1258,99 @@ func ingestionRunModelToDomain(model ingestionRunModel) (IngestionRun, error) {
 }
 
 func rawVenuePayloadToModel(payload RawVenuePayload) (rawVenuePayloadModel, error) {
-	metadataJSON, err := marshalLineageMetadata(payload.Metadata)
+	requestMetadataJSON, err := marshalLineageMetadata(payload.RequestMetadata)
 	if err != nil {
 		return rawVenuePayloadModel{}, err
 	}
 
+	var instrumentSymbol string
+	var instrumentAssetClass string
+	if payload.Instrument != nil {
+		instrumentSymbol = payload.Instrument.Symbol.String()
+		instrumentAssetClass = payload.Instrument.AssetClass.String()
+	}
+
+	var timeframe string
+	if payload.Timeframe != "" {
+		timeframe = payload.Timeframe.String()
+	}
+
+	var startAt time.Time
+	var endAt time.Time
+	if payload.TimeRange != nil {
+		startAt = payload.TimeRange.Start.UTC()
+		endAt = payload.TimeRange.End.UTC()
+	}
+	if payload.PayloadBodyRef == "" {
+		return rawVenuePayloadModel{}, validationError("raw payload body ref is required")
+	}
+	if payload.ResponseBodyHash == "" {
+		return rawVenuePayloadModel{}, validationError("raw payload response body hash is required")
+	}
+
 	return rawVenuePayloadModel{
-		ID:             payload.ID,
-		IngestionRunID: payload.IngestionRunID,
-		Source:         payload.Source,
-		Venue:          payload.Venue.String(),
-		ContentType:    payload.ContentType,
-		Body:           append([]byte(nil), payload.Body...),
-		Checksum:       payload.Checksum,
-		ReceivedAt:     payload.ReceivedAt.UTC(),
-		RequestKey:     payload.RequestKey,
-		SourceRecordID: payload.SourceRecordID,
-		MetadataJSON:   metadataJSON,
+		ID:                  payload.ID,
+		IngestionRunID:      payload.IngestionRunID,
+		Source:              payload.Source,
+		Venue:               payload.Venue.String(),
+		Endpoint:            payload.Endpoint,
+		RequestType:         payload.RequestType,
+		RequestPayloadHash:  payload.RequestPayloadHash,
+		RequestMetadataJSON: requestMetadataJSON,
+		RequestAt:           payload.RequestAt.UTC(),
+		ResponseAt:          payload.ResponseAt.UTC(),
+		HTTPStatus:          payload.HTTPStatus,
+		ResponseBodyHash:    payload.ResponseBodyHash,
+		PayloadBodyRef:      payload.PayloadBodyRef,
+		EntityHint:          payload.EntityHint,
+		InstrumentSymbol:    instrumentSymbol,
+		InstrumentAssetCls:  instrumentAssetClass,
+		Timeframe:           timeframe,
+		StartAt:             startAt,
+		EndAt:               endAt,
+		ReceivedAt:          payload.ReceivedAt.UTC(),
 	}, nil
 }
 
 func rawVenuePayloadModelToDomain(model rawVenuePayloadModel) (RawVenuePayload, error) {
-	metadata, err := unmarshalLineageMetadata(model.MetadataJSON)
+	requestMetadata, err := unmarshalLineageMetadata(model.RequestMetadataJSON)
 	if err != nil {
 		return RawVenuePayload{}, err
 	}
 
+	var instrument *BatchInstrumentRef
+	if strings.TrimSpace(model.InstrumentSymbol) != "" || strings.TrimSpace(model.InstrumentAssetCls) != "" {
+		instrument = &BatchInstrumentRef{
+			Symbol:     domain.Symbol(model.InstrumentSymbol),
+			AssetClass: domain.AssetClass(model.InstrumentAssetCls),
+		}
+	}
+
+	var timeRange *domain.TimeRange
+	if !model.StartAt.IsZero() || !model.EndAt.IsZero() {
+		candidate := domain.TimeRange{Start: model.StartAt.UTC(), End: model.EndAt.UTC()}
+		timeRange = &candidate
+	}
+
 	payload, err := NewRawVenuePayload(RawVenuePayloadParams{
-		ID:             model.ID,
-		IngestionRunID: model.IngestionRunID,
-		Source:         model.Source,
-		Venue:          domain.Venue(model.Venue),
-		ContentType:    model.ContentType,
-		Body:           append([]byte(nil), model.Body...),
-		Checksum:       model.Checksum,
-		ReceivedAt:     model.ReceivedAt.UTC(),
-		RequestKey:     model.RequestKey,
-		SourceRecordID: model.SourceRecordID,
-		Metadata:       metadata,
+		ID:                 model.ID,
+		IngestionRunID:     model.IngestionRunID,
+		Source:             model.Source,
+		Venue:              domain.Venue(model.Venue),
+		Endpoint:           model.Endpoint,
+		RequestType:        model.RequestType,
+		RequestPayloadHash: model.RequestPayloadHash,
+		RequestMetadata:    requestMetadata,
+		RequestAt:          model.RequestAt.UTC(),
+		ResponseAt:         model.ResponseAt.UTC(),
+		HTTPStatus:         model.HTTPStatus,
+		ResponseBodyHash:   model.ResponseBodyHash,
+		PayloadBodyRef:     model.PayloadBodyRef,
+		EntityHint:         model.EntityHint,
+		Instrument:         instrument,
+		Timeframe:          domain.Timeframe(model.Timeframe),
+		TimeRange:          timeRange,
+		ReceivedAt:         model.ReceivedAt.UTC(),
 	})
 	if err != nil {
 		return RawVenuePayload{}, fmt.Errorf("map raw venue payload row to domain: %w", err)
@@ -1207,6 +1521,10 @@ func findDataBatchModel(db *gorm.DB, id string) (dataBatchModel, error) {
 }
 
 func ensureIngestionRunExists(tx *gorm.DB, ingestionRunID string) error {
+	if strings.TrimSpace(ingestionRunID) == "" {
+		return nil
+	}
+
 	var count int64
 	if err := tx.Model(&ingestionRunModel{}).Where("id = ?", ingestionRunID).Count(&count).Error; err != nil {
 		return fmt.Errorf("lookup ingestion run row: %w", err)
@@ -1344,6 +1662,32 @@ func mapReplayTrades(db *gorm.DB, rows []tradeModel) ([]ReplayTrade, error) {
 	return trades, nil
 }
 
+func listRawPayloadIDsByLinkedColumn(
+	db *gorm.DB,
+	model any,
+	column string,
+	value any,
+) ([]string, error) {
+	type rawPayloadIDRow struct {
+		RawPayloadID string `gorm:"column:raw_payload_id"`
+	}
+
+	var rows []rawPayloadIDRow
+	if err := db.Model(model).
+		Where(column+" = ?", value).
+		Order("raw_payload_id ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("query raw payload links: %w", err)
+	}
+
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.RawPayloadID)
+	}
+
+	return ids, nil
+}
+
 func replaceNormalizationRunRawPayloadLinks(
 	tx *gorm.DB,
 	normalizationRunID string,
@@ -1416,6 +1760,9 @@ func listIngestionRunsByID(
 	ingestionRunIDs := make([]string, 0, len(rawPayloadRows))
 	seen := make(map[string]struct{}, len(rawPayloadRows))
 	for _, row := range rawPayloadRows {
+		if strings.TrimSpace(row.IngestionRunID) == "" {
+			continue
+		}
 		if _, ok := seen[row.IngestionRunID]; ok {
 			continue
 		}
@@ -1492,13 +1839,17 @@ func buildRawVenuePayloadAudits(
 		if payloadErr != nil {
 			return nil, nil, payloadErr
 		}
-		runRow, ok := ingestionRunsByID[payloadRow.IngestionRunID]
-		if !ok {
-			return nil, nil, fmt.Errorf("lookup ingestion run row: %w", ErrLineageParentNotFound)
-		}
-		ingestionRun, runErr := ingestionRunModelToDomain(runRow)
-		if runErr != nil {
-			return nil, nil, runErr
+		var ingestionRun *IngestionRun
+		if strings.TrimSpace(payloadRow.IngestionRunID) != "" {
+			runRow, ok := ingestionRunsByID[payloadRow.IngestionRunID]
+			if !ok {
+				return nil, nil, fmt.Errorf("lookup ingestion run row: %w", ErrLineageParentNotFound)
+			}
+			mappedRun, runErr := ingestionRunModelToDomain(runRow)
+			if runErr != nil {
+				return nil, nil, runErr
+			}
+			ingestionRun = &mappedRun
 		}
 		rawPayloadIDs = append(rawPayloadIDs, payload.ID)
 		rawPayloads = append(rawPayloads, RawVenuePayloadAudit{

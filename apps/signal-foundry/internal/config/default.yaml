@@ -110,6 +110,9 @@ dataLayer:
     tablePrefix: "signal_foundry_data_"
     # Local/test-friendly default; disable when migrations are managed externally.
     autoMigrate: true
+  rawPayloadBlobStore:
+    # Optional local raw payload blob directory. Empty defaults under dataDir.
+    path: ""
 
 skills:
   # Set to true to enable skill discovery and tool registration.

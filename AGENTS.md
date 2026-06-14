@@ -106,6 +106,7 @@ The rules are:
 - OpenSpec gates pass only with a clean relevant git status.
 - Archive OpenSpec changes before any final submission step.
 - Use `make test-live-compile` for regular live-lane build coverage.
+- OpenSpec manager work must be done by the requested sub-agent.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

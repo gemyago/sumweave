@@ -44,22 +44,30 @@ type TradeReadRequest struct {
 	PageToken  string
 }
 
+// ReadResultMetadata carries optional non-canonical read metadata.
+type ReadResultMetadata struct {
+	RawPayloadIDs []string
+}
+
 // InstrumentReadResult returns canonical venue instruments plus optional paging state.
 type InstrumentReadResult struct {
 	Instruments   []domain.Instrument
 	NextPageToken string
+	Metadata      ReadResultMetadata
 }
 
 // CandleReadResult returns canonical candles plus optional paging state.
 type CandleReadResult struct {
 	Candles       []domain.Candle
 	NextPageToken string
+	Metadata      ReadResultMetadata
 }
 
 // TradeReadResult returns canonical trades plus optional paging state.
 type TradeReadResult struct {
 	Trades        []domain.Trade
 	NextPageToken string
+	Metadata      ReadResultMetadata
 }
 
 // InstrumentReadRequestParams holds raw inputs for a canonical instrument read request.
@@ -181,6 +189,7 @@ func NewInstrumentReadResult(
 	return InstrumentReadResult{
 		Instruments:   canonicalInstruments,
 		NextPageToken: strings.TrimSpace(nextPageToken),
+		Metadata:      ReadResultMetadata{},
 	}, nil
 }
 
@@ -194,6 +203,7 @@ func NewCandleReadResult(candles []domain.Candle, nextPageToken string) (CandleR
 	return CandleReadResult{
 		Candles:       canonicalCandles,
 		NextPageToken: strings.TrimSpace(nextPageToken),
+		Metadata:      ReadResultMetadata{},
 	}, nil
 }
 
@@ -207,6 +217,7 @@ func NewTradeReadResult(trades []domain.Trade, nextPageToken string) (TradeReadR
 	return TradeReadResult{
 		Trades:        canonicalTrades,
 		NextPageToken: strings.TrimSpace(nextPageToken),
+		Metadata:      ReadResultMetadata{},
 	}, nil
 }
 

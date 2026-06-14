@@ -124,6 +124,7 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "dataLayer.database.dsn").asString(),
 		provideConfigValue(cfg, "dataLayer.database.tablePrefix").asString(),
 		provideConfigValue(cfg, "dataLayer.database.autoMigrate").asBool(),
+		provideConfigValue(cfg, "dataLayer.rawPayloadBlobStore.path").asString(),
 
 		// skills config
 		provideConfigValue(cfg, "skills.enabled").asBool(),

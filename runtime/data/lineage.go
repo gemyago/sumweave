@@ -65,32 +65,48 @@ type IngestionRunParams struct {
 
 // RawVenuePayload stores raw venue response lineage for audit and replay.
 type RawVenuePayload struct {
-	ID             string
-	IngestionRunID string
-	Source         string
-	Venue          domain.Venue
-	ContentType    string
-	Body           []byte
-	Checksum       string
-	ReceivedAt     time.Time
-	RequestKey     string
-	SourceRecordID string
-	Metadata       map[string]string
+	ID                 string
+	IngestionRunID     string
+	Source             string
+	Venue              domain.Venue
+	Endpoint           string
+	RequestType        string
+	RequestPayloadHash string
+	RequestMetadata    map[string]string
+	RequestAt          time.Time
+	ResponseAt         time.Time
+	HTTPStatus         int
+	ResponseBody       []byte
+	ResponseBodyHash   string
+	PayloadBodyRef     string
+	EntityHint         string
+	Instrument         *BatchInstrumentRef
+	Timeframe          domain.Timeframe
+	TimeRange          *domain.TimeRange
+	ReceivedAt         time.Time
 }
 
 // RawVenuePayloadParams configures raw payload construction.
 type RawVenuePayloadParams struct {
-	ID             string
-	IngestionRunID string
-	Source         string
-	Venue          domain.Venue
-	ContentType    string
-	Body           []byte
-	Checksum       string
-	ReceivedAt     time.Time
-	RequestKey     string
-	SourceRecordID string
-	Metadata       map[string]string
+	ID                 string
+	IngestionRunID     string
+	Source             string
+	Venue              domain.Venue
+	Endpoint           string
+	RequestType        string
+	RequestPayloadHash string
+	RequestMetadata    map[string]string
+	RequestAt          time.Time
+	ResponseAt         time.Time
+	HTTPStatus         int
+	ResponseBody       []byte
+	ResponseBodyHash   string
+	PayloadBodyRef     string
+	EntityHint         string
+	Instrument         *BatchInstrumentRef
+	Timeframe          domain.Timeframe
+	TimeRange          *domain.TimeRange
+	ReceivedAt         time.Time
 }
 
 // NormalizationRun describes a stable normalization lineage record.
@@ -158,7 +174,7 @@ type DataBatchParams struct {
 // RawVenuePayloadAudit bundles a raw payload and its parent ingestion run.
 type RawVenuePayloadAudit struct {
 	Payload      RawVenuePayload
-	IngestionRun IngestionRun
+	IngestionRun *IngestionRun
 }
 
 // DataBatchAudit returns the lineage chain for one persisted batch.
@@ -168,6 +184,12 @@ type DataBatchAudit struct {
 	Batch            DataBatch
 	NormalizationRun NormalizationRun
 	RawPayloads      []RawVenuePayloadAudit
+}
+
+// RawPayloadBody stores a raw body blob reference and checksum.
+type RawPayloadBody struct {
+	Ref  string
+	Hash string
 }
 
 // NewIngestionRun validates and canonicalizes an ingestion run lineage record.
@@ -243,9 +265,6 @@ func canonicalizeRawVenuePayload(payload RawVenuePayload) (RawVenuePayload, erro
 	}
 
 	ingestionRunID := strings.TrimSpace(payload.IngestionRunID)
-	if ingestionRunID == "" {
-		return RawVenuePayload{}, validationError("raw payload ingestion run id is required")
-	}
 
 	source := strings.TrimSpace(payload.Source)
 	if source == "" {
@@ -257,40 +276,145 @@ func canonicalizeRawVenuePayload(payload RawVenuePayload) (RawVenuePayload, erro
 		return RawVenuePayload{}, validationError("raw payload venue is required")
 	}
 
-	contentType := strings.TrimSpace(payload.ContentType)
-	if contentType == "" {
-		return RawVenuePayload{}, validationError("raw payload content type is required")
+	endpoint := strings.TrimSpace(payload.Endpoint)
+	if endpoint == "" {
+		return RawVenuePayload{}, validationError("raw payload endpoint is required")
 	}
 
-	if len(payload.Body) == 0 {
-		return RawVenuePayload{}, validationError("raw payload body is required")
+	requestType := strings.TrimSpace(payload.RequestType)
+	if requestType == "" {
+		return RawVenuePayload{}, validationError("raw payload request type is required")
 	}
 
-	checksum := strings.TrimSpace(payload.Checksum)
-	if checksum == "" {
-		return RawVenuePayload{}, validationError("raw payload checksum is required")
+	requestPayloadHash := strings.TrimSpace(payload.RequestPayloadHash)
+	if requestPayloadHash == "" {
+		return RawVenuePayload{}, validationError("raw payload request payload hash is required")
+	}
+
+	requestAt, responseAt, err := canonicalizeRawPayloadExchangeTimes(payload.RequestAt, payload.ResponseAt)
+	if err != nil {
+		return RawVenuePayload{}, err
+	}
+
+	if payload.HTTPStatus < 100 || payload.HTTPStatus > 999 {
+		return RawVenuePayload{}, validationError("raw payload http status must be a three-digit code")
+	}
+
+	responseBody, responseBodyHash, payloadBodyRef, err := canonicalizeRawPayloadBody(payload)
+	if err != nil {
+		return RawVenuePayload{}, err
 	}
 
 	if payload.ReceivedAt.IsZero() {
 		return RawVenuePayload{}, validationError("raw payload received time is required")
 	}
 
-	metadata := canonicalizeMetadataMap(payload.Metadata)
-	body := slices.Clone(payload.Body)
+	requestMetadata := canonicalizeMetadataMap(payload.RequestMetadata)
+	instrument, timeframe, timeRange, err := canonicalizeRawPayloadScope(payload)
+	if err != nil {
+		return RawVenuePayload{}, err
+	}
 
 	return RawVenuePayload{
-		ID:             id,
-		IngestionRunID: ingestionRunID,
-		Source:         source,
-		Venue:          venue,
-		ContentType:    contentType,
-		Body:           body,
-		Checksum:       checksum,
-		ReceivedAt:     payload.ReceivedAt.UTC(),
-		RequestKey:     strings.TrimSpace(payload.RequestKey),
-		SourceRecordID: strings.TrimSpace(payload.SourceRecordID),
-		Metadata:       metadata,
+		ID:                 id,
+		IngestionRunID:     ingestionRunID,
+		Source:             source,
+		Venue:              venue,
+		Endpoint:           endpoint,
+		RequestType:        requestType,
+		RequestPayloadHash: requestPayloadHash,
+		RequestMetadata:    requestMetadata,
+		RequestAt:          requestAt,
+		ResponseAt:         responseAt,
+		HTTPStatus:         payload.HTTPStatus,
+		ResponseBody:       responseBody,
+		ResponseBodyHash:   responseBodyHash,
+		PayloadBodyRef:     payloadBodyRef,
+		EntityHint:         strings.TrimSpace(payload.EntityHint),
+		Instrument:         instrument,
+		Timeframe:          timeframe,
+		TimeRange:          timeRange,
+		ReceivedAt:         payload.ReceivedAt.UTC(),
 	}, nil
+}
+
+func canonicalizeRawPayloadExchangeTimes(
+	requestAt time.Time,
+	responseAt time.Time,
+) (time.Time, time.Time, error) {
+	if requestAt.IsZero() {
+		return time.Time{}, time.Time{}, validationError("raw payload request time is required")
+	}
+	if responseAt.IsZero() {
+		return time.Time{}, time.Time{}, validationError("raw payload response time is required")
+	}
+
+	canonicalRequestAt := requestAt.UTC()
+	canonicalResponseAt := responseAt.UTC()
+	if canonicalResponseAt.Before(canonicalRequestAt) {
+		return time.Time{}, time.Time{}, validationError(
+			"raw payload response time must not be before request time",
+		)
+	}
+
+	return canonicalRequestAt, canonicalResponseAt, nil
+}
+
+func canonicalizeRawPayloadBody(
+	payload RawVenuePayload,
+) ([]byte, string, string, error) {
+	responseBody := slices.Clone(payload.ResponseBody)
+	responseBodyHash := strings.TrimSpace(payload.ResponseBodyHash)
+	payloadBodyRef := strings.TrimSpace(payload.PayloadBodyRef)
+
+	if responseBodyHash == "" && len(responseBody) == 0 {
+		return nil, "", "", validationError("raw payload response body hash is required")
+	}
+	if payloadBodyRef == "" && len(responseBody) == 0 {
+		return nil, "", "", validationError("raw payload response body or body ref is required")
+	}
+
+	return responseBody, responseBodyHash, payloadBodyRef, nil
+}
+
+func canonicalizeRawPayloadScope(
+	payload RawVenuePayload,
+) (*BatchInstrumentRef, domain.Timeframe, *domain.TimeRange, error) {
+	var instrument *BatchInstrumentRef
+	if payload.Instrument != nil {
+		symbol, symbolErr := domain.NewSymbol(payload.Instrument.Symbol.String())
+		if symbolErr != nil {
+			return nil, "", nil, validationError("raw payload instrument symbol is required")
+		}
+		assetClass, assetClassErr := domain.NewAssetClass(payload.Instrument.AssetClass.String())
+		if assetClassErr != nil {
+			return nil, "", nil, validationError("raw payload instrument asset class is required")
+		}
+		instrument = &BatchInstrumentRef{Symbol: symbol, AssetClass: assetClass}
+	}
+
+	var timeframe domain.Timeframe
+	if strings.TrimSpace(payload.Timeframe.String()) != "" {
+		canonicalTimeframe, timeframeErr := domain.NewTimeframe(payload.Timeframe.String())
+		if timeframeErr != nil {
+			return nil, "", nil, validationError("raw payload timeframe is invalid")
+		}
+		timeframe = canonicalTimeframe
+	}
+
+	var timeRange *domain.TimeRange
+	if payload.TimeRange != nil {
+		canonicalTimeRange, timeRangeErr := domain.NewTimeRange(
+			payload.TimeRange.Start,
+			payload.TimeRange.End,
+		)
+		if timeRangeErr != nil {
+			return nil, "", nil, validationError(timeRangeErr.Error())
+		}
+		timeRange = &canonicalTimeRange
+	}
+
+	return instrument, timeframe, timeRange, nil
 }
 
 func canonicalizeNormalizationRun(run NormalizationRun) (NormalizationRun, error) {

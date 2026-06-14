@@ -3,6 +3,8 @@ package venueedge
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/google/uuid"
 )
 
 const (
@@ -22,6 +25,8 @@ const (
 	hyperliquidInfoTypeKey      = "type"
 	hyperliquidInfoTypeMeta     = "meta"
 	hyperliquidInfoTypeTrades   = "recentTrades"
+	hyperliquidInfoEndpoint     = "/info"
+	hyperliquidRequestCoinKey   = "coin"
 )
 
 // HyperliquidPerpsVenueName is the canonical venue used by the Hyperliquid perps adapter.
@@ -29,8 +34,35 @@ const HyperliquidPerpsVenueName domain.Venue = "hyperliquid-perps"
 
 // HyperliquidPerpsVenueParams configures the concrete Hyperliquid perps market-data adapter.
 type HyperliquidPerpsVenueParams struct {
-	BaseURL    string
-	HTTPClient httpDoer
+	BaseURL                 string
+	HTTPClient              httpDoer
+	RawEvidenceRecorder     HyperliquidRawEvidenceRecorder
+	RawEvidenceIngestionRun string
+}
+
+// HyperliquidRawEvidenceRecorder persists one Hyperliquid HTTP exchange.
+type HyperliquidRawEvidenceRecorder interface {
+	RecordHyperliquidRawEvidence(ctx context.Context, capture HyperliquidRawEvidenceCapture) (string, error)
+}
+
+// HyperliquidRawEvidenceCapture carries one raw Hyperliquid `/info` exchange.
+type HyperliquidRawEvidenceCapture struct {
+	ID                 string
+	IngestionRunID     string
+	Venue              domain.Venue
+	Endpoint           string
+	RequestType        string
+	RequestPayloadHash string
+	RequestMetadata    map[string]string
+	RequestAt          time.Time
+	ResponseAt         time.Time
+	HTTPStatus         int
+	ResponseBody       []byte
+	EntityHint         string
+	Instrument         *domain.Instrument
+	Timeframe          domain.Timeframe
+	TimeRange          *domain.TimeRange
+	ReceivedAt         time.Time
 }
 
 type hyperliquidMetaResponse struct {
@@ -67,8 +99,17 @@ type hyperliquidVenueError struct {
 
 // HyperliquidPerpsVenue adapts documented Hyperliquid Info market-data reads into canonical records.
 type HyperliquidPerpsVenue struct {
-	baseURL    string
-	httpClient httpDoer
+	baseURL                 string
+	httpClient              httpDoer
+	rawEvidenceRecorder     HyperliquidRawEvidenceRecorder
+	rawEvidenceIngestionRun string
+}
+
+type hyperliquidInfoCaptureScope struct {
+	entityHint string
+	instrument *domain.Instrument
+	timeframe  domain.Timeframe
+	timeRange  *domain.TimeRange
 }
 
 // NewHyperliquidPerpsVenue creates a concrete mocked-HTTP-friendly Hyperliquid perps adapter.
@@ -82,8 +123,10 @@ func NewHyperliquidPerpsVenue(params HyperliquidPerpsVenueParams) (*HyperliquidP
 	}
 
 	return &HyperliquidPerpsVenue{
-		baseURL:    baseURL,
-		httpClient: params.HTTPClient,
+		baseURL:                 baseURL,
+		httpClient:              params.HTTPClient,
+		rawEvidenceRecorder:     params.RawEvidenceRecorder,
+		rawEvidenceIngestionRun: strings.TrimSpace(params.RawEvidenceIngestionRun),
 	}, nil
 }
 
@@ -103,10 +146,10 @@ func (v *HyperliquidPerpsVenue) ReadInstruments(
 	}
 
 	var response hyperliquidMetaResponse
-	postErr := v.postInfoJSON(ctx, map[string]any{
+	metadata, postErr := v.postInfoJSON(ctx, hyperliquidInfoTypeMeta, map[string]any{
 		hyperliquidInfoTypeKey: hyperliquidInfoTypeMeta,
 		"dex":                  "",
-	}, &response)
+	}, hyperliquidInfoCaptureScope{entityHint: "instrument"}, &response)
 	if postErr != nil {
 		return InstrumentReadResult{}, postErr
 	}
@@ -128,7 +171,13 @@ func (v *HyperliquidPerpsVenue) ReadInstruments(
 		instruments = append(instruments, instrument)
 	}
 
-	return NewInstrumentReadResult(instruments, "")
+	result, err := NewInstrumentReadResult(instruments, "")
+	if err != nil {
+		return InstrumentReadResult{}, err
+	}
+	result.Metadata = metadata
+
+	return result, nil
 }
 
 // ReadCandles maps Hyperliquid candle snapshots into canonical candles with half-open time ranges.
@@ -160,14 +209,23 @@ func (v *HyperliquidPerpsVenue) ReadCandles(
 	}
 
 	var rows []hyperliquidCandle
-	postErr := v.postInfoJSON(ctx, map[string]any{
+	requestTimeRange := domain.TimeRange{
+		Start: startTime,
+		End:   canonicalRequest.TimeRange.End,
+	}
+	metadata, postErr := v.postInfoJSON(ctx, hyperliquidInfoTypeCandle, map[string]any{
 		hyperliquidInfoTypeKey: hyperliquidInfoTypeCandle,
 		"req": map[string]any{
-			"coin":      canonicalRequest.Instrument.Symbol.String(),
-			"interval":  interval,
-			"startTime": startTime.UnixMilli(),
-			"endTime":   canonicalRequest.TimeRange.End.UnixMilli(),
+			hyperliquidRequestCoinKey: canonicalRequest.Instrument.Symbol.String(),
+			"interval":                interval,
+			"startTime":               startTime.UnixMilli(),
+			"endTime":                 canonicalRequest.TimeRange.End.UnixMilli(),
 		},
+	}, hyperliquidInfoCaptureScope{
+		entityHint: "candle",
+		instrument: &canonicalRequest.Instrument,
+		timeframe:  canonicalRequest.Timeframe,
+		timeRange:  &requestTimeRange,
 	}, &rows)
 	if postErr != nil {
 		return CandleReadResult{}, postErr
@@ -182,32 +240,18 @@ func (v *HyperliquidPerpsVenue) ReadCandles(
 		effectiveLimit = hyperliquidDefaultReadLimit
 	}
 
-	candles := make([]domain.Candle, 0, smallerInt(len(rows), effectiveLimit))
-	var nextPageToken string
-	for _, row := range rows {
-		candle, mapErr := mapHyperliquidCandle(canonicalRequest.Instrument, canonicalRequest.Timeframe, row)
-		if mapErr != nil {
-			return CandleReadResult{}, mapErr
-		}
-		if candle.TimeRange.Start.Before(canonicalRequest.TimeRange.Start) ||
-			!candle.TimeRange.Start.Before(canonicalRequest.TimeRange.End) {
-			continue
-		}
-		if len(candles) == effectiveLimit {
-			nextPageToken = fmt.Sprintf("startTime:%d", candle.TimeRange.Start.UnixMilli())
-			break
-		}
-		candles = append(candles, candle)
+	candles, nextPageToken, err := buildHyperliquidCandlePage(canonicalRequest, rows, effectiveLimit)
+	if err != nil {
+		return CandleReadResult{}, err
 	}
 
-	if nextPageToken == "" && len(candles) > 0 && len(rows) >= hyperliquidDefaultReadLimit {
-		nextStart := candles[len(candles)-1].TimeRange.End
-		if nextStart.Before(canonicalRequest.TimeRange.End) {
-			nextPageToken = fmt.Sprintf("startTime:%d", nextStart.UnixMilli())
-		}
+	result, err := NewCandleReadResult(candles, nextPageToken)
+	if err != nil {
+		return CandleReadResult{}, err
 	}
+	result.Metadata = metadata
 
-	return NewCandleReadResult(candles, nextPageToken)
+	return result, nil
 }
 
 // ReadTrades maps Hyperliquid recent trades into canonical trades.
@@ -232,9 +276,14 @@ func (v *HyperliquidPerpsVenue) ReadTrades(
 	}
 
 	var rows []hyperliquidTrade
-	postErr := v.postInfoJSON(ctx, map[string]any{
-		hyperliquidInfoTypeKey: hyperliquidInfoTypeTrades,
-		"coin":                 canonicalRequest.Instrument.Symbol.String(),
+	requestTimeRange := canonicalRequest.TimeRange
+	metadata, postErr := v.postInfoJSON(ctx, hyperliquidInfoTypeTrades, map[string]any{
+		hyperliquidInfoTypeKey:    hyperliquidInfoTypeTrades,
+		hyperliquidRequestCoinKey: canonicalRequest.Instrument.Symbol.String(),
+	}, hyperliquidInfoCaptureScope{
+		entityHint: "trade",
+		instrument: &canonicalRequest.Instrument,
+		timeRange:  &requestTimeRange,
 	}, &rows)
 	if postErr != nil {
 		return TradeReadResult{}, postErr
@@ -274,7 +323,13 @@ func (v *HyperliquidPerpsVenue) ReadTrades(
 		trades = append(trades, trade)
 	}
 
-	return NewTradeReadResult(trades, "")
+	result, err := NewTradeReadResult(trades, "")
+	if err != nil {
+		return TradeReadResult{}, err
+	}
+	result.Metadata = metadata
+
+	return result, nil
 }
 
 func validateHyperliquidTradeRangeSupport(
@@ -295,47 +350,136 @@ func validateHyperliquidTradeRangeSupport(
 	return nil
 }
 
-func (v *HyperliquidPerpsVenue) postInfoJSON(
-	ctx context.Context,
-	payload any,
-	target any,
-) error {
-	requestBody, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal request body: %w", err)
+func buildHyperliquidCandlePage(
+	request CandleReadRequest,
+	rows []hyperliquidCandle,
+	effectiveLimit int,
+) ([]domain.Candle, string, error) {
+	candles := make([]domain.Candle, 0, smallerInt(len(rows), effectiveLimit))
+	var nextPageToken string
+	for _, row := range rows {
+		candle, err := mapHyperliquidCandle(request.Instrument, request.Timeframe, row)
+		if err != nil {
+			return nil, "", err
+		}
+		if candle.TimeRange.Start.Before(request.TimeRange.Start) ||
+			!candle.TimeRange.Start.Before(request.TimeRange.End) {
+			continue
+		}
+		if len(candles) == effectiveLimit {
+			nextPageToken = fmt.Sprintf("startTime:%d", candle.TimeRange.Start.UnixMilli())
+			break
+		}
+		candles = append(candles, candle)
 	}
 
+	if nextPageToken == "" && len(candles) > 0 && len(rows) >= hyperliquidDefaultReadLimit {
+		nextStart := candles[len(candles)-1].TimeRange.End
+		if nextStart.Before(request.TimeRange.End) {
+			nextPageToken = fmt.Sprintf("startTime:%d", nextStart.UnixMilli())
+		}
+	}
+
+	return candles, nextPageToken, nil
+}
+
+func (v *HyperliquidPerpsVenue) postInfoJSON(
+	ctx context.Context,
+	requestType string,
+	payload any,
+	scope hyperliquidInfoCaptureScope,
+	target any,
+) (ReadResultMetadata, error) {
+	requestBody, err := json.Marshal(payload)
+	if err != nil {
+		return ReadResultMetadata{}, fmt.Errorf("marshal request body: %w", err)
+	}
+
+	requestAt := time.Now().UTC()
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		v.baseURL+"/info",
+		v.baseURL+hyperliquidInfoEndpoint,
 		bytes.NewReader(requestBody),
 	)
 	if err != nil {
-		return fmt.Errorf("build request: %w", err)
+		return ReadResultMetadata{}, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := v.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("perform request: %w", err)
+		return ReadResultMetadata{}, fmt.Errorf("perform request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
+		return ReadResultMetadata{}, fmt.Errorf("read response body: %w", err)
+	}
+	responseAt := time.Now().UTC()
+	receivedAt := time.Now().UTC()
+
+	metadata, err := v.recordRawEvidence(ctx, HyperliquidRawEvidenceCapture{
+		ID:                 uuid.NewString(),
+		IngestionRunID:     v.rawEvidenceIngestionRun,
+		Venue:              HyperliquidPerpsVenueName,
+		Endpoint:           hyperliquidInfoEndpoint,
+		RequestType:        requestType,
+		RequestPayloadHash: hashBytesSHA256(requestBody),
+		RequestMetadata: map[string]string{
+			"content-type": req.Header.Get("Content-Type"),
+			"method":       req.Method,
+		},
+		RequestAt:    requestAt,
+		ResponseAt:   responseAt,
+		HTTPStatus:   resp.StatusCode,
+		ResponseBody: body,
+		EntityHint:   scope.entityHint,
+		Instrument:   scope.instrument,
+		Timeframe:    scope.timeframe,
+		TimeRange:    scope.timeRange,
+		ReceivedAt:   receivedAt,
+	})
+	if err != nil {
+		return ReadResultMetadata{}, err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return hyperliquidHTTPError(resp.StatusCode, body)
+		return ReadResultMetadata{}, hyperliquidHTTPError(resp.StatusCode, body)
 	}
 
 	if decodeErr := json.Unmarshal(body, target); decodeErr != nil {
-		return fmt.Errorf("decode response body: %w", decodeErr)
+		return ReadResultMetadata{}, fmt.Errorf("decode response body: %w", decodeErr)
 	}
 
-	return nil
+	return metadata, nil
+}
+
+func (v *HyperliquidPerpsVenue) recordRawEvidence(
+	ctx context.Context,
+	capture HyperliquidRawEvidenceCapture,
+) (ReadResultMetadata, error) {
+	if v.rawEvidenceRecorder == nil {
+		return ReadResultMetadata{}, nil
+	}
+
+	rawPayloadID, err := v.rawEvidenceRecorder.RecordHyperliquidRawEvidence(ctx, capture)
+	if err != nil {
+		return ReadResultMetadata{}, fmt.Errorf("record hyperliquid raw evidence: %w", err)
+	}
+
+	canonicalRawPayloadID := strings.TrimSpace(rawPayloadID)
+	if canonicalRawPayloadID == "" {
+		return ReadResultMetadata{}, nil
+	}
+
+	return ReadResultMetadata{RawPayloadIDs: []string{canonicalRawPayloadID}}, nil
+}
+
+func hashBytesSHA256(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }
 
 func hyperliquidIntervalForTimeframe(timeframe domain.Timeframe) (string, error) {

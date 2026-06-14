@@ -4,6 +4,7 @@ package internal
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/venueedge"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,6 +34,8 @@ func TestNewRuntime(t *testing.T) {
 			TablePrefix: tablePrefix,
 		})
 		require.NoError(t, err)
+		rawPayloadBlobStore, err := data.NewLocalRawPayloadBlobStore(filepath.Join(dataDir, "raw-payloads"))
+		require.NoError(t, err)
 		dataIngestionService, err := data.NewIngestionService(data.IngestionServiceDeps{
 			InstrumentStore: dataStore,
 			CandleStore:     dataStore,
@@ -42,6 +46,11 @@ func TestNewRuntime(t *testing.T) {
 			InstrumentStore: dataStore,
 			CandleStore:     dataStore,
 			TradeStore:      dataStore,
+		})
+		require.NoError(t, err)
+		dataLineageService, err := data.NewLineageService(data.LineageServiceDeps{
+			Store:     dataStore,
+			BlobStore: rawPayloadBlobStore,
 		})
 		require.NoError(t, err)
 
@@ -60,6 +69,7 @@ func TestNewRuntime(t *testing.T) {
 			DataStore:                       dataStore,
 			DataIngestionService:            dataIngestionService,
 			DataReadService:                 dataReadService,
+			DataLineageService:              dataLineageService,
 		}
 	}
 
@@ -100,6 +110,67 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
 		assert.NotNil(t, runtime.HTTPHandler)
+		assert.NotNil(t, runtime.VenueIngestionFlow)
+		assert.NotNil(t, runtime.HyperliquidRecorder)
+	})
+
+	t.Run("wires hyperliquid recorder and lineage-enabled ingestion flow", func(t *testing.T) {
+		deps := makeDeps(t)
+		runtime, err := newRuntime(deps)
+		require.NoError(t, err)
+		require.NotNil(t, runtime)
+		require.NotNil(t, runtime.HyperliquidRecorder)
+		require.NotNil(t, runtime.VenueIngestionFlow)
+		require.NotNil(t, runtime.DataLineageService)
+
+		instrument, err := domain.NewInstrument(domain.InstrumentParams{
+			Venue:      venueedge.HyperliquidPerpsVenueName,
+			Symbol:     domain.Symbol("symbol-" + fake.Lorem().Word()),
+			AssetClass: domain.AssetClassFuture,
+			Active:     true,
+		})
+		require.NoError(t, err)
+
+		rawPayloadID, err := runtime.HyperliquidRecorder.RecordHyperliquidRawEvidence(
+			t.Context(),
+			venueedge.HyperliquidRawEvidenceCapture{
+				ID:                 "raw-" + fake.Lorem().Word(),
+				Venue:              venueedge.HyperliquidPerpsVenueName,
+				Endpoint:           "/info",
+				RequestType:        "meta",
+				RequestPayloadHash: "request-hash-" + fake.Lorem().Word(),
+				RequestMetadata:    map[string]string{"method": http.MethodPost},
+				RequestAt:          time.Now().Add(-time.Second).UTC(),
+				ResponseAt:         time.Now().UTC(),
+				HTTPStatus:         http.StatusOK,
+				ResponseBody: []byte(fmt.Sprintf(
+					`{"universe":[{"name":"%s","isDelisted":false}]}`,
+					instrument.Symbol,
+				)),
+				EntityHint: "instrument",
+				Instrument: &instrument,
+				ReceivedAt: time.Now().UTC(),
+			},
+		)
+		require.NoError(t, err)
+		require.NotEmpty(t, rawPayloadID)
+
+		readResult := venueedge.InstrumentReadResult{
+			Instruments: []domain.Instrument{instrument},
+			Metadata:    venueedge.ReadResultMetadata{RawPayloadIDs: []string{rawPayloadID}},
+		}
+
+		persisted, err := runtime.VenueIngestionFlow.IngestInstruments(
+			t.Context(),
+			&stubVenueForWiring{instrumentResult: readResult},
+			venueedge.InstrumentReadRequest{Venue: venueedge.HyperliquidPerpsVenueName},
+		)
+		require.NoError(t, err)
+		require.Len(t, persisted, 1)
+
+		linkedIDs, err := runtime.DataLineageService.ListInstrumentRawPayloadIDs(t.Context(), instrument)
+		require.NoError(t, err)
+		require.Equal(t, []string{rawPayloadID}, linkedIDs)
 	})
 
 	t.Run("creates missing workspacefs agent temp directory", func(t *testing.T) {
@@ -125,6 +196,8 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
 		assert.NotNil(t, runtime.HTTPHandler)
+		assert.NotNil(t, runtime.VenueIngestionFlow)
+		assert.NotNil(t, runtime.HyperliquidRecorder)
 
 		profilesSvc, err := agent.NewDatabaseAgentProfilesService(
 			deps.AgentRuntimeDatabaseDSN,
@@ -146,6 +219,8 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
 		assert.NotNil(t, runtime.HTTPHandler)
+		assert.NotNil(t, runtime.VenueIngestionFlow)
+		assert.NotNil(t, runtime.HyperliquidRecorder)
 
 		profilesSvc, err := agent.NewDatabaseAgentProfilesService(
 			deps.AgentRuntimeDatabaseDSN,
@@ -168,6 +243,9 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime.DataStore)
 		require.NotNil(t, runtime.DataIngestionService)
 		require.NotNil(t, runtime.DataReadService)
+		require.NotNil(t, runtime.DataLineageService)
+		require.NotNil(t, runtime.VenueIngestionFlow)
+		require.NotNil(t, runtime.HyperliquidRecorder)
 
 		store, err := data.NewDatabaseStore(deps.DataLayerDatabaseDSN, dataStoreOpts(deps))
 		require.NoError(t, err)
@@ -184,6 +262,8 @@ func TestNewRuntime(t *testing.T) {
 		runtime, err := newRuntime(deps)
 		require.NoError(t, err)
 		require.NotNil(t, runtime)
+		require.NotNil(t, runtime.VenueIngestionFlow)
+		require.NotNil(t, runtime.HyperliquidRecorder)
 
 		store, err := data.NewDatabaseStore(deps.DataLayerDatabaseDSN, dataStoreOpts(deps))
 		require.NoError(t, err)
@@ -212,6 +292,8 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
 		assert.NotNil(t, runtime.HTTPHandler)
+		assert.NotNil(t, runtime.VenueIngestionFlow)
+		assert.NotNil(t, runtime.HyperliquidRecorder)
 	})
 
 	t.Run("exec enabled with valid limits", func(t *testing.T) {
@@ -225,6 +307,8 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
 		assert.NotNil(t, runtime.HTTPHandler)
+		assert.NotNil(t, runtime.VenueIngestionFlow)
+		assert.NotNil(t, runtime.HyperliquidRecorder)
 	})
 
 	t.Run("skills disabled - runtime starts normally without skills tools", func(t *testing.T) {
@@ -236,6 +320,8 @@ func TestNewRuntime(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
+		assert.NotNil(t, runtime.VenueIngestionFlow)
+		assert.NotNil(t, runtime.HyperliquidRecorder)
 	})
 
 	t.Run("skills enabled with default recommended paths - runtime starts with skills tools", func(t *testing.T) {

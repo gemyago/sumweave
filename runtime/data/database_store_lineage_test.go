@@ -3,7 +3,6 @@ package data
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -103,22 +102,31 @@ func TestDatabaseStoreLineage(t *testing.T) {
 	makeRawVenuePayload := func(t *testing.T, ingestionRunID string) RawVenuePayload {
 		t.Helper()
 
+		requestAt := randomTime()
+		responseAt := requestAt.Add(time.Duration(fake.IntBetween(1, 30)) * time.Second)
+		receivedAt := responseAt.Add(time.Duration(fake.IntBetween(0, 5)) * time.Second)
+		if responseAt.Before(requestAt) {
+			responseAt = requestAt.Add(time.Second)
+		}
+
 		payload, err := NewRawVenuePayload(RawVenuePayloadParams{
-			ID:             randomWord("raw-payload"),
-			IngestionRunID: ingestionRunID,
-			Source:         randomWord("source"),
-			Venue:          domain.Venue(randomWord("venue")),
-			ContentType:    "application/json",
-			Body: []byte(
-				`{"items":` + strconv.Itoa(fake.IntBetween(1, 99)) + `}`,
-			),
-			Checksum:       randomWord("checksum"),
-			ReceivedAt:     randomTime(),
-			RequestKey:     randomWord("request-key"),
-			SourceRecordID: randomWord("source-record"),
-			Metadata: map[string]string{
+			ID:                 randomWord("raw-payload"),
+			IngestionRunID:     ingestionRunID,
+			Source:             randomWord("source"),
+			Venue:              domain.Venue(randomWord("venue")),
+			Endpoint:           "/info",
+			RequestType:        randomWord("request-type"),
+			RequestPayloadHash: randomWord("request-hash"),
+			RequestMetadata: map[string]string{
 				randomWord("safe-key"): randomWord("safe-value"),
 			},
+			RequestAt:        requestAt,
+			ResponseAt:       responseAt,
+			HTTPStatus:       200,
+			ResponseBodyHash: randomWord("body-hash"),
+			PayloadBodyRef:   randomWord("payload-body-ref"),
+			EntityHint:       randomWord("entity-hint"),
+			ReceivedAt:       receivedAt,
 		})
 		require.NoError(t, err)
 
@@ -261,13 +269,22 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			"ingestion_run_id",
 			"source",
 			"venue",
-			"content_type",
-			"body",
-			"checksum",
+			"endpoint",
+			"request_type",
+			"request_payload_hash",
+			"request_metadata_json",
+			"request_at",
+			"response_at",
+			"http_status",
+			"response_body_hash",
+			"payload_body_ref",
+			"entity_hint",
+			"instrument_symbol",
+			"instrument_asset_class",
+			"timeframe",
+			"start_at",
+			"end_at",
 			"received_at",
-			"request_key",
-			"source_record_id",
-			"metadata_json",
 			"created_at",
 			"updated_at",
 		})
@@ -336,6 +353,33 @@ func TestDatabaseStoreLineage(t *testing.T) {
 				[]string{"normalization_run_id", "raw_payload_id"},
 			),
 		)
+		require.True(
+			t,
+			hasUniqueIndexWithColumns(
+				t,
+				store,
+				tablePrefix+"raw_payload_instrument_links",
+				[]string{"raw_payload_id", "instrument_id"},
+			),
+		)
+		require.True(
+			t,
+			hasUniqueIndexWithColumns(
+				t,
+				store,
+				tablePrefix+"raw_payload_candle_links",
+				[]string{"raw_payload_id", "candle_id"},
+			),
+		)
+		require.True(
+			t,
+			hasUniqueIndexWithColumns(
+				t,
+				store,
+				tablePrefix+"raw_payload_trade_links",
+				[]string{"raw_payload_id", "trade_id"},
+			),
+		)
 
 		assertColumns(tablePrefix+"candles", []string{
 			"id",
@@ -370,6 +414,21 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			"created_at",
 			"updated_at",
 		})
+		assertColumns(tablePrefix+"raw_payload_instrument_links", []string{
+			"raw_payload_id",
+			"instrument_id",
+			"created_at",
+		})
+		assertColumns(tablePrefix+"raw_payload_candle_links", []string{
+			"raw_payload_id",
+			"candle_id",
+			"created_at",
+		})
+		assertColumns(tablePrefix+"raw_payload_trade_links", []string{
+			"raw_payload_id",
+			"trade_id",
+			"created_at",
+		})
 	})
 
 	t.Run("UpsertIngestionRun updates one row and normalizes UTC timestamps", func(t *testing.T) {
@@ -400,7 +459,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 		require.Equal(t, int64(1), readCount(t, store, "ingestion_runs"))
 	})
 
-	t.Run("UpsertRawVenuePayload rejects unknown parents and excludes secret metadata", func(t *testing.T) {
+	t.Run("UpsertRawVenuePayload supports standalone rows and preserves body refs", func(t *testing.T) {
 		t.Parallel()
 
 		store := makeStore(t, "")
@@ -414,18 +473,19 @@ func TestDatabaseStoreLineage(t *testing.T) {
 		_, err = store.UpsertIngestionRun(t.Context(), run)
 		require.NoError(t, err)
 
+		requestAt := randomTime()
+		responseAt := requestAt.Add(time.Minute)
+		receivedAt := responseAt.Add(time.Minute)
+
 		payload, err := NewRawVenuePayload(RawVenuePayloadParams{
-			ID:             randomWord("raw-payload"),
-			IngestionRunID: run.ID,
-			Source:         randomWord("source"),
-			Venue:          domain.Venue(randomWord("venue")),
-			ContentType:    "application/json",
-			Body:           []byte(`{"first":true}`),
-			Checksum:       randomWord("checksum"),
-			ReceivedAt:     randomTime(),
-			RequestKey:     randomWord("request-key"),
-			SourceRecordID: randomWord("source-record"),
-			Metadata: map[string]string{
+			ID:                 randomWord("raw-payload"),
+			IngestionRunID:     run.ID,
+			Source:             randomWord("source"),
+			Venue:              domain.Venue(randomWord("venue")),
+			Endpoint:           "/info",
+			RequestType:        randomWord("request-type"),
+			RequestPayloadHash: randomWord("request-hash"),
+			RequestMetadata: map[string]string{
 				"Authorization":         randomWord("auth"),
 				"cookie":                randomWord("cookie"),
 				"x-api-key":             randomWord("api-key"),
@@ -433,42 +493,63 @@ func TestDatabaseStoreLineage(t *testing.T) {
 				"safe-request-id":       randomWord("request-id"),
 				"safe-response-version": randomWord("version"),
 			},
+			RequestAt:        requestAt,
+			ResponseAt:       responseAt,
+			HTTPStatus:       200,
+			ResponseBodyHash: randomWord("body-hash"),
+			PayloadBodyRef:   randomWord("body-ref"),
+			EntityHint:       randomWord("entity-hint"),
+			ReceivedAt:       receivedAt,
 		})
 		require.NoError(t, err)
 
 		persisted, err := store.UpsertRawVenuePayload(t.Context(), payload)
 		require.NoError(t, err)
 		require.Equal(t, time.UTC, persisted.ReceivedAt.Location())
-		require.Contains(t, persisted.Metadata, "safe-request-id")
-		require.NotContains(t, persisted.Metadata, "Authorization")
-		require.NotContains(t, persisted.Metadata, "cookie")
-		require.NotContains(t, persisted.Metadata, "x-api-key")
-		require.NotContains(t, persisted.Metadata, "response-signature")
+		require.Contains(t, persisted.RequestMetadata, "safe-request-id")
+		require.NotContains(t, persisted.RequestMetadata, "Authorization")
+		require.NotContains(t, persisted.RequestMetadata, "cookie")
+		require.NotContains(t, persisted.RequestMetadata, "x-api-key")
+		require.NotContains(t, persisted.RequestMetadata, "response-signature")
+		require.Empty(t, persisted.ResponseBody)
 
 		updated, err := NewRawVenuePayload(RawVenuePayloadParams{
-			ID:             payload.ID,
-			IngestionRunID: payload.IngestionRunID,
-			Source:         payload.Source,
-			Venue:          payload.Venue,
-			ContentType:    payload.ContentType,
-			Body:           []byte(`{"first":false,"second":true}`),
-			Checksum:       randomWord("checksum"),
-			ReceivedAt:     payload.ReceivedAt.Add(time.Minute),
-			RequestKey:     payload.RequestKey,
-			SourceRecordID: payload.SourceRecordID,
-			Metadata: map[string]string{
-				"safe-request-id": payload.Metadata["safe-request-id"],
+			ID:                 payload.ID,
+			IngestionRunID:     payload.IngestionRunID,
+			Source:             payload.Source,
+			Venue:              payload.Venue,
+			Endpoint:           payload.Endpoint,
+			RequestType:        payload.RequestType,
+			RequestPayloadHash: payload.RequestPayloadHash,
+			RequestMetadata: map[string]string{
+				"safe-request-id": payload.RequestMetadata["safe-request-id"],
 			},
+			RequestAt:        payload.RequestAt.Add(time.Minute),
+			ResponseAt:       payload.ResponseAt.Add(2 * time.Minute),
+			HTTPStatus:       503,
+			ResponseBodyHash: randomWord("new-body-hash"),
+			PayloadBodyRef:   randomWord("new-body-ref"),
+			EntityHint:       payload.EntityHint,
+			ReceivedAt:       payload.ReceivedAt.Add(3 * time.Minute),
 		})
 		require.NoError(t, err)
 
 		persistedUpdated, err := store.UpsertRawVenuePayload(t.Context(), updated)
 		require.NoError(t, err)
-		require.Equal(t, updated, persistedUpdated)
+		require.Equal(t, payload.PayloadBodyRef, persistedUpdated.PayloadBodyRef)
+		require.Equal(t, payload.ResponseBodyHash, persistedUpdated.ResponseBodyHash)
+		require.Equal(t, updated.HTTPStatus, persistedUpdated.HTTPStatus)
 		require.Equal(t, int64(1), readCount(t, store, "raw_venue_payloads"))
 
+		standalonePayload := makeRawVenuePayload(t, "")
+		persistedStandalone, err := store.UpsertRawVenuePayload(t.Context(), standalonePayload)
+		require.NoError(t, err)
+		require.Empty(t, persistedStandalone.IngestionRunID)
+
 		var row struct {
-			MetadataJSON string `gorm:"column:metadata_json"`
+			RequestMetadataJSON string `gorm:"column:request_metadata_json"`
+			PayloadBodyRef      string `gorm:"column:payload_body_ref"`
+			ResponseBodyHash    string `gorm:"column:response_body_hash"`
 		}
 		require.NoError(
 			t,
@@ -477,11 +558,13 @@ func TestDatabaseStoreLineage(t *testing.T) {
 				Where("id = ?", payload.ID).
 				First(&row).Error,
 		)
-		require.Contains(t, row.MetadataJSON, "safe-request-id")
-		require.NotContains(t, row.MetadataJSON, "Authorization")
-		require.NotContains(t, row.MetadataJSON, "cookie")
-		require.NotContains(t, row.MetadataJSON, "api-key")
-		require.NotContains(t, row.MetadataJSON, "signature")
+		require.Contains(t, row.RequestMetadataJSON, "safe-request-id")
+		require.NotContains(t, row.RequestMetadataJSON, "Authorization")
+		require.NotContains(t, row.RequestMetadataJSON, "cookie")
+		require.NotContains(t, row.RequestMetadataJSON, "api-key")
+		require.NotContains(t, row.RequestMetadataJSON, "signature")
+		require.Equal(t, payload.PayloadBodyRef, row.PayloadBodyRef)
+		require.Equal(t, payload.ResponseBodyHash, row.ResponseBodyHash)
 	})
 
 	t.Run("UpsertNormalizationRun rejects unknown raw payloads and handles duplicate writes", func(t *testing.T) {
@@ -555,41 +638,17 @@ func TestDatabaseStoreLineage(t *testing.T) {
 				laterReceivedAt = receivedAt.Add(2 * time.Minute)
 			}
 
-			payloadLater, err := NewRawVenuePayload(RawVenuePayloadParams{
-				ID:             "z-" + randomWord("payload"),
-				IngestionRunID: runTwo.ID,
-				Source:         randomWord("source"),
-				Venue:          domain.Venue(randomWord("venue")),
-				ContentType:    "application/json",
-				Body:           []byte(`{"later":true}`),
-				Checksum:       randomWord("checksum"),
-				ReceivedAt:     laterReceivedAt,
-			})
-			require.NoError(t, err)
+			payloadLater := makeRawVenuePayload(t, runTwo.ID)
+			payloadLater.ID = "z-" + payloadLater.ID
+			payloadLater.ReceivedAt = laterReceivedAt.UTC()
 
-			payloadSameTimeSecondID, err := NewRawVenuePayload(RawVenuePayloadParams{
-				ID:             "b-" + randomWord("payload"),
-				IngestionRunID: runOne.ID,
-				Source:         randomWord("source"),
-				Venue:          domain.Venue(randomWord("venue")),
-				ContentType:    "application/json",
-				Body:           []byte(`{"same_time_second_id":true}`),
-				Checksum:       randomWord("checksum"),
-				ReceivedAt:     receivedAt,
-			})
-			require.NoError(t, err)
+			payloadSameTimeSecondID := makeRawVenuePayload(t, runOne.ID)
+			payloadSameTimeSecondID.ID = "b-" + payloadSameTimeSecondID.ID
+			payloadSameTimeSecondID.ReceivedAt = receivedAt.UTC()
 
-			payloadSameTimeFirstID, err := NewRawVenuePayload(RawVenuePayloadParams{
-				ID:             "a-" + randomWord("payload"),
-				IngestionRunID: runOne.ID,
-				Source:         randomWord("source"),
-				Venue:          domain.Venue(randomWord("venue")),
-				ContentType:    "application/json",
-				Body:           []byte(`{"same_time_first_id":true}`),
-				Checksum:       randomWord("checksum"),
-				ReceivedAt:     receivedAt,
-			})
-			require.NoError(t, err)
+			payloadSameTimeFirstID := makeRawVenuePayload(t, runOne.ID)
+			payloadSameTimeFirstID.ID = "a-" + payloadSameTimeFirstID.ID
+			payloadSameTimeFirstID.ReceivedAt = receivedAt.UTC()
 
 			for _, payload := range []RawVenuePayload{payloadLater, payloadSameTimeSecondID, payloadSameTimeFirstID} {
 				_, err = store.UpsertRawVenuePayload(t.Context(), payload)
@@ -873,6 +932,73 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			Where("provenance_identity_key = ?", wrongTrade.Provenance.RecordID)
 		require.NoError(t, tradeCountQuery.Count(&tradeCount).Error)
 		require.Zero(t, tradeCount)
+	})
+
+	t.Run("raw payload normalized record links persist and read back stably", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		payloadOne := makeRawVenuePayload(t, run.ID)
+		payloadTwo := makeRawVenuePayload(t, run.ID)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payloadOne)
+		require.NoError(t, err)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payloadTwo)
+		require.NoError(t, err)
+
+		instrument := makeInstrument(t, run.Venue)
+		persistedInstrument, err := store.UpsertInstrument(t.Context(), instrument)
+		require.NoError(t, err)
+
+		start := randomTime().UTC()
+		candleRange, err := domain.NewTimeRange(start, start.Add(time.Minute))
+		require.NoError(t, err)
+		candle := makeCandle(t, persistedInstrument, candleRange)
+		_, err = store.UpsertCandle(t.Context(), candle)
+		require.NoError(t, err)
+
+		trade := makeTrade(t, persistedInstrument, start.Add(time.Second))
+		_, err = store.UpsertTrade(t.Context(), trade)
+		require.NoError(t, err)
+
+		err = store.LinkRawPayloadToInstrument(t.Context(), payloadOne.ID, persistedInstrument)
+		require.NoError(t, err)
+		err = store.LinkRawPayloadToInstrument(t.Context(), payloadTwo.ID, persistedInstrument)
+		require.NoError(t, err)
+		err = store.LinkRawPayloadToInstrument(t.Context(), payloadTwo.ID, persistedInstrument)
+		require.NoError(t, err)
+
+		err = store.LinkRawPayloadToCandle(t.Context(), payloadOne.ID, candle)
+		require.NoError(t, err)
+		err = store.LinkRawPayloadToTrade(t.Context(), payloadTwo.ID, trade)
+		require.NoError(t, err)
+
+		instrumentIDs, err := store.ListInstrumentRawPayloadIDs(t.Context(), persistedInstrument)
+		require.NoError(t, err)
+		require.Equal(t, []string{min(payloadOne.ID, payloadTwo.ID), max(payloadOne.ID, payloadTwo.ID)}, instrumentIDs)
+
+		candleIDs, err := store.ListCandleRawPayloadIDs(t.Context(), candle)
+		require.NoError(t, err)
+		require.Equal(t, []string{payloadOne.ID}, candleIDs)
+
+		tradeIDs, err := store.ListTradeRawPayloadIDs(t.Context(), trade)
+		require.NoError(t, err)
+		require.Equal(t, []string{payloadTwo.ID}, tradeIDs)
+	})
+
+	t.Run("raw payload normalized record links reject unknown raw payload ids", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		instrument := makeInstrument(t, domain.Venue(randomWord("venue")))
+		persistedInstrument, err := store.UpsertInstrument(t.Context(), instrument)
+		require.NoError(t, err)
+
+		err = store.LinkRawPayloadToInstrument(t.Context(), randomWord("missing-payload"), persistedInstrument)
+		require.ErrorIs(t, err, ErrLineageParentNotFound)
 	})
 
 	t.Run("replay by data batch returns stable canonical identities", func(t *testing.T) {

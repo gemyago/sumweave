@@ -88,24 +88,29 @@ func TestLineageRecords(t *testing.T) {
 		t.Run("canonicalizes fields", func(t *testing.T) {
 			t.Parallel()
 
-			receivedAt := randomTime()
+			requestAt := randomTime()
+			responseAt := requestAt.Add(time.Minute)
+			receivedAt := responseAt.Add(time.Minute)
 			payloadBody := []byte("  " + randomWord("body") + "  ")
 			metadata := map[string]string{
 				"  " + randomWord("header") + "  ": "  " + randomWord("value") + "  ",
 			}
 
 			payload, err := NewRawVenuePayload(RawVenuePayloadParams{
-				ID:             "  " + randomWord("payload") + "  ",
-				IngestionRunID: "  " + randomWord("run") + "  ",
-				Source:         "  " + randomWord("source") + "  ",
-				Venue:          domain.Venue("  " + randomWord("venue") + "  "),
-				ContentType:    "  application/json  ",
-				Body:           payloadBody,
-				Checksum:       "  " + randomWord("checksum") + "  ",
-				ReceivedAt:     receivedAt,
-				RequestKey:     "  " + randomWord("request") + "  ",
-				SourceRecordID: "  " + randomWord("record") + "  ",
-				Metadata:       metadata,
+				ID:                 "  " + randomWord("payload") + "  ",
+				IngestionRunID:     "  " + randomWord("run") + "  ",
+				Source:             "  " + randomWord("source") + "  ",
+				Venue:              domain.Venue("  " + randomWord("venue") + "  "),
+				Endpoint:           "  /info  ",
+				RequestType:        "  " + randomWord("request") + "  ",
+				RequestPayloadHash: "  " + randomWord("request-hash") + "  ",
+				RequestMetadata:    metadata,
+				RequestAt:          requestAt,
+				ResponseAt:         responseAt,
+				HTTPStatus:         200,
+				ResponseBody:       payloadBody,
+				EntityHint:         "  " + randomWord("entity") + "  ",
+				ReceivedAt:         receivedAt,
 			})
 			require.NoError(t, err)
 
@@ -113,31 +118,38 @@ func TestLineageRecords(t *testing.T) {
 			require.Equal(t, strings.TrimSpace(payload.IngestionRunID), payload.IngestionRunID)
 			require.Equal(t, strings.TrimSpace(payload.Source), payload.Source)
 			require.Equal(t, domain.Venue(strings.TrimSpace(payload.Venue.String())), payload.Venue)
-			require.Equal(t, "application/json", payload.ContentType)
+			require.Equal(t, "/info", payload.Endpoint)
+			require.Equal(t, strings.TrimSpace(payload.RequestType), payload.RequestType)
+			require.Equal(t, strings.TrimSpace(payload.RequestPayloadHash), payload.RequestPayloadHash)
+			require.Equal(t, requestAt.UTC(), payload.RequestAt)
+			require.Equal(t, responseAt.UTC(), payload.ResponseAt)
 			require.Equal(t, receivedAt.UTC(), payload.ReceivedAt)
-			require.Equal(t, strings.TrimSpace(payload.RequestKey), payload.RequestKey)
-			require.Equal(t, strings.TrimSpace(payload.SourceRecordID), payload.SourceRecordID)
-			require.Len(t, payload.Metadata, 1)
-			for key, value := range payload.Metadata {
+			require.Equal(t, strings.TrimSpace(payload.EntityHint), payload.EntityHint)
+			require.Len(t, payload.RequestMetadata, 1)
+			for key, value := range payload.RequestMetadata {
 				require.Equal(t, strings.TrimSpace(key), key)
 				require.Equal(t, strings.TrimSpace(value), value)
 			}
 
 			payloadBody[0] = 'x'
-			require.NotEqual(t, payloadBody, payload.Body)
+			require.NotEqual(t, payloadBody, payload.ResponseBody)
 		})
 
-		t.Run("rejects missing parent identity", func(t *testing.T) {
+		t.Run("rejects missing request payload hash", func(t *testing.T) {
 			t.Parallel()
 
+			requestAt := randomTime()
 			_, err := NewRawVenuePayload(RawVenuePayloadParams{
-				ID:          randomWord("payload"),
-				Source:      randomWord("source"),
-				Venue:       domain.Venue(randomWord("venue")),
-				ContentType: "application/json",
-				Body:        []byte(randomWord("body")),
-				Checksum:    randomWord("checksum"),
-				ReceivedAt:  randomTime(),
+				ID:           randomWord("payload"),
+				Source:       randomWord("source"),
+				Venue:        domain.Venue(randomWord("venue")),
+				Endpoint:     "/info",
+				RequestType:  randomWord("request"),
+				RequestAt:    requestAt,
+				ResponseAt:   requestAt.Add(time.Minute),
+				HTTPStatus:   200,
+				ResponseBody: []byte(randomWord("body")),
+				ReceivedAt:   requestAt.Add(2 * time.Minute),
 			})
 			require.ErrorIs(t, err, ErrValidation)
 		})

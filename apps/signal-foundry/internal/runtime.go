@@ -12,6 +12,7 @@ import (
 	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/httpapi"
+	"github.com/gemyago/signal-foundry/runtime/venueedge"
 	"github.com/gemyago/signal-foundry/tools/skills"
 	"github.com/gemyago/signal-foundry/tools/workspacefs"
 	"go.uber.org/dig"
@@ -41,9 +42,10 @@ type RuntimeDeps struct {
 	AgentRuntimeDatabaseAutoMigrate bool   `name:"config.agentRuntime.database.autoMigrate"`
 
 	// Data-layer persistence (canonical instruments, candles, trades)
-	DataLayerDatabaseDSN         string `name:"config.dataLayer.database.dsn"`
-	DataLayerDatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
-	DataLayerDatabaseAutoMigrate bool   `name:"config.dataLayer.database.autoMigrate"`
+	DataLayerDatabaseDSN             string `name:"config.dataLayer.database.dsn"`
+	DataLayerDatabaseTablePrefix     string `name:"config.dataLayer.database.tablePrefix"`
+	DataLayerDatabaseAutoMigrate     bool   `name:"config.dataLayer.database.autoMigrate"`
+	DataLayerRawPayloadBlobStorePath string `name:"config.dataLayer.rawPayloadBlobStore.path"`
 
 	// Skills configuration
 	SkillsEnabled           bool     `name:"config.skills.enabled"`
@@ -56,6 +58,7 @@ type RuntimeDeps struct {
 	DataStore            *data.DatabaseStore
 	DataIngestionService *data.IngestionService
 	DataReadService      *data.ReadService
+	DataLineageService   *data.LineageService
 }
 
 type Runtime struct {
@@ -65,6 +68,9 @@ type Runtime struct {
 	DataStore            *data.DatabaseStore
 	DataIngestionService *data.IngestionService
 	DataReadService      *data.ReadService
+	DataLineageService   *data.LineageService
+	VenueIngestionFlow   *venueedge.IngestionFlow
+	HyperliquidRecorder  venueedge.HyperliquidRawEvidenceRecorder
 }
 
 type runtimeServices struct {
@@ -154,8 +160,10 @@ func registerRuntime(container *dig.Container) error {
 		container,
 		agent.NewToolsRegistry,
 		newDataLayerStore,
+		newDataRawPayloadBlobStore,
 		newDataIngestionService,
 		newDataReadService,
+		newDataLineageService,
 		newRuntime,
 	)
 }
@@ -199,6 +207,16 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 	}
 
 	services, err := newRuntimeServices(deps)
+	if err != nil {
+		return nil, err
+	}
+
+	venueIngestionFlow, err := newVenueIngestionFlow(deps.DataIngestionService, deps.DataLineageService)
+	if err != nil {
+		return nil, err
+	}
+
+	hyperliquidRecorder, err := newHyperliquidRawEvidenceRecorder(deps.DataLineageService)
 	if err != nil {
 		return nil, err
 	}
@@ -270,5 +288,8 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 		DataStore:            deps.DataStore,
 		DataIngestionService: deps.DataIngestionService,
 		DataReadService:      deps.DataReadService,
+		DataLineageService:   deps.DataLineageService,
+		VenueIngestionFlow:   venueIngestionFlow,
+		HyperliquidRecorder:  hyperliquidRecorder,
 	}, nil
 }
