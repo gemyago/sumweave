@@ -269,6 +269,7 @@ Each appended round must include:
 4. If an existing change was provided and auto-detection says plan artifacts already exist, skip `openspec propose` and start at step 5.
 5. Otherwise spawn the planning sub-agent.
   - If task details are in form of a Notion ticket or some other document/url, pass the document/url to the planning sub-agent, do not interpret it yourself.
+  - No need to split initial planning into chunks. Planning sub-agents are smart enough to handle even complex planning work.
 6. Once the OpenSpec directory is known, create/update `manager-status.md` and initialize standard review files as needed.
 7. Spawn the plan-reviewing sub-agent.
 8. Append the planning review to `review-planning.md`.
