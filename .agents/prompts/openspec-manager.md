@@ -90,6 +90,8 @@ The user may provide either:
 
 If resuming, start from the requested phase only if the required earlier outputs are available in context, in repository artifacts, or from explicit user input.
 
+If you can not fetch or read task details (e.g notion reading fails), this must be considered a **hard failure** and reported to the user to fix the issue.
+
 ## Existing-change auto-detection
 
 When the user gives an existing OpenSpec change/spec slug without explicitly saying which phase to resume from, inspect only the minimum OpenSpec artifacts needed to classify the state.
@@ -266,6 +268,7 @@ Each appended round must include:
 3. Read `openspec-manager.yaml` if it exists.
 4. If an existing change was provided and auto-detection says plan artifacts already exist, skip `openspec propose` and start at step 5.
 5. Otherwise spawn the planning sub-agent.
+  - If task details are in form of a Notion ticket or some other document/url, pass the document/url to the planning sub-agent, do not interpret it yourself.
 6. Once the OpenSpec directory is known, create/update `manager-status.md` and initialize standard review files as needed.
 7. Spawn the plan-reviewing sub-agent.
 8. Append the planning review to `review-planning.md`.
