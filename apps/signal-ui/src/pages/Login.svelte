@@ -2,6 +2,7 @@
   import { push } from 'svelte-spa-router'
   import { loginApi } from '../lib/auth/auth-api'
   import { authStore } from '../lib/auth/auth-store.svelte'
+  import { resolvePostLoginDestination } from '../lib/routing/post-login-destination'
 
   let username = $state('')
   let password = $state('')
@@ -15,7 +16,7 @@
     try {
       const res = await loginApi({ username, password })
       authStore.setAuth(res.accessToken, res.refreshToken, res.user)
-      push('/chat')
+      push(resolvePostLoginDestination())
     } catch {
       error = 'Invalid username or password.'
     } finally {

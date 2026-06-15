@@ -8,10 +8,25 @@
     "type": "git",
     "url": "https://github.com/gemyago/signal-foundry.git"
   },
+  "scripts": {
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js",
+    "pm2:delete": "pm2 delete ecosystem.config.js",
+    "pm2:status": "pm2 status",
+    "pm2:logs": "pm2 logs",
+    "pm2:start:api": "pm2 start ecosystem.config.js --only signal-foundry-api",
+    "pm2:start:ui": "pm2 start ecosystem.config.js --only signal-foundry-ui",
+    "pm2:stop:api": "pm2 stop signal-foundry-api",
+    "pm2:stop:ui": "pm2 stop signal-foundry-ui",
+    "pm2:restart:api": "pm2 restart signal-foundry-api",
+    "pm2:restart:ui": "pm2 restart signal-foundry-ui"
+  },
   "devDependencies": {
     "@fission-ai/openspec": "^1.4.1",
     "@nx-go/nx-go": "4.0.0-beta.0",
-    "nx": "22.6.4"
+    "nx": "22.6.4",
+    "pm2": "^7.0.1"
   },
   "nx": {}
 }

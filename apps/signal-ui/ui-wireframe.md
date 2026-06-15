@@ -37,7 +37,7 @@
 **Route guarding**
 
 - `/chat`, `/data`, and `/providers`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
-- If `authStore.isAuthenticated` is false: `conditionsFailed` → `replace('/login')`.
+- If `authStore.isAuthenticated` is false: `conditionsFailed` stores the requested protected route and then `replace('/login')`.
 - `/login` is public.
 - Nav is hidden when unauthenticated.
 
@@ -47,10 +47,10 @@
 
 | Path | Behavior |
 | :--- | :--- |
-| `/` | `replace('/chat')` on mount; brief status text. |
-| `/login` | Login page; username + password form. On success, sets auth tokens and `push('/chat')`. On failure, shows inline error alert. |
+| `/` | `replace('/data')` on mount; brief status text. |
+| `/login` | Login page; username + password form. On success, sets auth tokens and `push()`es the remembered protected destination or `/data`. On failure, shows inline error alert. |
 | `/chat/:sessionId?` | Chat; optional id in URL after `sessionBound` (`replace`). One route entry so binding the id does not remount the page or abort the stream. |
-| `/data` | Historical data browser. Protected (auth required). Explicit Load only; no initial auto-query. |
+| `/data` | Historical data browser. Protected (auth required). Browse-first availability loads on open, then exact candle reads stay editable. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
 
 ---
@@ -140,46 +140,58 @@
 **Layout**
 
 - Header: **Historical data** heading + short explanatory copy.
-- Filter form before results, with fields for **venue**, **symbol**, **asset class**, **timeframe**, **UTC start**, **UTC end**, and optional **ingestion run ID**.
-- Results below the form in this order:
-  - summary card (**N normalized candles**, **N raw payload rows**)
-  - normalized candle panel (chart + reliable selection table)
-  - raw payload metadata panel (table + row detail action)
+- Availability panel first, listing available normalized candle entries as **venue + symbol + asset class** cards/buttons.
+- Each availability entry shows:
+  - nested timeframe summaries (**timeframe**, **count**, **start/end range**)
+  - that entry’s deterministic **default slice** (**timeframe**, **start**, **end**)
+- Filter form remains available below availability, with fields for **venue**, **symbol**, **asset class**, **timeframe**, **UTC start**, **UTC end**, and optional **ingestion run ID**.
+- Results below the form in this order once a candle scope exists:
+  - summary cards (**N normalized candles**, raw payload metadata loaded/not loaded, selected candle status, selected availability entry when present)
+  - full-width normalized candle panel (chart + reliable selection table + visible selected-candle banner)
   - linked raw evidence panel for the selected candle
-- Raw payload detail opens in a right-side drawer-like panel with dialog semantics and a close button.
+  - raw payload metadata panel (explicit secondary load + table + row detail action)
+- Raw payload detail opens in a centered large dialog panel with dialog semantics, close button, copy actions, and an explicit note when only a bounded preview is available.
 
 **Behavior**
 
 - Route is protected; unauthenticated users are redirected to `/login` using the same guard behavior as other protected routes.
-- Initial render shows only the filter form and explanatory copy; the page MUST NOT call data APIs automatically.
-- **Load** validates required filters client-side before calling APIs.
+- Initial render calls `GET /api/v1/data/candle-availability` for the first page.
+- If the availability endpoint returns `404 Not Found`, the page shows a non-alert note that points to a likely stale/older backend mismatch and keeps the manual exact candle form fully usable.
+- When the first availability page includes `defaultSelection`, the page immediately calls `GET /api/v1/data/candles` with that exact **venue**, **symbol**, **assetClass**, **timeframe**, **start**, and **end**.
+- If availability is empty, the page shows an empty state and MUST NOT guess candle filters or call the candle endpoint.
+- Selecting an availability entry uses that item’s per-entry `defaultSlice`, updates the filter form to match, and loads normalized candles for that exact slice.
+- Manual **Load candles** validates required filters client-side before calling `GET /api/v1/data/candles`.
 - Client-side validation covers:
   - missing required fields
   - invalid ISO-8601 UTC timestamps for start/end
   - `start >= end`
   - the documented 10,000-interval cap using the selected timeframe (matching the server rule and message)
-- Successful Load calls both:
-  - `GET /api/v1/data/candles`
-  - `GET /api/v1/data/raw-payloads`
-- Each valid Load starts a new request scope, clears prior summary/table results immediately, and only applies responses from the latest submitted filter set.
-- Both calls use the authenticated app fetch wrapper (Bearer + refresh flow), not anonymous fetches.
-- Load stays disabled while either request is in flight.
+- Each valid candle load starts a new candle-scope request, clears prior candle-linked evidence and broad raw metadata results immediately, and only applies responses from the latest submitted scope.
+- All data calls use the authenticated app fetch wrapper (Bearer + refresh flow), not anonymous fetches.
 - Candle chart renders persisted normalized candle OHLC values only; it does not synthesize missing intervals.
-- Reliable v0 candle selection happens from the candle table. Selecting a row calls `GET /api/v1/data/candle-raw-payloads` with that candle’s `provenanceSource` and `provenanceIdentity`.
-- Selecting a raw payload metadata row calls `GET /api/v1/data/raw-payloads/{id}` and opens the detail drawer with bounded preview metadata.
+- The first returned candle row is selected automatically when available, and the page calls `GET /api/v1/data/candle-raw-payloads` with that candle’s `provenanceSource` and `provenanceIdentity`.
+- Selecting a different candle row reloads linked evidence through the same provenance-based endpoint and updates visible selected state beyond the row highlight (selected button/banner/summary).
+- Broad `GET /api/v1/data/raw-payloads` browsing is explicit and secondary:
+  - it does **not** run on initial browse-first availability/default-candle load
+  - it runs only when the user clicks **Load raw payload metadata** for the current candle scope
+- Selecting a raw payload metadata row calls `GET /api/v1/data/raw-payloads/{id}` and opens the detail dialog with bounded preview metadata, copy actions, and explicit guidance when the backend only exposes a preview/body ref instead of the full payload.
 
 | State | When | UI |
 | :--- | :--- | :--- |
-| Initial | First render | Filter form + explanatory copy only; no summary/chart/tables yet. |
-| Validation error | Required field missing, invalid UTC range, or selected range exceeds 10,000 intervals | Inline alert semantics above results; **Load** does not call APIs. |
-| Loading | Load submitted with valid filters | **Load** disabled; status text shown while candle/raw metadata requests are pending; summary/tables reflect only the in-flight filter set (no stale prior results). |
+| Availability loading | First render | Availability panel shows loading status while the first page loads. |
+| Availability compatibility fallback | Availability endpoint returns `404 Not Found` | Non-alert note explains this is usually a stale/older backend mismatch and manual exact candle reads remain available. |
+| Availability empty | Availability response has no items | Availability empty message; form stays editable; no guessed candle scope. |
+| Availability default scope loading | First availability page includes `defaultSelection` | Availability list renders; matching entry selected; normalized candle status shown while the exact default slice loads. |
+| Validation error | Required field missing, invalid UTC range, or selected range exceeds 10,000 intervals | Inline alert semantics above results; **Load candles** does not call APIs. |
 | Candle empty | Candle response has no items | "No normalized candles matched these filters." |
-| Raw payload empty | Raw payload response has no items | "No raw payload metadata matched these filters." |
+| Raw payload idle | Candle scope exists, but explicit raw browsing not requested yet | Prompt explains that broad raw payload metadata is optional and secondary. |
+| Raw payload loading | User clicked **Load raw payload metadata** | Explicit raw metadata status shown; button disabled while in flight. |
+| Raw payload empty | Explicit raw payload response has no items | "No raw payload metadata matched these filters." |
 | API error | Any data API request fails | Error copy uses alert semantics; unrelated successful data stays visible. |
 | Linked evidence idle | No candle selected yet | Prompt tells the user to select a normalized candle row. |
 | Linked evidence loading | Candle selected, linked evidence request in flight | Loading status in linked evidence panel. |
 | Linked evidence empty | Candle selected, no linked payloads | Empty evidence message (not an error). |
-| Detail drawer | Raw payload row selected | Dialog-like side panel with metadata, hashes, body ref, instrument/timeframe/range hints, preview byte count, truncation flag, and bounded preview body. |
+| Detail dialog | Raw payload row selected | Large dialog-like panel with metadata, hashes, body ref, instrument/timeframe/range hints, body byte count, truncation flag, bounded preview body, copy actions, and explicit preview/full-body guidance. |
 
 **A11y**
 

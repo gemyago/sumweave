@@ -54,15 +54,30 @@ func (s *fakeInstrumentStore) LookupInstrument(
 }
 
 type fakeCandleStore struct {
-	upserted     []domain.Candle
-	batchUpserts []batchCandleUpsertCall
-	queried      []candleQueryCall
-	replayed     []candleQueryCall
-	queryValue   []domain.Candle
-	replayValue  []ReplayCandle
-	upsertErr    error
-	queryErr     error
-	replayErr    error
+	availabilityQueried []CandleAvailabilityListQuery
+	availabilityValue   CandleAvailabilityListResult
+	upserted            []domain.Candle
+	batchUpserts        []batchCandleUpsertCall
+	queried             []candleQueryCall
+	replayed            []candleQueryCall
+	queryValue          []domain.Candle
+	replayValue         []ReplayCandle
+	availabilityErr     error
+	upsertErr           error
+	queryErr            error
+	replayErr           error
+}
+
+func (s *fakeCandleStore) ListCandleAvailability(
+	_ context.Context,
+	query CandleAvailabilityListQuery,
+) (CandleAvailabilityListResult, error) {
+	s.availabilityQueried = append(s.availabilityQueried, query)
+	if s.availabilityErr != nil {
+		return CandleAvailabilityListResult{}, s.availabilityErr
+	}
+
+	return s.availabilityValue, nil
 }
 
 func (s *fakeCandleStore) UpsertCandle(
@@ -659,6 +674,66 @@ func TestServices(t *testing.T) {
 			require.Equal(t, expectedRange, deps.candleStore.queried[0].timeRange)
 		})
 
+		t.Run("delegates candle availability reads with canonical filters", func(t *testing.T) {
+			t.Parallel()
+
+			deps := makeMockDeps()
+			start := randomTime().UTC().Truncate(time.Minute)
+			deps.candleStore.availabilityValue = CandleAvailabilityListResult{
+				Items: []CandleAvailabilityItem{{
+					Venue:      domain.Venue(randomWord("venue")),
+					Symbol:     domain.Symbol(strings.ToUpper(randomWord("symbol"))),
+					AssetClass: domain.AssetClassCrypto,
+					Timeframes: []CandleAvailabilityTimeframeSummary{{
+						Timeframe: domain.Timeframe1m,
+						StartAt:   start,
+						EndAt:     start.Add(time.Minute),
+						Count:     1,
+					}},
+					DefaultSlice: CandleAvailabilityDefaultSlice{
+						Timeframe: domain.Timeframe1m,
+						StartAt:   start,
+						EndAt:     start.Add(time.Minute),
+					},
+				}},
+			}
+
+			readSvc, err := NewReadService(ReadServiceDeps{
+				InstrumentStore: deps.instrumentStore,
+				CandleStore:     deps.candleStore,
+				TradeStore:      deps.tradeStore,
+			})
+			require.NoError(t, err)
+
+			result, err := readSvc.ListCandleAvailability(t.Context(), CandleAvailabilityListQuery{
+				Venue:      domain.Venue("  " + randomWord("venue") + "  "),
+				Symbol:     domain.Symbol("  " + strings.ToUpper(randomWord("symbol")) + "  "),
+				AssetClass: domain.AssetClass("  CRYPTO  "),
+				Limit:      1,
+				Cursor: encodeCandleAvailabilityListCursor(
+					start.Add(2*time.Minute),
+					domain.Venue(randomWord("cursor-venue")),
+					domain.Symbol(strings.ToUpper(randomWord("cursor-symbol"))),
+					domain.AssetClassCrypto,
+				),
+			})
+			require.NoError(t, err)
+			require.Equal(t, deps.candleStore.availabilityValue, result)
+			require.Len(t, deps.candleStore.availabilityQueried, 1)
+			require.Equal(t, 1, deps.candleStore.availabilityQueried[0].Limit)
+			require.Equal(
+				t,
+				strings.TrimSpace(deps.candleStore.availabilityQueried[0].Venue.String()),
+				deps.candleStore.availabilityQueried[0].Venue.String(),
+			)
+			require.Equal(
+				t,
+				strings.TrimSpace(deps.candleStore.availabilityQueried[0].Symbol.String()),
+				deps.candleStore.availabilityQueried[0].Symbol.String(),
+			)
+			require.Equal(t, domain.AssetClassCrypto, deps.candleStore.availabilityQueried[0].AssetClass)
+		})
+
 		t.Run("queries trades with normalized half-open inputs", func(t *testing.T) {
 			t.Parallel()
 
@@ -833,6 +908,13 @@ func TestServices(t *testing.T) {
 				run  func(*ReadService) error
 			}{
 				{
+					name: "list candle availability invalid limit",
+					run: func(svc *ReadService) error {
+						_, err := svc.ListCandleAvailability(t.Context(), CandleAvailabilityListQuery{Limit: -1})
+						return err
+					},
+				},
+				{
 					name: "query candles missing instrument venue",
 					run: func(svc *ReadService) error {
 						_, err := svc.QueryCandles(
@@ -905,6 +987,7 @@ func TestServices(t *testing.T) {
 					require.Error(t, err)
 					require.ErrorIs(t, err, ErrValidation)
 					require.Empty(t, deps.candleStore.queried)
+					require.Empty(t, deps.candleStore.availabilityQueried)
 					require.Empty(t, deps.candleStore.replayed)
 					require.Empty(t, deps.tradeStore.queried)
 					require.Empty(t, deps.tradeStore.replayed)

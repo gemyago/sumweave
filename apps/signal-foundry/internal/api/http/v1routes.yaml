@@ -149,6 +149,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/data/candle-availability:
+    get:
+      summary: Browse persisted normalized candle availability
+      operationId: listDataCandleAvailability
+      tags:
+        - data
+      parameters:
+        - in: query
+          name: venue
+          schema:
+            type: string
+        - in: query
+          name: symbol
+          schema:
+            type: string
+        - in: query
+          name: assetClass
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int64
+            default: 50
+            minimum: 1
+            maximum: 200
+        - in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Persisted candle availability page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandleAvailabilityListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/v1/data/raw-payloads:
     get:
       summary: Browse raw payload metadata
@@ -427,6 +471,98 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DataCandle"
+    CandleAvailabilityTimeframeSummary:
+      type: object
+      required:
+        - timeframe
+        - start
+        - end
+        - count
+      properties:
+        timeframe:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        count:
+          type: integer
+          format: int64
+    CandleAvailabilityDefaultSlice:
+      type: object
+      required:
+        - timeframe
+        - start
+        - end
+      properties:
+        timeframe:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    CandleAvailabilityItem:
+      type: object
+      required:
+        - venue
+        - symbol
+        - assetClass
+        - timeframes
+        - defaultSlice
+      properties:
+        venue:
+          type: string
+        symbol:
+          type: string
+        assetClass:
+          type: string
+        timeframes:
+          type: array
+          items:
+            $ref: "#/components/schemas/CandleAvailabilityTimeframeSummary"
+        defaultSlice:
+          $ref: "#/components/schemas/CandleAvailabilityDefaultSlice"
+    CandleAvailabilityDefaultSelection:
+      type: object
+      required:
+        - venue
+        - symbol
+        - assetClass
+        - timeframe
+        - start
+        - end
+      properties:
+        venue:
+          type: string
+        symbol:
+          type: string
+        assetClass:
+          type: string
+        timeframe:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    CandleAvailabilityListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CandleAvailabilityItem"
+        nextCursor:
+          type: string
+        defaultSelection:
+          $ref: "#/components/schemas/CandleAvailabilityDefaultSelection"
     RawPayloadMetadata:
       type: object
       required:

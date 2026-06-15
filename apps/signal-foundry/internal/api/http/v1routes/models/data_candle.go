@@ -19,8 +19,8 @@ type DataCandle struct {
 	Symbol string `json:"symbol"`
 	AssetClass string `json:"assetClass"`
 	Timeframe string `json:"timeframe"`
-	Start time.Time `json:"start"`
-	End time.Time `json:"end"`
+	Start *time.Time `json:"start"`
+	End *time.Time `json:"end"`
 	Open float64 `json:"open"`
 	High float64 `json:"high"`
 	Low float64 `json:"low"`

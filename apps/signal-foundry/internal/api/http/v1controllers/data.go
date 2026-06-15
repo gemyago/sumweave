@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware"
@@ -21,7 +23,19 @@ const maxCandleIntervals = 10_000
 
 const supportedHistoricalDataVenue = "hyperliquid-perps"
 
+const (
+	queryParamAssetClass = "assetClass"
+	queryParamCursor     = "cursor"
+	queryParamLimit      = "limit"
+	queryParamSymbol     = "symbol"
+	queryParamVenue      = "venue"
+)
+
 type replayReadService interface {
+	ListCandleAvailability(
+		ctx context.Context,
+		query data.CandleAvailabilityListQuery,
+	) (data.CandleAvailabilityListResult, error)
 	ReplayCandles(
 		ctx context.Context,
 		instrument domain.Instrument,
@@ -83,6 +97,52 @@ func (c *DataController) GetDataRawPayload(
 			ResponseBodyPreview:          string(detail.ResponseBodyPreview),
 			ResponseBodyPreviewTruncated: detail.ResponseBodyPreviewTruncated,
 		}, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *DataController) ListDataCandleAvailability(
+	builder handlers.HandlerBuilder[
+		*models.ListDataCandleAvailabilityParams,
+		*models.CandleAvailabilityListResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWithHTTP(func(
+		_ http.ResponseWriter,
+		req *http.Request,
+		params *models.ListDataCandleAvailabilityParams,
+	) (*models.CandleAvailabilityListResponse, error) {
+		if err := validateAvailabilityQueryParams(req); err != nil {
+			return nil, err
+		}
+
+		venue, err := validateOptionalSupportedVenue(params.Venue)
+		if err != nil {
+			return nil, err
+		}
+
+		query, err := data.NewCandleAvailabilityListQuery(data.CandleAvailabilityListQueryParams{
+			Venue:      venue,
+			Symbol:     domain.Symbol(params.Symbol),
+			AssetClass: domain.AssetClass(params.AssetClass),
+			Limit:      int(params.Limit),
+			Cursor:     params.Cursor,
+		})
+		if err != nil {
+			return nil, mapDataReadError(err, "candle-availability")
+		}
+
+		result, err := c.deps.ReadService.ListCandleAvailability(req.Context(), query)
+		if err != nil {
+			return nil, mapDataReadError(err, "candle-availability")
+		}
+
+		response := mapCandleAvailabilityListResponse(result)
+		if query.Cursor != "" {
+			response.DefaultSelection = nil
+		}
+		return &response, nil
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -273,6 +333,39 @@ func validateSupportedVenue(raw string) (domain.Venue, error) {
 	return venue, nil
 }
 
+func validateOptionalSupportedVenue(raw string) (domain.Venue, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+
+	return validateSupportedVenue(raw)
+}
+
+func validateAvailabilityQueryParams(req *http.Request) error {
+	allowed := map[string]struct{}{
+		queryParamAssetClass: {},
+		queryParamCursor:     {},
+		queryParamLimit:      {},
+		queryParamSymbol:     {},
+		queryParamVenue:      {},
+	}
+
+	unsupported := make([]string, 0)
+	for key := range req.URL.Query() {
+		if _, ok := allowed[key]; ok {
+			continue
+		}
+		unsupported = append(unsupported, key)
+	}
+
+	if len(unsupported) == 0 {
+		return nil
+	}
+
+	sort.Strings(unsupported)
+	return app.NewErrInvalidInput("query", fmt.Sprintf("unsupported query parameter %q", unsupported[0]))
+}
+
 func timeframeDuration(timeframe domain.Timeframe) (time.Duration, error) {
 	switch timeframe {
 	case domain.Timeframe1m:
@@ -303,8 +396,8 @@ func mapReplayCandle(item data.ReplayCandle) (models.DataCandle, error) {
 		Symbol:             item.Candle.Instrument.Symbol.String(),
 		AssetClass:         item.Candle.Instrument.AssetClass.String(),
 		Timeframe:          item.Candle.Timeframe.String(),
-		Start:              item.Candle.TimeRange.Start,
-		End:                item.Candle.TimeRange.End,
+		Start:              &item.Candle.TimeRange.Start,
+		End:                &item.Candle.TimeRange.End,
 		Open:               item.Candle.Open,
 		High:               item.Candle.High,
 		Low:                item.Candle.Low,
@@ -314,6 +407,79 @@ func mapReplayCandle(item data.ReplayCandle) (models.DataCandle, error) {
 		ProvenanceSource:   item.Candle.Provenance.Source,
 		ProvenanceIDentity: item.Candle.Provenance.RecordID,
 	}, nil
+}
+
+func mapCandleAvailabilityListResponse(
+	result data.CandleAvailabilityListResult,
+) models.CandleAvailabilityListResponse {
+	items := make([]*models.CandleAvailabilityItem, len(result.Items))
+	for i := range result.Items {
+		item := mapCandleAvailabilityItem(result.Items[i])
+		items[i] = &item
+	}
+
+	response := models.CandleAvailabilityListResponse{
+		Items:      items,
+		NextCursor: result.NextCursor,
+	}
+	if result.DefaultSelection != nil {
+		selection := mapCandleAvailabilityDefaultSelection(*result.DefaultSelection)
+		response.DefaultSelection = &selection
+	}
+
+	return response
+}
+
+func mapCandleAvailabilityItem(item data.CandleAvailabilityItem) models.CandleAvailabilityItem {
+	timeframes := make([]*models.CandleAvailabilityTimeframeSummary, len(item.Timeframes))
+	for i := range item.Timeframes {
+		summary := mapCandleAvailabilityTimeframeSummary(item.Timeframes[i])
+		timeframes[i] = &summary
+	}
+
+	defaultSlice := mapCandleAvailabilityDefaultSlice(item.DefaultSlice)
+
+	return models.CandleAvailabilityItem{
+		Venue:        item.Venue.String(),
+		Symbol:       item.Symbol.String(),
+		AssetClass:   item.AssetClass.String(),
+		Timeframes:   timeframes,
+		DefaultSlice: &defaultSlice,
+	}
+}
+
+func mapCandleAvailabilityTimeframeSummary(
+	item data.CandleAvailabilityTimeframeSummary,
+) models.CandleAvailabilityTimeframeSummary {
+	return models.CandleAvailabilityTimeframeSummary{
+		Timeframe: item.Timeframe.String(),
+		Start:     item.StartAt,
+		End:       item.EndAt,
+		Count:     item.Count,
+	}
+}
+
+func mapCandleAvailabilityDefaultSlice(
+	item data.CandleAvailabilityDefaultSlice,
+) models.CandleAvailabilityDefaultSlice {
+	return models.CandleAvailabilityDefaultSlice{
+		Timeframe: item.Timeframe.String(),
+		Start:     item.StartAt,
+		End:       item.EndAt,
+	}
+}
+
+func mapCandleAvailabilityDefaultSelection(
+	item data.CandleAvailabilityDefaultSelection,
+) models.CandleAvailabilityDefaultSelection {
+	return models.CandleAvailabilityDefaultSelection{
+		Venue:      item.Venue.String(),
+		Symbol:     item.Symbol.String(),
+		AssetClass: item.AssetClass.String(),
+		Timeframe:  item.Timeframe.String(),
+		Start:      item.StartAt,
+		End:        item.EndAt,
+	}
 }
 
 func mapRawPayloadMetadata(item data.RawPayloadMetadata) models.RawPayloadMetadata {

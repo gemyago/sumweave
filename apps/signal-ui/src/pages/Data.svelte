@@ -1,11 +1,16 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import DataCandlestickChart from '../components/DataCandlestickChart.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { toChartCandleRows } from '../lib/data/charting'
   import {
     createSignalDataApiForAuth,
+    type CandleAvailabilityDefaultSelection,
+    type CandleAvailabilityItem,
+    DataApiError,
     type DataCandle,
     type DataTimeframe,
+    type ListDataCandlesParams,
     type RawPayloadDetailResponse,
     type RawPayloadMetadata,
   } from '../lib/data/data-api'
@@ -36,14 +41,25 @@
   let ingestionRunId = $state('')
 
   let validationErrors = $state<string[]>([])
-  let hasSubmitted = $state(false)
-  let loading = $state(false)
+
+  let availabilityItems = $state<CandleAvailabilityItem[]>([])
+  let availabilityLoading = $state(true)
+  let availabilityError = $state<string | null>(null)
+  let availabilityCompatibilityNote = $state<string | null>(null)
+  let selectedAvailabilityKey = $state<string | null>(null)
+  let availabilityRequestToken = 0
 
   let candles = $state<DataCandle[]>([])
-  let rawPayloads = $state<RawPayloadMetadata[]>([])
+  let candlesLoading = $state(false)
   let candlesError = $state<string | null>(null)
+  let candlesRequestToken = 0
+  let currentScope = $state<ListDataCandlesParams | null>(null)
+
+  let rawPayloads = $state<RawPayloadMetadata[]>([])
+  let rawPayloadsLoading = $state(false)
+  let rawPayloadsLoaded = $state(false)
   let rawPayloadsError = $state<string | null>(null)
-  let searchRequestToken = 0
+  let rawPayloadsRequestToken = 0
 
   let selectedCandleIdentity = $state<number | null>(null)
   let linkedEvidence = $state<RawPayloadMetadata[]>([])
@@ -54,6 +70,7 @@
   let detailDrawerOpen = $state(false)
   let detailLoading = $state(false)
   let detailError = $state<string | null>(null)
+  let detailFeedback = $state<string | null>(null)
   let selectedRawPayloadId = $state<string | null>(null)
   let rawPayloadDetail = $state<RawPayloadDetailResponse | null>(null)
   let detailRequestToken = 0
@@ -64,6 +81,53 @@
       ? null
       : candles.find((candle) => candle.identity === selectedCandleIdentity) ?? null,
   )
+  const selectedAvailability = $derived(
+    selectedAvailabilityKey === null
+      ? null
+      : availabilityItems.find((item) => availabilityKey(item) === selectedAvailabilityKey) ?? null,
+  )
+
+  onMount(() => {
+    void loadAvailability()
+  })
+
+  async function loadAvailability() {
+    const requestToken = ++availabilityRequestToken
+    availabilityLoading = true
+    availabilityError = null
+    availabilityCompatibilityNote = null
+
+    try {
+      const response = await dataApi.listCandleAvailability({})
+      if (requestToken !== availabilityRequestToken) {
+        return
+      }
+
+      availabilityItems = response.items
+
+      if (response.defaultSelection) {
+        const defaultKey = availabilityKeyFromSelection(response.defaultSelection)
+        selectedAvailabilityKey = defaultKey
+        void loadCandlesForScope(mapDefaultSelectionToScope(response.defaultSelection), defaultKey)
+      }
+    } catch (error) {
+      if (requestToken !== availabilityRequestToken) {
+        return
+      }
+      availabilityItems = []
+      if (error instanceof DataApiError && error.status === 404) {
+        availabilityCompatibilityNote =
+          'Browse-first availability returned 404. This usually means the UI is pointed at an older or stale backend process. You can still use the manual exact candle form below.'
+      } else {
+        availabilityError =
+          error instanceof Error ? error.message : 'Failed to load candle availability'
+      }
+    } finally {
+      if (requestToken === availabilityRequestToken) {
+        availabilityLoading = false
+      }
+    }
+  }
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault()
@@ -73,63 +137,94 @@
       return
     }
 
-    hasSubmitted = true
-    const requestToken = ++searchRequestToken
-    loading = true
-    candles = []
-    rawPayloads = []
+    const scope = {
+      venue: venue.trim(),
+      symbol: symbol.trim(),
+      assetClass: assetClass.trim(),
+      timeframe: timeframe.trim(),
+      start: parsed.start,
+      end: parsed.end,
+    }
+
+    await loadCandlesForScope(scope, findAvailabilityKeyForScope(scope))
+  }
+
+  async function handleAvailabilitySelection(item: CandleAvailabilityItem) {
+    const scope = mapAvailabilityItemToScope(item)
+    const key = availabilityKey(item)
+    validationErrors = []
+    selectedAvailabilityKey = key
+    await loadCandlesForScope(scope, key)
+  }
+
+  async function loadCandlesForScope(scope: ListDataCandlesParams, availabilityKeyValue: string | null) {
+    const requestToken = ++candlesRequestToken
+    candlesLoading = true
     candlesError = null
-    rawPayloadsError = null
-    selectedCandleIdentity = null
-    linkedEvidenceRequestToken += 1
-    linkedEvidence = []
-    linkedEvidenceLoading = false
-    linkedEvidenceError = null
-    detailRequestToken += 1
-    detailDrawerOpen = false
-    detailLoading = false
-    selectedRawPayloadId = null
-    rawPayloadDetail = null
-    detailError = null
+    currentScope = scope
+    selectedAvailabilityKey = availabilityKeyValue
+    applyScopeToFilters(scope)
+    resetLinkedEvidenceState()
+    resetRawPayloadScopeState()
+    resetDetailState()
+    candles = []
 
-    const api = dataApi
-    const [candlesResult, rawPayloadsResult] = await Promise.allSettled([
-      api.listCandles({
-        venue: venue.trim(),
-        symbol: symbol.trim(),
-        assetClass: assetClass.trim(),
-        timeframe: timeframe.trim(),
-        start: parsed.start,
-        end: parsed.end,
-      }),
-      api.listRawPayloads({
-        venue: venue.trim(),
-        symbol: symbol.trim(),
-        assetClass: assetClass.trim(),
-        timeframe: timeframe.trim(),
-        start: parsed.start,
-        end: parsed.end,
-        ingestionRunId: ingestionRunId.trim(),
-      }),
-    ])
+    try {
+      const response = await dataApi.listCandles(scope)
+      if (requestToken !== candlesRequestToken) {
+        return
+      }
 
-    if (requestToken !== searchRequestToken) {
+      candles = response.items
+      if (response.items.length > 0) {
+        await selectCandle(response.items[0])
+      }
+    } catch (error) {
+      if (requestToken !== candlesRequestToken) {
+        return
+      }
+      candlesError = error instanceof Error ? error.message : 'Failed to load normalized candles'
+      candles = []
+    } finally {
+      if (requestToken === candlesRequestToken) {
+        candlesLoading = false
+      }
+    }
+  }
+
+  async function loadRawPayloadsForCurrentScope() {
+    if (!currentScope) {
       return
     }
 
-    if (candlesResult.status === 'fulfilled') {
-      candles = candlesResult.value.items
-    } else {
-      candlesError = candlesResult.reason instanceof Error ? candlesResult.reason.message : 'Failed to load normalized candles'
-    }
+    const requestToken = ++rawPayloadsRequestToken
+    rawPayloadsLoading = true
+    rawPayloadsLoaded = true
+    rawPayloadsError = null
+    rawPayloads = []
+    resetDetailState()
 
-    if (rawPayloadsResult.status === 'fulfilled') {
-      rawPayloads = rawPayloadsResult.value.items
-    } else {
-      rawPayloadsError = rawPayloadsResult.reason instanceof Error ? rawPayloadsResult.reason.message : 'Failed to load raw payload metadata'
+    try {
+      const response = await dataApi.listRawPayloads({
+        ...currentScope,
+        ingestionRunId: ingestionRunId.trim(),
+      })
+      if (requestToken !== rawPayloadsRequestToken) {
+        return
+      }
+      rawPayloads = response.items
+    } catch (error) {
+      if (requestToken !== rawPayloadsRequestToken) {
+        return
+      }
+      rawPayloadsError =
+        error instanceof Error ? error.message : 'Failed to load raw payload metadata'
+      rawPayloads = []
+    } finally {
+      if (requestToken === rawPayloadsRequestToken) {
+        rawPayloadsLoading = false
+      }
     }
-
-    loading = false
   }
 
   async function selectCandle(candle: DataCandle) {
@@ -137,6 +232,7 @@
     const requestToken = ++linkedEvidenceRequestToken
     linkedEvidenceLoading = true
     linkedEvidenceError = null
+    linkedEvidence = []
 
     try {
       const response = await dataApi.listCandleRawPayloads({
@@ -171,6 +267,7 @@
     detailDrawerOpen = true
     detailLoading = true
     detailError = null
+    detailFeedback = null
     selectedRawPayloadId = id
     rawPayloadDetail = null
 
@@ -197,8 +294,49 @@
     detailDrawerOpen = false
     detailLoading = false
     detailError = null
+    detailFeedback = null
     selectedRawPayloadId = null
     rawPayloadDetail = null
+  }
+
+  function resetLinkedEvidenceState() {
+    selectedCandleIdentity = null
+    linkedEvidenceRequestToken += 1
+    linkedEvidence = []
+    linkedEvidenceLoading = false
+    linkedEvidenceError = null
+  }
+
+  function resetRawPayloadScopeState() {
+    rawPayloadsRequestToken += 1
+    rawPayloads = []
+    rawPayloadsLoading = false
+    rawPayloadsLoaded = false
+    rawPayloadsError = null
+  }
+
+  function resetDetailState() {
+    detailRequestToken += 1
+    detailDrawerOpen = false
+    detailLoading = false
+    detailError = null
+    detailFeedback = null
+    selectedRawPayloadId = null
+    rawPayloadDetail = null
+  }
+
+  async function copyDetailValue(value: string, label: string) {
+    if (!window.navigator.clipboard?.writeText) {
+      detailFeedback = 'Clipboard copy is unavailable in this browser.'
+      return
+    }
+
+    try {
+      await window.navigator.clipboard.writeText(value)
+      detailFeedback = `${label} copied.`
+    } catch {
+      detailFeedback = `Failed to copy ${label.toLowerCase()}.`
+    }
   }
 
   function validateAndBuildQuery(): { errors: string[]; start: Date | null; end: Date | null } {
@@ -234,6 +372,58 @@
     return { errors, start, end }
   }
 
+  function applyScopeToFilters(scope: ListDataCandlesParams) {
+    venue = scope.venue
+    symbol = scope.symbol
+    assetClass = scope.assetClass
+    timeframe = scope.timeframe
+    utcStart = scope.start.toISOString()
+    utcEnd = scope.end.toISOString()
+  }
+
+  function availabilityKey(item: Pick<CandleAvailabilityItem, 'venue' | 'symbol' | 'assetClass'>): string {
+    return `${item.venue}::${item.symbol}::${item.assetClass}`
+  }
+
+  function availabilityKeyFromSelection(
+    item: Pick<CandleAvailabilityDefaultSelection, 'venue' | 'symbol' | 'assetClass'>,
+  ): string {
+    return availabilityKey(item)
+  }
+
+  function findAvailabilityKeyForScope(scope: Pick<ListDataCandlesParams, 'venue' | 'symbol' | 'assetClass'>) {
+    const match = availabilityItems.find(
+      (item) =>
+        item.venue === scope.venue &&
+        item.symbol === scope.symbol &&
+        item.assetClass === scope.assetClass,
+    )
+
+    return match ? availabilityKey(match) : null
+  }
+
+  function mapDefaultSelectionToScope(selection: CandleAvailabilityDefaultSelection): ListDataCandlesParams {
+    return {
+      venue: selection.venue,
+      symbol: selection.symbol,
+      assetClass: selection.assetClass,
+      timeframe: selection.timeframe,
+      start: selection.start,
+      end: selection.end,
+    }
+  }
+
+  function mapAvailabilityItemToScope(item: CandleAvailabilityItem): ListDataCandlesParams {
+    return {
+      venue: item.venue,
+      symbol: item.symbol,
+      assetClass: item.assetClass,
+      timeframe: item.defaultSlice.timeframe,
+      start: item.defaultSlice.start,
+      end: item.defaultSlice.end,
+    }
+  }
+
   function parseUtcTimestamp(value: string): Date | null {
     const trimmed = value.trim()
     if (!trimmed) {
@@ -249,6 +439,18 @@
   function formatDateTime(value: Date | null): string {
     return value ? value.toISOString() : '—'
   }
+
+  function formatAvailabilityRange(item: { start: Date; end: Date }): string {
+    return `${formatDateTime(item.start)} → ${formatDateTime(item.end)}`
+  }
+
+  function formatSelectedCandleLabel(candle: DataCandle | null): string {
+    if (!candle) {
+      return 'No normalized candle selected yet.'
+    }
+
+    return `${formatDateTime(candle.start)} · ${candle.timeframe} · O ${candle.open} · C ${candle.close}`
+  }
 </script>
 
 <section class="page" aria-labelledby="data-heading">
@@ -256,10 +458,59 @@
     <div>
       <h1 id="data-heading">Historical data</h1>
       <p class="page-copy">
-        Browse normalized candles and linked raw payload evidence. Load is manual so the route never auto-queries large ranges.
+        Browse persisted normalized candle availability first, then drill into exact candles,
+        linked evidence, and optional raw payload metadata for the current candle scope.
       </p>
     </div>
   </header>
+
+  <section class="panel" aria-labelledby="availability-heading">
+    <div class="panel-header">
+      <div>
+        <h2 id="availability-heading">Available normalized candle entries</h2>
+        <p>Open the route and start from persisted venue, symbol, and asset class availability.</p>
+      </div>
+    </div>
+
+    {#if availabilityLoading}
+      <p class="status">Loading candle availability…</p>
+    {:else if availabilityError}
+      <p class="alert" role="alert">{availabilityError}</p>
+    {:else if availabilityCompatibilityNote}
+      <p class="note">{availabilityCompatibilityNote}</p>
+    {:else if availabilityItems.length === 0}
+      <p class="empty">No normalized candle availability was found yet.</p>
+    {:else}
+      <div class="availability-list" aria-label="Candle availability entries">
+        {#each availabilityItems as item (availabilityKey(item))}
+          <button
+            class:selected={selectedAvailabilityKey === availabilityKey(item)}
+            class="availability-card"
+            type="button"
+            onclick={() => handleAvailabilitySelection(item)}
+          >
+            <div class="availability-card__header">
+              <strong>{item.venue}</strong>
+              <span>{item.symbol}</span>
+              <span>{item.assetClass}</span>
+            </div>
+            <p class="availability-card__default">
+              Default slice: {item.defaultSlice.timeframe} · {formatAvailabilityRange(item.defaultSlice)}
+            </p>
+            <ul class="availability-timeframes">
+              {#each item.timeframes as timeframeSummary (`${item.symbol}-${timeframeSummary.timeframe}`)}
+                <li>
+                  <strong>{timeframeSummary.timeframe}</strong>
+                  <span>{timeframeSummary.count} candles</span>
+                  <span>{formatAvailabilityRange(timeframeSummary)}</span>
+                </li>
+              {/each}
+            </ul>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </section>
 
   <form class="filter-form" aria-label="Historical data filters" onsubmit={handleSubmit}>
     <label>
@@ -304,8 +555,21 @@
       <span>Ingestion run ID</span>
       <input bind:value={ingestionRunId} placeholder="Optional" spellcheck="false" />
     </label>
-    <div class="form-actions">
-      <button class="primary" type="submit" disabled={loading}>Load</button>
+    <div class="actions-row">
+      <p class="actions-copy">
+        Use the exact filters below any time. Broad raw payload metadata stays optional for the current candle scope.
+      </p>
+      <div class="form-actions">
+        <button class="primary" type="submit" disabled={candlesLoading}>Load candles</button>
+        <button
+          class="secondary"
+          type="button"
+          disabled={!currentScope || candlesLoading || rawPayloadsLoading}
+          onclick={loadRawPayloadsForCurrentScope}
+        >
+          Load raw payload metadata
+        </button>
+      </div>
     </div>
   </form>
 
@@ -319,8 +583,8 @@
     </div>
   {/if}
 
-  {#if loading}
-    <p class="status">Loading normalized candles and raw payload metadata…</p>
+  {#if candlesLoading}
+    <p class="status">Loading normalized candles…</p>
   {/if}
 
   {#if candlesError}
@@ -331,98 +595,89 @@
     <p class="alert" role="alert">{rawPayloadsError}</p>
   {/if}
 
-  {#if hasSubmitted}
+  {#if currentScope}
     <section class="summary" aria-label="Data summary">
       <div class="summary-card">
         <h2>Summary</h2>
         <p>{candles.length} normalized candles</p>
-        <p>{rawPayloads.length} raw payload rows</p>
+        <p>{rawPayloadsLoaded ? `${rawPayloads.length} raw payload rows` : 'Raw payload metadata not loaded yet'}</p>
       </div>
+      <div class="summary-card">
+        <h2>Selected candle</h2>
+        <p>{formatSelectedCandleLabel(selectedCandle)}</p>
+        <p>
+          {#if !selectedCandle}
+            Select a normalized candle to inspect linked evidence.
+          {:else if linkedEvidenceLoading}
+            Loading linked evidence…
+          {:else}
+            {linkedEvidence.length} linked raw payload rows
+          {/if}
+        </p>
+      </div>
+      {#if selectedAvailability}
+        <div class="summary-card">
+          <h2>Selected availability entry</h2>
+          <p>{selectedAvailability.venue} / {selectedAvailability.symbol} / {selectedAvailability.assetClass}</p>
+          <p>{selectedAvailability.defaultSlice.timeframe} default · {formatAvailabilityRange(selectedAvailability.defaultSlice)}</p>
+        </div>
+      {/if}
     </section>
 
-    <div class="results-grid">
-      <section class="panel" aria-labelledby="candles-heading">
-        <div class="panel-header">
+    <section class="panel" aria-labelledby="candles-heading">
+      <div class="panel-header">
+        <div>
           <h2 id="candles-heading">Normalized candles</h2>
-          <p>Select a table row to load linked evidence.</p>
+          <p>Returned candles default-select the first row and load linked evidence by provenance.</p>
         </div>
+      </div>
 
-        {#if candles.length > 0}
-          <DataCandlestickChart rows={chartRows} />
+      {#if candles.length > 0}
+        <p class="selection-banner" aria-live="polite">
+          <strong>Selected candle:</strong>
+          {formatSelectedCandleLabel(selectedCandle)}
+        </p>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Start</th>
-                  <th scope="col">Open</th>
-                  <th scope="col">Close</th>
-                  <th scope="col">Quality</th>
-                  <th scope="col">Evidence</th>
+        <DataCandlestickChart rows={chartRows} />
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Start</th>
+                <th scope="col">Open</th>
+                <th scope="col">Close</th>
+                <th scope="col">Quality</th>
+                <th scope="col">Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each candles as candle (candle.identity)}
+                <tr class:selected={selectedCandleIdentity === candle.identity}>
+                  <td>{formatDateTime(candle.start)}</td>
+                  <td>{candle.open}</td>
+                  <td>{candle.close}</td>
+                  <td>{candle.quality}</td>
+                  <td>
+                    <button
+                      class="secondary table-button"
+                      type="button"
+                      disabled={selectedCandleIdentity === candle.identity}
+                      aria-pressed={selectedCandleIdentity === candle.identity}
+                      onclick={() => selectCandle(candle)}
+                    >
+                      {selectedCandleIdentity === candle.identity ? 'Selected' : 'Select'}
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {#each candles as candle (candle.identity)}
-                  <tr class:selected={selectedCandleIdentity === candle.identity}>
-                    <td>{formatDateTime(candle.start)}</td>
-                    <td>{candle.open}</td>
-                    <td>{candle.close}</td>
-                    <td>{candle.quality}</td>
-                    <td>
-                      <button class="secondary table-button" type="button" onclick={() => selectCandle(candle)}>
-                        Select
-                      </button>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {:else if !candlesError && !loading}
-          <p class="empty">No normalized candles matched these filters.</p>
-        {/if}
-      </section>
-
-      <section class="panel" aria-labelledby="raw-payloads-heading">
-        <div class="panel-header">
-          <h2 id="raw-payloads-heading">Raw payload metadata</h2>
-          <p>Response bodies stay bounded until you open detail.</p>
+              {/each}
+            </tbody>
+          </table>
         </div>
-
-        {#if rawPayloads.length > 0}
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">ID</th>
-                  <th scope="col">Endpoint</th>
-                  <th scope="col">Request type</th>
-                  <th scope="col">Received at</th>
-                  <th scope="col">Detail</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each rawPayloads as item (item.id)}
-                  <tr>
-                    <td>{item.id}</td>
-                    <td>{item.endpoint}</td>
-                    <td>{item.requestType}</td>
-                    <td>{formatDateTime(item.receivedAt)}</td>
-                    <td>
-                      <button class="secondary table-button" type="button" onclick={() => openRawPayloadDetail(item.id)}>
-                        View detail
-                      </button>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {:else if !rawPayloadsError && !loading}
-          <p class="empty">No raw payload metadata matched these filters.</p>
-        {/if}
-      </section>
-    </div>
+      {:else if !candlesError && !candlesLoading}
+        <p class="empty">No normalized candles matched these filters.</p>
+      {/if}
+    </section>
 
     <section class="panel" aria-labelledby="evidence-heading">
       <div class="panel-header">
@@ -463,12 +718,62 @@
         </div>
       {/if}
     </section>
+
+    <section class="panel" aria-labelledby="raw-payloads-heading">
+      <div class="panel-header">
+        <div>
+          <h2 id="raw-payloads-heading">Raw payload metadata</h2>
+          <p>Broad raw payload browsing is explicit and secondary to the current normalized candle scope.</p>
+        </div>
+      </div>
+
+      {#if rawPayloadsLoading}
+        <p class="status">Loading raw payload metadata…</p>
+      {:else if !rawPayloadsLoaded}
+        <p class="empty">Load raw payload metadata when you want broader browsing for this candle scope.</p>
+      {:else if rawPayloads.length > 0}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">Endpoint</th>
+                <th scope="col">Request type</th>
+                <th scope="col">Received at</th>
+                <th scope="col">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each rawPayloads as item (item.id)}
+                <tr>
+                  <td>{item.id}</td>
+                  <td>{item.endpoint}</td>
+                  <td>{item.requestType}</td>
+                  <td>{formatDateTime(item.receivedAt)}</td>
+                  <td>
+                    <button class="secondary table-button" type="button" onclick={() => openRawPayloadDetail(item.id)}>
+                      View detail
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else if !rawPayloadsError}
+        <p class="empty">No raw payload metadata matched these filters.</p>
+      {/if}
+    </section>
   {/if}
 
   {#if detailDrawerOpen}
-    <div class="drawer" role="dialog" aria-modal="false" aria-label="Raw payload detail">
+    <div class="drawer-backdrop" aria-hidden="true" onclick={closeRawPayloadDetail}></div>
+    <div class="drawer" role="dialog" aria-modal="true" aria-label="Raw payload detail">
       <div class="drawer-header">
-        <h2>Raw payload detail</h2>
+        <div>
+          <h2>Raw payload detail</h2>
+          <p class="drawer-copy">Inspect the bounded payload preview and copy the storage ref for the full body when needed.</p>
+        </div>
         <button class="secondary" type="button" onclick={closeRawPayloadDetail}>Close</button>
       </div>
 
@@ -477,6 +782,37 @@
       {:else if detailError}
         <p class="alert" role="alert">{detailError}</p>
       {:else if rawPayloadDetail && selectedRawPayloadId}
+        <div class="detail-actions">
+          <p class:detail-warning={rawPayloadDetail.responseBodyPreviewTruncated} class="detail-note">
+            {#if rawPayloadDetail.responseBodyPreviewTruncated}
+              This API exposes only a truncated preview. Use the body ref below to inspect the full payload in storage.
+            {:else}
+              This API exposes the available payload preview and storage ref for follow-up inspection.
+            {/if}
+          </p>
+
+          <div class="detail-actions__buttons">
+            <button
+              class="secondary"
+              type="button"
+              onclick={() => copyDetailValue(rawPayloadDetail!.responseBodyPreview, 'Preview')}
+            >
+              Copy preview
+            </button>
+            <button
+              class="secondary"
+              type="button"
+              onclick={() => copyDetailValue(rawPayloadDetail!.metadata.payloadBodyRef, 'Body ref')}
+            >
+              Copy body ref
+            </button>
+          </div>
+        </div>
+
+        {#if detailFeedback}
+          <p class="status detail-feedback" aria-live="polite">{detailFeedback}</p>
+        {/if}
+
         <dl class="detail-grid">
           <div><dt>ID</dt><dd>{selectedRawPayloadId}</dd></div>
           <div><dt>Endpoint</dt><dd>{rawPayloadDetail.metadata.endpoint}</dd></div>
@@ -486,7 +822,7 @@
           <div><dt>Instrument hint</dt><dd>{rawPayloadDetail.metadata.symbol ?? '—'}</dd></div>
           <div><dt>Timeframe</dt><dd>{rawPayloadDetail.metadata.timeframe ?? '—'}</dd></div>
           <div><dt>Range</dt><dd>{formatDateTime(rawPayloadDetail.metadata.start)} → {formatDateTime(rawPayloadDetail.metadata.end)}</dd></div>
-          <div><dt>Preview bytes</dt><dd>{rawPayloadDetail.responseBodySizeBytes}</dd></div>
+          <div><dt>Body bytes</dt><dd>{rawPayloadDetail.responseBodySizeBytes}</dd></div>
           <div><dt>Truncated</dt><dd>{rawPayloadDetail.responseBodyPreviewTruncated ? 'Yes' : 'No'}</dd></div>
         </dl>
 
@@ -524,6 +860,10 @@
     background: var(--surface-raised);
   }
 
+  .actions-row {
+    grid-column: 1 / -1;
+  }
+
   .filter-form label {
     display: flex;
     flex-direction: column;
@@ -546,12 +886,37 @@
 
   .form-actions {
     display: flex;
-    align-items: end;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .actions-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-16);
+    padding-top: var(--space-8);
+    border-top: 1px solid var(--border);
+  }
+
+  .actions-copy {
+    margin: 0;
+    color: var(--text);
+    max-width: 44ch;
+  }
+
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: var(--space-16);
   }
 
   .summary-card,
   .panel,
-  .drawer {
+  .drawer,
+  .availability-card {
     border: 1px solid var(--border);
     border-radius: var(--radius-default);
     background: var(--surface-raised);
@@ -570,14 +935,60 @@
     margin-bottom: var(--space-16);
   }
 
-  .results-grid {
+  .availability-list {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
-    gap: var(--space-24);
+    grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+    gap: var(--space-16);
+  }
+
+  .availability-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+    padding: var(--space-16);
+    text-align: left;
+    color: inherit;
+  }
+
+  .availability-card.selected {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+  }
+
+  .availability-card__header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+  }
+
+  .availability-card__default {
+    margin: 0;
+  }
+
+  .availability-timeframes {
+    margin: 0;
+    padding-left: var(--space-20);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+  }
+
+  .availability-timeframes li {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
   }
 
   .table-wrap {
     overflow-x: auto;
+  }
+
+  .selection-banner {
+    margin: 0 0 var(--space-16);
+    padding: var(--space-12) var(--space-16);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-default);
+    background: var(--bg-subtle, var(--bg));
   }
 
   table {
@@ -619,23 +1030,72 @@
     color: var(--text);
   }
 
+  .note {
+    margin: 0;
+    padding: var(--space-12) var(--space-16);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-default);
+    background: var(--bg-subtle, var(--bg));
+    color: var(--text);
+  }
+
   .drawer {
     position: fixed;
-    top: var(--space-20);
-    right: var(--space-20);
-    bottom: var(--space-20);
-    width: min(32rem, calc(100vw - 2 * var(--space-20)));
+    inset: var(--space-20);
+    width: min(72rem, calc(100vw - 2 * var(--space-20)));
+    height: min(85vh, calc(100vh - 2 * var(--space-20)));
+    margin: auto;
     padding: var(--space-16);
     overflow: auto;
     z-index: 20;
+  }
+
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: color-mix(in srgb, var(--bg) 75%, transparent);
+    z-index: 19;
   }
 
   .drawer-header {
     display: flex;
     justify-content: space-between;
     gap: var(--space-16);
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: var(--space-16);
+  }
+
+  .drawer-copy {
+    margin: var(--space-8) 0 0;
+    color: var(--text);
+    max-width: 56ch;
+  }
+
+  .detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--space-12);
+    margin-bottom: var(--space-16);
+  }
+
+  .detail-note {
+    margin: 0;
+    max-width: 56ch;
+  }
+
+  .detail-warning {
+    color: var(--warning-text, var(--text-h));
+  }
+
+  .detail-actions__buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+  }
+
+  .detail-feedback {
+    margin-top: 0;
   }
 
   .detail-grid {
@@ -664,15 +1124,23 @@
 
   @media (max-width: 767px) {
     .drawer {
-      inset: auto var(--space-16) var(--space-16) var(--space-16);
-      top: var(--space-16);
+      inset: var(--space-16);
       width: auto;
+      height: auto;
     }
 
     .panel-header,
     .page-header {
       flex-direction: column;
       align-items: flex-start;
+    }
+
+    .actions-row,
+    .form-actions,
+    .detail-actions,
+    .detail-actions__buttons {
+      flex-direction: column;
+      align-items: stretch;
     }
   }
 </style>

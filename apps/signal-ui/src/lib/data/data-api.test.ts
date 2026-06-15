@@ -6,7 +6,14 @@ vi.mock('../auth/auth-fetch', () => ({
 }))
 
 import { createAuthFetch } from '../auth/auth-fetch'
-import { createSignalDataApi, createSignalDataApiForAuth, type RawPayloadMetadata, type DataCandle } from './data-api'
+import {
+  DataApiError,
+  createSignalDataApi,
+  createSignalDataApiForAuth,
+  type CandleAvailabilityItem,
+  type DataCandle,
+  type RawPayloadMetadata,
+} from './data-api'
 
 const mockCreateAuthFetch = vi.mocked(createAuthFetch)
 
@@ -51,6 +58,27 @@ function makeRawPayloadJson() {
     start: faker.date.recent().toISOString(),
     end: faker.date.recent().toISOString(),
     receivedAt: faker.date.recent().toISOString(),
+  }
+}
+
+function makeAvailabilityJson() {
+  return {
+    venue: 'hyperliquid-perps',
+    symbol: `${faker.finance.currencyCode()}USD`,
+    assetClass: 'crypto',
+    timeframes: [
+      {
+        timeframe: '1m',
+        start: faker.date.recent().toISOString(),
+        end: faker.date.recent().toISOString(),
+        count: faker.number.int({ min: 1, max: 500 }),
+      },
+    ],
+    defaultSlice: {
+      timeframe: '1m',
+      start: faker.date.recent().toISOString(),
+      end: faker.date.recent().toISOString(),
+    },
   }
 }
 
@@ -114,6 +142,56 @@ describe('createSignalDataApi', () => {
     expect(requestUrl.searchParams.get('end')).toBe(end.toISOString())
     expect(requestUrl.searchParams.get('entityHint')).toBeNull()
     expect(requestUrl.searchParams.get('endpoint')).toBeNull()
+  })
+
+  it('serializes availability filters and maps nested availability response dates', async () => {
+    const availability = makeAvailabilityJson()
+    const nextCursor = faker.string.alphanumeric(10)
+    const authFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [availability],
+          nextCursor,
+          defaultSelection: {
+            venue: availability.venue,
+            symbol: availability.symbol,
+            assetClass: availability.assetClass,
+            timeframe: availability.defaultSlice.timeframe,
+            start: availability.defaultSlice.start,
+            end: availability.defaultSlice.end,
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    const api = createSignalDataApi({ baseUrl: '/api/v1/data', fetch: authFetch })
+
+    const response = await api.listCandleAvailability({
+      venue: availability.venue,
+      symbol: '   ',
+      assetClass: availability.assetClass,
+      limit: 50,
+      cursor: nextCursor,
+    })
+
+    const requestUrl = new URL(authFetch.mock.calls[0][0] as string)
+    expect(requestUrl.pathname).toBe('/api/v1/data/candle-availability')
+    expect(requestUrl.searchParams.get('venue')).toBe(availability.venue)
+    expect(requestUrl.searchParams.get('assetClass')).toBe(availability.assetClass)
+    expect(requestUrl.searchParams.get('limit')).toBe('50')
+    expect(requestUrl.searchParams.get('cursor')).toBe(nextCursor)
+    expect(requestUrl.searchParams.get('symbol')).toBeNull()
+    expect(response.items[0]).toEqual(
+      expect.objectContaining<Partial<CandleAvailabilityItem>>({
+        venue: availability.venue,
+        symbol: availability.symbol,
+        assetClass: availability.assetClass,
+      }),
+    )
+    expect(response.items[0].timeframes[0].start).toBeInstanceOf(Date)
+    expect(response.items[0].defaultSlice.end).toBeInstanceOf(Date)
+    expect(response.defaultSelection?.start).toBeInstanceOf(Date)
+    expect(response.nextCursor).toBe(nextCursor)
   })
 
   it('maps candle, raw payload, and detail responses into typed models', async () => {
@@ -230,6 +308,25 @@ describe('createSignalDataApi', () => {
         end: new Date(faker.date.recent()),
       }),
     ).rejects.toThrow(/Data API GET \/candles failed:/)
+  })
+
+  it('includes structured status metadata on API errors', async () => {
+    const authFetch = vi.fn().mockResolvedValue(
+      new Response('', {
+        status: 404,
+        statusText: 'Not Found',
+      }),
+    )
+    const api = createSignalDataApi({ baseUrl: '/api/v1/data', fetch: authFetch })
+
+    const request = api.listCandleAvailability({})
+
+    await expect(request).rejects.toBeInstanceOf(DataApiError)
+    await expect(request).rejects.toMatchObject({
+      status: 404,
+      path: '/candle-availability',
+      message: 'Data API GET /candle-availability failed: 404 Not Found',
+    })
   })
 
   it('falls back to HTTP status text when an error body is not JSON', async () => {

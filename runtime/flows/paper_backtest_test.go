@@ -304,6 +304,13 @@ type replayOnlyCandleStore struct {
 	replayCalls []replayCall
 }
 
+func (s *replayOnlyCandleStore) ListCandleAvailability(
+	_ context.Context,
+	_ data.CandleAvailabilityListQuery,
+) (data.CandleAvailabilityListResult, error) {
+	return data.CandleAvailabilityListResult{}, nil
+}
+
 func (s *replayOnlyCandleStore) QueryCandles(
 	_ context.Context,
 	_ domain.Instrument,

@@ -47,6 +47,42 @@ export interface DataCandleListResponse {
   items: DataCandle[]
 }
 
+export interface CandleAvailabilityTimeframeSummary {
+  timeframe: DataTimeframe | string
+  start: Date
+  end: Date
+  count: number
+}
+
+export interface CandleAvailabilityDefaultSlice {
+  timeframe: DataTimeframe | string
+  start: Date
+  end: Date
+}
+
+export interface CandleAvailabilityItem {
+  venue: string
+  symbol: string
+  assetClass: string
+  timeframes: CandleAvailabilityTimeframeSummary[]
+  defaultSlice: CandleAvailabilityDefaultSlice
+}
+
+export interface CandleAvailabilityDefaultSelection {
+  venue: string
+  symbol: string
+  assetClass: string
+  timeframe: DataTimeframe | string
+  start: Date
+  end: Date
+}
+
+export interface CandleAvailabilityListResponse {
+  items: CandleAvailabilityItem[]
+  nextCursor?: string
+  defaultSelection?: CandleAvailabilityDefaultSelection
+}
+
 export interface RawPayloadMetadataListResponse {
   items: RawPayloadMetadata[]
   nextCursor?: string
@@ -87,12 +123,23 @@ export interface ListRawPayloadsParams {
   cursor?: string
 }
 
+export interface ListCandleAvailabilityParams {
+  venue?: string
+  symbol?: string
+  assetClass?: string
+  limit?: number
+  cursor?: string
+}
+
 export interface ListCandleRawPayloadsParams extends ListDataCandlesParams {
   provenanceSource: string
   provenanceIdentity: string
 }
 
 export interface SignalDataApi {
+  listCandleAvailability(
+    params: ListCandleAvailabilityParams,
+  ): Promise<CandleAvailabilityListResponse>
   listCandles(params: ListDataCandlesParams): Promise<DataCandleListResponse>
   listRawPayloads(params: ListRawPayloadsParams): Promise<RawPayloadMetadataListResponse>
   getRawPayloadDetail(id: string): Promise<RawPayloadDetailResponse>
@@ -102,6 +149,18 @@ export interface SignalDataApi {
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+export class DataApiError extends Error {
+  readonly status: number
+  readonly path: string
+
+  constructor(params: { path: string; status: number; message: string }) {
+    super(`Data API GET ${params.path} failed: ${params.message}`)
+    this.name = 'DataApiError'
+    this.status = params.status
+    this.path = params.path
+  }
+}
 
 export function createSignalDataApi(params: {
   baseUrl: string
@@ -125,13 +184,29 @@ export function createSignalDataApi(params: {
         typeof json === 'object' && json !== null && 'message' in json && typeof json.message === 'string'
           ? json.message
           : `${response.status} ${response.statusText}`.trim()
-      throw new Error(`Data API GET ${path} failed: ${message}`)
+      throw new DataApiError({ path, status: response.status, message })
     }
 
     return json as T
   }
 
   return {
+    async listCandleAvailability(paramsIn) {
+      const json = await request<{
+        items: RawCandleAvailabilityItem[]
+        nextCursor?: string
+        defaultSelection?: RawCandleAvailabilityDefaultSelection
+      }>('/candle-availability', buildSearchParams(paramsIn))
+
+      return {
+        items: json.items.map(mapCandleAvailabilityItem),
+        ...(json.nextCursor ? { nextCursor: json.nextCursor } : {}),
+        ...(json.defaultSelection
+          ? { defaultSelection: mapCandleAvailabilityDefaultSelection(json.defaultSelection) }
+          : {}),
+      }
+    },
+
     async listCandles(paramsIn) {
       const json = await request<{ items: RawDataCandle[] }>('/candles', buildSearchParams(paramsIn))
       return { items: json.items.map(mapDataCandle) }
@@ -201,6 +276,34 @@ interface RawDataCandle {
   provenanceIdentity: string
 }
 
+interface RawCandleAvailabilityTimeframeSummary {
+  timeframe: string
+  start: string
+  end: string
+  count: number
+}
+
+interface RawCandleAvailabilityDefaultSelection {
+  venue: string
+  symbol: string
+  assetClass: string
+  timeframe: string
+  start: string
+  end: string
+}
+
+interface RawCandleAvailabilityItem {
+  venue: string
+  symbol: string
+  assetClass: string
+  timeframes: RawCandleAvailabilityTimeframeSummary[]
+  defaultSlice: {
+    timeframe: string
+    start: string
+    end: string
+  }
+}
+
 interface RawRawPayloadMetadata {
   id: string
   ingestionRunId: string
@@ -243,6 +346,44 @@ function buildSearchParams<T extends object>(params: T): URLSearchParams {
 }
 
 function mapDataCandle(item: RawDataCandle): DataCandle {
+  return {
+    ...item,
+    start: new Date(item.start),
+    end: new Date(item.end),
+  }
+}
+
+function mapCandleAvailabilityItem(item: RawCandleAvailabilityItem): CandleAvailabilityItem {
+  return {
+    ...item,
+    timeframes: item.timeframes.map(mapCandleAvailabilityTimeframeSummary),
+    defaultSlice: mapCandleAvailabilityDefaultSlice(item.defaultSlice),
+  }
+}
+
+function mapCandleAvailabilityTimeframeSummary(
+  item: RawCandleAvailabilityTimeframeSummary,
+): CandleAvailabilityTimeframeSummary {
+  return {
+    ...item,
+    start: new Date(item.start),
+    end: new Date(item.end),
+  }
+}
+
+function mapCandleAvailabilityDefaultSlice(
+  item: RawCandleAvailabilityItem['defaultSlice'],
+): CandleAvailabilityDefaultSlice {
+  return {
+    ...item,
+    start: new Date(item.start),
+    end: new Date(item.end),
+  }
+}
+
+function mapCandleAvailabilityDefaultSelection(
+  item: RawCandleAvailabilityDefaultSelection,
+): CandleAvailabilityDefaultSelection {
   return {
     ...item,
     start: new Date(item.start),

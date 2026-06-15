@@ -23,16 +23,34 @@ import (
 )
 
 type replayReadServiceStub struct {
+	listCandleAvailabilityFunc func(
+		ctx context.Context,
+		query data.CandleAvailabilityListQuery,
+	) (data.CandleAvailabilityListResult, error)
 	replayCandlesFunc func(
 		ctx context.Context,
 		instrument domain.Instrument,
 		timeframe domain.Timeframe,
 		timeRange domain.TimeRange,
 	) ([]data.ReplayCandle, error)
-	calls          int
-	lastInstrument domain.Instrument
-	lastTimeframe  domain.Timeframe
-	lastTimeRange  domain.TimeRange
+	listAvailabilityCalls int
+	lastAvailabilityQuery data.CandleAvailabilityListQuery
+	calls                 int
+	lastInstrument        domain.Instrument
+	lastTimeframe         domain.Timeframe
+	lastTimeRange         domain.TimeRange
+}
+
+func (s *replayReadServiceStub) ListCandleAvailability(
+	ctx context.Context,
+	query data.CandleAvailabilityListQuery,
+) (data.CandleAvailabilityListResult, error) {
+	s.listAvailabilityCalls++
+	s.lastAvailabilityQuery = query
+	if s.listCandleAvailabilityFunc == nil {
+		return data.CandleAvailabilityListResult{}, errors.New("unexpected ListCandleAvailability call")
+	}
+	return s.listCandleAvailabilityFunc(ctx, query)
 }
 
 func (s *replayReadServiceStub) ReplayCandles(
@@ -172,6 +190,21 @@ func TestDataController(t *testing.T) {
 		}
 		return "/api/v1/data/candles?" + query.Encode()
 	}
+	makeAvailabilityURL := func(params map[string]string) string {
+		query := url.Values{}
+		for key, value := range params {
+			if value == "" {
+				query.Del(key)
+				continue
+			}
+			query.Set(key, value)
+		}
+		encoded := query.Encode()
+		if encoded == "" {
+			return "/api/v1/data/candle-availability"
+		}
+		return "/api/v1/data/candle-availability?" + encoded
+	}
 	makeRawPayloadListURL := func(params map[string]string) string {
 		query := url.Values{
 			"venue": []string{validInstrument.Venue.String()},
@@ -238,6 +271,7 @@ func TestDataController(t *testing.T) {
 			name string
 			url  string
 		}{
+			{name: "candle availability", url: makeAvailabilityURL(nil)},
 			{name: "candles", url: makeCandleURL(nil)},
 			{name: "raw payload list", url: makeRawPayloadListURL(nil)},
 			{name: "raw payload detail", url: "/api/v1/data/raw-payloads/" + fake.UUID().V4()},
@@ -249,6 +283,260 @@ func TestDataController(t *testing.T) {
 				assert.Equal(t, http.StatusUnauthorized, resp.Code)
 			})
 		}
+	})
+
+	t.Run("ListDataCandleAvailability", func(t *testing.T) {
+		t.Run("first page maps exact filters and includes camelCase defaultSelection", func(t *testing.T) {
+			readSvc := makeReplayReadService()
+			availabilityStart := validStart.Add(-24 * time.Hour)
+			availabilityEnd := validEnd.Add(24 * time.Hour)
+			readSvc.listCandleAvailabilityFunc = func(
+				_ context.Context,
+				_ data.CandleAvailabilityListQuery,
+			) (data.CandleAvailabilityListResult, error) {
+				return data.CandleAvailabilityListResult{
+					Items: []data.CandleAvailabilityItem{
+						{
+							Venue:      validInstrument.Venue,
+							Symbol:     validInstrument.Symbol,
+							AssetClass: validInstrument.AssetClass,
+							Timeframes: []data.CandleAvailabilityTimeframeSummary{
+								{
+									Timeframe: domain.Timeframe1m,
+									StartAt:   availabilityStart,
+									EndAt:     availabilityEnd,
+									Count:     321,
+								},
+								{
+									Timeframe: domain.Timeframe5m,
+									StartAt:   availabilityStart.Add(5 * time.Minute),
+									EndAt:     availabilityEnd,
+									Count:     99,
+								},
+							},
+							DefaultSlice: data.CandleAvailabilityDefaultSlice{
+								Timeframe: domain.Timeframe5m,
+								StartAt:   availabilityEnd.Add(-2 * time.Hour),
+								EndAt:     availabilityEnd,
+							},
+						},
+					},
+					NextCursor: fake.Lorem().Word(),
+					DefaultSelection: &data.CandleAvailabilityDefaultSelection{
+						Venue:      validInstrument.Venue,
+						Symbol:     validInstrument.Symbol,
+						AssetClass: validInstrument.AssetClass,
+						Timeframe:  domain.Timeframe5m,
+						StartAt:    availabilityEnd.Add(-2 * time.Hour),
+						EndAt:      availabilityEnd,
+					},
+				}, nil
+			}
+
+			ctrl := newController(readSvc, makeLineageBrowserService(), makeAuthMiddleware())
+			resp := httptest.NewRecorder()
+			newDataHTTPHandler(ctrl).ServeHTTP(resp, newRequest(
+				http.MethodGet,
+				makeAvailabilityURL(map[string]string{
+					"venue":      validInstrument.Venue.String(),
+					"symbol":     validInstrument.Symbol.String(),
+					"assetClass": validInstrument.AssetClass.String(),
+					"limit":      "12",
+				}),
+				true,
+			))
+
+			require.Equal(t, http.StatusOK, resp.Code)
+			var body models.CandleAvailabilityListResponse
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+			require.Len(t, body.Items, 1)
+			assert.Equal(t, validInstrument.Venue.String(), body.Items[0].Venue)
+			assert.Equal(t, validInstrument.Symbol.String(), body.Items[0].Symbol)
+			assert.Equal(t, validInstrument.AssetClass.String(), body.Items[0].AssetClass)
+			require.Len(t, body.Items[0].Timeframes, 2)
+			assert.Equal(t, domain.Timeframe1m.String(), body.Items[0].Timeframes[0].Timeframe)
+			assert.Equal(t, availabilityStart, body.Items[0].Timeframes[0].Start)
+			assert.Equal(t, availabilityEnd, body.Items[0].Timeframes[0].End)
+			assert.Equal(t, int64(321), body.Items[0].Timeframes[0].Count)
+			require.NotNil(t, body.Items[0].DefaultSlice)
+			assert.Equal(t, domain.Timeframe5m.String(), body.Items[0].DefaultSlice.Timeframe)
+			require.NotNil(t, body.DefaultSelection)
+			assert.Equal(t, domain.Timeframe5m.String(), body.DefaultSelection.Timeframe)
+			assert.Equal(t, availabilityEnd, body.DefaultSelection.End)
+			assert.Equal(t, 1, readSvc.listAvailabilityCalls)
+			assert.Equal(t, validInstrument.Venue, readSvc.lastAvailabilityQuery.Venue)
+			assert.Equal(t, validInstrument.Symbol, readSvc.lastAvailabilityQuery.Symbol)
+			assert.Equal(t, validInstrument.AssetClass, readSvc.lastAvailabilityQuery.AssetClass)
+			assert.Equal(t, 12, readSvc.lastAvailabilityQuery.Limit)
+			assert.Empty(t, readSvc.lastAvailabilityQuery.Cursor)
+
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &raw))
+			_, hasDefaultSelection := raw["defaultSelection"]
+			assert.True(t, hasDefaultSelection)
+			itemsRaw, ok := raw["items"].([]any)
+			require.True(t, ok)
+			itemRaw, ok := itemsRaw[0].(map[string]any)
+			require.True(t, ok)
+			_, hasAssetClass := itemRaw["assetClass"]
+			_, hasDefaultSlice := itemRaw["defaultSlice"]
+			assert.True(t, hasAssetClass)
+			assert.True(t, hasDefaultSlice)
+		})
+
+		t.Run("cursor pages omit defaultSelection even when lower layer returns it", func(t *testing.T) {
+			readSvc := makeReplayReadService()
+			cursor := base64.RawURLEncoding.EncodeToString([]byte(
+				validEnd.UTC().Format(time.RFC3339Nano) + "\n" +
+					validInstrument.Venue.String() + "\n" +
+					validInstrument.Symbol.String() + "\n" +
+					validInstrument.AssetClass.String(),
+			))
+			readSvc.listCandleAvailabilityFunc = func(
+				_ context.Context,
+				_ data.CandleAvailabilityListQuery,
+			) (data.CandleAvailabilityListResult, error) {
+				return data.CandleAvailabilityListResult{
+					Items: []data.CandleAvailabilityItem{
+						{
+							Venue:      validInstrument.Venue,
+							Symbol:     validInstrument.Symbol,
+							AssetClass: validInstrument.AssetClass,
+							Timeframes: []data.CandleAvailabilityTimeframeSummary{{
+								Timeframe: validTimeframe,
+								StartAt:   validStart,
+								EndAt:     validEnd,
+								Count:     1,
+							}},
+							DefaultSlice: data.CandleAvailabilityDefaultSlice{
+								Timeframe: validTimeframe,
+								StartAt:   validStart,
+								EndAt:     validEnd,
+							},
+						},
+					},
+					DefaultSelection: &data.CandleAvailabilityDefaultSelection{
+						Venue:      validInstrument.Venue,
+						Symbol:     validInstrument.Symbol,
+						AssetClass: validInstrument.AssetClass,
+						Timeframe:  validTimeframe,
+						StartAt:    validStart,
+						EndAt:      validEnd,
+					},
+				}, nil
+			}
+
+			ctrl := newController(readSvc, makeLineageBrowserService(), makeAuthMiddleware())
+			resp := httptest.NewRecorder()
+			newDataHTTPHandler(ctrl).ServeHTTP(resp, newRequest(
+				http.MethodGet,
+				makeAvailabilityURL(map[string]string{"cursor": cursor}),
+				true,
+			))
+
+			require.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, 1, readSvc.listAvailabilityCalls)
+			assert.Equal(t, cursor, readSvc.lastAvailabilityQuery.Cursor)
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &raw))
+			_, hasDefaultSelection := raw["defaultSelection"]
+			assert.False(t, hasDefaultSelection)
+		})
+
+		t.Run("whitespace cursor keeps defaultSelection on canonical first page", func(t *testing.T) {
+			readSvc := makeReplayReadService()
+			readSvc.listCandleAvailabilityFunc = func(
+				_ context.Context,
+				_ data.CandleAvailabilityListQuery,
+			) (data.CandleAvailabilityListResult, error) {
+				return data.CandleAvailabilityListResult{
+					Items: []data.CandleAvailabilityItem{{
+						Venue:      validInstrument.Venue,
+						Symbol:     validInstrument.Symbol,
+						AssetClass: validInstrument.AssetClass,
+						Timeframes: []data.CandleAvailabilityTimeframeSummary{{
+							Timeframe: validTimeframe,
+							StartAt:   validStart,
+							EndAt:     validEnd,
+							Count:     1,
+						}},
+						DefaultSlice: data.CandleAvailabilityDefaultSlice{
+							Timeframe: validTimeframe,
+							StartAt:   validStart,
+							EndAt:     validEnd,
+						},
+					}},
+					DefaultSelection: &data.CandleAvailabilityDefaultSelection{
+						Venue:      validInstrument.Venue,
+						Symbol:     validInstrument.Symbol,
+						AssetClass: validInstrument.AssetClass,
+						Timeframe:  validTimeframe,
+						StartAt:    validStart,
+						EndAt:      validEnd,
+					},
+				}, nil
+			}
+
+			ctrl := newController(readSvc, makeLineageBrowserService(), makeAuthMiddleware())
+			resp := httptest.NewRecorder()
+			newDataHTTPHandler(ctrl).ServeHTTP(resp, newRequest(
+				http.MethodGet,
+				makeAvailabilityURL(map[string]string{"cursor": "   "}),
+				true,
+			))
+
+			require.Equal(t, http.StatusOK, resp.Code)
+			assert.Equal(t, 1, readSvc.listAvailabilityCalls)
+			assert.Empty(t, readSvc.lastAvailabilityQuery.Cursor)
+
+			var body models.CandleAvailabilityListResponse
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+			require.NotNil(t, body.DefaultSelection)
+
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &raw))
+			_, hasDefaultSelection := raw["defaultSelection"]
+			assert.True(t, hasDefaultSelection)
+		})
+
+		t.Run("empty availability returns empty items without default selection", func(t *testing.T) {
+			readSvc := makeReplayReadService()
+			readSvc.listCandleAvailabilityFunc = func(
+				_ context.Context,
+				_ data.CandleAvailabilityListQuery,
+			) (data.CandleAvailabilityListResult, error) {
+				return data.CandleAvailabilityListResult{Items: []data.CandleAvailabilityItem{}}, nil
+			}
+
+			lineageSvc := makeLineageBrowserService()
+			ctrl := newController(readSvc, lineageSvc, makeAuthMiddleware())
+			resp := httptest.NewRecorder()
+			newDataHTTPHandler(ctrl).ServeHTTP(resp, newRequest(http.MethodGet, makeAvailabilityURL(nil), true))
+
+			require.Equal(t, http.StatusOK, resp.Code)
+			var body models.CandleAvailabilityListResponse
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+			require.Empty(t, body.Items)
+			assert.Nil(t, body.DefaultSelection)
+			assert.Equal(t, 0, lineageSvc.listCalls)
+			assert.Equal(t, 0, lineageSvc.detailCalls)
+			assert.Equal(t, 0, lineageSvc.linkedCalls)
+		})
+
+		t.Run("unsupported availability query params are rejected before reads", func(t *testing.T) {
+			readSvc := makeReplayReadService()
+			ctrl := newController(readSvc, makeLineageBrowserService(), makeAuthMiddleware())
+			resp := httptest.NewRecorder()
+			newDataHTTPHandler(ctrl).ServeHTTP(resp, newRequest(
+				http.MethodGet,
+				makeAvailabilityURL(map[string]string{"timeframe": validTimeframe.String()}),
+				true,
+			))
+
+			assert.Equal(t, http.StatusBadRequest, resp.Code)
+			assert.Equal(t, 0, readSvc.listAvailabilityCalls)
+			assert.Equal(t, 0, readSvc.calls)
+		})
 	})
 
 	t.Run("ListDataCandles", func(t *testing.T) {
@@ -307,6 +595,8 @@ func TestDataController(t *testing.T) {
 			var body models.DataCandleListResponse
 			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
 			require.Len(t, body.Items, 2)
+			require.NotNil(t, body.Items[0].Start)
+			require.NotNil(t, body.Items[1].Start)
 			assert.Equal(t, identityOne, body.Items[0].IDentity)
 			assert.Equal(t, validInstrument.Venue.String(), body.Items[0].Venue)
 			assert.Equal(t, validInstrument.Symbol.String(), body.Items[0].Symbol)
@@ -315,7 +605,7 @@ func TestDataController(t *testing.T) {
 			assert.Equal(t, "hyperliquid", body.Items[0].ProvenanceSource)
 			assert.NotEmpty(t, body.Items[0].ProvenanceIDentity)
 			assert.Equal(t, identityTwo, body.Items[1].IDentity)
-			assert.True(t, body.Items[0].Start.Before(body.Items[1].Start))
+			assert.True(t, body.Items[0].Start.Before(*body.Items[1].Start))
 			assert.Equal(t, 1, readSvc.calls)
 			assert.Equal(t, validInstrument.Venue, readSvc.lastInstrument.Venue)
 			assert.Equal(t, validInstrument.Symbol, readSvc.lastInstrument.Symbol)
@@ -370,7 +660,12 @@ func TestDataController(t *testing.T) {
 				name   string
 				params map[string]string
 			}{
+				{name: "missing venue", params: map[string]string{"venue": ""}},
+				{name: "missing symbol", params: map[string]string{"symbol": ""}},
+				{name: "missing asset class", params: map[string]string{"assetClass": ""}},
 				{name: "missing timeframe", params: map[string]string{"timeframe": ""}},
+				{name: "missing start", params: map[string]string{"start": ""}},
+				{name: "missing end", params: map[string]string{"end": ""}},
 				{name: "invalid venue", params: map[string]string{"venue": "bad-venue"}},
 				{name: "blank symbol", params: map[string]string{"symbol": "   "}},
 				{name: "invalid asset class", params: map[string]string{"assetClass": "bad-asset-class"}},
@@ -441,8 +736,10 @@ func TestDataController(t *testing.T) {
 			var body models.DataCandleListResponse
 			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
 			assert.Len(t, body.Items, 2)
-			assert.Equal(t, validStart, body.Items[0].Start)
-			assert.Equal(t, validStart.Add(3*time.Minute), body.Items[1].Start)
+			require.NotNil(t, body.Items[0].Start)
+			require.NotNil(t, body.Items[1].Start)
+			assert.Equal(t, validStart, *body.Items[0].Start)
+			assert.Equal(t, validStart.Add(3*time.Minute), *body.Items[1].Start)
 		})
 
 		t.Run("blank venue returns bad request before replay", func(t *testing.T) {

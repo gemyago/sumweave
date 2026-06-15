@@ -3,6 +3,10 @@ import { faker } from '@faker-js/faker'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import Login from './Login.svelte'
+import {
+  POST_LOGIN_DESTINATION_KEY,
+  rememberPostLoginDestination,
+} from '../lib/routing/post-login-destination'
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
@@ -32,6 +36,7 @@ function makeLoginResponse() {
 
 describe('Login', () => {
   beforeEach(() => {
+    window.sessionStorage.clear()
     mocks.push.mockReset()
     mocks.loginApi.mockReset()
     mocks.setAuth.mockReset()
@@ -49,7 +54,7 @@ describe('Login', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled()
   })
 
-  it('on successful login, calls setAuth and redirects to /chat', async () => {
+  it('on successful login, calls setAuth and redirects to /data by default', async () => {
     const user = userEvent.setup()
     const response = makeLoginResponse()
     mocks.loginApi.mockResolvedValue(response)
@@ -66,8 +71,27 @@ describe('Login', () => {
         response.refreshToken,
         response.user,
       )
-      expect(mocks.push).toHaveBeenCalledWith('/chat')
+      expect(mocks.push).toHaveBeenCalledWith('/data')
     })
+  })
+
+  it('returns to an explicitly requested protected route after login', async () => {
+    const user = userEvent.setup()
+    const response = makeLoginResponse()
+    const requestedRoute = `/chat/${faker.string.uuid()}`
+    mocks.loginApi.mockResolvedValue(response)
+    rememberPostLoginDestination({ route: requestedRoute })
+
+    render(Login)
+
+    await user.type(screen.getByLabelText('Username'), faker.internet.username())
+    await user.type(screen.getByLabelText('Password'), faker.internet.password())
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    await waitFor(() => {
+      expect(mocks.push).toHaveBeenCalledWith(requestedRoute)
+    })
+    expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBeNull()
   })
 
   it('on failed login, shows error alert without redirecting', async () => {

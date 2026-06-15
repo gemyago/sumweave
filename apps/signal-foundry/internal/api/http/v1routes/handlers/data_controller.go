@@ -9,7 +9,7 @@ import (
 )
 
 // Below is to workaround unused imports if that happens.
-type _ func() CandleRawPayloadMetadataListResponse
+type _ func() CandleAvailabilityListResponse
 
 type DataController interface {
 	// GET /api/v1/data/raw-payloads/{id}
@@ -20,6 +20,16 @@ type DataController interface {
 	GetDataRawPayload(HandlerBuilder[
 		*GetDataRawPayloadParams,
 		*RawPayloadDetailResponse,
+	]) http.Handler
+
+	// GET /api/v1/data/candle-availability
+	//
+	// Request type: ListDataCandleAvailabilityParams,
+	//
+	// Response type: CandleAvailabilityListResponse
+	ListDataCandleAvailability(HandlerBuilder[
+		*ListDataCandleAvailabilityParams,
+		*CandleAvailabilityListResponse,
 	]) http.Handler
 
 	// GET /api/v1/data/candle-raw-payloads
@@ -57,6 +67,8 @@ type DataController interface {
 // 
 // - GET /api/v1/data/raw-payloads/{id}
 // 
+// - GET /api/v1/data/candle-availability
+// 
 // - GET /api/v1/data/candle-raw-payloads
 // 
 // - GET /api/v1/data/candles
@@ -67,6 +79,7 @@ type DataController interface {
 func(rootHandler *RootHandler) RegisterDataRoutes(controller DataController) *RootHandler {
 	builder := newDataControllerBuilder(rootHandler)
 	rootHandler.router.HandleRoute("GET", "/api/v1/data/raw-payloads/{id}", controller.GetDataRawPayload(builder.GetDataRawPayload))
+	rootHandler.router.HandleRoute("GET", "/api/v1/data/candle-availability", controller.ListDataCandleAvailability(builder.ListDataCandleAvailability))
 	rootHandler.router.HandleRoute("GET", "/api/v1/data/candle-raw-payloads", controller.ListDataCandleRawPayloads(builder.ListDataCandleRawPayloads))
 	rootHandler.router.HandleRoute("GET", "/api/v1/data/candles", controller.ListDataCandles(builder.ListDataCandles))
 	rootHandler.router.HandleRoute("GET", "/api/v1/data/raw-payloads", controller.ListDataRawPayloads(builder.ListDataRawPayloads))

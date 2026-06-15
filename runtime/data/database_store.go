@@ -2,9 +2,11 @@ package data
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -216,6 +218,16 @@ type rawPayloadTradeLinkModel struct {
 
 func (rawPayloadTradeLinkModel) TableName(namer schema.Namer) string {
 	return namer.TableName("raw_payload_trade_links")
+}
+
+type candleAvailabilitySummaryRow struct {
+	Venue      string
+	Symbol     string
+	AssetClass string
+	Timeframe  string
+	StartAt    time.Time
+	EndAt      time.Time
+	Count      int64
 }
 
 // DatabaseStore persists canonical data-layer records in SQLite or PostgreSQL via GORM.
@@ -488,6 +500,212 @@ func (s *DatabaseStore) ReplayCandles(
 	}
 
 	return candles, nil
+}
+
+// ListCandleAvailability returns one deterministic page of grouped candle availability.
+func (s *DatabaseStore) ListCandleAvailability(
+	ctx context.Context,
+	query CandleAvailabilityListQuery,
+) (CandleAvailabilityListResult, error) {
+	if err := ctx.Err(); err != nil {
+		return CandleAvailabilityListResult{}, err
+	}
+
+	canonicalQuery, err := canonicalizeCandleAvailabilityListQuery(query)
+	if err != nil {
+		return CandleAvailabilityListResult{}, err
+	}
+
+	rows, err := queryCandleAvailabilitySummaryRows(s.db.WithContext(ctx), canonicalQuery)
+	if err != nil {
+		return CandleAvailabilityListResult{}, err
+	}
+
+	items, err := buildCandleAvailabilityItems(rows)
+	if err != nil {
+		return CandleAvailabilityListResult{}, err
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		leftEnd := items[i].DefaultSlice.EndAt
+		rightEnd := items[j].DefaultSlice.EndAt
+		if !leftEnd.Equal(rightEnd) {
+			return leftEnd.After(rightEnd)
+		}
+		if items[i].Venue != items[j].Venue {
+			return items[i].Venue.String() < items[j].Venue.String()
+		}
+		if items[i].Symbol != items[j].Symbol {
+			return items[i].Symbol.String() < items[j].Symbol.String()
+		}
+		return items[i].AssetClass.String() < items[j].AssetClass.String()
+	})
+
+	filteredItems := make([]CandleAvailabilityItem, 0, min(len(items), canonicalQuery.Limit))
+	for _, item := range items {
+		if !candleAvailabilityItemAfterCursor(item, canonicalQuery.cursor) {
+			continue
+		}
+		filteredItems = append(filteredItems, item)
+		if len(filteredItems) == canonicalQuery.Limit+1 {
+			break
+		}
+	}
+
+	result := CandleAvailabilityListResult{Items: filteredItems}
+	if len(result.Items) > canonicalQuery.Limit {
+		lastReturned := result.Items[canonicalQuery.Limit-1]
+		result.NextCursor = encodeCandleAvailabilityListCursor(
+			lastReturned.DefaultSlice.EndAt,
+			lastReturned.Venue,
+			lastReturned.Symbol,
+			lastReturned.AssetClass,
+		)
+		result.Items = append([]CandleAvailabilityItem(nil), result.Items[:canonicalQuery.Limit]...)
+	}
+
+	if canonicalQuery.Cursor == "" && len(result.Items) > 0 {
+		first := result.Items[0]
+		result.DefaultSelection = &CandleAvailabilityDefaultSelection{
+			Venue:      first.Venue,
+			Symbol:     first.Symbol,
+			AssetClass: first.AssetClass,
+			Timeframe:  first.DefaultSlice.Timeframe,
+			StartAt:    first.DefaultSlice.StartAt,
+			EndAt:      first.DefaultSlice.EndAt,
+		}
+	}
+
+	if result.Items == nil {
+		result.Items = []CandleAvailabilityItem{}
+	}
+
+	return result, nil
+}
+
+type candleAvailabilityEntryKey struct {
+	venue      string
+	symbol     string
+	assetClass string
+}
+
+type candleAvailabilityItemBuilder struct {
+	item CandleAvailabilityItem
+}
+
+func buildCandleAvailabilityItems(
+	rows []candleAvailabilitySummaryRow,
+) ([]CandleAvailabilityItem, error) {
+	builders := make(map[candleAvailabilityEntryKey]*candleAvailabilityItemBuilder, len(rows))
+	keys := make([]candleAvailabilityEntryKey, 0, len(rows))
+	for _, row := range rows {
+		key, summary, item, err := candleAvailabilitySummaryRowToItemParts(row)
+		if err != nil {
+			return nil, err
+		}
+
+		builder, ok := builders[key]
+		if !ok {
+			builder = &candleAvailabilityItemBuilder{item: item}
+			builders[key] = builder
+			keys = append(keys, key)
+		}
+
+		builder.item.Timeframes = append(builder.item.Timeframes, summary)
+	}
+
+	items := make([]CandleAvailabilityItem, 0, len(builders))
+	for _, key := range keys {
+		item, err := finalizeCandleAvailabilityItem(builders[key].item)
+		if err != nil {
+			return nil, err
+		}
+		if len(item.Timeframes) == 0 {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
+func candleAvailabilitySummaryRowToItemParts(
+	row candleAvailabilitySummaryRow,
+) (
+	candleAvailabilityEntryKey,
+	CandleAvailabilityTimeframeSummary,
+	CandleAvailabilityItem,
+	error,
+) {
+	venue, venueErr := domain.NewVenue(row.Venue)
+	if venueErr != nil {
+		return candleAvailabilityEntryKey{}, CandleAvailabilityTimeframeSummary{}, CandleAvailabilityItem{},
+			validationError("candle availability venue is invalid")
+	}
+	symbol, symbolErr := domain.NewSymbol(row.Symbol)
+	if symbolErr != nil {
+		return candleAvailabilityEntryKey{}, CandleAvailabilityTimeframeSummary{}, CandleAvailabilityItem{},
+			validationError("candle availability symbol is invalid")
+	}
+	assetClass, assetClassErr := domain.NewAssetClass(row.AssetClass)
+	if assetClassErr != nil {
+		return candleAvailabilityEntryKey{}, CandleAvailabilityTimeframeSummary{}, CandleAvailabilityItem{},
+			validationError("candle availability asset class is invalid")
+	}
+	timeframe, timeframeErr := domain.NewTimeframe(row.Timeframe)
+	if timeframeErr != nil {
+		return candleAvailabilityEntryKey{}, CandleAvailabilityTimeframeSummary{}, CandleAvailabilityItem{},
+			validationError("candle availability timeframe is invalid")
+	}
+
+	return candleAvailabilityEntryKey{
+			venue:      venue.String(),
+			symbol:     symbol.String(),
+			assetClass: assetClass.String(),
+		}, CandleAvailabilityTimeframeSummary{
+			Timeframe: timeframe,
+			StartAt:   row.StartAt.UTC(),
+			EndAt:     row.EndAt.UTC(),
+			Count:     row.Count,
+		}, CandleAvailabilityItem{
+			Venue:      venue,
+			Symbol:     symbol,
+			AssetClass: assetClass,
+		}, nil
+}
+
+func finalizeCandleAvailabilityItem(item CandleAvailabilityItem) (CandleAvailabilityItem, error) {
+	sort.Slice(item.Timeframes, func(i, j int) bool {
+		return candleAvailabilityTimeframeSummaryLess(item.Timeframes[i], item.Timeframes[j])
+	})
+
+	defaultSummary, defaultSummaryErr := selectDefaultCandleAvailabilitySummary(item.Timeframes)
+	if defaultSummaryErr != nil {
+		return CandleAvailabilityItem{}, defaultSummaryErr
+	}
+
+	defaultSlice, defaultSliceErr := buildDefaultCandleAvailabilitySlice(defaultSummary)
+	if defaultSliceErr != nil {
+		return CandleAvailabilityItem{}, defaultSliceErr
+	}
+
+	item.DefaultSlice = defaultSlice
+	return item, nil
+}
+
+func candleAvailabilityTimeframeSummaryLess(
+	left CandleAvailabilityTimeframeSummary,
+	right CandleAvailabilityTimeframeSummary,
+) bool {
+	leftDuration, leftErr := candleAvailabilityTimeframeDuration(left.Timeframe)
+	rightDuration, rightErr := candleAvailabilityTimeframeDuration(right.Timeframe)
+	if leftErr != nil || rightErr != nil {
+		return left.Timeframe.String() < right.Timeframe.String()
+	}
+	if leftDuration != rightDuration {
+		return leftDuration < rightDuration
+	}
+	return left.Timeframe.String() < right.Timeframe.String()
 }
 
 func (s *DatabaseStore) UpsertTrade(ctx context.Context, trade domain.Trade) (domain.Trade, error) {
@@ -1921,6 +2139,206 @@ func queryRawPayloadMetadataRows(
 	}
 
 	return rows, nil
+}
+
+func queryCandleAvailabilitySummaryRows(
+	db *gorm.DB,
+	query CandleAvailabilityListQuery,
+) ([]candleAvailabilitySummaryRow, error) {
+	instrumentsTable := db.NamingStrategy.TableName("instruments")
+	candlesTable := db.NamingStrategy.TableName("candles")
+
+	statement := db.Table(candlesTable + " AS candles").
+		Select(strings.Join([]string{
+			"instruments.venue AS venue",
+			"instruments.symbol AS symbol",
+			"instruments.asset_class AS asset_class",
+			"candles.timeframe AS timeframe",
+			"MIN(candles.start_at) AS start_at",
+			"MAX(candles.end_at) AS end_at",
+			"COUNT(*) AS candle_count",
+		}, ", ")).
+		Joins("JOIN " + instrumentsTable + " AS instruments ON instruments.id = candles.instrument_id")
+
+	if query.Venue != "" {
+		statement = statement.Where("instruments.venue = ?", query.Venue.String())
+	}
+	if query.Symbol != "" {
+		statement = statement.Where("instruments.symbol = ?", query.Symbol.String())
+	}
+	if query.AssetClass != "" {
+		statement = statement.Where("instruments.asset_class = ?", query.AssetClass.String())
+	}
+
+	sqlRows, err := statement.
+		Group("instruments.venue, instruments.symbol, instruments.asset_class, candles.timeframe").
+		Rows()
+	if err != nil {
+		return nil, fmt.Errorf("query candle availability rows: %w", err)
+	}
+	defer func() {
+		_ = sqlRows.Close()
+	}()
+
+	rows := make([]candleAvailabilitySummaryRow, 0)
+	for sqlRows.Next() {
+		var (
+			row        candleAvailabilitySummaryRow
+			startValue any
+			endValue   any
+		)
+		scanErr := sqlRows.Scan(
+			&row.Venue,
+			&row.Symbol,
+			&row.AssetClass,
+			&row.Timeframe,
+			&startValue,
+			&endValue,
+			&row.Count,
+		)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan candle availability row: %w", scanErr)
+		}
+
+		row.StartAt, err = scanAggregatedTimeValue(startValue)
+		if err != nil {
+			return nil, err
+		}
+		row.EndAt, err = scanAggregatedTimeValue(endValue)
+		if err != nil {
+			return nil, err
+		}
+
+		rows = append(rows, row)
+	}
+	rowsErr := sqlRows.Err()
+	if rowsErr != nil {
+		return nil, fmt.Errorf("iterate candle availability rows: %w", rowsErr)
+	}
+
+	return rows, nil
+}
+
+func scanAggregatedTimeValue(value any) (time.Time, error) {
+	switch typed := value.(type) {
+	case time.Time:
+		return typed.UTC(), nil
+	case string:
+		return parseAggregatedTimeString(typed)
+	case []byte:
+		return parseAggregatedTimeString(string(typed))
+	case sql.NullTime:
+		if !typed.Valid {
+			return time.Time{}, validationError("candle availability time is invalid")
+		}
+		return typed.Time.UTC(), nil
+	default:
+		return time.Time{}, validationError("candle availability time is invalid")
+	}
+}
+
+func parseAggregatedTimeString(value string) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, validationError("candle availability time is invalid")
+	}
+
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05-07:00", "2006-01-02 15:04:05Z07:00", "2006-01-02 15:04:05"} {
+		parsed, err := time.Parse(layout, trimmed)
+		if err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+
+	return time.Time{}, validationError("candle availability time is invalid")
+}
+
+func selectDefaultCandleAvailabilitySummary(
+	summaries []CandleAvailabilityTimeframeSummary,
+) (CandleAvailabilityTimeframeSummary, error) {
+	if len(summaries) == 0 {
+		return CandleAvailabilityTimeframeSummary{}, validationError(
+			"candle availability item timeframes are required",
+		)
+	}
+
+	selected := summaries[0]
+	selectedDuration, err := candleAvailabilityTimeframeDuration(selected.Timeframe)
+	if err != nil {
+		return CandleAvailabilityTimeframeSummary{}, err
+	}
+
+	for _, candidate := range summaries[1:] {
+		candidateDuration, candidateErr := candleAvailabilityTimeframeDuration(candidate.Timeframe)
+		if candidateErr != nil {
+			return CandleAvailabilityTimeframeSummary{}, candidateErr
+		}
+
+		if candidate.EndAt.After(selected.EndAt) {
+			selected = candidate
+			selectedDuration = candidateDuration
+			continue
+		}
+		if candidate.EndAt.Equal(selected.EndAt) {
+			if candidateDuration < selectedDuration {
+				selected = candidate
+				selectedDuration = candidateDuration
+				continue
+			}
+			if candidateDuration == selectedDuration && candidate.Timeframe.String() < selected.Timeframe.String() {
+				selected = candidate
+				selectedDuration = candidateDuration
+			}
+		}
+	}
+
+	return selected, nil
+}
+
+func buildDefaultCandleAvailabilitySlice(
+	summary CandleAvailabilityTimeframeSummary,
+) (CandleAvailabilityDefaultSlice, error) {
+	duration, err := candleAvailabilityTimeframeDuration(summary.Timeframe)
+	if err != nil {
+		return CandleAvailabilityDefaultSlice{}, err
+	}
+
+	startAt := summary.EndAt.Add(-time.Duration(maxDefaultCandleSliceIntervals) * duration)
+	if startAt.Before(summary.StartAt) {
+		startAt = summary.StartAt
+	}
+
+	return CandleAvailabilityDefaultSlice{
+		Timeframe: summary.Timeframe,
+		StartAt:   startAt.UTC(),
+		EndAt:     summary.EndAt.UTC(),
+	}, nil
+}
+
+func candleAvailabilityItemAfterCursor(
+	item CandleAvailabilityItem,
+	cursor candleAvailabilityListCursor,
+) bool {
+	if cursor.LatestEnd.IsZero() {
+		return true
+	}
+
+	itemLatestEnd := item.DefaultSlice.EndAt.UTC()
+	if itemLatestEnd.Before(cursor.LatestEnd) {
+		return true
+	}
+	if itemLatestEnd.After(cursor.LatestEnd) {
+		return false
+	}
+
+	if item.Venue.String() != cursor.Venue.String() {
+		return item.Venue.String() > cursor.Venue.String()
+	}
+	if item.Symbol.String() != cursor.Symbol.String() {
+		return item.Symbol.String() > cursor.Symbol.String()
+	}
+
+	return item.AssetClass.String() > cursor.AssetClass.String()
 }
 
 func listNormalizationRunRawPayloadIDs(tx *gorm.DB, normalizationRunID string) ([]string, error) {

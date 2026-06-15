@@ -22,29 +22,16 @@ permission:
   bash:
     "*": deny
     openspec*: allow
-    git checkout*: allow
-    git status*: allow
-    git diff*: allow
-    git log*: allow
-    git rev-parse*: allow
-    git branch*: allow
-    git fetch*: allow
-    git remote*: allow
-    git ls-files*: allow
-    git add*: allow
-    git commit*: allow
-    git pull*: allow
-    git push*: allow
-    gh pr *: allow
-    gh api *: allow
+    git*: allow
+    gh*: allow
   task:
-    "*": deny
-    openspec-planning: allow
-    openspec-plan-reviewing: allow
-    openspec-implementation: allow
-    openspec-chunk-finalizing: allow
-    openspec-implementation-finalizing: allow
-    openspec-comments-addressing: allow
+    "*": allow
+    # openspec-planning: allow
+    # openspec-plan-reviewing: allow
+    # openspec-implementation: allow
+    # openspec-chunk-finalizing: allow
+    # openspec-implementation-finalizing: allow
+    # openspec-comments-addressing: allow
   webfetch: deny
   lsp: deny
   external_directory: deny

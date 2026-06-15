@@ -89,10 +89,29 @@ npm run dev
 
 # Start everything in one terminal
 nx run-many -t dev
+
+# Or manage both long-running processes via PM2 from the repo root
+npm run pm2:start
 ```
 
 Frontend host/port: http://localhost:5173
-Backend host/port: http://localhost:8080
+Backend host/port: http://localhost:4501
+
+PM2 process names:
+- `signal-foundry-api`
+- `signal-foundry-ui`
+
+Useful PM2 commands from the repo root:
+```bash
+npm run pm2:status
+npm run pm2:restart
+npm run pm2:restart:api
+npm run pm2:restart:ui
+npm run pm2:stop
+npm run pm2:delete
+```
+
+If the data screen still shows a browse-first availability `404` after a PM2 restart, check `npm run pm2:status`: the UI proxies `/api/v1/*` to port `4501`, and a stale non-PM2 `signal-foundry start` process on that port can keep PM2's backend stopped. The PM2 API entry now attempts to replace a stale `signal-foundry start` listener automatically on startup.
 
 ### Combined local mode
 

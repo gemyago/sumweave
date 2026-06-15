@@ -54,8 +54,10 @@ Tools/Frameworks:
 - Go 1.26.x
 - Node.js 24.x
 - Svelte 5
+- PM2 for repo-scoped local process management
 
 Go and Node.js are managed by direnv (in .envrc) and nvm respectively. All dependencies are project scoped (e.g no global node_modules e.t.c).
+PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from the repo root.
 
 **Shell usage notes**
 - If shell is persistent (e.g human controlled terminal), then `direnv allow` and then run all commands directly in the shell.

@@ -14,7 +14,7 @@ import (
 var _ = BindingContext{}
 var _ = http.MethodGet
 var _ = time.Time{}
-type _ func() CandleRawPayloadMetadataListResponse
+type _ func() CandleAvailabilityListResponse
 
 type paramsParserDataGetDataRawPayload struct {
 	bindID requestParamBinder[string, string]
@@ -34,6 +34,75 @@ func newParamsParserDataGetDataRawPayload(rootHandler *RootHandler) paramsParser
 		bindID: newRequestParamBinder(binderParams[string, string]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
+type paramsParserDataListDataCandleAvailability struct {
+	bindVenue requestParamBinder[[]string, string]
+	bindSymbol requestParamBinder[[]string, string]
+	bindAssetClass requestParamBinder[[]string, string]
+	bindLimit requestParamBinder[[]string, int64]
+	bindCursor requestParamBinder[[]string, string]
+}
+
+func (p *paramsParserDataListDataCandleAvailability) parse(router httpRouter, req *http.Request) (*ListDataCandleAvailabilityParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &ListDataCandleAvailabilityParams{}
+	// query params
+	query := req.URL.Query()
+	queryParamsCtx := bindingCtx.Fork("query")
+	p.bindVenue(queryParamsCtx.Fork("venue"), readQueryValue("venue", query), &reqParams.Venue)
+	p.bindSymbol(queryParamsCtx.Fork("symbol"), readQueryValue("symbol", query), &reqParams.Symbol)
+	p.bindAssetClass(queryParamsCtx.Fork("assetClass"), readQueryValue("assetClass", query), &reqParams.AssetClass)
+	p.bindLimit(queryParamsCtx.Fork("limit"), readQueryValue("limit", query), &reqParams.Limit)
+	p.bindCursor(queryParamsCtx.Fork("cursor"), readQueryValue("cursor", query), &reqParams.Cursor)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserDataListDataCandleAvailability(rootHandler *RootHandler) paramsParser[*ListDataCandleAvailabilityParams] {
+	return &paramsParserDataListDataCandleAvailability{
+		bindVenue: newRequestParamBinder(binderParams[[]string, string]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindSymbol: newRequestParamBinder(binderParams[[]string, string]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindAssetClass: newRequestParamBinder(binderParams[[]string, string]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindLimit: newRequestParamBinder(binderParams[[]string, int64]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.int64Parser,
+			),
+			validateValue: NewSimpleFieldValidator[int64](
+				NewMinMaxValueValidator[int64](1, false, true),
+				NewMinMaxValueValidator[int64](200, false, false),
+			),
+		}),
+		bindCursor: newRequestParamBinder(binderParams[[]string, string]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
 				rootHandler.knownParsers.stringParser,
 			),
 			validateValue: NewSimpleFieldValidator[string](
@@ -366,6 +435,18 @@ type dataControllerBuilder struct {
 		httpHandlerActionFunc[*GetDataRawPayloadParams, *RawPayloadDetailResponse],
 	]
 
+	// GET /api/v1/data/candle-availability
+	//
+	// Request type: ListDataCandleAvailabilityParams,
+	//
+	// Response type: CandleAvailabilityListResponse
+	ListDataCandleAvailability genericHandlerBuilder[
+		*ListDataCandleAvailabilityParams,
+		*CandleAvailabilityListResponse,
+		handlerActionFunc[*ListDataCandleAvailabilityParams, *CandleAvailabilityListResponse],
+		httpHandlerActionFunc[*ListDataCandleAvailabilityParams, *CandleAvailabilityListResponse],
+	]
+
 	// GET /api/v1/data/candle-raw-payloads
 	//
 	// Request type: ListDataCandleRawPayloadsParams,
@@ -422,6 +503,26 @@ func newDataControllerBuilder(app *RootHandler) *dataControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserDataGetDataRawPayload(app),
+			},
+		),
+
+		// GET /api/v1/data/candle-availability
+		ListDataCandleAvailability: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*ListDataCandleAvailabilityParams,
+				*CandleAvailabilityListResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*ListDataCandleAvailabilityParams,
+				*CandleAvailabilityListResponse,
+			](),
+			makeActionBuilderParams[
+				*ListDataCandleAvailabilityParams,
+				*CandleAvailabilityListResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserDataListDataCandleAvailability(app),
 			},
 		),
 

@@ -1,13 +1,14 @@
 <script>
   import { onMount } from 'svelte'
   import { replace } from 'svelte-spa-router'
+  import { DEFAULT_AUTHENTICATED_ROUTE } from '../lib/routing/post-login-destination'
 
   onMount(() => {
-    replace('/chat')
+    replace(DEFAULT_AUTHENTICATED_ROUTE)
   })
 </script>
 
-<p class="muted" role="status">Opening chat…</p>
+<p class="muted" role="status">Opening data…</p>
 
 <style>
   .muted {

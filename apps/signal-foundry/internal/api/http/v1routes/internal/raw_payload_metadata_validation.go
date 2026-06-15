@@ -57,10 +57,8 @@ func NewRawPayloadMetadataValidator() FieldValidator[*RawPayloadMetadata] {
 	validateTimeframe := NewSimpleFieldValidator[string](
 	)
 	validateStart := NewSimpleFieldValidator[*time.Time](
-		SkipNullValidator(EnsureNonDefault[time.Time]),
 	)
 	validateEnd := NewSimpleFieldValidator[*time.Time](
-		SkipNullValidator(EnsureNonDefault[time.Time]),
 	)
 	validateReceivedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],

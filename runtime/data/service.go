@@ -41,6 +41,10 @@ type instrumentLookupStore interface {
 }
 
 type candleQueryStore interface {
+	ListCandleAvailability(
+		ctx context.Context,
+		query CandleAvailabilityListQuery,
+	) (CandleAvailabilityListResult, error)
 	QueryCandles(
 		ctx context.Context,
 		instrument domain.Instrument,
@@ -292,6 +296,24 @@ func (s *ReadService) LookupInstrument(
 	}
 
 	return instrument, nil
+}
+
+// ListCandleAvailability returns one deterministic page of normalized candle availability.
+func (s *ReadService) ListCandleAvailability(
+	ctx context.Context,
+	query CandleAvailabilityListQuery,
+) (CandleAvailabilityListResult, error) {
+	canonicalQuery, err := canonicalizeCandleAvailabilityListQuery(query)
+	if err != nil {
+		return CandleAvailabilityListResult{}, err
+	}
+
+	result, err := s.candleStore.ListCandleAvailability(ctx, canonicalQuery)
+	if err != nil {
+		return CandleAvailabilityListResult{}, fmt.Errorf("list candle availability: %w", err)
+	}
+
+	return result, nil
 }
 
 // QueryCandles returns canonical candles for an instrument, timeframe, and half-open time range.

@@ -24,6 +24,13 @@ import (
 
 type testReplayReadService struct{}
 
+func (s *testReplayReadService) ListCandleAvailability(
+	_ context.Context,
+	_ data.CandleAvailabilityListQuery,
+) (data.CandleAvailabilityListResult, error) {
+	return data.CandleAvailabilityListResult{Items: []data.CandleAvailabilityItem{}}, nil
+}
+
 func (s *testReplayReadService) ReplayCandles(
 	_ context.Context,
 	_ domain.Instrument,
@@ -153,14 +160,15 @@ func TestSetupV1Routes(t *testing.T) {
 		})
 
 		t.Run("data routes are registered on the app router", func(t *testing.T) {
-			req := httptest.NewRequest(
-				http.MethodGet,
+			for _, target := range []string{
+				"/api/v1/data/candle-availability",
 				"/api/v1/data/candles?venue=hyperliquid-perps&symbol=BTCUSD&assetClass=crypto&timeframe=1m&start=2026-06-15T12:00:00Z&end=2026-06-15T13:00:00Z",
-				http.NoBody,
-			)
-			w := httptest.NewRecorder()
-			rootHandler.ServeHTTP(w, req)
-			require.Equal(t, http.StatusOK, w.Code)
+			} {
+				req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
+				w := httptest.NewRecorder()
+				rootHandler.ServeHTTP(w, req)
+				require.Equal(t, http.StatusOK, w.Code)
+			}
 		})
 	})
 

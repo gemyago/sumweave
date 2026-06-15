@@ -8,6 +8,7 @@ tmp
 .venv
 tmp
 /data
+.pm2
 *.log
 
 # User configs

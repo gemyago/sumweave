@@ -4,16 +4,20 @@
   import { wrap } from 'svelte-spa-router/wrap'
   import Nav from './components/Nav.svelte'
   import { themeStore } from './lib/theme/theme-store.svelte'
+  import {
+    LOGIN_ROUTE,
+    rememberCurrentPostLoginDestination,
+  } from './lib/routing/post-login-destination'
   import Chat from './pages/Chat.svelte'
   import Data from './pages/Data.svelte'
   import Login from './pages/Login.svelte'
   import Providers from './pages/Providers.svelte'
-  import RedirectToChat from './pages/RedirectToChat.svelte'
+  import RedirectToDefaultRoute from './pages/RedirectToDefaultRoute.svelte'
   import { authStore } from './lib/auth/auth-store.svelte'
 
   const routes = {
-    '/login': Login,
-    '/': RedirectToChat,
+    [LOGIN_ROUTE]: Login,
+    '/': RedirectToDefaultRoute,
     '/chat/:sessionId?': wrap({
       component: Chat,
       conditions: [() => authStore.isAuthenticated],
@@ -29,7 +33,8 @@
   }
 
   function handleConditionsFailed() {
-    replace('/login')
+    rememberCurrentPostLoginDestination()
+    replace(LOGIN_ROUTE)
   }
 
   onMount(async () => {
