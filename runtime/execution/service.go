@@ -242,11 +242,25 @@ func canonicalApprovedDecision(decision domain.GovernorDecision) (domain.Governo
 
 func canonicalCommand(command domain.ExecutionCommand) (domain.ExecutionCommand, error) {
 	canonicalCommand, err := domain.NewExecutionCommand(domain.ExecutionCommandParams{
-		CommandID:        string(command.CommandID),
-		ApprovedDecision: command.ApprovedDecision,
-		Status:           command.Status,
-		Quantity:         command.Quantity,
-		EventTime:        command.EventTime.Time(),
+		CommandID:                 string(command.CommandID),
+		TraceID:                   string(command.TraceID),
+		IntentID:                  string(command.IntentID),
+		Mode:                      command.Mode,
+		StrategyID:                command.StrategyID,
+		StrategyVersion:           command.StrategyVersion,
+		StrategyArtifactHash:      command.StrategyArtifactHash,
+		Venue:                     command.Venue,
+		Instrument:                command.Instrument,
+		ActionKind:                command.ActionKind,
+		OrderType:                 command.OrderType,
+		LimitPrice:                command.LimitPrice,
+		ReduceOnly:                command.ReduceOnly,
+		GovernorDecisionReference: command.GovernorDecisionReference,
+		ApprovedDecision:          command.ApprovedDecision,
+		Status:                    command.Status,
+		Quantity:                  command.Quantity,
+		Notional:                  command.Notional,
+		EventTime:                 command.EventTime.Time(),
 	})
 	if err != nil {
 		return domain.ExecutionCommand{}, validationError(
@@ -259,13 +273,23 @@ func canonicalCommand(command domain.ExecutionCommand) (domain.ExecutionCommand,
 
 func canonicalOrder(order domain.ExecutionOrder) (domain.ExecutionOrder, error) {
 	canonicalOrder, err := domain.NewExecutionOrder(domain.ExecutionOrderParams{
-		OrderID:       string(order.OrderID),
-		Command:       order.Command,
-		Venue:         order.Venue,
-		ClientOrderID: order.ClientOrderID,
-		Status:        order.Status,
-		Quantity:      order.Quantity,
-		EventTime:     order.EventTime.Time(),
+		OrderID:              string(order.OrderID),
+		Command:              order.Command,
+		Mode:                 order.Mode,
+		StrategyID:           order.StrategyID,
+		StrategyVersion:      order.StrategyVersion,
+		StrategyArtifactHash: order.StrategyArtifactHash,
+		Venue:                order.Venue,
+		Instrument:           order.Instrument,
+		OrderType:            order.OrderType,
+		TimeInForce:          order.TimeInForce,
+		ReduceOnly:           order.ReduceOnly,
+		ClientOrderID:        order.ClientOrderID,
+		Status:               order.Status,
+		Quantity:             order.Quantity,
+		Notional:             order.Notional,
+		LimitPrice:           order.LimitPrice,
+		EventTime:            order.EventTime.Time(),
 	})
 	if err != nil {
 		return domain.ExecutionOrder{}, validationError(
@@ -278,11 +302,15 @@ func canonicalOrder(order domain.ExecutionOrder) (domain.ExecutionOrder, error) 
 
 func canonicalFill(fill domain.ExecutionFill) (domain.ExecutionFill, error) {
 	canonicalFill, err := domain.NewExecutionFill(domain.ExecutionFillParams{
-		FillID:    string(fill.FillID),
-		Order:     fill.Order,
-		Quantity:  fill.Quantity,
-		Price:     fill.Price,
-		EventTime: fill.EventTime.Time(),
+		FillID:                    string(fill.FillID),
+		Order:                     fill.Order,
+		SourceMarketDataReference: fill.SourceMarketDataReference,
+		FeeAmount:                 fill.FeeAmount,
+		SlippageAmount:            fill.SlippageAmount,
+		Metadata:                  fill.Metadata,
+		Quantity:                  fill.Quantity,
+		Price:                     fill.Price,
+		EventTime:                 fill.EventTime.Time(),
 	})
 	if err != nil {
 		return domain.ExecutionFill{}, err

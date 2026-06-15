@@ -2,6 +2,7 @@ package governor
 
 import (
 	"hash/fnv"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -68,11 +69,11 @@ func TestService(t *testing.T) {
 		return instrument
 	}
 
-	makeStrategy := func(t *testing.T, fake faker.Faker) domain.StrategyIdentity {
+	makeStrategy := func(t *testing.T, instrument domain.Instrument) domain.StrategyIdentity {
 		t.Helper()
 
 		strategy, err := domain.NewStrategyIdentity(domain.StrategyIdentityParams{
-			Instrument: makeInstrument(t, fake),
+			Instrument: instrument,
 			Timeframe:  domain.Timeframe1m,
 			Kind:       domain.StrategyKindMovingAverageCrossover,
 		})
@@ -130,6 +131,78 @@ func TestService(t *testing.T) {
 		return decision
 	}
 
+	makeIntentInput := func(
+		t *testing.T,
+		fake faker.Faker,
+		action domain.CandidateAction,
+		strategyID string,
+		strategyVersion string,
+		strategyArtifactHash string,
+		mode domain.DecisionMode,
+		quantity float64,
+		limitPrice float64,
+	) IntentInput {
+		t.Helper()
+
+		intent, err := domain.NewOrderIntent(domain.OrderIntentParams{
+			IntentID:                 randomWord(t, fake, "intent"),
+			TraceID:                  randomWord(t, fake, "trace"),
+			StrategyID:               strategyID,
+			StrategyVersion:          strategyVersion,
+			StrategyArtifactHash:     strategyArtifactHash,
+			Mode:                     mode,
+			Instrument:               action.Strategy.Instrument,
+			Timeframe:                action.Strategy.Timeframe,
+			ActionKind:               action.Kind,
+			OrderType:                domain.OrderTypeLimit,
+			RequestedQuantity:        quantity,
+			RequestedNotional:        quantity * limitPrice,
+			RequestedLimitPrice:      &limitPrice,
+			SourceReasonCode:         string(domain.GovernorDecisionReasonOK),
+			CandidateActionReference: randomWord(t, fake, "candidate-ref"),
+			CreatedTime:              action.DecisionTime.Time(),
+			Status:                   domain.OrderIntentStatusCreated,
+			Metadata: map[string]string{
+				"origin": randomWord(t, fake, "origin"),
+			},
+		})
+		require.NoError(t, err)
+
+		return IntentInput{
+			CandidateAction:                   action,
+			Intent:                            intent,
+			CurrentStrategyExposureNotional:   0,
+			CurrentInstrumentExposureNotional: 0,
+			GovernorPolicyID:                  randomWord(t, fake, "policy-id"),
+			GovernorPolicyVersion:             randomWord(t, fake, "policy-version"),
+			GovernorPolicyHash:                randomWord(t, fake, "policy-hash"),
+		}
+	}
+
+	basePolicy := func(
+		instrument domain.Instrument,
+		strategyID string,
+	) Policy {
+		return Policy{
+			AllowedModes: []domain.DecisionMode{
+				domain.DecisionModePaper,
+				domain.DecisionModeBacktest,
+			},
+			AllowedVenues:      []domain.Venue{instrument.Venue},
+			AllowedInstruments: []domain.Instrument{instrument},
+			AllowedStrategyIDs: []string{strategyID},
+			AllowedActionKinds: []domain.CandidateActionKind{
+				domain.CandidateActionKindLong,
+				domain.CandidateActionKindShort,
+			},
+			MinimumQuality:                    domain.DataQualityRaw,
+			MaximumOrderNotional:              1000,
+			MaximumStrategyExposureNotional:   2000,
+			MaximumInstrumentExposureNotional: 2000,
+			MaximumApprovedCount:              4,
+		}
+	}
+
 	t.Run("NewService", func(t *testing.T) {
 		t.Parallel()
 
@@ -145,7 +218,8 @@ func TestService(t *testing.T) {
 
 			fake := newFake(t)
 			service := NewService()
-			strategy := makeStrategy(t, fake)
+			instrument := makeInstrument(t, fake)
+			strategy := makeStrategy(t, instrument)
 			action := makeAction(
 				t,
 				strategy,
@@ -185,6 +259,16 @@ func TestService(t *testing.T) {
 					},
 					expectedMsg: "maximum approved action count must be zero or greater",
 				},
+				{
+					name: "negative maximum order notional",
+					policy: Policy{
+						AllowedActionKinds:   []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:       domain.DataQualityRaw,
+						MaximumOrderNotional: -1,
+						MaximumApprovedCount: 1,
+					},
+					expectedMsg: "maximum order notional must be finite and zero or greater",
+				},
 			}
 
 			for _, testCase := range testCases {
@@ -192,8 +276,10 @@ func TestService(t *testing.T) {
 					t.Parallel()
 
 					result, err := service.Evaluate(t.Context(), EvaluateRequest{
-						CandidateActions: []domain.CandidateAction{action},
-						Policy:           testCase.policy,
+						CandidateActions: []domain.CandidateAction{
+							action,
+						},
+						Policy: testCase.policy,
 					})
 
 					require.ErrorIs(t, err, ErrValidation)
@@ -203,12 +289,13 @@ func TestService(t *testing.T) {
 			}
 		})
 
-		t.Run("returns stable decisions ordered by candidate decision time", func(t *testing.T) {
+		t.Run("returns stable candidate-action decisions ordered by decision time", func(t *testing.T) {
 			t.Parallel()
 
 			fake := newFake(t)
 			service := NewService()
-			strategy := makeStrategy(t, fake)
+			instrument := makeInstrument(t, fake)
+			strategy := makeStrategy(t, instrument)
 			baseTime := randomTime(t, fake)
 
 			lateAction := makeAction(
@@ -234,7 +321,11 @@ func TestService(t *testing.T) {
 			)
 
 			request := EvaluateRequest{
-				CandidateActions: []domain.CandidateAction{lateAction, earlyAction, middleAction},
+				CandidateActions: []domain.CandidateAction{
+					lateAction,
+					earlyAction,
+					middleAction,
+				},
 				Policy: Policy{
 					AllowedActionKinds: []domain.CandidateActionKind{
 						domain.CandidateActionKindLong,
@@ -251,39 +342,23 @@ func TestService(t *testing.T) {
 			secondResult, err := service.Evaluate(t.Context(), request)
 			require.NoError(t, err)
 
-			expected := EvaluateResult{
-				Decisions: []domain.GovernorDecision{
-					makeDecision(
-						t,
-						earlyAction,
-						domain.GovernorDecisionStatusApproved,
-						domain.GovernorDecisionReasonEligible,
-					),
-					makeDecision(
-						t,
-						middleAction,
-						domain.GovernorDecisionStatusApproved,
-						domain.GovernorDecisionReasonEligible,
-					),
-					makeDecision(
-						t,
-						lateAction,
-						domain.GovernorDecisionStatusApproved,
-						domain.GovernorDecisionReasonEligible,
-					),
-				},
-			}
+			expected := EvaluateResult{Decisions: []domain.GovernorDecision{
+				makeDecision(t, earlyAction, domain.GovernorDecisionStatusApproved, domain.GovernorDecisionReasonOK),
+				makeDecision(t, middleAction, domain.GovernorDecisionStatusApproved, domain.GovernorDecisionReasonOK),
+				makeDecision(t, lateAction, domain.GovernorDecisionStatusApproved, domain.GovernorDecisionReasonOK),
+			}}
 
 			require.Equal(t, expected, firstResult)
 			require.Equal(t, firstResult, secondResult)
 		})
 
-		t.Run("applies approval, rejection, and blocking policy rules", func(t *testing.T) {
+		t.Run("applies candidate-action approval rejection and blocking rules", func(t *testing.T) {
 			t.Parallel()
 
 			fake := newFake(t)
 			service := NewService()
-			strategy := makeStrategy(t, fake)
+			instrument := makeInstrument(t, fake)
+			strategy := makeStrategy(t, instrument)
 			baseTime := randomTime(t, fake)
 
 			approvedAction := makeAction(
@@ -330,44 +405,43 @@ func TestService(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			expected := EvaluateResult{
-				Decisions: []domain.GovernorDecision{
-					makeDecision(
-						t,
-						approvedAction,
-						domain.GovernorDecisionStatusApproved,
-						domain.GovernorDecisionReasonEligible,
-					),
-					makeDecision(
-						t,
-						disallowedAction,
-						domain.GovernorDecisionStatusRejected,
-						domain.GovernorDecisionReasonDisallowedActionKind,
-					),
-					makeDecision(
-						t,
-						belowMinimumAction,
-						domain.GovernorDecisionStatusRejected,
-						domain.GovernorDecisionReasonBelowMinimumQuality,
-					),
-					makeDecision(
-						t,
-						blockedAction,
-						domain.GovernorDecisionStatusBlocked,
-						domain.GovernorDecisionReasonApprovalLimitReached,
-					),
-				},
-			}
+			expected := EvaluateResult{Decisions: []domain.GovernorDecision{
+				makeDecision(
+					t,
+					approvedAction,
+					domain.GovernorDecisionStatusApproved,
+					domain.GovernorDecisionReasonOK,
+				),
+				makeDecision(
+					t,
+					disallowedAction,
+					domain.GovernorDecisionStatusRejected,
+					domain.GovernorDecisionReasonActionKindNotAllowed,
+				),
+				makeDecision(
+					t,
+					belowMinimumAction,
+					domain.GovernorDecisionStatusRejected,
+					domain.GovernorDecisionReasonDataQualityTooLow,
+				),
+				makeDecision(
+					t,
+					blockedAction,
+					domain.GovernorDecisionStatusBlocked,
+					domain.GovernorDecisionReasonApprovalLimitReached,
+				),
+			}}
 
 			require.Equal(t, expected, result)
 		})
 
-		t.Run("evaluates canonical candidate actions without external dependencies", func(t *testing.T) {
+		t.Run("rejects invalid intent inputs with INVALID_INTENT", func(t *testing.T) {
 			t.Parallel()
 
 			fake := newFake(t)
 			service := NewService()
-			strategy := makeStrategy(t, fake)
+			instrument := makeInstrument(t, fake)
+			strategy := makeStrategy(t, instrument)
 			action := makeAction(
 				t,
 				strategy,
@@ -375,26 +449,356 @@ func TestService(t *testing.T) {
 				randomTime(t, fake),
 				domain.DataQualityValidated,
 			)
+			strategyID := randomWord(t, fake, "strategy-id")
+			strategyVersion := randomWord(t, fake, "strategy-version")
+			strategyArtifactHash := randomWord(t, fake, "strategy-artifact")
+			baseInput := makeIntentInput(
+				t,
+				fake,
+				action,
+				strategyID,
+				strategyVersion,
+				strategyArtifactHash,
+				domain.DecisionModeBacktest,
+				2,
+				101,
+			)
+			policy := basePolicy(instrument, strategyID)
 
-			result, err := service.Evaluate(t.Context(), EvaluateRequest{
-				CandidateActions: []domain.CandidateAction{action},
-				Policy: Policy{
-					AllowedActionKinds:   []domain.CandidateActionKind{domain.CandidateActionKindLong},
-					MinimumQuality:       domain.DataQualityValidated,
-					MaximumApprovedCount: 1,
+			testCases := []struct {
+				name        string
+				mutate      func(IntentInput) IntentInput
+				expectedMsg string
+			}{
+				{
+					name: "missing mode",
+					mutate: func(input IntentInput) IntentInput {
+						input.Intent.Mode = ""
+						return input
+					},
+					expectedMsg: "order intent mode is required",
 				},
-			})
+				{
+					name: "missing strategy id",
+					mutate: func(input IntentInput) IntentInput {
+						input.Intent.StrategyID = ""
+						return input
+					},
+					expectedMsg: "order intent strategy id is required",
+				},
+				{
+					name: "missing quantity and notional",
+					mutate: func(input IntentInput) IntentInput {
+						input.Intent.RequestedQuantity = 0
+						input.Intent.RequestedNotional = 0
+						return input
+					},
+					expectedMsg: "order intent requested quantity or requested notional is required",
+				},
+				{
+					name: "missing limit price",
+					mutate: func(input IntentInput) IntentInput {
+						input.Intent.RequestedLimitPrice = nil
+						return input
+					},
+					expectedMsg: "order intent requested limit price is required for limit orders",
+				},
+				{
+					name: "missing policy hash",
+					mutate: func(input IntentInput) IntentInput {
+						input.GovernorPolicyHash = ""
+						return input
+					},
+					expectedMsg: "governor policy hash is required",
+				},
+				{
+					name: "invalid strategy exposure",
+					mutate: func(input IntentInput) IntentInput {
+						input.CurrentStrategyExposureNotional = math.NaN()
+						return input
+					},
+					expectedMsg: "current strategy exposure notional must be finite",
+				},
+			}
+
+			for _, testCase := range testCases {
+				t.Run(testCase.name, func(t *testing.T) {
+					t.Parallel()
+
+					result, err := service.Evaluate(t.Context(), EvaluateRequest{
+						IntentInputs: []IntentInput{testCase.mutate(baseInput)},
+						Policy:       policy,
+					})
+
+					require.ErrorIs(t, err, ErrValidation)
+					require.ErrorContains(t, err, string(domain.GovernorDecisionReasonInvalidIntent))
+					require.ErrorContains(t, err, testCase.expectedMsg)
+					require.Equal(t, EvaluateResult{}, result)
+				})
+			}
+		})
+
+		t.Run("applies intent mode scope kill-switch and notional checks with canonical reasons", func(t *testing.T) {
+			t.Parallel()
+
+			fake := newFake(t)
+			service := NewService()
+			instrument := makeInstrument(t, fake)
+			strategy := makeStrategy(t, instrument)
+			action := makeAction(
+				t,
+				strategy,
+				domain.CandidateActionKindLong,
+				randomTime(t, fake),
+				domain.DataQualityValidated,
+			)
+			strategyID := randomWord(t, fake, "strategy-id")
+			strategyVersion := randomWord(t, fake, "strategy-version")
+			strategyArtifactHash := randomWord(t, fake, "strategy-artifact")
+			allowedPolicy := basePolicy(instrument, strategyID)
+			baseInput := makeIntentInput(
+				t,
+				fake,
+				action,
+				strategyID,
+				strategyVersion,
+				strategyArtifactHash,
+				domain.DecisionModeBacktest,
+				2,
+				100,
+			)
+
+			otherInstrument := makeInstrument(t, fake)
+			otherVenue, err := domain.NewVenue(randomWord(t, fake, "other-venue"))
 			require.NoError(t, err)
-			require.Equal(t, EvaluateResult{
-				Decisions: []domain.GovernorDecision{
-					makeDecision(
-						t,
-						action,
-						domain.GovernorDecisionStatusApproved,
-						domain.GovernorDecisionReasonEligible,
-					),
+
+			testCases := []struct {
+				name           string
+				mutatePolicy   func(Policy) Policy
+				mutateInput    func(IntentInput) IntentInput
+				expectedStatus domain.GovernorDecisionStatus
+				expectedReason domain.GovernorDecisionReason
+			}{
+				{
+					name:           "approves valid input",
+					mutatePolicy:   func(policy Policy) Policy { return policy },
+					mutateInput:    func(input IntentInput) IntentInput { return input },
+					expectedStatus: domain.GovernorDecisionStatusApproved,
+					expectedReason: domain.GovernorDecisionReasonOK,
 				},
-			}, result)
+				{
+					name:         "rejects live mode",
+					mutatePolicy: func(policy Policy) Policy { return policy },
+					mutateInput: func(input IntentInput) IntentInput {
+						input.Intent.Mode = domain.DecisionModeLive
+						return input
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonModeNotAllowed,
+				},
+				{
+					name: "rejects disallowed venue",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.AllowedVenues = []domain.Venue{otherVenue}
+						return policy
+					},
+					mutateInput:    func(input IntentInput) IntentInput { return input },
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonVenueNotAllowed,
+				},
+				{
+					name: "rejects disallowed instrument",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.AllowedInstruments = []domain.Instrument{otherInstrument}
+						return policy
+					},
+					mutateInput:    func(input IntentInput) IntentInput { return input },
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonInstrumentNotAllowed,
+				},
+				{
+					name: "rejects disallowed strategy",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.AllowedStrategyIDs = []string{randomWord(t, fake, "other-strategy")}
+						return policy
+					},
+					mutateInput:    func(input IntentInput) IntentInput { return input },
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonStrategyNotAllowed,
+				},
+				{
+					name: "rejects disallowed action kind",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.AllowedActionKinds = []domain.CandidateActionKind{domain.CandidateActionKindShort}
+						return policy
+					},
+					mutateInput:    func(input IntentInput) IntentInput { return input },
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonActionKindNotAllowed,
+				},
+				{
+					name: "rejects low quality",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.MinimumQuality = domain.DataQualityValidated
+						return policy
+					},
+					mutateInput: func(input IntentInput) IntentInput {
+						input.CandidateAction.Quality = domain.DataQualityRaw
+						return input
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonDataQualityTooLow,
+				},
+				{
+					name: "blocks kill switch",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.BlockNewRisk = true
+						return policy
+					},
+					mutateInput:    func(input IntentInput) IntentInput { return input },
+					expectedStatus: domain.GovernorDecisionStatusBlocked,
+					expectedReason: domain.GovernorDecisionReasonKillSwitchActive,
+				},
+				{
+					name: "rejects order notional over limit",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.MaximumOrderNotional = 50
+						return policy
+					},
+					mutateInput:    func(input IntentInput) IntentInput { return input },
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonOrderNotionalExceedsLimit,
+				},
+				{
+					name: "rejects projected strategy exposure over limit",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.MaximumStrategyExposureNotional = 150
+						return policy
+					},
+					mutateInput: func(input IntentInput) IntentInput {
+						input.CurrentStrategyExposureNotional = 75
+						return input
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonStrategyExposureExceedsLimit,
+				},
+				{
+					name: "rejects projected instrument exposure over limit",
+					mutatePolicy: func(policy Policy) Policy {
+						policy.MaximumInstrumentExposureNotional = 150
+						return policy
+					},
+					mutateInput: func(input IntentInput) IntentInput {
+						input.CurrentInstrumentExposureNotional = 75
+						return input
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonInstrumentExposureExceedsLimit,
+				},
+			}
+
+			for _, testCase := range testCases {
+				t.Run(testCase.name, func(t *testing.T) {
+					t.Parallel()
+
+					input := testCase.mutateInput(baseInput)
+					result, evalErr := service.Evaluate(t.Context(), EvaluateRequest{
+						IntentInputs: []IntentInput{input},
+						Policy:       testCase.mutatePolicy(allowedPolicy),
+					})
+					require.NoError(t, evalErr)
+					require.Equal(t, EvaluateResult{Decisions: []domain.GovernorDecision{
+						makeDecision(t, input.CandidateAction, testCase.expectedStatus, testCase.expectedReason),
+					}}, result)
+					require.Equal(
+						t,
+						strings.ToUpper(testCase.expectedReason.String()),
+						testCase.expectedReason.String(),
+					)
+				})
+			}
+		})
+
+		t.Run("blocks after approval limit and stays deterministic for repeated intent evaluation", func(t *testing.T) {
+			t.Parallel()
+
+			fake := newFake(t)
+			service := NewService()
+			instrument := makeInstrument(t, fake)
+			strategy := makeStrategy(t, instrument)
+			strategyID := randomWord(t, fake, "strategy-id")
+			strategyVersion := randomWord(t, fake, "strategy-version")
+			strategyArtifactHash := randomWord(t, fake, "strategy-artifact")
+			baseTime := randomTime(t, fake)
+
+			firstAction := makeAction(
+				t,
+				strategy,
+				domain.CandidateActionKindLong,
+				baseTime,
+				domain.DataQualityValidated,
+			)
+			secondAction := makeAction(
+				t,
+				strategy,
+				domain.CandidateActionKindShort,
+				baseTime.Add(time.Minute),
+				domain.DataQualityValidated,
+			)
+			firstInput := makeIntentInput(
+				t,
+				fake,
+				firstAction,
+				strategyID,
+				strategyVersion,
+				strategyArtifactHash,
+				domain.DecisionModePaper,
+				1,
+				100,
+			)
+			secondInput := makeIntentInput(
+				t,
+				fake,
+				secondAction,
+				strategyID,
+				strategyVersion,
+				strategyArtifactHash,
+				domain.DecisionModePaper,
+				1,
+				100,
+			)
+
+			policy := basePolicy(instrument, strategyID)
+			policy.MaximumApprovedCount = 1
+
+			request := EvaluateRequest{
+				IntentInputs: []IntentInput{secondInput, firstInput},
+				Policy:       policy,
+			}
+
+			firstResult, err := service.Evaluate(t.Context(), request)
+			require.NoError(t, err)
+
+			secondResult, err := service.Evaluate(t.Context(), request)
+			require.NoError(t, err)
+
+			expected := EvaluateResult{Decisions: []domain.GovernorDecision{
+				makeDecision(
+					t,
+					firstAction,
+					domain.GovernorDecisionStatusApproved,
+					domain.GovernorDecisionReasonOK,
+				),
+				makeDecision(
+					t,
+					secondAction,
+					domain.GovernorDecisionStatusBlocked,
+					domain.GovernorDecisionReasonApprovalLimitReached,
+				),
+			}}
+
+			require.Equal(t, expected, firstResult)
+			require.Equal(t, firstResult, secondResult)
 		})
 	})
 }

@@ -77,6 +77,26 @@ func TestDomain(t *testing.T) {
 		GovernorDecisionReasonBelowMinimumQuality,
 		GovernorDecisionReasonApprovalLimitReached,
 	}
+	validDecisionModes := []DecisionMode{
+		DecisionModePaper,
+		DecisionModeBacktest,
+		DecisionModeLive,
+	}
+	validDecisionTraceResults := []DecisionTraceResult{
+		DecisionTraceResultNoAction,
+		DecisionTraceResultIntentCreated,
+		DecisionTraceResultBlockedBeforeIntent,
+		DecisionTraceResultError,
+	}
+	validOrderTypes := []OrderType{OrderTypeLimit}
+	validOrderIntentStatuses := []OrderIntentStatus{
+		OrderIntentStatusCreated,
+		OrderIntentStatusSentToGovernor,
+		OrderIntentStatusApproved,
+		OrderIntentStatusRejected,
+		OrderIntentStatusBlocked,
+		OrderIntentStatusExecutionCreated,
+	}
 	validExecutionCommandStatuses := []ExecutionCommandStatus{
 		ExecutionCommandStatusCreated,
 	}
@@ -303,6 +323,79 @@ func TestDomain(t *testing.T) {
 		require.Equal(t, time.UTC, trade.EventTime.Location())
 	})
 
+	t.Run("audit records validate required fields and normalize UTC timestamps", func(t *testing.T) {
+		t.Parallel()
+
+		instrument := randomInstrument(t)
+		decisionTime := randomLocationTime()
+		createdAt := randomLocationTime()
+		inputStart := randomLocationTime()
+		inputEnd := inputStart.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
+
+		trace, err := NewDecisionTrace(DecisionTraceParams{
+			TraceID:              randomWord("trace-id"),
+			Mode:                 validDecisionModes[fake.IntBetween(0, len(validDecisionModes)-1)],
+			DecisionTime:         decisionTime,
+			StrategyID:           randomWord("strategy-id"),
+			StrategyVersion:      randomWord("strategy-version"),
+			StrategyArtifactHash: randomWord("strategy-artifact"),
+			Instrument:           instrument,
+			Timeframe:            validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)],
+			InputRange:           TimeRange{Start: inputStart, End: inputEnd},
+			DataQuality:          validQualities[fake.IntBetween(0, len(validQualities)-1)],
+			EvaluatorName:        randomWord("evaluator-name"),
+			EvaluatorVersion:     randomWord("evaluator-version"),
+			Result:               validDecisionTraceResults[fake.IntBetween(0, len(validDecisionTraceResults)-1)],
+			ReasonCodes:          []string{"OK"},
+			Metadata:             map[string]string{"scope": "unit-test"},
+		})
+		require.NoError(t, err)
+		require.Equal(t, decisionTime.UTC(), trace.DecisionTime.Time())
+		require.Equal(t, inputStart.UTC(), trace.InputRange.Start)
+		require.Equal(t, inputEnd.UTC(), trace.InputRange.End)
+
+		limitPrice := fake.Float64(2, 1, 1000)
+		intent, err := NewOrderIntent(OrderIntentParams{
+			IntentID:                 randomWord("intent-id"),
+			TraceID:                  string(trace.TraceID),
+			StrategyID:               trace.StrategyID,
+			StrategyVersion:          trace.StrategyVersion,
+			StrategyArtifactHash:     trace.StrategyArtifactHash,
+			Mode:                     trace.Mode,
+			Instrument:               instrument,
+			Timeframe:                trace.Timeframe,
+			ActionKind:               validCandidateActionKinds[fake.IntBetween(0, len(validCandidateActionKinds)-1)],
+			OrderType:                validOrderTypes[fake.IntBetween(0, len(validOrderTypes)-1)],
+			RequestedQuantity:        fake.Float64(2, 1, 100),
+			RequestedLimitPrice:      &limitPrice,
+			SourceReasonCode:         "OK",
+			CandidateActionReference: randomWord("candidate-action-ref"),
+			CreatedTime:              createdAt,
+			Status:                   validOrderIntentStatuses[fake.IntBetween(0, len(validOrderIntentStatuses)-1)],
+			Metadata:                 map[string]string{"flow": "paper-backtest"},
+		})
+		require.NoError(t, err)
+		require.Equal(t, createdAt.UTC(), intent.CreatedTime.Time())
+		require.NotNil(t, intent.RequestedLimitPrice)
+
+		_, err = NewOrderIntent(OrderIntentParams{
+			IntentID:             randomWord("bad-intent-id"),
+			TraceID:              string(trace.TraceID),
+			StrategyID:           trace.StrategyID,
+			StrategyVersion:      trace.StrategyVersion,
+			StrategyArtifactHash: trace.StrategyArtifactHash,
+			Mode:                 trace.Mode,
+			Instrument:           instrument,
+			Timeframe:            trace.Timeframe,
+			ActionKind:           validCandidateActionKinds[0],
+			OrderType:            OrderTypeLimit,
+			RequestedQuantity:    1,
+			CreatedTime:          createdAt,
+			Status:               OrderIntentStatusCreated,
+		})
+		require.Error(t, err)
+	})
+
 	t.Run("domain structs remain persistence free", func(t *testing.T) {
 		t.Parallel()
 
@@ -326,6 +419,8 @@ func TestDomain(t *testing.T) {
 			reflect.TypeFor[AnalyticsPoint](),
 			reflect.TypeFor[StrategyIdentity](),
 			reflect.TypeFor[CandidateAction](),
+			reflect.TypeFor[DecisionTrace](),
+			reflect.TypeFor[OrderIntent](),
 			reflect.TypeFor[GovernorDecision](),
 			reflect.TypeFor[ExecutionCommand](),
 			reflect.TypeFor[ExecutionOrder](),

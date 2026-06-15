@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/analytics"
+	"github.com/gemyago/signal-foundry/runtime/audit"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/execution"
@@ -131,6 +132,50 @@ func (f *fakeGovernorEvaluator) Evaluate(
 	}
 
 	return f.result, nil
+}
+
+type fakeAuditRecorder struct {
+	callOrder         *[]string
+	recordedTraces    []domain.DecisionTrace
+	createdIntents    []domain.OrderIntent
+	recordTraceCalls  int
+	createIntentCalls int
+	traceErr          error
+	intentErr         error
+}
+
+func (f *fakeAuditRecorder) RecordTrace(
+	_ context.Context,
+	trace domain.DecisionTrace,
+) (domain.DecisionTrace, error) {
+	if f.callOrder != nil {
+		*f.callOrder = append(*f.callOrder, "audit-record-trace")
+	}
+	if f.traceErr != nil {
+		return domain.DecisionTrace{}, f.traceErr
+	}
+
+	f.recordTraceCalls++
+	f.recordedTraces = append(f.recordedTraces, trace)
+
+	return trace, nil
+}
+
+func (f *fakeAuditRecorder) CreateOrderIntent(
+	_ context.Context,
+	intent domain.OrderIntent,
+) (domain.OrderIntent, error) {
+	if f.callOrder != nil {
+		*f.callOrder = append(*f.callOrder, "audit-create-intent")
+	}
+	if f.intentErr != nil {
+		return domain.OrderIntent{}, f.intentErr
+	}
+
+	f.createIntentCalls++
+	f.createdIntents = append(f.createdIntents, intent)
+
+	return intent, nil
 }
 
 type fakeExecutionRecorder struct {
@@ -358,15 +403,23 @@ func TestPaperBacktestFlow(t *testing.T) {
 		fake := newFake(t)
 
 		return PaperBacktestRequest{
-			RunID:      "  " + randomWord(t, fake, "run") + "  ",
-			Instrument: makeInstrument(t, fake),
-			Timeframe:  domain.Timeframe("  " + strings.ToUpper(domain.Timeframe1m.String()) + "  "),
-			TimeRange:  makeTimeRange(t, fake),
+			RunID:                "  " + randomWord(t, fake, "run") + "  ",
+			Mode:                 domain.DecisionModeBacktest,
+			StrategyID:           "  " + randomWord(t, fake, "strategy-id") + "  ",
+			StrategyVersion:      "  " + randomWord(t, fake, "strategy-version") + "  ",
+			StrategyArtifactHash: "  " + randomWord(t, fake, "strategy-artifact") + "  ",
+			Instrument:           makeInstrument(t, fake),
+			Timeframe:            domain.Timeframe("  " + strings.ToUpper(domain.Timeframe1m.String()) + "  "),
+			TimeRange:            makeTimeRange(t, fake),
 			StrategyParameters: strategy.MovingAverageCrossoverParams{
 				FastWindow: fake.IntBetween(1, 10),
 				SlowWindow: fake.IntBetween(11, 25),
 			},
 			GovernorPolicy: governor.Policy{
+				AllowedModes: []domain.DecisionMode{
+					domain.DecisionModePaper,
+					domain.DecisionModeBacktest,
+				},
 				AllowedActionKinds: []domain.CandidateActionKind{
 					domain.CandidateActionKindLong,
 					domain.CandidateActionKindShort,
@@ -487,6 +540,7 @@ func TestPaperBacktestFlow(t *testing.T) {
 		replayReader      *fakeCandleReplayReader
 		analyticsCalc     *fakeAnalyticsCalculator
 		strategyEvaluator *fakeStrategyEvaluator
+		auditRecorder     *fakeAuditRecorder
 		governorEvaluator *fakeGovernorEvaluator
 		executionRecorder *fakeExecutionRecorder
 		paperBacktestDeps PaperBacktestFlowDeps
@@ -496,6 +550,7 @@ func TestPaperBacktestFlow(t *testing.T) {
 		replayReader := &fakeCandleReplayReader{callOrder: callOrder}
 		analyticsCalc := &fakeAnalyticsCalculator{callOrder: callOrder}
 		strategyEvaluator := &fakeStrategyEvaluator{callOrder: callOrder}
+		auditRecorder := &fakeAuditRecorder{callOrder: callOrder}
 		governorEvaluator := &fakeGovernorEvaluator{callOrder: callOrder}
 		executionRecorder := &fakeExecutionRecorder{callOrder: callOrder}
 
@@ -503,12 +558,14 @@ func TestPaperBacktestFlow(t *testing.T) {
 			replayReader:      replayReader,
 			analyticsCalc:     analyticsCalc,
 			strategyEvaluator: strategyEvaluator,
+			auditRecorder:     auditRecorder,
 			governorEvaluator: governorEvaluator,
 			executionRecorder: executionRecorder,
 			paperBacktestDeps: PaperBacktestFlowDeps{
 				CandleReplayReader:  replayReader,
 				AnalyticsCalculator: analyticsCalc,
 				StrategyEvaluator:   strategyEvaluator,
+				AuditRecorder:       auditRecorder,
 				GovernorEvaluator:   governorEvaluator,
 				ExecutionRecorder:   executionRecorder,
 			},
@@ -546,6 +603,13 @@ func TestPaperBacktestFlow(t *testing.T) {
 						deps.StrategyEvaluator = nil
 					},
 					message: "strategy evaluator is required",
+				},
+				{
+					name: "audit recorder",
+					mutate: func(deps *PaperBacktestFlowDeps) {
+						deps.AuditRecorder = nil
+					},
+					message: "audit recorder is required",
 				},
 				{
 					name: "governor evaluator",
@@ -611,6 +675,15 @@ func TestPaperBacktestFlow(t *testing.T) {
 			request.RunID = " \t "
 
 			assertValidationError(t, request, "run id is required")
+		})
+
+		t.Run("rejects missing strategy id", func(t *testing.T) {
+			t.Parallel()
+
+			request := makeRequest(t)
+			request.StrategyID = " \t "
+
+			assertValidationError(t, request, "strategy id is required")
 		})
 
 		t.Run("rejects invalid instrument", func(t *testing.T) {
@@ -715,6 +788,20 @@ func TestPaperBacktestFlow(t *testing.T) {
 					},
 					expected: "maximum approved action count must be zero or greater",
 				},
+				{
+					name: "negative maximum order notional",
+					mutate: func(policy *governor.Policy) {
+						policy.MaximumOrderNotional = -1
+					},
+					expected: "maximum order notional must be finite and zero or greater",
+				},
+				{
+					name: "blank allowed strategy id",
+					mutate: func(policy *governor.Policy) {
+						policy.AllowedStrategyIDs = []string{"  "}
+					},
+					expected: "allowed strategy ids must not be empty",
+				},
 			}
 
 			for _, testCase := range testCases {
@@ -725,6 +812,188 @@ func TestPaperBacktestFlow(t *testing.T) {
 					testCase.mutate(&request.GovernorPolicy)
 
 					assertValidationError(t, request, testCase.expected)
+				})
+			}
+		})
+
+		t.Run("preserves expanded governor policy checks end to end", func(t *testing.T) {
+			t.Parallel()
+
+			fake := newFake(t)
+			request := makeRequest(t)
+			strategyIdentity := makeStrategyIdentity(t, request.Instrument, request.Timeframe)
+			action := makeCandidateAction(
+				t,
+				strategyIdentity,
+				domain.CandidateActionKindLong,
+				request.TimeRange.Start.Add(5*time.Minute),
+				domain.TimeRange{
+					Start: request.TimeRange.Start,
+					End:   request.TimeRange.Start.Add(5 * time.Minute),
+				},
+				domain.DataQualityValidated,
+			)
+
+			makeRealFlow := func(t *testing.T) *PaperBacktestFlow {
+				t.Helper()
+
+				replayReader := &fakeCandleReplayReader{result: makeReplayCandles(
+					t,
+					fake,
+					request.Instrument,
+					domain.Timeframe1m,
+					request.TimeRange.Start,
+					time.Minute,
+					[]float64{10, 11, 12, 13, 14, 15, 16},
+				)}
+				analyticsCalc := &fakeAnalyticsCalculator{}
+				strategyEvaluator := &fakeStrategyEvaluator{result: strategy.EvaluateResult{
+					Strategy:   strategyIdentity,
+					TimeRange:  request.TimeRange,
+					Parameters: request.StrategyParameters,
+					Actions:    []domain.CandidateAction{action},
+				}}
+				auditRecorder := &fakeAuditRecorder{}
+				executionRecorder := &fakeExecutionRecorder{}
+
+				return makeFlow(t, PaperBacktestFlowDeps{
+					CandleReplayReader:  replayReader,
+					AnalyticsCalculator: analyticsCalc,
+					StrategyEvaluator:   strategyEvaluator,
+					AuditRecorder:       auditRecorder,
+					GovernorEvaluator:   governor.NewService(),
+					ExecutionRecorder:   executionRecorder,
+				})
+			}
+
+			testCases := []struct {
+				name           string
+				policy         governor.Policy
+				expectedStatus domain.GovernorDecisionStatus
+				expectedReason domain.GovernorDecisionReason
+			}{
+				{
+					name: "mode allowlist",
+					policy: governor.Policy{
+						AllowedModes:       []domain.DecisionMode{domain.DecisionModePaper},
+						AllowedVenues:      []domain.Venue{request.Instrument.Venue},
+						AllowedInstruments: []domain.Instrument{request.Instrument},
+						AllowedStrategyIDs: []string{request.StrategyID},
+						AllowedActionKinds: []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:     domain.DataQualityValidated,
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonModeNotAllowed,
+				},
+				{
+					name: "venue allowlist",
+					policy: governor.Policy{
+						AllowedModes:       []domain.DecisionMode{domain.DecisionModeBacktest},
+						AllowedVenues:      []domain.Venue{domain.Venue(randomWord(t, fake, "other-venue"))},
+						AllowedInstruments: []domain.Instrument{request.Instrument},
+						AllowedStrategyIDs: []string{request.StrategyID},
+						AllowedActionKinds: []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:     domain.DataQualityValidated,
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonVenueNotAllowed,
+				},
+				{
+					name: "instrument allowlist",
+					policy: governor.Policy{
+						AllowedModes:       []domain.DecisionMode{domain.DecisionModeBacktest},
+						AllowedVenues:      []domain.Venue{request.Instrument.Venue},
+						AllowedInstruments: []domain.Instrument{makeInstrument(t, fake)},
+						AllowedStrategyIDs: []string{request.StrategyID},
+						AllowedActionKinds: []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:     domain.DataQualityValidated,
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonInstrumentNotAllowed,
+				},
+				{
+					name: "strategy allowlist",
+					policy: governor.Policy{
+						AllowedModes:       []domain.DecisionMode{domain.DecisionModeBacktest},
+						AllowedVenues:      []domain.Venue{request.Instrument.Venue},
+						AllowedInstruments: []domain.Instrument{request.Instrument},
+						AllowedStrategyIDs: []string{randomWord(t, fake, "other-strategy")},
+						AllowedActionKinds: []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:     domain.DataQualityValidated,
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonStrategyNotAllowed,
+				},
+				{
+					name: "kill switch",
+					policy: governor.Policy{
+						AllowedModes:       []domain.DecisionMode{domain.DecisionModeBacktest},
+						AllowedVenues:      []domain.Venue{request.Instrument.Venue},
+						AllowedInstruments: []domain.Instrument{request.Instrument},
+						AllowedStrategyIDs: []string{request.StrategyID},
+						AllowedActionKinds: []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:     domain.DataQualityValidated,
+						BlockNewRisk:       true,
+					},
+					expectedStatus: domain.GovernorDecisionStatusBlocked,
+					expectedReason: domain.GovernorDecisionReasonKillSwitchActive,
+				},
+				{
+					name: "order notional limit",
+					policy: governor.Policy{
+						AllowedModes:         []domain.DecisionMode{domain.DecisionModeBacktest},
+						AllowedVenues:        []domain.Venue{request.Instrument.Venue},
+						AllowedInstruments:   []domain.Instrument{request.Instrument},
+						AllowedStrategyIDs:   []string{request.StrategyID},
+						AllowedActionKinds:   []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:       domain.DataQualityValidated,
+						MaximumOrderNotional: 1,
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonOrderNotionalExceedsLimit,
+				},
+				{
+					name: "strategy exposure limit",
+					policy: governor.Policy{
+						AllowedModes:                    []domain.DecisionMode{domain.DecisionModeBacktest},
+						AllowedVenues:                   []domain.Venue{request.Instrument.Venue},
+						AllowedInstruments:              []domain.Instrument{request.Instrument},
+						AllowedStrategyIDs:              []string{request.StrategyID},
+						AllowedActionKinds:              []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:                  domain.DataQualityValidated,
+						MaximumStrategyExposureNotional: 1,
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonStrategyExposureExceedsLimit,
+				},
+				{
+					name: "instrument exposure limit",
+					policy: governor.Policy{
+						AllowedModes:                      []domain.DecisionMode{domain.DecisionModeBacktest},
+						AllowedVenues:                     []domain.Venue{request.Instrument.Venue},
+						AllowedInstruments:                []domain.Instrument{request.Instrument},
+						AllowedStrategyIDs:                []string{request.StrategyID},
+						AllowedActionKinds:                []domain.CandidateActionKind{domain.CandidateActionKindLong},
+						MinimumQuality:                    domain.DataQualityValidated,
+						MaximumInstrumentExposureNotional: 1,
+					},
+					expectedStatus: domain.GovernorDecisionStatusRejected,
+					expectedReason: domain.GovernorDecisionReasonInstrumentExposureExceedsLimit,
+				},
+			}
+
+			for _, testCase := range testCases {
+				t.Run(testCase.name, func(t *testing.T) {
+					flow := makeRealFlow(t)
+					caseRequest := request
+					caseRequest.GovernorPolicy = testCase.policy
+
+					result, err := flow.Run(t.Context(), caseRequest)
+
+					require.NoError(t, err)
+					require.Len(t, result.GovernorEvaluation.Decisions, 1)
+					require.Equal(t, testCase.expectedStatus, result.GovernorEvaluation.Decisions[0].Status)
+					require.Equal(t, testCase.expectedReason, result.GovernorEvaluation.Decisions[0].Reason)
 				})
 			}
 		})
@@ -831,6 +1100,10 @@ func TestPaperBacktestFlow(t *testing.T) {
 				"analytics-window-" + strconv.Itoa(request.StrategyParameters.FastWindow),
 				"analytics-window-" + strconv.Itoa(request.StrategyParameters.SlowWindow),
 				"strategy",
+				"audit-record-trace",
+				"audit-create-intent",
+				"audit-record-trace",
+				"audit-create-intent",
 				"governor",
 				"execution-create-command",
 				"execution-record-order",
@@ -849,8 +1122,26 @@ func TestPaperBacktestFlow(t *testing.T) {
 			require.Equal(t, request.TimeRange.Start.UTC(), deps.strategyEvaluator.calls[0].TimeRange.Start)
 			require.Equal(t, request.TimeRange.End.UTC(), deps.strategyEvaluator.calls[0].TimeRange.End)
 			require.Len(t, deps.governorEvaluator.calls, 1)
-			require.Equal(t, deps.strategyEvaluator.result.Actions, deps.governorEvaluator.calls[0].CandidateActions)
+			require.Len(t, deps.governorEvaluator.calls[0].IntentInputs, 2)
+			require.Equal(
+				t,
+				result.IntentContexts[0].CandidateAction,
+				deps.governorEvaluator.calls[0].IntentInputs[0].CandidateAction,
+			)
+			require.Equal(t, result.IntentContexts[0].Intent, deps.governorEvaluator.calls[0].IntentInputs[0].Intent)
+			require.NotEmpty(t, deps.governorEvaluator.calls[0].IntentInputs[0].GovernorPolicyID)
+			require.NotEmpty(t, deps.governorEvaluator.calls[0].IntentInputs[0].GovernorPolicyVersion)
+			require.NotEmpty(t, deps.governorEvaluator.calls[0].IntentInputs[0].GovernorPolicyHash)
 			require.Equal(t, deps.strategyEvaluator.result, result.StrategyEvaluation)
+			require.Len(t, result.IntentContexts, 2)
+			require.Equal(t, deps.auditRecorder.recordedTraces[0].TraceID, result.IntentContexts[0].Trace.TraceID)
+			require.Equal(t, deps.auditRecorder.createdIntents[0].IntentID, result.IntentContexts[0].Intent.IntentID)
+			require.Equal(t, result.IntentContexts[0].Trace.TraceID, result.IntentContexts[0].Intent.TraceID)
+			require.Equal(t, deps.strategyEvaluator.result.Actions[0], result.IntentContexts[0].CandidateAction)
+			require.Equal(t, domain.OrderIntentStatusCreated, result.IntentContexts[0].Intent.Status)
+			require.Equal(t, request.Mode, result.IntentContexts[0].Trace.Mode)
+			require.Equal(t, request.Mode, result.IntentContexts[0].Intent.Mode)
+			require.NotNil(t, result.IntentContexts[0].Intent.RequestedLimitPrice)
 			require.Equal(t, deps.governorEvaluator.result, result.GovernorEvaluation)
 			require.Equal(t, deps.governorEvaluator.result.Decisions, result.GovernorEvaluation.Decisions)
 			require.Equal(t, strings.TrimSpace(request.RunID), result.RunID)
@@ -1083,7 +1374,7 @@ func TestPaperBacktestFlow(t *testing.T) {
 			require.EqualError(
 				t,
 				err,
-				"paper execution approved decision 0 fill price candle: replay candle close price is required at decision time",
+				"prepare order intent 0 limit price: replay candle close price is required at decision time",
 			)
 			require.Zero(t, deps.executionRecorder.createCommandCalls)
 			require.Zero(t, deps.executionRecorder.recordOrderCalls)
@@ -1195,25 +1486,39 @@ func TestPaperBacktestFlow(t *testing.T) {
 			require.NoError(t, err)
 
 			governorService := governor.NewService()
+			auditStore, err := audit.NewDatabaseStore(":memory:", audit.DatabaseStoreOpts{})
+			require.NoError(t, err)
+			require.NoError(t, auditStore.AutoMigrate())
+			auditService, err := audit.NewService(auditStore)
+			require.NoError(t, err)
 			executionRecorder := execution.NewService()
 			flow := makeFlow(t, PaperBacktestFlowDeps{
 				CandleReplayReader:  readService,
 				AnalyticsCalculator: analyticsService,
 				StrategyEvaluator:   strategyService,
+				AuditRecorder:       auditService,
 				GovernorEvaluator:   governorService,
 				ExecutionRecorder:   executionRecorder,
 			})
 
 			result, err := flow.Run(t.Context(), PaperBacktestRequest{
-				RunID:      "  " + randomWord(t, fake, "real-run") + "  ",
-				Instrument: instrument,
-				Timeframe:  domain.Timeframe1m,
-				TimeRange:  requestRange,
+				RunID:                "  " + randomWord(t, fake, "real-run") + "  ",
+				Mode:                 domain.DecisionModeBacktest,
+				StrategyID:           "  " + randomWord(t, fake, "real-strategy-id") + "  ",
+				StrategyVersion:      "  " + randomWord(t, fake, "real-strategy-version") + "  ",
+				StrategyArtifactHash: "  " + randomWord(t, fake, "real-strategy-artifact") + "  ",
+				Instrument:           instrument,
+				Timeframe:            domain.Timeframe1m,
+				TimeRange:            requestRange,
 				StrategyParameters: strategy.MovingAverageCrossoverParams{
 					FastWindow: 2,
 					SlowWindow: 3,
 				},
 				GovernorPolicy: governor.Policy{
+					AllowedModes: []domain.DecisionMode{
+						domain.DecisionModePaper,
+						domain.DecisionModeBacktest,
+					},
 					AllowedActionKinds: []domain.CandidateActionKind{
 						domain.CandidateActionKindLong,
 						domain.CandidateActionKindShort,

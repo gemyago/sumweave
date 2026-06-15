@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/analytics"
+	"github.com/gemyago/signal-foundry/runtime/audit"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/execution"
@@ -56,6 +57,12 @@ type GovernorEvaluator interface {
 	) (governor.EvaluateResult, error)
 }
 
+// AuditRecorder persists durable trace and order intent records for the flow.
+type AuditRecorder interface {
+	RecordTrace(ctx context.Context, trace domain.DecisionTrace) (domain.DecisionTrace, error)
+	CreateOrderIntent(ctx context.Context, intent domain.OrderIntent) (domain.OrderIntent, error)
+}
+
 // ExecutionRecorder creates local paper execution records.
 type ExecutionRecorder interface {
 	CreateCommand(
@@ -81,19 +88,24 @@ type PaperBacktestFlowDeps struct {
 	CandleReplayReader  CandleReplayReader
 	AnalyticsCalculator AnalyticsCalculator
 	StrategyEvaluator   StrategyEvaluator
+	AuditRecorder       AuditRecorder
 	GovernorEvaluator   GovernorEvaluator
 	ExecutionRecorder   ExecutionRecorder
 }
 
 // PaperBacktestRequest defines one deterministic paper backtest run.
 type PaperBacktestRequest struct {
-	RunID              string
-	Instrument         domain.Instrument
-	Timeframe          domain.Timeframe
-	TimeRange          domain.TimeRange
-	StrategyParameters strategy.MovingAverageCrossoverParams
-	GovernorPolicy     governor.Policy
-	Quantity           float64
+	RunID                string
+	Mode                 domain.DecisionMode
+	StrategyID           string
+	StrategyVersion      string
+	StrategyArtifactHash string
+	Instrument           domain.Instrument
+	Timeframe            domain.Timeframe
+	TimeRange            domain.TimeRange
+	StrategyParameters   strategy.MovingAverageCrossoverParams
+	GovernorPolicy       governor.Policy
+	Quantity             float64
 }
 
 // PaperExecutionResult groups local paper execution records for one decision.
@@ -110,6 +122,7 @@ type PaperExecutionResult struct {
 type PaperBacktestResult struct {
 	RunID              string
 	StrategyEvaluation strategy.EvaluateResult
+	IntentContexts     []audit.IntentContext
 	GovernorEvaluation governor.EvaluateResult
 	PaperExecutions    []PaperExecutionResult
 }
@@ -119,6 +132,7 @@ type PaperBacktestFlow struct {
 	candleReplayReader  CandleReplayReader
 	analyticsCalculator AnalyticsCalculator
 	strategyEvaluator   StrategyEvaluator
+	auditRecorder       AuditRecorder
 	governorEvaluator   GovernorEvaluator
 	executionRecorder   ExecutionRecorder
 }
@@ -134,6 +148,9 @@ func NewPaperBacktestFlow(deps PaperBacktestFlowDeps) (*PaperBacktestFlow, error
 	if deps.StrategyEvaluator == nil {
 		return nil, errors.New("strategy evaluator is required")
 	}
+	if deps.AuditRecorder == nil {
+		return nil, errors.New("audit recorder is required")
+	}
 	if deps.GovernorEvaluator == nil {
 		return nil, errors.New("governor evaluator is required")
 	}
@@ -145,6 +162,7 @@ func NewPaperBacktestFlow(deps PaperBacktestFlowDeps) (*PaperBacktestFlow, error
 		candleReplayReader:  deps.CandleReplayReader,
 		analyticsCalculator: deps.AnalyticsCalculator,
 		strategyEvaluator:   deps.StrategyEvaluator,
+		auditRecorder:       deps.AuditRecorder,
 		governorEvaluator:   deps.GovernorEvaluator,
 		executionRecorder:   deps.ExecutionRecorder,
 	}, nil
@@ -186,9 +204,24 @@ func (f *PaperBacktestFlow) Run(
 		return PaperBacktestResult{}, fmt.Errorf("evaluate strategy: %w", err)
 	}
 
+	replayClosePrices := make(map[time.Time]float64, len(replayedCandles))
+	for _, replayedCandle := range replayedCandles {
+		replayClosePrices[replayedCandle.Candle.TimeRange.End.UTC()] = replayedCandle.Candle.Close
+	}
+
+	intentContexts, err := f.prepareIntentContexts(
+		ctx,
+		canonicalRequest,
+		strategyEvaluation.Actions,
+		replayClosePrices,
+	)
+	if err != nil {
+		return PaperBacktestResult{}, err
+	}
+
 	governorEvaluation, err := f.governorEvaluator.Evaluate(ctx, governor.EvaluateRequest{
-		CandidateActions: strategyEvaluation.Actions,
-		Policy:           canonicalRequest.governorPolicy,
+		IntentInputs: buildGovernorIntentInputs(canonicalRequest, intentContexts),
+		Policy:       canonicalRequest.governorPolicy,
 	})
 	if err != nil {
 		return PaperBacktestResult{}, fmt.Errorf("evaluate governor: %w", err)
@@ -207,9 +240,64 @@ func (f *PaperBacktestFlow) Run(
 	return PaperBacktestResult{
 		RunID:              canonicalRequest.runID,
 		StrategyEvaluation: strategyEvaluation,
+		IntentContexts:     intentContexts,
 		GovernorEvaluation: governorEvaluation,
 		PaperExecutions:    paperExecutions,
 	}, nil
+}
+
+func (f *PaperBacktestFlow) prepareIntentContexts(
+	ctx context.Context,
+	request canonicalPaperBacktestRequest,
+	actions []domain.CandidateAction,
+	replayClosePrices map[time.Time]float64,
+) ([]audit.IntentContext, error) {
+	contexts := make([]audit.IntentContext, 0, len(actions))
+
+	for idx, action := range actions {
+		decisionTime := action.DecisionTime.Time().UTC()
+		limitPrice, ok := replayClosePrices[decisionTime]
+		if !ok {
+			return nil, fmt.Errorf(
+				"prepare order intent %d limit price: replay candle close price is required at decision time",
+				idx,
+			)
+		}
+
+		traceToRecord, err := buildDecisionTrace(request, action, idx)
+		if err != nil {
+			return nil, fmt.Errorf("build decision trace %d: %w", idx, err)
+		}
+
+		trace, err := f.auditRecorder.RecordTrace(ctx, traceToRecord)
+		if err != nil {
+			return nil, fmt.Errorf("record decision trace %d: %w", idx, err)
+		}
+
+		intentToCreate, err := buildOrderIntent(
+			request,
+			action,
+			trace,
+			limitPrice,
+			idx,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("build order intent %d: %w", idx, err)
+		}
+
+		intent, err := f.auditRecorder.CreateOrderIntent(ctx, intentToCreate)
+		if err != nil {
+			return nil, fmt.Errorf("create order intent %d: %w", idx, err)
+		}
+
+		contexts = append(contexts, audit.IntentContext{
+			Trace:           trace,
+			Intent:          intent,
+			CandidateAction: action,
+		})
+	}
+
+	return contexts, nil
 }
 
 func (f *PaperBacktestFlow) runAnalyticsStage(
@@ -325,13 +413,17 @@ func (f *PaperBacktestFlow) runExecutionStage(
 }
 
 type canonicalPaperBacktestRequest struct {
-	runID              string
-	instrument         domain.Instrument
-	timeframe          domain.Timeframe
-	timeRange          domain.TimeRange
-	strategyParameters strategy.MovingAverageCrossoverParams
-	governorPolicy     governor.Policy
-	quantity           float64
+	runID                string
+	mode                 domain.DecisionMode
+	strategyID           string
+	strategyVersion      string
+	strategyArtifactHash string
+	instrument           domain.Instrument
+	timeframe            domain.Timeframe
+	timeRange            domain.TimeRange
+	strategyParameters   strategy.MovingAverageCrossoverParams
+	governorPolicy       governor.Policy
+	quantity             float64
 }
 
 func canonicalizePaperBacktestRequest(
@@ -340,6 +432,24 @@ func canonicalizePaperBacktestRequest(
 	runID := strings.TrimSpace(request.RunID)
 	if runID == "" {
 		return canonicalPaperBacktestRequest{}, validationError("run id is required")
+	}
+
+	mode, err := domain.NewDecisionMode(request.Mode.String())
+	if err != nil {
+		return canonicalPaperBacktestRequest{}, validationError(err.Error())
+	}
+
+	strategyID := strings.TrimSpace(request.StrategyID)
+	if strategyID == "" {
+		return canonicalPaperBacktestRequest{}, validationError("strategy id is required")
+	}
+	strategyVersion := strings.TrimSpace(request.StrategyVersion)
+	if strategyVersion == "" {
+		return canonicalPaperBacktestRequest{}, validationError("strategy version is required")
+	}
+	strategyArtifactHash := strings.TrimSpace(request.StrategyArtifactHash)
+	if strategyArtifactHash == "" {
+		return canonicalPaperBacktestRequest{}, validationError("strategy artifact hash is required")
 	}
 
 	strategyIdentity, err := domain.NewStrategyIdentity(domain.StrategyIdentityParams{
@@ -371,31 +481,44 @@ func canonicalizePaperBacktestRequest(
 	}
 
 	return canonicalPaperBacktestRequest{
-		runID:              runID,
-		instrument:         strategyIdentity.Instrument,
-		timeframe:          strategyIdentity.Timeframe,
-		timeRange:          timeRange,
-		strategyParameters: strategyParameters,
-		governorPolicy:     governorPolicy,
-		quantity:           request.Quantity,
+		runID:                runID,
+		mode:                 mode,
+		strategyID:           strategyID,
+		strategyVersion:      strategyVersion,
+		strategyArtifactHash: strategyArtifactHash,
+		instrument:           strategyIdentity.Instrument,
+		timeframe:            strategyIdentity.Timeframe,
+		timeRange:            timeRange,
+		strategyParameters:   strategyParameters,
+		governorPolicy:       governorPolicy,
+		quantity:             request.Quantity,
 	}, nil
 }
 
 func canonicalizeGovernorPolicy(policy governor.Policy) (governor.Policy, error) {
-	if len(policy.AllowedActionKinds) == 0 {
-		return governor.Policy{}, validationError("allowed action kinds are required")
+	canonicalAllowedModes, err := canonicalizeGovernorModes(policy.AllowedModes)
+	if err != nil {
+		return governor.Policy{}, err
 	}
 
-	canonicalAllowedActionKinds := make([]domain.CandidateActionKind, 0, len(policy.AllowedActionKinds))
-	for _, actionKind := range policy.AllowedActionKinds {
-		canonicalActionKind, err := domain.NewCandidateActionKind(actionKind.String())
-		if err != nil {
-			return governor.Policy{}, validationError(
-				fmt.Sprintf("unsupported allowed action kind %q", actionKind),
-			)
-		}
+	canonicalAllowedVenues, err := canonicalizeGovernorVenues(policy.AllowedVenues)
+	if err != nil {
+		return governor.Policy{}, err
+	}
 
-		canonicalAllowedActionKinds = append(canonicalAllowedActionKinds, canonicalActionKind)
+	canonicalAllowedInstruments, err := canonicalizeGovernorInstruments(policy.AllowedInstruments)
+	if err != nil {
+		return governor.Policy{}, err
+	}
+
+	canonicalAllowedStrategyIDs, err := canonicalizeGovernorStrategyIDs(policy.AllowedStrategyIDs)
+	if err != nil {
+		return governor.Policy{}, err
+	}
+
+	canonicalAllowedActionKinds, err := canonicalizeGovernorActionKinds(policy.AllowedActionKinds)
+	if err != nil {
+		return governor.Policy{}, err
 	}
 
 	switch policy.MinimumQuality {
@@ -414,15 +537,128 @@ func canonicalizeGovernorPolicy(policy governor.Policy) (governor.Policy, error)
 		return governor.Policy{}, validationError(err.Error())
 	}
 
-	if policy.MaximumApprovedCount < 0 {
-		return governor.Policy{}, validationError("maximum approved action count must be zero or greater")
+	if thresholdErr := validateGovernorPolicyThresholds(policy); thresholdErr != nil {
+		return governor.Policy{}, thresholdErr
 	}
 
 	return governor.Policy{
-		AllowedActionKinds:   canonicalAllowedActionKinds,
-		MinimumQuality:       minimumQuality,
-		MaximumApprovedCount: policy.MaximumApprovedCount,
+		AllowedModes:                      canonicalAllowedModes,
+		AllowedVenues:                     canonicalAllowedVenues,
+		AllowedInstruments:                canonicalAllowedInstruments,
+		AllowedStrategyIDs:                canonicalAllowedStrategyIDs,
+		AllowedActionKinds:                canonicalAllowedActionKinds,
+		MinimumQuality:                    minimumQuality,
+		BlockNewRisk:                      policy.BlockNewRisk,
+		MaximumOrderNotional:              policy.MaximumOrderNotional,
+		MaximumStrategyExposureNotional:   policy.MaximumStrategyExposureNotional,
+		MaximumInstrumentExposureNotional: policy.MaximumInstrumentExposureNotional,
+		MaximumApprovedCount:              policy.MaximumApprovedCount,
 	}, nil
+}
+
+func canonicalizeGovernorModes(modes []domain.DecisionMode) ([]domain.DecisionMode, error) {
+	canonicalModes := make([]domain.DecisionMode, 0, len(modes))
+	for _, mode := range modes {
+		canonicalMode, err := domain.NewDecisionMode(mode.String())
+		if err != nil {
+			return nil, validationError(fmt.Sprintf("unsupported allowed mode %q", mode))
+		}
+
+		canonicalModes = append(canonicalModes, canonicalMode)
+	}
+
+	return canonicalModes, nil
+}
+
+func canonicalizeGovernorVenues(venues []domain.Venue) ([]domain.Venue, error) {
+	canonicalVenues := make([]domain.Venue, 0, len(venues))
+	for _, venue := range venues {
+		canonicalVenue, err := domain.NewVenue(venue.String())
+		if err != nil {
+			return nil, validationError(fmt.Sprintf("unsupported allowed venue %q", venue))
+		}
+
+		canonicalVenues = append(canonicalVenues, canonicalVenue)
+	}
+
+	return canonicalVenues, nil
+}
+
+func canonicalizeGovernorInstruments(instruments []domain.Instrument) ([]domain.Instrument, error) {
+	canonicalInstruments := make([]domain.Instrument, 0, len(instruments))
+	for _, instrument := range instruments {
+		canonicalInstrument, err := domain.NewInstrument(domain.InstrumentParams(instrument))
+		if err != nil {
+			return nil, validationError(
+				fmt.Sprintf("unsupported allowed instrument %q/%q", instrument.Venue, instrument.Symbol),
+			)
+		}
+
+		canonicalInstruments = append(canonicalInstruments, canonicalInstrument)
+	}
+
+	return canonicalInstruments, nil
+}
+
+func canonicalizeGovernorStrategyIDs(strategyIDs []string) ([]string, error) {
+	canonicalStrategyIDs := make([]string, 0, len(strategyIDs))
+	for _, strategyID := range strategyIDs {
+		normalizedStrategyID := strings.TrimSpace(strategyID)
+		if normalizedStrategyID == "" {
+			return nil, validationError("allowed strategy ids must not be empty")
+		}
+
+		canonicalStrategyIDs = append(canonicalStrategyIDs, normalizedStrategyID)
+	}
+
+	return canonicalStrategyIDs, nil
+}
+
+func canonicalizeGovernorActionKinds(
+	actionKinds []domain.CandidateActionKind,
+) ([]domain.CandidateActionKind, error) {
+	if len(actionKinds) == 0 {
+		return nil, validationError("allowed action kinds are required")
+	}
+
+	canonicalActionKinds := make([]domain.CandidateActionKind, 0, len(actionKinds))
+	for _, actionKind := range actionKinds {
+		canonicalActionKind, err := domain.NewCandidateActionKind(actionKind.String())
+		if err != nil {
+			return nil, validationError(
+				fmt.Sprintf("unsupported allowed action kind %q", actionKind),
+			)
+		}
+
+		canonicalActionKinds = append(canonicalActionKinds, canonicalActionKind)
+	}
+
+	return canonicalActionKinds, nil
+}
+
+func validateGovernorPolicyThresholds(policy governor.Policy) error {
+	if policy.MaximumApprovedCount < 0 {
+		return validationError("maximum approved action count must be zero or greater")
+	}
+	if !isNonNegativeFinite(policy.MaximumOrderNotional) {
+		return validationError("maximum order notional must be finite and zero or greater")
+	}
+	if !isNonNegativeFinite(policy.MaximumStrategyExposureNotional) {
+		return validationError(
+			"maximum strategy exposure notional must be finite and zero or greater",
+		)
+	}
+	if !isNonNegativeFinite(policy.MaximumInstrumentExposureNotional) {
+		return validationError(
+			"maximum instrument exposure notional must be finite and zero or greater",
+		)
+	}
+
+	return nil
+}
+
+func isNonNegativeFinite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
 }
 
 func validationError(message string) error {
@@ -432,4 +668,97 @@ func validationError(message string) error {
 func flowStableID(parts ...string) string {
 	hash := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(hash[:16])
+}
+
+func buildDecisionTrace(
+	request canonicalPaperBacktestRequest,
+	action domain.CandidateAction,
+	index int,
+) (domain.DecisionTrace, error) {
+	trace, err := domain.NewDecisionTrace(domain.DecisionTraceParams{
+		TraceID:              flowStableID("trace", request.runID, strconv.Itoa(index)),
+		Mode:                 request.mode,
+		DecisionTime:         action.DecisionTime.Time(),
+		StrategyID:           request.strategyID,
+		StrategyVersion:      request.strategyVersion,
+		StrategyArtifactHash: request.strategyArtifactHash,
+		Instrument:           request.instrument,
+		Timeframe:            request.timeframe,
+		RunReference:         request.runID,
+		InputRange:           action.InputRange,
+		AnalyticsReference:   flowStableID("analytics", request.runID, strconv.Itoa(index)),
+		DataQuality:          action.Quality,
+		EvaluatorName:        "paper-backtest-flow",
+		EvaluatorVersion:     "v0",
+		Result:               domain.DecisionTraceResultIntentCreated,
+		ReasonCodes:          []string{"OK"},
+		Metadata: map[string]string{
+			"action_kind": action.Kind.String(),
+		},
+	})
+	if err != nil {
+		return domain.DecisionTrace{}, err
+	}
+
+	return trace, nil
+}
+
+func buildOrderIntent(
+	request canonicalPaperBacktestRequest,
+	action domain.CandidateAction,
+	trace domain.DecisionTrace,
+	limitPrice float64,
+	index int,
+) (domain.OrderIntent, error) {
+	intent, err := domain.NewOrderIntent(domain.OrderIntentParams{
+		IntentID:                 flowStableID("intent", request.runID, strconv.Itoa(index)),
+		TraceID:                  string(trace.TraceID),
+		StrategyID:               request.strategyID,
+		StrategyVersion:          request.strategyVersion,
+		StrategyArtifactHash:     request.strategyArtifactHash,
+		Mode:                     request.mode,
+		Instrument:               request.instrument,
+		Timeframe:                request.timeframe,
+		ActionKind:               action.Kind,
+		OrderType:                domain.OrderTypeLimit,
+		RequestedQuantity:        request.quantity,
+		RequestedNotional:        request.quantity * limitPrice,
+		RequestedLimitPrice:      &limitPrice,
+		SourceReasonCode:         "OK",
+		CandidateActionReference: flowStableID("candidate-action", request.runID, strconv.Itoa(index)),
+		CreatedTime:              action.DecisionTime.Time(),
+		Status:                   domain.OrderIntentStatusCreated,
+		Metadata: map[string]string{
+			"run_id": request.runID,
+		},
+	})
+	if err != nil {
+		return domain.OrderIntent{}, err
+	}
+
+	return intent, nil
+}
+
+func buildGovernorIntentInputs(
+	request canonicalPaperBacktestRequest,
+	contexts []audit.IntentContext,
+) []governor.IntentInput {
+	inputs := make([]governor.IntentInput, 0, len(contexts))
+	policyID := flowStableID("governor-policy", request.runID)
+	policyVersion := "v0"
+	policyHash := flowStableID("governor-policy-hash", request.runID)
+
+	for _, intentContext := range contexts {
+		inputs = append(inputs, governor.IntentInput{
+			CandidateAction:                   intentContext.CandidateAction,
+			Intent:                            intentContext.Intent,
+			CurrentStrategyExposureNotional:   0,
+			CurrentInstrumentExposureNotional: 0,
+			GovernorPolicyID:                  policyID,
+			GovernorPolicyVersion:             policyVersion,
+			GovernorPolicyHash:                policyHash,
+		})
+	}
+
+	return inputs
 }
