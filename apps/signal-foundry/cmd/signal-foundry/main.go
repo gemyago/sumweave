@@ -19,6 +19,7 @@ func setupCommands() *cobra.Command {
 	}
 	rootCmd.AddCommand(
 		newStartServerCmd(container),
+		newDataCmd(container, nil),
 		newUserCmd(container),
 	)
 	return rootCmd
