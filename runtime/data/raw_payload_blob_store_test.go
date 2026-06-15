@@ -54,6 +54,32 @@ func TestLocalRawPayloadBlobStore(t *testing.T) {
 		require.Equal(t, filepath.Base(stored.Ref), entries[0].Name())
 	})
 
+	t.Run("reads bounded payload previews with exact size metadata", func(t *testing.T) {
+		t.Parallel()
+
+		basePath := filepath.Join(t.TempDir(), randomWord("raw-payloads"))
+		store, err := NewLocalRawPayloadBlobStore(basePath)
+		require.NoError(t, err)
+
+		payloadID := randomWord("payload")
+		body := []byte(strings.Repeat(randomWord("body"), 32))
+
+		stored, err := store.StoreRawPayloadBody(t.Context(), payloadID, body)
+		require.NoError(t, err)
+
+		preview, err := store.readRawPayloadBodyPreview(t.Context(), stored.Ref, len(body)/3)
+		require.NoError(t, err)
+		require.Equal(t, len(body), preview.sizeBytes)
+		require.Equal(t, body[:len(body)/3], preview.preview)
+		require.True(t, preview.truncated)
+
+		fullPreview, err := store.readRawPayloadBodyPreview(t.Context(), stored.Ref, len(body))
+		require.NoError(t, err)
+		require.Equal(t, len(body), fullPreview.sizeBytes)
+		require.Equal(t, body, fullPreview.preview)
+		require.False(t, fullPreview.truncated)
+	})
+
 	t.Run("rejects invalid inputs and traversal refs", func(t *testing.T) {
 		t.Parallel()
 
@@ -67,6 +93,9 @@ func TestLocalRawPayloadBlobStore(t *testing.T) {
 		require.ErrorIs(t, err, ErrValidation)
 
 		_, err = store.ReadRawPayloadBody(t.Context(), "../escape.blob")
+		require.ErrorIs(t, err, ErrValidation)
+
+		_, err = store.readRawPayloadBodyPreview(t.Context(), "../escape.blob", 1)
 		require.ErrorIs(t, err, ErrValidation)
 	})
 

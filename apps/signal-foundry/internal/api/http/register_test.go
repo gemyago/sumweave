@@ -1,6 +1,7 @@
 package http_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +15,46 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1controllers"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
+	"github.com/gemyago/signal-foundry/runtime/data"
+	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type testReplayReadService struct{}
+
+func (s *testReplayReadService) ReplayCandles(
+	_ context.Context,
+	_ domain.Instrument,
+	_ domain.Timeframe,
+	_ domain.TimeRange,
+) ([]data.ReplayCandle, error) {
+	return []data.ReplayCandle{}, nil
+}
+
+type testLineageBrowserService struct{}
+
+func (s *testLineageBrowserService) ListRawPayloadMetadata(
+	_ context.Context,
+	_ data.RawPayloadMetadataListQuery,
+) (data.RawPayloadMetadataListResult, error) {
+	return data.RawPayloadMetadataListResult{}, nil
+}
+
+func (s *testLineageBrowserService) GetRawPayloadDetail(
+	_ context.Context,
+	_ string,
+) (data.RawPayloadDetail, error) {
+	return data.RawPayloadDetail{}, nil
+}
+
+func (s *testLineageBrowserService) ListCandleLinkedRawPayloadMetadata(
+	_ context.Context,
+	_ data.CandleLinkedRawPayloadsQuery,
+) ([]data.RawPayloadMetadata, error) {
+	return []data.RawPayloadMetadata{}, nil
+}
 
 func TestSetupV1Routes(t *testing.T) {
 	fake := faker.New()
@@ -45,10 +82,16 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthService:    nil,
 			AuthMiddleware: passthroughMiddleware,
 		})
+		dataCtrl := v1controllers.NewDataController(v1controllers.DataControllerDeps{
+			ReadService:    &testReplayReadService{},
+			LineageService: &testLineageBrowserService{},
+			AuthMiddleware: passthroughMiddleware,
+		})
 		healthCtrl := &v1controllers.HealthController{}
 		signalfoundryhttp.SetupV1Routes(signalfoundryhttp.V1RoutesDeps{
 			HealthController: healthCtrl,
 			AuthController:   authCtrl,
+			DataController:   dataCtrl,
 			AuthMiddleware:   passthroughMiddleware,
 			RootHandler:      rootHandler,
 			HTTPRouter:       router,
@@ -83,10 +126,16 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthService:    nil,
 			AuthMiddleware: passthroughMiddleware,
 		})
+		dataCtrl := v1controllers.NewDataController(v1controllers.DataControllerDeps{
+			ReadService:    &testReplayReadService{},
+			LineageService: &testLineageBrowserService{},
+			AuthMiddleware: passthroughMiddleware,
+		})
 
 		signalfoundryhttp.SetupV1Routes(signalfoundryhttp.V1RoutesDeps{
 			HealthController: &v1controllers.HealthController{},
 			AuthController:   authCtrl,
+			DataController:   dataCtrl,
 			AuthMiddleware:   passthroughMiddleware,
 			RootHandler:      rootHandler,
 			HTTPRouter:       router,
@@ -101,6 +150,17 @@ func TestSetupV1Routes(t *testing.T) {
 			rootHandler.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code)
 			require.Equal(t, wantResult, w.Body.String())
+		})
+
+		t.Run("data routes are registered on the app router", func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/api/v1/data/candles?venue=hyperliquid-perps&symbol=BTCUSD&assetClass=crypto&timeframe=1m&start=2026-06-15T12:00:00Z&end=2026-06-15T13:00:00Z",
+				http.NoBody,
+			)
+			w := httptest.NewRecorder()
+			rootHandler.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
 		})
 	})
 

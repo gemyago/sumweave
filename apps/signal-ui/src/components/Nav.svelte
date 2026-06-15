@@ -42,6 +42,7 @@
   <a class="brand" href="/chat" use:link>Signal Foundry</a>
   <ul class="links">
     <li><a href="/chat" use:link>Chat</a></li>
+    <li><a href="/data" use:link>Data</a></li>
     <li><a href="/providers" use:link>Providers</a></li>
   </ul>
   <div class="nav-end">

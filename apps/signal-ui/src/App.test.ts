@@ -44,6 +44,24 @@ describe('App shell', () => {
     })
   })
 
+  it('shows Chat, Data, and Providers navigation links when authenticated', () => {
+    render(App)
+
+    expect(screen.getByRole('link', { name: 'Chat' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Providers' })).toBeInTheDocument()
+  })
+
+  it('renders the data browser route shell when authenticated', async () => {
+    window.location.hash = '#/data'
+
+    render(App)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Historical data' }),
+    ).toBeInTheDocument()
+  })
+
   it('shows the message composer when the hash includes a session id', async () => {
     const sessionSlug = faker.string.uuid()
     window.location.hash = `#/chat/${sessionSlug}`
@@ -55,6 +73,7 @@ describe('App shell', () => {
 
   it('redirects to /login when navigating to protected route unauthenticated', async () => {
     mocks.isAuthenticated = false
+    window.location.hash = '#/data'
     render(App)
     await waitFor(() => {
       expect(window.location.hash).toBe('#/login')

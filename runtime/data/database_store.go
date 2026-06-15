@@ -853,6 +853,100 @@ func (s *DatabaseStore) UpsertDataBatch(
 	return dataBatchModelToDomain(persisted)
 }
 
+// ListRawPayloadMetadata returns one deterministic page of raw payload metadata rows.
+func (s *DatabaseStore) ListRawPayloadMetadata(
+	ctx context.Context,
+	query RawPayloadMetadataListQuery,
+) (RawPayloadMetadataListResult, error) {
+	if err := ctx.Err(); err != nil {
+		return RawPayloadMetadataListResult{}, err
+	}
+
+	canonicalQuery, err := canonicalizeRawPayloadMetadataListQuery(query)
+	if err != nil {
+		return RawPayloadMetadataListResult{}, err
+	}
+
+	rows, err := queryRawPayloadMetadataRows(s.db.WithContext(ctx), canonicalQuery, canonicalQuery.Limit+1)
+	if err != nil {
+		return RawPayloadMetadataListResult{}, err
+	}
+
+	result := RawPayloadMetadataListResult{Items: make([]RawPayloadMetadata, 0, min(len(rows), canonicalQuery.Limit))}
+	for idx, row := range rows {
+		if idx == canonicalQuery.Limit {
+			lastReturned := rows[canonicalQuery.Limit-1]
+			result.NextCursor = encodeRawPayloadListCursor(lastReturned.ReceivedAt, lastReturned.ID)
+			break
+		}
+
+		metadata, metadataErr := rawPayloadMetadataFromModel(row)
+		if metadataErr != nil {
+			return RawPayloadMetadataListResult{}, metadataErr
+		}
+		result.Items = append(result.Items, metadata)
+	}
+
+	return result, nil
+}
+
+// GetRawPayloadMetadata returns one raw payload metadata row by ID.
+func (s *DatabaseStore) GetRawPayloadMetadata(
+	ctx context.Context,
+	rawPayloadID string,
+) (RawPayloadMetadata, error) {
+	if err := ctx.Err(); err != nil {
+		return RawPayloadMetadata{}, err
+	}
+
+	canonicalRawPayloadID, err := canonicalizeRawPayloadID(rawPayloadID)
+	if err != nil {
+		return RawPayloadMetadata{}, err
+	}
+
+	var row rawVenuePayloadModel
+	lookupErr := s.db.WithContext(ctx).Where("id = ?", canonicalRawPayloadID).First(&row).Error
+	if lookupErr != nil {
+		if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return RawPayloadMetadata{}, ErrRawPayloadNotFound
+		}
+		return RawPayloadMetadata{}, fmt.Errorf("lookup raw payload row: %w", lookupErr)
+	}
+
+	return rawPayloadMetadataFromModel(row)
+}
+
+// ListCandleLinkedRawPayloadMetadata returns raw payload metadata linked to one exact candle key.
+func (s *DatabaseStore) ListCandleLinkedRawPayloadMetadata(
+	ctx context.Context,
+	query CandleLinkedRawPayloadsQuery,
+) ([]RawPayloadMetadata, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	canonicalQuery, err := canonicalizeCandleLinkedRawPayloadsQuery(query)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.queryCandleLinkedRawPayloadMetadataRows(ctx, canonicalQuery)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]RawPayloadMetadata, 0, len(rows))
+	for _, row := range rows {
+		metadata, metadataErr := rawPayloadMetadataFromModel(row)
+		if metadataErr != nil {
+			return nil, metadataErr
+		}
+		items = append(items, metadata)
+	}
+
+	return items, nil
+}
+
 // LinkRawPayloadToInstrument persists a raw-payload link to one canonical instrument.
 func (s *DatabaseStore) LinkRawPayloadToInstrument(
 	ctx context.Context,
@@ -1017,6 +1111,60 @@ func (s *DatabaseStore) GetDataBatchAudit(ctx context.Context, batchID string) (
 	}
 
 	return audit, nil
+}
+
+func (s *DatabaseStore) queryCandleLinkedRawPayloadMetadataRows(
+	ctx context.Context,
+	query CandleLinkedRawPayloadsQuery,
+) ([]rawVenuePayloadModel, error) {
+	rawPayloadTable := s.db.Config.NamingStrategy.TableName("raw_venue_payloads")
+	rawPayloadCandleLinkTable := s.db.Config.NamingStrategy.TableName("raw_payload_candle_links")
+	candleTable := s.db.Config.NamingStrategy.TableName("candles")
+	instrumentTable := s.db.Config.NamingStrategy.TableName("instruments")
+
+	var rows []rawVenuePayloadModel
+	err := s.db.WithContext(ctx).
+		Model(&rawVenuePayloadModel{}).
+		Joins(
+			fmt.Sprintf(
+				"JOIN %s ON %s.raw_payload_id = %s.id",
+				rawPayloadCandleLinkTable,
+				rawPayloadCandleLinkTable,
+				rawPayloadTable,
+			),
+		).
+		Joins(
+			fmt.Sprintf(
+				"JOIN %s ON %s.id = %s.candle_id",
+				candleTable,
+				candleTable,
+				rawPayloadCandleLinkTable,
+			),
+		).
+		Joins(
+			fmt.Sprintf(
+				"JOIN %s ON %s.id = %s.instrument_id",
+				instrumentTable,
+				instrumentTable,
+				candleTable,
+			),
+		).
+		Where(fmt.Sprintf("%s.venue = ?", instrumentTable), query.Venue.String()).
+		Where(fmt.Sprintf("%s.symbol = ?", instrumentTable), query.Symbol.String()).
+		Where(fmt.Sprintf("%s.asset_class = ?", instrumentTable), query.AssetClass.String()).
+		Where(fmt.Sprintf("%s.timeframe = ?", candleTable), query.Timeframe.String()).
+		Where(fmt.Sprintf("%s.start_at = ?", candleTable), query.TimeRange.Start.UTC()).
+		Where(fmt.Sprintf("%s.end_at = ?", candleTable), query.TimeRange.End.UTC()).
+		Where(fmt.Sprintf("%s.provenance_source = ?", candleTable), query.ProvenanceSource).
+		Where(fmt.Sprintf("%s.provenance_identity_key = ?", candleTable), query.ProvenanceIdentity).
+		Order(fmt.Sprintf("%s.received_at ASC", rawPayloadTable)).
+		Order(fmt.Sprintf("%s.id ASC", rawPayloadTable)).
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("query candle linked raw payload rows: %w", err)
+	}
+
+	return rows, nil
 }
 
 func (s *DatabaseStore) findInstrumentModel(
@@ -1357,6 +1505,15 @@ func rawVenuePayloadModelToDomain(model rawVenuePayloadModel) (RawVenuePayload, 
 	}
 
 	return payload, nil
+}
+
+func rawPayloadMetadataFromModel(model rawVenuePayloadModel) (RawPayloadMetadata, error) {
+	payload, err := rawVenuePayloadModelToDomain(model)
+	if err != nil {
+		return RawPayloadMetadata{}, err
+	}
+
+	return rawPayloadMetadataFromDomain(payload), nil
 }
 
 func normalizationRunToModel(run NormalizationRun) normalizationRunModel {
@@ -1716,6 +1873,54 @@ func replaceNormalizationRunRawPayloadLinks(
 	}
 
 	return nil
+}
+
+func queryRawPayloadMetadataRows(
+	db *gorm.DB,
+	query RawPayloadMetadataListQuery,
+	limit int,
+) ([]rawVenuePayloadModel, error) {
+	statement := db.Model(&rawVenuePayloadModel{}).Where("venue = ?", query.Venue.String())
+	if query.Instrument != nil {
+		statement = statement.
+			Where("instrument_symbol = ?", query.Instrument.Symbol.String()).
+			Where("instrument_asset_class = ?", query.Instrument.AssetClass.String())
+	}
+	if query.Timeframe != "" {
+		statement = statement.Where("timeframe = ?", query.Timeframe.String())
+	}
+	if query.TimeRange != nil {
+		statement = statement.
+			Where("start_at >= ?", query.TimeRange.Start.UTC()).
+			Where("end_at <= ?", query.TimeRange.End.UTC())
+	}
+	if query.IngestionRunID != "" {
+		statement = statement.Where("ingestion_run_id = ?", query.IngestionRunID)
+	}
+	if query.EntityHint != "" {
+		statement = statement.Where("entity_hint = ?", query.EntityHint)
+	}
+	if query.Endpoint != "" {
+		statement = statement.Where("endpoint = ?", query.Endpoint)
+	}
+	if query.RequestType != "" {
+		statement = statement.Where("request_type = ?", query.RequestType)
+	}
+	if !query.cursor.ReceivedAt.IsZero() {
+		statement = statement.Where(
+			"(received_at > ?) OR (received_at = ? AND id > ?)",
+			query.cursor.ReceivedAt.UTC(),
+			query.cursor.ReceivedAt.UTC(),
+			query.cursor.ID,
+		)
+	}
+
+	var rows []rawVenuePayloadModel
+	if err := statement.Order("received_at ASC").Order("id ASC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("query raw payload rows: %w", err)
+	}
+
+	return rows, nil
 }
 
 func listNormalizationRunRawPayloadIDs(tx *gorm.DB, normalizationRunID string) ([]string, error) {

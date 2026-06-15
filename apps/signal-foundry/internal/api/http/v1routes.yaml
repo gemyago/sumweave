@@ -97,6 +97,217 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/data/candles:
+    get:
+      summary: Browse persisted normalized candles
+      operationId: listDataCandles
+      tags:
+        - data
+      parameters:
+        - in: query
+          name: venue
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: symbol
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: assetClass
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: timeframe
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: start
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: end
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Persisted candle rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataCandleListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/data/raw-payloads:
+    get:
+      summary: Browse raw payload metadata
+      operationId: listDataRawPayloads
+      tags:
+        - data
+      parameters:
+        - in: query
+          name: venue
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: symbol
+          schema:
+            type: string
+        - in: query
+          name: assetClass
+          schema:
+            type: string
+        - in: query
+          name: timeframe
+          schema:
+            type: string
+        - in: query
+          name: start
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: end
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: ingestionRunId
+          schema:
+            type: string
+        - in: query
+          name: entityHint
+          schema:
+            type: string
+        - in: query
+          name: endpoint
+          schema:
+            type: string
+        - in: query
+          name: requestType
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int64
+        - in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Raw payload metadata page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RawPayloadMetadataListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/data/raw-payloads/{id}:
+    get:
+      summary: Read raw payload detail preview
+      operationId: getDataRawPayload
+      tags:
+        - data
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Raw payload detail preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RawPayloadDetailResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/data/candle-raw-payloads:
+    get:
+      summary: Browse raw payload metadata linked to one candle
+      operationId: listDataCandleRawPayloads
+      tags:
+        - data
+      parameters:
+        - in: query
+          name: venue
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: symbol
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: assetClass
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: timeframe
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: start
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: end
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: provenanceSource
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: provenanceIdentity
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Candle-linked raw payload metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandleRawPayloadMetadataListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   schemas:
     HealthResponsePayload:
@@ -148,6 +359,175 @@ components:
           type: string
         user:
           $ref: "#/components/schemas/UserInfo"
+    DataCandle:
+      type: object
+      required:
+        - identity
+        - venue
+        - symbol
+        - assetClass
+        - timeframe
+        - start
+        - end
+        - open
+        - high
+        - low
+        - close
+        - volume
+        - quality
+        - provenanceSource
+        - provenanceIdentity
+      properties:
+        identity:
+          type: integer
+          format: int64
+        venue:
+          type: string
+        symbol:
+          type: string
+        assetClass:
+          type: string
+        timeframe:
+          type: string
+        start:
+          type: string
+          format: date-time
+          nullable: true
+        end:
+          type: string
+          format: date-time
+          nullable: true
+        open:
+          type: number
+          format: double
+        high:
+          type: number
+          format: double
+        low:
+          type: number
+          format: double
+        close:
+          type: number
+          format: double
+        volume:
+          type: number
+          format: double
+        quality:
+          type: string
+        provenanceSource:
+          type: string
+        provenanceIdentity:
+          type: string
+    DataCandleListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataCandle"
+    RawPayloadMetadata:
+      type: object
+      required:
+        - id
+        - ingestionRunId
+        - source
+        - venue
+        - endpoint
+        - requestType
+        - requestPayloadHash
+        - requestAt
+        - responseAt
+        - httpStatus
+        - responseBodyHash
+        - payloadBodyRef
+        - entityHint
+        - receivedAt
+      properties:
+        id:
+          type: string
+        ingestionRunId:
+          type: string
+        source:
+          type: string
+        venue:
+          type: string
+        endpoint:
+          type: string
+        requestType:
+          type: string
+        requestPayloadHash:
+          type: string
+        requestAt:
+          type: string
+          format: date-time
+        responseAt:
+          type: string
+          format: date-time
+        httpStatus:
+          type: integer
+          format: int64
+        responseBodyHash:
+          type: string
+        payloadBodyRef:
+          type: string
+        entityHint:
+          type: string
+        symbol:
+          type: string
+        assetClass:
+          type: string
+        timeframe:
+          type: string
+        start:
+          type: string
+          format: date-time
+          nullable: true
+        end:
+          type: string
+          format: date-time
+          nullable: true
+        receivedAt:
+          type: string
+          format: date-time
+    RawPayloadMetadataListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RawPayloadMetadata"
+        nextCursor:
+          type: string
+    RawPayloadDetailResponse:
+      type: object
+      required:
+        - metadata
+        - responseBodySizeBytes
+        - responseBodyPreview
+        - responseBodyPreviewTruncated
+      properties:
+        metadata:
+          $ref: "#/components/schemas/RawPayloadMetadata"
+        responseBodySizeBytes:
+          type: integer
+          format: int64
+        responseBodyPreview:
+          type: string
+        responseBodyPreviewTruncated:
+          type: boolean
+    CandleRawPayloadMetadataListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RawPayloadMetadata"
     Error:
       type: object
       required:

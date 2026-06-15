@@ -35,4 +35,12 @@ describe('Nav', () => {
     expect(mocks.clearAuth).toHaveBeenCalledTimes(1)
     expect(mocks.replace).toHaveBeenCalledWith('/login')
   })
+
+  it('renders Chat, Data, and Providers links for authenticated navigation', () => {
+    render(Nav)
+
+    expect(screen.getByRole('link', { name: 'Chat' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Providers' })).toBeInTheDocument()
+  })
 })

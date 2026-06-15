@@ -118,6 +118,63 @@ func (s *LocalRawPayloadBlobStore) ReadRawPayloadBody(ctx context.Context, ref s
 	return body, nil
 }
 
+func (s *LocalRawPayloadBlobStore) readRawPayloadBodyPreview(
+	ctx context.Context,
+	ref string,
+	limit int,
+) (rawPayloadBodyPreview, error) {
+	if err := ctx.Err(); err != nil {
+		return rawPayloadBodyPreview{}, err
+	}
+	if limit < 0 {
+		return rawPayloadBodyPreview{}, validationError("raw payload preview limit must be zero or greater")
+	}
+
+	fullPath, err := s.blobPath(ref)
+	if err != nil {
+		return rawPayloadBodyPreview{}, err
+	}
+
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return rawPayloadBodyPreview{}, fmt.Errorf("open raw payload blob: %w", err)
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	info, err := file.Stat()
+	if err != nil {
+		return rawPayloadBodyPreview{}, fmt.Errorf("stat raw payload blob: %w", err)
+	}
+
+	previewLimit := int64(limit)
+	if limit < int(^uint(0)>>1) {
+		previewLimit++
+	}
+
+	preview, err := io.ReadAll(io.LimitReader(file, previewLimit))
+	if err != nil {
+		return rawPayloadBodyPreview{}, fmt.Errorf("read raw payload blob preview: %w", err)
+	}
+
+	truncated := len(preview) > limit
+	if truncated {
+		preview = preview[:limit]
+	}
+
+	sizeBytes := max(int(info.Size()), len(preview))
+	if truncated && sizeBytes < limit+1 {
+		sizeBytes = limit + 1
+	}
+
+	return rawPayloadBodyPreview{
+		sizeBytes: sizeBytes,
+		preview:   preview,
+		truncated: truncated,
+	}, nil
+}
+
 func makeRawPayloadBlobRef(payloadID string) string {
 	sum := sha256.Sum256([]byte(payloadID))
 	key := hex.EncodeToString(sum[:])

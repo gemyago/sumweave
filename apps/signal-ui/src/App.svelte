@@ -5,6 +5,7 @@
   import Nav from './components/Nav.svelte'
   import { themeStore } from './lib/theme/theme-store.svelte'
   import Chat from './pages/Chat.svelte'
+  import Data from './pages/Data.svelte'
   import Login from './pages/Login.svelte'
   import Providers from './pages/Providers.svelte'
   import RedirectToChat from './pages/RedirectToChat.svelte'
@@ -19,6 +20,10 @@
     }),
     '/providers': wrap({
       component: Providers,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/data': wrap({
+      component: Data,
       conditions: [() => authStore.isAuthenticated],
     }),
   }

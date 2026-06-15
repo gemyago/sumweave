@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@lucide/svelte": "^1.8.0",
+    "lightweight-charts": "^5.2.0",
     "openapi-fetch": "^0.17.0",
     "svelte-spa-router": "^5.0.0"
   }

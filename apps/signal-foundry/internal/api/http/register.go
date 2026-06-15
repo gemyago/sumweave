@@ -22,6 +22,7 @@ type V1RoutesDeps struct {
 
 	*v1controllers.HealthController
 	*v1controllers.AuthController
+	*v1controllers.DataController
 
 	RootHandler *handlers.RootHandler
 
@@ -41,6 +42,7 @@ func SetupV1Routes(deps V1RoutesDeps) { // coverage-ignore // Little value in te
 	rootHandler := deps.RootHandler
 	rootHandler.RegisterHealthRoutes(deps.HealthController)
 	rootHandler.RegisterAuthRoutes(deps.AuthController)
+	rootHandler.RegisterDataRoutes(deps.DataController)
 
 	// Runtime routes — protected
 	deps.HTTPRouter.Handle(

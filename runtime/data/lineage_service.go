@@ -16,6 +16,12 @@ type lineageStore interface {
 	UpsertRawVenuePayload(ctx context.Context, payload RawVenuePayload) (RawVenuePayload, error)
 	UpsertNormalizationRun(ctx context.Context, run NormalizationRun) (NormalizationRun, error)
 	UpsertDataBatch(ctx context.Context, batch DataBatch) (DataBatch, error)
+	ListRawPayloadMetadata(ctx context.Context, query RawPayloadMetadataListQuery) (RawPayloadMetadataListResult, error)
+	GetRawPayloadMetadata(ctx context.Context, rawPayloadID string) (RawPayloadMetadata, error)
+	ListCandleLinkedRawPayloadMetadata(
+		ctx context.Context,
+		query CandleLinkedRawPayloadsQuery,
+	) ([]RawPayloadMetadata, error)
 	LinkRawPayloadToInstrument(ctx context.Context, rawPayloadID string, instrument domain.Instrument) error
 	LinkRawPayloadToCandle(ctx context.Context, rawPayloadID string, candle domain.Candle) error
 	LinkRawPayloadToTrade(ctx context.Context, rawPayloadID string, trade domain.Trade) error
@@ -31,6 +37,20 @@ type lineageStore interface {
 type RawPayloadBlobStore interface {
 	StoreRawPayloadBody(ctx context.Context, payloadID string, body []byte) (RawPayloadBody, error)
 	ReadRawPayloadBody(ctx context.Context, ref string) ([]byte, error)
+}
+
+type rawPayloadBodyPreview struct {
+	sizeBytes int
+	preview   []byte
+	truncated bool
+}
+
+type rawPayloadBlobPreviewReader interface {
+	readRawPayloadBodyPreview(
+		ctx context.Context,
+		ref string,
+		limit int,
+	) (rawPayloadBodyPreview, error)
 }
 
 // LineageServiceDeps configures lineage service dependencies.
@@ -136,6 +156,98 @@ func (s *LineageService) RecordNormalizationRun(
 	}
 
 	return persisted, nil
+}
+
+// ListRawPayloadMetadata returns one deterministic page of raw payload metadata.
+func (s *LineageService) ListRawPayloadMetadata(
+	ctx context.Context,
+	query RawPayloadMetadataListQuery,
+) (RawPayloadMetadataListResult, error) {
+	canonicalQuery, err := canonicalizeRawPayloadMetadataListQuery(query)
+	if err != nil {
+		return RawPayloadMetadataListResult{}, err
+	}
+
+	result, err := s.store.ListRawPayloadMetadata(ctx, canonicalQuery)
+	if err != nil {
+		return RawPayloadMetadataListResult{}, fmt.Errorf("list raw payload metadata: %w", err)
+	}
+
+	return result, nil
+}
+
+// GetRawPayloadDetail returns metadata plus a bounded response body preview.
+func (s *LineageService) GetRawPayloadDetail(
+	ctx context.Context,
+	rawPayloadID string,
+) (RawPayloadDetail, error) {
+	canonicalRawPayloadID, err := canonicalizeRawPayloadID(rawPayloadID)
+	if err != nil {
+		return RawPayloadDetail{}, err
+	}
+
+	metadata, err := s.store.GetRawPayloadMetadata(ctx, canonicalRawPayloadID)
+	if err != nil {
+		if errors.Is(err, ErrRawPayloadNotFound) {
+			return RawPayloadDetail{}, err
+		}
+		return RawPayloadDetail{}, fmt.Errorf("get raw payload metadata: %w", err)
+	}
+
+	if previewReader, ok := s.blobStore.(rawPayloadBlobPreviewReader); ok {
+		preview, previewErr := previewReader.readRawPayloadBodyPreview(
+			ctx,
+			metadata.PayloadBodyRef,
+			rawPayloadPreviewByteLimit,
+		)
+		if previewErr != nil {
+			return RawPayloadDetail{}, fmt.Errorf("read raw payload body preview: %w", previewErr)
+		}
+
+		return RawPayloadDetail{
+			Metadata:                     metadata,
+			ResponseBodySizeBytes:        preview.sizeBytes,
+			ResponseBodyPreview:          append([]byte(nil), preview.preview...),
+			ResponseBodyPreviewTruncated: preview.truncated,
+		}, nil
+	}
+
+	body, err := s.blobStore.ReadRawPayloadBody(ctx, metadata.PayloadBodyRef)
+	if err != nil {
+		return RawPayloadDetail{}, fmt.Errorf("read raw payload body preview: %w", err)
+	}
+
+	preview := body
+	truncated := false
+	if len(preview) > rawPayloadPreviewByteLimit {
+		preview = preview[:rawPayloadPreviewByteLimit]
+		truncated = true
+	}
+
+	return RawPayloadDetail{
+		Metadata:                     metadata,
+		ResponseBodySizeBytes:        len(body),
+		ResponseBodyPreview:          append([]byte(nil), preview...),
+		ResponseBodyPreviewTruncated: truncated,
+	}, nil
+}
+
+// ListCandleLinkedRawPayloadMetadata returns metadata linked to one exact candle key.
+func (s *LineageService) ListCandleLinkedRawPayloadMetadata(
+	ctx context.Context,
+	query CandleLinkedRawPayloadsQuery,
+) ([]RawPayloadMetadata, error) {
+	canonicalQuery, err := canonicalizeCandleLinkedRawPayloadsQuery(query)
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := s.store.ListCandleLinkedRawPayloadMetadata(ctx, canonicalQuery)
+	if err != nil {
+		return nil, fmt.Errorf("list candle linked raw payload metadata: %w", err)
+	}
+
+	return items, nil
 }
 
 // LinkRawPayloadToInstrument persists one raw-payload to instrument audit link.

@@ -17,8 +17,15 @@ type fakeRawPayloadBlobStore struct {
 	bodyByRef    map[string][]byte
 	storeErr     error
 	readErr      error
+	previewErr   error
 	storedIDs    []string
 	storedBodies [][]byte
+}
+
+type legacyRawPayloadBlobStore struct {
+	bodyByRef map[string][]byte
+	storeErr  error
+	readErr   error
 }
 
 func (s *fakeRawPayloadBlobStore) StoreRawPayloadBody(
@@ -45,11 +52,50 @@ func (s *fakeRawPayloadBlobStore) ReadRawPayloadBody(_ context.Context, ref stri
 	return append([]byte(nil), s.bodyByRef[ref]...), nil
 }
 
+func (s *fakeRawPayloadBlobStore) readRawPayloadBodyPreview(
+	_ context.Context,
+	ref string,
+	limit int,
+) (rawPayloadBodyPreview, error) {
+	if s.previewErr != nil {
+		return rawPayloadBodyPreview{}, s.previewErr
+	}
+	body := s.bodyByRef[ref]
+	preview := append([]byte(nil), body...)
+	truncated := false
+	if len(preview) > limit {
+		preview = preview[:limit]
+		truncated = true
+	}
+	return rawPayloadBodyPreview{sizeBytes: len(body), preview: preview, truncated: truncated}, nil
+}
+
+func (s *legacyRawPayloadBlobStore) StoreRawPayloadBody(
+	_ context.Context,
+	_ string,
+	_ []byte,
+) (RawPayloadBody, error) {
+	if s.storeErr != nil {
+		return RawPayloadBody{}, s.storeErr
+	}
+	return RawPayloadBody{Ref: "legacy-ref"}, nil
+}
+
+func (s *legacyRawPayloadBlobStore) ReadRawPayloadBody(_ context.Context, ref string) ([]byte, error) {
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	return append([]byte(nil), s.bodyByRef[ref]...), nil
+}
+
 type fakeLineageStore struct {
 	upsertedIngestionRuns     []IngestionRun
 	upsertedRawPayloads       []RawVenuePayload
 	upsertedNormalizationRuns []NormalizationRun
 	upsertedDataBatches       []DataBatch
+	rawPayloadListQueries     []RawPayloadMetadataListQuery
+	rawPayloadMetadataIDs     []string
+	linkedRawPayloadQueries   []CandleLinkedRawPayloadsQuery
 	auditBatchIDs             []string
 	replayCandleBatchIDs      []string
 	replayTradeBatchIDs       []string
@@ -57,6 +103,9 @@ type fakeLineageStore struct {
 	linkedCandlePayloads      []string
 	linkedTradePayloads       []string
 	auditValue                DataBatchAudit
+	rawPayloadListValue       RawPayloadMetadataListResult
+	rawPayloadMetadataValue   RawPayloadMetadata
+	linkedRawPayloadValue     []RawPayloadMetadata
 	replayCandlesValue        []ReplayCandle
 	replayTradesValue         []ReplayTrade
 	instrumentRawPayloadIDs   []string
@@ -66,6 +115,9 @@ type fakeLineageStore struct {
 	upsertRawPayloadErr       error
 	upsertNormalizationErr    error
 	upsertDataBatchErr        error
+	rawPayloadListErr         error
+	rawPayloadMetadataErr     error
+	linkedRawPayloadErr       error
 	auditErr                  error
 	replayCandlesErr          error
 	replayTradesErr           error
@@ -107,6 +159,39 @@ func (s *fakeLineageStore) UpsertDataBatch(_ context.Context, batch DataBatch) (
 		return DataBatch{}, s.upsertDataBatchErr
 	}
 	return batch, nil
+}
+
+func (s *fakeLineageStore) ListRawPayloadMetadata(
+	_ context.Context,
+	query RawPayloadMetadataListQuery,
+) (RawPayloadMetadataListResult, error) {
+	s.rawPayloadListQueries = append(s.rawPayloadListQueries, query)
+	if s.rawPayloadListErr != nil {
+		return RawPayloadMetadataListResult{}, s.rawPayloadListErr
+	}
+	return s.rawPayloadListValue, nil
+}
+
+func (s *fakeLineageStore) GetRawPayloadMetadata(
+	_ context.Context,
+	rawPayloadID string,
+) (RawPayloadMetadata, error) {
+	s.rawPayloadMetadataIDs = append(s.rawPayloadMetadataIDs, rawPayloadID)
+	if s.rawPayloadMetadataErr != nil {
+		return RawPayloadMetadata{}, s.rawPayloadMetadataErr
+	}
+	return s.rawPayloadMetadataValue, nil
+}
+
+func (s *fakeLineageStore) ListCandleLinkedRawPayloadMetadata(
+	_ context.Context,
+	query CandleLinkedRawPayloadsQuery,
+) ([]RawPayloadMetadata, error) {
+	s.linkedRawPayloadQueries = append(s.linkedRawPayloadQueries, query)
+	if s.linkedRawPayloadErr != nil {
+		return nil, s.linkedRawPayloadErr
+	}
+	return s.linkedRawPayloadValue, nil
 }
 
 func (s *fakeLineageStore) LinkRawPayloadToInstrument(
@@ -269,6 +354,11 @@ func TestLineageService(t *testing.T) {
 		return payload
 	}
 
+	makeRawPayloadMetadata := func() RawPayloadMetadata {
+		payload := makeRawPayload()
+		return rawPayloadMetadataFromDomain(payload)
+	}
+
 	makeNormalizationRun := func() NormalizationRun {
 		run, err := NewNormalizationRun(NormalizationRunParams{
 			ID:                   randomWord("normalization"),
@@ -408,6 +498,116 @@ func TestLineageService(t *testing.T) {
 		persistedBatch, err := svc.RecordDataBatch(t.Context(), batch)
 		require.NoError(t, err)
 		require.Equal(t, persistedBatch, store.upsertedDataBatches[0])
+	})
+
+	t.Run("ListRawPayloadMetadata canonicalizes filters and delegates", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore()
+		store.rawPayloadListValue = RawPayloadMetadataListResult{
+			Items:      []RawPayloadMetadata{makeRawPayloadMetadata()},
+			NextCursor: randomWord("cursor"),
+		}
+		svc := makeService(t, store, makeBlobStore())
+
+		start := randomTime()
+		result, err := svc.ListRawPayloadMetadata(t.Context(), RawPayloadMetadataListQuery{
+			Venue: domain.Venue("  " + randomWord("venue") + "  "),
+			Instrument: &BatchInstrumentRef{
+				Symbol:     domain.Symbol("  " + strings.ToUpper(randomWord("symbol")) + "  "),
+				AssetClass: domain.AssetClass("  CRYPTO  "),
+			},
+			Timeframe:      domain.Timeframe(" 1M "),
+			TimeRange:      &domain.TimeRange{Start: start, End: start.Add(time.Minute)},
+			IngestionRunID: "  " + randomWord("run") + "  ",
+			EntityHint:     "  " + randomWord("entity") + "  ",
+			Endpoint:       "  /info  ",
+			RequestType:    "  " + randomWord("request") + "  ",
+			Limit:          0,
+		})
+		require.NoError(t, err)
+		require.Equal(t, store.rawPayloadListValue, result)
+		require.Len(t, store.rawPayloadListQueries, 1)
+		require.Equal(t, defaultRawPayloadMetadataLimit, store.rawPayloadListQueries[0].Limit)
+		require.Equal(t, domain.Timeframe1m, store.rawPayloadListQueries[0].Timeframe)
+		require.NotNil(t, store.rawPayloadListQueries[0].Instrument)
+		require.Equal(
+			t,
+			strings.TrimSpace(store.rawPayloadListQueries[0].Instrument.Symbol.String()),
+			store.rawPayloadListQueries[0].Instrument.Symbol.String(),
+		)
+	})
+
+	t.Run("GetRawPayloadDetail reads body preview with deterministic truncation", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore()
+		metadata := makeRawPayloadMetadata()
+		metadata.PayloadBodyRef = randomWord("ref")
+		store.rawPayloadMetadataValue = metadata
+		blobStore := makeBlobStore()
+		body := []byte(strings.Repeat("a", rawPayloadPreviewByteLimit+fake.IntBetween(1, 64)))
+		blobStore.bodyByRef[metadata.PayloadBodyRef] = body
+		svc := makeService(t, store, blobStore)
+
+		detail, err := svc.GetRawPayloadDetail(t.Context(), "  "+metadata.ID+"  ")
+		require.NoError(t, err)
+		require.Equal(t, metadata.ID, store.rawPayloadMetadataIDs[0])
+		require.Equal(t, metadata, detail.Metadata)
+		require.Equal(t, len(body), detail.ResponseBodySizeBytes)
+		require.Len(t, detail.ResponseBodyPreview, rawPayloadPreviewByteLimit)
+		require.True(t, detail.ResponseBodyPreviewTruncated)
+	})
+
+	t.Run("GetRawPayloadDetail returns not found deterministically", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore()
+		store.rawPayloadMetadataErr = ErrRawPayloadNotFound
+		svc := makeService(t, store, makeBlobStore())
+
+		_, err := svc.GetRawPayloadDetail(t.Context(), randomWord("payload"))
+		require.ErrorIs(t, err, ErrRawPayloadNotFound)
+	})
+
+	t.Run("GetRawPayloadDetail falls back to full reads for legacy blob stores", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore()
+		metadata := makeRawPayloadMetadata()
+		metadata.PayloadBodyRef = randomWord("ref")
+		store.rawPayloadMetadataValue = metadata
+		body := []byte(randomWord("body") + randomWord("suffix"))
+		blobStore := &legacyRawPayloadBlobStore{bodyByRef: map[string][]byte{metadata.PayloadBodyRef: body}}
+		svc, err := NewLineageService(LineageServiceDeps{Store: store, BlobStore: blobStore})
+		require.NoError(t, err)
+
+		detail, err := svc.GetRawPayloadDetail(t.Context(), metadata.ID)
+		require.NoError(t, err)
+		require.Equal(t, len(body), detail.ResponseBodySizeBytes)
+		require.Equal(t, body, detail.ResponseBodyPreview)
+		require.False(t, detail.ResponseBodyPreviewTruncated)
+	})
+
+	t.Run("ListCandleLinkedRawPayloadMetadata validates provenance before store reads", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore()
+		svc := makeService(t, store, makeBlobStore())
+		start := randomTime()
+
+		_, err := svc.ListCandleLinkedRawPayloadMetadata(t.Context(), CandleLinkedRawPayloadsQuery{
+			Venue:      domain.Venue(randomWord("venue")),
+			Symbol:     domain.Symbol(strings.ToUpper(randomWord("symbol"))),
+			AssetClass: domain.AssetClassCrypto,
+			Timeframe:  domain.Timeframe1m,
+			TimeRange: domain.TimeRange{
+				Start: start,
+				End:   start.Add(time.Minute),
+			},
+		})
+		require.ErrorIs(t, err, ErrValidation)
+		require.Empty(t, store.linkedRawPayloadQueries)
 	})
 
 	t.Run("link and list raw payload ids", func(t *testing.T) {

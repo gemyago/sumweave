@@ -1001,6 +1001,215 @@ func TestDatabaseStoreLineage(t *testing.T) {
 		require.ErrorIs(t, err, ErrLineageParentNotFound)
 	})
 
+	t.Run("ListRawPayloadMetadata filters ordered rows with deterministic pagination", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		makeScopedPayload := func(id string, receivedAt time.Time) RawVenuePayload {
+			t.Helper()
+
+			payload, payloadErr := NewRawVenuePayload(RawVenuePayloadParams{
+				ID:                 id,
+				IngestionRunID:     run.ID,
+				Source:             randomWord("source"),
+				Venue:              run.Venue,
+				Endpoint:           "/info",
+				RequestType:        "candleSnapshot",
+				RequestPayloadHash: randomWord("request-hash"),
+				RequestAt:          receivedAt.Add(-2 * time.Second),
+				ResponseAt:         receivedAt.Add(-time.Second),
+				HTTPStatus:         200,
+				ResponseBodyHash:   randomWord("body-hash"),
+				PayloadBodyRef:     randomWord("ref"),
+				EntityHint:         "candle",
+				Instrument: &BatchInstrumentRef{
+					Symbol:     domain.Symbol("BTC-USD"),
+					AssetClass: domain.AssetClassCrypto,
+				},
+				Timeframe:  domain.Timeframe1m,
+				TimeRange:  &domain.TimeRange{Start: receivedAt.Add(-time.Minute), End: receivedAt},
+				ReceivedAt: receivedAt,
+			})
+			require.NoError(t, payloadErr)
+
+			return payload
+		}
+
+		baseReceivedAt := randomTime().UTC()
+		matchingFirst := makeScopedPayload("payload-a", baseReceivedAt)
+		matchingSecond := makeScopedPayload("payload-b", baseReceivedAt)
+		wrongEndpoint := makeScopedPayload("payload-c", baseReceivedAt.Add(time.Minute))
+		wrongEndpoint.Endpoint = "/other"
+		wrongEndpoint, err = NewRawVenuePayload(RawVenuePayloadParams(wrongEndpoint))
+		require.NoError(t, err)
+
+		for _, payload := range []RawVenuePayload{matchingSecond, wrongEndpoint, matchingFirst} {
+			_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+			require.NoError(t, err)
+		}
+
+		query, err := NewRawPayloadMetadataListQuery(RawPayloadMetadataListQueryParams{
+			Venue:          run.Venue,
+			Symbol:         domain.Symbol("BTC-USD"),
+			AssetClass:     domain.AssetClassCrypto,
+			Timeframe:      domain.Timeframe1m,
+			StartAt:        matchingFirst.TimeRange.Start,
+			EndAt:          matchingFirst.TimeRange.End.Add(time.Second),
+			IngestionRunID: run.ID,
+			EntityHint:     "candle",
+			Endpoint:       "/info",
+			RequestType:    "candleSnapshot",
+			Limit:          1,
+		})
+		require.NoError(t, err)
+
+		firstPage, err := store.ListRawPayloadMetadata(t.Context(), query)
+		require.NoError(t, err)
+		require.Len(t, firstPage.Items, 1)
+		require.Equal(t, matchingFirst.ID, firstPage.Items[0].ID)
+		require.NotEmpty(t, firstPage.NextCursor)
+
+		secondPage, err := store.ListRawPayloadMetadata(t.Context(), RawPayloadMetadataListQuery{
+			Venue:          run.Venue,
+			Instrument:     query.Instrument,
+			Timeframe:      query.Timeframe,
+			TimeRange:      query.TimeRange,
+			IngestionRunID: query.IngestionRunID,
+			EntityHint:     query.EntityHint,
+			Endpoint:       query.Endpoint,
+			RequestType:    query.RequestType,
+			Limit:          1,
+			Cursor:         firstPage.NextCursor,
+		})
+		require.NoError(t, err)
+		require.Len(t, secondPage.Items, 1)
+		require.Equal(t, matchingSecond.ID, secondPage.Items[0].ID)
+		require.Empty(t, secondPage.NextCursor)
+	})
+
+	t.Run("GetRawPayloadMetadata returns metadata only and reports not found", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		payload := makeRawVenuePayload(t, run.ID)
+		payload.ResponseBody = []byte(randomWord("body"))
+		payload.PayloadBodyRef = randomWord("ref")
+		payload, err = NewRawVenuePayload(RawVenuePayloadParams(payload))
+		require.NoError(t, err)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+		require.NoError(t, err)
+
+		metadata, err := store.GetRawPayloadMetadata(t.Context(), payload.ID)
+		require.NoError(t, err)
+		require.Equal(t, payload.ID, metadata.ID)
+		require.Equal(t, payload.PayloadBodyRef, metadata.PayloadBodyRef)
+		require.Equal(t, payload.ResponseBodyHash, metadata.ResponseBodyHash)
+
+		_, err = store.GetRawPayloadMetadata(t.Context(), randomWord("missing-payload"))
+		require.ErrorIs(t, err, ErrRawPayloadNotFound)
+	})
+
+	t.Run("ListCandleLinkedRawPayloadMetadata uses exact provenance-bearing candle key", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		run := makeIngestionRun(t)
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		payloadOne := makeRawVenuePayload(t, run.ID)
+		payloadOne.ID = "payload-a"
+		payloadOne.ReceivedAt = randomTime().UTC()
+		payloadOne, err = NewRawVenuePayload(RawVenuePayloadParams(payloadOne))
+		require.NoError(t, err)
+		payloadTwo := makeRawVenuePayload(t, run.ID)
+		payloadTwo.ID = "payload-b"
+		payloadTwo.ReceivedAt = payloadOne.ReceivedAt
+		payloadTwo, err = NewRawVenuePayload(RawVenuePayloadParams(payloadTwo))
+		require.NoError(t, err)
+		payloadOther := makeRawVenuePayload(t, run.ID)
+		payloadOther.ID = "payload-c"
+		payloadOther.ReceivedAt = payloadOne.ReceivedAt.Add(time.Minute)
+		payloadOther, err = NewRawVenuePayload(RawVenuePayloadParams(payloadOther))
+		require.NoError(t, err)
+
+		for _, payload := range []RawVenuePayload{payloadTwo, payloadOther, payloadOne} {
+			_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+			require.NoError(t, err)
+		}
+
+		instrument := makeInstrument(t, run.Venue)
+		persistedInstrument, err := store.UpsertInstrument(t.Context(), instrument)
+		require.NoError(t, err)
+
+		start := randomTime().UTC()
+		candleRange, err := domain.NewTimeRange(start, start.Add(time.Minute))
+		require.NoError(t, err)
+		selectedCandle := makeCandle(t, persistedInstrument, candleRange)
+		_, err = store.UpsertCandle(t.Context(), selectedCandle)
+		require.NoError(t, err)
+
+		otherProvenance, err := domain.NewSourceProvenance(
+			selectedCandle.Provenance.Source,
+			randomWord("other-record"),
+		)
+		require.NoError(t, err)
+		otherCandle, err := domain.NewCandle(domain.CandleParams{
+			Instrument: persistedInstrument,
+			Timeframe:  selectedCandle.Timeframe,
+			TimeRange:  selectedCandle.TimeRange,
+			Open:       selectedCandle.Open,
+			High:       selectedCandle.High,
+			Low:        selectedCandle.Low,
+			Close:      selectedCandle.Close,
+			Volume:     selectedCandle.Volume,
+			Quality:    selectedCandle.Quality,
+			Provenance: otherProvenance,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertCandle(t.Context(), otherCandle)
+		require.NoError(t, err)
+
+		err = store.LinkRawPayloadToCandle(t.Context(), payloadTwo.ID, selectedCandle)
+		require.NoError(t, err)
+		err = store.LinkRawPayloadToCandle(t.Context(), payloadOne.ID, selectedCandle)
+		require.NoError(t, err)
+		err = store.LinkRawPayloadToCandle(t.Context(), payloadOther.ID, otherCandle)
+		require.NoError(t, err)
+
+		items, err := store.ListCandleLinkedRawPayloadMetadata(t.Context(), CandleLinkedRawPayloadsQuery{
+			Venue:              persistedInstrument.Venue,
+			Symbol:             persistedInstrument.Symbol,
+			AssetClass:         persistedInstrument.AssetClass,
+			Timeframe:          selectedCandle.Timeframe,
+			TimeRange:          selectedCandle.TimeRange,
+			ProvenanceSource:   selectedCandle.Provenance.Source,
+			ProvenanceIdentity: candleIdentityKey(selectedCandle.Provenance),
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{payloadOne.ID, payloadTwo.ID}, []string{items[0].ID, items[1].ID})
+
+		emptyItems, err := store.ListCandleLinkedRawPayloadMetadata(t.Context(), CandleLinkedRawPayloadsQuery{
+			Venue:              persistedInstrument.Venue,
+			Symbol:             persistedInstrument.Symbol,
+			AssetClass:         persistedInstrument.AssetClass,
+			Timeframe:          selectedCandle.Timeframe,
+			TimeRange:          selectedCandle.TimeRange,
+			ProvenanceSource:   selectedCandle.Provenance.Source,
+			ProvenanceIdentity: randomWord("missing-identity"),
+		})
+		require.NoError(t, err)
+		require.Empty(t, emptyItems)
+	})
+
 	t.Run("replay by data batch returns stable canonical identities", func(t *testing.T) {
 		t.Parallel()
 

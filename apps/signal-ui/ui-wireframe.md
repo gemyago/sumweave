@@ -9,7 +9,7 @@
 **Shell (`Nav` + `<main>`)**
 
 - **Nav — left:** Brand label **Signal Foundry** → `/chat`.
-- **Nav — center:** **Chat** / **Providers** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
+- **Nav — center:** **Chat** / **Data** / **Providers** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
 - **Nav — right:** **Sign out** (text) **to the left of** the compact **Theme** segmented control; both **end-aligned** in the right margin; only when authenticated.
 - **`<main>`:** Centered content wrapper `main-inner` (~800–900px max width) with `Router` inside.
 - **`/chat`:** `main-inner` is full width so the session rail can sit at the viewport’s left inset; shell is viewport-height with **no page scrollbar** — only the transcript strip scrolls.
@@ -36,7 +36,7 @@
 
 **Route guarding**
 
-- `/chat` and `/providers`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
+- `/chat`, `/data`, and `/providers`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
 - If `authStore.isAuthenticated` is false: `conditionsFailed` → `replace('/login')`.
 - `/login` is public.
 - Nav is hidden when unauthenticated.
@@ -50,6 +50,7 @@
 | `/` | `replace('/chat')` on mount; brief status text. |
 | `/login` | Login page; username + password form. On success, sets auth tokens and `push('/chat')`. On failure, shows inline error alert. |
 | `/chat/:sessionId?` | Chat; optional id in URL after `sessionBound` (`replace`). One route entry so binding the id does not remount the page or abort the stream. |
+| `/data` | Historical data browser. Protected (auth required). Explicit Load only; no initial auto-query. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
 
 ---
@@ -131,6 +132,60 @@
 - List: `aria-live="polite"`.
 - Errors: `role="alert"`.
 - Labeled input.
+
+---
+
+## Historical data (`/data`)
+
+**Layout**
+
+- Header: **Historical data** heading + short explanatory copy.
+- Filter form before results, with fields for **venue**, **symbol**, **asset class**, **timeframe**, **UTC start**, **UTC end**, and optional **ingestion run ID**.
+- Results below the form in this order:
+  - summary card (**N normalized candles**, **N raw payload rows**)
+  - normalized candle panel (chart + reliable selection table)
+  - raw payload metadata panel (table + row detail action)
+  - linked raw evidence panel for the selected candle
+- Raw payload detail opens in a right-side drawer-like panel with dialog semantics and a close button.
+
+**Behavior**
+
+- Route is protected; unauthenticated users are redirected to `/login` using the same guard behavior as other protected routes.
+- Initial render shows only the filter form and explanatory copy; the page MUST NOT call data APIs automatically.
+- **Load** validates required filters client-side before calling APIs.
+- Client-side validation covers:
+  - missing required fields
+  - invalid ISO-8601 UTC timestamps for start/end
+  - `start >= end`
+  - the documented 10,000-interval cap using the selected timeframe (matching the server rule and message)
+- Successful Load calls both:
+  - `GET /api/v1/data/candles`
+  - `GET /api/v1/data/raw-payloads`
+- Each valid Load starts a new request scope, clears prior summary/table results immediately, and only applies responses from the latest submitted filter set.
+- Both calls use the authenticated app fetch wrapper (Bearer + refresh flow), not anonymous fetches.
+- Load stays disabled while either request is in flight.
+- Candle chart renders persisted normalized candle OHLC values only; it does not synthesize missing intervals.
+- Reliable v0 candle selection happens from the candle table. Selecting a row calls `GET /api/v1/data/candle-raw-payloads` with that candle’s `provenanceSource` and `provenanceIdentity`.
+- Selecting a raw payload metadata row calls `GET /api/v1/data/raw-payloads/{id}` and opens the detail drawer with bounded preview metadata.
+
+| State | When | UI |
+| :--- | :--- | :--- |
+| Initial | First render | Filter form + explanatory copy only; no summary/chart/tables yet. |
+| Validation error | Required field missing, invalid UTC range, or selected range exceeds 10,000 intervals | Inline alert semantics above results; **Load** does not call APIs. |
+| Loading | Load submitted with valid filters | **Load** disabled; status text shown while candle/raw metadata requests are pending; summary/tables reflect only the in-flight filter set (no stale prior results). |
+| Candle empty | Candle response has no items | "No normalized candles matched these filters." |
+| Raw payload empty | Raw payload response has no items | "No raw payload metadata matched these filters." |
+| API error | Any data API request fails | Error copy uses alert semantics; unrelated successful data stays visible. |
+| Linked evidence idle | No candle selected yet | Prompt tells the user to select a normalized candle row. |
+| Linked evidence loading | Candle selected, linked evidence request in flight | Loading status in linked evidence panel. |
+| Linked evidence empty | Candle selected, no linked payloads | Empty evidence message (not an error). |
+| Detail drawer | Raw payload row selected | Dialog-like side panel with metadata, hashes, body ref, instrument/timeframe/range hints, preview byte count, truncation flag, and bounded preview body. |
+
+**A11y**
+
+- Validation and API failures use `role="alert"`.
+- Raw payload detail panel uses dialog semantics and a visible close button.
+- Tables keep explicit headers for candle rows, raw payload metadata, and linked evidence.
 
 ---
 
