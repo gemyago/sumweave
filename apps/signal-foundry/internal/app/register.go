@@ -6,5 +6,22 @@ import (
 )
 
 func Register(container *dig.Container) error {
-	return di.ProvideAll(container)
+	return di.ProvideAll(
+		container,
+		newStrategyArtifactStore,
+		newStrategyVersionRegistryService,
+		NewStrategyWorkspaceService,
+		newEvaluationGovernorPolicyStore,
+		newEvaluationAuditStore,
+		newEvaluationExecutionStore,
+		newEvaluationBacktestStore,
+		newEvaluationAnalyticsService,
+		newEvaluationStrategyService,
+		newEvaluationAuditService,
+		newEvaluationBacktestService,
+		newEvaluationPaperService,
+		newEvaluationSnapshotService,
+		newDurableBacktestFlow,
+		NewEvaluationWorkspaceService,
+	)
 }

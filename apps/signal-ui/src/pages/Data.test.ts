@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { faker } from '@faker-js/faker'
-import { render, screen, waitFor, within } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import Data from './Data.svelte'
 import { DataApiError } from '../lib/data/data-api'
@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   getRawPayloadDetail: vi.fn(),
   listCandleRawPayloads: vi.fn(),
 }))
+
+let availabilityCounter = 0
 
 vi.mock('../lib/data/data-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/data/data-api')>()
@@ -56,15 +58,16 @@ function makeAvailabilityItem(overrides: Partial<ReturnType<typeof baseAvailabil
 }
 
 function baseAvailabilityItem() {
+  const symbolId = availabilityCounter++
   const latestStart = faker.date.recent()
   const latestEnd = faker.date.soon({ refDate: latestStart })
   const earlierStart = faker.date.past({ years: 1, refDate: latestStart })
   const earlierEnd = faker.date.soon({ refDate: earlierStart })
 
-  return {
-    venue: 'hyperliquid-perps',
-    symbol: `${faker.finance.currencyCode()}USD`,
-    assetClass: 'crypto',
+    return {
+      venue: 'hyperliquid-perps',
+      symbol: `COIN${symbolId}USD`,
+      assetClass: 'crypto',
     timeframes: [
       {
         timeframe: '1m',
@@ -148,8 +151,33 @@ async function fillRequiredFilters(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText('Symbol'), 'BTCUSD')
   await user.selectOptions(screen.getByLabelText('Asset class'), 'crypto')
   await user.selectOptions(screen.getByLabelText('Timeframe'), '1m')
-  await user.type(screen.getByLabelText('UTC start'), '2026-06-15T12:00:00Z')
-  await user.type(screen.getByLabelText('UTC end'), '2026-06-15T13:00:00Z')
+  await fillUtcRange(user, {
+    startDate: '2026-06-15',
+    startTime: '12:00:00',
+    endDate: '2026-06-15',
+    endTime: '13:00:00',
+  })
+}
+
+async function fillUtcRange(
+  _user: ReturnType<typeof userEvent.setup>,
+  range: { startDate: string; startTime: string; endDate: string; endTime: string },
+) {
+  const startDate = screen.getByLabelText('UTC start date') as HTMLInputElement
+  const startTime = screen.getByLabelText('UTC start time') as HTMLInputElement
+  const endDate = screen.getByLabelText('UTC end date') as HTMLInputElement
+  const endTime = screen.getByLabelText('UTC end time') as HTMLInputElement
+
+  await fireEvent.input(startDate, { target: { value: range.startDate } })
+  await fireEvent.change(startDate, { target: { value: range.startDate } })
+  await fireEvent.blur(startDate)
+  await fireEvent.input(startTime, { target: { value: range.startTime } })
+  await fireEvent.change(startTime, { target: { value: range.startTime } })
+  await fireEvent.input(endDate, { target: { value: range.endDate } })
+  await fireEvent.change(endDate, { target: { value: range.endDate } })
+  await fireEvent.blur(endDate)
+  await fireEvent.input(endTime, { target: { value: range.endTime } })
+  await fireEvent.change(endTime, { target: { value: range.endTime } })
 }
 
 function mockAvailabilityResponse(items: ReturnType<typeof makeAvailabilityItem>[]) {
@@ -173,6 +201,7 @@ function mockAvailabilityResponse(items: ReturnType<typeof makeAvailabilityItem>
 
 describe('Data page', () => {
   beforeEach(() => {
+    availabilityCounter = 0
     chartSetData.mockReset()
     mocks.listCandleAvailability.mockReset()
     mocks.listCandles.mockReset()
@@ -324,7 +353,7 @@ describe('Data page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Load candles' }))
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Venue is required.')
+    expect(screen.getByText('Venue is required.')).toBeInTheDocument()
     expect(mocks.listCandles).not.toHaveBeenCalled()
   })
 
@@ -366,10 +395,12 @@ describe('Data page', () => {
     await user.type(screen.getByLabelText('Symbol'), availability.symbol)
     await user.selectOptions(screen.getByLabelText('Asset class'), 'crypto')
     await user.selectOptions(screen.getByLabelText('Timeframe'), '1m')
-    await user.clear(screen.getByLabelText('UTC start'))
-    await user.type(screen.getByLabelText('UTC start'), '2026-06-15T12:00:00Z')
-    await user.clear(screen.getByLabelText('UTC end'))
-    await user.type(screen.getByLabelText('UTC end'), '2026-06-15T13:00:00Z')
+    await fillUtcRange(user, {
+      startDate: '2026-06-15',
+      startTime: '12:00:00',
+      endDate: '2026-06-15',
+      endTime: '13:00:00',
+    })
     await user.click(screen.getByRole('button', { name: 'Load candles' }))
 
     expect(await screen.findByText('Selected availability entry')).toBeInTheDocument()
@@ -429,7 +460,7 @@ describe('Data page', () => {
 
     render(Data)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Candle read failed')
+    expect(await screen.findByText('Candle read failed')).toBeInTheDocument()
   })
 
   it('shows the 10,000-interval cap validation on manual exact reads', async () => {
@@ -441,32 +472,89 @@ describe('Data page', () => {
     await user.type(screen.getByLabelText('Symbol'), 'BTCUSD')
     await user.selectOptions(screen.getByLabelText('Asset class'), 'crypto')
     await user.selectOptions(screen.getByLabelText('Timeframe'), '1m')
-    await user.type(screen.getByLabelText('UTC start'), '2026-06-15T12:00:00Z')
-    await user.type(screen.getByLabelText('UTC end'), '2026-06-23T00:00:01Z')
+    await fillUtcRange(user, {
+      startDate: '2026-06-15',
+      startTime: '12:00:00',
+      endDate: '2026-06-23',
+      endTime: '00:00:01',
+    })
     await user.click(screen.getByRole('button', { name: 'Load candles' }))
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(await screen.findByText(
       'Selected range exceeds the server limit of 10,000 1m intervals.',
-    )
+    )).toBeInTheDocument()
     expect(mocks.listCandles).not.toHaveBeenCalled()
   })
 
-  it('shows invalid UTC validation on manual exact reads', async () => {
+  it('resolves data presets against the selected availability timeframe without auto-loading candles', async () => {
+    const availability = makeAvailabilityItem({
+      defaultSlice: {
+        timeframe: '1m',
+        start: new Date('2026-06-15T00:00:00.000Z'),
+        end: new Date('2026-06-15T12:00:00.000Z'),
+      },
+      timeframes: [
+        {
+          timeframe: '1m',
+          start: new Date('2026-06-10T00:00:00.000Z'),
+          end: new Date('2026-06-15T12:00:00.000Z'),
+          count: 100,
+        },
+      ],
+    })
+    mockAvailabilityResponse([availability])
+    mocks.listCandles.mockResolvedValue({ items: [] })
+
     const user = userEvent.setup()
     render(Data)
-    await screen.findByText('No normalized candle availability was found yet.')
 
-    await user.selectOptions(screen.getByLabelText('Venue'), 'hyperliquid-perps')
-    await user.type(screen.getByLabelText('Symbol'), 'BTCUSD')
-    await user.selectOptions(screen.getByLabelText('Asset class'), 'crypto')
-    await user.selectOptions(screen.getByLabelText('Timeframe'), '1m')
-    await user.type(screen.getByLabelText('UTC start'), faker.date.recent().toISOString().replace('Z', ''))
-    await user.type(screen.getByLabelText('UTC end'), '2026-06-15T13:00:00Z')
+    await screen.findByText(availability.symbol)
+    mocks.listCandles.mockClear()
+
+    await user.click(screen.getByRole('button', { name: 'Last 24h' }))
+
+    expect(screen.getByText('2026-06-14T12:00:00.000Z')).toBeInTheDocument()
+    expect(screen.getAllByText('2026-06-15T12:00:00.000Z').length).toBeGreaterThan(0)
+    expect(mocks.listCandles).not.toHaveBeenCalled()
+  })
+
+  it('shows selected availability bound validation on manual exact reads', async () => {
+    const availability = makeAvailabilityItem({
+      defaultSlice: {
+        timeframe: '1m',
+        start: new Date('2026-06-15T00:00:00.000Z'),
+        end: new Date('2026-06-15T12:00:00.000Z'),
+      },
+      timeframes: [
+        {
+          timeframe: '1m',
+          start: new Date('2026-06-15T00:00:00.000Z'),
+          end: new Date('2026-06-15T12:00:00.000Z'),
+          count: 100,
+        },
+      ],
+    })
+    mockAvailabilityResponse([availability])
+    mocks.listCandles.mockResolvedValue({ items: [] })
+
+    const user = userEvent.setup()
+    render(Data)
+
+    await screen.findByText(availability.symbol)
+    mocks.listCandles.mockClear()
+
+    await fillUtcRange(user, {
+      startDate: '2026-06-14',
+      startTime: '23:00:00',
+      endDate: '2026-06-15',
+      endTime: '12:00:00',
+    })
     await user.click(screen.getByRole('button', { name: 'Load candles' }))
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'UTC start must be a valid ISO-8601 timestamp.',
-    )
+    expect(screen.getByText(
+      'UTC range must stay within the selected availability window.',
+    )).toBeInTheDocument()
+    expect(mocks.listCandles).not.toHaveBeenCalled()
   })
 
   it('shows start-before-end validation on manual exact reads', async () => {
@@ -478,13 +566,17 @@ describe('Data page', () => {
     await user.type(screen.getByLabelText('Symbol'), 'BTCUSD')
     await user.selectOptions(screen.getByLabelText('Asset class'), 'crypto')
     await user.selectOptions(screen.getByLabelText('Timeframe'), '1m')
-    await user.type(screen.getByLabelText('UTC start'), '2026-06-15T13:00:00Z')
-    await user.type(screen.getByLabelText('UTC end'), '2026-06-15T13:00:00Z')
+    await fillUtcRange(user, {
+      startDate: '2026-06-15',
+      startTime: '13:00:00',
+      endDate: '2026-06-15',
+      endTime: '13:00:00',
+    })
     await user.click(screen.getByRole('button', { name: 'Load candles' }))
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
+    expect(await screen.findByText(
       'UTC start must be earlier than UTC end.',
-    )
+    )).toBeInTheDocument()
     expect(mocks.listCandles).not.toHaveBeenCalled()
   })
 
@@ -537,7 +629,7 @@ describe('Data page', () => {
 
     render(Data)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Linked evidence failed')
+    expect(await screen.findByText('Linked evidence failed')).toBeInTheDocument()
   })
 
   it('keeps broad raw payload browsing explicit for the current candle scope', async () => {
@@ -616,7 +708,7 @@ describe('Data page', () => {
     await screen.findByRole('button', { name: 'Load raw payload metadata' })
     await user.click(screen.getByRole('button', { name: 'Load raw payload metadata' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Raw payload read failed')
+    expect(await screen.findByText('Raw payload read failed')).toBeInTheDocument()
   })
 
   it('opens the raw payload detail drawer after explicit raw metadata browsing', async () => {

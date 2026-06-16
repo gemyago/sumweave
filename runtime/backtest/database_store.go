@@ -165,6 +165,28 @@ func (s *DatabaseStore) getDatasetReferenceModel(
 	return model, nil
 }
 
+// GetDatasetReference reads one persisted dataset reference by stable id.
+func (s *DatabaseStore) GetDatasetReference(
+	ctx context.Context,
+	datasetID string,
+) (*domain.DatasetReference, error) {
+	model, err := s.getDatasetReferenceModel(ctx, datasetID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrBacktestRunNotFound
+		}
+
+		return nil, fmt.Errorf("get dataset reference: %w", err)
+	}
+
+	reference, err := datasetReferenceFromModel(model)
+	if err != nil {
+		return nil, err
+	}
+
+	return &reference, nil
+}
+
 func (s *DatabaseStore) CreateBacktestRun(
 	ctx context.Context,
 	run domain.BacktestRun,
@@ -328,6 +350,28 @@ func (s *DatabaseStore) QueryEvaluationReports(
 	}
 
 	return reports, nil
+}
+
+// GetEvaluationReport reads one persisted evaluation report by stable id.
+func (s *DatabaseStore) GetEvaluationReport(
+	ctx context.Context,
+	evaluationID string,
+) (*domain.EvaluationReport, error) {
+	var model evaluationReportModel
+	if err := s.db.WithContext(ctx).Where("evaluation_id = ?", evaluationID).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrBacktestRunNotFound
+		}
+
+		return nil, fmt.Errorf("get evaluation report: %w", err)
+	}
+
+	report, err := evaluationReportFromModel(model)
+	if err != nil {
+		return nil, err
+	}
+
+	return &report, nil
 }
 
 func datasetReferenceToModel(reference domain.DatasetReference) (datasetReferenceModel, error) {

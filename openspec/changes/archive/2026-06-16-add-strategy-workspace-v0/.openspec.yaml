@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-06-15
+goal: Human operator can create/edit constrained strategy versions, duplicate
+  demos, run deterministic backtests, and inspect evaluation evidence without AI
+  or live trading in the runtime path.

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import DataCandlestickChart from '../components/DataCandlestickChart.svelte'
+  import UtcDateRangePicker from '../components/UtcDateRangePicker.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { toChartCandleRows } from '../lib/data/charting'
   import {
@@ -14,6 +15,7 @@
     type RawPayloadDetailResponse,
     type RawPayloadMetadata,
   } from '../lib/data/data-api'
+  import { validateUtcRange } from '../lib/utc-date-range'
 
   const dataBaseUrl = import.meta.env.VITE_DATA_API_BASE_URL ?? '/api/v1/data'
 
@@ -41,6 +43,7 @@
   let ingestionRunId = $state('')
 
   let validationErrors = $state<string[]>([])
+  let showRangeValidation = $state(false)
 
   let availabilityItems = $state<CandleAvailabilityItem[]>([])
   let availabilityLoading = $state(true)
@@ -85,6 +88,19 @@
     selectedAvailabilityKey === null
       ? null
       : availabilityItems.find((item) => availabilityKey(item) === selectedAvailabilityKey) ?? null,
+  )
+  const selectedAvailabilityTimeframe = $derived(
+    selectedAvailability
+      ? selectedAvailability.timeframes.find((item) => item.timeframe === timeframe) ?? null
+      : null,
+  )
+  const selectedTimeframeDurationMs = $derived(
+    timeframe in timeframeDurationsMs ? timeframeDurationsMs[timeframe as DataTimeframe] : null,
+  )
+  const selectedTimeframeMaxIntervalsMessage = $derived(
+    selectedTimeframeDurationMs === null
+      ? undefined
+      : `Selected range exceeds the server limit of 10,000 ${timeframe} intervals.`,
   )
 
   onMount(() => {
@@ -131,9 +147,10 @@
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault()
+    showRangeValidation = true
     const parsed = validateAndBuildQuery()
     validationErrors = parsed.errors
-    if (parsed.errors.length > 0 || !parsed.start || !parsed.end) {
+    if (parsed.errors.length > 0 || parsed.rangeErrors.length > 0 || !parsed.start || !parsed.end) {
       return
     }
 
@@ -153,6 +170,7 @@
     const scope = mapAvailabilityItemToScope(item)
     const key = availabilityKey(item)
     validationErrors = []
+    showRangeValidation = false
     selectedAvailabilityKey = key
     await loadCandlesForScope(scope, key)
   }
@@ -339,7 +357,12 @@
     }
   }
 
-  function validateAndBuildQuery(): { errors: string[]; start: Date | null; end: Date | null } {
+  function validateAndBuildQuery(): {
+    errors: string[]
+    rangeErrors: string[]
+    start: Date | null
+    end: Date | null
+  } {
     const errors: string[] = []
     const trimmedVenue = venue.trim()
     const trimmedSymbol = symbol.trim()
@@ -352,24 +375,34 @@
     if (!trimmedSymbol) errors.push('Symbol is required.')
     if (!trimmedAssetClass) errors.push('Asset class is required.')
     if (!trimmedTimeframe) errors.push('Timeframe is required.')
-    if (!utcStart.trim()) errors.push('UTC start is required.')
-    if (!utcEnd.trim()) errors.push('UTC end is required.')
-    if (utcStart.trim() && !start) errors.push('UTC start must be a valid ISO-8601 timestamp.')
-    if (utcEnd.trim() && !end) errors.push('UTC end must be a valid ISO-8601 timestamp.')
 
-    if (start && end && start >= end) {
-      errors.push('UTC start must be earlier than UTC end.')
-    }
+    const timeframeDurationMs =
+      trimmedTimeframe && trimmedTimeframe in timeframeDurationsMs
+        ? timeframeDurationsMs[trimmedTimeframe as DataTimeframe]
+        : null
 
-    if (start && end && trimmedTimeframe && trimmedTimeframe in timeframeDurationsMs) {
-      const timeframeKey = trimmedTimeframe as DataTimeframe
-      const maxRange = timeframeDurationsMs[timeframeKey] * maxIntervals
-      if (end.getTime() - start.getTime() > maxRange) {
-        errors.push(`Selected range exceeds the server limit of 10,000 ${trimmedTimeframe} intervals.`)
-      }
-    }
+    const rangeErrors = validateUtcRange({
+      startIso: utcStart,
+      endIso: utcEnd,
+      requiredStartMessage: 'UTC start is required.',
+      requiredEndMessage: 'UTC end is required.',
+      invalidStartMessage: 'UTC start must be a valid ISO-8601 timestamp.',
+      invalidEndMessage: 'UTC end must be a valid ISO-8601 timestamp.',
+      notEarlierMessage: 'UTC start must be earlier than UTC end.',
+      minIso: selectedAvailabilityTimeframe?.start.toISOString(),
+      maxIso: selectedAvailabilityTimeframe?.end.toISOString(),
+      outOfBoundsMessage: selectedAvailabilityTimeframe
+        ? 'UTC range must stay within the selected availability window.'
+        : undefined,
+      timeframeDurationMs,
+      maxIntervals,
+      maxIntervalsMessage:
+        timeframeDurationMs === null
+          ? undefined
+          : `Selected range exceeds the server limit of 10,000 ${trimmedTimeframe} intervals.`,
+    })
 
-    return { errors, start, end }
+    return { errors, rangeErrors, start, end }
   }
 
   function applyScopeToFilters(scope: ListDataCandlesParams) {
@@ -543,14 +576,31 @@
         <option value="1d">1d</option>
       </select>
     </label>
-    <label>
-      <span>UTC start</span>
-      <input bind:value={utcStart} placeholder="2026-06-15T12:00:00Z" spellcheck="false" />
-    </label>
-    <label>
-      <span>UTC end</span>
-      <input bind:value={utcEnd} placeholder="2026-06-15T13:00:00Z" spellcheck="false" />
-    </label>
+    <div class="filter-form__range">
+      <p class="filter-form__range-label">UTC range</p>
+      <UtcDateRangePicker
+        bind:startValue={utcStart}
+        bind:endValue={utcEnd}
+        showValidation={showRangeValidation}
+        disabled={candlesLoading}
+        showPresets={selectedAvailabilityTimeframe !== null}
+        presetAnchorIso={selectedAvailabilityTimeframe?.end.toISOString() ?? null}
+        minIso={selectedAvailabilityTimeframe?.start.toISOString() ?? null}
+        maxIso={selectedAvailabilityTimeframe?.end.toISOString() ?? null}
+        timeframeDurationMs={selectedTimeframeDurationMs}
+        maxIntervals={selectedTimeframeDurationMs === null ? null : maxIntervals}
+        outOfBoundsMessage={selectedAvailabilityTimeframe
+          ? 'UTC range must stay within the selected availability window.'
+          : undefined}
+        maxIntervalsMessage={selectedTimeframeMaxIntervalsMessage}
+      />
+      {#if selectedAvailabilityTimeframe}
+        <p class="filter-form__range-note">
+          Presets anchor to the latest persisted {selectedAvailabilityTimeframe.timeframe} candle end for
+          the selected availability entry.
+        </p>
+      {/if}
+    </div>
     <label>
       <span>Ingestion run ID</span>
       <input bind:value={ingestionRunId} placeholder="Optional" spellcheck="false" />
@@ -862,6 +912,24 @@
 
   .actions-row {
     grid-column: 1 / -1;
+  }
+
+  .filter-form__range {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+    color: var(--text-h);
+  }
+
+  .filter-form__range-label {
+    margin: 0;
+    font-weight: 700;
+  }
+
+  .filter-form__range-note {
+    margin: 0;
+    color: var(--text);
   }
 
   .filter-form label {

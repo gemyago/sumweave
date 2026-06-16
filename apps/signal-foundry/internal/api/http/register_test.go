@@ -14,9 +14,11 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1controllers"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	rtstrategy "github.com/gemyago/signal-foundry/runtime/strategy"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,6 +44,8 @@ func (s *testReplayReadService) ReplayCandles(
 
 type testLineageBrowserService struct{}
 
+type testEvaluationWorkspaceService struct{}
+
 func (s *testLineageBrowserService) ListRawPayloadMetadata(
 	_ context.Context,
 	_ data.RawPayloadMetadataListQuery,
@@ -63,6 +67,41 @@ func (s *testLineageBrowserService) ListCandleLinkedRawPayloadMetadata(
 	return []data.RawPayloadMetadata{}, nil
 }
 
+func (s *testEvaluationWorkspaceService) CreateEvaluation(
+	context.Context,
+	app.CreateEvaluationParams,
+) (*app.EvaluationDetail, error) {
+	return &app.EvaluationDetail{}, nil
+}
+
+func (s *testEvaluationWorkspaceService) ListEvaluations(
+	context.Context,
+	app.ListEvaluationsParams,
+) ([]app.EvaluationListItem, error) {
+	return []app.EvaluationListItem{}, nil
+}
+
+func (s *testEvaluationWorkspaceService) GetEvaluation(
+	context.Context,
+	string,
+) (*app.EvaluationDetail, error) {
+	return &app.EvaluationDetail{}, nil
+}
+
+func (s *testEvaluationWorkspaceService) GetEvaluationReport(
+	context.Context,
+	string,
+) (*app.EvaluationReportView, error) {
+	return &app.EvaluationReportView{}, nil
+}
+
+func (s *testEvaluationWorkspaceService) GetEvaluationEvidence(
+	context.Context,
+	string,
+) (*app.EvaluationEvidenceView, error) {
+	return &app.EvaluationEvidenceView{}, nil
+}
+
 func TestSetupV1Routes(t *testing.T) {
 	fake := faker.New()
 
@@ -73,6 +112,30 @@ func TestSetupV1Routes(t *testing.T) {
 
 	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler) {
 		t.Helper()
+		strategyDSN := filepath.Join(t.TempDir(), "strategy-workspace.db")
+		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
+			strategyDSN,
+			rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: "http_test_"},
+		)
+		require.NoError(t, err)
+		require.NoError(t, artifactStore.AutoMigrate())
+		registry, err := rtstrategy.NewVersionRegistryService(
+			strategyDSN,
+			rtstrategy.VersionRegistryServiceDeps{
+				ArtifactStore: artifactStore,
+				TablePrefix:   "http_test_",
+			},
+		)
+		require.NoError(t, err)
+		require.NoError(t, registry.AutoMigrate())
+		strategyService, err := app.NewStrategyWorkspaceService(
+			app.StrategyWorkspaceServiceDeps{
+				ArtifactStore:   artifactStore,
+				VersionRegistry: registry,
+			},
+		)
+		require.NoError(t, err)
+
 		router := server.NewHTTPRouter(server.HTTPRouterDeps{
 			Middleware: func(h http.Handler) http.Handler { return h },
 		})
@@ -94,17 +157,31 @@ func TestSetupV1Routes(t *testing.T) {
 			LineageService: &testLineageBrowserService{},
 			AuthMiddleware: passthroughMiddleware,
 		})
+		strategiesCtrl := v1controllers.NewStrategiesController(
+			v1controllers.StrategiesControllerDeps{
+				StrategyWorkspaceService: strategyService,
+				AuthMiddleware:           passthroughMiddleware,
+			},
+		)
+		evaluationsCtrl := v1controllers.NewEvaluationsController(
+			v1controllers.EvaluationsControllerDeps{
+				EvaluationWorkspaceService: &testEvaluationWorkspaceService{},
+				AuthMiddleware:             passthroughMiddleware,
+			},
+		)
 		healthCtrl := &v1controllers.HealthController{}
 		signalfoundryhttp.SetupV1Routes(signalfoundryhttp.V1RoutesDeps{
-			HealthController: healthCtrl,
-			AuthController:   authCtrl,
-			DataController:   dataCtrl,
-			AuthMiddleware:   passthroughMiddleware,
-			RootHandler:      rootHandler,
-			HTTPRouter:       router,
-			Runtime:          rt,
-			RootLogger:       telemetry.RootTestLogger(),
-			UILocation:       uiLocation,
+			HealthController:      healthCtrl,
+			AuthController:        authCtrl,
+			DataController:        dataCtrl,
+			StrategiesController:  strategiesCtrl,
+			EvaluationsController: evaluationsCtrl,
+			AuthMiddleware:        passthroughMiddleware,
+			RootHandler:           rootHandler,
+			HTTPRouter:            router,
+			Runtime:               rt,
+			RootLogger:            telemetry.RootTestLogger(),
+			UILocation:            uiLocation,
 		})
 		return router, healthCtrl, rootHandler
 	}
@@ -138,26 +215,70 @@ func TestSetupV1Routes(t *testing.T) {
 			LineageService: &testLineageBrowserService{},
 			AuthMiddleware: passthroughMiddleware,
 		})
+		strategyDSN := filepath.Join(t.TempDir(), "strategy-workspace.db")
+		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
+			strategyDSN,
+			rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: "http_test_"},
+		)
+		require.NoError(t, err)
+		require.NoError(t, artifactStore.AutoMigrate())
+		registry, err := rtstrategy.NewVersionRegistryService(
+			strategyDSN,
+			rtstrategy.VersionRegistryServiceDeps{
+				ArtifactStore: artifactStore,
+				TablePrefix:   "http_test_",
+			},
+		)
+		require.NoError(t, err)
+		require.NoError(t, registry.AutoMigrate())
+		strategyService, err := app.NewStrategyWorkspaceService(
+			app.StrategyWorkspaceServiceDeps{
+				ArtifactStore:   artifactStore,
+				VersionRegistry: registry,
+			},
+		)
+		require.NoError(t, err)
+		strategiesCtrl := v1controllers.NewStrategiesController(
+			v1controllers.StrategiesControllerDeps{
+				StrategyWorkspaceService: strategyService,
+				AuthMiddleware:           passthroughMiddleware,
+			},
+		)
+		evaluationsCtrl := v1controllers.NewEvaluationsController(
+			v1controllers.EvaluationsControllerDeps{
+				EvaluationWorkspaceService: &testEvaluationWorkspaceService{},
+				AuthMiddleware:             passthroughMiddleware,
+			},
+		)
 
 		signalfoundryhttp.SetupV1Routes(signalfoundryhttp.V1RoutesDeps{
-			HealthController: &v1controllers.HealthController{},
-			AuthController:   authCtrl,
-			DataController:   dataCtrl,
-			AuthMiddleware:   passthroughMiddleware,
-			RootHandler:      rootHandler,
-			HTTPRouter:       router,
-			Runtime:          rt,
-			RootLogger:       telemetry.RootTestLogger(),
+			HealthController:      &v1controllers.HealthController{},
+			AuthController:        authCtrl,
+			DataController:        dataCtrl,
+			StrategiesController:  strategiesCtrl,
+			EvaluationsController: evaluationsCtrl,
+			AuthMiddleware:        passthroughMiddleware,
+			RootHandler:           rootHandler,
+			HTTPRouter:            router,
+			Runtime:               rt,
+			RootLogger:            telemetry.RootTestLogger(),
 		})
 
-		t.Run("routes under /api/v1/runtime/ are handled by runtime HTTP handler", func(t *testing.T) {
-			subpath := fmt.Sprintf("%s/subpath", fake.Lorem().Word())
-			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/runtime/%s", subpath), http.NoBody)
-			w := httptest.NewRecorder()
-			rootHandler.ServeHTTP(w, req)
-			require.Equal(t, http.StatusOK, w.Code)
-			require.Equal(t, wantResult, w.Body.String())
-		})
+		t.Run(
+			"routes under /api/v1/runtime/ are handled by runtime HTTP handler",
+			func(t *testing.T) {
+				subpath := fmt.Sprintf("%s/subpath", fake.Lorem().Word())
+				req := httptest.NewRequest(
+					http.MethodPost,
+					fmt.Sprintf("/api/v1/runtime/%s", subpath),
+					http.NoBody,
+				)
+				w := httptest.NewRecorder()
+				rootHandler.ServeHTTP(w, req)
+				require.Equal(t, http.StatusOK, w.Code)
+				require.Equal(t, wantResult, w.Body.String())
+			},
+		)
 
 		t.Run("data routes are registered on the app router", func(t *testing.T) {
 			for _, target := range []string{
@@ -196,8 +317,14 @@ func TestSetupV1Routes(t *testing.T) {
 			wantIndexContent := fake.Lorem().Sentence(5)
 			wantAssetContent := fake.Lorem().Sentence(3)
 			assetName := fake.Lorem().Word() + ".js"
-			require.NoError(t, os.WriteFile(filepath.Join(uiDir, "index.html"), []byte(wantIndexContent), 0o600))
-			require.NoError(t, os.WriteFile(filepath.Join(uiDir, assetName), []byte(wantAssetContent), 0o600))
+			require.NoError(
+				t,
+				os.WriteFile(filepath.Join(uiDir, "index.html"), []byte(wantIndexContent), 0o600),
+			)
+			require.NoError(
+				t,
+				os.WriteFile(filepath.Join(uiDir, assetName), []byte(wantAssetContent), 0o600),
+			)
 
 			_, _, rootHandler := makeSetup(t, uiDir)
 
@@ -219,7 +346,11 @@ func TestSetupV1Routes(t *testing.T) {
 
 			t.Run("API routes remain functional", func(t *testing.T) {
 				subpath := fmt.Sprintf("%s/subpath", fake.Lorem().Word())
-				req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/runtime/%s", subpath), http.NoBody)
+				req := httptest.NewRequest(
+					http.MethodPost,
+					fmt.Sprintf("/api/v1/runtime/%s", subpath),
+					http.NoBody,
+				)
 				w := httptest.NewRecorder()
 				rootHandler.ServeHTTP(w, req)
 				assert.Equal(t, http.StatusOK, w.Code)
@@ -227,16 +358,19 @@ func TestSetupV1Routes(t *testing.T) {
 			})
 		})
 
-		t.Run("when ui location is invalid directory, server operates in API-only mode", func(t *testing.T) {
-			nonExistentDir := filepath.Join(t.TempDir(), fake.Lorem().Word())
-			_, _, rootHandler := makeSetup(t, nonExistentDir)
+		t.Run(
+			"when ui location is invalid directory, server operates in API-only mode",
+			func(t *testing.T) {
+				nonExistentDir := filepath.Join(t.TempDir(), fake.Lorem().Word())
+				_, _, rootHandler := makeSetup(t, nonExistentDir)
 
-			t.Run("GET / returns 404", func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
-				w := httptest.NewRecorder()
-				rootHandler.ServeHTTP(w, req)
-				assert.Equal(t, http.StatusNotFound, w.Code)
-			})
-		})
+				t.Run("GET / returns 404", func(t *testing.T) {
+					req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+					w := httptest.NewRecorder()
+					rootHandler.ServeHTTP(w, req)
+					assert.Equal(t, http.StatusNotFound, w.Code)
+				})
+			},
+		)
 	})
 }

@@ -9,8 +9,9 @@
 **Shell (`Nav` + `<main>`)**
 
 - **Nav — left:** Brand label **Signal Foundry** → `/chat`.
-- **Nav — center:** **Chat** / **Data** / **Providers** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
+- **Nav — center:** **Chat** / **Data** / **Providers** / **Strategies** / **Evaluations** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
 - **Nav — right:** **Sign out** (text) **to the left of** the compact **Theme** segmented control; both **end-aligned** in the right margin; only when authenticated.
+- **≤700px Nav:** brand + auth controls stay on the first row; route links wrap onto a dedicated second row instead of colliding with the brand or sign-out cluster.
 - **`<main>`:** Centered content wrapper `main-inner` (~800–900px max width) with `Router` inside.
 - **`/chat`:** `main-inner` is full width so the session rail can sit at the viewport’s left inset; shell is viewport-height with **no page scrollbar** — only the transcript strip scrolls.
 - **Sign out:** `authStore.clearAuth()` (removes refresh token from `localStorage`, clears in-memory session) and `replace('/login')` so the user lands on the public login route without stacking authenticated history entries.
@@ -36,7 +37,7 @@
 
 **Route guarding**
 
-- `/chat`, `/data`, and `/providers`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
+- `/chat`, `/data`, `/providers`, `/strategies*`, and `/evaluations*`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
 - If `authStore.isAuthenticated` is false: `conditionsFailed` stores the requested protected route and then `replace('/login')`.
 - `/login` is public.
 - Nav is hidden when unauthenticated.
@@ -52,6 +53,13 @@
 | `/chat/:sessionId?` | Chat; optional id in URL after `sessionBound` (`replace`). One route entry so binding the id does not remount the page or abort the stream. |
 | `/data` | Historical data browser. Protected (auth required). Browse-first availability loads on open, then exact candle reads stay editable. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
+| `/strategies` | Strategy workspace list + local draft editor. Protected. New drafts start here. |
+| `/strategies/:strategyId/:version` | Strategy version detail. Protected. Saved version stays immutable; duplicate creates a local draft. |
+| `/evaluations` | Evaluation run form + history table. Protected. |
+| `/evaluations/run/:strategyId/:version` | Same evaluation history page with the run form preselected to a ready strategy version. Protected. |
+| `/evaluations/:runId` | Evaluation detail page with summary/report and table-first evidence. Protected. |
+
+- `/strategies*` and `/evaluations*` may use a wider centered canvas than the default reading column so dense forms and audit tables stay readable.
 
 ---
 
@@ -144,7 +152,8 @@
 - Each availability entry shows:
   - nested timeframe summaries (**timeframe**, **count**, **start/end range**)
   - that entry’s deterministic **default slice** (**timeframe**, **start**, **end**)
-- Filter form remains available below availability, with fields for **venue**, **symbol**, **asset class**, **timeframe**, **UTC start**, **UTC end**, and optional **ingestion run ID**.
+- Filter form remains available below availability, with fields for **venue**, **symbol**, **asset class**, **timeframe**, a shared UTC-aware range picker, and optional **ingestion run ID**.
+- The shared UTC range picker shows separate UTC **date** and **time** controls, an inline calendar, visible resolved UTC ISO `start` / `end` values, and deterministic quick presets whenever the selected availability/timeframe exposes an anchor.
 - Results below the form in this order once a candle scope exists:
   - summary cards (**N normalized candles**, raw payload metadata loaded/not loaded, selected candle status, selected availability entry when present)
   - full-width normalized candle panel (chart + reliable selection table + visible selected-candle banner)
@@ -163,9 +172,10 @@
 - Manual **Load candles** validates required filters client-side before calling `GET /api/v1/data/candles`.
 - Client-side validation covers:
   - missing required fields
-  - invalid ISO-8601 UTC timestamps for start/end
+  - invalid or incomplete UTC range values before a valid ISO range is resolved
   - `start >= end`
   - the documented 10,000-interval cap using the selected timeframe (matching the server rule and message)
+  - selected availability window bounds when the current timeframe has persisted availability
 - Each valid candle load starts a new candle-scope request, clears prior candle-linked evidence and broad raw metadata results immediately, and only applies responses from the latest submitted scope.
 - All data calls use the authenticated app fetch wrapper (Bearer + refresh flow), not anonymous fetches.
 - Candle chart renders persisted normalized candle OHLC values only; it does not synthesize missing intervals.
@@ -182,7 +192,7 @@
 | Availability compatibility fallback | Availability endpoint returns `404 Not Found` | Non-alert note explains this is usually a stale/older backend mismatch and manual exact candle reads remain available. |
 | Availability empty | Availability response has no items | Availability empty message; form stays editable; no guessed candle scope. |
 | Availability default scope loading | First availability page includes `defaultSelection` | Availability list renders; matching entry selected; normalized candle status shown while the exact default slice loads. |
-| Validation error | Required field missing, invalid UTC range, or selected range exceeds 10,000 intervals | Inline alert semantics above results; **Load candles** does not call APIs. |
+| Validation error | Required field missing, invalid UTC range, selected range exceeds 10,000 intervals, or selected range leaves the chosen availability window | Inline alert semantics above results; **Load candles** does not call APIs. |
 | Candle empty | Candle response has no items | "No normalized candles matched these filters." |
 | Raw payload idle | Candle scope exists, but explicit raw browsing not requested yet | Prompt explains that broad raw payload metadata is optional and secondary. |
 | Raw payload loading | User clicked **Load raw payload metadata** | Explicit raw metadata status shown; button disabled while in flight. |
@@ -237,3 +247,105 @@
 - Delete → `deleteProvider`.
 - After each mutating operation: `listProviders()` to refresh the list.
 - API key never shown in full — only `apiKeyPreview` (`...XXXX`).
+
+---
+
+## Strategies (`/strategies`, `/strategies/:strategyId/:version`)
+
+**Layout**
+
+- Header: **Strategies** heading + short v0 scope copy + **New draft** button.
+- Strategy list panel first.
+- **Strategy editor** sits below the list on the workspace route.
+- Route-selected immutable detail opens on its own screen instead of sharing the draft workspace.
+
+**Strategy list**
+
+- On mount: `listStrategies()`.
+- Columns: display name, `strategyId/version`, status, source label, artifact hash, instrument triple, timeframe, created timestamp.
+- Dense strategy list rows may show compact artifact hashes in-table; full values remain available in detail/hover affordances.
+- The list MUST NOT show or depend on latest evaluation summary data in v0.
+- Demo rows show explicit example-only copy; evaluation still depends on matching local historical data.
+
+**Editor / draft behavior**
+
+- Supported fields only: fixed kind `moving-average-crossover`, venue, symbol, asset class, active flag, timeframe, fast window, slow window, display name, notes, strategy id, version.
+- **New draft** resets local editor state and routes to `/strategies`.
+- Draft state is local-only until **Validate** or **Save version**.
+- Validation calls `POST /api/v1/strategies/validate` and shows either:
+  - field errors (`path`, `message`) with alert semantics, or
+  - canonical preview (`schemaVersion`, canonical JSON, artifact hash, existing artifact flag, canonical parameter summary).
+- Saving calls `POST /api/v1/strategies/versions` and creates a new immutable `ready` record; successful save routes to the saved detail URL.
+
+**Saved version detail**
+
+- Route-selected saved version loads via `GET /api/v1/strategies/:strategyId/versions/:version`.
+- Detail shows immutable metadata: status, source label, artifact hash, timeframe, and full constrained definition payload.
+- Copy must state that saved versions are immutable.
+- **Duplicate to draft** calls `POST /api/v1/strategies/:strategyId/versions/:version/duplicate`, hydrates the editor with a draft candidate, and returns the user to `/strategies`.
+- **Run evaluation** link is visible only when the saved version status is `ready`; archived versions stay visible but non-runnable.
+
+| State | When | UI |
+| :--- | :--- | :--- |
+| Strategy list loading | Initial `listStrategies()` | Loading status in the list panel. |
+| Strategy list empty | No rows returned | Empty workspace copy. |
+| Validation success | Backend validation returns `valid=true` | Canonical preview panel with hash + canonical JSON. |
+| Validation error | Backend validation returns `valid=false` | Inline field error list with alert semantics. |
+| Saved detail loading | Route includes `strategyId/version` | Detail panel loading state. |
+| Immutable saved detail | Saved version loaded | Dedicated detail screen with immutable note + duplicate action + artifact hash visible. |
+| Runnable saved version | Selected saved version status is `ready` | **Run evaluation** link visible. |
+| Non-runnable saved version | Selected saved version status is `archived` | No **Run evaluation** action. |
+
+**A11y**
+
+- Validation and load/save failures use `role="alert"`.
+- List/detail tables keep explicit headers.
+- Editor inputs remain labeled; fixed kind is rendered as a disabled text field, not unlabeled copy.
+
+---
+
+## Evaluations (`/evaluations`, `/evaluations/run/:strategyId/:version`, `/evaluations/:runId`)
+
+**History + run page**
+
+- Header: **Evaluations** heading + deterministic backtest copy.
+- Run form first, then history filters + history table.
+- History results render as stacked run summaries rather than a wide audit table.
+- Run form loads ready strategy versions from `listStrategies()` and offers a single select of `displayName — strategyId/version`.
+- `/evaluations/run/:strategyId/:version` preselects the run form when that ready version is available, and later route-param changes update the selected ready version instead of leaving stale form state behind.
+- Run form fields: selected strategy version, shared UTC-aware range picker, quantity, optional note.
+- Evaluation range controls include deterministic Last 24h / 7d / 30d / 90d / 180d presets that resolve once to explicit UTC values and remain stable until changed again.
+- Client validation prevents requests for missing selection, invalid UTC range values, `start >= end`, or non-positive quantity.
+- Successful create keeps the operator on the history page, shows the returned synchronous status/result (`completed` or `failed`), refreshes history, and exposes an **Open evaluation detail** link.
+
+**History summaries**
+
+- Loads from `GET /api/v1/evaluations/backtests` on mount.
+- Filters: strategy id and status at minimum; **Apply filters** reruns the list call.
+- Each run summary surfaces run id, strategy id/version, artifact hash, instrument triple, timeframe, full tested range, status, decision, trade counts, blocked/rejected counts, and UTC created/updated lifecycle timestamps.
+- Dense history rows may compact run ids and hashes for readability while preserving the full value in navigation/detail affordances.
+
+**Detail page**
+
+- `GET /api/v1/evaluations/backtests/:runId`, `/report`, and `/evidence` all load on open.
+- Summary shows run id, status, decision, strategy id/version, artifact hash, dataset id/checksum when present, policy reference/hash, compact metrics, tested range, and request note.
+- Summary-level technical identifiers may be compacted for readability; the full identifier remains available via native hover text.
+- Evidence remains table-first in v0: traces, order intents, governor decisions, and execution records are primary. Empty evidence tables show non-error empty copy.
+- No chart overlays, live trading controls, or AI runtime actions are introduced here.
+
+| State | When | UI |
+| :--- | :--- | :--- |
+| Ready versions loading | `listStrategies()` in flight on run page | Strategy select disabled with loading state. |
+| Run validation error | Missing selection, bad UTC range, or invalid quantity | Inline alert list; create request not sent. |
+| Run in flight | `createEvaluationBacktest()` in flight | **Start evaluation** button shows loading state. |
+| Run created | Create call returns a run detail | Inline result panel with run id, status, and **Open evaluation detail** link. |
+| History empty | No rows matched current filters | Non-error empty state. |
+| Detail loading | Detail/report/evidence requests in flight | Loading status in detail route. |
+| Detail failure | Any detail/report/evidence request fails | Alert copy; summary/evidence hidden. |
+| Evidence empty | Any evidence table has zero rows | Non-error empty table copy per section. |
+
+**A11y**
+
+- Run validation and API failures use `role="alert"`.
+- History and evidence tables keep explicit headers.
+- Result and loading copy use status semantics (`role="status"` where appropriate).

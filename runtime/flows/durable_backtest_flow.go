@@ -120,6 +120,23 @@ type DurableBacktestFlow struct {
 	backtestRecorder    backtestRecorder
 }
 
+type durableFlowStageError struct {
+	reason string
+	err    error
+}
+
+func (e *durableFlowStageError) Error() string { return e.err.Error() }
+
+func (e *durableFlowStageError) Unwrap() error { return e.err }
+
+func newDurableFlowStageError(reason string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return &durableFlowStageError{reason: reason, err: err}
+}
+
 // NewDurableBacktestFlow creates a linked durable backtest flow.
 func NewDurableBacktestFlow(deps DurableBacktestFlowDeps) (*DurableBacktestFlow, error) {
 	if deps.CandleReplayReader == nil {
@@ -169,7 +186,9 @@ func (f *DurableBacktestFlow) Run(
 		return DurableBacktestResult{}, err
 	}
 	if canonicalRequest.mode != domain.DecisionModeBacktest {
-		return DurableBacktestResult{}, validationError("durable backtest flow mode must be backtest")
+		return DurableBacktestResult{}, validationError(
+			"durable backtest flow mode must be backtest",
+		)
 	}
 
 	replayedCandles, err := f.candleReplayReader.ReplayCandles(
@@ -179,14 +198,21 @@ func (f *DurableBacktestFlow) Run(
 		canonicalRequest.timeRange,
 	)
 	if err != nil {
-		return DurableBacktestResult{}, fmt.Errorf("replay candles: %w", err)
+		return DurableBacktestResult{}, newDurableFlowStageError(
+			"replay-failed",
+			fmt.Errorf("replay candles: %w", err),
+		)
 	}
 
 	datasetReference, err := buildDatasetReference(canonicalRequest, replayedCandles)
 	if err != nil {
 		return DurableBacktestResult{}, err
 	}
-	datasetReference, backtestRun, err := f.initializeBacktest(ctx, canonicalRequest, datasetReference)
+	datasetReference, backtestRun, err := f.initializeBacktest(
+		ctx,
+		canonicalRequest,
+		datasetReference,
+	)
 	if err != nil {
 		return DurableBacktestResult{}, err
 	}
@@ -201,6 +227,7 @@ func (f *DurableBacktestFlow) Run(
 		return DurableBacktestResult{}, f.failBacktestRun(
 			ctx,
 			backtestRun.RunID.String(),
+			failureReasonForError(err, "evaluation-failed"),
 			err,
 			canonicalRequest.timeRange.End.UTC(),
 		)
@@ -220,21 +247,58 @@ func (f *DurableBacktestFlow) Run(
 		return DurableBacktestResult{}, f.failBacktestRun(
 			ctx,
 			backtestRun.RunID.String(),
+			failureReasonForError(err, "report-failed"),
 			err,
-			linkedReportTime(canonicalRequest, governorEvaluation.Decisions, portfolioSnapshots, fills),
+			linkedReportTime(
+				canonicalRequest,
+				governorEvaluation.Decisions,
+				portfolioSnapshots,
+				fills,
+			),
 		)
 	}
-	reportCreatedAt := report.CreatedAt.Time()
+	return f.finalizeBacktestResult(
+		ctx,
+		canonicalRequest,
+		datasetReference,
+		backtestRun,
+		report,
+		strategyEvaluation,
+		intentContexts,
+		governorEvaluation,
+		paperExecutions,
+		positionSnapshots,
+		portfolioSnapshots,
+	)
+}
 
-	backtestRun, err = f.backtestRecorder.CompleteBacktestRun(ctx, backtest.CompleteBacktestRunRequest{
-		RunID:   backtestRun.RunID.String(),
-		Metrics: report.Metrics,
-		EndedAt: domain.BacktestRunTime(reportCreatedAt),
-	})
+func (f *DurableBacktestFlow) finalizeBacktestResult(
+	ctx context.Context,
+	canonicalRequest canonicalPaperBacktestRequest,
+	datasetReference domain.DatasetReference,
+	backtestRun domain.BacktestRun,
+	report domain.EvaluationReport,
+	strategyEvaluation strategy.EvaluateResult,
+	intentContexts []audit.IntentContext,
+	governorEvaluation governor.EvaluateResult,
+	paperExecutions []execution.ExecuteApprovedIntentResult,
+	positionSnapshots []domain.PositionSnapshot,
+	portfolioSnapshots []domain.PortfolioSnapshot,
+) (DurableBacktestResult, error) {
+	reportCreatedAt := report.CreatedAt.Time()
+	completedRun, err := f.backtestRecorder.CompleteBacktestRun(
+		ctx,
+		backtest.CompleteBacktestRunRequest{
+			RunID:   backtestRun.RunID.String(),
+			Metrics: report.Metrics,
+			EndedAt: domain.BacktestRunTime(reportCreatedAt),
+		},
+	)
 	if err != nil {
 		return DurableBacktestResult{}, f.failBacktestRun(
 			ctx,
 			backtestRun.RunID.String(),
+			"report-failed",
 			fmt.Errorf("complete backtest run: %w", err),
 			reportCreatedAt,
 		)
@@ -243,7 +307,7 @@ func (f *DurableBacktestFlow) Run(
 	return DurableBacktestResult{
 		RunID:              canonicalRequest.runID,
 		DatasetReference:   datasetReference,
-		BacktestRun:        backtestRun,
+		BacktestRun:        completedRun,
 		StrategyEvaluation: strategyEvaluation,
 		IntentContexts:     intentContexts,
 		GovernorEvaluation: governorEvaluation,
@@ -261,7 +325,10 @@ func (f *DurableBacktestFlow) initializeBacktest(
 ) (domain.DatasetReference, domain.BacktestRun, error) {
 	persistedDataset, err := f.backtestRecorder.CreateDatasetReference(ctx, datasetReference)
 	if err != nil {
-		return domain.DatasetReference{}, domain.BacktestRun{}, fmt.Errorf("create dataset reference: %w", err)
+		return domain.DatasetReference{}, domain.BacktestRun{}, fmt.Errorf(
+			"create dataset reference: %w",
+			err,
+		)
 	}
 
 	backtestRun, err := buildBacktestRun(request, persistedDataset)
@@ -270,7 +337,10 @@ func (f *DurableBacktestFlow) initializeBacktest(
 	}
 	backtestRun, err = f.backtestRecorder.CreateBacktestRun(ctx, backtestRun)
 	if err != nil {
-		return domain.DatasetReference{}, domain.BacktestRun{}, fmt.Errorf("create backtest run: %w", err)
+		return domain.DatasetReference{}, domain.BacktestRun{}, fmt.Errorf(
+			"create backtest run: %w",
+			err,
+		)
 	}
 
 	backtestRun, err = f.backtestRecorder.StartBacktestRun(
@@ -279,7 +349,10 @@ func (f *DurableBacktestFlow) initializeBacktest(
 		domain.BacktestRunTime(backtestRun.CreatedAt.Time()),
 	)
 	if err != nil {
-		return domain.DatasetReference{}, domain.BacktestRun{}, fmt.Errorf("start backtest run: %w", err)
+		return domain.DatasetReference{}, domain.BacktestRun{}, fmt.Errorf(
+			"start backtest run: %w",
+			err,
+		)
 	}
 
 	return persistedDataset, backtestRun, nil
@@ -304,7 +377,10 @@ func (f *DurableBacktestFlow) evaluateBacktest(
 	}
 
 	if err := prepareFlow.runAnalyticsStage(ctx, request); err != nil {
-		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, err
+		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, newDurableFlowStageError(
+			"analytics-failed",
+			err,
+		)
 	}
 
 	strategyEvaluation, err := f.strategyEvaluator.Evaluate(ctx, strategy.EvaluateRequest{
@@ -315,9 +391,9 @@ func (f *DurableBacktestFlow) evaluateBacktest(
 		Parameters:   request.strategyParameters,
 	})
 	if err != nil {
-		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, fmt.Errorf(
-			"evaluate strategy: %w",
-			err,
+		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, newDurableFlowStageError(
+			"strategy-failed",
+			fmt.Errorf("evaluate strategy: %w", err),
 		)
 	}
 
@@ -335,7 +411,10 @@ func (f *DurableBacktestFlow) evaluateBacktest(
 		datasetReference,
 	)
 	if err != nil {
-		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, err
+		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, newDurableFlowStageError(
+			"execution-failed",
+			err,
+		)
 	}
 
 	intentContexts, err = f.markIntentsSentToGovernor(ctx, intentContexts)
@@ -348,9 +427,9 @@ func (f *DurableBacktestFlow) evaluateBacktest(
 		Policy:       request.governorPolicy,
 	})
 	if err != nil {
-		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, fmt.Errorf(
-			"evaluate governor: %w",
-			err,
+		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, newDurableFlowStageError(
+			"governor-failed",
+			fmt.Errorf("evaluate governor: %w", err),
 		)
 	}
 
@@ -361,7 +440,10 @@ func (f *DurableBacktestFlow) evaluateBacktest(
 		replayedCandles,
 	)
 	if err != nil {
-		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, err
+		return strategy.EvaluateResult{}, nil, governor.EvaluateResult{}, nil, nil, newDurableFlowStageError(
+			"execution-failed",
+			err,
+		)
 	}
 
 	return strategyEvaluation, intentContexts, governorEvaluation, paperExecutions, fills, nil
@@ -416,7 +498,11 @@ func (f *DurableBacktestFlow) executeGovernorDecisions(
 			intentStatusForDecision(decision),
 		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("update order intent %d status after governor: %w", idx, err)
+			return nil, nil, fmt.Errorf(
+				"update order intent %d status after governor: %w",
+				idx,
+				err,
+			)
 		}
 		intentContexts[idx].Intent = updatedIntent
 
@@ -424,11 +510,14 @@ func (f *DurableBacktestFlow) executeGovernorDecisions(
 			continue
 		}
 
-		paperExecution, err := f.paperExecutor.ExecuteApprovedIntent(ctx, execution.ExecuteApprovedIntentRequest{
-			Intent:           updatedIntent,
-			ApprovedDecision: decision,
-			ReplayCandles:    replayedCandles,
-		})
+		paperExecution, err := f.paperExecutor.ExecuteApprovedIntent(
+			ctx,
+			execution.ExecuteApprovedIntentRequest{
+				Intent:           updatedIntent,
+				ApprovedDecision: decision,
+				ReplayCandles:    replayedCandles,
+			},
+		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("execute approved intent %d: %w", idx, err)
 		}
@@ -465,7 +554,11 @@ func (f *DurableBacktestFlow) executeGovernorDecisions(
 			domain.OrderIntentStatusExecutionCreated,
 		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("update order intent %d status execution_created: %w", idx, err)
+			return nil, nil, fmt.Errorf(
+				"update order intent %d status execution_created: %w",
+				idx,
+				err,
+			)
 		}
 		intentContexts[idx].Intent = updatedIntent
 
@@ -489,7 +582,10 @@ func (f *DurableBacktestFlow) projectAndReport(
 ) ([]audit.IntentContext, []domain.PositionSnapshot, []domain.PortfolioSnapshot, domain.EvaluationReport, error) {
 	positionSnapshots, err := f.snapshotProjector.RecordPositionSnapshots(ctx, fills)
 	if err != nil {
-		return nil, nil, nil, domain.EvaluationReport{}, fmt.Errorf("record position snapshots: %w", err)
+		return nil, nil, nil, domain.EvaluationReport{}, fmt.Errorf(
+			"record position snapshots: %w",
+			err,
+		)
 	}
 
 	portfolioSnapshots, err := f.snapshotProjector.RecordPortfolioSnapshots(
@@ -499,27 +595,36 @@ func (f *DurableBacktestFlow) projectAndReport(
 		},
 	)
 	if err != nil {
-		return nil, nil, nil, domain.EvaluationReport{}, fmt.Errorf("record portfolio snapshots: %w", err)
+		return nil, nil, nil, domain.EvaluationReport{}, fmt.Errorf(
+			"record portfolio snapshots: %w",
+			err,
+		)
 	}
 
 	reportCreatedAt := linkedReportTime(request, decisions, portfolioSnapshots, fills)
-	report, err := f.backtestRecorder.CreateEvaluationReport(ctx, backtest.CreateEvaluationReportRequest{
-		EvaluationID:         flowStableID("evaluation-report", request.runID),
-		StrategyID:           request.strategyID,
-		StrategyVersion:      request.strategyVersion,
-		StrategyArtifactHash: request.strategyArtifactHash,
-		BacktestRunID:        runID,
-		DatasetID:            datasetID,
-		Decision:             domain.EvaluationDecisionNeedsReview,
-		FailureReasons:       collectGovernorFailureReasons(decisions),
-		Notes:                "flow-linked durable backtest evidence",
-		CreatedAt:            domain.EvaluationReportTime(reportCreatedAt),
-		Fills:                fills,
-		GovernorDecisions:    decisions,
-		PortfolioSnapshots:   portfolioSnapshots,
-	})
+	report, err := f.backtestRecorder.CreateEvaluationReport(
+		ctx,
+		backtest.CreateEvaluationReportRequest{
+			EvaluationID:         flowStableID("evaluation-report", request.runID),
+			StrategyID:           request.strategyID,
+			StrategyVersion:      request.strategyVersion,
+			StrategyArtifactHash: request.strategyArtifactHash,
+			BacktestRunID:        runID,
+			DatasetID:            datasetID,
+			Decision:             domain.EvaluationDecisionNeedsReview,
+			FailureReasons:       collectGovernorFailureReasons(decisions),
+			Notes:                reportNotes(request),
+			CreatedAt:            domain.EvaluationReportTime(reportCreatedAt),
+			Fills:                fills,
+			GovernorDecisions:    decisions,
+			PortfolioSnapshots:   portfolioSnapshots,
+		},
+	)
 	if err != nil {
-		return nil, nil, nil, domain.EvaluationReport{}, fmt.Errorf("create evaluation report: %w", err)
+		return nil, nil, nil, domain.EvaluationReport{}, newDurableFlowStageError(
+			"report-failed",
+			fmt.Errorf("create evaluation report: %w", err),
+		)
 	}
 
 	updatedIntentContexts, err := f.writeDownstreamAuditReferences(
@@ -540,12 +645,13 @@ func (f *DurableBacktestFlow) projectAndReport(
 func (f *DurableBacktestFlow) failBacktestRun(
 	ctx context.Context,
 	runID string,
+	failureReason string,
 	cause error,
 	endedAt time.Time,
 ) error {
 	_, failErr := f.backtestRecorder.FailBacktestRun(ctx, backtest.FailBacktestRunRequest{
 		RunID:          runID,
-		FailureReason:  "flow-linkage-error",
+		FailureReason:  failureReason,
 		FailureDetails: cause.Error(),
 		EndedAt:        domain.BacktestRunTime(endedAt.UTC()),
 	})
@@ -554,6 +660,23 @@ func (f *DurableBacktestFlow) failBacktestRun(
 	}
 
 	return cause
+}
+
+func failureReasonForError(err error, fallback string) string {
+	var stageErr *durableFlowStageError
+	if errors.As(err, &stageErr) && strings.TrimSpace(stageErr.reason) != "" {
+		return stageErr.reason
+	}
+
+	return fallback
+}
+
+func reportNotes(request canonicalPaperBacktestRequest) string {
+	if strings.TrimSpace(request.reportNotes) != "" {
+		return request.reportNotes
+	}
+
+	return "flow-linked durable backtest evidence"
 }
 
 func prepareLinkedIntentContexts(
@@ -658,9 +781,9 @@ func buildBacktestRun(
 		StrategyVersion:       request.strategyVersion,
 		StrategyArtifactHash:  request.strategyArtifactHash,
 		DatasetID:             datasetReference.DatasetID.String(),
-		GovernorPolicyID:      flowStableID("governor-policy", request.runID),
-		GovernorPolicyVersion: "v0",
-		GovernorPolicyHash:    flowStableID("governor-policy-hash", request.runID),
+		GovernorPolicyID:      request.governorPolicyID,
+		GovernorPolicyVersion: request.governorPolicyVersion,
+		GovernorPolicyHash:    request.governorPolicyHash,
 		Mode:                  request.mode,
 		TestedRange:           request.timeRange,
 		FeeAssumptions: map[string]string{

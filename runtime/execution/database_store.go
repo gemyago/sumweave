@@ -320,6 +320,60 @@ func (s *DatabaseStore) ListFillsByOrder(
 	return fills, nil
 }
 
+// GetCommand reads one persisted execution command by stable id.
+func (s *DatabaseStore) GetCommand(
+	ctx context.Context,
+	commandID string,
+) (*domain.ExecutionCommand, error) {
+	model, err := s.findExecutionCommandModel(ctx, commandID)
+	if err != nil {
+		return nil, err
+	}
+
+	command, err := executionCommandModelToDomain(model)
+	if err != nil {
+		return nil, err
+	}
+
+	return &command, nil
+}
+
+// GetOrder reads one persisted execution order by stable id.
+func (s *DatabaseStore) GetOrder(
+	ctx context.Context,
+	orderID string,
+) (*domain.ExecutionOrder, error) {
+	model, err := s.findExecutionOrderModel(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+
+	order, err := s.executionOrderModelToDomain(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+
+	return &order, nil
+}
+
+// GetFill reads one persisted execution fill by stable id.
+func (s *DatabaseStore) GetFill(
+	ctx context.Context,
+	fillID string,
+) (*domain.ExecutionFill, error) {
+	var model executionFillModel
+	if err := s.db.WithContext(ctx).First(&model, "fill_id = ?", fillID).Error; err != nil {
+		return nil, fmt.Errorf("find execution fill: %w", err)
+	}
+
+	fill, err := s.executionFillModelToDomain(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+
+	return &fill, nil
+}
+
 func (s *DatabaseStore) findExecutionCommandModel(
 	ctx context.Context,
 	commandID string,

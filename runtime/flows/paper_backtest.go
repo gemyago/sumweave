@@ -95,17 +95,21 @@ type PaperBacktestFlowDeps struct {
 
 // PaperBacktestRequest defines one deterministic paper backtest run.
 type PaperBacktestRequest struct {
-	RunID                string
-	Mode                 domain.DecisionMode
-	StrategyID           string
-	StrategyVersion      string
-	StrategyArtifactHash string
-	Instrument           domain.Instrument
-	Timeframe            domain.Timeframe
-	TimeRange            domain.TimeRange
-	StrategyParameters   strategy.MovingAverageCrossoverParams
-	GovernorPolicy       governor.Policy
-	Quantity             float64
+	RunID                 string
+	Mode                  domain.DecisionMode
+	StrategyID            string
+	StrategyVersion       string
+	StrategyArtifactHash  string
+	GovernorPolicyID      string
+	GovernorPolicyVersion string
+	GovernorPolicyHash    string
+	Instrument            domain.Instrument
+	Timeframe             domain.Timeframe
+	TimeRange             domain.TimeRange
+	StrategyParameters    strategy.MovingAverageCrossoverParams
+	GovernorPolicy        governor.Policy
+	Quantity              float64
+	ReportNotes           string
 }
 
 // PaperExecutionResult groups local paper execution records for one decision.
@@ -413,17 +417,21 @@ func (f *PaperBacktestFlow) runExecutionStage(
 }
 
 type canonicalPaperBacktestRequest struct {
-	runID                string
-	mode                 domain.DecisionMode
-	strategyID           string
-	strategyVersion      string
-	strategyArtifactHash string
-	instrument           domain.Instrument
-	timeframe            domain.Timeframe
-	timeRange            domain.TimeRange
-	strategyParameters   strategy.MovingAverageCrossoverParams
-	governorPolicy       governor.Policy
-	quantity             float64
+	runID                 string
+	mode                  domain.DecisionMode
+	strategyID            string
+	strategyVersion       string
+	strategyArtifactHash  string
+	governorPolicyID      string
+	governorPolicyVersion string
+	governorPolicyHash    string
+	instrument            domain.Instrument
+	timeframe             domain.Timeframe
+	timeRange             domain.TimeRange
+	strategyParameters    strategy.MovingAverageCrossoverParams
+	governorPolicy        governor.Policy
+	quantity              float64
+	reportNotes           string
 }
 
 func canonicalizePaperBacktestRequest(
@@ -450,6 +458,18 @@ func canonicalizePaperBacktestRequest(
 	strategyArtifactHash := strings.TrimSpace(request.StrategyArtifactHash)
 	if strategyArtifactHash == "" {
 		return canonicalPaperBacktestRequest{}, validationError("strategy artifact hash is required")
+	}
+	governorPolicyID := strings.TrimSpace(request.GovernorPolicyID)
+	if governorPolicyID == "" {
+		governorPolicyID = flowStableID("governor-policy", runID)
+	}
+	governorPolicyVersion := strings.TrimSpace(request.GovernorPolicyVersion)
+	if governorPolicyVersion == "" {
+		governorPolicyVersion = "v0"
+	}
+	governorPolicyHash := strings.TrimSpace(request.GovernorPolicyHash)
+	if governorPolicyHash == "" {
+		governorPolicyHash = flowStableID("governor-policy-hash", runID)
 	}
 
 	strategyIdentity, err := domain.NewStrategyIdentity(domain.StrategyIdentityParams{
@@ -481,17 +501,21 @@ func canonicalizePaperBacktestRequest(
 	}
 
 	return canonicalPaperBacktestRequest{
-		runID:                runID,
-		mode:                 mode,
-		strategyID:           strategyID,
-		strategyVersion:      strategyVersion,
-		strategyArtifactHash: strategyArtifactHash,
-		instrument:           strategyIdentity.Instrument,
-		timeframe:            strategyIdentity.Timeframe,
-		timeRange:            timeRange,
-		strategyParameters:   strategyParameters,
-		governorPolicy:       governorPolicy,
-		quantity:             request.Quantity,
+		runID:                 runID,
+		mode:                  mode,
+		strategyID:            strategyID,
+		strategyVersion:       strategyVersion,
+		strategyArtifactHash:  strategyArtifactHash,
+		governorPolicyID:      governorPolicyID,
+		governorPolicyVersion: governorPolicyVersion,
+		governorPolicyHash:    governorPolicyHash,
+		instrument:            strategyIdentity.Instrument,
+		timeframe:             strategyIdentity.Timeframe,
+		timeRange:             timeRange,
+		strategyParameters:    strategyParameters,
+		governorPolicy:        governorPolicy,
+		quantity:              request.Quantity,
+		reportNotes:           strings.TrimSpace(request.ReportNotes),
 	}, nil
 }
 
@@ -744,19 +768,15 @@ func buildGovernorIntentInputs(
 	contexts []audit.IntentContext,
 ) []governor.IntentInput {
 	inputs := make([]governor.IntentInput, 0, len(contexts))
-	policyID := flowStableID("governor-policy", request.runID)
-	policyVersion := "v0"
-	policyHash := flowStableID("governor-policy-hash", request.runID)
-
 	for _, intentContext := range contexts {
 		inputs = append(inputs, governor.IntentInput{
 			CandidateAction:                   intentContext.CandidateAction,
 			Intent:                            intentContext.Intent,
 			CurrentStrategyExposureNotional:   0,
 			CurrentInstrumentExposureNotional: 0,
-			GovernorPolicyID:                  policyID,
-			GovernorPolicyVersion:             policyVersion,
-			GovernorPolicyHash:                policyHash,
+			GovernorPolicyID:                  request.governorPolicyID,
+			GovernorPolicyVersion:             request.governorPolicyVersion,
+			GovernorPolicyHash:                request.governorPolicyHash,
 		})
 	}
 

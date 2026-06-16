@@ -12,6 +12,7 @@ Use these documents as the active documentation set for this repository.
 - Product vocabulary: [domain-terminology.md](./domain-terminology.md)
 - Go coding conventions: [golang-coding-guide.md](./golang-coding-guide.md)
 - Generic testing guidance: [testing-best-practices.md](./testing-best-practices.md)
+- Manual browser e2e runbook: [manual-e2e.md](./manual-e2e.md)
 - Hyperliquid venue reference: [hyperliquid.md](./hyperliquid.md)
 - Hyperliquid live smoke runbook: [live-hyperliquid-smoke.md](./live-hyperliquid-smoke.md)
 

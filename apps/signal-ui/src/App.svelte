@@ -10,9 +10,12 @@
   } from './lib/routing/post-login-destination'
   import Chat from './pages/Chat.svelte'
   import Data from './pages/Data.svelte'
+  import EvaluationDetail from './pages/EvaluationDetail.svelte'
+  import Evaluations from './pages/Evaluations.svelte'
   import Login from './pages/Login.svelte'
   import Providers from './pages/Providers.svelte'
   import RedirectToDefaultRoute from './pages/RedirectToDefaultRoute.svelte'
+  import Strategies from './pages/Strategies.svelte'
   import { authStore } from './lib/auth/auth-store.svelte'
 
   const routes = {
@@ -24,6 +27,26 @@
     }),
     '/providers': wrap({
       component: Providers,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/strategies/:strategyId/:version': wrap({
+      component: Strategies,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/strategies': wrap({
+      component: Strategies,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/evaluations/run/:strategyId/:version': wrap({
+      component: Evaluations,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/evaluations/:runId': wrap({
+      component: EvaluationDetail,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/evaluations': wrap({
+      component: Evaluations,
       conditions: [() => authStore.isAuthenticated],
     }),
     '/data': wrap({
@@ -46,6 +69,11 @@
     typeof router.location === 'string' && router.location.startsWith('/chat'),
   )
 
+  const isWideWorkspaceRoute = $derived(
+    typeof router.location === 'string' &&
+      (router.location.startsWith('/strategies') || router.location.startsWith('/evaluations')),
+  )
+
   $effect(() => {
     if (typeof document === 'undefined') return
     document.body.classList.toggle('chat-route-fullheight', isChatRoute)
@@ -64,7 +92,11 @@
     {/if}
     <main class="main" class:main--chat={isChatRoute}>
       <!-- Inner column: DESIGN.md ~800–900px reading width; `/chat` uses full width (see `.main-inner--chat`). -->
-      <div class="main-inner" class:main-inner--chat={isChatRoute}>
+      <div
+        class="main-inner"
+        class:main-inner--chat={isChatRoute}
+        class:main-inner--wide={isWideWorkspaceRoute}
+      >
         <Router {routes} onConditionsFailed={handleConditionsFailed} />
       </div>
     </main>
@@ -120,6 +152,10 @@
     margin-inline: 0;
     flex: 1;
     min-height: 0;
+  }
+
+  .main-inner--wide {
+    max-width: 1100px;
   }
 
   .loading {

@@ -44,6 +44,8 @@
     <li><a href="/chat" use:link>Chat</a></li>
     <li><a href="/data" use:link>Data</a></li>
     <li><a href="/providers" use:link>Providers</a></li>
+    <li><a href="/strategies" use:link>Strategies</a></li>
+    <li><a href="/evaluations" use:link>Evaluations</a></li>
   </ul>
   <div class="nav-end">
     <button type="button" class="sign-out" onclick={signOut}>Sign out</button>
@@ -214,5 +216,28 @@
   .theme-seg__btn:focus-visible {
     outline: 2px solid var(--color-accent-blue);
     outline-offset: 1px;
+  }
+
+  @media (max-width: 700px) {
+    .app-nav {
+      grid-template-columns: minmax(0, 1fr) auto;
+      row-gap: var(--space-12);
+    }
+
+    .brand {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .nav-end {
+      grid-column: 2;
+      grid-row: 1;
+    }
+
+    .links {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      gap: var(--space-16);
+    }
   }
 </style>

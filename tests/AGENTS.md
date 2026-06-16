@@ -39,6 +39,10 @@ Replace `'<provider/model>'` with a real name printed by `list-models`.
 
 Once setup check succeeds, follow [./agent/scenarios/master.md](./agent/scenarios/master.md)
 
+## Manual browser e2e
+
+- Manual browser e2e notes live in [../docs/manual-e2e.md](../docs/manual-e2e.md).
+
 ## Task Completion Protocol
 
 Repository level task completion protocol **MUST ALWAYS** be followed. If you didn't follow it, this means task is not complete.

@@ -22,6 +22,8 @@ tmp
 
 # Node stuff
 node_modules
+.playwright-cli/
+.local-users
 
 
 .nx/cache

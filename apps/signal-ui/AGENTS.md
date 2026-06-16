@@ -2,103 +2,114 @@
 
 ## Status
 
-**Active.** Vite + Svelte 5 TypeScript SPA under this folder (`package.json`, `package-lock.json`). Root `make lint` / `make test` include this module (same order as other submodules: after `apps/signal-foundry`).
-
-Always follow [DESIGN.md](./DESIGN.md) when making changes to the UI.
-
-## Template Origin And Boundary
-
-This module is part of the intended long-term product path. Treat `apps/signal-ui/` as the real UI foundation, not as throwaway scaffold code.
-
-The module started from the official Vite + Svelte TypeScript template. Template-origin foundation in this module is mainly the toolchain/bootstrap layer and its historical docs:
-- `index.html`
-- `package.json`
-- `package-lock.json`
-- `vite.config.ts`
-- `svelte.config.js`
-- `tsconfig*.json`
-- `src/main.ts`
-
-Use those template-derived pieces as reference and a starting point only. Do not preserve template defaults or sample patterns unless they still serve the actual product UI.
-
-## Node / npm
-
-- On **GitHub Actions**, the reusable Tests workflow runs `actions/setup-node` with the repo root **`.nvmrc`**, then **`npm ci`** in `apps/signal-ui`, before root `make lint` / `make test`.
-- Use a **current Node.js LTS** (or newer) and the **npm** that ships with it. CI and local dev should match closely to avoid lockfile drift.
-- Install dependencies with **`npm ci`** from `apps/signal-ui` (requires `package-lock.json`; use `npm install` only when changing deps).
-- **Cross-platform lockfile:** some toolchains expose peers only on certain OSes (e.g. Linux-only optional WASM helpers). If `npm ci` on CI reports packages “Missing from lock file” after a macOS `npm install`, add those packages as **direct `devDependencies`** (or `overrides`) so every platform records the same graph—avoid relying on regenerating the lock only on Linux.
-- **`npm run dev`** — Vite dev server.
-- **`npm run build`** / **`npm run preview`** — production build and local preview of `dist/`.
-
-## OpenAPI → TypeScript (`openapi-typescript`)
-
-- **Spec (single source of truth):** `../../runtime/internal/agentapi/openapi.yaml` (from this module; repo path `runtime/internal/agentapi/openapi.yaml`). Generated `components.schemas` include session listing (`SessionMetadata`, `SessionListResponse`) and provider model `summarization` alongside existing provider and chat types.
-- **Codegen (Makefile only; no npm scripts):**
-  - **`make generate-api`** — runs `openapi-typescript` and writes **`src/lib/agentapi/agentapi.generated.ts`**.
-  - **`make check-api`** — same invocation with **`--check`** (fails if the generated file is out of date vs the spec).
-- Run **`make generate-api`** after changing the spec or when onboarding. **`make check-api`** runs automatically as part of **`make lint`** (and therefore root **`make lint`** / CI).
-
-## Lint and test (module)
-
-From **`apps/signal-ui`**:
-
-- **`make lint`** — runs `npm run lint` (ESLint + `svelte-check` / TS checks), then **`make check-api`** (OpenAPI generated file in sync with the spec).
-- **`make test`** — runs `npm run test:run` (Vitest in CI mode with v8 coverage: text summary and `coverage/` HTML + lcov). Global minimum thresholds in **`vite.config.ts`** must never go down.
-
-## Module Rules and Conventions
-
-Project level rules and conventions must also be followed.
-
-- Tests: Avoid checking typescript types - it's a compiler job.
-- Tests: Avoid excessive tests, general rule - one code branch one test.
-- Tests: Avoid test global variables or setup if possible. Prefer fixture functions per test. Strong justification (via comment) is required for global setup.
-- Tests: Generated sample data (IDs, ISO timestamps, titles, tokens, URLs, payloads) MUST use `@faker-js/faker` (`import { faker } from '@faker-js/faker'`); avoid hardcoded placeholder strings or dates. Exception: literals that match production for assertions (accessible names, button text, routes, theme keys, domain enums).
-
-## Svelte
-
-You are able to use the Svelte MCP server, where you have access to comprehensive Svelte 5 and SvelteKit documentation. Here's how to use the available tools effectively:
-
-### Available Svelte MCP Tools:
-
-#### 1. list-sections
-
-Use this FIRST to discover all available documentation sections. Returns a structured list with titles, use_cases, and paths.
-When asked about Svelte or SvelteKit topics, ALWAYS use this tool at the start of the chat to find relevant sections.
-
-#### 2. get-documentation
-
-Retrieves full documentation content for specific sections. Accepts single or multiple sections.
-After calling the list-sections tool, you MUST analyze the returned documentation sections (especially the use_cases field) and then use the get-documentation tool to fetch ALL documentation sections that are relevant for the user's task.
-
-#### 3. svelte-autofixer
-
-Analyzes Svelte code and returns issues and suggestions.
-You MUST use this tool whenever writing Svelte code before sending it to the user. Keep calling it until no issues or suggestions are returned.
-
-#### 4. playground-link
-
-Generates a Svelte Playground link with the provided code.
-After completing the code, ask the user if they want a playground link. Only call this tool after user confirmation and NEVER if code was written to files in their project.
-I
-
-## Project Documentation
-
-- Architecture overview: [doc/architecture.md](./doc/architecture.md)
-- **UI wireframe (structure, states, behavior):** [ui-wireframe.md](./ui-wireframe.md)
-- **CSS design system (two layers, same framework):** [src/app.css](./src/app.css) — tokens, theme, global defaults, shell utilities (**layer 1**); [src/styles/design-system.css](./src/styles/design-system.css) — **`ds-*`** primitives (**layer 2**). Roles, tokens glossary, class index: [DESIGN.md](./DESIGN.md) §10.
-
-**LLM / agent note:** Read `ui-wireframe.md` before changing or explaining UI so composition, routing, and screen states stay accurate. When you change screens, routing, or user-visible behavior, **update `ui-wireframe.md` in the same change** so it remains the source of truth for layout and behavior (not styling).
-
-## Module Rules and Conventions
-
-Project level rules and conventions must also be followed.
-
-- Method with more than 3 arguments (context does not count) is a warning sign. Use params struct instead.
+**Active.** Svelte 5 + Vite + TypeScript SPA. Nx project **`signal-ui`**. Root `make lint` / `make test` include this module (after `apps/signal-foundry`). Product direction: [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
 ## Purpose
 
-- Browser SPA for Signal Foundry (client-side routing, static `dist/` build).
+Browser SPA for Signal Foundry: client-side hash routing, static `dist/` build, consumes the runtime Agent API (including SSE streams).
+
+## Template Origin And Boundary
+
+This module is part of the intended long-term product path. Treat `apps/signal-ui/` as the real UI foundation, not throwaway scaffold.
+
+Bootstrapped from the official Vite + Svelte TypeScript template (toolchain/bootstrap only). Do not preserve template defaults or sample patterns unless they still serve the product UI.
+
+## Layout (module root)
+
+```
+.
+├── src/
+│   ├── main.ts              # app bootstrap
+│   ├── App.svelte           # shell + Router / route map
+│   ├── pages/               # route-level views (login, chat, providers, …)
+│   ├── components/          # shared UI (nav, session list, …)
+│   ├── lib/                 # shared logic (agentapi, auth, theme, data, …)
+│   ├── app.css              # design tokens, theme, global defaults (layer 1)
+│   └── styles/design-system.css  # ds-* primitives (layer 2)
+├── public/                  # static assets → dist/
+├── doc/architecture.md      # stack and integration notes
+├── ui-wireframe.md          # screen structure, states, behavior
+├── DESIGN.md                # visual design system
+├── Makefile                 # lint, test, OpenAPI codegen
+└── project.json             # Nx project
+```
+
+## Run
+
+From the repo root:
+
+- **`pm2 start signal-foundry-ui`** — Vite dev server on **127.0.0.1:5173** (pair with **`pm2 start signal-foundry-api`** on port **4501** for full stack).
+- **`npx nx dev signal-ui`** — same dev server via Nx (runs `install-deps` first). Note: this is blocking, prefer pm2 in most cases.
+
+In order to use the web UI you have to also make sure to start the backend server. See root AGENTS.md for more details.
+
+From **`apps/signal-ui`**: **`npm run dev`**, **`npm run build`**, **`npm run preview`**. Install deps with **`npm ci`** (`npm install` only when changing deps). Client env: **`VITE_*`** only — see **`.env.example`**.
+
+## Lint / test / API codegen
+
+From **`apps/signal-ui`**:
+
+- **`make lint`** — `npm run lint` (ESLint + `svelte-check` / TS), then **`make check-api`**.
+- **`make test`** — `npm run test:run` (Vitest + coverage). Do not lower thresholds in **`vite.config.ts`**.
+- **`make generate-api`** — regenerate **`src/lib/agentapi/agentapi.generated.ts`** from **`runtime/internal/agentapi/openapi.yaml`**.
+- **`make check-api`** — fails if generated API types are stale (runs as part of **`make lint`**).
+
+From the repo root: **`npx nx lint signal-ui`**, **`npx nx test signal-ui`**, or **`make affected-lint-test`** after code changes.
+
+## Documentation
+
+Read before changing UI; update docs in the same change when behavior shifts.
+
+| Doc | Use for |
+| --- | --- |
+| [DESIGN.md](./DESIGN.md) | Styling, tokens, `ds-*` classes — **always follow** for visual changes |
+| [ui-wireframe.md](./ui-wireframe.md) | Layout, routing, screen states, behavior (not styling) |
+| [doc/architecture.md](./doc/architecture.md) | Stack, env, API integration, repo wiring |
+
+## Module Rules and Conventions
+
+Module-specific rules. Project-level rules in root [AGENTS.md](../../AGENTS.md) also apply.
+
+The rules are:
+- Update module rules when user corrects AI behavior.
+- Follow [DESIGN.md](./DESIGN.md) for all UI styling changes.
+- Read [ui-wireframe.md](./ui-wireframe.md) before changing UI; update it when screens, routing, or user-visible behavior change.
+- Prefer separate detail routes over dense split-pane workspaces.
+- Prefer stacked summaries over oversized multi-column tables.
+- Run **`make generate-api`** after editing **`runtime/internal/agentapi/openapi.yaml`**.
+- Methods with more than 3 arguments (context excluded): prefer a params struct.
+- Tests: do not assert TypeScript types — that is the compiler's job.
+- Tests: one branch, one test; avoid excessive coverage.
+- Tests: prefer per-test fixture functions over global setup (comment required if globals are unavoidable).
+- Tests: use **`@faker-js/faker`** for generated sample data; exception — literals that match production (labels, routes, theme keys, domain enums).
+
+## Using third-party packages
+
+Before using a third-party package, ask yourself:
+- Do I need to bring a third party? Is the thing big enough? - if not, implement a small custom tool/component...
+- When researching the package, make sure the following:
+  - It is actively maintained: enough stars ~300, commits are relatively fresh (last 6 months). New issues and pull requests are being created.
+  - Would it fit our environment: is it compatible with our stack? Is it easy to integrate?
+- If you are confident that the package is required: provide a summary of your investigation and justification:
+  - Project is active (stars, commits, issues, pull requests)
+  - Project is compatible with our stack
 
 ## Task Completion Protocol
 
 Repository level task completion protocol **MUST ALWAYS** be followed. If you didn't follow it, this means task is not complete.
+
+### UI Task Completion Protocol
+
+In addition to coding task completion protocol, you must also follow the UI task completion protocol if any UI changed:
+- Follow manual e2e runbook in [manual-e2e.md](../../docs/manual-e2e.md) to understand how to interact with the UI.
+- Do a smoke test of the the UI changes by checking the common user flow that was changed, confirm everything is operational.
+- Do a visual assessment if the UI/UX changes are visually correct and functional
+- Signs of poor UI/UX experience:
+  - Texts that should be usually on a single line are wrapped and hard to read
+  - Elements are not aligned or overflow each other
+  - Screen space is not optimally allocated creating unnecessary empty areas
+
+If any findings discovered, resolve them and repeat the test.
+
+Report task completion status:
+- UI/UX: ✓ no issues found / discovered issues resolved

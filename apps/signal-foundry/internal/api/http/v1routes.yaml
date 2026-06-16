@@ -352,6 +352,262 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/strategies:
+    get:
+      summary: List saved strategy versions
+      operationId: listStrategies
+      tags:
+        - strategies
+      responses:
+        '200':
+          description: Saved strategy versions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StrategyVersionListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/strategies/validate:
+    post:
+      summary: Validate a strategy definition without saving it
+      operationId: validateStrategy
+      tags:
+        - strategies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StrategyValidationRequest"
+      responses:
+        '200':
+          description: Validation preview or deterministic errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StrategyValidationResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/strategies/versions:
+    post:
+      summary: Create a saved immutable strategy version
+      operationId: createStrategyVersion
+      tags:
+        - strategies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateStrategyVersionRequest"
+      responses:
+        '200':
+          description: Saved immutable strategy version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StrategyVersionDetail"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/strategies/{strategyId}/versions/{version}:
+    get:
+      summary: Get one saved strategy version
+      operationId: getStrategyVersion
+      tags:
+        - strategies
+      parameters:
+        - in: path
+          name: strategyId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: version
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Saved immutable strategy version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StrategyVersionDetail"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/strategies/{strategyId}/versions/{version}/duplicate:
+    post:
+      summary: Duplicate one saved strategy version as a draftable candidate
+      operationId: duplicateStrategyVersion
+      tags:
+        - strategies
+      parameters:
+        - in: path
+          name: strategyId
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: version
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Draftable duplicate candidate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StrategyVersionCandidate"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/evaluations/backtests:
+    get:
+      summary: List persisted evaluation backtest runs
+      operationId: listEvaluationBacktests
+      tags:
+        - evaluations
+      parameters:
+        - in: query
+          name: strategyId
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Persisted evaluation backtest runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Create and synchronously run one evaluation backtest
+      operationId: createEvaluationBacktest
+      tags:
+        - evaluations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEvaluationRequest"
+      responses:
+        '200':
+          description: Completed or failed persisted evaluation backtest detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationDetail"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/evaluations/backtests/{runId}:
+    get:
+      summary: Get one persisted evaluation backtest detail
+      operationId: getEvaluationBacktest
+      tags:
+        - evaluations
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Persisted evaluation backtest detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationDetail"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/evaluations/backtests/{runId}/report:
+    get:
+      summary: Get compact persisted evaluation report view
+      operationId: getEvaluationBacktestReport
+      tags:
+        - evaluations
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Compact persisted evaluation report view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationReport"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/evaluations/backtests/{runId}/evidence:
+    get:
+      summary: Get bounded persisted evaluation evidence
+      operationId: getEvaluationBacktestEvidence
+      tags:
+        - evaluations
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bounded persisted evaluation evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvaluationEvidence"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   schemas:
     HealthResponsePayload:
@@ -664,6 +920,691 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RawPayloadMetadata"
+    StrategyDefinitionInstrument:
+      type: object
+      required:
+        - venue
+        - symbol
+        - assetClass
+        - active
+      properties:
+        venue:
+          type: string
+        symbol:
+          type: string
+        assetClass:
+          type: string
+        active:
+          type: boolean
+    StrategyDefinitionParameters:
+      type: object
+      required:
+        - fastWindow
+        - slowWindow
+      properties:
+        fastWindow:
+          type: integer
+          format: int64
+        slowWindow:
+          type: integer
+          format: int64
+    StrategyDefinition:
+      type: object
+      required:
+        - kind
+        - instrument
+        - timeframe
+        - parameters
+      properties:
+        kind:
+          type: string
+        instrument:
+          $ref: "#/components/schemas/StrategyDefinitionInstrument"
+        timeframe:
+          type: string
+        parameters:
+          $ref: "#/components/schemas/StrategyDefinitionParameters"
+    StrategyParameterSummary:
+      type: object
+      required:
+        - fastWindow
+        - slowWindow
+      properties:
+        fastWindow:
+          type: integer
+          format: int64
+        slowWindow:
+          type: integer
+          format: int64
+    StrategyFieldError:
+      type: object
+      required:
+        - path
+        - message
+      properties:
+        path:
+          type: string
+        message:
+          type: string
+    StrategyValidationPreview:
+      type: object
+      required:
+        - schemaVersion
+        - kind
+        - instrument
+        - timeframe
+        - parameterSummary
+        - canonicalJson
+        - artifactHash
+        - existingArtifact
+      properties:
+        schemaVersion:
+          type: string
+        kind:
+          type: string
+        instrument:
+          $ref: "#/components/schemas/StrategyDefinitionInstrument"
+        timeframe:
+          type: string
+        parameterSummary:
+          $ref: "#/components/schemas/StrategyParameterSummary"
+        canonicalJson:
+          type: string
+        artifactHash:
+          type: string
+        existingArtifact:
+          type: boolean
+    StrategyValidationRequest:
+      type: object
+      required:
+        - definition
+      properties:
+        definition:
+          $ref: "#/components/schemas/StrategyDefinition"
+    StrategyValidationResponse:
+      type: object
+      required:
+        - valid
+        - errors
+      properties:
+        valid:
+          type: boolean
+        preview:
+          $ref: "#/components/schemas/StrategyValidationPreview"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/StrategyFieldError"
+    CreateStrategyVersionRequest:
+      type: object
+      required:
+        - strategyId
+        - version
+        - displayName
+        - definition
+      properties:
+        strategyId:
+          type: string
+        version:
+          type: string
+        displayName:
+          type: string
+        notes:
+          type: string
+        parentStrategyId:
+          type: string
+        parentVersion:
+          type: string
+        definition:
+          $ref: "#/components/schemas/StrategyDefinition"
+    StrategyVersionRow:
+      type: object
+      required:
+        - strategyId
+        - version
+        - displayName
+        - status
+        - sourceType
+        - sourceLabel
+        - artifactHash
+        - schemaVersion
+        - kind
+        - instrument
+        - timeframe
+        - parameterSummary
+        - notes
+        - createdAt
+        - updatedAt
+      properties:
+        strategyId:
+          type: string
+        version:
+          type: string
+        displayName:
+          type: string
+        status:
+          type: string
+        sourceType:
+          type: string
+        sourceLabel:
+          type: string
+        artifactHash:
+          type: string
+        schemaVersion:
+          type: string
+        kind:
+          type: string
+        instrument:
+          $ref: "#/components/schemas/StrategyDefinitionInstrument"
+        timeframe:
+          type: string
+        parameterSummary:
+          $ref: "#/components/schemas/StrategyParameterSummary"
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    StrategyVersionListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StrategyVersionRow"
+    StrategyVersionDetail:
+      allOf:
+        - $ref: "#/components/schemas/StrategyVersionRow"
+        - type: object
+          required:
+            - definition
+          properties:
+            definition:
+              $ref: "#/components/schemas/StrategyDefinition"
+            parentStrategyId:
+              type: string
+            parentVersion:
+              type: string
+    StrategyVersionCandidate:
+      type: object
+      required:
+        - strategyId
+        - version
+        - displayName
+        - status
+        - sourceType
+        - sourceLabel
+        - notes
+        - definition
+      properties:
+        strategyId:
+          type: string
+        version:
+          type: string
+        displayName:
+          type: string
+        status:
+          type: string
+        sourceType:
+          type: string
+        sourceLabel:
+          type: string
+        notes:
+          type: string
+        definition:
+          $ref: "#/components/schemas/StrategyDefinition"
+        parentStrategyId:
+          type: string
+        parentVersion:
+          type: string
+    CreateEvaluationRequest:
+      type: object
+      required:
+        - strategyId
+        - strategyVersion
+        - start
+        - end
+        - quantity
+      properties:
+        strategyId:
+          type: string
+        strategyVersion:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        quantity:
+          type: number
+          format: double
+        governorPolicyHash:
+          type: string
+        note:
+          type: string
+    EvaluationMetricSummary:
+      type: object
+      properties:
+        tradeCount:
+          type: integer
+          format: int64
+        blockedGovernorDecisionCount:
+          type: integer
+          format: int64
+        rejectedGovernorDecisionCount:
+          type: integer
+          format: int64
+        maxDrawdown:
+          type: number
+          format: double
+    EvaluationEvidenceCounts:
+      type: object
+      required:
+        - traces
+        - orderIntents
+        - governorDecisions
+        - executionRecords
+        - positionSnapshots
+        - portfolioSnapshots
+      properties:
+        traces:
+          type: integer
+          format: int64
+        orderIntents:
+          type: integer
+          format: int64
+        governorDecisions:
+          type: integer
+          format: int64
+        executionRecords:
+          type: integer
+          format: int64
+        positionSnapshots:
+          type: integer
+          format: int64
+        portfolioSnapshots:
+          type: integer
+          format: int64
+    EvaluationAiReadyMetadata:
+      type: object
+      required:
+        - requestSourceType
+        - strategySourceType
+        - strategySourceLabel
+        - note
+        - evidenceCounts
+      properties:
+        requestSourceType:
+          type: string
+        strategySourceType:
+          type: string
+        strategySourceLabel:
+          type: string
+        note:
+          type: string
+        evidenceCounts:
+          $ref: "#/components/schemas/EvaluationEvidenceCounts"
+    EvaluationDatasetReference:
+      type: object
+      required:
+        - datasetId
+        - replayChecksum
+        - createdAt
+      properties:
+        datasetId:
+          type: string
+        replayChecksum:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    EvaluationPolicyReference:
+      type: object
+      required:
+        - policyId
+        - policyVersion
+        - policyHash
+      properties:
+        policyId:
+          type: string
+        policyVersion:
+          type: string
+        policyHash:
+          type: string
+    EvaluationTraceRow:
+      type: object
+      required:
+        - traceId
+        - decisionTime
+        - result
+        - reasonCodes
+        - dataQuality
+        - runReference
+      properties:
+        traceId:
+          type: string
+        decisionTime:
+          type: string
+          format: date-time
+        result:
+          type: string
+        reasonCodes:
+          type: array
+          items:
+            type: string
+        dataQuality:
+          type: string
+        runReference:
+          type: string
+    EvaluationOrderIntentRow:
+      type: object
+      required:
+        - intentId
+        - traceId
+        - status
+        - actionKind
+        - requestedQuantity
+        - requestedNotional
+        - createdTime
+      properties:
+        intentId:
+          type: string
+        traceId:
+          type: string
+        status:
+          type: string
+        actionKind:
+          type: string
+        requestedQuantity:
+          type: number
+          format: double
+        requestedNotional:
+          type: number
+          format: double
+        createdTime:
+          type: string
+          format: date-time
+    EvaluationGovernorDecisionRow:
+      type: object
+      required:
+        - decisionId
+        - intentId
+        - status
+        - reason
+        - reference
+      properties:
+        decisionId:
+          type: string
+        intentId:
+          type: string
+        status:
+          type: string
+        reason:
+          type: string
+        reference:
+          type: string
+    EvaluationExecutionRow:
+      type: object
+      required:
+        - commandId
+        - orderId
+        - fillId
+        - status
+      properties:
+        commandId:
+          type: string
+        orderId:
+          type: string
+        fillId:
+          type: string
+        status:
+          type: string
+        eventTime:
+          type: string
+          format: date-time
+          nullable: true
+    EvaluationPositionSnapshotRow:
+      type: object
+      required:
+        - snapshotId
+        - fillId
+        - quantity
+        - realizedPnl
+        - eventTime
+      properties:
+        snapshotId:
+          type: string
+        fillId:
+          type: string
+        quantity:
+          type: number
+          format: double
+        realizedPnl:
+          type: number
+          format: double
+        eventTime:
+          type: string
+          format: date-time
+    EvaluationPortfolioSnapshotRow:
+      type: object
+      required:
+        - snapshotId
+        - fillId
+        - grossExposure
+        - netExposure
+        - realizedPnl
+        - eventTime
+      properties:
+        snapshotId:
+          type: string
+        fillId:
+          type: string
+        grossExposure:
+          type: number
+          format: double
+        netExposure:
+          type: number
+          format: double
+        realizedPnl:
+          type: number
+          format: double
+        eventTime:
+          type: string
+          format: date-time
+    EvaluationRow:
+      type: object
+      required:
+        - runId
+        - strategyId
+        - strategyVersion
+        - strategyArtifactHash
+        - sourceType
+        - sourceLabel
+        - instrument
+        - timeframe
+        - testedRangeStart
+        - testedRangeEnd
+        - status
+        - failureReason
+        - failureDetails
+        - createdAt
+        - updatedAt
+        - aiReadyMetadata
+      properties:
+        runId:
+          type: string
+        strategyId:
+          type: string
+        strategyVersion:
+          type: string
+        strategyArtifactHash:
+          type: string
+        sourceType:
+          type: string
+        sourceLabel:
+          type: string
+        instrument:
+          $ref: "#/components/schemas/StrategyDefinitionInstrument"
+        timeframe:
+          type: string
+        testedRangeStart:
+          type: string
+          format: date-time
+        testedRangeEnd:
+          type: string
+          format: date-time
+        status:
+          type: string
+        decision:
+          type: string
+        metrics:
+          $ref: "#/components/schemas/EvaluationMetricSummary"
+        failureReason:
+          type: string
+        failureDetails:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        aiReadyMetadata:
+          $ref: "#/components/schemas/EvaluationAiReadyMetadata"
+    EvaluationListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationRow"
+    EvaluationReport:
+      type: object
+      required:
+        - runId
+        - status
+        - failureReason
+        - failureDetails
+        - policyReference
+        - aiReadyMetadata
+      properties:
+        runId:
+          type: string
+        status:
+          type: string
+        decision:
+          type: string
+        failureReason:
+          type: string
+        failureDetails:
+          type: string
+        metrics:
+          $ref: "#/components/schemas/EvaluationMetricSummary"
+        datasetReference:
+          $ref: "#/components/schemas/EvaluationDatasetReference"
+        policyReference:
+          $ref: "#/components/schemas/EvaluationPolicyReference"
+        aiReadyMetadata:
+          $ref: "#/components/schemas/EvaluationAiReadyMetadata"
+    EvaluationEvidence:
+      type: object
+      required:
+        - runId
+        - status
+        - aiReadyMetadata
+        - traces
+        - orderIntents
+        - governorDecisions
+        - executionRecords
+        - positionSnapshots
+        - portfolioSnapshots
+      properties:
+        runId:
+          type: string
+        status:
+          type: string
+        aiReadyMetadata:
+          $ref: "#/components/schemas/EvaluationAiReadyMetadata"
+        traces:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationTraceRow"
+        orderIntents:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationOrderIntentRow"
+        governorDecisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationGovernorDecisionRow"
+        executionRecords:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationExecutionRow"
+        positionSnapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationPositionSnapshotRow"
+        portfolioSnapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvaluationPortfolioSnapshotRow"
+    EvaluationDetail:
+      allOf:
+        - $ref: "#/components/schemas/EvaluationRow"
+        - type: object
+          required:
+            - strategySourceType
+            - strategySourceLabel
+            - policyReference
+            - aiReadyMetadata
+            - traces
+            - orderIntents
+            - governorDecisions
+            - executionRecords
+            - positionSnapshots
+            - portfolioSnapshots
+          properties:
+            strategySourceType:
+              type: string
+            strategySourceLabel:
+              type: string
+            datasetReference:
+              $ref: "#/components/schemas/EvaluationDatasetReference"
+            policyReference:
+              $ref: "#/components/schemas/EvaluationPolicyReference"
+            traces:
+              type: array
+              items:
+                $ref: "#/components/schemas/EvaluationTraceRow"
+            orderIntents:
+              type: array
+              items:
+                $ref: "#/components/schemas/EvaluationOrderIntentRow"
+            governorDecisions:
+              type: array
+              items:
+                $ref: "#/components/schemas/EvaluationGovernorDecisionRow"
+            executionRecords:
+              type: array
+              items:
+                $ref: "#/components/schemas/EvaluationExecutionRow"
+            positionSnapshots:
+              type: array
+              items:
+                $ref: "#/components/schemas/EvaluationPositionSnapshotRow"
+            portfolioSnapshots:
+              type: array
+              items:
+                $ref: "#/components/schemas/EvaluationPortfolioSnapshotRow"
     Error:
       type: object
       required:

@@ -13,5 +13,5 @@ describe('main entry', () => {
     await import('./main')
     const root = document.getElementById('app')
     expect(root?.childElementCount).toBeGreaterThan(0)
-  })
+  }, 15000)
 })

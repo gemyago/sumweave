@@ -39,6 +39,8 @@
     "vitest": "^4.1.2"
   },
   "dependencies": {
+    "@ark-ui/svelte": "^5.22.1",
+    "@internationalized/date": "^3.12.2",
     "@lucide/svelte": "^1.8.0",
     "lightweight-charts": "^5.2.0",
     "openapi-fetch": "^0.17.0",

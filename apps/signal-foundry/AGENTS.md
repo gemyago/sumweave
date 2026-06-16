@@ -30,37 +30,11 @@ Notable layout parts of `apps/signal-foundry`:
 
 ## Run
 
-From the module root (`apps/signal-foundry`):
+From the repo root:
 
-- **HTTP server:** `go run ./cmd/signal-foundry start` (Cobra root is `signal-foundry`; `start` runs the HTTP server).
-- **CLI help:** `go run ./cmd/signal-foundry --help`, `go run ./cmd/signal-foundry start --help`.
+`pm2 start signal-foundry-api` (PM2 process name is `signal-foundry-api`).
 
-## Install
-
-From `apps/signal-foundry` (with `GOBIN` or `GOPATH/bin` on your `PATH`):
-
-- **Main binary:** `go install ./cmd/signal-foundry` → installs `signal-foundry` (binary name follows the `cmd/signal-foundry` directory).
-
-## Env / config
-
-- **Embedded YAML:** `internal/config/default.yaml` is merged first, then `internal/config/<env>.yaml` (e.g. `local.yaml`, `test.yaml`, `production.yaml`). Optional per-developer overrides: `internal/config/<env>-user.yaml` (gitignored patterns may apply—file may be absent).
-- **Environment:** Viper uses prefix **`APP`** and `AutomaticEnv()`. `-` and `.` in config keys are replaced with `_` when binding env vars (see `internal/config/load.go`). Override embedded defaults by setting the corresponding `APP_…` variable for the path you need. Top-level keys in `internal/config/default.yaml` include `defaultLogLevel`, `pprofListener`, `gracefulShutdownTimeout`, `httpServer`, `openTelemetry`, `skills`, and `agentRuntime` (see that file for the full tree). Provider configuration (API keys, base URLs, models) is managed exclusively via the Providers CRUD API / `ProvidersConfigService` — there are no `openai.*` config keys.
-- **Agent runtime persistence (`agentRuntime` key):** `agentRuntime.storage.type` selects where the embedded agent runtime stores state (sessions, providers config, agent profiles with execution settings, etc.) — `"file"` (default; file-specific options under `agentRuntime.storage.file`, e.g. `baseDir`) or `"database"` (GORM-backed; set DSN via `APP_AGENTRUNTIME_DATABASE_DSN` or `agentRuntime.database.dsn`). `agentRuntime.database.tablePrefix` sets the GORM table name prefix for database-backed runtime tables (embedded default `signal_foundry_` in `default.yaml`; override via `APP_AGENTRUNTIME_DATABASE_TABLEPREFIX`). The runtime library does not apply a prefix when this value is empty. When `"database"` is used, `agentRuntime.database.autoMigrate` (bool, default `true`) controls whether `runner.AutoMigrate()` runs on startup; set `APP_AGENTRUNTIME_DATABASE_AUTOMIGRATE=false` to disable.
-- **Deprecated config/env (breaking):** if you used the previous `ai` / `sessionStorage` names, migrate as follows:
-
-  | Old YAML path | New YAML path |
-  | --- | --- |
-  | `ai.sessionStorage` | `agentRuntime.storage` |
-  | `ai.sessionStorage.type` | `agentRuntime.storage.type` |
-  | `ai.database` | `agentRuntime.database` |
-
-  | Old env var | New env var |
-  | --- | --- |
-  | `APP_AI_SESSIONSTORAGE_TYPE` | `APP_AGENTRUNTIME_STORAGE_TYPE` |
-  | `APP_AI_DATABASE_DSN` | `APP_AGENTRUNTIME_DATABASE_DSN` |
-  | `APP_AI_DATABASE_AUTOMIGRATE` | `APP_AGENTRUNTIME_DATABASE_AUTOMIGRATE` |
-- **Skills config:** `skills.enabled` (bool, default `false`), `skills.paths` (list of directories; defaults to `~/.config/agents/skills` and `.agents/skills`), `skills.maxSkillBytes` (int, default 65536), `skills.maxCatalogEntries` (int, default 500). When `skills.enabled` is `true`, the runtime discovers `SKILL.md` files in the configured paths, registers `skills_list` and `skills_read` tools, and injects a compact `<available_skills>` block into the agent instruction. Non-existent paths, malformed files, and duplicate skill names produce warning logs and are skipped; they do not fail startup.
-- **CLI flags** (global): `--env` / `-e` selects which `<env>.yaml` layer loads (default env for loaders is `local` when not overridden). Logging: `--log-level` / `-l`, `--json-logs`, `--logs-file` (tests).
+This will start the HTTP server on port 4501.
 
 ## Lint / test
 

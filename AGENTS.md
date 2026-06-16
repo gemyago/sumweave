@@ -56,15 +56,21 @@ Tools/Frameworks:
 - Svelte 5
 - PM2 for repo-scoped local process management
 
-Go and Node.js are managed by direnv (in .envrc) and nvm respectively. All dependencies are project scoped (e.g no global node_modules e.t.c).
-PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from the repo root.
-
 **Shell usage notes**
 - If shell is persistent (e.g human controlled terminal), then `direnv allow` and then run all commands directly in the shell.
 - If shell is ephemeral (most typical in AI agents), then run most commands via `direnv exec <working_dir> <command>`.
 - This mostly applies to project specific commands (like `make`, `go` e.t.c). Regular exploration related commands (like `ls`, `cd`, `pwd` e.t.c) can be run directly in the shell.
 - Keep in mind that `<working_dir>` doesn't change cwd, just loads the env from the specified working dir.
 - When documenting commands, do not add `direnv exec` prefix. This should be assumed after reading this section.
+
+Go and Node.js are managed by direnv (in .envrc) and nvm respectively. All dependencies are project scoped (e.g no global node_modules e.t.c).
+PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from the repo root.
+
+**PM2 usage notes**
+- Run `pm2 start ecosystem.config.js` to start all processes and add them to the PM2 process manager. Usually do it just once.
+- Run `pm2 status` to see the status of all processes
+- Run `pm2 start|stop|restart id|name` to control specific processes
+- Run `pm2 logs id|name` to see the logs of specific processes
 
 ## Nx (monorepo tasks)
 
