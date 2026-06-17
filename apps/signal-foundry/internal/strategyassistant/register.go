@@ -5,31 +5,36 @@ import (
 	"errors"
 
 	app "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
+	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/runtime/agent"
 	rtdata "github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 )
 
 const (
-	toolNameDataListCandleAvailability = "sf_data_list_candle_availability"
-	toolNameDataGetCandles             = "sf_data_get_candles"
-	toolNameDataGetCandleEvidence      = "sf_data_get_candle_evidence"
-	toolNameStrategyListVersions       = "sf_strategy_list_versions"
-	toolNameStrategyGetVersion         = "sf_strategy_get_version"
-	toolNameStrategyValidateDefinition = "sf_strategy_validate_definition"
-	toolNameStrategyDuplicateVersion   = "sf_strategy_duplicate_version"
-	toolNameStrategyCreateVersion      = "sf_strategy_create_version"
-	toolNameEvaluationRunBacktest      = "sf_evaluation_run_backtest"
-	toolNameEvaluationListBacktests    = "sf_evaluation_list_backtests"
-	toolNameEvaluationGetDetail        = "sf_evaluation_get_backtest_detail"
-	toolNameEvaluationGetReport        = "sf_evaluation_get_backtest_report"
-	toolNameEvaluationGetEvidence      = "sf_evaluation_get_backtest_evidence"
+	toolNameDataListCandleAvailability      = "sf_data_list_candle_availability"
+	toolNameDataGetCandles                  = "sf_data_get_candles"
+	toolNameDataGetCandleEvidence           = "sf_data_get_candle_evidence"
+	toolNameJobsStartHistoricalDataBackfill = "sf_jobs_start_historical_data_backfill"
+	toolNameJobsList                        = "sf_jobs_list"
+	toolNameJobsGet                         = "sf_jobs_get"
+	toolNameStrategyListVersions            = "sf_strategy_list_versions"
+	toolNameStrategyGetVersion              = "sf_strategy_get_version"
+	toolNameStrategyValidateDefinition      = "sf_strategy_validate_definition"
+	toolNameStrategyDuplicateVersion        = "sf_strategy_duplicate_version"
+	toolNameStrategyCreateVersion           = "sf_strategy_create_version"
+	toolNameEvaluationRunBacktest           = "sf_evaluation_run_backtest"
+	toolNameEvaluationListBacktests         = "sf_evaluation_list_backtests"
+	toolNameEvaluationGetDetail             = "sf_evaluation_get_backtest_detail"
+	toolNameEvaluationGetReport             = "sf_evaluation_get_backtest_report"
+	toolNameEvaluationGetEvidence           = "sf_evaluation_get_backtest_evidence"
 )
 
 type RegisterDeps struct {
 	Registry            *agent.ToolsRegistry
 	DataRead            candleReadService
 	DataLineage         candleLineageService
+	JobsService         jobsService
 	StrategyWorkspace   strategyWorkspaceService
 	EvaluationWorkspace evaluationWorkspaceService
 }
@@ -52,6 +57,15 @@ type candleLineageService interface {
 		ctx context.Context,
 		query rtdata.CandleLinkedRawPayloadsQuery,
 	) ([]rtdata.RawPayloadMetadata, error)
+}
+
+type jobsService interface {
+	CreateHistoricalRawCandleBackfill(
+		ctx context.Context,
+		params jobspkg.CreateHistoricalRawCandleBackfillParams,
+	) (*jobspkg.Job, error)
+	List(ctx context.Context, params jobspkg.ListParams) (jobspkg.ListResult, error)
+	Get(ctx context.Context, jobID string) (*jobspkg.Job, error)
 }
 
 type strategyWorkspaceService interface {
@@ -99,6 +113,9 @@ func RegisterTools(deps RegisterDeps) error {
 		newListCandleAvailabilityTool(deps),
 		newGetCandlesTool(deps),
 		newGetCandleEvidenceTool(deps),
+		newStartHistoricalDataBackfillTool(deps),
+		newListJobsTool(deps),
+		newGetJobTool(deps),
 		newListStrategyVersionsTool(deps),
 		newGetStrategyVersionTool(deps),
 		newValidateStrategyDefinitionTool(deps),
@@ -152,6 +169,44 @@ func newGetCandleEvidenceTool(deps RegisterDeps) agent.ToolDef[GetCandleEvidence
 		),
 		func(ctx *agent.ToolContext, input GetCandleEvidenceRequest) (GetCandleEvidenceResponse, error) {
 			return handleGetCandleEvidenceTool(ctx, deps, input)
+		},
+	)
+}
+
+func newStartHistoricalDataBackfillTool(
+	deps RegisterDeps,
+) agent.ToolDef[StartHistoricalDataBackfillRequest, StartHistoricalDataBackfillResponse] {
+	return agent.NewToolDef(
+		toolNameJobsStartHistoricalDataBackfill,
+		internalAlphaBoundedDescription(
+			"Starts bounded durable historical data backfill jobs without live trading, shell access, or raw SQL access.",
+		),
+		func(ctx *agent.ToolContext, input StartHistoricalDataBackfillRequest) (StartHistoricalDataBackfillResponse, error) {
+			return handleStartHistoricalDataBackfillTool(ctx, deps, input)
+		},
+	)
+}
+
+func newListJobsTool(deps RegisterDeps) agent.ToolDef[ListJobsRequest, ListJobsResponse] {
+	return agent.NewToolDef(
+		toolNameJobsList,
+		internalAlphaBoundedDescription(
+			"Lists bounded durable historical data jobs without live trading, shell access, or raw SQL access.",
+		),
+		func(ctx *agent.ToolContext, input ListJobsRequest) (ListJobsResponse, error) {
+			return handleListJobsTool(ctx, deps, input)
+		},
+	)
+}
+
+func newGetJobTool(deps RegisterDeps) agent.ToolDef[GetJobRequest, GetJobResponse] {
+	return agent.NewToolDef(
+		toolNameJobsGet,
+		internalAlphaBoundedDescription(
+			"Reads one bounded durable historical data job without live trading, shell access, or raw SQL access.",
+		),
+		func(ctx *agent.ToolContext, input GetJobRequest) (GetJobResponse, error) {
+			return handleGetJobTool(ctx, deps, input)
 		},
 	)
 }

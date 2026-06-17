@@ -13,6 +13,8 @@
   import EvaluationDetail from './pages/EvaluationDetail.svelte'
   import Evaluations from './pages/Evaluations.svelte'
   import Login from './pages/Login.svelte'
+  import JobDetail from './pages/JobDetail.svelte'
+  import Jobs from './pages/Jobs.svelte'
   import Providers from './pages/Providers.svelte'
   import RedirectToDefaultRoute from './pages/RedirectToDefaultRoute.svelte'
   import Strategies from './pages/Strategies.svelte'
@@ -27,6 +29,14 @@
     }),
     '/providers': wrap({
       component: Providers,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/jobs/:jobId': wrap({
+      component: JobDetail,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/jobs': wrap({
+      component: Jobs,
       conditions: [() => authStore.isAuthenticated],
     }),
     '/strategies/:strategyId/:version': wrap({

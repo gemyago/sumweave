@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { link } from 'svelte-spa-router'
   import DataCandlestickChart from '../components/DataCandlestickChart.svelte'
   import UtcDateRangePicker from '../components/UtcDateRangePicker.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
@@ -15,13 +16,19 @@
     type RawPayloadDetailResponse,
     type RawPayloadMetadata,
   } from '../lib/data/data-api'
+  import {
+    createSignalJobsApiForAuth,
+    type JobDetail,
+  } from '../lib/jobs/api'
   import { validateUtcRange } from '../lib/utc-date-range'
 
   const dataBaseUrl = import.meta.env.VITE_DATA_API_BASE_URL ?? '/api/v1/data'
+  const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
 
   const dataApi = $derived.by(() =>
     createSignalDataApiForAuth({ baseUrl: dataBaseUrl, authStore }),
   )
+  const jobsApi = $derived.by(() => createSignalJobsApiForAuth({ baseUrl: appBaseUrl, authStore }))
 
   const timeframeDurationsMs: Record<DataTimeframe, number> = {
     '1m': 60_000,
@@ -77,6 +84,12 @@
   let selectedRawPayloadId = $state<string | null>(null)
   let rawPayloadDetail = $state<RawPayloadDetailResponse | null>(null)
   let detailRequestToken = 0
+
+  let jobSubmitting = $state(false)
+  let jobError = $state<string | null>(null)
+  let createdJob = $state<JobDetail | null>(null)
+  let backfillIdempotencyKey = $state('')
+  let backfillPageSize = $state('500')
 
   const chartRows = $derived(toChartCandleRows(candles))
   const selectedCandle = $derived(
@@ -207,6 +220,44 @@
       if (requestToken === candlesRequestToken) {
         candlesLoading = false
       }
+    }
+  }
+
+  async function startHistoricalBackfill() {
+    showRangeValidation = true
+    jobError = null
+    createdJob = null
+    const parsed = validateAndBuildQuery()
+    validationErrors = parsed.errors
+    if (parsed.errors.length > 0 || parsed.rangeErrors.length > 0 || !parsed.start || !parsed.end) {
+      return
+    }
+
+    const pageSizeNumber = Number(backfillPageSize.trim() || '0')
+    if (!Number.isInteger(pageSizeNumber) || pageSizeNumber < 0) {
+      jobError = 'Backfill page size must be zero or a positive integer.'
+      return
+    }
+
+    jobSubmitting = true
+    try {
+      createdJob = await jobsApi.createHistoricalDataBackfillJob({
+        body: {
+          ...(backfillIdempotencyKey.trim() ? { idempotencyKey: backfillIdempotencyKey.trim() } : {}),
+          venue: venue.trim(),
+          symbol: symbol.trim(),
+          assetClass: mapAssetClassForBackfill(assetClass.trim(), venue.trim()),
+          timeframe: timeframe.trim(),
+          start: parsed.start,
+          end: parsed.end,
+          pageSize: pageSizeNumber,
+        },
+      })
+    } catch (error) {
+      jobError = error instanceof Error ? error.message : 'Failed to create historical backfill job'
+      createdJob = null
+    } finally {
+      jobSubmitting = false
     }
   }
 
@@ -484,6 +535,13 @@
 
     return `${formatDateTime(candle.start)} · ${candle.timeframe} · O ${candle.open} · C ${candle.close}`
   }
+
+  function mapAssetClassForBackfill(assetClassValue: string, venueValue: string): string {
+    if (venueValue === 'hyperliquid-perps' && assetClassValue === 'crypto') {
+      return 'future'
+    }
+    return assetClassValue
+  }
 </script>
 
 <section class="page" aria-labelledby="data-heading">
@@ -562,6 +620,7 @@
       <select bind:value={assetClass}>
         <option value="">Select asset class</option>
         <option value="crypto">crypto</option>
+        <option value="future">future</option>
       </select>
     </label>
     <label>
@@ -622,6 +681,45 @@
       </div>
     </div>
   </form>
+
+  <section class="panel" aria-labelledby="backfill-heading">
+    <div class="panel-header">
+      <div>
+        <h2 id="backfill-heading">Start historical backfill</h2>
+        <p>Explicitly create a durable job from the current data scope. Browsing, loading, and selecting candles stay read-only unless you use this action.</p>
+      </div>
+    </div>
+
+    <div class="backfill-panel">
+      <p class="note">Current backfill request uses the current form scope. For `hyperliquid-perps`, the backend currently expects futures job scope even though read browsing uses the existing `crypto` label.</p>
+      <div class="backfill-fields">
+        <label>
+          <span>Idempotency key</span>
+          <input bind:value={backfillIdempotencyKey} placeholder="Optional" spellcheck="false" />
+        </label>
+        <label>
+          <span>Backfill page size</span>
+          <input bind:value={backfillPageSize} inputmode="numeric" placeholder="0 uses backend default" />
+        </label>
+      </div>
+      <div class="form-actions backfill-actions">
+        <button class="warning" type="button" disabled={jobSubmitting} onclick={startHistoricalBackfill}>
+          Start historical backfill
+        </button>
+      </div>
+    </div>
+
+    {#if jobError}
+      <p class="alert" role="alert">{jobError}</p>
+    {/if}
+
+    {#if createdJob}
+      <p class="success" aria-live="polite">
+        Created job {createdJob.id} with status {createdJob.status}.
+        <a href={`/jobs/${encodeURIComponent(createdJob.id)}`} use:link>Open created job</a>
+      </p>
+    {/if}
+  </section>
 
   {#if validationErrors.length > 0}
     <div class="alert" role="alert">
@@ -912,6 +1010,37 @@
 
   .actions-row {
     grid-column: 1 / -1;
+  }
+
+  .backfill-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+  }
+
+  .backfill-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--space-16);
+  }
+
+  .backfill-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+  }
+
+  .backfill-actions {
+    justify-content: flex-start;
+  }
+
+  .success {
+    color: var(--color-success-green);
+  }
+
+  .success a {
+    color: inherit;
+    font-weight: 500;
   }
 
   .filter-form__range {

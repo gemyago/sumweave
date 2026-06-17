@@ -9,7 +9,7 @@
 **Shell (`Nav` + `<main>`)**
 
 - **Nav — left:** Brand label **Signal Foundry** → `/chat`.
-- **Nav — center:** **Chat** / **Data** / **Providers** / **Strategies** / **Evaluations** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
+- **Nav — center:** **Chat** / **Data** / **Jobs** / **Providers** / **Strategies** / **Evaluations** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
 - **Nav — right:** **Sign out** (text) **to the left of** the compact **Theme** segmented control; both **end-aligned** in the right margin; only when authenticated.
 - **≤700px Nav:** brand + auth controls stay on the first row; route links wrap onto a dedicated second row instead of colliding with the brand or sign-out cluster.
 - **`<main>`:** Centered content wrapper `main-inner` (~800–900px max width) with `Router` inside.
@@ -37,7 +37,7 @@
 
 **Route guarding**
 
-- `/chat`, `/data`, `/providers`, `/strategies*`, and `/evaluations*`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
+- `/chat`, `/data`, `/jobs*`, `/providers`, `/strategies*`, and `/evaluations*`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
 - If `authStore.isAuthenticated` is false: `conditionsFailed` stores the requested protected route and then `replace('/login')`.
 - `/login` is public.
 - Nav is hidden when unauthenticated.
@@ -52,6 +52,8 @@
 | `/login` | Login page; username + password form. On success, sets auth tokens and `push()`es the remembered protected destination or `/data`. On failure, shows inline error alert. |
 | `/chat/:sessionId?` | Chat; optional id in URL after `sessionBound` (`replace`). One route entry so binding the id does not remount the page or abort the stream. |
 | `/data` | Historical data browser. Protected (auth required). Browse-first availability loads on open, then exact candle reads stay editable. |
+| `/jobs` | Durable historical ingestion job list. Protected. Summary-first stacked cards with filters, refresh, and open-detail actions. |
+| `/jobs/:jobId` | Durable historical ingestion job detail. Protected. Separate route with request, timeline, worker, result, and safe error sections plus back links to Jobs and Data. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
 | `/strategies` | Strategy workspace list + local draft editor. Protected. New drafts start here. |
 | `/strategies/:strategyId/:version` | Strategy version detail. Protected. Saved version stays immutable; duplicate creates a local draft. |
@@ -90,7 +92,7 @@
 | New chat (default) | No URL `sessionId` | Sidebar + header + empty transcript + composer (default focus). **New chat** still clears draft and `push('/chat')` when starting from a session or re-clicked. |
 | Composer with session | URL has `sessionId` | Sidebar + messages + composer. **New chat** in sidebar resets to `/chat`. |
 | Reconnecting | `sessionId` in URL on mount; `readSession` in progress | Streaming UI shown (busy); input disabled until session loads. |
-| Streaming | `streamState.busy` | Extra assistant line: live text (incremental `agent` SSE chunks concatenated) or "Thinking…". |
+| Streaming | `streamState.busy` | Extra assistant activity group: status line ("Thinking…", running-tool progress, or waiting-for-next-step copy) plus any live text/tool calls until `done`. |
 | Error | `runError` | Alert in the turn-activity strip (scroll region), directly above composer. |
 | Send off | Empty input or `sendDisabled` | Send disabled; textarea disabled while sending. |
 | No selectable models | `listModels` succeeded with zero models, or not yet successful | Send disabled; short copy with in-app link to `/providers`. |
@@ -132,6 +134,8 @@
 **Tool call blocks**
 
 - Agent turns may include tool calls alongside or instead of text.
+- Mixed assistant text and tool calls preserve the original stream order during both live runs and replayed history refreshes.
+- Consecutive assistant rows that contain only tool calls stack with tighter spacing than normal message turns so tool bursts read as one cluster.
 - Each: `ToolCallBlock` — collapsible `<details>` / `<summary>`.
 - **Collapsed (default):** "Tool call:" + function name (e.g. `workspacefs_write_file`).
 - **Expanded:** Formatted JSON for "Arguments" (`args`) and, if present, "Response" (`response`).
@@ -160,6 +164,7 @@
 - Filter form remains available below availability, with fields for **venue**, **symbol**, **asset class**, **timeframe**, a shared UTC-aware range picker, and optional **ingestion run ID**.
 - The shared UTC range picker shows separate UTC **date** and **time** controls, an inline calendar, visible resolved UTC ISO `start` / `end` values, and deterministic quick presets whenever the selected availability/timeframe exposes an anchor.
 - Results below the form in this order once a candle scope exists:
+  - explicit **Start historical backfill** panel using the current form scope; this is the only mutating path on the page and shows the created job link/status when successful
   - summary cards (**N normalized candles**, raw payload metadata loaded/not loaded, selected candle status, selected availability entry when present)
   - full-width normalized candle panel (chart + reliable selection table + visible selected-candle banner)
   - linked raw evidence panel for the selected candle
@@ -175,6 +180,12 @@
 - If availability is empty, the page shows an empty state and MUST NOT guess candle filters or call the candle endpoint.
 - Selecting an availability entry uses that item’s per-entry `defaultSlice`, updates the filter form to match, and loads normalized candles for that exact slice.
 - Manual **Load candles** validates required filters client-side before calling `GET /api/v1/data/candles`.
+- **Start historical backfill** is explicit and separate from browse/load/select paths:
+  - validates the same required current form scope before calling `POST /api/v1/jobs/historical-data-backfills`
+  - includes optional idempotency key and page size controls (`0` delegates to the backend default page size)
+  - shows the created job id/status and a route link to `#/jobs/:jobId` on success
+  - does **not** run during availability auto-load, manual candle load, candle selection, or raw payload browsing
+- For the current Hyperliquid v0 contract, the backfill panel maps the Data-page `crypto` browse asset-class label to the backend job request's expected `future` asset-class value and calls this out in panel copy.
 - Client-side validation covers:
   - missing required fields
   - invalid or incomplete UTC range values before a valid ISO range is resolved
@@ -198,6 +209,8 @@
 | Availability empty | Availability response has no items | Availability empty message; form stays editable; no guessed candle scope. |
 | Availability default scope loading | First availability page includes `defaultSelection` | Availability list renders; matching entry selected; normalized candle status shown while the exact default slice loads. |
 | Validation error | Required field missing, invalid UTC range, selected range exceeds 10,000 intervals, or selected range leaves the chosen availability window | Inline alert semantics above results; **Load candles** does not call APIs. |
+| Backfill validation / create error | Explicit **Start historical backfill** used with invalid scope/page size (negative values only; `0` is valid) or the job API fails | Inline alert in the backfill panel; no job is created implicitly. |
+| Backfill created | Job create succeeds | Success copy shows created job id/status plus a link to `#/jobs/:jobId`. |
 | Candle empty | Candle response has no items | "No normalized candles matched these filters." |
 | Raw payload idle | Candle scope exists, but explicit raw browsing not requested yet | Prompt explains that broad raw payload metadata is optional and secondary. |
 | Raw payload loading | User clicked **Load raw payload metadata** | Explicit raw metadata status shown; button disabled while in flight. |
@@ -213,6 +226,51 @@
 - Validation and API failures use `role="alert"`.
 - Raw payload detail panel uses dialog semantics and a visible close button.
 - Tables keep explicit headers for candle rows, raw payload metadata, and linked evidence.
+
+---
+
+## Jobs (`/jobs`, `/jobs/:jobId`)
+
+**List (`/jobs`)**
+
+- Header: **Jobs** heading + refresh action.
+- Filters row: **status**, **job type**, **source**, then **Apply filters**.
+- Body: stacked summary cards, not a dense table.
+- Each card shows:
+  - job id
+  - status + job type
+  - requested scope (**venue / symbol / asset class / timeframe**)
+  - requester source/user
+  - created time + attempt count
+  - compact result or safe error summary when present
+  - **Open job detail** route link
+- When the API returns `nextCursor`, show it as an operator-visible note only; paging interaction is deferred.
+
+| State | When | UI |
+| :--- | :--- | :--- |
+| Loading | Initial open or refresh/apply in flight | `Loading jobs…` status. |
+| Empty | API returns no items | `No durable jobs matched the current filters.` |
+| Error | List request fails | Alert with safe API message. |
+| Success | Items returned | Stacked job summary cards with open-detail links. |
+
+**Detail (`/jobs/:jobId`)**
+
+- Header: **Job detail** heading + backlinks to **Jobs** and **Data**.
+- Sections, in order:
+  - summary (**status**, **job type**, **requester**, **worker**, **attempt count**)
+  - input (**ingestionRunId**, venue/symbol/asset class/timeframe, page size, start/end)
+  - timeline/worker timestamps (**created**, **updated**, **started**, **completed**, **last attempt**)
+  - optional result (**persisted/expected/missing/duplicate counts**, raw payload count, missing-preview cap, missing interval preview list)
+  - optional safe error (**summary**, **code**, **details**)
+
+| State | When | UI |
+| :--- | :--- | :--- |
+| Missing id | Route param absent | Inline alert: `Job id is required.` |
+| Loading | Detail fetch in flight | `Loading job detail…` |
+| Error | Detail fetch fails | Alert with safe API message. |
+| Queued/running | Non-terminal job | Summary/input/timeline visible; result/error absent until present. |
+| Succeeded | Terminal success | Result section visible, including missing interval preview when provided. |
+| Failed | Terminal failure | Error section visible with safe summary/code/details. |
 
 ---
 

@@ -13,6 +13,18 @@ export interface ToolCallEntry {
   response?: Record<string, unknown>
 }
 
+export interface AssistantTextPart {
+  kind: 'text'
+  id: string
+  text: string
+}
+
+export interface AssistantToolCallPart extends ToolCallEntry {
+  kind: 'toolCall'
+}
+
+export type AssistantTurnPart = AssistantTextPart | AssistantToolCallPart
+
 /**
  * UI-facing state for a single in-flight agent run (one POST → SSE until done/error).
  * `applyAgentStreamEvent` only interprets stream events; the caller sets `busy` when
@@ -31,6 +43,8 @@ export interface AgentRunStreamState {
   error: string | null
   /** Set by `sessionStatus` event: true when a run is active, false when idle. */
   sessionActive: boolean | null
+  /** Assistant turn content in the order it arrived from the stream. */
+  assistantTurnParts: AssistantTurnPart[]
   /** Tool calls accumulated in the current assistant turn. */
   toolCalls: ToolCallEntry[]
 }
@@ -44,24 +58,10 @@ export function createInitialAgentRunStreamState(
     assistantTurnText: '',
     error: null,
     sessionActive: null,
+    assistantTurnParts: [],
     toolCalls: [],
     ...overrides,
   }
-}
-
-function snapshotTextFromAgentEvent(ev: AgentStreamEvent): string | undefined {
-  if (ev.content?.role === 'user') {
-    return undefined
-  }
-  const parts = ev.content?.parts
-  if (!parts?.length) {
-    return undefined
-  }
-  // Only join text parts; skip toolCall/toolResult parts
-  return parts
-    .filter((p) => p.text !== undefined && p.toolCall === undefined && p.toolResult === undefined)
-    .map((p) => p.text)
-    .join('')
 }
 
 function applySessionBound(state: AgentRunStreamState, event: SessionBoundEvent): AgentRunStreamState {
@@ -72,61 +72,115 @@ function applySessionStatus(state: AgentRunStreamState, event: SessionStatusEven
   return { ...state, sessionActive: event.status === 'active' }
 }
 
-function applyToolCallParts(
-  state: AgentRunStreamState,
-  event: AgentStreamEvent,
-): AgentRunStreamState {
-  const parts = event.content?.parts
-  if (!parts?.length) {
-    return state
-  }
+function nextTextPartID(parts: AssistantTurnPart[]): string {
+  const textPartCount = parts.filter((part) => part.kind === 'text').length
+  return `text-${textPartCount + 1}`
+}
 
-  let toolCalls = state.toolCalls
-  for (const part of parts) {
-    if (part.toolCall) {
-      const { id, name, args } = part.toolCall
-      toolCalls = [
-        ...toolCalls,
-        { id, name, args: (args as Record<string, unknown> | undefined) ?? {} },
-      ]
-    } else if (part.toolResult) {
-      const { id, response } = part.toolResult
-      toolCalls = toolCalls.map((entry) =>
-        entry.id === id
-          ? { ...entry, response: (response as Record<string, unknown> | undefined) ?? {} }
-          : entry,
-      )
-    }
+function mergeTextDelta(existing: string, delta: string, isFinalSnapshot: boolean): string {
+  if (!isFinalSnapshot || existing.length === 0) {
+    return existing + delta
   }
+  if (delta === existing) {
+    return existing
+  }
+  if (delta.startsWith(existing)) {
+    return delta
+  }
+  return existing + delta
+}
 
-  if (toolCalls === state.toolCalls) {
-    return state
-  }
-  return { ...state, toolCalls }
+function snapshotAssistantText(parts: AssistantTurnPart[]): string {
+  return parts
+    .filter((part): part is AssistantTextPart => part.kind === 'text')
+    .map((part) => part.text)
+    .join('')
+}
+
+function snapshotToolCalls(parts: AssistantTurnPart[]): ToolCallEntry[] {
+  return parts
+    .filter((part): part is AssistantToolCallPart => part.kind === 'toolCall')
+    .map((part) => ({
+      id: part.id,
+      name: part.name,
+      args: part.args,
+      ...(part.response !== undefined ? { response: part.response } : {}),
+    }))
 }
 
 function applyAgent(state: AgentRunStreamState, event: AgentStreamEvent): AgentRunStreamState {
-  // Process tool call/result parts first
-  const next = applyToolCallParts(state, event)
-
-  const delta = snapshotTextFromAgentEvent(event)
-  if (delta === undefined) {
-    return next
+  const eventParts = event.content?.parts
+  if (!eventParts?.length) {
+    return state
   }
 
-  // Non-partial events after incremental chunks often carry the full aggregated answer; appending
-  // would duplicate (mirrors runtime/internal shouldSkipStreamingEvent for streaming consumers).
-  // Still append when `partial === false` is a true continuation chunk (suffix, not a superset).
-  if (event.partial === false && next.assistantTurnText.length > 0) {
-    if (delta === next.assistantTurnText) {
-      return next
+  const ignoreText = event.content?.role === 'user'
+  let nextParts = state.assistantTurnParts
+
+  for (const part of eventParts) {
+    if (part.toolCall) {
+      const { id, name, args } = part.toolCall
+      nextParts = [
+        ...nextParts,
+        {
+          kind: 'toolCall',
+          id,
+          name,
+          args: (args as Record<string, unknown> | undefined) ?? {},
+        },
+      ]
+      continue
     }
-    if (delta.startsWith(next.assistantTurnText)) {
-      return { ...next, assistantTurnText: delta }
+
+    if (part.toolResult) {
+      const { id, response } = part.toolResult
+      nextParts = nextParts.map((entry) =>
+        entry.kind === 'toolCall' && entry.id === id
+          ? { ...entry, response: (response as Record<string, unknown> | undefined) ?? {} }
+          : entry,
+      )
+      continue
     }
+
+    if (part.text === undefined || ignoreText) {
+      continue
+    }
+
+    const lastPart = nextParts[nextParts.length - 1]
+    if (part.text.trim().length === 0 && lastPart?.kind !== 'text') {
+      continue
+    }
+    if (lastPart?.kind === 'text') {
+      nextParts = [
+        ...nextParts.slice(0, -1),
+        {
+          ...lastPart,
+          text: mergeTextDelta(lastPart.text, part.text, event.partial === false),
+        },
+      ]
+      continue
+    }
+
+    nextParts = [
+      ...nextParts,
+      {
+        kind: 'text',
+        id: nextTextPartID(nextParts),
+        text: part.text,
+      },
+    ]
   }
 
-  return { ...next, assistantTurnText: next.assistantTurnText + delta }
+  if (nextParts === state.assistantTurnParts) {
+    return state
+  }
+
+  return {
+    ...state,
+    assistantTurnParts: nextParts,
+    assistantTurnText: snapshotAssistantText(nextParts),
+    toolCalls: snapshotToolCalls(nextParts),
+  }
 }
 
 function applyError(state: AgentRunStreamState, event: StreamErrorEvent): AgentRunStreamState {
@@ -141,18 +195,25 @@ function applyDone(state: AgentRunStreamState): AgentRunStreamState {
 export type ChatTranscriptMessage = {
   role: 'user' | 'assistant'
   text: string
+  parts?: AssistantTurnPart[]
   toolCalls?: ToolCallEntry[]
 }
 
-function flushAssistantMessage(state: AgentRunStreamState): ChatTranscriptMessage | null {
+export function assistantMessageFromStreamState(
+  state: AgentRunStreamState,
+): ChatTranscriptMessage | null {
   const text = state.assistantTurnText
   const toolCalls = state.toolCalls
-  if (!text && toolCalls.length === 0) {
+  const parts = state.assistantTurnParts
+  if (!text && toolCalls.length === 0 && parts.length === 0) {
     return null
   }
   const row: ChatTranscriptMessage = { role: 'assistant', text }
+  if (parts.length > 0) {
+    row.parts = [...parts]
+  }
   if (toolCalls.length > 0) {
-    row.toolCalls = toolCalls
+    row.toolCalls = [...toolCalls]
   }
   return row
 }
@@ -176,10 +237,10 @@ export function applyIdleHistoryAgentEvent(
   if (event.content?.role === 'user') {
     let next = applyAgentStreamEvent(state, event)
     const userText = event.content.parts?.map((p) => p.text).join('') ?? ''
-    const assistantRow = flushAssistantMessage(next)
+    const assistantRow = assistantMessageFromStreamState(next)
     if (assistantRow && !toolCallsStillPending(assistantRow)) {
       appended.push(assistantRow)
-      next = { ...next, assistantTurnText: '', toolCalls: [] }
+      next = { ...next, assistantTurnText: '', assistantTurnParts: [], toolCalls: [] }
     }
     if (userText) {
       appended.push({ role: 'user', text: userText })
@@ -189,10 +250,10 @@ export function applyIdleHistoryAgentEvent(
 
   let next = applyAgentStreamEvent(state, event)
   if (event.turnComplete) {
-    const row = flushAssistantMessage(next)
+    const row = assistantMessageFromStreamState(next)
     if (row && !toolCallsStillPending(row)) {
       appended.push(row)
-      next = { ...next, assistantTurnText: '', toolCalls: [] }
+      next = { ...next, assistantTurnText: '', assistantTurnParts: [], toolCalls: [] }
     }
   }
   return { state: next, appended }

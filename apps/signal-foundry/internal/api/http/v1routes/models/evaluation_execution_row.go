@@ -13,10 +13,10 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-type EvaluationExecutionRow struct {
-	CommandID string     `json:"commandId"`
-	OrderID   string     `json:"orderId"`
-	FillID    string     `json:"fillId"`
-	Status    string     `json:"status"`
+type EvaluationExecutionRow struct { 
+	CommandID string `json:"commandId"`
+	OrderID string `json:"orderId"`
+	FillID string `json:"fillId"`
+	Status string `json:"status"`
 	EventTime *time.Time `json:"eventTime,omitempty"`
 }

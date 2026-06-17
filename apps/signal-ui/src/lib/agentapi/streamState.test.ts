@@ -136,6 +136,32 @@ describe('applyAgentStreamEvent', () => {
     expect(state.assistantTurnText).toBe(a + b)
   })
 
+  it('ignores empty text parts so blank assistant bubbles are not created', () => {
+    const text = faker.lorem.sentence()
+    let state = base()
+    state = applyAgentStreamEvent(state, {
+      event: 'agent',
+      partial: false,
+      content: { parts: [{ text: '' }, { text }] },
+    })
+    expect(state.assistantTurnText).toBe(text)
+    expect(state.assistantTurnParts).toEqual([{ kind: 'text', id: 'text-1', text }])
+  })
+
+  it('ignores leading whitespace-only text parts before a tool call', () => {
+    const id = faker.string.uuid()
+    let state = base()
+    state = applyAgentStreamEvent(state, {
+      event: 'agent',
+      partial: false,
+      content: { parts: [{ text: '\n\n  ' }, { toolCall: { id, name: 'sf_jobs_list', args: {} } }] },
+    })
+    expect(state.assistantTurnText).toBe('')
+    expect(state.assistantTurnParts).toEqual([
+      { kind: 'toolCall', id, name: 'sf_jobs_list', args: {} },
+    ])
+  })
+
   it('agent with no content.parts leaves previous assistantTurnText', () => {
     const keep = faker.lorem.words(3)
     let state = base()
@@ -227,6 +253,26 @@ describe('tool call tracking in applyAgentStreamEvent', () => {
     expect(state.toolCalls[0].name).toBe(name)
   })
 
+  it('preserves assistant turn part order across tool and text events', () => {
+    const firstToolId = faker.string.uuid()
+    const secondToolId = faker.string.uuid()
+    const text = faker.lorem.sentence()
+    let state = base()
+    state = applyAgentStreamEvent(state, makeToolCallEvent(firstToolId, 'first_tool', { step: 1 }))
+    state = applyAgentStreamEvent(state, {
+      event: 'agent',
+      partial: false,
+      content: { parts: [{ text }] },
+    })
+    state = applyAgentStreamEvent(state, makeToolCallEvent(secondToolId, 'second_tool', { step: 2 }))
+
+    expect(state.assistantTurnParts).toEqual([
+      { kind: 'toolCall', id: firstToolId, name: 'first_tool', args: { step: 1 } },
+      { kind: 'text', id: 'text-1', text },
+      { kind: 'toolCall', id: secondToolId, name: 'second_tool', args: { step: 2 } },
+    ])
+  })
+
   it('toolCall-only event is still flushable (creates entry with no response)', () => {
     const id = faker.string.uuid()
     const name = faker.word.noun()
@@ -260,7 +306,13 @@ describe('applyIdleHistoryAgentEvent', () => {
       turnComplete: true,
       content: { role: 'model', parts: [{ text: modelMsg }] },
     })
-    expect(r.appended).toEqual([{ role: 'assistant', text: modelMsg }])
+    expect(r.appended).toEqual([
+      {
+        role: 'assistant',
+        text: modelMsg,
+        parts: [{ kind: 'text', id: 'text-1', text: modelMsg }],
+      },
+    ])
   })
 
   it('partial then full model does not duplicate prefix in flushed row', () => {
@@ -279,7 +331,13 @@ describe('applyIdleHistoryAgentEvent', () => {
       turnComplete: true,
       content: { role: 'model', parts: [{ text: full }] },
     })
-    expect(r.appended).toEqual([{ role: 'assistant', text: full }])
+    expect(r.appended).toEqual([
+      {
+        role: 'assistant',
+        text: full,
+        parts: [{ kind: 'text', id: 'text-1', text: full }],
+      },
+    ])
   })
 
   it('flushes tool calls with assistant message on turnComplete', () => {

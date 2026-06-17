@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-06-17
+goal: Operator and strategy assistant can explicitly start, list, inspect, and
+  monitor durable historical raw candle backfill jobs.

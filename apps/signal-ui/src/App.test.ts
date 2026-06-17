@@ -25,6 +25,18 @@ vi.mock('./lib/strategy-workspace/api', async (importOriginal) => {
   }
 })
 
+vi.mock('./lib/jobs/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./lib/jobs/api')>()
+  return {
+    ...actual,
+    createSignalJobsApiForAuth: vi.fn(() => ({
+      listJobs: vi.fn().mockResolvedValue({ items: [], nextCursor: '' }),
+      getJob: vi.fn(),
+      createHistoricalDataBackfillJob: vi.fn(),
+    })),
+  }
+})
+
 // Mock the auth store so tests can control authentication state
 const mocks = vi.hoisted(() => ({
   isAuthenticated: true,
@@ -99,6 +111,15 @@ describe('App shell', () => {
     })
   })
 
+  it('navigates to Jobs when Jobs link is clicked', async () => {
+    const user = userEvent.setup()
+    render(App)
+    await user.click(screen.getByRole('link', { name: 'Jobs' }))
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Jobs' })).toBeInTheDocument()
+    })
+  })
+
   it('shows protected navigation links when authenticated', async () => {
     render(App)
 
@@ -107,6 +128,7 @@ describe('App shell', () => {
     expect(screen.getByRole('link', { name: 'Providers' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Strategies' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Evaluations' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Jobs' })).toBeInTheDocument()
   })
 
   it('renders the data browser route shell when authenticated', async () => {
@@ -124,6 +146,15 @@ describe('App shell', () => {
     navigateHash(`#/chat/${sessionSlug}`)
     expect(
       await screen.findByRole('textbox', { name: 'Message' }),
+    ).toBeInTheDocument()
+  })
+
+  it('renders the jobs detail route shell when authenticated', async () => {
+    render(App)
+    navigateHash('#/jobs/job-123')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Job detail' }),
     ).toBeInTheDocument()
   })
 

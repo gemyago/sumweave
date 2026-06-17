@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   listRawPayloads: vi.fn(),
   getRawPayloadDetail: vi.fn(),
   listCandleRawPayloads: vi.fn(),
+  createHistoricalDataBackfillJob: vi.fn(),
 }))
 
 let availabilityCounter = 0
@@ -42,6 +43,16 @@ vi.mock('../lib/data/data-api', async (importOriginal) => {
 vi.mock('../lib/auth/auth-store.svelte', () => ({
   authStore: { accessToken: faker.string.alphanumeric(32) },
 }))
+
+vi.mock('../lib/jobs/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/jobs/api')>()
+  return {
+    ...actual,
+    createSignalJobsApiForAuth: vi.fn(() => ({
+      createHistoricalDataBackfillJob: mocks.createHistoricalDataBackfillJob,
+    })),
+  }
+})
 
 function createDeferred<T>() {
   let resolve: (value: T) => void = () => undefined
@@ -208,6 +219,7 @@ describe('Data page', () => {
     mocks.listRawPayloads.mockReset()
     mocks.getRawPayloadDetail.mockReset()
     mocks.listCandleRawPayloads.mockReset()
+    mocks.createHistoricalDataBackfillJob.mockReset()
     mocks.listCandleAvailability.mockResolvedValue({ items: [] })
     mocks.listCandles.mockResolvedValue({ items: [] })
     mocks.listRawPayloads.mockResolvedValue({ items: [] })
@@ -375,6 +387,134 @@ describe('Data page', () => {
         }),
       )
     })
+  })
+
+  it('keeps browse-first and explicit candle loads read-only until start historical backfill is used', async () => {
+    const availability = makeAvailabilityItem()
+    mockAvailabilityResponse([availability])
+    mocks.listCandles.mockResolvedValue({ items: [] })
+
+    const user = userEvent.setup()
+    render(Data)
+
+    await screen.findByText(availability.symbol)
+    expect(mocks.createHistoricalDataBackfillJob).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Load candles' }))
+
+    expect(mocks.createHistoricalDataBackfillJob).not.toHaveBeenCalled()
+  })
+
+  it('validates explicit historical backfill action and does not submit when required fields are missing', async () => {
+    const user = userEvent.setup()
+    render(Data)
+    await screen.findByText('No normalized candle availability was found yet.')
+
+    await user.click(screen.getByRole('button', { name: 'Start historical backfill' }))
+
+    expect(screen.getByText('Venue is required.')).toBeInTheDocument()
+    expect(mocks.createHistoricalDataBackfillJob).not.toHaveBeenCalled()
+  })
+
+  it('starts an explicit historical backfill job from the current data scope and shows the created job link', async () => {
+    const user = userEvent.setup()
+    mocks.createHistoricalDataBackfillJob.mockResolvedValue({
+      id: 'job-123',
+      jobType: 'historical_raw_candle_backfill',
+      status: 'queued',
+      requester: { userId: 'user-1', source: 'operator', agentSessionId: '', agentRunId: '' },
+      input: {
+        ingestionRunId: 'ingest-1',
+        venue: 'hyperliquid-perps',
+        symbol: 'BTCUSD',
+        assetClass: 'future',
+        timeframe: '1m',
+        start: new Date('2026-06-15T12:00:00.000Z'),
+        end: new Date('2026-06-15T13:00:00.000Z'),
+        pageSize: 0,
+      },
+      createdAt: new Date('2026-06-15T11:59:00.000Z'),
+      updatedAt: new Date('2026-06-15T11:59:00.000Z'),
+      startedAt: null,
+      completedAt: null,
+      attemptCount: 0,
+      workerId: '',
+      lastAttemptAt: null,
+    })
+
+    render(Data)
+    await screen.findByText('No normalized candle availability was found yet.')
+
+    await fillRequiredFilters(user)
+    await user.click(screen.getByRole('button', { name: 'Start historical backfill' }))
+
+    await waitFor(() => {
+      expect(mocks.createHistoricalDataBackfillJob).toHaveBeenCalledWith({
+        body: {
+          venue: 'hyperliquid-perps',
+          symbol: 'BTCUSD',
+          assetClass: 'future',
+          timeframe: '1m',
+          start: new Date('2026-06-15T12:00:00.000Z'),
+          end: new Date('2026-06-15T13:00:00.000Z'),
+          pageSize: 500,
+        },
+      })
+    })
+
+    expect(await screen.findByText('Created job job-123 with status queued.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open created job' })).toHaveAttribute('href', '#/jobs/job-123')
+  })
+
+  it('allows zero backfill page size to use the backend default path', async () => {
+    const user = userEvent.setup()
+    mocks.createHistoricalDataBackfillJob.mockResolvedValue({
+      id: 'job-zero',
+      jobType: 'historical_raw_candle_backfill',
+      status: 'queued',
+      requester: { userId: 'user-1', source: 'operator', agentSessionId: '', agentRunId: '' },
+      input: {
+        ingestionRunId: 'ingest-zero',
+        venue: 'hyperliquid-perps',
+        symbol: 'BTCUSD',
+        assetClass: 'future',
+        timeframe: '1m',
+        start: new Date('2026-06-15T12:00:00.000Z'),
+        end: new Date('2026-06-15T13:00:00.000Z'),
+        pageSize: 0,
+      },
+      createdAt: new Date('2026-06-15T11:59:00.000Z'),
+      updatedAt: new Date('2026-06-15T11:59:00.000Z'),
+      startedAt: null,
+      completedAt: null,
+      attemptCount: 0,
+      workerId: '',
+      lastAttemptAt: null,
+    })
+
+    render(Data)
+    await screen.findByText('No normalized candle availability was found yet.')
+
+    await fillRequiredFilters(user)
+    await user.clear(screen.getByLabelText('Backfill page size'))
+    await user.type(screen.getByLabelText('Backfill page size'), '0')
+    await user.click(screen.getByRole('button', { name: 'Start historical backfill' }))
+
+    await waitFor(() => {
+      expect(mocks.createHistoricalDataBackfillJob).toHaveBeenCalledWith({
+        body: {
+          venue: 'hyperliquid-perps',
+          symbol: 'BTCUSD',
+          assetClass: 'future',
+          timeframe: '1m',
+          start: new Date('2026-06-15T12:00:00.000Z'),
+          end: new Date('2026-06-15T13:00:00.000Z'),
+          pageSize: 0,
+        },
+      })
+    })
+
+    expect(screen.queryByText('Backfill page size must be zero or a positive integer.')).not.toBeInTheDocument()
   })
 
   it('manual exact reads keep the matching availability entry selected when one exists', async () => {

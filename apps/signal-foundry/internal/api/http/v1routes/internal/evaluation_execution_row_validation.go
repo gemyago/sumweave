@@ -3,8 +3,8 @@
 package internal
 
 import (
-	. "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1routes/models"
 	"time"
+	. "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1routes/models"
 )
 
 // Below is to workaround unused imports.
@@ -23,8 +23,9 @@ func NewEvaluationExecutionRowValidator() FieldValidator[*EvaluationExecutionRow
 	validateStatus := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateEventTime := NewSimpleFieldValidator[*time.Time]()
-
+	validateEventTime := NewSimpleFieldValidator[*time.Time](
+	)
+	
 	return func(bindingCtx *BindingContext, value *EvaluationExecutionRow) {
 		validateCommandID(bindingCtx.Fork("commandId"), value.CommandID)
 		validateOrderID(bindingCtx.Fork("orderId"), value.OrderID)

@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
 	app "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
+	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/strategyassistant"
 	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/gemyago/signal-foundry/runtime/data"
@@ -28,6 +30,7 @@ const (
 	storageTypeDatabase     = "database"
 	postgresUndefinedTable  = "42P01"
 	agentProfilesTableToken = "agent_profiles"
+	platformAgentsWorkspace = "platform-agents"
 )
 
 type RuntimeDeps struct {
@@ -69,6 +72,7 @@ type RuntimeDeps struct {
 	DataIngestionService *data.IngestionService
 	DataReadService      *data.ReadService
 	DataLineageService   *data.LineageService
+	JobsService          *jobspkg.Service
 	StrategyWorkspace    *app.StrategyWorkspaceService
 	EvaluationWorkspace  *app.EvaluationWorkspaceService
 }
@@ -185,6 +189,10 @@ func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOp
 	if err := os.MkdirAll(agentTempDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create workspacefs agent temp directory: %w", err)
 	}
+	platformAgentsDir, err := bundledPlatformAgentsDir()
+	if err != nil {
+		return nil, err
+	}
 
 	registerOpts := []workspacefs.RegisterToolsOpt{
 		workspacefs.WithWorkspaces([]workspacefs.WorkspaceConfig{
@@ -192,6 +200,11 @@ func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOp
 				Identifier:  "agent-temp",
 				Description: "Agent can store temporary files here",
 				Path:        agentTempDir,
+			},
+			{
+				Identifier:  platformAgentsWorkspace,
+				Description: "Bundled platform-agent docs and skills live here",
+				Path:        platformAgentsDir,
 			},
 		}),
 		workspacefs.WithLogger(deps.RootLogger),
@@ -207,6 +220,15 @@ func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOp
 	return registerOpts, nil
 }
 
+func bundledPlatformAgentsDir() (string, error) {
+	_, currentFile, _, ok := goruntime.Caller(0)
+	if !ok {
+		return "", errors.New("resolve bundled platform-agents directory: caller unavailable")
+	}
+
+	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", "..", ".platform-agents")), nil
+}
+
 func registerStrategyAssistantTools(deps RuntimeDeps, toolsRegistry *agent.ToolsRegistry) error {
 	if deps.StrategyWorkspace == nil || deps.EvaluationWorkspace == nil {
 		return nil
@@ -216,6 +238,7 @@ func registerStrategyAssistantTools(deps RuntimeDeps, toolsRegistry *agent.Tools
 		Registry:            toolsRegistry,
 		DataRead:            deps.DataReadService,
 		DataLineage:         deps.DataLineageService,
+		JobsService:         deps.JobsService,
 		StrategyWorkspace:   deps.StrategyWorkspace,
 		EvaluationWorkspace: deps.EvaluationWorkspace,
 	}); registerErr != nil {

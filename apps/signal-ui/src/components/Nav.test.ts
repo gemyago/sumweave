@@ -44,6 +44,7 @@ describe('Nav', () => {
 
     expect(screen.getByRole('link', { name: 'Chat' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Data' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Jobs' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Providers' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Strategies' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Evaluations' })).toBeInTheDocument()

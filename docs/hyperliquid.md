@@ -12,6 +12,39 @@ Short reference for Signal Foundry venue integration planning.
 - Authenticated trading, account state, and wallet approval flows are not implemented yet.
 - The manual live runtime smoke is documented in [live-hyperliquid-smoke.md](./live-hyperliquid-smoke.md).
 
+## Market-data constraints
+
+- Hyperliquid `candleSnapshot` is a **recent-window** API, not a full historical archive.
+- The official docs state that only the most recent `5000` candles are available from `candleSnapshot`.
+- For `1m` candles, that means only about `3` days, `11` hours, and `20` minutes of history are available at any given time.
+- Older requests can return:
+  - a clipped partial response that starts at the earliest still-available candle
+  - an empty array when the full requested range is outside the retained window
+- The docs also state that Hyperliquid does **not** publish candle archives in its S3 historical-data bucket.
+- In practice, this means large retrospective `1m` backfills are impossible unless Signal Foundry already captured the data earlier or another vendor provides it.
+
+## Market-data implications for Signal Foundry
+
+- A historical backfill job can complete successfully while still returning only gaps if Hyperliquid returns no retained candles for that range.
+- This is a venue-data availability limitation, not necessarily an ingestion bug.
+- Before treating missing candles as a runtime defect, verify:
+  - exact venue, symbol, timeframe, and UTC range
+  - whether the request falls outside the recent retention window
+  - whether a coarser timeframe would still be available within the same date range
+- Practical workarounds are:
+  - run continuous local capture for the needed venue and timeframe
+  - use a coarser timeframe when it satisfies the workflow
+  - source old history from a third-party historical market-data vendor
+
+## Realtime and incremental reads
+
+- For realtime or near-realtime updates, Hyperliquid provides websocket subscriptions for:
+  - `candle`
+  - `trades`
+  - other market and account feeds
+- Websocket capture is the practical way to preserve deeper history than the REST recent window exposes.
+- REST historical reads should be treated as bounded recent catch-up, not as a substitute for a long-term archive.
+
 ## Account model and onboarding
 
 - Hyperliquid does **not** use a typical centralized-exchange API key and secret pair.
@@ -85,10 +118,13 @@ Short reference for Signal Foundry venue integration planning.
 ## Sources
 
 - API overview: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api>
+- Historical data: <https://hyperliquid.gitbook.io/hyperliquid-docs/historical-data>
+- Info endpoint: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint>
 - Account onboarding: <https://hyperliquid.gitbook.io/hyperliquid-docs/onboarding/how-to-start-trading>
 - Testnet faucet: <https://hyperliquid.gitbook.io/hyperliquid-docs/onboarding/testnet-faucet>
 - API wallets and nonces: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/nonces-and-api-wallets>
 - Exchange endpoint: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint>
 - Signing: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/signing>
 - Rate limits: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits>
+- Websocket subscriptions: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions>
 - Activation gas fee: <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/activation-gas-fee>

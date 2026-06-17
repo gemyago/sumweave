@@ -481,6 +481,106 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/jobs:
+    get:
+      summary: List durable historical ingestion jobs
+      operationId: listJobs
+      tags:
+        - jobs
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: array
+            items:
+              type: string
+        - in: query
+          name: jobType
+          schema:
+            type: array
+            items:
+              type: string
+        - in: query
+          name: source
+          schema:
+            type: array
+            items:
+              type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int64
+            default: 25
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Durable jobs page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/jobs/{jobId}:
+    get:
+      summary: Get one durable historical ingestion job
+      operationId: getJob
+      tags:
+        - jobs
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Durable historical ingestion job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobDetailResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/jobs/historical-data-backfills:
+    post:
+      summary: Create one queued historical data backfill job
+      operationId: createHistoricalDataBackfillJob
+      tags:
+        - jobs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHistoricalDataBackfillJobRequest"
+      responses:
+        '200':
+          description: Queued historical data backfill job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobDetailResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/v1/evaluations/backtests:
     get:
       summary: List persisted evaluation backtest runs
@@ -1605,6 +1705,220 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/EvaluationPortfolioSnapshotRow"
+    CreateHistoricalDataBackfillJobRequest:
+      type: object
+      required:
+        - venue
+        - symbol
+        - assetClass
+        - timeframe
+        - start
+        - end
+      properties:
+        idempotencyKey:
+          type: string
+        correlationId:
+          type: string
+        venue:
+          type: string
+        symbol:
+          type: string
+        assetClass:
+          type: string
+        timeframe:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        pageSize:
+          type: integer
+          format: int64
+    JobRequester:
+      type: object
+      required:
+        - userId
+        - source
+        - agentSessionId
+        - agentRunId
+      properties:
+        userId:
+          type: string
+        source:
+          type: string
+        agentSessionId:
+          type: string
+        agentRunId:
+          type: string
+    HistoricalDataBackfillJobInput:
+      type: object
+      required:
+        - ingestionRunId
+        - venue
+        - symbol
+        - assetClass
+        - timeframe
+        - start
+        - end
+        - pageSize
+      properties:
+        ingestionRunId:
+          type: string
+        venue:
+          type: string
+        symbol:
+          type: string
+        assetClass:
+          type: string
+        timeframe:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        pageSize:
+          type: integer
+          format: int64
+    JobTimeRange:
+      type: object
+      required:
+        - start
+        - end
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    HistoricalDataBackfillJobResult:
+      type: object
+      required:
+        - ingestionRunId
+        - persistedCount
+        - expectedCount
+        - missingIntervalCount
+        - duplicateNaturalKeyCount
+        - missingIntervalPreviewCap
+      properties:
+        ingestionRunId:
+          type: string
+        persistedCount:
+          type: integer
+          format: int64
+        expectedCount:
+          type: integer
+          format: int64
+        missingIntervalCount:
+          type: integer
+          format: int64
+        duplicateNaturalKeyCount:
+          type: integer
+          format: int64
+        firstPersistedStart:
+          type: string
+          format: date-time
+          nullable: true
+        lastPersistedEnd:
+          type: string
+          format: date-time
+          nullable: true
+        rawPayloadCount:
+          type: integer
+          format: int64
+          nullable: true
+        missingIntervalPreview:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobTimeRange"
+        missingIntervalPreviewCap:
+          type: integer
+          format: int64
+    JobError:
+      type: object
+      required:
+        - code
+        - summary
+        - details
+      properties:
+        code:
+          type: string
+        summary:
+          type: string
+        details:
+          type: string
+    JobSummary:
+      type: object
+      required:
+        - id
+        - jobType
+        - status
+        - requester
+        - input
+        - createdAt
+        - updatedAt
+        - attemptCount
+      properties:
+        id:
+          type: string
+        jobType:
+          type: string
+        status:
+          type: string
+        requester:
+          $ref: "#/components/schemas/JobRequester"
+        input:
+          $ref: "#/components/schemas/HistoricalDataBackfillJobInput"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        attemptCount:
+          type: integer
+          format: int64
+        result:
+          $ref: "#/components/schemas/HistoricalDataBackfillJobResult"
+        error:
+          $ref: "#/components/schemas/JobError"
+    JobDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/JobSummary"
+        - type: object
+          required:
+            - workerId
+          properties:
+            workerId:
+              type: string
+            lastAttemptAt:
+              type: string
+              format: date-time
+              nullable: true
+    JobListResponse:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobSummary"
+        nextCursor:
+          type: string
     Error:
       type: object
       required:

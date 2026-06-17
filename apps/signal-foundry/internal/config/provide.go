@@ -126,6 +126,14 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "dataLayer.database.autoMigrate").asBool(),
 		provideConfigValue(cfg, "dataLayer.rawPayloadBlobStore.path").asString(),
 
+		// jobs config
+		provideConfigValue(cfg, "jobs.worker.enabled").asBool(),
+		provideConfigValue(cfg, "jobs.worker.pollInterval").asDuration(),
+		provideConfigValue(cfg, "jobs.worker.maxAttempts").asInt(),
+		provideConfigValue(cfg, "jobs.worker.maxConcurrentHistoricalBackfills").asInt(),
+		provideConfigValue(cfg, "jobs.historicalBackfill.maxIntervals").asInt(),
+		provideConfigValue(cfg, "jobs.historicalBackfill.maxPageSize").asInt(),
+
 		// skills config
 		provideConfigValue(cfg, "skills.enabled").asBool(),
 		provideConfigValue(cfg, "skills.paths").asStringSlice(),

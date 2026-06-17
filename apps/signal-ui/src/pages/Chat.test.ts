@@ -81,6 +81,10 @@ function bytesStream(s: string): ReadableStream<Uint8Array> {
   })
 }
 
+function sseBlock(eventName: string, body: object): string {
+  return `event: ${eventName}\ndata: ${JSON.stringify(body)}\n\n`
+}
+
 describe('Chat', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
@@ -492,6 +496,275 @@ describe('Chat', () => {
     await waitFor(() => {
       expect(screen.getByText(toolName)).toBeInTheDocument()
     })
+  })
+
+  it('renders streaming tool calls in arrival order without splitting the active turn', async () => {
+    const sessionId = faker.string.uuid()
+    const firstToolId = faker.string.uuid()
+    const secondToolId = faker.string.uuid()
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(c) {
+            controller = c
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        },
+      ),
+    )
+
+    const { container } = render(Chat, { props: { params: {} } })
+    const user = userEvent.setup()
+    await waitForModelPickerReady()
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'do the thing')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    controller?.enqueue(
+      new TextEncoder().encode(sseBlock('sessionBound', { event: 'sessionBound', sessionId })),
+    )
+    controller?.enqueue(
+      new TextEncoder().encode(
+        sseBlock('agent', {
+          event: 'agent',
+          partial: false,
+          content: {
+            parts: [{ toolCall: { id: firstToolId, name: 'workspacefs_list_files', args: { path: '.' } } }],
+          },
+        }),
+      ),
+    )
+    controller?.enqueue(
+      new TextEncoder().encode(
+        sseBlock('agent', {
+          event: 'agent',
+          partial: false,
+          content: { parts: [{ text: 'Found the files you asked for.' }] },
+        }),
+      ),
+    )
+    controller?.enqueue(
+      new TextEncoder().encode(
+        sseBlock('agent', {
+          event: 'agent',
+          partial: false,
+          content: {
+            parts: [{ toolCall: { id: secondToolId, name: 'workspacefs_read_file', args: { path: './README.md' } } }],
+          },
+        }),
+      ),
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('workspacefs_list_files')).toBeInTheDocument()
+      expect(screen.getByText('Found the files you asked for.')).toBeInTheDocument()
+      expect(screen.getByText('workspacefs_read_file')).toBeInTheDocument()
+    })
+
+    const activeTurn = container.querySelector('.turn-activity.message-group')
+    expect(activeTurn).not.toBeNull()
+    expect(
+      [...(activeTurn?.children ?? [])]
+        .filter(
+          (element) =>
+            element.classList.contains('tool-call-block') || element.classList.contains('bubble'),
+        )
+        .map((element) =>
+          element.classList.contains('tool-call-block')
+            ? element.querySelector('.tool-call-name')?.textContent?.trim()
+            : element.textContent?.replace(/^Assistant:/, '').trim(),
+        ),
+    ).toEqual([
+      'workspacefs_list_files',
+      'Found the files you asked for.',
+      'workspacefs_read_file',
+    ])
+  })
+
+  it('shows explicit streaming progress while tool calls are still in flight', async () => {
+    const sessionId = faker.string.uuid()
+    const toolCallId = faker.string.uuid()
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(c) {
+            controller = c
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        },
+      ),
+    )
+
+    render(Chat, { props: { params: {} } })
+    const user = userEvent.setup()
+    await waitForModelPickerReady()
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'check status')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(screen.getByText('Thinking…')).toBeInTheDocument()
+
+    controller?.enqueue(
+      new TextEncoder().encode(sseBlock('sessionBound', { event: 'sessionBound', sessionId })),
+    )
+    controller?.enqueue(
+      new TextEncoder().encode(
+        sseBlock('agent', {
+          event: 'agent',
+          partial: false,
+          content: {
+            parts: [{ toolCall: { id: toolCallId, name: 'workspacefs_list_files', args: { path: '.' } } }],
+          },
+        }),
+      ),
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Working… 1 tool still running. More updates may still arrive.'),
+      ).toBeInTheDocument()
+    })
+
+    controller?.enqueue(
+      new TextEncoder().encode(
+        sseBlock('agent', {
+          event: 'agent',
+          partial: false,
+          content: {
+            role: 'user',
+            parts: [{ toolResult: { id: toolCallId, response: { items: [] } } }],
+          },
+        }),
+      ),
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Working… 1 tool finished. Waiting for the next step.'),
+      ).toBeInTheDocument()
+    })
+  })
+
+  it('marks consecutive replayed tool-only assistant rows for compact stacking', async () => {
+    const sessionId = faker.string.uuid()
+    const firstToolId = faker.string.uuid()
+    const secondToolId = faker.string.uuid()
+    const sse = [
+      sseBlock('sessionBound', { event: 'sessionBound', sessionId }),
+      sseBlock('sessionStatus', { event: 'sessionStatus', status: 'idle' }),
+      sseBlock('agent', {
+        event: 'agent',
+        partial: false,
+        content: {
+          role: 'model',
+          parts: [
+            { toolCall: { id: firstToolId, name: 'workspacefs_list_workspaces', args: {} } },
+          ],
+        },
+      }),
+      sseBlock('agent', {
+        event: 'agent',
+        partial: false,
+        content: {
+          role: 'user',
+          parts: [{ toolResult: { id: firstToolId, response: { workspaces: [] } } }],
+        },
+      }),
+      sseBlock('agent', {
+        event: 'agent',
+        partial: false,
+        content: {
+          role: 'model',
+          parts: [{ toolCall: { id: secondToolId, name: 'sf_jobs_list', args: { limit: 5 } } }],
+        },
+      }),
+      sseBlock('agent', {
+        event: 'agent',
+        partial: false,
+        content: {
+          role: 'user',
+          parts: [{ toolResult: { id: secondToolId, response: { jobs: [] } } }],
+        },
+      }),
+      sseBlock('done', { event: 'done' }),
+    ].join('')
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(bytesStream(sse), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+
+    const { container } = render(Chat, { props: { params: { sessionId } } })
+
+    await waitFor(() => {
+      expect(screen.getByText('workspacefs_list_workspaces')).toBeInTheDocument()
+      expect(screen.getByText('sf_jobs_list')).toBeInTheDocument()
+    })
+
+    const compactGroups = [...container.querySelectorAll('li.message-group.tool-call-only-group')]
+      .filter(
+        (group) =>
+          group.textContent?.includes('workspacefs_list_workspaces') ||
+          group.textContent?.includes('sf_jobs_list'),
+      )
+
+    expect(compactGroups).toHaveLength(2)
+    expect(compactGroups[0]?.nextElementSibling).toBe(compactGroups[1])
+  })
+
+  it('does not render an empty assistant bubble for replayed whitespace-only text parts before tool calls', async () => {
+    const sessionId = faker.string.uuid()
+    const toolCallId = faker.string.uuid()
+    const sse = [
+      sseBlock('sessionBound', { event: 'sessionBound', sessionId }),
+      sseBlock('sessionStatus', { event: 'sessionStatus', status: 'idle' }),
+      sseBlock('agent', {
+        event: 'agent',
+        partial: false,
+        content: {
+          role: 'model',
+          parts: [{ text: '\n\n  ' }, { toolCall: { id: toolCallId, name: 'sf_data_list_candle_availability', args: {} } }],
+        },
+      }),
+      sseBlock('agent', {
+        event: 'agent',
+        partial: false,
+        content: {
+          role: 'user',
+          parts: [{ toolResult: { id: toolCallId, response: { entries: [] } } }],
+        },
+      }),
+      sseBlock('done', { event: 'done' }),
+    ].join('')
+
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(bytesStream(sse), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+
+    const { container } = render(Chat, { props: { params: { sessionId } } })
+
+    await waitFor(() => {
+      expect(screen.getByText('sf_data_list_candle_availability')).toBeInTheDocument()
+    })
+
+    const assistantBubbles = [...container.querySelectorAll('.bubble.assistant')]
+      .map((bubble) => bubble.textContent?.replace(/^Assistant:/, '').trim() ?? '')
+      .filter(Boolean)
+
+    expect(assistantBubbles).toEqual([])
   })
 
   it('renders strategy and evaluation links from real backtest tool results', async () => {

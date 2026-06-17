@@ -65,6 +65,11 @@ Expected value: `"#/data"`
 
 ## Notes
 
+- Durable historical jobs smoke flow after login:
+  1. Open `#/data`, choose a bounded Hyperliquid futures scope, and use **Start historical backfill**.
+  2. Follow the created job link to `#/jobs/<jobId>` or open `#/jobs` and wait for `succeeded`.
+  3. Return to `#/data`, reload the same scope, and confirm candles are now visible.
+  4. Open `#/evaluations` and run the existing synchronous evaluation on the backfilled range.
 - Use `snapshot` when you need locators or page state. For a quick pass, the hash check above is the cleaner success signal.
 - Use `console` and `requests` for browser-side debugging.
 - Use `state-save auth.json` if you want to reuse a logged-in session.

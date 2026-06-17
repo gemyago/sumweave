@@ -167,7 +167,7 @@ func TestNewRuntime(t *testing.T) {
 	t.Run(
 		"registers strategy assistant tools before runner construction when app services are wired",
 		func(t *testing.T) {
-			container, bundledSkillsRoot := makeWiredRuntimeContainer(t)
+			container, bundledPlatformSkillsRoot := makeWiredRuntimeContainer(t)
 
 			var runtime *Runtime
 			var registry *agent.ToolsRegistry
@@ -192,13 +192,21 @@ func TestNewRuntime(t *testing.T) {
 
 			registeredNames := registeredToolNames(t, registry)
 			assert.Contains(t, registeredNames, "sf_data_list_candle_availability")
+			assert.Contains(t, registeredNames, "sf_jobs_start_historical_data_backfill")
+			assert.Contains(t, registeredNames, "sf_jobs_list")
+			assert.Contains(t, registeredNames, "sf_jobs_get")
 			assert.Contains(t, registeredNames, "sf_strategy_create_version")
 			assert.Contains(t, registeredNames, "sf_evaluation_run_backtest")
 			assert.Contains(t, registeredNames, "workspacefs_list_workspaces")
 			assert.Contains(t, registeredNames, "skills_list")
 			assert.Contains(t, registeredNames, "skills_read")
 
-			require.DirExists(t, bundledSkillsRoot)
+			require.DirExists(t, bundledPlatformSkillsRoot)
+			assert.ElementsMatch(
+				t,
+				[]string{"agent-temp", platformAgentsWorkspace},
+				listedWorkspaceIdentifiers(t, registry),
+			)
 		},
 	)
 
@@ -515,10 +523,10 @@ func TestNewRuntime(t *testing.T) {
 		assert.Contains(t, profile.Instructions, "No live trading")
 	})
 
-	t.Run("bundled strategy workflow skills are discoverable from the default bundled path", func(t *testing.T) {
-		_, bundledSkillsRoot := makeWiredRuntimeContainer(t)
+	t.Run("bundled platform-agent skills are discoverable from the default bundled path", func(t *testing.T) {
+		_, bundledPlatformSkillsRoot := makeWiredRuntimeContainer(t)
 
-		skillDirEntries, err := os.ReadDir(bundledSkillsRoot)
+		skillDirEntries, err := os.ReadDir(bundledPlatformSkillsRoot)
 		require.NoError(t, err)
 
 		skillNames := make([]string, 0, len(skillDirEntries))
@@ -530,14 +538,38 @@ func TestNewRuntime(t *testing.T) {
 		}
 
 		assert.Contains(t, skillNames, "strategy-research-loop")
+		assert.Contains(t, skillNames, "historical-data-jobs")
 		assert.Contains(t, skillNames, "backtest-critique")
 		assert.Contains(t, skillNames, "strategy-iteration")
+		assert.Contains(t, skillNames, "platform-info")
 
-		for _, skillName := range []string{"strategy-research-loop", "backtest-critique", "strategy-iteration"} {
-			content, readErr := os.ReadFile(filepath.Join(bundledSkillsRoot, skillName, "SKILL.md"))
+		for _, skillName := range []string{
+			"strategy-research-loop",
+			"historical-data-jobs",
+			"backtest-critique",
+			"strategy-iteration",
+			"platform-info",
+		} {
+			content, readErr := os.ReadFile(filepath.Join(bundledPlatformSkillsRoot, skillName, "SKILL.md"))
 			require.NoError(t, readErr)
+			if skillName == "platform-info" {
+				assert.Contains(t, string(content), "Workflow")
+				continue
+			}
 			assert.Contains(t, string(content), "Safety boundaries")
 		}
+
+		historicalContent, err := os.ReadFile(
+			filepath.Join(bundledPlatformSkillsRoot, "historical-data-jobs", "SKILL.md"),
+		)
+		require.NoError(t, err)
+		historicalText := strings.ToLower(string(historicalContent))
+		assert.Contains(t, historicalText, "sf_data_list_candle_availability")
+		assert.Contains(t, historicalText, "duplicate queued/running jobs")
+		assert.Contains(t, historicalText, "poll until terminal")
+		assert.Contains(t, historicalText, "synchronous evaluation")
+		assert.Contains(t, historicalText, "do not invent data")
+		assert.Contains(t, historicalText, "continuous ingestion is unavailable")
 	})
 
 	t.Run("skills enabled with duplicate skill names - runtime starts keeping first occurrence", func(t *testing.T) {
@@ -570,20 +602,23 @@ func makeWiredRuntimeContainer(t *testing.T) (*dig.Container, string) {
 	require.NoError(t, err)
 	appRoot := filepath.Clean(filepath.Join(cwd, ".."))
 	t.Chdir(appRoot)
-	bundledSkillsRoot := filepath.Clean(filepath.Join(appRoot, "..", "..", ".agents", "skills"))
+	bundledPlatformSkillsRoot := filepath.Clean(
+		filepath.Join(appRoot, "..", "..", ".platform-agents", "skills"),
+	)
 
 	cfg := config.New()
 	cfg.Set("env", "test")
 	cfg.Set("dataDir", t.TempDir())
 	cfg.Set("dataLayer.database.dsn", filepath.Join(t.TempDir(), "data-layer.db"))
 	cfg.Set("dataLayer.rawPayloadBlobStore.path", filepath.Join(t.TempDir(), "raw-payloads"))
+	cfg.Set("jobs.worker.pollInterval", "10ms")
 	cfg.Set("skills.enabled", true)
 
 	container := dig.New()
 	err = Setup(context.Background(), cfg, container)
 	require.NoError(t, err)
 
-	return container, bundledSkillsRoot
+	return container, bundledPlatformSkillsRoot
 }
 
 func registeredToolNames(t *testing.T, registry *agent.ToolsRegistry) []string {
@@ -600,6 +635,48 @@ func registeredToolNames(t *testing.T, registry *agent.ToolsRegistry) []string {
 	}
 
 	return names
+}
+
+func listedWorkspaceIdentifiers(t *testing.T, registry *agent.ToolsRegistry) []string {
+	t.Helper()
+
+	toolsField := reflect.ValueOf(registry).Elem().FieldByName("tools")
+	require.True(t, toolsField.IsValid())
+	toolsField = reflect.NewAt(toolsField.Type(), unsafe.Pointer(toolsField.UnsafeAddr())).Elem()
+
+	for index := range toolsField.Len() {
+		toolValue := reflect.ValueOf(toolsField.Index(index).Interface())
+		if toolValue.FieldByName("Name").String() != "workspacefs_list_workspaces" {
+			continue
+		}
+
+		handler := toolValue.FieldByName("Handler")
+		require.True(t, handler.IsValid())
+		require.False(t, handler.IsNil())
+
+		outputs := handler.Call([]reflect.Value{
+			reflect.ValueOf(&agent.ToolContext{Context: t.Context()}),
+			reflect.Zero(handler.Type().In(1)),
+		})
+		require.Len(t, outputs, 2)
+		require.True(t, outputs[1].IsNil())
+
+		workspacesField := outputs[0].FieldByName("Workspaces")
+		require.True(t, workspacesField.IsValid())
+
+		identifiers := make([]string, 0, workspacesField.Len())
+		for workspaceIndex := range workspacesField.Len() {
+			identifiers = append(
+				identifiers,
+				workspacesField.Index(workspaceIndex).FieldByName("Identifier").String(),
+			)
+		}
+
+		return identifiers
+	}
+
+	t.Fatalf("workspacefs_list_workspaces tool not found")
+	return nil
 }
 
 func dataStoreOpts(deps RuntimeDeps) data.DatabaseStoreOpts {

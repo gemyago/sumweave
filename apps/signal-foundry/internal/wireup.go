@@ -10,6 +10,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/config"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/infrastructure"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/lifecycle"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
@@ -75,6 +76,9 @@ func Setup(
 
 		// infrastructure
 		infrastructure.Register(rootCtx, container),
+
+		// jobs
+		jobs.Register(rootCtx, container),
 
 		// some setup after all components are registered
 		container.Invoke(telemetry.OTELSetup),

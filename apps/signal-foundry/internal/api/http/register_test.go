@@ -15,9 +15,12 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1controllers"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
+	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/httpapi"
 	rtstrategy "github.com/gemyago/signal-foundry/runtime/strategy"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -45,6 +48,10 @@ func (s *testReplayReadService) ReplayCandles(
 type testLineageBrowserService struct{}
 
 type testEvaluationWorkspaceService struct{}
+
+type registerTestCallerIdentity struct{ userID string }
+
+func (c *registerTestCallerIdentity) UserID() string { return c.userID }
 
 func (s *testLineageBrowserService) ListRawPayloadMetadata(
 	_ context.Context,
@@ -105,9 +112,12 @@ func (s *testEvaluationWorkspaceService) GetEvaluationEvidence(
 func TestSetupV1Routes(t *testing.T) {
 	fake := faker.New()
 
-	// passthroughMiddleware is an AuthMiddleware that passes all requests through.
+	// passthroughMiddleware is an AuthMiddleware that injects a test identity.
 	passthroughMiddleware := middleware.AuthMiddleware(func(next http.Handler) http.Handler {
-		return next
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := httpapi.ContextWithCallerIdentity(r.Context(), &registerTestCallerIdentity{userID: fake.UUID().V4()})
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
 	})
 
 	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler) {
@@ -135,6 +145,14 @@ func TestSetupV1Routes(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
+		jobsStore, err := jobspkg.NewStore(filepath.Join(t.TempDir(), "jobs.db"), jobspkg.StoreOpts{})
+		require.NoError(t, err)
+		require.NoError(t, jobsStore.AutoMigrate())
+		jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
+			Store:       jobsStore,
+			IDGenerator: ident.NewDefaultGenerator(),
+		})
+		require.NoError(t, err)
 
 		router := server.NewHTTPRouter(server.HTTPRouterDeps{
 			Middleware: func(h http.Handler) http.Handler { return h },
@@ -157,6 +175,10 @@ func TestSetupV1Routes(t *testing.T) {
 			LineageService: &testLineageBrowserService{},
 			AuthMiddleware: passthroughMiddleware,
 		})
+		jobsCtrl := v1controllers.NewJobsController(v1controllers.JobsControllerDeps{
+			JobsService:    jobsService,
+			AuthMiddleware: passthroughMiddleware,
+		})
 		strategiesCtrl := v1controllers.NewStrategiesController(
 			v1controllers.StrategiesControllerDeps{
 				StrategyWorkspaceService: strategyService,
@@ -174,6 +196,7 @@ func TestSetupV1Routes(t *testing.T) {
 			HealthController:      healthCtrl,
 			AuthController:        authCtrl,
 			DataController:        dataCtrl,
+			JobsController:        jobsCtrl,
 			StrategiesController:  strategiesCtrl,
 			EvaluationsController: evaluationsCtrl,
 			AuthMiddleware:        passthroughMiddleware,
@@ -238,6 +261,14 @@ func TestSetupV1Routes(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
+		jobsStore, err := jobspkg.NewStore(filepath.Join(t.TempDir(), "jobs.db"), jobspkg.StoreOpts{})
+		require.NoError(t, err)
+		require.NoError(t, jobsStore.AutoMigrate())
+		jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
+			Store:       jobsStore,
+			IDGenerator: ident.NewDefaultGenerator(),
+		})
+		require.NoError(t, err)
 		strategiesCtrl := v1controllers.NewStrategiesController(
 			v1controllers.StrategiesControllerDeps{
 				StrategyWorkspaceService: strategyService,
@@ -250,11 +281,16 @@ func TestSetupV1Routes(t *testing.T) {
 				AuthMiddleware:             passthroughMiddleware,
 			},
 		)
+		jobsCtrl := v1controllers.NewJobsController(v1controllers.JobsControllerDeps{
+			JobsService:    jobsService,
+			AuthMiddleware: passthroughMiddleware,
+		})
 
 		signalfoundryhttp.SetupV1Routes(signalfoundryhttp.V1RoutesDeps{
 			HealthController:      &v1controllers.HealthController{},
 			AuthController:        authCtrl,
 			DataController:        dataCtrl,
+			JobsController:        jobsCtrl,
 			StrategiesController:  strategiesCtrl,
 			EvaluationsController: evaluationsCtrl,
 			AuthMiddleware:        passthroughMiddleware,
@@ -284,6 +320,7 @@ func TestSetupV1Routes(t *testing.T) {
 			for _, target := range []string{
 				"/api/v1/data/candle-availability",
 				"/api/v1/data/candles?venue=hyperliquid-perps&symbol=BTCUSD&assetClass=crypto&timeframe=1m&start=2026-06-15T12:00:00Z&end=2026-06-15T13:00:00Z",
+				"/api/v1/jobs",
 			} {
 				req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
 				w := httptest.NewRecorder()

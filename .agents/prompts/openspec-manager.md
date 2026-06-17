@@ -516,9 +516,8 @@ Review goals:
 - Flag scattered related work across non-consecutive parent tasks as a planning issue.
 
 Chunking guidelines:
-- Default to one implementation sub-agent per parent task.
 - Default sequencing to sequential.
-- Only combine consecutive parent tasks when tightly related and low complexity.
+- Allow combining consecutive parent tasks if changes are small, or related. Otherwise prefer one implementation sub-agent per parent task.
 - Never combine non-consecutive parent tasks.
 - Do not split one parent task unless there is no simpler option.
 - Keep parent-task order intact.

@@ -22,6 +22,10 @@ Unless explicitly promoted by the user, everything outside that core package, Go
 ```
 <project layout>/
 ├── AGENTS.md                     # root AGENTS.md
+├── .platform-agents/
+│   └── skills/                   # bundled platform-internal agent skills
+├── .agents/
+│   └── skills/                   # generic repo-local agent skills
 ├── runtime/                      # core runtime and related infrastructure (go)
 │   └── AGENTS.md
 ├── apps/
@@ -107,6 +111,9 @@ The rules are:
 - Update project rules and conventions when user corrects the behavior of AI.
 - Each rule must aim to be a simple and clear one line (50-80 characters)
 - `docs/ARCHITECTURE.md` is the source of truth for product direction.
+- Keep platform-internal skills under `.platform-agents/skills`.
+- Keep generic repo-local skills under `.agents/skills`.
+- Platform runtime loads only `.platform-agents/skills`.
 - Treat template-derived code as reference unless adopted.
 - Prefer core Go, Go app, and UI as real product scope.
 - Keep package/release pipeline code removed unless explicitly revived.
@@ -117,6 +124,21 @@ The rules are:
 - OpenSpec manager work must be done by the requested sub-agent.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
+
+## Platform Agent Skills
+
+Platform-internal skills live under `.platform-agents/skills`.
+The in-product Signal Foundry agent loads only this platform-agent root.
+
+Current platform-agent skills:
+- `platform-info` — vendor/platform behavior, constraints, and bug-vs-vendor triage
+- `historical-data-jobs` — bounded historical backfill workflow for missing candles
+- `strategy-research-loop` — browse-first strategy research and evaluation loop
+- `strategy-iteration` — safe saved-strategy revision and re-evaluation
+- `backtest-critique` — evidence-first backtest review and failure analysis
+
+Generic repo-local skills may still live under `.agents/skills`, but they are not loaded
+by the in-product platform agent unless the app config is explicitly changed.
 
 ## Task Completion Protocol
 

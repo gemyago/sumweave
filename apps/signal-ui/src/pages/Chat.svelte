@@ -7,7 +7,9 @@
   import {
     applyAgentStreamEvent,
     applyIdleHistoryAgentEvent,
+    assistantMessageFromStreamState,
     createInitialAgentRunStreamState,
+    type AssistantTurnPart,
     type AgentRunStreamState,
     type ChatTranscriptMessage,
   } from '../lib/agentapi/streamState'
@@ -293,28 +295,13 @@
         if (event.event === 'done') {
           if (isActive) {
             // Live run finished: commit the streamed assistant turn to messages.
-            const assistantText = streamState.assistantTurnText
-            const toolCalls = streamState.toolCalls
-            if (assistantText || toolCalls.length > 0) {
-              const row: ChatTranscriptMessage = { role: 'assistant', text: assistantText }
-              if (toolCalls.length > 0) {
-                row.toolCalls = [...toolCalls]
-              }
+            const row = assistantMessageFromStreamState(streamState)
+            if (row) {
               messages = [...messages, row]
             }
           } else {
-            const tailText = replayAssistState.assistantTurnText
-            const tailToolCalls = replayAssistState.toolCalls
-            const tail: ChatTranscriptMessage[] =
-              tailText || tailToolCalls.length > 0
-                ? [
-                    {
-                      role: 'assistant',
-                      text: tailText,
-                      ...(tailToolCalls.length > 0 ? { toolCalls: [...tailToolCalls] } : {}),
-                    },
-                  ]
-                : []
+            const tailRow = assistantMessageFromStreamState(replayAssistState)
+            const tail: ChatTranscriptMessage[] = tailRow ? [tailRow] : []
             messages = [...messages, ...idleReplayRows, ...tail]
           }
           streamState = createInitialAgentRunStreamState({ sessionId, busy: false })
@@ -338,6 +325,57 @@
   function effectiveSessionId(): string | null {
     return params.sessionId ?? streamState.sessionId
   }
+
+  function messageParts(message: ChatTranscriptMessage): AssistantTurnPart[] {
+    return message.role === 'assistant' ? message.parts ?? [] : []
+  }
+
+  function allToolCallParts(parts: AssistantTurnPart[]): boolean {
+    return parts.length > 0 && parts.every((part) => part.kind === 'toolCall')
+  }
+
+  function isToolOnlyAssistantMessage(message: ChatTranscriptMessage): boolean {
+    return message.role === 'assistant' && allToolCallParts(messageParts(message))
+  }
+
+  function streamToolCallProgress(parts: AssistantTurnPart[]): {
+    total: number
+    pending: number
+    completed: number
+  } {
+    const toolCalls = parts.filter((part) => part.kind === 'toolCall')
+    const completed = toolCalls.filter((part) => part.response !== undefined).length
+    return {
+      total: toolCalls.length,
+      pending: toolCalls.length - completed,
+      completed,
+    }
+  }
+
+  function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+    return count === 1 ? singular : plural
+  }
+
+  const streamStatusText = $derived.by(() => {
+    if (!streamState.busy) {
+      return ''
+    }
+    if (streamState.assistantTurnParts.length === 0) {
+      return 'Thinking…'
+    }
+
+    const { total, pending, completed } = streamToolCallProgress(streamState.assistantTurnParts)
+    if (pending > 0) {
+      if (completed > 0) {
+        return `Working… ${pending} ${pluralize(pending, 'tool')} still running, ${completed} finished. More updates may still arrive.`
+      }
+      return `Working… ${pending} ${pluralize(pending, 'tool')} still running. More updates may still arrive.`
+    }
+    if (total > 0) {
+      return `Working… ${completed} ${pluralize(completed, 'tool')} finished. Waiting for the next step.`
+    }
+    return 'Working… Waiting for the next step.'
+  })
 
   function handleNewChat() {
     runOwningSessionId = null
@@ -420,13 +458,10 @@
         }
 
         if (event.event === 'done') {
-          const assistantText = streamState.assistantTurnText
-          const toolCalls = streamState.toolCalls
-          const row: ChatTranscriptMessage = { role: 'assistant', text: assistantText }
-          if (toolCalls.length > 0) {
-            row.toolCalls = [...toolCalls]
+          const row = assistantMessageFromStreamState(streamState)
+          if (row) {
+            messages = [...messages, row]
           }
-          messages = [...messages, row]
           streamState = createInitialAgentRunStreamState({
             sessionId: streamState.sessionId,
             busy: false,
@@ -517,11 +552,19 @@
       >
         <ul class="messages">
           {#each messages as m, i (i)}
-            <li class="message-group">
-              {#if m.text}
+            <li class="message-group" class:tool-call-only-group={isToolOnlyAssistantMessage(m)}>
+              {#if m.role === 'assistant' && messageParts(m).length > 0}
+                {#each messageParts(m) as part (part.id)}
+                  {#if part.kind === 'text'}
+                    <div class="bubble assistant"><span class="sr-only">Assistant:</span>{part.text}</div>
+                  {:else}
+                    <ToolCallBlock name={part.name} args={part.args} response={part.response} />
+                  {/if}
+                {/each}
+              {:else if m.text}
                 <div class="bubble" class:user={m.role === 'user'} class:assistant={m.role === 'assistant'}><span class="sr-only">{m.role === 'user' ? 'You' : 'Assistant'}:</span>{m.text}</div>
               {/if}
-              {#if m.toolCalls?.length}
+              {#if m.role !== 'assistant' && m.toolCalls?.length}
                 {#each m.toolCalls as tc (tc.id)}
                   <ToolCallBlock name={tc.name} args={tc.args} response={tc.response} />
                 {/each}
@@ -530,16 +573,19 @@
           {/each}
         </ul>
 
-        {#if streamState.busy && streamState.assistantTurnText}
-          <div class="turn-activity bubble assistant streaming" aria-busy="true"><span class="sr-only">Assistant:</span>{streamState.assistantTurnText}</div>
-        {:else if streamState.busy}
-          <div class="turn-activity bubble assistant streaming muted" aria-busy="true"><span class="sr-only">Assistant:</span>Thinking…</div>
-        {/if}
-
-        {#if streamState.toolCalls.length > 0}
-          <div class="turn-tool-calls">
-            {#each streamState.toolCalls as tc (tc.id)}
-              <ToolCallBlock name={tc.name} args={tc.args} response={tc.response} />
+        {#if streamState.busy}
+          <div
+            class="turn-activity message-group streaming"
+            class:tool-call-only-group={allToolCallParts(streamState.assistantTurnParts)}
+            aria-busy="true"
+          >
+            <p class="stream-status muted" role="status">{streamStatusText}</p>
+            {#each streamState.assistantTurnParts as part (part.id)}
+              {#if part.kind === 'text'}
+                <div class="bubble assistant"><span class="sr-only">Assistant:</span>{part.text}</div>
+              {:else}
+                <ToolCallBlock name={part.name} args={part.args} response={part.response} />
+              {/if}
             {/each}
           </div>
         {/if}
@@ -773,7 +819,6 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-8);
     flex-shrink: 0;
   }
 
@@ -783,15 +828,32 @@
     gap: var(--space-8);
   }
 
-  .turn-tool-calls {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-    flex-shrink: 0;
+  .message-group + .message-group {
+    margin-top: var(--space-8);
+  }
+
+  .message-group.tool-call-only-group + .message-group.tool-call-only-group {
+    margin-top: var(--space-4);
   }
 
   .turn-activity {
     flex-shrink: 0;
+  }
+
+  .messages + .turn-activity {
+    margin-top: var(--space-8);
+  }
+
+  .stream-status {
+    margin: 0;
+    align-self: flex-start;
+    font-size: var(--font-size-caption);
+    line-height: 1.5;
+  }
+
+  .stream-status.muted {
+    color: var(--text);
+    font-style: italic;
   }
 
   .turn-error {
@@ -824,12 +886,6 @@
     border: none;
     background: transparent;
     color: var(--text);
-  }
-
-  .bubble.muted {
-    color: var(--text);
-    font-style: italic;
-    font-weight: 400;
   }
 
   .model-banner {

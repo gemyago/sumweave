@@ -5,6 +5,7 @@ import (
 	"time"
 
 	app "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
+	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 )
 
 const (
@@ -657,4 +658,118 @@ type GetBacktestEvidenceResponse struct {
 	Error        *ToolError          `json:"error,omitempty"`
 	Truncation   *ToolTruncation     `json:"truncation,omitempty"`
 	NextStepHint string              `json:"nextStepHint,omitempty"`
+}
+
+type StartHistoricalDataBackfillRequest struct {
+	IdempotencyKey string    `json:"idempotencyKey,omitempty"`
+	Venue          string    `json:"venue"`
+	Symbol         string    `json:"symbol"`
+	AssetClass     string    `json:"assetClass"`
+	Timeframe      string    `json:"timeframe"`
+	Start          time.Time `json:"start"`
+	End            time.Time `json:"end"`
+	PageSize       int       `json:"pageSize,omitempty"`
+}
+
+type JobRequester struct {
+	UserID         string `json:"userId,omitempty"`
+	Source         string `json:"source"`
+	AgentSessionID string `json:"agentSessionId,omitempty"`
+	AgentRunID     string `json:"agentRunId,omitempty"`
+}
+
+type HistoricalDataBackfillJobInput struct {
+	IngestionRunID string    `json:"ingestionRunId"`
+	Venue          string    `json:"venue"`
+	Symbol         string    `json:"symbol"`
+	AssetClass     string    `json:"assetClass"`
+	Timeframe      string    `json:"timeframe"`
+	Start          time.Time `json:"start"`
+	End            time.Time `json:"end"`
+	PageSize       int       `json:"pageSize"`
+}
+
+type JobTimeRange struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+}
+
+type HistoricalDataBackfillJobResult struct {
+	IngestionRunID            string         `json:"ingestionRunId"`
+	PersistedCount            int            `json:"persistedCount"`
+	ExpectedCount             int            `json:"expectedCount"`
+	MissingIntervalCount      int            `json:"missingIntervalCount"`
+	DuplicateNaturalKeyCount  int            `json:"duplicateNaturalKeyCount"`
+	FirstPersistedStart       *time.Time     `json:"firstPersistedStart,omitempty"`
+	LastPersistedEnd          *time.Time     `json:"lastPersistedEnd,omitempty"`
+	RawPayloadCount           *int           `json:"rawPayloadCount,omitempty"`
+	MissingIntervalPreview    []JobTimeRange `json:"missingIntervalPreview,omitempty"`
+	MissingIntervalPreviewCap int            `json:"missingIntervalPreviewCap"`
+}
+
+type JobExecutionError struct {
+	Code    string `json:"code"`
+	Summary string `json:"summary"`
+	Details string `json:"details,omitempty"`
+}
+
+type JobSummary struct {
+	ID           string                           `json:"id"`
+	JobType      string                           `json:"jobType"`
+	Status       string                           `json:"status"`
+	Requester    JobRequester                     `json:"requester"`
+	Input        HistoricalDataBackfillJobInput   `json:"input"`
+	Result       *HistoricalDataBackfillJobResult `json:"result,omitempty"`
+	Error        *JobExecutionError               `json:"error,omitempty"`
+	CreatedAt    time.Time                        `json:"createdAt"`
+	UpdatedAt    time.Time                        `json:"updatedAt"`
+	StartedAt    *time.Time                       `json:"startedAt,omitempty"`
+	CompletedAt  *time.Time                       `json:"completedAt,omitempty"`
+	AttemptCount int                              `json:"attemptCount"`
+}
+
+type JobDetail struct {
+	JobSummary
+
+	WorkerID      string     `json:"workerId,omitempty"`
+	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
+}
+
+type StartHistoricalDataBackfillResponse struct {
+	Job          *JobDetail `json:"job,omitempty"`
+	Error        *ToolError `json:"error,omitempty"`
+	NextStepHint string     `json:"nextStepHint,omitempty"`
+}
+
+type ListJobsRequest struct {
+	Statuses []string `json:"statuses,omitempty"`
+	Sources  []string `json:"sources,omitempty"`
+	Limit    int      `json:"limit,omitempty"`
+	Cursor   string   `json:"cursor,omitempty"`
+}
+
+type ListJobsResponse struct {
+	Items        []JobSummary    `json:"items"`
+	Error        *ToolError      `json:"error,omitempty"`
+	Truncation   *ToolTruncation `json:"truncation,omitempty"`
+	NextStepHint string          `json:"nextStepHint,omitempty"`
+}
+
+type GetJobRequest struct {
+	JobID string `json:"jobId"`
+}
+
+type GetJobResponse struct {
+	Job          *JobDetail `json:"job,omitempty"`
+	Error        *ToolError `json:"error,omitempty"`
+	NextStepHint string     `json:"nextStepHint,omitempty"`
+}
+
+func mapJobRequester(requester jobspkg.Requester) JobRequester {
+	return JobRequester{
+		UserID:         requester.UserID,
+		Source:         string(requester.Source),
+		AgentSessionID: requester.AgentSessionID,
+		AgentRunID:     requester.AgentRunID,
+	}
 }
