@@ -13,6 +13,7 @@
   } from '../lib/agentapi/streamState'
   import {
     isStreamEvent,
+    type AgentProfileResponse,
     type AgentRunRequest,
     type ModelInfo,
     type SessionMetadata,
@@ -32,6 +33,8 @@
   )
 
   const MODEL_STORAGE_KEY = 'selectedModel'
+  const PROFILE_STORAGE_KEY = 'selectedProfile'
+  const STRATEGY_ASSISTANT_PROFILE_NAME = 'strategy-assistant'
 
   let { params = {} } = $props<{ params?: { sessionId?: string | null } }>()
 
@@ -44,6 +47,10 @@
   /** `loading` until the first `listModels` attempt finishes. */
   let modelsLoadStatus = $state<'loading' | 'success' | 'empty' | 'error'>('loading')
   let modelsListErrorMessage = $state<string | null>(null)
+  let availableProfiles = $state<AgentProfileResponse[]>([])
+  let selectedProfileName = $state<string>(localStorage.getItem(PROFILE_STORAGE_KEY) ?? '')
+  let profilesLoadStatus = $state<'loading' | 'success' | 'error'>('loading')
+  let profilesListErrorMessage = $state<string | null>(null)
 
   let sessionList = $state<SessionMetadata[]>([])
   /** Narrow viewport: sidebar starts collapsed; toggle opens it. */
@@ -121,6 +128,56 @@
       cancelled = true
     }
   })
+
+  $effect(() => {
+    const api = agentApi
+    let cancelled = false
+    profilesLoadStatus = 'loading'
+    profilesListErrorMessage = null
+    api
+      .listAgentProfiles()
+      .then((res) => {
+        if (cancelled) {
+          return
+        }
+        availableProfiles = res.profiles
+        profilesLoadStatus = 'success'
+        const stored = localStorage.getItem(PROFILE_STORAGE_KEY)
+        const valid = res.profiles.find((profile) => profile.name === stored)
+        if (valid) {
+          selectedProfileName = valid.name
+          return
+        }
+
+        const recommended = res.profiles.find(
+          (profile) => profile.name === STRATEGY_ASSISTANT_PROFILE_NAME,
+        )
+        selectedProfileName = recommended?.name ?? ''
+        if (recommended) {
+          localStorage.setItem(PROFILE_STORAGE_KEY, recommended.name)
+          return
+        }
+        localStorage.removeItem(PROFILE_STORAGE_KEY)
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return
+        }
+        profilesLoadStatus = 'error'
+        profilesListErrorMessage =
+          err instanceof Error ? err.message : 'Failed to load execution profiles'
+        availableProfiles = []
+        selectedProfileName = ''
+        localStorage.removeItem(PROFILE_STORAGE_KEY)
+      })
+    return () => {
+      cancelled = true
+    }
+  })
+
+  const selectedProfile = $derived.by(
+    () => availableProfiles.find((profile) => profile.name === selectedProfileName) ?? null,
+  )
 
   const canSendMessage = $derived.by(() => {
     if (modelsLoadStatus !== 'success' || availableModels.length === 0) {
@@ -308,6 +365,7 @@
     runOwningSessionId = sessionId
     const body: AgentRunRequest = {
       model: selectedModel,
+      ...(selectedProfileName ? { profileName: selectedProfileName } : {}),
       message: { parts: [{ text }] },
     }
 
@@ -502,6 +560,16 @@
         </p>
       {/if}
 
+      {#if profilesLoadStatus === 'error'}
+        <p class="profile-banner muted" role="status">{profilesListErrorMessage ?? 'Execution profiles unavailable. Using direct model selection only.'}</p>
+      {:else if selectedProfile?.name === STRATEGY_ASSISTANT_PROFILE_NAME}
+        <p class="profile-banner" role="status">
+          <strong>{selectedProfile.displayName || 'Strategy assistant'}</strong> is active.
+          Follow the bounded loop: data discovery → validate/save → evaluate → evidence critique.
+          No live trading or readiness claims.
+        </p>
+      {/if}
+
       <form class="composer" onsubmit={handleSubmit}>
         <label class="sr-only" for="chat-input">Message</label>
         <textarea
@@ -515,6 +583,29 @@
         ></textarea>
         <div class="composer-bar">
           <div class="composer-bar-start">
+            {#if profilesLoadStatus === 'success'}
+              <div class="model-picker">
+                <label class="sr-only" for="profile-select">Execution profile</label>
+                <select
+                  id="profile-select"
+                  class="model-select"
+                  bind:value={selectedProfileName}
+                  onchange={() => {
+                    if (selectedProfileName) {
+                      localStorage.setItem(PROFILE_STORAGE_KEY, selectedProfileName)
+                      return
+                    }
+                    localStorage.removeItem(PROFILE_STORAGE_KEY)
+                  }}
+                  disabled={sendDisabled}
+                >
+                  <option value="">Direct model</option>
+                  {#each availableProfiles as profile (profile.name)}
+                    <option value={profile.name}>{profile.displayName || profile.name}</option>
+                  {/each}
+                </select>
+              </div>
+            {/if}
             {#if modelsLoadStatus === 'success' && availableModels.length > 0}
               <div class="model-picker">
                 <label class="sr-only" for="model-select">Model</label>
@@ -748,6 +839,18 @@
     line-height: 1.5;
   }
 
+  .profile-banner {
+    flex-shrink: 0;
+    margin: 0 0 var(--space-8);
+    font-size: var(--font-size-caption);
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .profile-banner.muted {
+    font-style: italic;
+  }
+
   .model-banner.muted {
     color: var(--text);
     font-style: italic;
@@ -779,6 +882,8 @@
     min-width: 0;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-8);
   }
 
   .model-picker {

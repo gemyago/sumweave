@@ -1,24 +1,34 @@
 package internal
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	app "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/strategyassistant"
 	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/httpapi"
 	"github.com/gemyago/signal-foundry/runtime/venueedge"
 	"github.com/gemyago/signal-foundry/tools/skills"
 	"github.com/gemyago/signal-foundry/tools/workspacefs"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/dig"
 )
 
-const storageTypeDatabase = "database"
+const (
+	storageTypeDatabase     = "database"
+	postgresUndefinedTable  = "42P01"
+	agentProfilesTableToken = "agent_profiles"
+)
 
 type RuntimeDeps struct {
 	dig.In
@@ -59,6 +69,8 @@ type RuntimeDeps struct {
 	DataIngestionService *data.IngestionService
 	DataReadService      *data.ReadService
 	DataLineageService   *data.LineageService
+	StrategyWorkspace    *app.StrategyWorkspaceService
+	EvaluationWorkspace  *app.EvaluationWorkspaceService
 }
 
 type Runtime struct {
@@ -195,6 +207,56 @@ func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOp
 	return registerOpts, nil
 }
 
+func registerStrategyAssistantTools(deps RuntimeDeps, toolsRegistry *agent.ToolsRegistry) error {
+	if deps.StrategyWorkspace == nil || deps.EvaluationWorkspace == nil {
+		return nil
+	}
+
+	if registerErr := strategyassistant.RegisterTools(strategyassistant.RegisterDeps{
+		Registry:            toolsRegistry,
+		DataRead:            deps.DataReadService,
+		DataLineage:         deps.DataLineageService,
+		StrategyWorkspace:   deps.StrategyWorkspace,
+		EvaluationWorkspace: deps.EvaluationWorkspace,
+	}); registerErr != nil {
+		return fmt.Errorf("register strategy assistant tools: %w", registerErr)
+	}
+
+	return nil
+}
+
+func buildRunnerOpts(deps RuntimeDeps, toolsRegistry *agent.ToolsRegistry) ([]agent.RunnerOpt, error) {
+	storageOpt := agent.WithFileSystemStorage(deps.DataDir)
+	if deps.AgentRuntimeStorageType == storageTypeDatabase {
+		storageOpt = agent.WithDatabaseStorage(deps.AgentRuntimeDatabaseDSN)
+	}
+
+	runnerOpts := []agent.RunnerOpt{
+		agent.WithLogger(deps.RootLogger),
+		storageOpt,
+		agent.WithDatabaseTablePrefix(deps.AgentRuntimeDatabaseTablePrefix),
+		agent.WithToolsRegistry(toolsRegistry),
+	}
+	if !deps.SkillsEnabled {
+		return runnerOpts, nil
+	}
+
+	skillSet, err := skills.New(
+		deps.SkillsPaths,
+		skills.WithLogger(deps.RootLogger),
+		skills.WithMaxSkillBytes(deps.SkillsMaxSkillBytes),
+		skills.WithMaxCatalogEntries(deps.SkillsMaxCatalogEntries),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build skills catalog: %w", err)
+	}
+
+	skillSet.RegisterTools(toolsRegistry)
+	runnerOpts = append(runnerOpts, agent.WithSystemPromptFragments(skillSet.BuildSystemPromptFragments()...))
+
+	return runnerOpts, nil
+}
+
 func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 	toolsRegistry := deps.ToolsRegistry
 	registerOpts, err := workspacefsRegisterOptions(deps)
@@ -204,6 +266,9 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 
 	if registerErr := workspacefs.RegisterTools(toolsRegistry, registerOpts...); registerErr != nil {
 		return nil, fmt.Errorf("register workspacefs tools: %w", registerErr)
+	}
+	if err = registerStrategyAssistantTools(deps, toolsRegistry); err != nil {
+		return nil, err
 	}
 
 	services, err := newRuntimeServices(deps)
@@ -221,29 +286,9 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 		return nil, err
 	}
 
-	storageOpt := agent.WithFileSystemStorage(deps.DataDir)
-	if deps.AgentRuntimeStorageType == storageTypeDatabase {
-		storageOpt = agent.WithDatabaseStorage(deps.AgentRuntimeDatabaseDSN)
-	}
-
-	runnerOpts := []agent.RunnerOpt{
-		agent.WithLogger(deps.RootLogger),
-		storageOpt,
-		agent.WithDatabaseTablePrefix(deps.AgentRuntimeDatabaseTablePrefix),
-		agent.WithToolsRegistry(toolsRegistry),
-	}
-	if deps.SkillsEnabled {
-		skillSet, skillsErr := skills.New(
-			deps.SkillsPaths,
-			skills.WithLogger(deps.RootLogger),
-			skills.WithMaxSkillBytes(deps.SkillsMaxSkillBytes),
-			skills.WithMaxCatalogEntries(deps.SkillsMaxCatalogEntries),
-		)
-		if skillsErr != nil {
-			return nil, fmt.Errorf("build skills catalog: %w", skillsErr)
-		}
-		skillSet.RegisterTools(toolsRegistry)
-		runnerOpts = append(runnerOpts, agent.WithSystemPromptFragments(skillSet.BuildSystemPromptFragments()...))
+	runnerOpts, err := buildRunnerOpts(deps, toolsRegistry)
+	if err != nil {
+		return nil, err
 	}
 
 	runner, err := agent.NewRunner(
@@ -270,6 +315,9 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 			return nil, err
 		}
 	}
+	if err = ensureStrategyAssistantProfile(context.Background(), services.agentProfilesSvc); err != nil {
+		return nil, err
+	}
 
 	httpHandler, err := httpapi.NewHandler(httpapi.HandlerArgs{
 		Runner:                 runner,
@@ -292,4 +340,48 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 		VenueIngestionFlow:   venueIngestionFlow,
 		HyperliquidRecorder:  hyperliquidRecorder,
 	}, nil
+}
+
+func ensureStrategyAssistantProfile(ctx context.Context, svc agent.AgentProfilesService) error {
+	_, err := svc.Get(ctx, strategyassistant.StrategyAssistantProfileName)
+	if err == nil {
+		return nil
+	}
+	if isMissingAgentProfilesSchemaError(err) {
+		return nil
+	}
+	if !errors.Is(err, agent.ErrAgentProfileNotFound) {
+		return fmt.Errorf("get strategy assistant profile: %w", err)
+	}
+
+	_, err = svc.Create(ctx, strategyassistant.ProfileCreateParams(
+		strategyassistant.StrategyAssistantProfileSeedDefaultModel,
+	))
+	if err == nil ||
+		errors.Is(err, agent.ErrAgentProfileNameConflict) ||
+		isMissingAgentProfilesSchemaError(err) {
+		return nil
+	}
+
+	return fmt.Errorf("create strategy assistant profile: %w", err)
+}
+
+func isMissingAgentProfilesSchemaError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, agentProfilesTableToken) {
+		return false
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == postgresUndefinedTable
+	}
+
+	return strings.Contains(message, strings.ToLower(postgresUndefinedTable)) ||
+		strings.Contains(message, "no such table") ||
+		(strings.Contains(message, "relation") && strings.Contains(message, "does not exist"))
 }

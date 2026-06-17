@@ -8,12 +8,13 @@ import {
   buildAgentRunWithToolCallSseStream,
   buildReadSessionSseSampleStream,
 } from '../lib/agentapi/testFixtures'
-import type { ModelInfo } from '../lib/agentapi/types'
+import type { AgentProfileResponse, ModelInfo } from '../lib/agentapi/types'
 
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   push: vi.fn(),
   listModels: vi.fn(),
+  listAgentProfiles: vi.fn(),
   listSessions: vi.fn(),
 }))
 
@@ -32,7 +33,12 @@ vi.mock('../lib/agentapi/client', async (importOriginal) => {
     ...actual,
     createSignalAgentApi: vi.fn((params: Parameters<typeof actual.createSignalAgentApi>[0]) => {
       const api = actual.createSignalAgentApi(params)
-      return { ...api, listModels: mocks.listModels, listSessions: mocks.listSessions }
+      return {
+        ...api,
+        listModels: mocks.listModels,
+        listAgentProfiles: mocks.listAgentProfiles,
+        listSessions: mocks.listSessions,
+      }
     }),
   }
 })
@@ -42,6 +48,20 @@ function makeModelInfo(overrides?: Partial<ModelInfo>): ModelInfo {
     provider: faker.word.noun().toLowerCase(),
     name: faker.word.noun().toLowerCase(),
     displayName: faker.company.name(),
+    ...overrides,
+  }
+}
+
+function makeAgentProfile(overrides?: Partial<AgentProfileResponse>): AgentProfileResponse {
+  return {
+    name: faker.helpers.slugify(faker.word.noun()).toLowerCase(),
+    displayName: faker.company.name(),
+    role: faker.person.jobTitle(),
+    instructions: faker.lorem.sentences(2),
+    toolRefs: [],
+    executionSettings: { defaultModel: 'provider/model' },
+    createdAt: faker.date.recent().toISOString(),
+    updatedAt: faker.date.recent().toISOString(),
     ...overrides,
   }
 }
@@ -68,6 +88,8 @@ describe('Chat', () => {
     mocks.push.mockReset()
     mocks.listModels.mockReset()
     mocks.listModels.mockResolvedValue({ models: [makeModelInfo()] })
+    mocks.listAgentProfiles.mockReset()
+    mocks.listAgentProfiles.mockResolvedValue({ profiles: [] })
     mocks.listSessions.mockReset()
     mocks.listSessions.mockResolvedValue({ sessions: [], total: 0 })
     localStorage.clear()
@@ -472,6 +494,54 @@ describe('Chat', () => {
     })
   })
 
+  it('renders strategy and evaluation links from real backtest tool results', async () => {
+    const sessionId = faker.string.uuid()
+    const toolCallId = faker.string.uuid()
+    const strategyId = faker.string.uuid()
+    const runId = faker.string.uuid()
+    const sse = buildAgentRunWithToolCallSseStream({
+      sessionId,
+      toolCallId,
+      toolName: 'sf_evaluation_run_backtest',
+      toolArgs: {
+        strategyId,
+        strategyVersion: 'v1',
+        start: '2026-01-01T00:00:00Z',
+        end: '2026-01-02T00:00:00Z',
+        quantity: 1,
+      },
+      toolResponse: {
+        run: {
+          runId,
+          status: 'completed',
+          createdAt: '2026-01-02T00:00:00Z',
+          updatedAt: '2026-01-02T00:00:00Z',
+        },
+      },
+    })
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      new Response(bytesStream(sse), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+
+    render(Chat, { props: { params: {} } })
+    const user = userEvent.setup()
+    await waitForModelPickerReady()
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'run it')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByRole('link', { name: /Strategy /i })).toHaveAttribute(
+      'href',
+      `#/strategies/${encodeURIComponent(strategyId)}/v1`,
+    )
+    expect(await screen.findByRole('link', { name: /Evaluation /i })).toHaveAttribute(
+      'href',
+      `#/evaluations/${encodeURIComponent(runId)}`,
+    )
+  })
+
   it('blocks send when no models and links to Providers', async () => {
     mocks.listModels.mockResolvedValue({ models: [] })
     render(Chat, { props: { params: {} } })
@@ -529,7 +599,7 @@ describe('Chat', () => {
       })
       const select = screen.getByRole('combobox', { name: 'Model' })
       expect(select).toHaveDisplayValue(model1.displayName!)
-      const options = screen.getAllByRole('option')
+      const options = select.querySelectorAll('option')
       expect(options).toHaveLength(2)
     })
 
@@ -588,6 +658,52 @@ describe('Chat', () => {
         expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument()
       })
       expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue(savedModel)
+    })
+  })
+
+  describe('execution profile picker', () => {
+    it('auto-selects the strategy assistant profile when available', async () => {
+      mocks.listAgentProfiles.mockResolvedValue({
+        profiles: [
+          makeAgentProfile({
+            name: 'strategy-assistant',
+            displayName: 'Strategy assistant',
+          }),
+        ],
+      })
+
+      render(Chat, { props: { params: {} } })
+
+      const select = await screen.findByRole('combobox', { name: 'Execution profile' })
+      expect(select).toHaveValue('strategy-assistant')
+      expect(screen.getByText(/data discovery → validate\/save → evaluate → evidence critique/i)).toBeInTheDocument()
+    })
+
+    it('submit sends the selected execution profile name in the request body', async () => {
+      mocks.listAgentProfiles.mockResolvedValue({
+        profiles: [makeAgentProfile({ name: 'strategy-assistant', displayName: 'Strategy assistant' })],
+      })
+      const sessionId = faker.string.uuid()
+      const sse = buildAgentRunSseSampleStream({ sessionId, partialText: 'a', fullText: 'ab' })
+      const fetchMock = vi.mocked(globalThis.fetch).mockResolvedValue(
+        new Response(bytesStream(sse), {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      )
+
+      render(Chat, { props: { params: {} } })
+      const user = userEvent.setup()
+
+      await screen.findByRole('combobox', { name: 'Execution profile' })
+      await waitForModelPickerReady()
+      await user.type(screen.getByRole('textbox', { name: 'Message' }), 'hello')
+      await user.click(screen.getByRole('button', { name: 'Send' }))
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      const firstArg = fetchMock.mock.calls[0][0]
+      const sentBody = await (firstArg as Request).json()
+      expect(sentBody.profileName).toBe('strategy-assistant')
     })
   })
 

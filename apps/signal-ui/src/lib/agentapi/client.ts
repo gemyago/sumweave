@@ -7,6 +7,7 @@
 import createClient from 'openapi-fetch'
 import type { paths } from './agentapi.generated'
 import type {
+  AgentProfileListResponse,
   AgentRunRequest,
   CreateProviderRequest,
   ModelListResponse,
@@ -53,6 +54,7 @@ export interface SignalAgentApi {
   }): Promise<ProviderResponse>
   deleteProvider(params: { providerName: string }): Promise<void>
   listModels(): Promise<ModelListResponse>
+  listAgentProfiles(): Promise<AgentProfileListResponse>
   listSessions(params: { limit: number; offset?: number }): Promise<SessionListResponse>
 }
 
@@ -130,6 +132,12 @@ export function createSignalAgentApi(params: {
     async listModels() {
       const { data, error } = await client.GET('/models')
       if (error) throwJsonApiError('GET /models', error)
+      return data!
+    },
+
+    async listAgentProfiles() {
+      const { data, error } = await client.GET('/agent-profiles')
+      if (error) throwJsonApiError('GET /agent-profiles', error)
       return data!
     },
 

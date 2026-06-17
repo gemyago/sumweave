@@ -76,7 +76,7 @@
 - **Desktop:** Rail’s **right border** spans the **full height** of the chat shell.
 - **Main column:** Header (“Chat” page title), then **chat column** in order:
   - **Transcript strip** — flex fills space between header and composer; **overflow-y** only on this strip.
-  - **Turn activity** → optional **profile availability banner** (loading, error, or empty) → **composer** (textarea, then **profile** `<select>` left + **Send** right on one row) **pinned to the bottom** of the viewport.
+  - **Turn activity** → optional **model/profile banners** (loading, error, empty, or strategy-assistant guidance) → **composer** (textarea, then **execution profile** `<select>` + **model** `<select>` on the left and **Send** on the right) **pinned to the bottom** of the viewport.
 - **Message chrome:** User turns — bordered, raised bubble, **end**-aligned. Assistant turns — plain body text on default surface (no card), including streaming lines.
 - **Composer:** Shown **by default** on `/chat` even when the URL has no `sessionId` (implicit new chat). **Enter** submits the message; **Shift+Enter** inserts a newline in the textarea.
 
@@ -93,9 +93,9 @@
 | Streaming | `streamState.busy` | Extra assistant line: live text (incremental `agent` SSE chunks concatenated) or "Thinking…". |
 | Error | `runError` | Alert in the turn-activity strip (scroll region), directly above composer. |
 | Send off | Empty input or `sendDisabled` | Send disabled; textarea disabled while sending. |
-| No selectable profiles | `listModels` succeeded with zero models, or not yet successful | Send disabled; short copy with in-app link to `/providers`. |
-| Profile options load error | `listModels` failed | Error alert; Send disabled until a successful load yields at least one selectable profile. |
-| Profile options loading | `listModels` in flight | Send disabled; “Loading profiles…” shown above the composer. |
+| No selectable models | `listModels` succeeded with zero models, or not yet successful | Send disabled; short copy with in-app link to `/providers`. |
+| Model options load error | `listModels` failed | Error alert; Send disabled until a successful load yields at least one selectable model. |
+| Model options loading | `listModels` in flight | Send disabled; “Loading models…” shown above the composer. |
 
 **Session / API**
 
@@ -106,16 +106,20 @@
 - New send or unmount aborts via `AbortController` (hydration vs agent-run scopes are separate).
 - All API calls include `Authorization: Bearer <accessToken>` from `authStore`; `userId` is not sent in the body or query (server derives identity via `CallerIdentity`).
 
-**Profile picker**
+**Execution profile + model pickers**
 
 - On mount: `listModels()` (`GET /models`).
-- Until it succeeds with at least one selectable profile: Send disabled.
-- If the call fails: error shown; Send stays disabled.
-- If it succeeds with an empty list: short message + link to **Providers** (`/providers`) — no implied default model.
-- When models exist: `<select>` on the **same row** as **Send** (profile left, Send right).
+- Also on mount: `listAgentProfiles()` (`GET /agent-profiles`) as a best-effort execution-profile load.
+- Until `listModels()` succeeds with at least one selectable model: Send disabled.
+- If `listModels()` fails: error shown; Send stays disabled.
+- If `listModels()` succeeds with an empty list: short message + link to **Providers** (`/providers`) — no implied default model.
+- When execution profiles load successfully: a non-blocking **Execution profile** `<select>` appears with **Direct model** first and saved profiles after it.
+- If `strategy-assistant` exists and the user has no saved selection, it is preselected for the alpha flow.
+- When `strategy-assistant` is selected: show a short bounded-workflow note (`data discovery → validate/save → evaluate → evidence critique`; no live trading or readiness claims).
+- When models exist: **Model** `<select>` stays on the same row as **Send**; the request still carries the selected model even when a regular profile is active.
 - Selected value: `localStorage` (`selectedModel`); restored on load if still in the list; otherwise first model selected and persisted.
-- Current source of selectable profiles: `listModels()` until dedicated profile listing is wired for the chat page.
-- Sends: fully-qualified name (`provider/model-name`) as `model` on `AgentRunRequest` while the list is valid.
+- Execution profile selection is stored in `localStorage` (`selectedProfile`) when non-empty.
+- Sends: fully-qualified name (`provider/model-name`) as `model` on `AgentRunRequest` while the list is valid, plus `profileName` when an execution profile is selected.
 
 **Reconnection (URL has `sessionId` on mount)**
 
@@ -131,6 +135,7 @@
 - Each: `ToolCallBlock` — collapsible `<details>` / `<summary>`.
 - **Collapsed (default):** "Tool call:" + function name (e.g. `workspacefs_write_file`).
 - **Expanded:** Formatted JSON for "Arguments" (`args`) and, if present, "Response" (`response`).
+- When the payload exposes strategy/version or evaluation run identifiers, show quick links to the matching strategy or evaluation detail route.
 - Placement: Below assistant text, or standalone if the turn has no text.
 - Same in streaming turn-activity during a run and in committed transcript after `done`.
 - Distinct muted-border style vs plain text messages.

@@ -116,13 +116,13 @@ dataLayer:
 
 skills:
   # Set to true to enable skill discovery and tool registration.
-  enabled: false
+  enabled: true
   # Directories to scan for skill subdirectories (each must contain a SKILL.md).
   # Relative paths are resolved from the process working directory.
-  # Defaults to the recommended locations from the agentskills ecosystem guidance.
+  # The bundled repo skills path assumes the documented PM2/Nx cwd: apps/signal-foundry/.
   paths:
     - ~/.config/agents/skills
-    - .agents/skills
+    - ../../.agents/skills
   # Maximum size in bytes of a single SKILL.md file (default 65536 = 64 KiB).
   maxSkillBytes: 65536
   # Maximum number of skills to load into the catalog.

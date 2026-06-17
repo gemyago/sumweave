@@ -28,6 +28,8 @@ export type UpdateProviderRequest = components['schemas']['UpdateProviderRequest
 export type ModelConfig = components['schemas']['ModelConfig']
 export type ModelInfo = components['schemas']['ModelInfo']
 export type ModelListResponse = components['schemas']['ModelListResponse']
+export type AgentProfileResponse = components['schemas']['AgentProfileResponse']
+export type AgentProfileListResponse = components['schemas']['AgentProfileListResponse']
 
 export type SessionMetadata = components['schemas']['SessionMetadata']
 export type SessionListResponse = components['schemas']['SessionListResponse']

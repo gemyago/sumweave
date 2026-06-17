@@ -3,23 +3,73 @@
 package internal
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
+	appinternal "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/config"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/strategyassistant"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/venueedge"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/dig"
 )
+
+func TestIsMissingAgentProfilesSchemaError(t *testing.T) {
+	t.Run("returns true for missing agent_profiles relation", func(t *testing.T) {
+		err := fmt.Errorf("get agent profile: %w", &pgconn.PgError{
+			Code:    "42P01",
+			Message: `relation "runtime_agent_profiles" does not exist`,
+		})
+
+		assert.True(t, isMissingAgentProfilesSchemaError(err))
+	})
+
+	t.Run("returns true for sqlite missing agent_profiles table", func(t *testing.T) {
+		err := errors.New("get agent profile: SQL logic error: no such table: runtime_agent_profiles (1)")
+
+		assert.True(t, isMissingAgentProfilesSchemaError(err))
+	})
+
+	t.Run("returns false for generic postgres missing schema", func(t *testing.T) {
+		err := fmt.Errorf("get agent profile: %w", &pgconn.PgError{
+			Code:    "3F000",
+			Message: `schema "runtime" does not exist`,
+		})
+
+		assert.False(t, isMissingAgentProfilesSchemaError(err))
+	})
+
+	t.Run("returns false for unrelated missing relation", func(t *testing.T) {
+		err := fmt.Errorf("get agent profile: %w", &pgconn.PgError{
+			Code:    "42P01",
+			Message: `relation "runtime_sessions" does not exist`,
+		})
+
+		assert.False(t, isMissingAgentProfilesSchemaError(err))
+	})
+
+	t.Run("returns false for generic unknown database", func(t *testing.T) {
+		err := errors.New("get agent profile: unknown database runtime")
+
+		assert.False(t, isMissingAgentProfilesSchemaError(err))
+	})
+}
 
 func TestNewRuntime(t *testing.T) {
 	fake := faker.New()
@@ -113,6 +163,44 @@ func TestNewRuntime(t *testing.T) {
 		assert.NotNil(t, runtime.VenueIngestionFlow)
 		assert.NotNil(t, runtime.HyperliquidRecorder)
 	})
+
+	t.Run(
+		"registers strategy assistant tools before runner construction when app services are wired",
+		func(t *testing.T) {
+			container, bundledSkillsRoot := makeWiredRuntimeContainer(t)
+
+			var runtime *Runtime
+			var registry *agent.ToolsRegistry
+			var strategyWorkspace *appinternal.StrategyWorkspaceService
+			var evaluationWorkspace *appinternal.EvaluationWorkspaceService
+			err := container.Invoke(func(
+				rt *Runtime,
+				reg *agent.ToolsRegistry,
+				strategySvc *appinternal.StrategyWorkspaceService,
+				evaluationSvc *appinternal.EvaluationWorkspaceService,
+			) {
+				runtime = rt
+				registry = reg
+				strategyWorkspace = strategySvc
+				evaluationWorkspace = evaluationSvc
+			})
+			require.NoError(t, err)
+			require.NotNil(t, runtime)
+			require.NotNil(t, runtime.Runner)
+			require.NotNil(t, strategyWorkspace)
+			require.NotNil(t, evaluationWorkspace)
+
+			registeredNames := registeredToolNames(t, registry)
+			assert.Contains(t, registeredNames, "sf_data_list_candle_availability")
+			assert.Contains(t, registeredNames, "sf_strategy_create_version")
+			assert.Contains(t, registeredNames, "sf_evaluation_run_backtest")
+			assert.Contains(t, registeredNames, "workspacefs_list_workspaces")
+			assert.Contains(t, registeredNames, "skills_list")
+			assert.Contains(t, registeredNames, "skills_read")
+
+			require.DirExists(t, bundledSkillsRoot)
+		},
+	)
 
 	t.Run("wires hyperliquid recorder and lineage-enabled ingestion flow", func(t *testing.T) {
 		deps := makeDeps(t)
@@ -208,12 +296,44 @@ func TestNewRuntime(t *testing.T) {
 
 		profiles, err := profilesSvc.List(t.Context())
 		require.NoError(t, err)
-		require.Empty(t, profiles)
+		require.Len(t, profiles, 1)
+		assert.Equal(t, strategyassistant.StrategyAssistantProfileName, profiles[0].Name)
 	})
 
-	t.Run("database storage - autoMigrate disabled still constructs runtime", func(t *testing.T) {
+	t.Run("database storage - autoMigrate disabled still seeds profile when schema exists", func(t *testing.T) {
 		deps := makeDatabaseDeps(t)
 		deps.AgentRuntimeDatabaseAutoMigrate = false
+
+		profilesSvc, err := agent.NewDatabaseAgentProfilesService(
+			deps.AgentRuntimeDatabaseDSN,
+			rootLogger,
+			deps.AgentRuntimeDatabaseTablePrefix,
+		)
+		require.NoError(t, err)
+		require.NoError(t, profilesSvc.AutoMigrate())
+
+		runtime, err := newRuntime(deps)
+		require.NoError(t, err)
+		require.NotNil(t, runtime)
+		assert.NotNil(t, runtime.Runner)
+		assert.NotNil(t, runtime.HTTPHandler)
+		assert.NotNil(t, runtime.VenueIngestionFlow)
+		assert.NotNil(t, runtime.HyperliquidRecorder)
+
+		profile, err := profilesSvc.Get(t.Context(), strategyassistant.StrategyAssistantProfileName)
+		require.NoError(t, err)
+		require.NotNil(t, profile)
+		assert.Equal(
+			t,
+			strategyassistant.StrategyAssistantProfileSeedDefaultModel,
+			profile.ExecutionSettings.DefaultModel,
+		)
+	})
+
+	t.Run("database storage - autoMigrate disabled still starts when profile schema is absent", func(t *testing.T) {
+		deps := makeDatabaseDeps(t)
+		deps.AgentRuntimeDatabaseAutoMigrate = false
+
 		runtime, err := newRuntime(deps)
 		require.NoError(t, err)
 		require.NotNil(t, runtime)
@@ -229,7 +349,7 @@ func TestNewRuntime(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		_, err = profilesSvc.List(t.Context())
+		_, err = profilesSvc.Get(t.Context(), strategyassistant.StrategyAssistantProfileName)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "no such table")
 	})
@@ -377,6 +497,49 @@ func TestNewRuntime(t *testing.T) {
 		assert.Same(t, providedRegistry, runtime.ToolsRegistry)
 	})
 
+	t.Run("file storage seeds the strategy assistant profile with regular guidance", func(t *testing.T) {
+		deps := makeDeps(t)
+
+		runtime, err := newRuntime(deps)
+		require.NoError(t, err)
+		require.NotNil(t, runtime)
+
+		profilesSvc, err := agent.NewFileAgentProfilesService(deps.DataDir, rootLogger)
+		require.NoError(t, err)
+
+		profile, err := profilesSvc.Get(t.Context(), strategyassistant.StrategyAssistantProfileName)
+		require.NoError(t, err)
+		require.NotNil(t, profile)
+		assert.Equal(t, agent.ExecutionModeRegular, profile.ExecutionSettings.ModeOrDefault())
+		assert.Contains(t, profile.Instructions, "Discover data scope first")
+		assert.Contains(t, profile.Instructions, "No live trading")
+	})
+
+	t.Run("bundled strategy workflow skills are discoverable from the default bundled path", func(t *testing.T) {
+		_, bundledSkillsRoot := makeWiredRuntimeContainer(t)
+
+		skillDirEntries, err := os.ReadDir(bundledSkillsRoot)
+		require.NoError(t, err)
+
+		skillNames := make([]string, 0, len(skillDirEntries))
+		for _, entry := range skillDirEntries {
+			if !entry.IsDir() {
+				continue
+			}
+			skillNames = append(skillNames, entry.Name())
+		}
+
+		assert.Contains(t, skillNames, "strategy-research-loop")
+		assert.Contains(t, skillNames, "backtest-critique")
+		assert.Contains(t, skillNames, "strategy-iteration")
+
+		for _, skillName := range []string{"strategy-research-loop", "backtest-critique", "strategy-iteration"} {
+			content, readErr := os.ReadFile(filepath.Join(bundledSkillsRoot, skillName, "SKILL.md"))
+			require.NoError(t, readErr)
+			assert.Contains(t, string(content), "Safety boundaries")
+		}
+	})
+
 	t.Run("skills enabled with duplicate skill names - runtime starts keeping first occurrence", func(t *testing.T) {
 		deps := makeDeps(t)
 		root1 := t.TempDir()
@@ -398,6 +561,45 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime)
 		assert.NotNil(t, runtime.Runner)
 	})
+}
+
+func makeWiredRuntimeContainer(t *testing.T) (*dig.Container, string) {
+	t.Helper()
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	appRoot := filepath.Clean(filepath.Join(cwd, ".."))
+	t.Chdir(appRoot)
+	bundledSkillsRoot := filepath.Clean(filepath.Join(appRoot, "..", "..", ".agents", "skills"))
+
+	cfg := config.New()
+	cfg.Set("env", "test")
+	cfg.Set("dataDir", t.TempDir())
+	cfg.Set("dataLayer.database.dsn", filepath.Join(t.TempDir(), "data-layer.db"))
+	cfg.Set("dataLayer.rawPayloadBlobStore.path", filepath.Join(t.TempDir(), "raw-payloads"))
+	cfg.Set("skills.enabled", true)
+
+	container := dig.New()
+	err = Setup(context.Background(), cfg, container)
+	require.NoError(t, err)
+
+	return container, bundledSkillsRoot
+}
+
+func registeredToolNames(t *testing.T, registry *agent.ToolsRegistry) []string {
+	t.Helper()
+
+	toolsField := reflect.ValueOf(registry).Elem().FieldByName("tools")
+	require.True(t, toolsField.IsValid())
+	toolsField = reflect.NewAt(toolsField.Type(), unsafe.Pointer(toolsField.UnsafeAddr())).Elem()
+
+	names := make([]string, 0, toolsField.Len())
+	for index := range toolsField.Len() {
+		toolValue := reflect.ValueOf(toolsField.Index(index).Interface())
+		names = append(names, toolValue.FieldByName("Name").String())
+	}
+
+	return names
 }
 
 func dataStoreOpts(deps RuntimeDeps) data.DatabaseStoreOpts {
