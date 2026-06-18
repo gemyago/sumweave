@@ -117,11 +117,19 @@
   )
 
   onMount(() => {
-    void loadAvailability()
+    const initialRouteScope = readRouteScopeFromHash()
+    if (initialRouteScope) {
+      validationErrors = []
+      showRangeValidation = false
+      applyScopeToFilters(initialRouteScope)
+    }
+    void loadAvailability({ initialRouteScope })
   })
 
-  async function loadAvailability() {
+  async function loadAvailability(options: { initialRouteScope?: ListDataCandlesParams | null } = {}) {
     const requestToken = ++availabilityRequestToken
+    const initialRouteScope = options.initialRouteScope ?? null
+    let shouldLoadInitialRouteScope = initialRouteScope !== null
     availabilityLoading = true
     availabilityError = null
     availabilityCompatibilityNote = null
@@ -134,7 +142,25 @@
 
       availabilityItems = response.items
 
-      if (response.defaultSelection) {
+      if (initialRouteScope) {
+        shouldLoadInitialRouteScope = false
+        void loadCandlesForScope(
+          initialRouteScope,
+          findAvailabilityKeyForScope(initialRouteScope, response.items),
+        )
+        return
+      }
+
+      const shouldAutoLoadDefaultSelection =
+        currentScope === null &&
+        venue.trim() === '' &&
+        symbol.trim() === '' &&
+        assetClass.trim() === '' &&
+        timeframe.trim() === '' &&
+        utcStart.trim() === '' &&
+        utcEnd.trim() === ''
+
+      if (response.defaultSelection && shouldAutoLoadDefaultSelection) {
         const defaultKey = availabilityKeyFromSelection(response.defaultSelection)
         selectedAvailabilityKey = defaultKey
         void loadCandlesForScope(mapDefaultSelectionToScope(response.defaultSelection), defaultKey)
@@ -154,6 +180,9 @@
     } finally {
       if (requestToken === availabilityRequestToken) {
         availabilityLoading = false
+        if (shouldLoadInitialRouteScope && initialRouteScope) {
+          void loadCandlesForScope(initialRouteScope, null)
+        }
       }
     }
   }
@@ -475,8 +504,11 @@
     return availabilityKey(item)
   }
 
-  function findAvailabilityKeyForScope(scope: Pick<ListDataCandlesParams, 'venue' | 'symbol' | 'assetClass'>) {
-    const match = availabilityItems.find(
+  function findAvailabilityKeyForScope(
+    scope: Pick<ListDataCandlesParams, 'venue' | 'symbol' | 'assetClass'>,
+    items: Pick<CandleAvailabilityItem, 'venue' | 'symbol' | 'assetClass'>[] = availabilityItems,
+  ) {
+    const match = items.find(
       (item) =>
         item.venue === scope.venue &&
         item.symbol === scope.symbol &&
@@ -505,6 +537,50 @@
       timeframe: item.defaultSlice.timeframe,
       start: item.defaultSlice.start,
       end: item.defaultSlice.end,
+    }
+  }
+
+  function readRouteScopeFromHash(): ListDataCandlesParams | null {
+    if (typeof window === 'undefined') {
+      return null
+    }
+
+    const hash = window.location.hash.startsWith('#')
+      ? window.location.hash.slice(1)
+      : window.location.hash
+    const queryIndex = hash.indexOf('?')
+    if (queryIndex < 0) {
+      return null
+    }
+
+    const routePath = hash.slice(0, queryIndex)
+    if (routePath !== '/data') {
+      return null
+    }
+
+    const searchParams = new URLSearchParams(hash.slice(queryIndex + 1))
+    const venueValue = searchParams.get('venue')?.trim() ?? ''
+    const symbolValue = searchParams.get('symbol')?.trim() ?? ''
+    const assetClassValue = searchParams.get('assetClass')?.trim() ?? ''
+    const timeframeValue = searchParams.get('timeframe')?.trim() ?? ''
+    const start = parseUtcTimestamp(searchParams.get('start') ?? '')
+    const end = parseUtcTimestamp(searchParams.get('end') ?? '')
+
+    if (!venueValue || !symbolValue || !assetClassValue || !timeframeValue || !start || !end) {
+      return null
+    }
+
+    if (!(timeframeValue in timeframeDurationsMs) || start >= end) {
+      return null
+    }
+
+    return {
+      venue: venueValue,
+      symbol: symbolValue,
+      assetClass: assetClassValue,
+      timeframe: timeframeValue,
+      start,
+      end,
     }
   }
 
@@ -714,10 +790,20 @@
     {/if}
 
     {#if createdJob}
-      <p class="success" aria-live="polite">
-        Created job {createdJob.id} with status {createdJob.status}.
-        <a href={`/jobs/${encodeURIComponent(createdJob.id)}`} use:link>Open created job</a>
-      </p>
+      <div class="success success-panel" aria-live="polite">
+        <p>
+          Created job {createdJob.id} with status {createdJob.status}.
+          <a href={`/jobs/${encodeURIComponent(createdJob.id)}`} use:link>Open created job</a>
+        </p>
+        <button
+          class="secondary"
+          type="button"
+          onclick={() => void loadAvailability()}
+          disabled={availabilityLoading}
+        >
+          {availabilityLoading ? 'Reloading availability…' : 'Reload availability'}
+        </button>
+      </div>
     {/if}
   </section>
 
@@ -1036,6 +1122,18 @@
 
   .success {
     color: var(--color-success-green);
+  }
+
+  .success-panel {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-12);
+  }
+
+  .success-panel p {
+    margin: 0;
   }
 
   .success a {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { createSignalJobsApiForAuth, type JobDetail as JobDetailModel } from '../lib/jobs/api'
@@ -13,21 +14,34 @@
   let error = $state<string | null>(null)
   let detail = $state<JobDetailModel | null>(null)
   let requestToken = 0
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+  const autoRefreshStatuses = new Set(['queued', 'running'])
+  const autoRefreshMs = 2_000
 
   $effect(() => {
+    clearRefreshTimer()
     void loadDetail(params.jobId)
   })
 
-  async function loadDetail(jobId: string | undefined) {
+  onDestroy(() => {
+    clearRefreshTimer()
+  })
+
+  async function loadDetail(jobId: string | undefined, options: { preserveDetail?: boolean } = {}) {
     const token = ++requestToken
-    detail = null
+    clearRefreshTimer()
     if (!jobId) {
+      detail = null
       loading = false
       error = 'Job id is required.'
       return
     }
 
-    loading = true
+    if (!options.preserveDetail) {
+      detail = null
+      loading = true
+    }
     error = null
     try {
       const loaded = await jobsApi.getJob({ jobId })
@@ -35,6 +49,11 @@
         return
       }
       detail = loaded
+      if (autoRefreshStatuses.has(loaded.status)) {
+        refreshTimer = setTimeout(() => {
+          void loadDetail(jobId, { preserveDetail: true })
+        }, autoRefreshMs)
+      }
     } catch (loadError) {
       if (token !== requestToken) {
         return
@@ -51,6 +70,25 @@
   function formatDate(value: Date | null): string {
     return value ? value.toISOString() : '—'
   }
+
+  function clearRefreshTimer() {
+    if (refreshTimer !== null) {
+      clearTimeout(refreshTimer)
+      refreshTimer = null
+    }
+  }
+
+  function buildDataScopeHref(item: JobDetailModel): string {
+    const query = new URLSearchParams({
+      venue: item.input.venue,
+      symbol: item.input.symbol,
+      assetClass: item.input.assetClass,
+      timeframe: item.input.timeframe,
+      start: item.input.start.toISOString(),
+      end: item.input.end.toISOString(),
+    })
+    return `/data?${query.toString()}`
+  }
 </script>
 
 <section class="page" aria-labelledby="job-detail-heading">
@@ -62,6 +100,9 @@
     <div class="page-links">
       <a href="/jobs" use:link>Back to jobs</a>
       <a href="/data" use:link>Back to data</a>
+      {#if detail}
+        <a href={buildDataScopeHref(detail)} use:link>Open data scope</a>
+      {/if}
     </div>
   </header>
 

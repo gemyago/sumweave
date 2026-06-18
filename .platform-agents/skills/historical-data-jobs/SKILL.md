@@ -1,19 +1,25 @@
 ---
 name: historical-data-jobs
-description: Run bounded historical data backfill jobs before synchronous evaluation when local candles are missing.
+description: Run the bounded historical raw candle backfill workflow before evaluation when local candles are missing.
 ---
 # Historical data jobs
 
-1. Check current local coverage first with `sf_data_list_candle_availability` and bounded candle/evidence reads.
-2. Use `sf_jobs_list` to inspect duplicate queued/running jobs before starting anything new.
-3. Start `sf_jobs_start_historical_data_backfill` only if the needed range is still missing, and prefer bounded incremental ranges over large catch-up requests.
-4. Poll until terminal with `sf_jobs_get`; do not run evaluation while the job is queued or running.
-5. After success, re-check local data availability for the exact scope, then run synchronous evaluation.
-6. After failure, summarize the bounded failure honestly and only retry with a narrower or corrected request if needed.
+Supported job: historical raw candle backfill only.
+
+Supported backfill scope: `hyperliquid-perps`, assetClass `future`, timeframes `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, UTC half-open range.
+
+Required workflow:
+1. `sf_data_list_candle_availability` first.
+2. `sf_jobs_list` for queued/running operator+agent jobs before starting a duplicate.
+3. Start with `sf_jobs_start_historical_data_backfill` only when needed.
+4. Use deterministic idempotency key: `backfill:<venue>:<symbol>:<assetClass>:<timeframe>:<start>:<end>`.
+5. Poll `sf_jobs_get` until `succeeded` or `failed`; poll until terminal.
+6. Do not run evaluation while job is `queued` or `running`.
+7. On success, verify `persistedCount`, `expectedCount`, `missingIntervalCount`, re-check local availability, optionally sample candles.
+8. On failure, include job id, status, error code/summary/details, input scope, attempt count; do not proceed to evaluation.
 
 Safety boundaries:
 - Do not invent data, fills, or evaluation outcomes.
-- Do not start repeated duplicates when a matching queued/running job already exists.
-- Prefer bounded incremental ranges instead of repeated full-history backfills.
-- Continuous ingestion is unavailable; jobs only cover explicit historical backfill requests.
-- No live trading, order placement, wallet actions, or real-money execution.
+- Do not duplicate a matching queued/running job.
+- Do not imply continuous ingestion exists.
+- Do not proceed to evaluation until the job is terminal and local data is verified.

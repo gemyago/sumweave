@@ -134,6 +134,7 @@ Current platform-agent skills:
 - `platform-info` — vendor/platform behavior, constraints, and bug-vs-vendor triage
 - `historical-data-jobs` — bounded historical backfill workflow for missing candles
 - `strategy-research-loop` — browse-first strategy research and evaluation loop
+- `strategy-dsl-v0` — persisted Strategy DSL v0 shape, rules, and crossover semantics
 - `strategy-iteration` — safe saved-strategy revision and re-evaluation
 - `backtest-critique` — evidence-first backtest review and failure analysis
 

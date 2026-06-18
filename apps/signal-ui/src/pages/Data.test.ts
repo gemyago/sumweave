@@ -210,9 +210,30 @@ function mockAvailabilityResponse(items: ReturnType<typeof makeAvailabilityItem>
   })
 }
 
+function availabilityCardNameMatcher(
+  item: Pick<ReturnType<typeof makeAvailabilityItem>, 'venue' | 'symbol' | 'assetClass'>,
+) {
+  return (_accessibleName: string, element: Element) => {
+    const text = element.textContent ?? ''
+    return text.includes(item.venue) && text.includes(item.symbol) && text.includes(item.assetClass)
+  }
+}
+
+async function findAvailabilityCard(item: ReturnType<typeof makeAvailabilityItem>) {
+  const list = await screen.findByLabelText('Candle availability entries')
+  return within(list).findByRole('button', { name: availabilityCardNameMatcher(item) })
+}
+
+async function waitForDefaultAvailabilityLoad() {
+  await waitFor(() => {
+    expect(mocks.listCandles).toHaveBeenCalledTimes(1)
+  })
+}
+
 describe('Data page', () => {
   beforeEach(() => {
     availabilityCounter = 0
+    window.location.hash = '#/data'
     chartSetData.mockReset()
     mocks.listCandleAvailability.mockReset()
     mocks.listCandles.mockReset()
@@ -285,17 +306,16 @@ describe('Data page', () => {
   })
 
   it('selecting a different availability entry uses that entry default slice', async () => {
-    const firstAvailability = makeAvailabilityItem()
-    const secondAvailability = makeAvailabilityItem({ symbol: `${faker.finance.currencyCode()}USD` })
+    const firstAvailability = makeAvailabilityItem({ symbol: 'BTCUSD' })
+    const secondAvailability = makeAvailabilityItem({ symbol: 'ETHUSD' })
     mockAvailabilityResponse([firstAvailability, secondAvailability])
     mocks.listCandles.mockResolvedValue({ items: [] })
 
     const user = userEvent.setup()
     render(Data)
 
-    const secondCard = await screen.findByRole('button', {
-      name: new RegExp(`${secondAvailability.venue}.*${secondAvailability.symbol}.*${secondAvailability.assetClass}`),
-    })
+    await waitForDefaultAvailabilityLoad()
+    const secondCard = await findAvailabilityCard(secondAvailability)
     await user.click(secondCard)
 
     await waitFor(() => {
@@ -312,8 +332,8 @@ describe('Data page', () => {
   })
 
   it('ignores stale candle responses when a newer availability selection wins', async () => {
-    const firstAvailability = makeAvailabilityItem()
-    const secondAvailability = makeAvailabilityItem({ symbol: `${faker.finance.currencyCode()}USD` })
+    const firstAvailability = makeAvailabilityItem({ symbol: 'BTCUSD' })
+    const secondAvailability = makeAvailabilityItem({ symbol: 'ETHUSD' })
     const firstCandles = createDeferred<{ items: ReturnType<typeof makeCandle>[] }>()
     const firstCandle = makeCandle({
       symbol: firstAvailability.symbol,
@@ -335,9 +355,8 @@ describe('Data page', () => {
     const user = userEvent.setup()
     render(Data)
 
-    const secondCard = await screen.findByRole('button', {
-      name: new RegExp(`${secondAvailability.venue}.*${secondAvailability.symbol}.*${secondAvailability.assetClass}`),
-    })
+    await waitForDefaultAvailabilityLoad()
+    const secondCard = await findAvailabilityCard(secondAvailability)
     await user.click(secondCard)
 
     expect(await screen.findByText(secondCandle.start.toISOString())).toBeInTheDocument()
@@ -389,6 +408,71 @@ describe('Data page', () => {
     })
   })
 
+  it('loads the exact data scope encoded in the route query instead of the availability default slice', async () => {
+    const availability = makeAvailabilityItem({
+      symbol: 'BTCUSD',
+      defaultSlice: {
+        timeframe: '5m',
+        start: new Date('2026-06-10T00:00:00.000Z'),
+        end: new Date('2026-06-10T01:00:00.000Z'),
+      },
+    })
+    const routeScope = {
+      venue: 'hyperliquid-perps',
+      symbol: 'BTC',
+      assetClass: 'future',
+      timeframe: '1h',
+      start: new Date('2026-06-15T12:00:00.000Z'),
+      end: new Date('2026-06-15T13:00:00.000Z'),
+    }
+    const routeCandle = makeCandle(routeScope)
+    mockAvailabilityResponse([availability])
+    mocks.listCandles.mockResolvedValue({ items: [routeCandle] })
+    mocks.listCandleRawPayloads.mockResolvedValue({ items: [] })
+    window.location.hash =
+      '#/data?venue=hyperliquid-perps&symbol=BTC&assetClass=future&timeframe=1h&start=2026-06-15T12%3A00%3A00.000Z&end=2026-06-15T13%3A00%3A00.000Z'
+
+    render(Data)
+
+    await waitFor(() => {
+      expect(mocks.listCandles).toHaveBeenCalledTimes(1)
+      expect(mocks.listCandles).toHaveBeenCalledWith(routeScope)
+    })
+    expect(screen.getByLabelText('Venue')).toHaveValue(routeScope.venue)
+    expect(screen.getByLabelText('Symbol')).toHaveValue(routeScope.symbol)
+    expect(screen.getByLabelText('Asset class')).toHaveValue(routeScope.assetClass)
+    expect(screen.getByLabelText('Timeframe')).toHaveValue(routeScope.timeframe)
+  })
+
+  it('still loads the routed data scope when availability falls back with a 404 compatibility note', async () => {
+    const routeScope = {
+      venue: 'hyperliquid-perps',
+      symbol: 'BTC',
+      assetClass: 'future',
+      timeframe: '1h',
+      start: new Date('2026-06-15T12:00:00.000Z'),
+      end: new Date('2026-06-15T13:00:00.000Z'),
+    }
+    mocks.listCandleAvailability.mockRejectedValue(
+      new DataApiError({ path: '/candle-availability', status: 404, message: '404 Not Found' }),
+    )
+    mocks.listCandles.mockResolvedValue({ items: [makeCandle(routeScope)] })
+    mocks.listCandleRawPayloads.mockResolvedValue({ items: [] })
+    window.location.hash =
+      '#/data?venue=hyperliquid-perps&symbol=BTC&assetClass=future&timeframe=1h&start=2026-06-15T12%3A00%3A00.000Z&end=2026-06-15T13%3A00%3A00.000Z'
+
+    render(Data)
+
+    expect(
+      await screen.findByText(
+        'Browse-first availability returned 404. This usually means the UI is pointed at an older or stale backend process. You can still use the manual exact candle form below.',
+      ),
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.listCandles).toHaveBeenCalledWith(routeScope)
+    })
+  })
+
   it('keeps browse-first and explicit candle loads read-only until start historical backfill is used', async () => {
     const availability = makeAvailabilityItem()
     mockAvailabilityResponse([availability])
@@ -416,7 +500,7 @@ describe('Data page', () => {
     expect(mocks.createHistoricalDataBackfillJob).not.toHaveBeenCalled()
   })
 
-  it('starts an explicit historical backfill job from the current data scope and shows the created job link', async () => {
+  it('starts an explicit historical backfill job from the current data scope and shows the created job link with reload action', async () => {
     const user = userEvent.setup()
     mocks.createHistoricalDataBackfillJob.mockResolvedValue({
       id: 'job-123',
@@ -464,6 +548,10 @@ describe('Data page', () => {
 
     expect(await screen.findByText('Created job job-123 with status queued.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open created job' })).toHaveAttribute('href', '#/jobs/job-123')
+    await user.click(screen.getByRole('button', { name: 'Reload availability' }))
+    await waitFor(() => {
+      expect(mocks.listCandleAvailability).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('allows zero backfill page size to use the backend default path', async () => {

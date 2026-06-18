@@ -1,13 +1,18 @@
 ---
 name: strategy-iteration
-description: Iterate on a saved strategy by reviewing evidence, duplicating safely, and re-evaluating.
+description: Iterate on a saved strategy by duplicating one baseline, changing one thing, and re-evaluating on the same verified range.
 ---
 # Strategy iteration
 
-1. Inspect the saved strategy version and the latest relevant evaluation identifiers.
-2. Use report/evidence findings to explain exactly what should change.
-3. Duplicate the saved version into an editable candidate, revise, validate, then create a new immutable version.
-4. Re-run evaluation on the new saved ready version and compare evidence.
+Workflow:
+1. Identify baseline with `sf_strategy_get_version` or `sf_strategy_list_versions`.
+2. Read latest relevant evaluation with `sf_evaluation_list_backtests`, report, and evidence.
+3. Duplicate baseline with `sf_strategy_duplicate_version`.
+4. Change one thing at a time; explain hypothesis.
+5. Validate with `sf_strategy_validate_definition`.
+6. Save new immutable version with `sf_strategy_create_version`; notes include baseline, motivating run, and hypothesis.
+7. Re-run over same verified range unless intentionally changed.
+8. Compare old/new status, decision, trade count, drawdown, blocked/rejected counts, evidence counts.
 
 Safety boundaries:
 - Keep edits bounded to the Strategy DSL and persisted version workflow.

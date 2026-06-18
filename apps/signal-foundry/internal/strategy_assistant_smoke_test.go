@@ -612,6 +612,7 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 			}
 		}
 		assert.Contains(t, skillNames, "historical-data-jobs")
+		assert.Contains(t, skillNames, "strategy-dsl-v0")
 		historicalJobsSkillBody, err := os.ReadFile(
 			filepath.Join(bundledPlatformSkillsRoot, "historical-data-jobs", "SKILL.md"),
 		)
@@ -619,7 +620,12 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 		historicalJobsText := strings.ToLower(string(historicalJobsSkillBody))
 		assert.Contains(t, historicalJobsText, "sf_jobs_start_historical_data_backfill")
 		assert.Contains(t, historicalJobsText, "poll until terminal")
-		assert.Contains(t, historicalJobsText, "synchronous evaluation")
+
+		strategyDSLSkillBody, err := os.ReadFile(
+			filepath.Join(bundledPlatformSkillsRoot, "strategy-dsl-v0", "SKILL.md"),
+		)
+		require.NoError(t, err)
+		assert.Contains(t, string(strategyDSLSkillBody), `"kind": "moving-average-crossover"`)
 	})
 
 	t.Run("missing local data persists explicit data-unavailable failure", func(t *testing.T) {

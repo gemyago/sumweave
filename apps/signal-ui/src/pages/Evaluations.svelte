@@ -280,6 +280,13 @@
             with status <strong>{createdRun.status}</strong>.
           </p>
           <p class="muted">Open detail to inspect summary, report, and evidence tables.</p>
+          {#if createdRun.status === 'failed' && createdRun.failureReason === 'replay-data-unavailable'}
+            <p class="warning-copy">
+              Next action: inspect local data on
+              <a class="button-link" href="/data" use:link>Historical data</a>
+              and start a bounded historical backfill before retrying this run.
+            </p>
+          {/if}
           <a class="button-link" href={`/evaluations/${encodeURIComponent(createdRun.runId)}`} use:link>
             Open evaluation detail
           </a>
@@ -568,6 +575,11 @@
   .error,
   .error-title {
     color: var(--color-danger-red);
+  }
+
+  .warning-copy {
+    margin: 0;
+    color: var(--color-warning-orange);
   }
 
   .result-panel {

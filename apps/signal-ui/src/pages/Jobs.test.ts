@@ -90,13 +90,18 @@ describe('Jobs page', () => {
       requester: { userId: faker.string.uuid(), source: 'agent', agentSessionId: 'session-1', agentRunId: 'run-1' },
       error: { code: 'job_failed', summary: 'safe error', details: 'detail' },
     })
-    mocks.listJobs.mockResolvedValue({ items: [first, second], nextCursor: 'cursor-2' })
+    const third = makeJobSummary({ id: faker.string.uuid(), status: 'succeeded' })
+    mocks.listJobs
+      .mockResolvedValueOnce({ items: [first, second], nextCursor: 'cursor-2' })
+      .mockResolvedValueOnce({ items: [first, second], nextCursor: 'cursor-2' })
+      .mockResolvedValueOnce({ items: [third], nextCursor: '' })
+      .mockResolvedValue({ items: [first, second], nextCursor: 'cursor-2' })
 
     render(Jobs)
 
     expect(await screen.findByText(first.id)).toBeInTheDocument()
     expect(screen.getByText(second.id)).toBeInTheDocument()
-    expect(screen.getByText('Next cursor available: cursor-2')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument()
     expect(screen.getByText('Result: 9 persisted / 10 expected · 1 missing intervals')).toBeInTheDocument()
     expect(screen.getByText('safe error')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Open job detail' })).toHaveLength(2)
@@ -116,8 +121,21 @@ describe('Jobs page', () => {
       })
     })
 
+    await user.click(screen.getByRole('button', { name: 'Load more' }))
+
+    await waitFor(() => {
+      expect(mocks.listJobs).toHaveBeenNthCalledWith(3, {
+        status: ['running'],
+        jobType: ['historical_raw_candle_backfill'],
+        source: ['agent'],
+        limit: 25,
+        cursor: 'cursor-2',
+      })
+    })
+    expect(await screen.findByText(third.id)).toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: 'Refresh jobs' }))
 
-    expect(mocks.listJobs).toHaveBeenCalledTimes(3)
+    expect(mocks.listJobs).toHaveBeenCalledTimes(4)
   })
 })

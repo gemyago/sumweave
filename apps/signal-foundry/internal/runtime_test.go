@@ -519,8 +519,10 @@ func TestNewRuntime(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, profile)
 		assert.Equal(t, agent.ExecutionModeRegular, profile.ExecutionSettings.ModeOrDefault())
-		assert.Contains(t, profile.Instructions, "Discover data scope first")
-		assert.Contains(t, profile.Instructions, "No live trading")
+		assert.Contains(t, profile.Instructions, "Signal Foundry strategy assistant")
+		assert.Contains(t, profile.Instructions, "Product tools are authoritative")
+		assert.Contains(t, profile.Instructions, "strategy-dsl-v0")
+		assert.Contains(t, profile.Instructions, "replay-data-unavailable")
 	})
 
 	t.Run("bundled platform-agent skills are discoverable from the default bundled path", func(t *testing.T) {
@@ -539,6 +541,7 @@ func TestNewRuntime(t *testing.T) {
 
 		assert.Contains(t, skillNames, "strategy-research-loop")
 		assert.Contains(t, skillNames, "historical-data-jobs")
+		assert.Contains(t, skillNames, "strategy-dsl-v0")
 		assert.Contains(t, skillNames, "backtest-critique")
 		assert.Contains(t, skillNames, "strategy-iteration")
 		assert.Contains(t, skillNames, "platform-info")
@@ -546,6 +549,7 @@ func TestNewRuntime(t *testing.T) {
 		for _, skillName := range []string{
 			"strategy-research-loop",
 			"historical-data-jobs",
+			"strategy-dsl-v0",
 			"backtest-critique",
 			"strategy-iteration",
 			"platform-info",
@@ -565,11 +569,52 @@ func TestNewRuntime(t *testing.T) {
 		require.NoError(t, err)
 		historicalText := strings.ToLower(string(historicalContent))
 		assert.Contains(t, historicalText, "sf_data_list_candle_availability")
-		assert.Contains(t, historicalText, "duplicate queued/running jobs")
-		assert.Contains(t, historicalText, "poll until terminal")
-		assert.Contains(t, historicalText, "synchronous evaluation")
-		assert.Contains(t, historicalText, "do not invent data")
-		assert.Contains(t, historicalText, "continuous ingestion is unavailable")
+		assert.Contains(t, historicalText, "backfill:<venue>:<symbol>:<assetclass>:<timeframe>:<start>:<end>")
+		assert.Contains(t, historicalText, "queued/running")
+		assert.Contains(t, historicalText, "do not run evaluation while job is `queued` or `running`")
+
+		researchLoopContent, err := os.ReadFile(
+			filepath.Join(bundledPlatformSkillsRoot, "strategy-research-loop", "SKILL.md"),
+		)
+		require.NoError(t, err)
+		assertOrderedSubstrings(
+			t,
+			string(researchLoopContent),
+			[]string{
+				"sf_data_list_candle_availability",
+				"sf_data_get_candles",
+				"historical-data-jobs",
+				"strategy-dsl-v0",
+				"sf_strategy_validate_definition",
+				"sf_strategy_create_version",
+				"sf_evaluation_run_backtest",
+				"sf_evaluation_get_backtest_report",
+				"sf_evaluation_get_backtest_evidence",
+			},
+		)
+
+		dslContent, err := os.ReadFile(
+			filepath.Join(bundledPlatformSkillsRoot, "strategy-dsl-v0", "SKILL.md"),
+		)
+		require.NoError(t, err)
+		dslText := string(dslContent)
+		assert.Contains(t, dslText, `"kind": "moving-average-crossover"`)
+		assert.Contains(t, dslText, "fastWindow must be less than slowWindow")
+		assert.Contains(t, dslText, "Emit long when previous fast <= previous slow and current fast > current slow.")
+
+		critiqueContent, err := os.ReadFile(
+			filepath.Join(bundledPlatformSkillsRoot, "backtest-critique", "SKILL.md"),
+		)
+		require.NoError(t, err)
+		assertOrderedSubstrings(
+			t,
+			string(critiqueContent),
+			[]string{
+				"sf_evaluation_get_backtest_detail",
+				"sf_evaluation_get_backtest_report",
+				"sf_evaluation_get_backtest_evidence",
+			},
+		)
 	})
 
 	t.Run("skills enabled with duplicate skill names - runtime starts keeping first occurrence", func(t *testing.T) {
@@ -682,5 +727,18 @@ func listedWorkspaceIdentifiers(t *testing.T, registry *agent.ToolsRegistry) []s
 func dataStoreOpts(deps RuntimeDeps) data.DatabaseStoreOpts {
 	return data.DatabaseStoreOpts{
 		TablePrefix: deps.DataLayerDatabaseTablePrefix,
+	}
+}
+
+func assertOrderedSubstrings(t *testing.T, text string, fragments []string) {
+	t.Helper()
+
+	searchStart := 0
+	for _, fragment := range fragments {
+		index := strings.Index(text[searchStart:], fragment)
+		if index < 0 {
+			t.Fatalf("expected fragment %q after offset %d", fragment, searchStart)
+		}
+		searchStart += index + len(fragment)
 	}
 }

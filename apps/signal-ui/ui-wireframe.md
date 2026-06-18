@@ -176,6 +176,8 @@
 - Route is protected; unauthenticated users are redirected to `/login` using the same guard behavior as other protected routes.
 - Initial render calls `GET /api/v1/data/candle-availability` for the first page.
 - If the availability endpoint returns `404 Not Found`, the page shows a non-alert note that points to a likely stale/older backend mismatch and keeps the manual exact candle form fully usable.
+- When `/data` opens with `venue`, `symbol`, `assetClass`, `timeframe`, `start`, and `end` query params in the hash route, the page applies that exact scope and loads those candles instead of the browse-first default selection.
+- If that exact-scope route load is present and availability returns `404 Not Found`, the page still loads the routed candle scope while showing the compatibility note.
 - When the first availability page includes `defaultSelection`, the page immediately calls `GET /api/v1/data/candles` with that exact **venue**, **symbol**, **assetClass**, **timeframe**, **start**, and **end**.
 - If availability is empty, the page shows an empty state and MUST NOT guess candle filters or call the candle endpoint.
 - Selecting an availability entry uses that item’s per-entry `defaultSlice`, updates the filter form to match, and loads normalized candles for that exact slice.
@@ -183,7 +185,7 @@
 - **Start historical backfill** is explicit and separate from browse/load/select paths:
   - validates the same required current form scope before calling `POST /api/v1/jobs/historical-data-backfills`
   - includes optional idempotency key and page size controls (`0` delegates to the backend default page size)
-  - shows the created job id/status and a route link to `#/jobs/:jobId` on success
+  - shows the created job id/status, a route link to `#/jobs/:jobId`, and a visible **Reload availability** action on success
   - does **not** run during availability auto-load, manual candle load, candle selection, or raw payload browsing
 - For the current Hyperliquid v0 contract, the backfill panel maps the Data-page `crypto` browse asset-class label to the backend job request's expected `future` asset-class value and calls this out in panel copy.
 - Client-side validation covers:
@@ -244,7 +246,7 @@
   - created time + attempt count
   - compact result or safe error summary when present
   - **Open job detail** route link
-- When the API returns `nextCursor`, show it as an operator-visible note only; paging interaction is deferred.
+- When the API returns `nextCursor`, show a visible **Load more** button and append the next page of cards.
 
 | State | When | UI |
 | :--- | :--- | :--- |
@@ -256,6 +258,7 @@
 **Detail (`/jobs/:jobId`)**
 
 - Header: **Job detail** heading + backlinks to **Jobs** and **Data**.
+- Add **Open data scope** route link to `#/data` with `venue`, `symbol`, `assetClass`, `timeframe`, `start`, and `end` query params for the job input scope.
 - Sections, in order:
   - summary (**status**, **job type**, **requester**, **worker**, **attempt count**)
   - input (**ingestionRunId**, venue/symbol/asset class/timeframe, page size, start/end)
@@ -268,7 +271,7 @@
 | Missing id | Route param absent | Inline alert: `Job id is required.` |
 | Loading | Detail fetch in flight | `Loading job detail…` |
 | Error | Detail fetch fails | Alert with safe API message. |
-| Queued/running | Non-terminal job | Summary/input/timeline visible; result/error absent until present. |
+| Queued/running | Non-terminal job | Summary/input/timeline visible; result/error absent until present; detail auto-refreshes until terminal. |
 | Succeeded | Terminal success | Result section visible, including missing interval preview when provided. |
 | Failed | Terminal failure | Error section visible with safe summary/code/details. |
 

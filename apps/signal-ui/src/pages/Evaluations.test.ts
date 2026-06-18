@@ -360,7 +360,12 @@ describe('Evaluations pages', () => {
 
   it('shows synchronous run status after creating a completed or failed evaluation', async () => {
     const strategy = makeStrategy()
-    const createdRun = makeEvaluationDetail({ strategyId: strategy.strategyId, strategyVersion: strategy.version, status: 'failed' })
+    const createdRun = makeEvaluationDetail({
+      strategyId: strategy.strategyId,
+      strategyVersion: strategy.version,
+      status: 'failed',
+      failureReason: 'replay-data-unavailable',
+    })
     mocks.listStrategies.mockResolvedValue([strategy])
     mocks.createEvaluationBacktest.mockResolvedValue(createdRun)
     mocks.listEvaluationBacktests.mockResolvedValue([makeEvaluationRow({ runId: createdRun.runId, status: createdRun.status })])
@@ -380,6 +385,8 @@ describe('Evaluations pages', () => {
     await waitFor(() => {
       expect(screen.getAllByText(formatCompactIdentifier(createdRun.runId)).length).toBeGreaterThan(0)
       expect(screen.getByRole('status')).toHaveTextContent('status failed')
+      expect(screen.getByRole('status')).toHaveTextContent('start a bounded historical backfill')
+      expect(screen.getByRole('link', { name: 'Historical data' })).toHaveAttribute('href', '#/data')
       for (const link of screen.getAllByRole('link', { name: 'Open evaluation detail' })) {
         expect(link).toHaveAttribute('href', `#/evaluations/${encodeURIComponent(createdRun.runId)}`)
       }

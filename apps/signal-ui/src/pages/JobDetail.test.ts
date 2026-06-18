@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { faker } from '@faker-js/faker'
 import { render, screen } from '@testing-library/svelte'
 import JobDetail from './JobDetail.svelte'
@@ -72,6 +72,10 @@ describe('Job detail page', () => {
     mocks.getJob.mockReset()
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('renders succeeded job detail, missing interval preview, and navigation links', async () => {
     const job = makeJobDetail()
     mocks.getJob.mockResolvedValue(job)
@@ -83,6 +87,10 @@ describe('Job detail page', () => {
     expect(screen.getByText(String(job.result.persistedCount))).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Back to jobs' })).toHaveAttribute('href', '#/jobs')
     expect(screen.getByRole('link', { name: 'Back to data' })).toHaveAttribute('href', '#/data')
+    expect(screen.getByRole('link', { name: 'Open data scope' })).toHaveAttribute(
+      'href',
+      `#/data?venue=${encodeURIComponent(job.input.venue)}&symbol=${encodeURIComponent(job.input.symbol)}&assetClass=${encodeURIComponent(job.input.assetClass)}&timeframe=${encodeURIComponent(job.input.timeframe)}&start=${encodeURIComponent(job.input.start.toISOString())}&end=${encodeURIComponent(job.input.end.toISOString())}`,
+    )
   })
 
   it('renders queued/running and failed-specific fields', async () => {
@@ -115,5 +123,28 @@ describe('Job detail page', () => {
     render(JobDetail, { params: { jobId: 'job-123' } })
 
     expect(await screen.findByRole('alert')).toHaveTextContent('detail blew up')
+  })
+
+  it('auto-refreshes queued jobs and stops once a terminal status is returned', async () => {
+    vi.useFakeTimers()
+
+    const queuedJob = makeJobDetail({ status: 'queued', completedAt: null, result: undefined })
+    const succeededJob = makeJobDetail({ id: queuedJob.id, status: 'succeeded' })
+    mocks.getJob.mockResolvedValueOnce(queuedJob).mockResolvedValueOnce(succeededJob)
+
+    render(JobDetail, { params: { jobId: queuedJob.id } })
+
+    await Promise.resolve()
+    expect(mocks.getJob).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(mocks.getJob).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    const callsAfterRefresh = mocks.getJob.mock.calls.length
+    expect(callsAfterRefresh).toBeGreaterThanOrEqual(2)
+
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(mocks.getJob).toHaveBeenCalledTimes(callsAfterRefresh)
   })
 })

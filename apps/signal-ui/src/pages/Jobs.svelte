@@ -10,6 +10,7 @@
   const jobsApi = $derived.by(() => createSignalJobsApiForAuth({ baseUrl: appBaseUrl, authStore }))
 
   let loading = $state(true)
+  let loadingMore = $state(false)
   let error = $state<string | null>(null)
   let jobs = $state<JobSummary[]>([])
   let nextCursor = $state('')
@@ -22,31 +23,50 @@
     void loadJobs()
   })
 
-  async function loadJobs() {
-    loading = true
-    error = null
+  async function loadJobs(options: { cursor?: string; append?: boolean } = {}) {
+    const append = options.append ?? false
+    const cursor = options.cursor ?? ''
+    if (append) {
+      loadingMore = true
+    } else {
+      loading = true
+      error = null
+    }
     try {
       const response = await jobsApi.listJobs({
         status: statusFilter ? [statusFilter] : [],
         jobType: jobTypeFilter ? [jobTypeFilter] : [],
         source: sourceFilter ? [sourceFilter] : [],
         limit: 25,
-        cursor: '',
+        cursor,
       })
-      jobs = response.items
+      jobs = append ? [...jobs, ...response.items] : response.items
       nextCursor = response.nextCursor
     } catch (loadError) {
-      jobs = []
-      nextCursor = ''
+      if (!append) {
+        jobs = []
+        nextCursor = ''
+      }
       error = loadError instanceof Error ? loadError.message : 'Failed to load jobs'
     } finally {
-      loading = false
+      if (append) {
+        loadingMore = false
+      } else {
+        loading = false
+      }
     }
   }
 
   async function applyFilters(event: SubmitEvent) {
     event.preventDefault()
     await loadJobs()
+  }
+
+  async function loadMore() {
+    if (!nextCursor) {
+      return
+    }
+    await loadJobs({ cursor: nextCursor, append: true })
   }
 
   function formatDate(value: Date | null): string {
@@ -64,7 +84,7 @@
       <h1 id="jobs-heading">Jobs</h1>
       <p class="muted">Review durable historical ingestion jobs, filter the queue, and open detail on a separate route.</p>
     </div>
-    <button class="secondary" type="button" onclick={loadJobs} disabled={loading}>Refresh jobs</button>
+    <button class="secondary" type="button" onclick={() => void loadJobs()} disabled={loading}>Refresh jobs</button>
   </header>
 
   <section class="panel">
@@ -151,7 +171,11 @@
     </div>
 
     {#if nextCursor}
-      <p class="muted">Next cursor available: {nextCursor}</p>
+      <div class="load-more">
+        <button class="secondary" type="button" onclick={loadMore} disabled={loadingMore}>
+          {loadingMore ? 'Loading more…' : 'Load more'}
+        </button>
+      </div>
     {/if}
   {/if}
 </section>
@@ -241,6 +265,11 @@
     color: var(--link);
     text-decoration: underline;
     font-weight: 500;
+  }
+
+  .load-more {
+    display: flex;
+    justify-content: flex-start;
   }
 
   .error,
