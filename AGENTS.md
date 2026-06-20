@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project is early in development; breaking public API changes are not a concern.
+**Early alpha note** This project is early in development; breaking API changes, data loss due to migrations incompatibility or other breaking changes are not a concern. We should not optimize for backward compatibility or plan any work that accounts for it.
 
 ## Project Origin And Direction
 
