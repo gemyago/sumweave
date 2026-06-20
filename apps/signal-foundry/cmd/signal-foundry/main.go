@@ -20,6 +20,7 @@ func setupCommands() *cobra.Command {
 	rootCmd.AddCommand(
 		newStartServerCmd(container),
 		newDataCmd(container, nil),
+		newFinancePOCCmd(financePOCCommandDeps{}),
 		newUserCmd(container),
 	)
 	return rootCmd

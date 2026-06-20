@@ -129,12 +129,13 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Keep `manager-status.md` current once the OpenSpec directory is known.
 - Retry a failed sub-agent spawn once. If the retry also fails, stop and tell the user.
 - Preserve configured model and reasoning settings on retries and resumes.
+- Preserve task-relevant outside-of-flow additions to the same work.
 - Resolve duplicate or still-running sub-agents before starting another run for the same chunk.
 - Close finished sub-agents when needed to free capacity.
 - Enforce `openspec apply` for all implementation, fixing, and comments-addressing work.
 - Enforce strict chunk order from the reviewed plan.
 - Pass relevant `AGENTS.md` constraints and artifact rules to every sub-agent.
-- Verify the git state yourself at every clean gate; untracked files count as pending changes.
+- Verify the relevant git state yourself at every clean gate; relevant untracked files count as pending changes.
 
 ### You must NOT do
 
@@ -148,6 +149,7 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Invent user intent that was not actually expressed.
 - Continue if a gate is missing a required verdict, completion protocol status, artifact cleanup status, or commit status.
 - Continue if `git status --short` still shows relevant tracked or untracked changes after a supposedly clean commit gate.
+- Do not treat outside-of-flow additions as branch contamination to revert.
 - Allow ad-hoc journey files, scratch notes, or random investigation summaries to remain in the repository.
 - If your environment allows, fork sub-agents to inherit the context.
 
@@ -167,6 +169,12 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 
 - Prefer the nearest relevant `AGENTS.md` for the affected area.
 - Keep changes simple. Do not future-proof without an explicit task requirement.
+
+## Outside-of-flow changes
+
+- Some task-relevant work may already exist outside the OpenSpec manager flow.
+- Preserve those additions. Do not revert, discard, or classify them as branch contamination just because they were created outside the flow.
+- Treat them as outside-of-flow additions to the same work and carry them through the normal relevant-file review and commit gates.
 
 ## Standard artifacts
 

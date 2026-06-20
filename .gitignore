@@ -11,7 +11,15 @@ tmp
 .pm2
 *.log
 
+# Financial POC artifacts
+data/financial-poc/
+*.enable-banking-session.json
+*.enable-banking-transactions.json
+*.monobank-transactions.json
+
 # User configs
+# Local configs/secrets e.t.c
+.envrc.local
 **/internal/config/*-user.yaml
 
 # Want to figure-out how to make it nice and not bloat the repo

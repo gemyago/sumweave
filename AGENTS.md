@@ -119,6 +119,7 @@ The rules are:
 - Keep package/release pipeline code removed unless explicitly revived.
 - Natural-language approval completes OpenSpec review by default.
 - OpenSpec gates pass only with a clean relevant git status.
+- Preserve outside-flow additions; never revert as contamination.
 - Archive OpenSpec changes before any final submission step.
 - Use `make test-live-compile` for regular live-lane build coverage.
 - OpenSpec manager work must be done by the requested sub-agent.
