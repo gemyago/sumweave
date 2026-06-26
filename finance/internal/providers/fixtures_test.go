@@ -60,19 +60,19 @@ func makeRandomProviderSyncState(
 	fake faker.Faker,
 	connection domain.ProviderConnectionRef,
 ) domain.ProviderSyncState {
-	lastSuccessfulWindow := makeRandomProviderSyncWindow(fake)
-	lastSuccessAt := lastSuccessfulWindow.End.Add(time.Hour)
+	lastWindow := makeRandomProviderSyncWindow(fake)
+	lastSuccessAt := lastWindow.End.Add(time.Hour)
 	lastAttemptAt := lastSuccessAt.Add(time.Hour)
 
 	return domain.ProviderSyncState{
-		Connection:           connection,
-		LastAttemptAt:        &lastAttemptAt,
-		LastSuccessAt:        &lastSuccessAt,
-		LastSuccessfulWindow: &lastSuccessfulWindow,
-		LastRunID:            "run-" + fake.UUID().V4(),
-		LastJobID:            "job-" + fake.UUID().V4(),
-		LastErrorSummary:     "error-" + fake.Lorem().Sentence(3),
-		AggregateStats:       makeRandomProviderSyncStats(fake),
+		Connection:     connection,
+		AttemptedAt:    &lastAttemptAt,
+		SucceededAt:    &lastSuccessAt,
+		Window:         lastWindow,
+		RunID:          "run-" + fake.UUID().V4(),
+		JobID:          "job-" + fake.UUID().V4(),
+		ErrorSummary:   "error-" + fake.Lorem().Sentence(3),
+		AggregateStats: makeRandomProviderSyncStats(fake),
 	}
 }
 

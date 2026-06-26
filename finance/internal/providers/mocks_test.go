@@ -98,12 +98,12 @@ func (_c *MockSyncStateJournal_AppendSyncState_Call) RunAndReturn(run func(ctx c
 	return _c
 }
 
-// LoadLastSucceededSyncState provides a mock function for the type MockSyncStateJournal
-func (_mock *MockSyncStateJournal) LoadLastSucceededSyncState(ctx context.Context, connection domain.ProviderConnectionRef) (*domain.ProviderSyncState, error) {
+// LoadLastState provides a mock function for the type MockSyncStateJournal
+func (_mock *MockSyncStateJournal) LoadLastState(ctx context.Context, connection domain.ProviderConnectionRef) (*domain.ProviderSyncState, error) {
 	ret := _mock.Called(ctx, connection)
 
 	if len(ret) == 0 {
-		panic("no return value specified for LoadLastSucceededSyncState")
+		panic("no return value specified for LoadLastState")
 	}
 
 	var r0 *domain.ProviderSyncState
@@ -126,19 +126,19 @@ func (_mock *MockSyncStateJournal) LoadLastSucceededSyncState(ctx context.Contex
 	return r0, r1
 }
 
-// MockSyncStateJournal_LoadLastSucceededSyncState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadLastSucceededSyncState'
-type MockSyncStateJournal_LoadLastSucceededSyncState_Call struct {
+// MockSyncStateJournal_LoadLastState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadLastState'
+type MockSyncStateJournal_LoadLastState_Call struct {
 	*mock.Call
 }
 
-// LoadLastSucceededSyncState is a helper method to define mock.On call
+// LoadLastState is a helper method to define mock.On call
 //   - ctx context.Context
 //   - connection domain.ProviderConnectionRef
-func (_e *MockSyncStateJournal_Expecter) LoadLastSucceededSyncState(ctx interface{}, connection interface{}) *MockSyncStateJournal_LoadLastSucceededSyncState_Call {
-	return &MockSyncStateJournal_LoadLastSucceededSyncState_Call{Call: _e.mock.On("LoadLastSucceededSyncState", ctx, connection)}
+func (_e *MockSyncStateJournal_Expecter) LoadLastState(ctx interface{}, connection interface{}) *MockSyncStateJournal_LoadLastState_Call {
+	return &MockSyncStateJournal_LoadLastState_Call{Call: _e.mock.On("LoadLastState", ctx, connection)}
 }
 
-func (_c *MockSyncStateJournal_LoadLastSucceededSyncState_Call) Run(run func(ctx context.Context, connection domain.ProviderConnectionRef)) *MockSyncStateJournal_LoadLastSucceededSyncState_Call {
+func (_c *MockSyncStateJournal_LoadLastState_Call) Run(run func(ctx context.Context, connection domain.ProviderConnectionRef)) *MockSyncStateJournal_LoadLastState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -156,12 +156,12 @@ func (_c *MockSyncStateJournal_LoadLastSucceededSyncState_Call) Run(run func(ctx
 	return _c
 }
 
-func (_c *MockSyncStateJournal_LoadLastSucceededSyncState_Call) Return(providerSyncState *domain.ProviderSyncState, err error) *MockSyncStateJournal_LoadLastSucceededSyncState_Call {
+func (_c *MockSyncStateJournal_LoadLastState_Call) Return(providerSyncState *domain.ProviderSyncState, err error) *MockSyncStateJournal_LoadLastState_Call {
 	_c.Call.Return(providerSyncState, err)
 	return _c
 }
 
-func (_c *MockSyncStateJournal_LoadLastSucceededSyncState_Call) RunAndReturn(run func(ctx context.Context, connection domain.ProviderConnectionRef) (*domain.ProviderSyncState, error)) *MockSyncStateJournal_LoadLastSucceededSyncState_Call {
+func (_c *MockSyncStateJournal_LoadLastState_Call) RunAndReturn(run func(ctx context.Context, connection domain.ProviderConnectionRef) (*domain.ProviderSyncState, error)) *MockSyncStateJournal_LoadLastState_Call {
 	_c.Call.Return(run)
 	return _c
 }

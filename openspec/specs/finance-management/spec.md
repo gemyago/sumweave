@@ -105,12 +105,34 @@ The finance module SHALL support secure provider linking plus explicit async syn
 - **AND** provider observation types MUST be clearly named with `Provider` or `ProviderSync` prefixes so they remain distinct from user-facing finance ledger types
 - **AND** provider connectors MUST NOT persist finance records directly
 
-#### Scenario: Provider sync v2 tracks per-connection state journal
+#### Scenario: Provider sync v2 tracks per-connection latest state journal
 - **WHEN** provider sync v2 records sync progress
-- **THEN** sync state snapshots MUST be scoped to a bank connection
-- **AND** the system MUST be able to load the latest succeeded sync state snapshot for that connection
-- **AND** each succeeded sync step MUST append the next succeeded state snapshot instead of overwriting earlier succeeded progress
-- **AND** succeeded snapshots MUST keep last attempt, last success, last successful window, last run or job identity, and aggregate sync stats where available
+- **THEN** sync state journal rows MUST be scoped to a bank connection
+- **AND** the system MUST append one latest-state row per attempted chunk window rather than only per succeeded chunk
+- **AND** the system MUST be able to load the newest appended state row for that connection
+- **AND** each state row MUST keep the attempted window bounds, attempt time, nullable success time, run or job identity, error summary, and aggregate sync stats where available
+
+#### Scenario: Provider sync v2 journal rows always describe a concrete attempted window
+- **WHEN** provider sync v2 appends a state row for a chunk attempt
+- **THEN** that row MUST store the concrete attempted window start and end even when the attempt fails
+- **AND** window bounds MUST NOT depend on whether `SucceededAt` is populated
+
+#### Scenario: Provider sync v2 latest state is interpreted through nullable success
+- **WHEN** provider sync v2 loads the newest appended state row for a connection
+- **THEN** `SucceededAt` populated on that row MUST mean the latest known attempt completed successfully
+- **AND** `SucceededAt` absent on that row MUST mean the latest known attempt did not record success
+- **AND** planning and retry logic MUST treat that distinction explicitly instead of assuming the newest row is always a succeeded checkpoint
+
+#### Scenario: Provider sync v2 lets target-window policy interpret the latest loaded state
+- **WHEN** provider sync v2 decides the next target window
+- **THEN** target-window planning MUST consume the latest loaded sync state directly
+- **AND** orchestration MUST NOT construct a synthetic future state by copying prior success fields into the current attempt before any chunk is known
+- **AND** concrete attempt state rows MUST be created only when an exact chunk window is being executed
+
+#### Scenario: Provider sync v2 treats empty journal state as no prior state
+- **WHEN** a bank connection has no state rows in the provider sync state journal
+- **THEN** the system MUST return no latest sync state for that connection
+- **AND** planning the next sync session MUST treat that connection as having no prior journal state
 
 #### Scenario: Provider sync v2 plans diffs before applying writes
 - **WHEN** provider sync v2 compares provider observations with persisted data
@@ -199,3 +221,4 @@ The finance module SHALL resolve the provider sync v2 fetch connector from the p
 - **WHEN** provider sync v2 coordinates a bank connection whose `ConnectorID` is empty, unknown, or not configured in the runtime registry
 - **THEN** the window sync executor MUST fail before any provider fetch call is attempted
 - **AND** the failure MUST identify connector resolution as the cause without exposing secrets or raw provider payload content
+

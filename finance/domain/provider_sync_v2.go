@@ -111,14 +111,14 @@ type ProviderSyncIssue struct {
 }
 
 type ProviderSyncState struct {
-	Connection           ProviderConnectionRef
-	LastAttemptAt        *time.Time
-	LastSuccessAt        *time.Time
-	LastSuccessfulWindow *ProviderSyncWindow
-	LastRunID            string
-	LastJobID            string
-	LastErrorSummary     string
-	AggregateStats       ProviderSyncStats
+	Connection     ProviderConnectionRef
+	AttemptedAt    *time.Time
+	SucceededAt    *time.Time
+	Window         ProviderSyncWindow
+	RunID          string
+	JobID          string
+	ErrorSummary   string
+	AggregateStats ProviderSyncStats
 }
 
 type ProviderSyncRun struct {

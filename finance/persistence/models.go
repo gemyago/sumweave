@@ -284,6 +284,28 @@ type bankConnectionSyncRunModel struct {
 
 func (bankConnectionSyncRunModel) TableName() string { return "finance_bank_connection_sync_runs" }
 
+type providerSyncStateJournalModel struct {
+	JournalID                    int64      `gorm:"column:journal_id;not null;primaryKey;autoIncrement"`
+	ConnectionID                 string     `gorm:"column:connection_id;size:255;not null;index:idx_finance_provider_sync_state_journal_latest,priority:1"`
+	AttemptedAt                  *time.Time `gorm:"column:attempted_at"`
+	SucceededAt                  *time.Time `gorm:"column:succeeded_at"`
+	WindowStart                  time.Time  `gorm:"column:window_start;not null"`
+	WindowEnd                    time.Time  `gorm:"column:window_end;not null"`
+	RunID                        string     `gorm:"column:run_id;size:255;not null;default:''"`
+	JobID                        string     `gorm:"column:job_id;size:255;not null;default:''"`
+	ErrorSummary                 string     `gorm:"column:error_summary;type:text;not null;default:''"`
+	ObservedAccounts             int64      `gorm:"column:observed_accounts;not null"`
+	ObservedTransactions         int64      `gorm:"column:observed_transactions;not null"`
+	CreatedTransactions          int64      `gorm:"column:created_transactions;not null"`
+	UpdatedTransactions          int64      `gorm:"column:updated_transactions;not null"`
+	AmbiguousCreatedTransactions int64      `gorm:"column:ambiguous_created_transactions;not null"`
+	CreatedAt                    time.Time  `gorm:"column:created_at;not null;index:idx_finance_provider_sync_state_journal_latest,priority:2"`
+}
+
+func (providerSyncStateJournalModel) TableName() string {
+	return "finance_provider_sync_state_journal_records"
+}
+
 type providerTransactionMatchModel struct {
 	ID                    string    `gorm:"column:id;size:255;not null;primaryKey"`
 	ConnectionID          string    `gorm:"column:connection_id;size:255;not null;index:idx_finance_provider_transaction_matches_provider_id,priority:1;index:idx_finance_provider_transaction_matches_fingerprint,priority:1"`
@@ -945,6 +967,55 @@ func bankConnectionSyncRunFromModel(model bankConnectionSyncRunModel) domain.Ban
 		JobID:        model.JobID,
 		CreatedAt:    normalizeUTC(model.CreatedAt),
 	}
+}
+
+func newProviderSyncStateJournalModel(
+	state domain.ProviderSyncState,
+	createdAt time.Time,
+) providerSyncStateJournalModel {
+	model := providerSyncStateJournalModel{
+		ConnectionID:                 state.Connection.ConnectionID,
+		AttemptedAt:                  normalizeUTCPointer(state.AttemptedAt),
+		SucceededAt:                  normalizeUTCPointer(state.SucceededAt),
+		WindowStart:                  normalizeUTC(state.Window.Start),
+		WindowEnd:                    normalizeUTC(state.Window.End),
+		RunID:                        state.RunID,
+		JobID:                        state.JobID,
+		ErrorSummary:                 state.ErrorSummary,
+		ObservedAccounts:             int64(state.AggregateStats.ObservedAccounts),
+		ObservedTransactions:         int64(state.AggregateStats.ObservedTransactions),
+		CreatedTransactions:          int64(state.AggregateStats.CreatedTransactions),
+		UpdatedTransactions:          int64(state.AggregateStats.UpdatedTransactions),
+		AmbiguousCreatedTransactions: int64(state.AggregateStats.AmbiguousCreatedTransactions),
+		CreatedAt:                    normalizeUTC(createdAt),
+	}
+	return model
+}
+
+func providerSyncStateFromJournalModel(
+	model providerSyncStateJournalModel,
+	connection domain.ProviderConnectionRef,
+) domain.ProviderSyncState {
+	state := domain.ProviderSyncState{
+		Connection:  connection,
+		AttemptedAt: normalizeUTCPointer(model.AttemptedAt),
+		SucceededAt: normalizeUTCPointer(model.SucceededAt),
+		Window: domain.ProviderSyncWindow{
+			Start: normalizeUTC(model.WindowStart),
+			End:   normalizeUTC(model.WindowEnd),
+		},
+		RunID:        model.RunID,
+		JobID:        model.JobID,
+		ErrorSummary: model.ErrorSummary,
+		AggregateStats: domain.ProviderSyncStats{
+			ObservedAccounts:             int(model.ObservedAccounts),
+			ObservedTransactions:         int(model.ObservedTransactions),
+			CreatedTransactions:          int(model.CreatedTransactions),
+			UpdatedTransactions:          int(model.UpdatedTransactions),
+			AmbiguousCreatedTransactions: int(model.AmbiguousCreatedTransactions),
+		},
+	}
+	return state
 }
 
 func newProviderTransactionMatchModel(

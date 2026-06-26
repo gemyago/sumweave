@@ -14,12 +14,12 @@ This document explains the finance provider sync flow at a high level.
 - Candidate window: a wider persisted lookup range used to catch the same transaction when the provider later shifts its timestamp or status.
 - Diff plan: the write-free plan describing what should be created or updated.
 - Diff planner: the pure component that builds the diff plan for one requested sync window.
-- Sync orchestrator: the component that loads the latest succeeded sync state, chooses the target window, splits it into chunk windows, and coordinates per-window execution.
+- Sync orchestrator: the component that loads the latest sync state, chooses the target window, splits it into chunk windows, and coordinates per-window execution.
 - Window sync executor: the component that executes one requested sync window end to end.
 - Provider-original fields: the last known raw provider values stored next to a transaction.
-- Sync state: one succeeded progress snapshot for one connection.
-- Sync state journal: the append-only history of succeeded sync state snapshots for one connection.
-- Latest succeeded sync state: the newest succeeded snapshot loaded to decide the next target window.
+- Sync state: one recorded chunk-attempt state for one connection.
+- Sync state journal: the append-only history of chunk-attempt states for one connection.
+- Latest sync state: the newest appended attempt state loaded to decide the next target window.
 
 ## Purpose
 
@@ -51,23 +51,25 @@ The request is scoped to one bank connection.
 
 ### 3. The sync orchestrator plans the session
 
-The sync orchestrator loads the latest succeeded sync state for the connection.
+The sync orchestrator loads the latest sync state for the connection.
 
 That detail matters because sync progress is modeled as a journal, not as one
 mutable state row that gets overwritten on every attempt.
 
 In practice:
 
-- each succeeded chunk appends the next succeeded sync state snapshot
-- failed attempts do not replace the latest succeeded snapshot
-- resume starts from the latest succeeded coverage, not from the start of the failed session
+- each attempted chunk appends one sync state row
+- each row stores the exact attempted chunk window
+- `SucceededAt` being present means that attempted chunk succeeded
+- `SucceededAt` being absent means the latest known attempt for that window failed
+- target-window planning receives the latest loaded state directly and owns the succeeded-vs-failed interpretation itself
 
 It then decides the target window for this sync session.
 
 The intended policy is:
 
 - sync at least the last 30 days ending at the current time
-- if the last successful window ended earlier than that, extend the target window backward to catch up from `lastSuccessfulWindow.End`
+- if the latest succeeded window ended earlier than that, extend the target window backward to catch up from that state's `Window.End`
 - if that target window is longer than 30 days, split it into chunk windows of at most 30 days
 - execute chunk windows oldest first
 
@@ -145,8 +147,8 @@ At a high level, this writes:
 
 ### 10. Sync state is updated
 
-After each succeeded chunk window, the system appends the next succeeded sync state
-snapshot for the connection.
+After each attempted chunk window, the system appends one sync state row for the
+connection.
 
 Conceptually, the journal for one connection evolves like this:
 
@@ -154,22 +156,23 @@ Conceptually, the journal for one connection evolves like this:
 state0 -> state1 -> state2 -> state3
 ```
 
-Where each next state extends the known succeeded coverage.
+Where each next state records the concrete attempted chunk window and whether it
+succeeded.
 
-If a later chunk fails, the latest succeeded state stays unchanged, so the next
-session resumes from that point.
+If a later chunk fails, the failed row is still appended, and target-window
+policy decides how that latest failed row should influence the next plan.
 
-That snapshot includes:
+That state row includes:
 
 - last attempt
 - last success
-- last successful window
+- attempted window
 - last run or job reference
 - stats
 
-Failed sessions do not replace the latest succeeded sync state snapshot. Resume
-starts from the latest succeeded window, while failures should be traced through
-run records and logs.
+Failed sessions are part of the same journal. They stay visible as explicit
+attempt history, and target-window policy is the seam that decides how the
+latest state should affect the next plan.
 
 ## Design Principles
 
@@ -177,9 +180,9 @@ run records and logs.
 - Plan before writing.
 - Prefer explicit matches over clever guesses.
 - Preserve user edits.
-- Keep a succeeded sync state journal per connection.
-- Load the latest succeeded snapshot before planning the next session.
-- Append succeeded progress; do not overwrite it on failed attempts.
+- Keep a latest-attempt sync state journal per connection.
+- Load the latest state before planning the next session.
+- Append every attempted chunk; do not hide failures behind older success rows.
 - Keep provider-specific transport details behind connectors.
 
 ## In Short
@@ -187,7 +190,7 @@ run records and logs.
 Conceptually, provider sync is:
 
 ```text
-connection -> load latest succeeded sync state -> choose target window -> split into chunk windows -> execute each requested window -> load existing window -> plan diff -> apply changes -> append next succeeded sync state
+connection -> load latest sync state -> choose target window -> split into chunk windows -> execute each requested window -> load existing window -> plan diff -> apply changes -> append next attempt state
 ```
 
 The important part is not just fetching bank data. The important part is making

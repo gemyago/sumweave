@@ -22,7 +22,7 @@ func TestMigrate(t *testing.T) {
 		require.NoError(t, store.Migrate(t.Context()))
 
 		schemaModels := financeSchemaModels()
-		require.Len(t, schemaModels, 20)
+		require.Len(t, schemaModels, 21)
 
 		sqlDB, err := store.db.DB()
 		require.NoError(t, err)
@@ -45,6 +45,7 @@ func TestMigrate(t *testing.T) {
 		assert.Contains(t, tableNames, "finance_transactions")
 		assert.Contains(t, tableNames, "finance_csv_imports")
 		assert.Contains(t, tableNames, "finance_pending_bank_link_starts")
+		assert.Contains(t, tableNames, "finance_provider_sync_state_journal_records")
 	})
 
 	t.Run("keeps schema initialization portable across sqlite modes", func(t *testing.T) {

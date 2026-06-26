@@ -26,6 +26,7 @@ func financeSchemaModels() []any {
 		&balanceSnapshotModel{},
 		&rawPayloadModel{},
 		&bankConnectionSyncRunModel{},
+		&providerSyncStateJournalModel{},
 		&providerTransactionMatchModel{},
 	}
 }

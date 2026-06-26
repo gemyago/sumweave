@@ -18,7 +18,7 @@ var (
 )
 
 type SyncStateJournal interface {
-	LoadLastSucceededSyncState(
+	LoadLastState(
 		ctx context.Context,
 		connection domain.ProviderConnectionRef,
 	) (*domain.ProviderSyncState, error)
@@ -70,11 +70,6 @@ type SyncOrchestrator struct {
 	now                func() time.Time
 }
 
-type preparedSyncState struct {
-	nextState    domain.ProviderSyncState
-	targetWindow domain.ProviderSyncWindow
-}
-
 func WithLogger(logger *slog.Logger) SyncOrchestratorOption {
 	return func(orchestrator *SyncOrchestrator) {
 		orchestrator.logger = logger
@@ -123,7 +118,7 @@ func NewSyncOrchestrator(
 	return orchestrator, nil
 }
 
-// Orchestrate loads the latest succeeded sync state, plans chunk windows, and appends the next succeeded state snapshot after each completed chunk.
+// Orchestrate loads the latest sync state, plans chunk windows, and appends one state row per attempted chunk.
 func (o *SyncOrchestrator) Orchestrate(
 	ctx context.Context,
 	request SyncOrchestrationRequest,
@@ -138,49 +133,50 @@ func (o *SyncOrchestrator) Orchestrate(
 		slog.String("reason", request.Reason),
 	)
 
-	lastSucceededState, err := o.syncStateJournal.LoadLastSucceededSyncState(ctx, request.Connection)
+	lastState, err := o.syncStateJournal.LoadLastState(ctx, request.Connection)
 	if err != nil {
 		return SyncOrchestrationResult{}, fmt.Errorf("load sync state: %w", err)
 	}
 
-	preparedState, err := o.prepareNextSyncState(
-		ctx,
-		request,
-		lastSucceededState,
-	)
+	targetWindow, err := o.targetWindowPolicy.Determine(o.now(), lastState)
 	if err != nil {
-		return SyncOrchestrationResult{}, err
+		o.logger.ErrorContext(
+			ctx,
+			"provider sync target window planning failed",
+			slog.String("connectionId", request.Connection.ConnectionID),
+			slog.String("jobId", request.JobID),
+			slog.String("error", err.Error()),
+		)
+		return SyncOrchestrationResult{}, fmt.Errorf("determine target window: %w", err)
 	}
-	nextState := preparedState.nextState
 
 	requestedWindows, err := o.planRequestedWindows(
 		ctx,
 		request.Connection,
 		request.JobID,
-		preparedState.targetWindow,
+		targetWindow,
 	)
 	if err != nil {
 		return SyncOrchestrationResult{}, err
 	}
 
 	result := SyncOrchestrationResult{
-		TargetWindow: preparedState.targetWindow,
+		TargetWindow: targetWindow,
 	}
 	for _, requestedWindow := range requestedWindows {
-		windowResult, updatedState, executeErr := o.executeRequestedWindow(
+		windowResult, updatedStats, executeErr := o.executeRequestedWindow(
 			ctx,
 			request,
 			requestedWindow,
-			nextState,
+			result.Stats,
 		)
 		if executeErr != nil {
 			return SyncOrchestrationResult{}, executeErr
 		}
-		nextState = updatedState
 
 		result.ExecutedWindows = append(result.ExecutedWindows, requestedWindow)
 		result.WindowResults = append(result.WindowResults, windowResult)
-		result.Stats = mergeProviderSyncStats(result.Stats, windowResult.Stats)
+		result.Stats = updatedStats
 		result.Issues = append(result.Issues, windowResult.Issues...)
 	}
 
@@ -194,38 +190,6 @@ func (o *SyncOrchestrator) Orchestrate(
 	)
 
 	return result, nil
-}
-
-func (o *SyncOrchestrator) prepareNextSyncState(
-	ctx context.Context,
-	request SyncOrchestrationRequest,
-	lastSucceededState *domain.ProviderSyncState,
-) (preparedSyncState, error) {
-	nextState := domain.ProviderSyncState{Connection: request.Connection}
-	if lastSucceededState != nil {
-		nextState.LastSuccessAt = lastSucceededState.LastSuccessAt
-		nextState.LastSuccessfulWindow = lastSucceededState.LastSuccessfulWindow
-	}
-	attemptedAt := o.now()
-	nextState.LastAttemptAt = &attemptedAt
-	nextState.LastJobID = request.JobID
-
-	targetWindow, err := o.targetWindowPolicy.Determine(attemptedAt, &nextState)
-	if err != nil {
-		o.logger.ErrorContext(
-			ctx,
-			"provider sync target window planning failed",
-			slog.String("connectionId", request.Connection.ConnectionID),
-			slog.String("jobId", request.JobID),
-			slog.String("error", err.Error()),
-		)
-		return preparedSyncState{}, fmt.Errorf("determine target window: %w", err)
-	}
-
-	return preparedSyncState{
-		nextState:    nextState,
-		targetWindow: targetWindow,
-	}, nil
 }
 
 func (o *SyncOrchestrator) planRequestedWindows(
@@ -264,8 +228,8 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 	ctx context.Context,
 	request SyncOrchestrationRequest,
 	requestedWindow domain.ProviderSyncWindow,
-	nextState domain.ProviderSyncState,
-) (WindowSyncResult, domain.ProviderSyncState, error) {
+	aggregateStats domain.ProviderSyncStats,
+) (WindowSyncResult, domain.ProviderSyncStats, error) {
 	o.logger.InfoContext(
 		ctx,
 		"execute provider sync window",
@@ -274,15 +238,37 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 		slog.Time("requested_end", requestedWindow.End),
 	)
 
+	attemptedAt := o.now()
+	chunkState := domain.ProviderSyncState{
+		Connection:     request.Connection,
+		AttemptedAt:    &attemptedAt,
+		Window:         requestedWindow,
+		JobID:          request.JobID,
+		AggregateStats: aggregateStats,
+	}
+
 	windowResult, executeErr := o.windowExecutor.Execute(ctx, WindowSyncRequest{
 		Connection:      request.Connection,
 		Secret:          request.Secret,
 		RequestedWindow: requestedWindow,
-		SyncState:       &nextState,
+		SyncState:       &chunkState,
 		JobID:           request.JobID,
 		Reason:          request.Reason,
 	})
 	if executeErr != nil {
+		chunkState.ErrorSummary = executeErr.Error()
+		if appendErr := o.syncStateJournal.AppendSyncState(ctx, chunkState); appendErr != nil {
+			o.logger.ErrorContext(
+				ctx,
+				"append failed provider sync state failed",
+				slog.String("connection_id", request.Connection.ConnectionID),
+				slog.Time("requested_start", requestedWindow.Start),
+				slog.Time("requested_end", requestedWindow.End),
+				slog.String("error", appendErr.Error()),
+			)
+
+			return WindowSyncResult{}, domain.ProviderSyncStats{}, fmt.Errorf("append failed sync state: %w", appendErr)
+		}
 		o.logger.WarnContext(
 			ctx,
 			"provider sync window failed",
@@ -291,17 +277,15 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 			slog.Time("requested_end", requestedWindow.End),
 			slog.String("error", executeErr.Error()),
 		)
-		return WindowSyncResult{}, domain.ProviderSyncState{}, fmt.Errorf("execute requested window: %w", executeErr)
+		return WindowSyncResult{}, domain.ProviderSyncStats{}, fmt.Errorf("execute requested window: %w", executeErr)
 	}
 
 	completedAt := o.now()
-	nextState.LastSuccessAt = &completedAt
-	nextState.LastSuccessfulWindow = extendSuccessfulWindow(nextState.LastSuccessfulWindow, requestedWindow)
-	nextState.LastRunID = windowResult.RunID
-	nextState.LastJobID = request.JobID
-	nextState.LastErrorSummary = ""
-	nextState.AggregateStats = mergeProviderSyncStats(nextState.AggregateStats, windowResult.Stats)
-	if appendErr := o.syncStateJournal.AppendSyncState(ctx, nextState); appendErr != nil {
+	chunkState.SucceededAt = &completedAt
+	chunkState.RunID = windowResult.RunID
+	updatedStats := mergeProviderSyncStats(chunkState.AggregateStats, windowResult.Stats)
+	chunkState.AggregateStats = updatedStats
+	if appendErr := o.syncStateJournal.AppendSyncState(ctx, chunkState); appendErr != nil {
 		o.logger.ErrorContext(
 			ctx,
 			"append provider sync state failed",
@@ -312,7 +296,7 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 			slog.String("error", appendErr.Error()),
 		)
 
-		return WindowSyncResult{}, domain.ProviderSyncState{}, fmt.Errorf("append sync state: %w", appendErr)
+		return WindowSyncResult{}, domain.ProviderSyncStats{}, fmt.Errorf("append sync state: %w", appendErr)
 	}
 
 	o.logger.InfoContext(
@@ -324,27 +308,7 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 		slog.String("run_id", windowResult.RunID),
 	)
 
-	return windowResult, nextState, nil
-}
-
-func extendSuccessfulWindow(
-	current *domain.ProviderSyncWindow,
-	succeededWindow domain.ProviderSyncWindow,
-) *domain.ProviderSyncWindow {
-	if current == nil {
-		window := succeededWindow
-		return &window
-	}
-
-	nextWindow := *current
-	if succeededWindow.Start.Before(nextWindow.Start) {
-		nextWindow.Start = succeededWindow.Start
-	}
-	if succeededWindow.End.After(nextWindow.End) {
-		nextWindow.End = succeededWindow.End
-	}
-
-	return &nextWindow
+	return windowResult, updatedStats, nil
 }
 
 func mergeProviderSyncStats(left domain.ProviderSyncStats, right domain.ProviderSyncStats) domain.ProviderSyncStats {

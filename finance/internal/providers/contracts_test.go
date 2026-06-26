@@ -159,10 +159,10 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 			End:   requestedWindow.End.Add(72 * time.Hour),
 		}
 		state := &domain.ProviderSyncState{
-			Connection:           connection,
-			LastRunID:            "run-" + fake.UUID().V4(),
-			LastJobID:            "job-" + fake.UUID().V4(),
-			LastSuccessfulWindow: &requestedWindow,
+			Connection: connection,
+			RunID:      "run-" + fake.UUID().V4(),
+			JobID:      "job-" + fake.UUID().V4(),
+			Window:     requestedWindow,
 		}
 		secret := domain.ConnectionSecret{
 			ID:        "secret-" + fake.UUID().V4(),
@@ -217,7 +217,7 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 		assert.Equal(t, secret, request.Secret)
 		assert.Equal(t, requestedWindow, request.RequestedWindow)
 		require.NotNil(t, request.SyncState)
-		assert.Equal(t, state.LastRunID, request.SyncState.LastRunID)
+		assert.Equal(t, state.RunID, request.SyncState.RunID)
 		assert.Equal(t, connection, snapshot.Connection)
 		assert.Equal(t, candidateWindow, snapshot.CandidateWindow)
 		require.Len(t, snapshot.Accounts, 1)

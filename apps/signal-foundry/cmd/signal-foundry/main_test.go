@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -20,6 +22,7 @@ import (
 	"github.com/gemyago/signal-foundry/runtime/execution"
 	rtgovernor "github.com/gemyago/signal-foundry/runtime/governor"
 	rtstrategy "github.com/gemyago/signal-foundry/runtime/strategy"
+	_ "github.com/glebarez/go-sqlite"
 	"github.com/jaswdr/faker/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -66,11 +69,6 @@ func migrateAppDatabaseForTests(t *testing.T, dsn string) {
 	_, err = io.Copy(target, source)
 	require.NoError(t, err)
 	require.NoError(t, target.Sync())
-	require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
-		DatabaseDSN: dsn,
-		TablePrefix: "signal_foundry_data_",
-	}))
-	require.NoError(t, runAppDatabaseMigrations(dsn))
 }
 
 func appDatabaseTemplatePath(t *testing.T) string {
@@ -83,10 +81,41 @@ func appDatabaseTemplatePath(t *testing.T) string {
 			return
 		}
 		appDatabaseTemplate.path = filepath.Join(templateDir, "template.sqlite")
-		appDatabaseTemplate.err = runAppDatabaseMigrations(appDatabaseTemplate.path)
+		appDatabaseTemplate.err = initializeAppDatabaseTemplate(appDatabaseTemplate.path)
 	})
 	require.NoError(t, appDatabaseTemplate.err)
 	return appDatabaseTemplate.path
+}
+
+func initializeAppDatabaseTemplate(dsn string) error {
+	if err := appdispatch.AutoMigrate(context.Background(), appdispatch.Config{
+		DatabaseDSN: dsn,
+		TablePrefix: "signal_foundry_data_",
+	}); err != nil {
+		return err
+	}
+
+	if err := runAppDatabaseMigrations(dsn); err != nil {
+		return err
+	}
+
+	return checkpointSQLiteTemplate(dsn)
+}
+
+func checkpointSQLiteTemplate(dsn string) error {
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("open sqlite template checkpoint handle: %w", err)
+	}
+	defer func() {
+		_ = db.Close()
+	}()
+
+	if _, err = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		return fmt.Errorf("checkpoint sqlite template wal: %w", err)
+	}
+
+	return nil
 }
 
 func runAppDatabaseMigrations(dsn string) error {
