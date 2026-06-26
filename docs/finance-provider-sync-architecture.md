@@ -68,8 +68,12 @@ It then decides the target window for this sync session.
 
 The intended policy is:
 
-- sync at least the last 30 days ending at the current time
-- if the latest succeeded window ended earlier than that, extend the target window backward to catch up from that state's `Window.End`
+- if there is no prior sync state, target the last 3 years ending at the current time
+- otherwise derive one prior checkpoint from the latest loaded state
+- use `state.Window.End` as that checkpoint when `SucceededAt` is present
+- use `state.Window.Start` as that checkpoint when `SucceededAt` is absent
+- if the derived checkpoint is within the last 30 days, target the last 30 days ending at the current time
+- if the derived checkpoint is older than 30 days, extend the target window backward to catch up from that checkpoint
 - if that target window is longer than 30 days, split it into chunk windows of at most 30 days
 - execute chunk windows oldest first
 
