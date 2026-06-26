@@ -54,7 +54,8 @@ func (p configValueProvider) asStringSlice() di.ConstructorWithOpts {
 }
 
 func Provide(container *dig.Container, cfg *viper.Viper) error {
-	return di.ProvideAll(container,
+	return di.ProvideAll(
+		container,
 		// env should only be used for tracing/debugging purposes
 		provideConfigValue(cfg, "env").asString(),
 
@@ -118,21 +119,41 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "agentRuntime.storage.type").asString(),
 		provideConfigValue(cfg, "agentRuntime.database.dsn").asString(),
 		provideConfigValue(cfg, "agentRuntime.database.tablePrefix").asString(),
-		provideConfigValue(cfg, "agentRuntime.database.autoMigrate").asBool(),
 
 		// data layer persistence config
 		provideConfigValue(cfg, "dataLayer.database.dsn").asString(),
 		provideConfigValue(cfg, "dataLayer.database.tablePrefix").asString(),
-		provideConfigValue(cfg, "dataLayer.database.autoMigrate").asBool(),
 		provideConfigValue(cfg, "dataLayer.rawPayloadBlobStore.path").asString(),
 
 		// jobs config
+		provideConfigValue(cfg, "jobs.scheduler.loopInterval").asDuration(),
 		provideConfigValue(cfg, "jobs.worker.enabled").asBool(),
 		provideConfigValue(cfg, "jobs.worker.pollInterval").asDuration(),
 		provideConfigValue(cfg, "jobs.worker.maxAttempts").asInt(),
 		provideConfigValue(cfg, "jobs.worker.maxConcurrentHistoricalBackfills").asInt(),
 		provideConfigValue(cfg, "jobs.historicalBackfill.maxIntervals").asInt(),
 		provideConfigValue(cfg, "jobs.historicalBackfill.maxPageSize").asInt(),
+
+		// finance providers config
+		provideConfigValue(cfg, "finance.fixtures.database.dsn").asString(),
+		provideConfigValue(cfg, "finance.fixtures.database.jobsTablePrefix").asString(),
+		provideConfigValue(cfg, "finance.providers.monobank.baseURL").asString(),
+		provideConfigValue(cfg, "finance.providers.monobank.sleepBetweenRequests").asDuration(),
+		provideConfigValue(cfg, "finance.providers.enableBanking.baseURL").asString(),
+		provideConfigValue(cfg, "finance.providers.enableBanking.callbackBaseURL").asString(),
+		di.ProvideValue(cfg.GetString("finance.providers.monobank.baseURL"), dig.Name("finance.monobankBaseURL")),
+		di.ProvideValue(
+			cfg.GetDuration("finance.providers.monobank.sleepBetweenRequests"),
+			dig.Name("finance.monobankSleepBetweenRequests"),
+		),
+		di.ProvideValue(
+			cfg.GetString("finance.providers.enableBanking.baseURL"),
+			dig.Name("finance.enableBankingBaseURL"),
+		),
+		di.ProvideValue(
+			cfg.GetString("finance.providers.enableBanking.callbackBaseURL"),
+			dig.Name("finance.enableBankingCallbackBaseURL"),
+		),
 
 		// skills config
 		provideConfigValue(cfg, "skills.enabled").asBool(),

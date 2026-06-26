@@ -44,9 +44,11 @@
     <li><a href="/chat" use:link>Chat</a></li>
     <li><a href="/data" use:link>Data</a></li>
     <li><a href="/jobs" use:link>Jobs</a></li>
+    <li><a href="/finance" use:link>Finance</a></li>
     <li><a href="/providers" use:link>Providers</a></li>
     <li><a href="/strategies" use:link>Strategies</a></li>
     <li><a href="/evaluations" use:link>Evaluations</a></li>
+    <li><a href="/admin" use:link>Admin</a></li>
   </ul>
   <div class="nav-end">
     <button type="button" class="sign-out" onclick={signOut}>Sign out</button>

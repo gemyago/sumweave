@@ -5,6 +5,14 @@ template-data:
   unroll-variadic: true
 
 packages:
+  log/slog:
+    interfaces:
+      Handler:
+        config:
+          dir: internal/telemetry/
+          pkgname: telemetry
+          filename: mock_slog_handler_test.go
+          structname: MockSlogHandler
   github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth:
     interfaces:
       userStore:
@@ -17,3 +25,5 @@ packages:
   github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1controllers:
     interfaces:
       AuthenticatingService:
+      financeService:
+      jobsService:

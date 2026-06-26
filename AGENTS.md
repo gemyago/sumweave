@@ -71,7 +71,10 @@ Go and Node.js are managed by direnv (in .envrc) and nvm respectively. All depen
 PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from the repo root.
 
 **PM2 usage notes**
-- Run `pm2 start ecosystem.config.js` to start all processes and add them to the PM2 process manager. Usually do it just once.
+- Run `go run ./apps/signal-foundry/cmd/signal-foundry db-migrate --env local` before starting or restarting backend PM2 processes that rely on persisted tables.
+- Standard local backend workflow is `db-migrate` followed by `go run ./apps/signal-foundry/cmd/signal-foundry start-all --env local` (or `pm2 start ecosystem.config.js` to run the same shape under PM2).
+- Run `pm2 start ecosystem.config.js` to create the PM2 apps from the current ecosystem file.
+- If the ecosystem command/args changed or you need a guaranteed fresh backend shape, recreate the app with `pm2 delete signal-foundry-api && pm2 start ecosystem.config.js`; PM2 can otherwise keep an older command definition.
 - Run `pm2 status` to see the status of all processes
 - Run `pm2 start|stop|restart id|name` to control specific processes
 - Run `pm2 logs id|name` to see the logs of specific processes
@@ -122,9 +125,22 @@ The rules are:
 - Preserve outside-flow additions; never revert as contamination.
 - Archive OpenSpec changes before any final submission step.
 - Use `make test-live-compile` for regular live-lane build coverage.
-- OpenSpec manager work must be done by the requested sub-agent.
+- Prefer manual browser e2e over new dedicated test modules.
+- Seed/reseed requests default to the first `.local-users` entry.
+- Reseed means replace local seeded data, then reopen the live DB.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
+
+## Golang
+
+- viper should only be used for config wireup, it should never leak into the codebase outside of the entrypoints or wireup paths.
+- components should not be doing nil checks to ensure if dependencies are initialized, this is a job of the DI container or the caller. This may only be justified if the dependency is optional.
+- unless explicitly documented, internal logic do not need to trim or otherwise normalize identifiers. Upper orchestration layer may chose to do it if needed.
+- when logging attributes, use camelCase for keys
+
+### Testing and mocking
+
+- Mockery is a must choice for mocking dependencies. If you need to create mock manually - justify it and be ready to explain why it's better than using mockery.
 
 ## Platform Agent Skills
 

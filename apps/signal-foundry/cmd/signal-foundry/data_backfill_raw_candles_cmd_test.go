@@ -158,7 +158,10 @@ func TestDataBackfillRawCandlesCmd(t *testing.T) {
 		chdirModuleRoot(t)
 
 		dataDir := filepath.Join(t.TempDir(), "data")
+		dataLayerDSN := filepath.Join(t.TempDir(), "data-layer.sqlite")
 		t.Setenv("APP_DATADIR", dataDir)
+		t.Setenv("APP_DATALAYER_DATABASE_DSN", dataLayerDSN)
+		migrateAppDatabaseForTests(t, dataLayerDSN)
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -254,7 +257,10 @@ func TestDataBackfillRawCandlesCmd(t *testing.T) {
 		chdirModuleRoot(t)
 
 		dataDir := filepath.Join(t.TempDir(), "data")
+		dataLayerDSN := filepath.Join(t.TempDir(), "data-layer.sqlite")
 		t.Setenv("APP_DATADIR", dataDir)
+		t.Setenv("APP_DATALAYER_DATABASE_DSN", dataLayerDSN)
+		migrateAppDatabaseForTests(t, dataLayerDSN)
 
 		runner := &fakeHistoricalRawCandleBackfillRunner{result: makeReport(t, false)}
 		factoryCalls := 0
@@ -282,7 +288,7 @@ func TestDataBackfillRawCandlesCmd(t *testing.T) {
 				require.NotNil(t, deps.Runtime.HyperliquidRecorder)
 
 				assert.Equal(t, dataDir, deps.ConfiguredDataDir)
-				assert.Equal(t, ":memory:", deps.ConfiguredDatabase)
+				assert.Equal(t, dataLayerDSN, deps.ConfiguredDatabase)
 				assert.Empty(t, deps.ConfiguredBlobStore)
 
 				instrument, instrumentErr := domain.NewInstrument(domain.InstrumentParams{

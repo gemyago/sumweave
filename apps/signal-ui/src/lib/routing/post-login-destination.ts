@@ -2,7 +2,16 @@ export const DEFAULT_AUTHENTICATED_ROUTE = '/data'
 export const LOGIN_ROUTE = '/login'
 export const POST_LOGIN_DESTINATION_KEY = 'signal-ui-post-login-destination'
 
-const PROTECTED_ROUTE_PREFIXES = ['/chat', '/data', '/providers']
+const PROTECTED_ROUTE_PREFIXES = [
+  '/chat',
+  '/data',
+  '/providers',
+  '/jobs',
+  '/finance',
+  '/strategies',
+  '/evaluations',
+  '/admin',
+]
 
 export function routeFromHash(hash: string): string {
   if (hash === '' || hash === '#') {

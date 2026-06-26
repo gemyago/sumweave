@@ -27,10 +27,27 @@ Data -> Analytics -> Strategy -> Governor -> Execution
 
 The intended long-term product path remains:
 - `runtime/` as the core product runtime
+- `finance/` as a separate product module for tenant finance workflows
 - `apps/signal-foundry/` as the Go API/jobs application
 - `apps/signal-ui/` as the operator UI
 
 Template-derived code outside those areas stays reference-only unless explicitly adopted.
+
+## Product surfaces
+
+- Trading and AI-assisted research continue to live around runtime-driven routes and services.
+- Finance is a distinct tenant-aware product surface with its own backend module, APIs, and UI routes.
+- Durable jobs, workers, and scheduler ticks are app-owned shared infrastructure used by both trading/data and finance workflows.
+- Admin diagnostics stay utilitarian and sanitized; they expose cross-cutting operational state without replacing tenant-facing finance workflows.
+
+## Local backend workflow
+
+The standard local backend workflow is:
+
+1. `signal-foundry db-migrate`
+2. `signal-foundry start-all`
+
+`start-all` is the normal all-in-one local mode for the backend app. Dedicated `start`, `jobs worker`, and `jobs enqueue-due` commands remain available for split or production-like environments.
 
 ## Original concept pages
 

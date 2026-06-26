@@ -17,6 +17,7 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, "DEBUG", cfg.GetString("defaultLogLevel"))
+		require.Equal(t, "https://api.monobank.ua", cfg.GetString("finance.providers.monobank.baseURL"))
 	})
 	t.Run("dev flow regression: default config has no ui location set", func(t *testing.T) {
 		cfg := New()
@@ -39,7 +40,6 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, "INFO", cfg.GetString("defaultLogLevel"))
-		require.False(t, cfg.GetBool("dataLayer.database.autoMigrate"))
 	})
 	t.Run("should return error if config is not found", func(t *testing.T) {
 		cfg := New()
@@ -53,7 +53,6 @@ func TestLoad(t *testing.T) {
 
 		require.Equal(t, ":memory:", cfg.GetString("dataLayer.database.dsn"))
 		require.Equal(t, "signal_foundry_data_", cfg.GetString("dataLayer.database.tablePrefix"))
-		require.True(t, cfg.GetBool("dataLayer.database.autoMigrate"))
 		require.Empty(t, cfg.GetString("dataLayer.rawPayloadBlobStore.path"))
 	})
 	t.Run("should allow env overrides for data layer config", func(t *testing.T) {
@@ -62,7 +61,6 @@ func TestLoad(t *testing.T) {
 		overrideBlobPath := fake.Lorem().Word() + "/raw"
 		t.Setenv("APP_DATALAYER_DATABASE_DSN", overrideDSN)
 		t.Setenv("APP_DATALAYER_DATABASE_TABLEPREFIX", overridePrefix)
-		t.Setenv("APP_DATALAYER_DATABASE_AUTOMIGRATE", "false")
 		t.Setenv("APP_DATALAYER_RAWPAYLOADBLOBSTORE_PATH", overrideBlobPath)
 
 		cfg := New()
@@ -71,7 +69,6 @@ func TestLoad(t *testing.T) {
 
 		require.Equal(t, overrideDSN, cfg.GetString("dataLayer.database.dsn"))
 		require.Equal(t, overridePrefix, cfg.GetString("dataLayer.database.tablePrefix"))
-		require.False(t, cfg.GetBool("dataLayer.database.autoMigrate"))
 		require.Equal(t, overrideBlobPath, cfg.GetString("dataLayer.rawPayloadBlobStore.path"))
 	})
 }

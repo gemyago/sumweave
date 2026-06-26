@@ -9,6 +9,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/config"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/financeapp"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/infrastructure"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
@@ -63,6 +64,11 @@ func Setup(
 
 		registerRuntime(container),
 
+		di.ProvideAll(
+			container,
+			newDatabaseMigrator,
+		),
+
 		config.Provide(container, cfg),
 
 		// telemetry needs to happen separately
@@ -79,6 +85,9 @@ func Setup(
 
 		// jobs
 		jobs.Register(rootCtx, container),
+
+		// finance
+		financeapp.Register(container),
 
 		// some setup after all components are registered
 		container.Invoke(telemetry.OTELSetup),

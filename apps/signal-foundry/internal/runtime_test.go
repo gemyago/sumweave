@@ -18,6 +18,7 @@ import (
 	appinternal "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/config"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/strategyassistant"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/startupmode"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/gemyago/signal-foundry/runtime/data"
@@ -105,21 +106,19 @@ func TestNewRuntime(t *testing.T) {
 		require.NoError(t, err)
 
 		return RuntimeDeps{
-			RootLogger:                      rootLogger,
-			DataDir:                         dataDir,
-			AgentRuntimeDatabaseAutoMigrate: true,
-			DataLayerDatabaseDSN:            dataLayerDSN,
-			DataLayerDatabaseTablePrefix:    tablePrefix,
-			DataLayerDatabaseAutoMigrate:    true,
-			SkillsEnabled:                   false,
-			SkillsPaths:                     []string{},
-			SkillsMaxSkillBytes:             65536,
-			SkillsMaxCatalogEntries:         500,
-			ToolsRegistry:                   agent.NewToolsRegistry(),
-			DataStore:                       dataStore,
-			DataIngestionService:            dataIngestionService,
-			DataReadService:                 dataReadService,
-			DataLineageService:              dataLineageService,
+			RootLogger:                   rootLogger,
+			DataDir:                      dataDir,
+			DataLayerDatabaseDSN:         dataLayerDSN,
+			DataLayerDatabaseTablePrefix: tablePrefix,
+			SkillsEnabled:                false,
+			SkillsPaths:                  []string{},
+			SkillsMaxSkillBytes:          65536,
+			SkillsMaxCatalogEntries:      500,
+			ToolsRegistry:                agent.NewToolsRegistry(),
+			DataStore:                    dataStore,
+			DataIngestionService:         dataIngestionService,
+			DataReadService:              dataReadService,
+			DataLineageService:           dataLineageService,
 		}
 	}
 
@@ -212,6 +211,7 @@ func TestNewRuntime(t *testing.T) {
 
 	t.Run("wires hyperliquid recorder and lineage-enabled ingestion flow", func(t *testing.T) {
 		deps := makeDeps(t)
+		require.NoError(t, deps.DataStore.AutoMigrate())
 		runtime, err := newRuntime(deps)
 		require.NoError(t, err)
 		require.NotNil(t, runtime)
@@ -285,7 +285,7 @@ func TestNewRuntime(t *testing.T) {
 		assert.True(t, info.IsDir())
 	})
 
-	t.Run("database storage - creates runtime with database backend and migrates profiles", func(t *testing.T) {
+	t.Run("database storage - does not auto migrate profiles when schema is absent", func(t *testing.T) {
 		deps := makeDatabaseDeps(t)
 		runtime, err := newRuntime(deps)
 		require.NoError(t, err)
@@ -302,15 +302,13 @@ func TestNewRuntime(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		profiles, err := profilesSvc.List(t.Context())
-		require.NoError(t, err)
-		require.Len(t, profiles, 1)
-		assert.Equal(t, strategyassistant.StrategyAssistantProfileName, profiles[0].Name)
+		_, err = profilesSvc.Get(t.Context(), strategyassistant.StrategyAssistantProfileName)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "no such table")
 	})
 
-	t.Run("database storage - autoMigrate disabled still seeds profile when schema exists", func(t *testing.T) {
+	t.Run("database storage - seeds profile when schema exists", func(t *testing.T) {
 		deps := makeDatabaseDeps(t)
-		deps.AgentRuntimeDatabaseAutoMigrate = false
 
 		profilesSvc, err := agent.NewDatabaseAgentProfilesService(
 			deps.AgentRuntimeDatabaseDSN,
@@ -338,9 +336,8 @@ func TestNewRuntime(t *testing.T) {
 		)
 	})
 
-	t.Run("database storage - autoMigrate disabled still starts when profile schema is absent", func(t *testing.T) {
+	t.Run("database storage - still starts when profile schema is absent", func(t *testing.T) {
 		deps := makeDatabaseDeps(t)
-		deps.AgentRuntimeDatabaseAutoMigrate = false
 
 		runtime, err := newRuntime(deps)
 		require.NoError(t, err)
@@ -362,7 +359,7 @@ func TestNewRuntime(t *testing.T) {
 		require.ErrorContains(t, err, "no such table")
 	})
 
-	t.Run("data layer autoMigrate enabled migrates canonical tables", func(t *testing.T) {
+	t.Run("data layer does not auto migrate canonical tables", func(t *testing.T) {
 		deps := makeDeps(t)
 
 		runtime, err := newRuntime(deps)
@@ -380,12 +377,13 @@ func TestNewRuntime(t *testing.T) {
 
 		venue, symbol := makeInstrumentIdentity(t)
 		_, err = store.LookupInstrument(t.Context(), venue, symbol)
-		require.ErrorIs(t, err, data.ErrInstrumentNotFound)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "no such table")
 	})
 
-	t.Run("data layer autoMigrate disabled skips canonical table creation", func(t *testing.T) {
+	t.Run("data layer works when canonical tables were migrated explicitly", func(t *testing.T) {
 		deps := makeDeps(t)
-		deps.DataLayerDatabaseAutoMigrate = false
+		require.NoError(t, deps.DataStore.AutoMigrate())
 
 		runtime, err := newRuntime(deps)
 		require.NoError(t, err)
@@ -398,8 +396,7 @@ func TestNewRuntime(t *testing.T) {
 
 		venue, symbol := makeInstrumentIdentity(t)
 		_, err = store.LookupInstrument(t.Context(), venue, symbol)
-		require.Error(t, err)
-		require.ErrorContains(t, err, "no such table")
+		require.ErrorIs(t, err, data.ErrInstrumentNotFound)
 	})
 
 	t.Run("http handler is wired with background runner", func(t *testing.T) {
@@ -656,13 +653,25 @@ func makeWiredRuntimeContainer(t *testing.T) (*dig.Container, string) {
 	cfg.Set("dataDir", t.TempDir())
 	cfg.Set("dataLayer.database.dsn", filepath.Join(t.TempDir(), "data-layer.db"))
 	cfg.Set("dataLayer.rawPayloadBlobStore.path", filepath.Join(t.TempDir(), "raw-payloads"))
+	cfg.Set("jobs.worker.enabled", true)
 	cfg.Set("jobs.worker.pollInterval", "10ms")
 	cfg.Set("skills.enabled", true)
 
 	container := dig.New()
+	require.NoError(t, container.Provide(
+		func() *startupmode.JobsWorkerAutoStart {
+			return &startupmode.JobsWorkerAutoStart{Enabled: false}
+		},
+		dig.Name("internal.jobs.worker.autoStart"),
+	))
 	err = Setup(context.Background(), cfg, container)
 	require.NoError(t, err)
-
+	var migrator *DatabaseMigrator
+	require.NoError(t, container.Invoke(func(resolved *DatabaseMigrator) {
+		migrator = resolved
+	}))
+	require.NotNil(t, migrator)
+	require.NoError(t, migrator.Migrate(t.Context()))
 	return container, bundledPlatformSkillsRoot
 }
 

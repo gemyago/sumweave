@@ -28,13 +28,40 @@ Notable layout parts of `apps/signal-foundry`:
 └── project.json      # Nx project
 ```
 
+## API Routes
+
+API Routes are generated using [apigen](https://github.com/gemyago/apigen) which follows openapi first approach.Steps to add new routes:
+- Add the new route to the `v1routes.yaml` file.
+- Run `go generate ./internal/api/http/register.go` to generate the new routes.
+- Implement new controller/new methods in the `v1controllers` package.
+
+Key rules:
+- Controllers are defined with tags in the openapi spec
+- Controller actions (e.g openapi operations) are implemented using 
+  `builder.HandleWith` - provides standard params parsing, validation and response serialization
+  `builder.HandleWithHTTP` - allows direct access to http objects if needed for advanced scenarios
+- Standard error handling can be tuned with `error_handler.go` middleware.
+
 ## Run
 
 From the repo root:
 
 `pm2 start signal-foundry-api` (PM2 process name is `signal-foundry-api`).
 
-This will start the HTTP server on port 4501.
+Before starting or restarting backend processes that rely on persisted tables, run `go run ./cmd/signal-foundry db-migrate --env local` from `apps/signal-foundry`.
+
+Standard local backend workflow is `go run ./cmd/signal-foundry db-migrate --env local` and then `go run ./cmd/signal-foundry start-all --env local`.
+
+PM2 startup runs the same all-in-one local backend shape on port 4501.
+
+If the PM2 command shape changed (for example from `start` to `start-all`) or you need to guarantee the current ecosystem config is applied, recreate the backend app with `pm2 delete signal-foundry-api && pm2 start ecosystem.config.js` from the repo root; PM2 can otherwise keep an older command definition.
+
+Durable jobs workflow:
+- `signal-foundry db-migrate` is the standard schema setup path for local/dev and PM2-backed environments.
+- `signal-foundry start-all` is the standard local backend mode; it runs the HTTP server, durable consumer, and scheduler loop together after schemas are prepared.
+- `signal-foundry start` starts only the API/server path; it must not execute durable jobs inline.
+- `signal-foundry jobs worker [--once]` is the dedicated split-mode consumer path for production-like or supervised environments.
+- `signal-foundry jobs enqueue-due` performs one scheduler tick and enqueues due scheduled jobs without running them; keep it for split or externally scheduled environments.
 
 ## Lint / test
 
@@ -50,6 +77,7 @@ Use gopher skill as your primary source of golang coding conventions and best pr
 The rules are:
 - Update module rules and conventions when user corrects the behavior of AI.
 - OpenAPI JSON uses camelCase for property names or any other identifiers or keys; regenerate after spec edits.
+- HTTP controller tests use registered routes, not custom builders.
 
 ## Purpose (directional)
 

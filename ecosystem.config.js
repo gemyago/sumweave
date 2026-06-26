@@ -5,7 +5,7 @@ module.exports = {
     {
       name: 'signal-foundry-api',
       cwd: './apps/signal-foundry',
-      script: 'go run ./cmd/signal-foundry start --json-logs | pino-pretty',
+      script: 'go run ./cmd/signal-foundry start-all --json-logs | pino-pretty',
       interpreter: "none"
     },
     {

@@ -14,6 +14,10 @@ Relevant POC notes:
 - [NBP Web API](https://api.nbp.pl/en.html)
 - [ECB reference rates](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html)
 
+Related docs:
+
+- [Finance Provider Sync Architecture](../finance-provider-sync-architecture.md)
+
 The design below is the implementation target for the first production-quality
 finance slice. The repository is still early in development, so API and storage
 shape can change as needed while implementing this slice.

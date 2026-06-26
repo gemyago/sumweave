@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/glebarez/go-sqlite"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -84,6 +86,7 @@ func TestStore(t *testing.T) {
 			"canonical_input_hash",
 			"input_json",
 			"result_json",
+			"progress_json",
 			"error_code",
 			"error_summary",
 			"error_details",
@@ -94,12 +97,19 @@ func TestStore(t *testing.T) {
 			"completed_at",
 			"worker_id",
 			"attempt_count",
+			"max_attempts",
 			"last_attempt_time",
 			"correlation_id",
+			"schedule_id",
 		}
 		assert.ElementsMatch(t, expectedColumns, columnNames)
 		reopened, err := NewStore(dsn, StoreOpts{TablePrefix: "test_"})
 		require.NoError(t, err)
+		sqlDB, err := reopened.db.DB()
+		require.NoError(t, err)
+		var journalMode string
+		require.NoError(t, sqlDB.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&journalMode))
+		assert.Equal(t, "wal", journalMode)
 		persisted, err := reopened.Get(t.Context(), job.ID)
 		require.NoError(t, err)
 		require.NotNil(t, persisted)
@@ -236,12 +246,79 @@ func TestStore(t *testing.T) {
 		require.Len(t, listed.Items, 1)
 	})
 
+	t.Run("claim queued waits through a transient sqlite writer lock", func(t *testing.T) {
+		dsn := filepath.Join(t.TempDir(), "store-claim-locked.sqlite")
+		store, err := NewStore(dsn, StoreOpts{TablePrefix: "test_"})
+		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
+
+		now := time.Now().UTC()
+		job := makeJob(now)
+		_, err = store.Create(t.Context(), job)
+		require.NoError(t, err)
+
+		locker, err := sql.Open("sqlite", dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, locker.Close()) }()
+		locker.SetMaxOpenConns(1)
+		locker.SetMaxIdleConns(1)
+
+		tx, err := locker.BeginTx(t.Context(), nil)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(
+			t.Context(),
+			"UPDATE test_jobs SET updated_at = ? WHERE id = ?",
+			now.Add(time.Second),
+			job.ID,
+		)
+		require.NoError(t, err)
+
+		claimedCh := make(chan error, 1)
+		go func() {
+			_, claimErr := store.ClaimQueued(t.Context(), job.ID, "worker-lock", now.Add(2*time.Second))
+			claimedCh <- claimErr
+		}()
+
+		time.Sleep(150 * time.Millisecond)
+		require.NoError(t, tx.Commit())
+
+		select {
+		case claimErr := <-claimedCh:
+			require.NoError(t, claimErr)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for claim queued to finish")
+		}
+	})
+
 	t.Run("rejects empty idempotency keys for idempotent creates", func(t *testing.T) {
 		store := makeStore(t, "store-idempotent-empty-key")
 		job := makeJob(time.Now().UTC())
 		job.IdempotencyKey = "   "
 		_, _, err := store.CreateIdempotent(t.Context(), job)
 		require.ErrorIs(t, err, ErrNoIdempotency)
+	})
+
+	t.Run("surfaces idempotency conflicts for reused keys with different canonical input", func(t *testing.T) {
+		store := makeStore(t, "store-idempotent-conflict")
+		now := time.Now().UTC()
+		job := makeJob(now)
+		_, createdNew, err := store.CreateIdempotent(t.Context(), job)
+		require.NoError(t, err)
+		assert.True(t, createdNew)
+
+		conflict := makeJob(now.Add(time.Second))
+		conflict.Requester = job.Requester
+		conflict.IdempotencyKey = job.IdempotencyKey
+		conflict.Input.Symbol = "ETH"
+		hash, hashErr := HashInput(conflict.Input)
+		require.NoError(t, hashErr)
+		conflict.InputHash = hash
+
+		loaded, createdNew, err := store.CreateIdempotent(t.Context(), conflict)
+		require.Error(t, err)
+		assert.False(t, createdNew)
+		assert.True(t, IsIdempotencyConflict(err))
+		assert.Equal(t, Job{}, loaded)
 	})
 
 	t.Run("covers not found and invalid cursor branches", func(t *testing.T) {
@@ -346,6 +423,42 @@ func TestStore(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("supports transactions cancellation and result encoding helpers", func(t *testing.T) {
+		store := makeStore(t, "store-transactions")
+		require.NoError(t, store.WithTx(t.Context(), nil))
+
+		now := time.Now().UTC()
+		job := makeJob(now)
+		require.NoError(t, store.WithTx(t.Context(), func(tx *StoreTx) error {
+			require.NotNil(t, tx)
+			require.NotNil(t, tx.SQLTx())
+			_, createErr := tx.Create(t.Context(), job)
+			return createErr
+		}))
+
+		persisted, err := store.Get(t.Context(), job.ID)
+		require.NoError(t, err)
+		assert.Equal(t, job.ID, persisted.ID)
+
+		var nilTx *StoreTx
+		assert.Nil(t, nilTx.SQLTx())
+
+		nilJSON, err := resultJSONFromValue(nil)
+		require.NoError(t, err)
+		assert.Nil(t, nilJSON)
+
+		rawJSON, err := resultJSONFromValue([]byte(`{"bytes":true}`))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"bytes":true}`, string(rawJSON))
+
+		passthrough, err := resultJSONFromValue(rawJSON)
+		require.NoError(t, err)
+		assert.JSONEq(t, string(rawJSON), string(passthrough))
+
+		_, err = resultJSONFromValue(func() {})
+		require.Error(t, err)
+	})
+
 	t.Run("recovers stale running rows by requeueing or failing", func(t *testing.T) {
 		store := makeStore(t, "store-recovery")
 		now := time.Now().UTC().Add(-time.Hour)
@@ -380,5 +493,71 @@ func TestStore(t *testing.T) {
 		assert.Equal(t, JobStatusFailed, exhaustedJob.Status)
 		require.NotNil(t, exhaustedJob.Error)
 		assert.Equal(t, "stale_running_attempts_exhausted", exhaustedJob.Error.Code)
+	})
+
+	t.Run("updates progress and schedule rows and lists due schedules", func(t *testing.T) {
+		store := makeStore(t, "store-schedules-progress")
+		now := time.Now().UTC()
+		job := makeJob(now)
+		_, err := store.Create(t.Context(), job)
+		require.NoError(t, err)
+		progressJSON := mustRegistryJSON(t, map[string]string{"stage": "queued"})
+		require.NoError(t, store.UpdateProgress(t.Context(), job.ID, progressJSON, now.Add(time.Minute)))
+		updated, err := store.Get(t.Context(), job.ID)
+		require.NoError(t, err)
+		require.NotNil(t, updated.ProgressJSON)
+
+		schedule := Schedule{
+			ID:        "sched-" + fake.UUID().V4(),
+			JobType:   JobType("finance.fx_rates_sync"),
+			Requester: Requester{UserID: "system", Source: RequesterSourceOperator},
+			Interval:  time.Hour,
+			NextRunAt: now.Add(-time.Minute),
+			InputJSON: mustRegistryJSON(t, map[string]string{"scope": "daily"}),
+		}
+		require.NoError(t, store.UpsertSchedule(t.Context(), schedule))
+		dueSchedules, err := store.ListDueSchedules(t.Context(), now)
+		require.NoError(t, err)
+		require.Len(t, dueSchedules, 1)
+		assert.Equal(t, schedule.ID, dueSchedules[0].ID)
+
+		require.NoError(t, store.MarkCanceled(t.Context(), job.ID, now.Add(2*time.Minute)))
+		canceled, err := store.Get(t.Context(), job.ID)
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusCanceled, canceled.Status)
+
+		schedule.NextRunAt = now.Add(2 * time.Hour)
+		schedule.Enabled = false
+		require.NoError(t, store.UpsertSchedule(t.Context(), schedule))
+		dueSchedules, err = store.ListDueSchedules(t.Context(), now)
+		require.NoError(t, err)
+		assert.Empty(t, dueSchedules)
+	})
+
+	t.Run("surfaces malformed historical payload rows", func(t *testing.T) {
+		_, err := jobFromModel(jobModel{
+			JobType:   string(JobTypeHistoricalRawCandleBackfill),
+			InputJSON: "{",
+		})
+		require.Error(t, err)
+
+		_, err = jobFromModel(jobModel{
+			JobType: string(JobTypeHistoricalRawCandleBackfill),
+			InputJSON: string(mustRegistryJSON(t, HistoricalRawCandleBackfillInput{
+				Venue:      "hyperliquid-perps",
+				Symbol:     "BTC",
+				AssetClass: "future",
+				Timeframe:  "1m",
+			})),
+			ResultJSON: "{",
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("list due schedules surfaces storage errors", func(t *testing.T) {
+		store := makeStore(t, "store-due-schedule-errors")
+		require.NoError(t, store.db.Exec("DROP TABLE "+store.scheduleTableName()).Error)
+		_, err := store.ListDueSchedules(t.Context(), time.Now().UTC())
+		require.Error(t, err)
 	})
 }

@@ -438,20 +438,14 @@ func newEnableBankingJWT(now time.Time, appID string, privateKeyPath string) (st
 		return "", err
 	}
 
-	claims := jwt.RegisteredClaims{
-		Issuer:    enableBankingJWTIssuer,
-		Audience:  jwt.ClaimStrings{enableBankingJWTAudience},
-		IssuedAt:  jwt.NewNumericDate(now.UTC()),
-		ExpiresAt: jwt.NewNumericDate(now.UTC().Add(enableBankingJWTLifetime)),
+	claims := jwt.MapClaims{
+		"iss": enableBankingJWTIssuer,
+		"aud": enableBankingJWTAudience,
+		"iat": jwt.NewNumericDate(now.UTC()),
+		"exp": jwt.NewNumericDate(now.UTC().Add(enableBankingJWTLifetime)),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = strings.TrimSpace(appID)
-
-	prevMarshalSingleStringAsArray := jwt.MarshalSingleStringAsArray
-	jwt.MarshalSingleStringAsArray = false
-	defer func() {
-		jwt.MarshalSingleStringAsArray = prevMarshalSingleStringAsArray
-	}()
 
 	signedToken, err := token.SignedString(privateKey)
 	if err != nil {

@@ -7,17 +7,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/venueedge"
 )
 
 const (
-	JobTypeHistoricalRawCandleBackfill JobType = "historical_raw_candle_backfill"
+	JobTypeHistoricalRawCandleBackfill JobType = "data.historical_raw_candle_backfill"
 
 	JobStatusQueued    JobStatus = "queued"
 	JobStatusRunning   JobStatus = "running"
 	JobStatusSucceeded JobStatus = "succeeded"
 	JobStatusFailed    JobStatus = "failed"
+	JobStatusCanceled  JobStatus = "canceled"
 
 	RequesterSourceOperator RequesterSource = "operator"
 	RequesterSourceAgent    RequesterSource = "agent"
@@ -32,6 +34,8 @@ const (
 	defaultHistoricalBackfillBaseURL = "https://api.hyperliquid.xyz"
 	maxErrorSummaryLength            = 240
 	maxErrorDetailsLength            = 1024
+
+	DispatchKindHistoricalRawCandleBackfill appdispatch.ExecutionKind = "jobs.data.historical_raw_candle_backfill.execute.v1"
 )
 
 type JobType string
@@ -91,7 +95,10 @@ type Job struct {
 	IdempotencyKey string
 	InputHash      string
 	Input          HistoricalRawCandleBackfillInput
+	InputJSON      json.RawMessage
 	Result         *HistoricalRawCandleBackfillResult
+	ResultJSON     json.RawMessage
+	ProgressJSON   json.RawMessage
 	Error          *JobError
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -100,8 +107,10 @@ type Job struct {
 	CompletedAt    *time.Time
 	WorkerID       string
 	AttemptCount   int
+	MaxAttempts    int
 	LastAttemptAt  *time.Time
 	CorrelationID  string
+	ScheduleID     string
 }
 
 type ListParams struct {
@@ -136,11 +145,48 @@ type HistoricalBackfillLimits struct {
 	MaxPageSize  int
 }
 
+type EnqueueParams struct {
+	JobType        JobType
+	Requester      Requester
+	IdempotencyKey string
+	CorrelationID  string
+	ScheduleID     string
+	Input          any
+}
+
+type EnqueueJSONParams struct {
+	JobType        JobType
+	Requester      Requester
+	IdempotencyKey string
+	CorrelationID  string
+	ScheduleID     string
+	InputHash      string
+	InputJSON      json.RawMessage
+}
+
+type Schedule struct {
+	ID             string
+	JobType        JobType
+	Requester      Requester
+	InputJSON      json.RawMessage
+	Interval       time.Duration
+	NextRunAt      time.Time
+	LastEnqueuedAt *time.Time
+	CorrelationID  string
+	Enabled        bool
+}
+
 type WorkerConfig struct {
 	Enabled                         bool
 	PollInterval                    time.Duration
 	MaxAttempts                     int
 	MaxConcurrentHistoricalBackfill int
+}
+
+type DispatchConfig struct {
+	DatabaseDSN string
+	JobsDSN     string
+	TablePrefix string
 }
 
 type idempotencyConflictError struct {
@@ -181,6 +227,37 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 		cfg.MaxConcurrentHistoricalBackfill = defaultWorkerMaxConcurrent
 	}
 	return cfg
+}
+
+func EncodeJobPayload[T any](payload T) (json.RawMessage, error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(encoded), nil
+}
+
+func DecodeJobInput[T any](job Job) (T, error) { //nolint:ireturn
+	return decodeJobPayload[T](job.InputJSON)
+}
+
+func DecodeJobResult[T any](job Job) (T, error) { //nolint:ireturn
+	return decodeJobPayload[T](job.ResultJSON)
+}
+
+func DecodeJobProgress[T any](job Job) (T, error) { //nolint:ireturn
+	return decodeJobPayload[T](job.ProgressJSON)
+}
+
+func decodeJobPayload[T any](payload json.RawMessage) (T, error) { //nolint:ireturn
+	var decoded T
+	if len(payload) == 0 {
+		return decoded, nil
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return decoded, err
+	}
+	return decoded, nil
 }
 
 func normalizeListParams(params ListParams) ListParams {
@@ -226,7 +303,7 @@ func jobErrorFromExecution(err error) *JobError {
 
 	message := strings.TrimSpace(err.Error())
 	messageLower := strings.ToLower(message)
-	summary := "historical backfill execution failed"
+	summary := "job execution failed"
 	details := message
 	if strings.Contains(messageLower, "gorm") ||
 		strings.Contains(messageLower, "sql") ||

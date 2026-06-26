@@ -11,11 +11,14 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1controllers"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1routes/handlers"
+	financepkg "github.com/gemyago/signal-foundry/finance"
 	"go.uber.org/dig"
 )
 
-// Use apigen to generate v1routes
-//go:generate go run github.com/gemyago/apigen server ./v1routes.yaml ./v1routes
+// Use apigen to generate v1routes.
+// The follow-up patch keeps generated validators buildable for required map fields
+// until the upstream generator emits a map-safe EnsureNonDefault helper.
+//go:generate sh -c "go run github.com/gemyago/apigen server ./v1routes.yaml ./v1routes && go run ./apigenpatch"
 
 type V1RoutesDeps struct {
 	dig.In
@@ -24,6 +27,7 @@ type V1RoutesDeps struct {
 	*v1controllers.AuthController
 	*v1controllers.DataController
 	*v1controllers.JobsController
+	*v1controllers.FinanceController
 	*v1controllers.StrategiesController
 	*v1controllers.EvaluationsController
 
@@ -32,8 +36,9 @@ type V1RoutesDeps struct {
 	HTTPRouter     *server.HTTPRouter
 	AuthMiddleware middleware.AuthMiddleware
 
-	Runtime    *signalfoundryinternal.Runtime
-	RootLogger *slog.Logger
+	Runtime        *signalfoundryinternal.Runtime
+	RootLogger     *slog.Logger
+	FinanceService *financepkg.Service
 
 	// UILocation is an optional path to the directory containing pre-built UI static assets.
 	// When set and the directory is readable, the backend serves index.html at GET /
@@ -47,6 +52,7 @@ func SetupV1Routes(deps V1RoutesDeps) { // coverage-ignore // Little value in te
 	rootHandler.RegisterAuthRoutes(deps.AuthController)
 	rootHandler.RegisterDataRoutes(deps.DataController)
 	rootHandler.RegisterJobsRoutes(deps.JobsController)
+	rootHandler.RegisterFinanceRoutes(deps.FinanceController)
 	rootHandler.RegisterStrategiesRoutes(deps.StrategiesController)
 	rootHandler.RegisterEvaluationsRoutes(deps.EvaluationsController)
 
@@ -54,6 +60,11 @@ func SetupV1Routes(deps V1RoutesDeps) { // coverage-ignore // Little value in te
 	deps.HTTPRouter.Handle(
 		"/api/v1/runtime/",
 		deps.AuthMiddleware(http.StripPrefix("/api/v1/runtime", deps.Runtime.HTTPHandler)),
+	)
+	deps.HTTPRouter.HandleRoute(
+		http.MethodGet,
+		enableBankingCallbackPath,
+		newEnableBankingCallbackHandler(deps.FinanceService),
 	)
 
 	mountUIRoutes(deps.RootLogger, deps.HTTPRouter, deps.UILocation)

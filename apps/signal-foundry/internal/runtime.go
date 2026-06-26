@@ -52,12 +52,10 @@ type RuntimeDeps struct {
 	AgentRuntimeStorageType         string `name:"config.agentRuntime.storage.type"`
 	AgentRuntimeDatabaseDSN         string `name:"config.agentRuntime.database.dsn"`
 	AgentRuntimeDatabaseTablePrefix string `name:"config.agentRuntime.database.tablePrefix"`
-	AgentRuntimeDatabaseAutoMigrate bool   `name:"config.agentRuntime.database.autoMigrate"`
 
 	// Data-layer persistence (canonical instruments, candles, trades)
 	DataLayerDatabaseDSN             string `name:"config.dataLayer.database.dsn"`
 	DataLayerDatabaseTablePrefix     string `name:"config.dataLayer.database.tablePrefix"`
-	DataLayerDatabaseAutoMigrate     bool   `name:"config.dataLayer.database.autoMigrate"`
 	DataLayerRawPayloadBlobStorePath string `name:"config.dataLayer.rawPayloadBlobStore.path"`
 
 	// Skills configuration
@@ -131,27 +129,6 @@ func newAgentProfilesService(deps RuntimeDeps) (agent.AgentProfilesService, erro
 		return nil, fmt.Errorf("create agent profiles service: %w", err)
 	}
 	return svc, nil
-}
-
-func autoMigrateRuntimeServices(
-	runner *agent.Runner,
-	agentProfilesSvc agent.AgentProfilesService,
-) error {
-	if err := runner.AutoMigrate(); err != nil {
-		return fmt.Errorf("auto migrate database: %w", err)
-	}
-	if err := agentProfilesSvc.AutoMigrate(); err != nil {
-		return fmt.Errorf("auto migrate agent profiles database: %w", err)
-	}
-	return nil
-}
-
-func autoMigrateDataLayerStore(store *data.DatabaseStore) error {
-	if err := store.AutoMigrate(); err != nil {
-		return fmt.Errorf("auto migrate data-layer database: %w", err)
-	}
-
-	return nil
 }
 
 func newRuntimeServices(deps RuntimeDeps) (*runtimeServices, error) {
@@ -325,19 +302,6 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 		return nil, fmt.Errorf("create agent runner: %w", err)
 	}
 
-	if deps.AgentRuntimeStorageType == storageTypeDatabase && deps.AgentRuntimeDatabaseAutoMigrate {
-		if err = autoMigrateRuntimeServices(
-			runner,
-			services.agentProfilesSvc,
-		); err != nil {
-			return nil, err
-		}
-	}
-	if deps.DataLayerDatabaseAutoMigrate {
-		if err = autoMigrateDataLayerStore(deps.DataStore); err != nil {
-			return nil, err
-		}
-	}
 	if err = ensureStrategyAssistantProfile(context.Background(), services.agentProfilesSvc); err != nil {
 		return nil, err
 	}

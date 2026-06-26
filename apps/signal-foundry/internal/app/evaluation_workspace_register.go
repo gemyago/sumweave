@@ -23,11 +23,6 @@ func newEvaluationGovernorPolicyStore(
 	if err != nil {
 		return nil, fmt.Errorf("create governor policy artifact store: %w", err)
 	}
-	if deps.AutoMigrate {
-		if err = store.AutoMigrate(); err != nil {
-			return nil, fmt.Errorf("auto migrate governor policy artifact store: %w", err)
-		}
-	}
 
 	return store, nil
 }
@@ -39,11 +34,6 @@ func newEvaluationAuditStore(deps strategyWorkspaceStoreDeps) (*audit.DatabaseSt
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create evaluation audit store: %w", err)
-	}
-	if deps.AutoMigrate {
-		if err = store.AutoMigrate(); err != nil {
-			return nil, fmt.Errorf("auto migrate evaluation audit store: %w", err)
-		}
 	}
 
 	return store, nil
@@ -59,11 +49,6 @@ func newEvaluationExecutionStore(
 	if err != nil {
 		return nil, fmt.Errorf("create evaluation execution store: %w", err)
 	}
-	if deps.AutoMigrate {
-		if err = store.AutoMigrate(); err != nil {
-			return nil, fmt.Errorf("auto migrate evaluation execution store: %w", err)
-		}
-	}
 
 	return store, nil
 }
@@ -75,11 +60,6 @@ func newEvaluationBacktestStore(deps strategyWorkspaceStoreDeps) (*backtest.Data
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create evaluation backtest store: %w", err)
-	}
-	if deps.AutoMigrate {
-		if err = store.AutoMigrate(); err != nil {
-			return nil, fmt.Errorf("auto migrate evaluation backtest store: %w", err)
-		}
 	}
 
 	return store, nil

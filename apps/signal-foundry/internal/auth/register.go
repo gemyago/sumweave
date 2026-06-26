@@ -18,13 +18,20 @@ type userStoreDIParams struct {
 	Logger  *slog.Logger
 }
 
+// jwtSigningKeyDIParams resolves the effective JWT signing key for DI consumers.
+type jwtSigningKeyDIParams struct {
+	dig.In
+
+	SigningKey string `name:"config.auth.jwtSigningKey"`
+	DataDir    string `name:"config.dataDir"`
+}
+
 // jwtServiceDIParams is the DI-aware version of JWTServiceDeps for container wiring.
 type jwtServiceDIParams struct {
 	dig.In
 
-	SigningKey     string        `name:"config.auth.jwtSigningKey"`
+	SigningKey     string        `name:"auth.jwtKey"`
 	AccessTokenTTL time.Duration `name:"config.auth.accessTokenTTL"`
-	DataDir        string        `name:"config.dataDir"`
 	Logger         *slog.Logger
 }
 
@@ -56,11 +63,19 @@ func newUserStoreFromDI(params userStoreDIParams) *UserStore {
 	})
 }
 
+func newJWTSigningKeyFromDI(params jwtSigningKeyDIParams) (string, error) {
+	key, err := resolveSigningKey(params.SigningKey, params.DataDir)
+	if err != nil {
+		return "", err
+	}
+
+	return string(key), nil
+}
+
 func newJWTServiceFromDI(params jwtServiceDIParams) (*JWTService, error) {
 	return NewJWTService(JWTServiceDeps{
 		SigningKey:     params.SigningKey,
 		AccessTokenTTL: params.AccessTokenTTL,
-		DataDir:        params.DataDir,
 		Logger:         params.Logger,
 	})
 }
@@ -88,6 +103,10 @@ func Register(container *dig.Container) error {
 	return di.ProvideAll(container,
 		NewArgon2idHasher,
 		newUserStoreFromDI,
+		di.ConstructorWithOpts{
+			Constructor: newJWTSigningKeyFromDI,
+			Options:     []dig.ProvideOption{dig.Name("auth.jwtKey")},
+		},
 		newJWTServiceFromDI,
 		newRefreshTokenStoreFromDI,
 		newAuthServiceFromDI,

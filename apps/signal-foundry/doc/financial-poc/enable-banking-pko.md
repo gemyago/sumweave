@@ -8,6 +8,7 @@ Run these commands from `apps/signal-foundry` with `go run ./cmd/signal-foundry 
 - Keep the Enable Banking private key outside the repo, for example under `~/.config/...`; do not commit it.
 - The Enable Banking application id is used as the JWT `kid`, so the value behind `ENABLE_BANKING_APP_ID` must match the registered app. JWT `iss` is always `enablebanking.com` and `aud` is always `api.enablebanking.com` (fixed by the provider, not derived from env).
 - The local `connect` flow redirects PKO back to `https://<listen-addr>/callback`. Create a browser-trusted certificate for that host once (see [Trusted local HTTPS certificate](#trusted-local-https-certificate-one-time)); without it, the CLI falls back to an ephemeral self-signed cert and the browser or PKO may block the callback.
+- The current shared sandbox flow should use `ENABLE_BANKING_ASPSP_NAME="Mock ASPSP"` on the backend. If that sandbox app changes, discover the available sandbox ASPSPs before treating a start-link failure as a callback problem, then update `ENABLE_BANKING_ASPSP_NAME` to the exposed entry (`Mock ASPSP`, `Bank Millennium`, or another non-PKO name).
 - `--callback-cert-file` and `--callback-key-file` must be provided together. When both are omitted, the CLI uses that self-signed fallback in memory only (nothing is written to disk).
 - Use either:
   - an HTTPS localhost callback flow with `connect --callback-listen-addr 127.0.0.1:8085` when the browser runs on the same machine, ideally with a trusted certificate pair, or
@@ -46,7 +47,7 @@ Pass the generated pair to `connect` with `--callback-cert-file` and `--callback
 
 ## Discover PKO / ASPSPs
 
-List Polish ASPSPs and confirm the exact PKO entry name before starting auth:
+List Polish ASPSPs and confirm the sandbox-exposed entry before starting auth. On the current shared sandbox, expect `Mock ASPSP` rather than `PKO Bank Polski`:
 
 ```bash
 go run ./cmd/signal-foundry finance-poc enable-banking aspsps --country PL --json
@@ -140,3 +141,5 @@ go run ./cmd/signal-foundry finance-poc enable-banking transactions \
 - Agents can verify command wiring, env loading, file paths, and JSON structure offline.
 - Live PKO testing still needs a human for bank login and SCA.
 - Keep the private key and any generated session/export files out of git-tracked locations.
+- For a shorter sandbox/operator runbook, see
+  [Enable Banking / PKO sandbox operator notes](./enable-banking-pko-sandbox-notes.md).

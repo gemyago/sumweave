@@ -1,8 +1,5 @@
 //go:build !release
 
-// TODO: generated code should include "//go:build !release" tags
-//go:generate mockgen -typed -package telemetry -destination mock_slog_handler_test.go log/slog Handler
-
 package telemetry
 
 import (

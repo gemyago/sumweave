@@ -13,7 +13,6 @@ type strategyWorkspaceStoreDeps struct {
 
 	DatabaseDSN         string `name:"config.dataLayer.database.dsn"`
 	DatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
-	AutoMigrate         bool   `name:"config.dataLayer.database.autoMigrate"`
 }
 
 func newStrategyArtifactStore(deps strategyWorkspaceStoreDeps) (*rtstrategy.ArtifactDatabaseStore, error) {
@@ -22,11 +21,6 @@ func newStrategyArtifactStore(deps strategyWorkspaceStoreDeps) (*rtstrategy.Arti
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create strategy artifact store: %w", err)
-	}
-	if deps.AutoMigrate {
-		if err = store.AutoMigrate(); err != nil {
-			return nil, fmt.Errorf("auto migrate strategy artifact store: %w", err)
-		}
 	}
 
 	return store, nil
@@ -42,11 +36,6 @@ func newStrategyVersionRegistryService(
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create strategy version registry service: %w", err)
-	}
-	if deps.AutoMigrate {
-		if err = service.AutoMigrate(); err != nil {
-			return nil, fmt.Errorf("auto migrate strategy version registry service: %w", err)
-		}
 	}
 	if _, err = service.EnsureDemoStrategyVersions(context.Background()); err != nil {
 		return nil, fmt.Errorf("seed demo strategy versions: %w", err)

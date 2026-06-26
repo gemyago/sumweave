@@ -1,6 +1,8 @@
 package jobs
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"sync/atomic"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -18,9 +21,22 @@ type wakeRecorder struct{ calls atomic.Int64 }
 
 func (w *wakeRecorder) SignalWake(_ string) { w.calls.Add(1) }
 
+type publisherStub struct {
+	publishCalls atomic.Int64
+	publishInTx  func(context.Context, *sql.Tx, appdispatch.Envelope) error
+}
+
+func (p *publisherStub) PublishInTx(ctx context.Context, tx *sql.Tx, envelope appdispatch.Envelope) error {
+	p.publishCalls.Add(1)
+	if p.publishInTx != nil {
+		return p.publishInTx(ctx, tx, envelope)
+	}
+	return nil
+}
+
 func TestService(t *testing.T) {
 	fake := faker.New()
-	makeService := func(t *testing.T, now time.Time) (*Service, *Store, ident.Generator) {
+	makeService := func(t *testing.T, now time.Time, publisher *publisherStub) (*Service, *Store, ident.Generator) {
 		t.Helper()
 		store, err := NewStore(
 			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
@@ -32,6 +48,7 @@ func TestService(t *testing.T) {
 		svc, err := NewService(ServiceDeps{
 			Store:       store,
 			IDGenerator: idGen,
+			Publisher:   publisher,
 			Clock: func() time.Time {
 				return now
 			},
@@ -60,7 +77,7 @@ func TestService(t *testing.T) {
 
 	t.Run("creates queued jobs immediately with generated job and ingestion run ids", func(t *testing.T) {
 		now := time.Now().UTC()
-		svc, _, _ := makeService(t, now)
+		svc, _, _ := makeService(t, now, &publisherStub{})
 		created, err := svc.CreateHistoricalRawCandleBackfill(t.Context(), validParams(now))
 		require.NoError(t, err)
 		require.NotNil(t, created)
@@ -71,7 +88,7 @@ func TestService(t *testing.T) {
 		assert.Equal(t, "BTC", created.Input.Symbol)
 	})
 
-	t.Run("get returns persisted jobs and create signals wake listeners", func(t *testing.T) {
+	t.Run("get returns persisted jobs", func(t *testing.T) {
 		now := time.Now().UTC()
 		store, err := NewStore(
 			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
@@ -83,6 +100,7 @@ func TestService(t *testing.T) {
 		svc, err := NewService(ServiceDeps{
 			Store:       store,
 			IDGenerator: ident.NewMockGenerator(),
+			Publisher:   &publisherStub{},
 			Clock: func() time.Time {
 				return now
 			},
@@ -95,7 +113,6 @@ func TestService(t *testing.T) {
 		loaded, err := svc.Get(t.Context(), created.ID)
 		require.NoError(t, err)
 		assert.Equal(t, created.ID, loaded.ID)
-		assert.EqualValues(t, 1, wake.calls.Load())
 	})
 
 	t.Run("reuses same idempotency key only for same canonical input hash", func(t *testing.T) {
@@ -110,6 +127,7 @@ func TestService(t *testing.T) {
 		svc, err := NewService(ServiceDeps{
 			Store:       store,
 			IDGenerator: ident.NewMockGenerator(),
+			Publisher:   &publisherStub{},
 			Clock: func() time.Time {
 				return now
 			},
@@ -123,7 +141,6 @@ func TestService(t *testing.T) {
 		second, err := svc.CreateHistoricalRawCandleBackfill(t.Context(), params)
 		require.NoError(t, err)
 		assert.Equal(t, first.ID, second.ID)
-		assert.EqualValues(t, 1, wake.calls.Load())
 		listed, err := store.List(t.Context(), ListParams{Limit: 10})
 		require.NoError(t, err)
 		require.Len(t, listed.Items, 1)
@@ -139,7 +156,7 @@ func TestService(t *testing.T) {
 
 	t.Run("allows same scope without idempotency key to create new jobs", func(t *testing.T) {
 		now := time.Now().UTC()
-		svc, store, _ := makeService(t, now)
+		svc, store, _ := makeService(t, now, &publisherStub{})
 		params := validParams(now)
 		params.IdempotencyKey = ""
 		first, err := svc.CreateHistoricalRawCandleBackfill(t.Context(), params)
@@ -154,7 +171,7 @@ func TestService(t *testing.T) {
 
 	t.Run("validates hyperliquid futures symbol timeframe range page size and future end", func(t *testing.T) {
 		now := time.Now().UTC()
-		svc, _, _ := makeService(t, now)
+		svc, _, _ := makeService(t, now, &publisherStub{})
 		cases := []CreateHistoricalRawCandleBackfillParams{
 			func() CreateHistoricalRawCandleBackfillParams { p := validParams(now); p.Venue = "other"; return p }(),
 			func() CreateHistoricalRawCandleBackfillParams { p := validParams(now); p.AssetClass = "spot"; return p }(),
@@ -183,14 +200,14 @@ func TestService(t *testing.T) {
 	})
 
 	t.Run("get returns not found for missing rows", func(t *testing.T) {
-		svc, _, _ := makeService(t, time.Now().UTC())
+		svc, _, _ := makeService(t, time.Now().UTC(), &publisherStub{})
 		_, err := svc.Get(t.Context(), fake.UUID().V4())
 		var notFound *app.NotFoundError
 		require.ErrorAs(t, err, &notFound)
 	})
 
 	t.Run("requires requester source", func(t *testing.T) {
-		svc, _, _ := makeService(t, time.Now().UTC())
+		svc, _, _ := makeService(t, time.Now().UTC(), &publisherStub{})
 		params := validParams(time.Now().UTC())
 		params.Requester.Source = ""
 		_, err := svc.CreateHistoricalRawCandleBackfill(t.Context(), params)
@@ -214,9 +231,202 @@ func TestService(t *testing.T) {
 		require.NoError(t, store.AutoMigrate())
 		_, err = NewService(ServiceDeps{Store: store})
 		require.Error(t, err)
-		svc, _, _ := makeService(t, time.Now().UTC())
+		svc, _, _ := makeService(t, time.Now().UTC(), &publisherStub{})
 		result, err := svc.List(t.Context(), ListParams{Limit: 5})
 		require.NoError(t, err)
 		assert.Empty(t, result.Items)
+	})
+
+	t.Run("generic enqueue and cancel retry validation paths are covered", func(t *testing.T) {
+		now := time.Now().UTC()
+		store, err := NewStore(
+			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			StoreOpts{TablePrefix: "svc_"},
+		)
+		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
+		registry := NewRegistry()
+		require.NoError(t, RegisterTypedHandler(
+			registry,
+			TypedHandlerSpec[map[string]string, map[string]string, struct{}]{
+				JobType: JobType("finance.fx_rates_sync"),
+				Run: func(_ context.Context, input map[string]string, _ func(struct{}) error) (map[string]string, error) {
+					return input, nil
+				},
+			},
+		))
+		svc, err := NewService(ServiceDeps{
+			Store:       store,
+			IDGenerator: ident.NewMockGenerator(),
+			Publisher:   &publisherStub{},
+			Clock:       func() time.Time { return now },
+			Registry:    registry,
+		})
+		require.NoError(t, err)
+		_, err = svc.Enqueue(t.Context(), EnqueueParams{
+			JobType:   JobType("missing"),
+			Requester: Requester{UserID: "u", Source: RequesterSourceOperator},
+			Input:     map[string]string{"a": "b"},
+		})
+		require.ErrorIs(t, err, ErrHandlerNotRegistered)
+		_, err = svc.Enqueue(t.Context(), EnqueueParams{
+			JobType:   JobType("finance.fx_rates_sync"),
+			Requester: Requester{UserID: "u"},
+			Input:     map[string]string{"a": "b"},
+		})
+		var invalid *app.InvalidInputError
+		require.ErrorAs(t, err, &invalid)
+		job, err := svc.Enqueue(t.Context(), EnqueueParams{
+			JobType:   JobType("finance.fx_rates_sync"),
+			Requester: Requester{UserID: "u", Source: RequesterSourceOperator},
+			Input:     map[string]string{"a": "b"},
+		})
+		require.NoError(t, err)
+		_, err = svc.Cancel(t.Context(), job.ID)
+		require.Error(t, err)
+		_, err = svc.Retry(t.Context(), job.ID)
+		require.Error(t, err)
+	})
+
+	t.Run("default registry and non-idempotent enqueue paths remain usable", func(t *testing.T) {
+		now := time.Now().UTC()
+		store, err := NewStore(
+			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			StoreOpts{TablePrefix: "svc_"},
+		)
+		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
+		wake := &wakeRecorder{}
+		svc, err := NewService(ServiceDeps{
+			Store:       store,
+			IDGenerator: ident.NewMockGenerator(),
+			Publisher:   &publisherStub{},
+			Clock:       func() time.Time { return now },
+			Wake:        wake,
+		})
+		require.NoError(t, err)
+
+		created, err := svc.Enqueue(t.Context(), EnqueueParams{
+			JobType:   JobTypeHistoricalRawCandleBackfill,
+			Requester: Requester{UserID: "user-" + fake.UUID().V4(), Source: RequesterSourceOperator},
+			Input: HistoricalRawCandleBackfillInput{
+				IngestionRunID: fake.UUID().V4(),
+				Venue:          "hyperliquid-perps",
+				Symbol:         "BTC",
+				AssetClass:     "future",
+				Timeframe:      "1m",
+				Start:          now.Add(-2 * time.Minute),
+				End:            now.Add(-time.Minute),
+				PageSize:       10,
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusQueued, created.Status)
+
+		worker, err := NewWorker(WorkerDeps{
+			Store:    store,
+			Registry: svc.registry,
+			DispatchConfig: DispatchConfig{
+				DatabaseDSN: filepath.Join(t.TempDir(), "dispatch.sqlite"),
+				TablePrefix: "svc_",
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, worker.ProcessJob(t.Context(), created.ID))
+		completed, err := store.Get(t.Context(), created.ID)
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusSucceeded, completed.Status)
+	})
+
+	t.Run("enqueue marshal and cancel retry handler errors surface cleanly", func(t *testing.T) {
+		now := time.Now().UTC()
+		svc, store, _ := makeService(t, now, &publisherStub{})
+		_, err := svc.Enqueue(t.Context(), EnqueueParams{
+			JobType:   JobType("finance.bad-input"),
+			Requester: Requester{UserID: "user-" + fake.UUID().V4(), Source: RequesterSourceOperator},
+			Input:     func() {},
+		})
+		require.Error(t, err)
+
+		registry := NewRegistry()
+		svcWithEmptyRegistry, err := NewService(ServiceDeps{
+			Store:       store,
+			IDGenerator: ident.NewMockGenerator(),
+			Publisher:   &publisherStub{},
+			Clock:       func() time.Time { return now },
+			Registry:    registry,
+		})
+		require.NoError(t, err)
+
+		queuedJob := Job{
+			ID:        fake.UUID().V4(),
+			JobType:   JobType("finance.missing-handler"),
+			Status:    JobStatusQueued,
+			Requester: Requester{UserID: "user-" + fake.UUID().V4(), Source: RequesterSourceOperator},
+			CreatedAt: now,
+			UpdatedAt: now,
+			QueuedAt:  now,
+		}
+		_, err = store.Create(t.Context(), queuedJob)
+		require.NoError(t, err)
+		_, err = svcWithEmptyRegistry.Cancel(t.Context(), queuedJob.ID)
+		require.ErrorIs(t, err, ErrHandlerNotRegistered)
+
+		failedJob := queuedJob
+		failedJob.ID = fake.UUID().V4()
+		failedJob.Status = JobStatusFailed
+		_, err = store.Create(t.Context(), failedJob)
+		require.NoError(t, err)
+		_, err = svcWithEmptyRegistry.Retry(t.Context(), failedJob.ID)
+		require.ErrorIs(t, err, ErrHandlerNotRegistered)
+	})
+
+	t.Run("validates before durable writes and publishes accepted work in the same transaction", func(t *testing.T) {
+		now := time.Now().UTC()
+		publisher := &publisherStub{}
+		svc, store, _ := makeService(t, now, publisher)
+
+		invalid := validParams(now)
+		invalid.Symbol = " "
+		_, err := svc.CreateHistoricalRawCandleBackfill(t.Context(), invalid)
+		var invalidInput *app.InvalidInputError
+		require.ErrorAs(t, err, &invalidInput)
+		assert.Zero(t, publisher.publishCalls.Load())
+		listed, err := store.List(t.Context(), ListParams{Limit: 10})
+		require.NoError(t, err)
+		assert.Empty(t, listed.Items)
+
+		publisher.publishInTx = func(_ context.Context, tx *sql.Tx, envelope appdispatch.Envelope) error {
+			var count int
+			require.NoError(t, tx.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM svc_jobs").Scan(&count))
+			assert.Equal(t, 1, count)
+			assert.Equal(t, appdispatch.EnvelopeVersionV1, envelope.Version)
+			assert.Equal(t, DispatchKindHistoricalRawCandleBackfill, envelope.Kind)
+			assert.NotEmpty(t, envelope.ObservableJobID)
+			return nil
+		}
+
+		created, err := svc.CreateHistoricalRawCandleBackfill(t.Context(), validParams(now))
+		require.NoError(t, err)
+		require.NotNil(t, created)
+		assert.EqualValues(t, 1, publisher.publishCalls.Load())
+		persisted, err := store.Get(t.Context(), created.ID)
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusQueued, persisted.Status)
+	})
+
+	t.Run("rolls back accepted observation state when durable publish fails", func(t *testing.T) {
+		now := time.Now().UTC()
+		publisher := &publisherStub{publishInTx: func(context.Context, *sql.Tx, appdispatch.Envelope) error {
+			return errors.New("publish failed")
+		}}
+		svc, store, _ := makeService(t, now, publisher)
+
+		created, err := svc.CreateHistoricalRawCandleBackfill(t.Context(), validParams(now))
+		require.Nil(t, created)
+		require.EqualError(t, err, "publish failed")
+		listed, err := store.List(t.Context(), ListParams{Limit: 10})
+		require.NoError(t, err)
+		assert.Empty(t, listed.Items)
 	})
 }

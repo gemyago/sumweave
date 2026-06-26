@@ -10,9 +10,24 @@
   } from './lib/routing/post-login-destination'
   import Chat from './pages/Chat.svelte'
   import Data from './pages/Data.svelte'
+  import Finance from './pages/Finance.svelte'
+  import FinanceTenants from './pages/FinanceTenants.svelte'
+  import FinanceAccounts from './pages/FinanceAccounts.svelte'
+  import FinanceAccountDetail from './pages/FinanceAccountDetail.svelte'
+  import FinanceTransactions from './pages/FinanceTransactions.svelte'
+  import FinanceTransactionEditor from './pages/FinanceTransactionEditor.svelte'
+  import FinanceCategories from './pages/FinanceCategories.svelte'
+  import FinanceConnections from './pages/FinanceConnections.svelte'
+  import FinanceImports from './pages/FinanceImports.svelte'
+  import FinanceJobDetail from './pages/FinanceJobDetail.svelte'
   import EvaluationDetail from './pages/EvaluationDetail.svelte'
   import Evaluations from './pages/Evaluations.svelte'
   import Login from './pages/Login.svelte'
+  import Admin from './pages/Admin.svelte'
+  import AdminJobs from './pages/AdminJobs.svelte'
+  import AdminJobDetail from './pages/AdminJobDetail.svelte'
+  import AdminFinanceFX from './pages/AdminFinanceFX.svelte'
+  import AdminFinanceProviders from './pages/AdminFinanceProviders.svelte'
   import JobDetail from './pages/JobDetail.svelte'
   import Jobs from './pages/Jobs.svelte'
   import Providers from './pages/Providers.svelte'
@@ -35,8 +50,72 @@
       component: JobDetail,
       conditions: [() => authStore.isAuthenticated],
     }),
+    '/finance/jobs/:jobId': wrap({
+      component: FinanceJobDetail,
+      conditions: [() => authStore.isAuthenticated],
+    }),
     '/jobs': wrap({
       component: Jobs,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/accounts/:accountId': wrap({
+      component: FinanceAccountDetail,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/tenants': wrap({
+      component: FinanceTenants,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/accounts': wrap({
+      component: FinanceAccounts,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/connections': wrap({
+      component: FinanceConnections,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/transactions': wrap({
+      component: FinanceTransactions,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/transactions/new': wrap({
+      component: FinanceTransactionEditor,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/transactions/:transactionId': wrap({
+      component: FinanceTransactionEditor,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/categories': wrap({
+      component: FinanceCategories,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/imports': wrap({
+      component: FinanceImports,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance': wrap({
+      component: Finance,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/admin/jobs/:jobId': wrap({
+      component: AdminJobDetail,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/admin/jobs': wrap({
+      component: AdminJobs,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/admin/finance/fx': wrap({
+      component: AdminFinanceFX,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/admin/finance/providers': wrap({
+      component: AdminFinanceProviders,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/admin': wrap({
+      component: Admin,
       conditions: [() => authStore.isAuthenticated],
     }),
     '/strategies/:strategyId/:version': wrap({
@@ -81,7 +160,10 @@
 
   const isWideWorkspaceRoute = $derived(
     typeof router.location === 'string' &&
-      (router.location.startsWith('/strategies') || router.location.startsWith('/evaluations')),
+      (router.location.startsWith('/strategies') ||
+        router.location.startsWith('/evaluations') ||
+        router.location.startsWith('/finance') ||
+        router.location.startsWith('/admin')),
   )
 
   $effect(() => {

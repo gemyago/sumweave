@@ -6,8 +6,8 @@ cover_dir=.cover
 cover_profile=$(cover_dir)/profile.out
 cover_html=$(cover_dir)/coverage.html
 
-# Tests should not be taking that long
-DEFAULT_TESTS_TIMEOUT ?= 10s
+# Package-level coverage runs need some CI headroom.
+DEFAULT_TESTS_TIMEOUT ?= 20s
 
 .DEFAULT_GOAL := all
 

@@ -13,14 +13,14 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-type CreateHistoricalDataBackfillJobRequest struct {
-	IDempotencyKey string    `json:"idempotencyKey,omitempty"`
-	CorrelationID  string    `json:"correlationId,omitempty"`
-	Venue          string    `json:"venue"`
-	Symbol         string    `json:"symbol"`
-	AssetClass     string    `json:"assetClass"`
-	Timeframe      string    `json:"timeframe"`
-	Start          time.Time `json:"start"`
-	End            time.Time `json:"end"`
-	PageSize       int64     `json:"pageSize,omitempty"`
+type CreateHistoricalDataBackfillJobRequest struct { 
+	IDempotencyKey string `json:"idempotencyKey,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty"`
+	Venue string `json:"venue"`
+	Symbol string `json:"symbol"`
+	AssetClass string `json:"assetClass"`
+	Timeframe string `json:"timeframe"`
+	Start time.Time `json:"start"`
+	End time.Time `json:"end"`
+	PageSize int64 `json:"pageSize,omitempty"`
 }

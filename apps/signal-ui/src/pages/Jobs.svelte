@@ -5,6 +5,11 @@
   import { formatCompactIdentifier } from '../lib/compact-identifier'
   import { createSignalJobsApiForAuth, type JobSummary } from '../lib/jobs/api'
 
+  let {
+    heading = 'Jobs',
+    description = 'Review durable historical ingestion jobs, filter the queue, and open detail on a separate route.',
+  } = $props<{ heading?: string; description?: string }>()
+
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
 
   const jobsApi = $derived.by(() => createSignalJobsApiForAuth({ baseUrl: appBaseUrl, authStore }))
@@ -81,8 +86,8 @@
 <section class="page" aria-labelledby="jobs-heading">
   <header class="page-header">
     <div>
-      <h1 id="jobs-heading">Jobs</h1>
-      <p class="muted">Review durable historical ingestion jobs, filter the queue, and open detail on a separate route.</p>
+      <h1 id="jobs-heading">{heading}</h1>
+      <p class="muted">{description}</p>
     </div>
     <button class="secondary" type="button" onclick={() => void loadJobs()} disabled={loading}>Refresh jobs</button>
   </header>
@@ -103,7 +108,11 @@
         <span>Job type</span>
         <select bind:value={jobTypeFilter} aria-label="Job type">
           <option value="">Any job type</option>
-          <option value="historical_raw_candle_backfill">historical_raw_candle_backfill</option>
+           <option value="data.historical_raw_candle_backfill">data.historical_raw_candle_backfill</option>
+           <option value="finance.bank_connection_sync">finance.bank_connection_sync</option>
+           <option value="finance.fx_rates_sync">finance.fx_rates_sync</option>
+           <option value="finance.csv_import">finance.csv_import</option>
+           <option value="finance.account_import">finance.account_import</option>
         </select>
       </label>
       <label>

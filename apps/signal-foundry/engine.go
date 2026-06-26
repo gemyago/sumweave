@@ -11,6 +11,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/config"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/lifecycle"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/startupmode"
 	"github.com/gemyago/signal-foundry/runtime/agent"
 	"github.com/spf13/viper"
 	"go.uber.org/dig"
@@ -34,6 +35,18 @@ func NewEngine(opts ...EngineOpt) (*Engine, error) {
 
 	cfg := o.Config
 	container := o.Container
+	autoStart := false
+	if o.JobsWorkerAutoStart != nil {
+		autoStart = *o.JobsWorkerAutoStart
+	}
+	if err := container.Provide(
+		func() *startupmode.JobsWorkerAutoStart {
+			return &startupmode.JobsWorkerAutoStart{Enabled: autoStart}
+		},
+		dig.Name("internal.jobs.worker.autoStart"),
+	); err != nil {
+		return nil, fmt.Errorf("provide jobs worker auto-start: %w", err)
+	}
 
 	if o.LogsFormatJSON {
 		cfg.Set("jsonLogs", true)

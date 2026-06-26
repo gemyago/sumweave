@@ -5,6 +5,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	financepkg "github.com/gemyago/signal-foundry/finance"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"go.uber.org/dig"
 )
@@ -18,9 +19,11 @@ func Register(container *dig.Container) error {
 		di.ProvideImplementation[*jobspkg.Service, jobsService],
 		di.ProvideImplementation[*data.ReadService, replayReadService],
 		di.ProvideImplementation[*data.LineageService, lineageBrowserService],
+		di.ProvideImplementation[*financepkg.Service, financeService],
 		NewAuthController,
 		NewDataController,
 		NewJobsController,
+		NewFinanceController,
 		NewEvaluationsController,
 		NewStrategiesController,
 	)

@@ -15,7 +15,9 @@ describe('post-login destination routing', () => {
     expect(routeFromHash('')).toBe('/')
     expect(routeFromHash('#')).toBe('/')
     expect(routeFromHash('#/chat/example-session')).toBe('/chat/example-session')
+    expect(routeFromHash('finance/transactions/new')).toBe('/finance/transactions/new')
     expect(isProtectedRoute('/chat/example-session')).toBe(true)
+    expect(isProtectedRoute('/finance/transactions/new')).toBe(true)
     expect(isProtectedRoute('/login')).toBe(false)
   })
 
@@ -30,6 +32,16 @@ describe('post-login destination routing', () => {
     expect(storage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe('/providers')
     expect(consumePostLoginDestination(storage)).toBe('/providers')
     expect(storage.getItem(POST_LOGIN_DESTINATION_KEY)).toBeNull()
+
+    rememberCurrentPostLoginDestination({ hash: '#/finance/transactions/new', storage })
+    expect(storage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe('/finance/transactions/new')
+    expect(consumePostLoginDestination(storage)).toBe('/finance/transactions/new')
+    expect(storage.getItem(POST_LOGIN_DESTINATION_KEY)).toBeNull()
+
+    storage.setItem(POST_LOGIN_DESTINATION_KEY, '/login')
+    expect(consumePostLoginDestination(storage)).toBeNull()
+    expect(storage.getItem(POST_LOGIN_DESTINATION_KEY)).toBeNull()
+
     expect(resolvePostLoginDestination(storage)).toBe(DEFAULT_AUTHENTICATED_ROUTE)
   })
 })

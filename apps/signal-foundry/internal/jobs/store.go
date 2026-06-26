@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,7 @@ const (
 	columnWorkerID        = "worker_id"
 	columnStartedAt       = "started_at"
 	columnUpdatedAt       = "updated_at"
+	columnProgressJSON    = "progress_json"
 	columnErrorCode       = "error_code"
 	columnErrorSummary    = "error_summary"
 	columnErrorDetails    = "error_details"
@@ -35,6 +37,7 @@ const (
 	columnQueuedAt        = "queued_at"
 	columnLastAttemptTime = "last_attempt_time"
 	columnAttemptCount    = "attempt_count"
+	columnMaxAttempts     = "max_attempts"
 	columnResultJSON      = "result_json"
 )
 
@@ -43,9 +46,20 @@ type Store struct {
 	tableName string
 }
 
+type StoreTx struct {
+	db        *gorm.DB
+	tableName string
+	sqlTx     *sql.Tx
+}
+
 type StoreOpts struct {
 	TablePrefix string
 }
+
+const (
+	sqliteBusyTimeoutMillis = 5000
+	sqliteMemoryDSN         = ":memory:"
+)
 
 type jobModel struct {
 	ID                 string     `gorm:"column:id;size:255;not null;primaryKey"`
@@ -59,6 +73,7 @@ type jobModel struct {
 	CanonicalInputHash string     `gorm:"column:canonical_input_hash;size:64;not null"`
 	InputJSON          string     `gorm:"column:input_json;type:text;not null"`
 	ResultJSON         string     `gorm:"column:result_json;type:text"`
+	ProgressJSON       string     `gorm:"column:progress_json;type:text"`
 	ErrorCode          string     `gorm:"column:error_code;size:128"`
 	ErrorSummary       string     `gorm:"column:error_summary;size:240"`
 	ErrorDetails       string     `gorm:"column:error_details;size:1024"`
@@ -69,11 +84,30 @@ type jobModel struct {
 	CompletedAt        *time.Time `gorm:"column:completed_at"`
 	WorkerID           string     `gorm:"column:worker_id;size:255;not null;default:''"`
 	AttemptCount       int        `gorm:"column:attempt_count;not null"`
+	MaxAttempts        int        `gorm:"column:max_attempts;not null"`
 	LastAttemptAt      *time.Time `gorm:"column:last_attempt_time"`
 	CorrelationID      string     `gorm:"column:correlation_id;size:255;not null;default:''"`
+	ScheduleID         string     `gorm:"column:schedule_id;size:255;not null;default:''"`
 }
 
 func (jobModel) TableName() string { return "jobs" }
+
+type scheduleModel struct {
+	ID              string     `gorm:"column:id;size:255;not null;primaryKey"`
+	JobType         string     `gorm:"column:job_type;size:128;not null"`
+	RequesterUserID string     `gorm:"column:requester_user_id;size:255;not null;default:''"`
+	RequesterSource string     `gorm:"column:requester_source;size:32;not null"`
+	AgentSessionID  string     `gorm:"column:agent_session_id;size:255;not null;default:''"`
+	AgentRunID      string     `gorm:"column:agent_run_id;size:255;not null;default:''"`
+	InputJSON       string     `gorm:"column:input_json;type:text;not null"`
+	IntervalSeconds int64      `gorm:"column:interval_seconds;not null"`
+	NextRunAt       time.Time  `gorm:"column:next_run_at;not null;index"`
+	LastEnqueuedAt  *time.Time `gorm:"column:last_enqueued_at"`
+	CorrelationID   string     `gorm:"column:correlation_id;size:255;not null;default:''"`
+	Enabled         bool       `gorm:"column:enabled;not null"`
+}
+
+func (scheduleModel) TableName() string { return "job_schedules" }
 
 func NewStore(dsn string, opts StoreOpts) (*Store, error) {
 	if strings.TrimSpace(dsn) == "" {
@@ -81,11 +115,7 @@ func NewStore(dsn string, opts StoreOpts) (*Store, error) {
 	}
 	dialector := postgres.Open(dsn)
 	trimmed := strings.TrimSpace(dsn)
-	if trimmed == ":memory:" ||
-		strings.HasPrefix(trimmed, "file:") ||
-		strings.Contains(trimmed, "sqlite") ||
-		strings.HasSuffix(trimmed, ".db") ||
-		strings.HasSuffix(trimmed, ".sqlite") {
+	if isSQLiteDSN(trimmed) {
 		dialector = sqlite.Open(dsn)
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{
@@ -95,6 +125,9 @@ func NewStore(dsn string, opts StoreOpts) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open jobs database: %w", err)
 	}
+	if err = applySQLiteConnectionDefaults(db, trimmed); err != nil {
+		return nil, err
+	}
 	tableName := "jobs"
 	if opts.TablePrefix != "" {
 		tableName = opts.TablePrefix + tableName
@@ -102,16 +135,74 @@ func NewStore(dsn string, opts StoreOpts) (*Store, error) {
 	return &Store{db: db, tableName: tableName}, nil
 }
 
+func applySQLiteConnectionDefaults(db *gorm.DB, dsn string) error {
+	if db == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(dsn)
+	if !isSQLiteDSN(trimmed) {
+		return nil
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("resolve sqlite jobs database handle: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
+	if execErr := db.Exec(fmt.Sprintf("PRAGMA busy_timeout = %d", sqliteBusyTimeoutMillis)).Error; execErr != nil {
+		return fmt.Errorf("set jobs sqlite busy timeout: %w", execErr)
+	}
+	if !supportsSQLiteWAL(trimmed) {
+		return nil
+	}
+
+	var journalMode string
+	if rowErr := db.Raw("PRAGMA journal_mode = WAL").Row().Scan(&journalMode); rowErr != nil {
+		return fmt.Errorf("set jobs sqlite journal mode: %w", rowErr)
+	}
+	if !strings.EqualFold(strings.TrimSpace(journalMode), "wal") {
+		return fmt.Errorf("set jobs sqlite journal mode: unexpected mode %q", journalMode)
+	}
+
+	return nil
+}
+
+func supportsSQLiteWAL(dsn string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(dsn))
+	return trimmed != sqliteMemoryDSN &&
+		!strings.Contains(trimmed, "mode=memory") &&
+		!strings.Contains(trimmed, "cache=shared&mode=memory") &&
+		!strings.Contains(trimmed, "mode=ro") &&
+		!strings.Contains(trimmed, "immutable=1")
+}
+
+func isSQLiteDSN(dsn string) bool {
+	trimmed := strings.TrimSpace(dsn)
+	return trimmed == ":memory:" ||
+		strings.HasPrefix(trimmed, "file:") ||
+		strings.Contains(trimmed, "sqlite") ||
+		strings.HasSuffix(trimmed, ".db") ||
+		strings.HasSuffix(trimmed, ".sqlite")
+}
+
 func (s *Store) AutoMigrate() error {
-	return s.db.Table(s.tableName).AutoMigrate(&jobModel{})
+	if err := s.db.Table(s.tableName).AutoMigrate(&jobModel{}); err != nil {
+		return err
+	}
+	return s.db.Table(s.scheduleTableName()).AutoMigrate(&scheduleModel{})
 }
 
 func (s *Store) Create(ctx context.Context, job Job) (Job, error) {
+	return s.createWithDB(ctx, s.db, job)
+}
+
+func (s *Store) createWithDB(ctx context.Context, db *gorm.DB, job Job) (Job, error) {
 	model, err := newJobModel(job)
 	if err != nil {
 		return Job{}, err
 	}
-	createErr := s.db.WithContext(ctx).Table(s.tableName).Create(&model).Error
+	createErr := db.WithContext(ctx).Table(s.tableName).Create(&model).Error
 	if createErr != nil {
 		return Job{}, fmt.Errorf("create job: %w", createErr)
 	}
@@ -119,6 +210,10 @@ func (s *Store) Create(ctx context.Context, job Job) (Job, error) {
 }
 
 func (s *Store) CreateIdempotent(ctx context.Context, job Job) (Job, bool, error) {
+	return s.createIdempotentWithDB(ctx, s.db, job)
+}
+
+func (s *Store) createIdempotentWithDB(ctx context.Context, db *gorm.DB, job Job) (Job, bool, error) {
 	model, err := newJobModel(job)
 	if err != nil {
 		return Job{}, false, err
@@ -126,7 +221,7 @@ func (s *Store) CreateIdempotent(ctx context.Context, job Job) (Job, bool, error
 	if strings.TrimSpace(model.IdempotencyKey) == "" {
 		return Job{}, false, ErrNoIdempotency
 	}
-	createErr := s.db.WithContext(ctx).Table(s.tableName).Create(&model).Error
+	createErr := db.WithContext(ctx).Table(s.tableName).Create(&model).Error
 	if createErr == nil {
 		created, jobErr := jobFromModel(model)
 		if jobErr != nil {
@@ -155,6 +250,41 @@ func (s *Store) CreateIdempotent(ctx context.Context, job Job) (Job, bool, error
 		return Job{}, false, &idempotencyConflictError{key: model.IdempotencyKey}
 	}
 	return *existing, false, nil
+}
+
+func (s *Store) WithTx(ctx context.Context, run func(*StoreTx) error) error {
+	if run == nil {
+		return nil
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		sqlTx, ok := tx.Statement.ConnPool.(*sql.Tx)
+		if !ok || sqlTx == nil {
+			return errors.New("resolve sql transaction")
+		}
+		return run(&StoreTx{db: tx, tableName: s.tableName, sqlTx: sqlTx})
+	})
+}
+
+func (tx *StoreTx) SQLTx() *sql.Tx {
+	if tx == nil {
+		return nil
+	}
+	return tx.sqlTx
+}
+
+func (tx *StoreTx) Create(ctx context.Context, job Job) (Job, error) {
+	store := Store{tableName: tx.tableName}
+	return store.createWithDB(ctx, tx.db, job)
+}
+
+func (tx *StoreTx) CreateIdempotent(ctx context.Context, job Job) (Job, bool, error) {
+	store := Store{db: tx.db, tableName: tx.tableName}
+	return store.createIdempotentWithDB(ctx, tx.db, job)
+}
+
+func (tx *StoreTx) UpsertSchedule(ctx context.Context, schedule Schedule) error {
+	store := Store{db: tx.db, tableName: tx.tableName}
+	return store.upsertScheduleWithDB(ctx, tx.db, schedule)
 }
 
 func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {
@@ -265,6 +395,7 @@ func (s *Store) ClaimQueued(
 			columnAttemptCount:    gorm.Expr("attempt_count + 1"),
 			columnLastAttemptTime: claimedAt,
 			columnStartedAt:       claimedAt,
+			columnProgressJSON:    "",
 			columnUpdatedAt:       claimedAt,
 		})
 	if result.Error != nil {
@@ -280,12 +411,12 @@ func (s *Store) MarkSucceeded(
 	ctx context.Context,
 	jobID string,
 	workerID string,
-	result HistoricalRawCandleBackfillResult,
+	result any,
 	completedAt time.Time,
 ) error {
-	resultJSON, err := json.Marshal(result)
+	resultJSON, err := resultJSONFromValue(result)
 	if err != nil {
-		return fmt.Errorf("marshal job result: %w", err)
+		return err
 	}
 	completedAt = completedAt.UTC()
 	updates := map[string]any{
@@ -304,6 +435,56 @@ func (s *Store) MarkSucceeded(
 		Updates(updates).Error
 	if updateErr != nil {
 		return fmt.Errorf("mark job succeeded: %w", updateErr)
+	}
+	return nil
+}
+
+func resultJSONFromValue(result any) (json.RawMessage, error) {
+	switch typed := result.(type) {
+	case nil:
+		return nil, nil
+	case json.RawMessage:
+		return typed, nil
+	case []byte:
+		return json.RawMessage(typed), nil
+	default:
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("marshal job result: %w", err)
+		}
+		return json.RawMessage(encoded), nil
+	}
+}
+
+func (s *Store) MarkCanceled(ctx context.Context, jobID string, completedAt time.Time) error {
+	completedAt = completedAt.UTC()
+	updateErr := s.db.WithContext(ctx).Table(s.tableName).
+		Model(&jobModel{}).
+		Where("id = ?", strings.TrimSpace(jobID)).
+		Updates(map[string]any{
+			columnStatus:      string(JobStatusCanceled),
+			columnCompletedAt: completedAt,
+			columnUpdatedAt:   completedAt,
+		}).Error
+	if updateErr != nil {
+		return fmt.Errorf("mark job canceled: %w", updateErr)
+	}
+	return nil
+}
+
+func (s *Store) UpdateProgress(
+	ctx context.Context,
+	jobID string,
+	progressJSON json.RawMessage,
+	updatedAt time.Time,
+) error {
+	updatedAt = updatedAt.UTC()
+	updateErr := s.db.WithContext(ctx).Table(s.tableName).
+		Model(&jobModel{}).
+		Where("id = ?", strings.TrimSpace(jobID)).
+		Updates(map[string]any{columnProgressJSON: string(progressJSON), columnUpdatedAt: updatedAt}).Error
+	if updateErr != nil {
+		return fmt.Errorf("update job progress: %w", updateErr)
 	}
 	return nil
 }
@@ -367,6 +548,7 @@ func (s *Store) RecoverStaleRunning(ctx context.Context, now time.Time, maxAttem
 				columnQueuedAt:     now,
 				columnStartedAt:    nil,
 				columnWorkerID:     "",
+				columnProgressJSON: "",
 				columnErrorCode:    "stale_running_requeued",
 				columnErrorSummary: "stale running job requeued",
 				columnErrorDetails: "startup recovery requeued a stale running job",
@@ -383,10 +565,82 @@ func (s *Store) RecoverStaleRunning(ctx context.Context, now time.Time, maxAttem
 	return nil
 }
 
+func (s *Store) UpsertSchedule(ctx context.Context, schedule Schedule) error {
+	return s.upsertScheduleWithDB(ctx, s.db, schedule)
+}
+
+func (s *Store) upsertScheduleWithDB(ctx context.Context, db *gorm.DB, schedule Schedule) error {
+	model := scheduleModel{
+		ID:              strings.TrimSpace(schedule.ID),
+		JobType:         string(schedule.JobType),
+		RequesterUserID: strings.TrimSpace(schedule.Requester.UserID),
+		RequesterSource: strings.TrimSpace(string(schedule.Requester.Source)),
+		AgentSessionID:  strings.TrimSpace(schedule.Requester.AgentSessionID),
+		AgentRunID:      strings.TrimSpace(schedule.Requester.AgentRunID),
+		InputJSON:       string(schedule.InputJSON),
+		IntervalSeconds: int64(schedule.Interval / time.Second),
+		NextRunAt:       schedule.NextRunAt.UTC(),
+		LastEnqueuedAt:  schedule.LastEnqueuedAt,
+		CorrelationID:   strings.TrimSpace(schedule.CorrelationID),
+		Enabled:         schedule.Enabled || !schedule.NextRunAt.IsZero(),
+	}
+	if err := db.WithContext(ctx).Table(s.scheduleTableName()).Save(&model).Error; err != nil {
+		return fmt.Errorf("upsert schedule: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListDueSchedules(ctx context.Context, now time.Time) ([]Schedule, error) {
+	var models []scheduleModel
+	if err := s.db.WithContext(ctx).
+		Table(s.scheduleTableName()).
+		Where("enabled = ? AND next_run_at <= ?", true, now.UTC()).
+		Order("next_run_at ASC").
+		Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list due schedules: %w", err)
+	}
+	items := make([]Schedule, 0, len(models))
+	for _, model := range models {
+		items = append(items, Schedule{
+			ID:      model.ID,
+			JobType: JobType(model.JobType),
+			Requester: Requester{
+				UserID:         model.RequesterUserID,
+				Source:         RequesterSource(model.RequesterSource),
+				AgentSessionID: model.AgentSessionID,
+				AgentRunID:     model.AgentRunID,
+			},
+			InputJSON:      json.RawMessage(model.InputJSON),
+			Interval:       time.Duration(model.IntervalSeconds) * time.Second,
+			NextRunAt:      model.NextRunAt.UTC(),
+			LastEnqueuedAt: model.LastEnqueuedAt,
+			CorrelationID:  model.CorrelationID,
+			Enabled:        model.Enabled,
+		})
+	}
+	return items, nil
+}
+
+func (s *Store) scheduleTableName() string {
+	return strings.TrimSuffix(s.tableName, "jobs") + "job_schedules"
+}
+
 func newJobModel(job Job) (jobModel, error) {
-	inputJSON, err := marshalHistoricalInput(job.Input)
-	if err != nil {
-		return jobModel{}, fmt.Errorf("marshal job input: %w", err)
+	inputJSON := job.InputJSON
+	if len(inputJSON) == 0 && job.JobType == JobTypeHistoricalRawCandleBackfill {
+		marshaled, err := marshalHistoricalInput(job.Input)
+		if err != nil {
+			return jobModel{}, fmt.Errorf("marshal job input: %w", err)
+		}
+		inputJSON = marshaled
+	}
+	resultJSON := job.ResultJSON
+	if len(resultJSON) == 0 && job.Result != nil {
+		marshaled, err := json.Marshal(job.Result)
+		if err != nil {
+			return jobModel{}, fmt.Errorf("marshal job result: %w", err)
+		}
+		resultJSON = marshaled
 	}
 	model := jobModel{
 		ID:                 strings.TrimSpace(job.ID),
@@ -399,6 +653,8 @@ func newJobModel(job Job) (jobModel, error) {
 		IdempotencyKey:     strings.TrimSpace(job.IdempotencyKey),
 		CanonicalInputHash: strings.TrimSpace(job.InputHash),
 		InputJSON:          string(inputJSON),
+		ResultJSON:         string(resultJSON),
+		ProgressJSON:       string(job.ProgressJSON),
 		CreatedAt:          job.CreatedAt.UTC(),
 		UpdatedAt:          job.UpdatedAt.UTC(),
 		QueuedAt:           job.QueuedAt.UTC(),
@@ -406,15 +662,10 @@ func newJobModel(job Job) (jobModel, error) {
 		CompletedAt:        job.CompletedAt,
 		WorkerID:           strings.TrimSpace(job.WorkerID),
 		AttemptCount:       job.AttemptCount,
+		MaxAttempts:        job.MaxAttempts,
 		LastAttemptAt:      job.LastAttemptAt,
 		CorrelationID:      strings.TrimSpace(job.CorrelationID),
-	}
-	if job.Result != nil {
-		resultJSON, marshalErr := json.Marshal(job.Result)
-		if marshalErr != nil {
-			return jobModel{}, fmt.Errorf("marshal job result: %w", marshalErr)
-		}
-		model.ResultJSON = string(resultJSON)
+		ScheduleID:         strings.TrimSpace(job.ScheduleID),
 	}
 	if job.Error != nil {
 		model.ErrorCode = truncateBounded(job.Error.Code, 128)
@@ -425,18 +676,20 @@ func newJobModel(job Job) (jobModel, error) {
 }
 
 func jobFromModel(model jobModel) (Job, error) {
-	var input HistoricalRawCandleBackfillInput
-	if err := json.Unmarshal([]byte(model.InputJSON), &input); err != nil {
-		return Job{}, fmt.Errorf("unmarshal job input: %w", err)
+	var historicalInput HistoricalRawCandleBackfillInput
+	var historicalResult *HistoricalRawCandleBackfillResult
+	if JobType(model.JobType) == JobTypeHistoricalRawCandleBackfill && strings.TrimSpace(model.InputJSON) != "" {
+		if err := json.Unmarshal([]byte(model.InputJSON), &historicalInput); err != nil {
+			return Job{}, fmt.Errorf("unmarshal job input: %w", err)
+		}
+		historicalInput = canonicalizeHistoricalInput(historicalInput)
 	}
-	input = canonicalizeHistoricalInput(input)
-	var result *HistoricalRawCandleBackfillResult
-	if strings.TrimSpace(model.ResultJSON) != "" {
+	if JobType(model.JobType) == JobTypeHistoricalRawCandleBackfill && strings.TrimSpace(model.ResultJSON) != "" {
 		decoded := HistoricalRawCandleBackfillResult{}
 		if err := json.Unmarshal([]byte(model.ResultJSON), &decoded); err != nil {
 			return Job{}, fmt.Errorf("unmarshal job result: %w", err)
 		}
-		result = &decoded
+		historicalResult = &decoded
 	}
 	var jobErr *JobError
 	if model.ErrorCode != "" || model.ErrorSummary != "" || model.ErrorDetails != "" {
@@ -458,8 +711,11 @@ func jobFromModel(model jobModel) (Job, error) {
 		},
 		IdempotencyKey: model.IdempotencyKey,
 		InputHash:      model.CanonicalInputHash,
-		Input:          input,
-		Result:         result,
+		Input:          historicalInput,
+		InputJSON:      json.RawMessage(model.InputJSON),
+		Result:         historicalResult,
+		ResultJSON:     json.RawMessage(model.ResultJSON),
+		ProgressJSON:   json.RawMessage(model.ProgressJSON),
 		Error:          jobErr,
 		CreatedAt:      model.CreatedAt.UTC(),
 		UpdatedAt:      model.UpdatedAt.UTC(),
@@ -468,8 +724,10 @@ func jobFromModel(model jobModel) (Job, error) {
 		CompletedAt:    model.CompletedAt,
 		WorkerID:       model.WorkerID,
 		AttemptCount:   model.AttemptCount,
+		MaxAttempts:    model.MaxAttempts,
 		LastAttemptAt:  model.LastAttemptAt,
 		CorrelationID:  model.CorrelationID,
+		ScheduleID:     model.ScheduleID,
 	}, nil
 }
 
@@ -479,8 +737,12 @@ func HashInput(input HistoricalRawCandleBackfillInput) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return hashBytes(payload), nil
+}
+
+func hashBytes(payload []byte) string {
 	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:]), nil
+	return hex.EncodeToString(sum[:])
 }
 
 func encodeCursor(createdAt time.Time, id string) string {

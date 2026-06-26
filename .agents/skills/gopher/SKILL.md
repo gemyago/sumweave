@@ -22,6 +22,7 @@ Nearest project instructions **win** when they conflict with anything below.
 
 ### Key considerations
 
+- Single responsibility principle applies to all code. No component must exist that is operating on more than one responsibility. If there is a need to create such a component - a strong justification is required and be ready to explain your decision in person.
 - **Accept interfaces, return structs** canonical way to structure code:
   - Dependencies (services, repos, clients or any other components) **SHELL** be accepted as consumer defined **interfaces** (testability, boundaries).
   - Return **concrete types** (structs) from constructors.
@@ -96,6 +97,7 @@ More detail is in **Testing best practices** below. Common points:
 - **Mocks:** follow the project’s documented approach (codegen tool, hand-written fakes, etc.).
 - Use **`t.Context()`** over `context.Background()` / `context.TODO()` in tests when the Go version supports it.
 - Avoid package-level test helpers; define them inside the relevant `TestXxx` (e.g. as a closure used by nested `t.Run` blocks) or inside a single `t.Run` when only that case needs them.
+- Use test fixtures (e.g `makeRandomSomething`) to construct randomized test data.
 
 ### Core Principles
 

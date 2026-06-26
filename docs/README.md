@@ -10,6 +10,7 @@ Use these documents as the active documentation set for this repository.
 ## Retained Reference Docs
 
 - Product vocabulary: [domain-terminology.md](./domain-terminology.md)
+- Finance provider sync architecture: [finance-provider-sync-architecture.md](./finance-provider-sync-architecture.md)
 - Strategy definition format: [strategy-dsl-v0.md](./strategy-dsl-v0.md)
 - Evaluation replay flow: [evaluation-backtest-flow-v0.md](./evaluation-backtest-flow-v0.md)
 - Go coding conventions: [golang-coding-guide.md](./golang-coding-guide.md)

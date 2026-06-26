@@ -8,7 +8,25 @@
 
   const jobsApi = $derived.by(() => createSignalJobsApiForAuth({ baseUrl: appBaseUrl, authStore }))
 
-  let { params = {} } = $props<{ params?: { jobId?: string } }>()
+  let {
+    params = {},
+    heading = 'Job detail',
+    description = 'Inspect one durable historical backfill request, its worker metadata, and terminal result or safe error.',
+    primaryBackHref = '/jobs',
+    primaryBackLabel = 'Back to jobs',
+    secondaryBackHref = '/data',
+    secondaryBackLabel = 'Back to data',
+    formatDateValue = (value: Date | null) => (value ? value.toISOString() : '—'),
+  } = $props<{
+    params?: { jobId?: string }
+    heading?: string
+    description?: string
+    primaryBackHref?: string
+    primaryBackLabel?: string
+    secondaryBackHref?: string
+    secondaryBackLabel?: string
+    formatDateValue?: (value: Date | null) => string
+  }>()
 
   let loading = $state(true)
   let error = $state<string | null>(null)
@@ -67,10 +85,6 @@
     }
   }
 
-  function formatDate(value: Date | null): string {
-    return value ? value.toISOString() : '—'
-  }
-
   function clearRefreshTimer() {
     if (refreshTimer !== null) {
       clearTimeout(refreshTimer)
@@ -89,21 +103,29 @@
     })
     return `/data?${query.toString()}`
   }
+
+  function hasHistoricalInput(item: JobDetailModel): boolean {
+    return Boolean(item.input.venue || item.input.symbol || item.input.ingestionRunId)
+  }
+
+  function hasHistoricalResult(item: JobDetailModel): boolean {
+    return item.result !== undefined && item.jobType.includes('historical')
+  }
 </script>
 
 <section class="page" aria-labelledby="job-detail-heading">
   <header class="page-header">
     <div>
-      <h1 id="job-detail-heading">Job detail</h1>
-      <p class="muted">Inspect one durable historical backfill request, its worker metadata, and terminal result or safe error.</p>
-    </div>
-    <div class="page-links">
-      <a href="/jobs" use:link>Back to jobs</a>
-      <a href="/data" use:link>Back to data</a>
-      {#if detail}
-        <a href={buildDataScopeHref(detail)} use:link>Open data scope</a>
-      {/if}
-    </div>
+        <h1 id="job-detail-heading">{heading}</h1>
+        <p class="muted">{description}</p>
+      </div>
+      <div class="page-links">
+        <a href={primaryBackHref} use:link>{primaryBackLabel}</a>
+        <a href={secondaryBackHref} use:link>{secondaryBackLabel}</a>
+        {#if detail && hasHistoricalInput(detail)}
+          <a href={buildDataScopeHref(detail)} use:link>Open data scope</a>
+        {/if}
+      </div>
   </header>
 
   {#if error}
@@ -123,32 +145,39 @@
       </dl>
     </section>
 
-    <section class="panel">
-      <h2>Input</h2>
-      <dl class="summary-grid">
-        <div><dt>ingestionRunId</dt><dd>{detail.input.ingestionRunId}</dd></div>
-        <div><dt>Venue</dt><dd>{detail.input.venue}</dd></div>
-        <div><dt>Symbol</dt><dd>{detail.input.symbol}</dd></div>
-        <div><dt>Asset class</dt><dd>{detail.input.assetClass}</dd></div>
-        <div><dt>Timeframe</dt><dd>{detail.input.timeframe}</dd></div>
-        <div><dt>Page size</dt><dd>{detail.input.pageSize}</dd></div>
-        <div><dt>Start</dt><dd>{formatDate(detail.input.start)}</dd></div>
-        <div><dt>End</dt><dd>{formatDate(detail.input.end)}</dd></div>
-      </dl>
-    </section>
+    {#if hasHistoricalInput(detail)}
+      <section class="panel">
+        <h2>Input</h2>
+        <dl class="summary-grid">
+          <div><dt>ingestionRunId</dt><dd>{detail.input.ingestionRunId}</dd></div>
+          <div><dt>Venue</dt><dd>{detail.input.venue}</dd></div>
+          <div><dt>Symbol</dt><dd>{detail.input.symbol}</dd></div>
+          <div><dt>Asset class</dt><dd>{detail.input.assetClass}</dd></div>
+          <div><dt>Timeframe</dt><dd>{detail.input.timeframe}</dd></div>
+          <div><dt>Page size</dt><dd>{detail.input.pageSize}</dd></div>
+          <div><dt>Start</dt><dd>{formatDateValue(detail.input.start)}</dd></div>
+          <div><dt>End</dt><dd>{formatDateValue(detail.input.end)}</dd></div>
+        </dl>
+      </section>
+    {:else}
+      <section class="panel">
+        <h2>Input</h2>
+        <p class="muted">Input details are not available for this job type in the current API surface.</p>
+      </section>
+    {/if}
 
     <section class="panel">
       <h2>Timeline and worker</h2>
       <dl class="summary-grid">
-        <div><dt>Created</dt><dd>{formatDate(detail.createdAt)}</dd></div>
-        <div><dt>Updated</dt><dd>{formatDate(detail.updatedAt)}</dd></div>
-        <div><dt>Started</dt><dd>{formatDate(detail.startedAt)}</dd></div>
-        <div><dt>Completed</dt><dd>{formatDate(detail.completedAt)}</dd></div>
-        <div><dt>Last attempt</dt><dd>{formatDate(detail.lastAttemptAt)}</dd></div>
+        <div><dt>Created</dt><dd>{formatDateValue(detail.createdAt)}</dd></div>
+        <div><dt>Updated</dt><dd>{formatDateValue(detail.updatedAt)}</dd></div>
+        <div><dt>Started</dt><dd>{formatDateValue(detail.startedAt)}</dd></div>
+        <div><dt>Completed</dt><dd>{formatDateValue(detail.completedAt)}</dd></div>
+        <div><dt>Last attempt</dt><dd>{formatDateValue(detail.lastAttemptAt)}</dd></div>
       </dl>
     </section>
 
-    {#if detail.result}
+    {#if hasHistoricalResult(detail) && detail.result}
       <section class="panel">
         <h2>Result</h2>
         <dl class="summary-grid">
@@ -165,11 +194,16 @@
             <h3>Missing interval preview</h3>
             <ul>
               {#each detail.result.missingIntervalPreview as item (`${item.start.toISOString()}-${item.end.toISOString()}`)}
-                <li>{formatDate(item.start)} → {formatDate(item.end)}</li>
+                <li>{formatDateValue(item.start)} → {formatDateValue(item.end)}</li>
               {/each}
             </ul>
           </div>
         {/if}
+      </section>
+    {:else if !detail.jobType.includes('historical')}
+      <section class="panel">
+        <h2>Result</h2>
+        <p class="muted">Result details are not yet specialized for this job type.</p>
       </section>
     {/if}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1routes/models"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/runtime/data"
@@ -176,20 +177,15 @@ func TestJobsControllerIntegration(t *testing.T) {
 	jobsStore, err := jobspkg.NewStore(sharedDSN, jobspkg.StoreOpts{})
 	require.NoError(t, err)
 	require.NoError(t, jobsStore.AutoMigrate())
-
-	worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
-		Store:  jobsStore,
-		Runner: runner,
-		Config: jobspkg.WorkerConfig{Enabled: true, PollInterval: 10 * time.Millisecond},
-	})
+	require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: sharedDSN}))
+	publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: sharedDSN})
 	require.NoError(t, err)
-	require.NoError(t, worker.Start(t.Context()))
-	t.Cleanup(func() { require.NoError(t, worker.Stop(t.Context())) })
+	t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
 	jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 		Store:       jobsStore,
 		IDGenerator: ident.NewDefaultGenerator(),
-		Wake:        worker,
+		Publisher:   publisher,
 	})
 	require.NoError(t, err)
 
@@ -224,18 +220,28 @@ func TestJobsControllerIntegration(t *testing.T) {
 	require.NotNil(t, created.Requester)
 	require.Equal(t, testUserID, created.Requester.UserID)
 
+	queuedBeforeWorkerResp := httptest.NewRecorder()
+	handler.ServeHTTP(queuedBeforeWorkerResp, newRequest(http.MethodGet, "/api/v1/jobs/"+created.ID, ""))
+	require.Equal(t, http.StatusOK, queuedBeforeWorkerResp.Code)
+	var queuedBeforeWorker models.JobDetailResponse
+	require.NoError(t, json.Unmarshal(queuedBeforeWorkerResp.Body.Bytes(), &queuedBeforeWorker))
+	require.Equal(t, "queued", queuedBeforeWorker.Status)
+	require.Nil(t, queuedBeforeWorker.Result)
+
+	worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
+		Store:  jobsStore,
+		Runner: runner,
+		Config: jobspkg.WorkerConfig{Enabled: true, PollInterval: 10 * time.Millisecond},
+	})
+	require.NoError(t, err)
+	require.NoError(t, worker.ProcessJob(t.Context(), created.ID))
+
+	terminalResp := httptest.NewRecorder()
+	handler.ServeHTTP(terminalResp, newRequest(http.MethodGet, "/api/v1/jobs/"+created.ID, ""))
+	require.Equal(t, http.StatusOK, terminalResp.Code)
 	var terminal models.JobDetailResponse
-	require.Eventually(t, func() bool {
-		resp := httptest.NewRecorder()
-		handler.ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/jobs/"+created.ID, ""))
-		if resp.Code != http.StatusOK {
-			return false
-		}
-		if unmarshalErr := json.Unmarshal(resp.Body.Bytes(), &terminal); unmarshalErr != nil {
-			return false
-		}
-		return terminal.Status == "succeeded"
-	}, time.Second, 20*time.Millisecond)
+	require.NoError(t, json.Unmarshal(terminalResp.Body.Bytes(), &terminal))
+	require.Equal(t, "succeeded", terminal.Status)
 
 	require.NotNil(t, terminal.Result)
 	require.Equal(t, created.Input.IngestionRunID, terminal.Result.IngestionRunID)
@@ -251,7 +257,7 @@ func TestJobsControllerIntegration(t *testing.T) {
 		listResp,
 		newRequest(
 			http.MethodGet,
-			"/api/v1/jobs?status=succeeded&jobType=historical_raw_candle_backfill&source=operator",
+			"/api/v1/jobs?status=succeeded&jobType=data.historical_raw_candle_backfill&source=operator",
 			"",
 		),
 	)
@@ -280,6 +286,7 @@ func TestJobsControllerIntegration(t *testing.T) {
 	restartedService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 		Store:       restartedStore,
 		IDGenerator: ident.NewDefaultGenerator(),
+		Publisher:   publisher,
 	})
 	require.NoError(t, err)
 	restartedHandler := server.NewTestRootHandler().RegisterJobsRoutes(

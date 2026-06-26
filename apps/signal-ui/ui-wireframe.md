@@ -9,7 +9,7 @@
 **Shell (`Nav` + `<main>`)**
 
 - **Nav — left:** Brand label **Signal Foundry** → `/chat`.
-- **Nav — center:** **Chat** / **Data** / **Jobs** / **Providers** / **Strategies** / **Evaluations** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
+- **Nav — center:** **Chat** / **Data** / **Jobs** / **Finance** / **Providers** / **Strategies** / **Evaluations** / **Admin** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
 - **Nav — right:** **Sign out** (text) **to the left of** the compact **Theme** segmented control; both **end-aligned** in the right margin; only when authenticated.
 - **≤700px Nav:** brand + auth controls stay on the first row; route links wrap onto a dedicated second row instead of colliding with the brand or sign-out cluster.
 - **`<main>`:** Centered content wrapper `main-inner` (~800–900px max width) with `Router` inside.
@@ -55,11 +55,27 @@
 | `/jobs` | Durable historical ingestion job list. Protected. Summary-first stacked cards with filters, refresh, and open-detail actions. |
 | `/jobs/:jobId` | Durable historical ingestion job detail. Protected. Separate route with request, timeline, worker, result, and safe error sections plus back links to Jobs and Data. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
+| `/finance` | Finance dashboard. Protected. Tenant-aware KPI, alert, missing-FX, and account/category summary route. |
+| `/finance/tenants` | Finance tenant selection/create/invite/join/member route. Protected. |
+| `/finance/accounts` | Finance account list and create route. Protected. |
+| `/finance/accounts/:accountId` | Finance account detail route. Protected. Separate detail route with recent transaction context. |
+| `/finance/connections` | Finance connection list/link/sync route. Protected. Schedule and last/next sync visibility stay here, and operators can locally delete a link without removing imported ledger history. |
+| `/finance/transactions` | Finance transactions browse/filter route. Protected. Card-first state cues plus explicit create/edit entry points. |
+| `/finance/transactions/new` | Dedicated protected transaction create editor route with a single-record mobile-friendly layout. |
+| `/finance/transactions/:transactionId` | Dedicated protected transaction edit route that reuses the transaction editor and loads tenant-scoped detail directly. |
+| `/finance/categories` | Finance categories and tags management route. Protected. |
+| `/finance/imports` | Finance CSV preview/confirm/import-audit route. Protected. |
+| `/finance/jobs/:jobId` | Finance-context durable job detail route. Protected. |
 | `/strategies` | Strategy workspace list + local draft editor. Protected. New drafts start here. |
 | `/strategies/:strategyId/:version` | Strategy version detail. Protected. Saved version stays immutable; duplicate creates a local draft. |
 | `/evaluations` | Evaluation run form + history table. Protected. |
 | `/evaluations/run/:strategyId/:version` | Same evaluation history page with the run form preselected to a ready strategy version. Protected. |
 | `/evaluations/:runId` | Evaluation detail page with summary/report and table-first evidence. Protected. |
+| `/admin` | Admin diagnostics overview. Protected. |
+| `/admin/jobs` | Generic admin job list. Protected. Utilitarian filters and stacked summaries. |
+| `/admin/jobs/:jobId` | Generic admin job detail route. Protected. |
+| `/admin/finance/fx` | Admin FX diagnostics and manual sync route. Protected. |
+| `/admin/finance/providers` | Admin provider readiness and recent finance-job diagnostics route. Protected. |
 
 - `/strategies*` and `/evaluations*` may use a wider centered canvas than the default reading column so dense forms and audit tables stay readable.
 
@@ -258,6 +274,87 @@
 **Detail (`/jobs/:jobId`)**
 
 - Header: **Job detail** heading + backlinks to **Jobs** and **Data**.
+
+---
+
+## Finance (`/finance*`)
+
+**Shared shape**
+
+- Finance routes stay visually distinct from trading/data routes and always render a finance sub-navigation strip first.
+- Tenant-aware finance routes share one client-side active-tenant workspace choice via local storage.
+- If the operator belongs to exactly one finance tenant, tenant-scoped finance routes auto-select it and continue without an extra step.
+- If the operator belongs to multiple finance tenants and no active tenant is stored yet, tenant-scoped finance routes stop on the requested route and require one explicit tenant choice there before loading tenant data.
+- After selection, the active tenant is reused across `#/finance`, `#/finance/accounts`, `#/finance/accounts/:accountId`, `#/finance/transactions`, `#/finance/transactions/new`, `#/finance/transactions/:transactionId`, `#/finance/categories`, `#/finance/connections`, `#/finance/imports`, and `#/finance/jobs/:jobId` until changed.
+- Tenant-aware routes keep a visible selected-tenant control near the top of the page.
+- Finance detail flows prefer separate routes over split panes; the first slice uses `/finance/accounts/:accountId` and `/finance/jobs/:jobId` for that purpose.
+- Finance user-facing dates render in browser-local date or date-time format instead of raw ISO strings.
+
+**Dashboard (`/finance`)**
+
+- Header: **Finance** heading + short tenant-workspace copy.
+- Top controls: tenant picker, previous/current/next period controls, and a custom date-range form.
+- In `current_month` mode, the visible start/end date controls stay populated with the active month bounds on first load and after **Current month** is clicked.
+- Previous period, next period, and custom-range actions keep the visible date inputs synchronized with the reporting window returned by the dashboard API.
+- Body order:
+  - KPI cards for settled net, pending net, and alert count
+  - alerts + missing-FX stack with a deep link to `#/admin/finance/fx`
+  - account balance summaries with a link to `#/finance/accounts`
+  - category breakdown summaries with a link to `#/finance/transactions`
+
+**Tenants (`/finance/tenants`)**
+
+- Header: **Finance tenants** heading + copy that explains select/create/invite/join flow.
+- Panels: selected-tenant picker, create-tenant form, accept-invite form, members list, invites list, create-invite form.
+
+**Accounts (`/finance/accounts`, `/finance/accounts/:accountId`)**
+
+- Accounts list: tenant picker, include-hidden toggle, create-account form, stacked account summary cards, and explicit **Open account detail** links.
+- Account detail: one focused account summary panel plus a recent-transactions stack and backlinks to Accounts and Transactions.
+- Direct entry to `#/finance/accounts/:accountId` preserves the requested route after tenant resolution instead of bouncing to another finance page.
+- If multiple tenants are joined and no active tenant is stored yet, the detail route shows a tenant selector plus an explicit “select active tenant” message before loading account data.
+
+**Transactions (`/finance/transactions`, `/finance/transactions/new`, `/finance/transactions/:transactionId`)**
+
+- Transactions browse route: tenant/account/status/source/sort filters plus a clear **Create transaction** action.
+- Browse results: stacked cards with explicit state badges for pending, hidden, transfer, refund, and reconciliation signals plus direct **Open transaction** links.
+- Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly layout, explicit save/cancel actions, and visible transaction state context.
+- Edit route: loads one tenant-scoped transaction directly, keeps finance navigation context intact, and shows provider-original values when present so synced data stays distinguishable from operator edits.
+
+**Categories / tags (`/finance/categories`)**
+
+- Two stacked management panels: one for categories, one for tags.
+- Each panel includes a create form and a simple stacked list of existing tenant-local items.
+
+**Connections (`/finance/connections`)**
+
+- Header copy calls out the only supported bank-link choices: monobank token linking and PKO bank login via Enable Banking.
+- The route does not render a free-text provider field or ask operators to enter connector names such as `enable-banking`.
+- Panels: tenant picker, monobank token form, PKO bank-login start panel, operator notes, then stacked connection cards.
+- PKO start sends the browser route `{origin}/#/finance/connections` to the backend, the backend derives `/enable-banking/callback` for the provider redirect and looks up the stored browser handoff by returned `state`, and the browser return is handed back to `{origin}/?code=...&state=...#/finance/connections`; the page clears the consumed query string only after a successful finish, keeps the hash route active, and preserves failed return params for a retry on refresh/re-open.
+- Each connection card shows provider/state plus a stable secondary identifier (provider reference, external id, or created timestamp), along with last sync outcome, schedule visibility, job deep links, and an in-card delete confirmation that repeats the selected row identifier before removing it immediately after a successful delete.
+
+**Imports (`/finance/imports`)**
+
+- Workflow stays step-by-step: preview form → preview/mapping panel → import audit panel.
+- Preview panel shows resolved headers, editable mapping fields, would-create lists, and confirm action.
+- Audit panel exposes import status and a deep link to `#/finance/jobs/:jobId`.
+
+**Finance job detail (`/finance/jobs/:jobId`)**
+
+- Direct entry preserves the requested finance job route after tenant resolution.
+- If multiple tenants are joined and no active tenant is stored yet, the route shows a tenant selector and explicit active-tenant prompt before rendering job detail content.
+- Once the active tenant is resolved, the page renders the shared job-detail content with finance-local back links and local date-time formatting.
+
+---
+
+## Admin (`/admin*`)
+
+- Admin routes render a utilitarian admin sub-navigation strip.
+- `#/admin` is a compact overview page with links to generic jobs, finance FX diagnostics, and provider diagnostics.
+- `#/admin/jobs` and `#/admin/jobs/:jobId` reuse the generic jobs list/detail flow with admin copy.
+- `#/admin/finance/fx` shows stored-rate counts, provider readiness, and a manual FX sync form that deep-links into admin job detail.
+- `#/admin/finance/providers` shows sanitized provider readiness plus recent finance-job summaries only; no secrets or raw payloads are shown.
 - Add **Open data scope** route link to `#/data` with `venue`, `symbol`, `assetClass`, `timeframe`, `start`, and `end` query params for the job input scope.
 - Sections, in order:
   - summary (**status**, **job type**, **requester**, **worker**, **attempt count**)

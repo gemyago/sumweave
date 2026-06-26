@@ -18,13 +18,31 @@ type Argon2idHasher struct {
 	keyLen      uint32
 }
 
+type Argon2idHasherParams struct {
+	Memory      uint32
+	Time        uint32
+	Parallelism uint8
+	SaltLen     uint32
+	KeyLen      uint32
+}
+
 func NewArgon2idHasher() *Argon2idHasher {
+	return NewArgon2idHasherWithParams(Argon2idHasherParams{
+		Memory:      64 * 1024, // 64 MB
+		Time:        1,
+		Parallelism: 4,
+		SaltLen:     16,
+		KeyLen:      32,
+	})
+}
+
+func NewArgon2idHasherWithParams(params Argon2idHasherParams) *Argon2idHasher {
 	return &Argon2idHasher{
-		memory:      64 * 1024, // 64 MB
-		time:        1,
-		parallelism: 4,
-		saltLen:     16,
-		keyLen:      32,
+		memory:      params.Memory,
+		time:        params.Time,
+		parallelism: params.Parallelism,
+		saltLen:     params.SaltLen,
+		keyLen:      params.KeyLen,
 	}
 }
 

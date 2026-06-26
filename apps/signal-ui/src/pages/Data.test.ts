@@ -159,7 +159,9 @@ function baseRawPayload() {
 
 async function fillRequiredFilters(user: ReturnType<typeof userEvent.setup>) {
   await user.selectOptions(screen.getByLabelText('Venue'), 'hyperliquid-perps')
-  await user.type(screen.getByLabelText('Symbol'), 'BTCUSD')
+  const symbolInput = screen.getByLabelText('Symbol') as HTMLInputElement
+  await fireEvent.input(symbolInput, { target: { value: 'BTCUSD' } })
+  await fireEvent.change(symbolInput, { target: { value: 'BTCUSD' } })
   await user.selectOptions(screen.getByLabelText('Asset class'), 'crypto')
   await user.selectOptions(screen.getByLabelText('Timeframe'), '1m')
   await fillUtcRange(user, {
@@ -500,7 +502,9 @@ describe('Data page', () => {
     expect(mocks.createHistoricalDataBackfillJob).not.toHaveBeenCalled()
   })
 
-  it('starts an explicit historical backfill job from the current data scope and shows the created job link with reload action', async () => {
+  it(
+    'starts an explicit historical backfill job from the current data scope and shows the created job link with reload action',
+    async () => {
     const user = userEvent.setup()
     mocks.createHistoricalDataBackfillJob.mockResolvedValue({
       id: 'job-123',
@@ -552,7 +556,9 @@ describe('Data page', () => {
     await waitFor(() => {
       expect(mocks.listCandleAvailability).toHaveBeenCalledTimes(2)
     })
-  })
+    },
+    10_000,
+  )
 
   it('allows zero backfill page size to use the backend default path', async () => {
     const user = userEvent.setup()

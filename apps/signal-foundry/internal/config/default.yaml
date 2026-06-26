@@ -98,9 +98,6 @@ agentRuntime:
     # Table name prefix for agent runtime database tables (sessions, provider config, etc.).
     # If underlying DB supports schemas, the prefix will serve as the schema name.
     tablePrefix: ""
-    # When true (default), GORM AutoMigrate runs on startup for database-backed agent runtime storage.
-    # Set to false when migrations are managed externally.
-    autoMigrate: true
 
 dataLayer:
   database:
@@ -108,13 +105,13 @@ dataLayer:
     dsn: "data/data-layer.db"
     # Table name prefix for data-layer tables so they can share a database safely.
     tablePrefix: "signal_foundry_data_"
-    # Local/test-friendly default; disable when migrations are managed externally.
-    autoMigrate: true
   rawPayloadBlobStore:
     # Optional local raw payload blob directory. Empty defaults under dataDir.
     path: ""
 
 jobs:
+  scheduler:
+    loopInterval: 30s
   worker:
     enabled: true
     pollInterval: 2s
@@ -123,6 +120,19 @@ jobs:
   historicalBackfill:
     maxIntervals: 10000
     maxPageSize: 5000
+
+finance:
+  fixtures:
+    database:
+      dsn: "data/data-layer.db"
+      jobsTablePrefix: "signal_foundry_data_jobs_"
+  providers:
+    monobank:
+      baseURL: "https://api.monobank.ua"
+      sleepBetweenRequests: 0s
+    enableBanking:
+      baseURL: ""
+      callbackBaseURL: ""
 
 skills:
   # Set to true to enable skill discovery and tool registration.

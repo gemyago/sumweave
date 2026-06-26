@@ -150,6 +150,9 @@ func NewDatabaseStore(dsn string, opts DatabaseStoreOpts) (*DatabaseStore, error
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	if err = gormsignalfoundry.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
+		return nil, err
+	}
 
 	return &DatabaseStore{db: db}, nil
 }

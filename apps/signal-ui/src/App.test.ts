@@ -37,6 +37,69 @@ vi.mock('./lib/jobs/api', async (importOriginal) => {
   }
 })
 
+vi.mock('./lib/finance/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./lib/finance/api')>()
+  const now = new Date('2026-06-20T12:00:00Z')
+  return {
+    ...actual,
+    createSignalFinanceApiForAuth: vi.fn(() => ({
+      listTenants: vi.fn().mockResolvedValue([
+        {
+          id: 'tenant-1',
+          name: 'Household',
+          displayCurrency: 'USD',
+          joinedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]),
+      getDashboard: vi.fn().mockResolvedValue({
+        period: {
+          preset: 'current_month',
+          startDate: now,
+          endDate: now,
+          previous: { startDate: now, endDate: now },
+          next: { startDate: now, endDate: now },
+        },
+        settled: { displayCurrency: 'USD', incomeMinor: 10000, expenseMinor: 5000, netMinor: 5000, transactionCount: 2, complete: true },
+        pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1000, netMinor: -1000, transactionCount: 1, complete: true },
+        categoryBreakdowns: [],
+        accountBalances: [],
+        alerts: [],
+        missingFx: [],
+        nativeSettledTotals: [],
+      }),
+      getFXDiagnostics: vi.fn().mockResolvedValue({
+        defaultProvider: 'frankfurter',
+        storedRatesCount: 12,
+        providers: [{ name: 'frankfurter', default: true, ready: true }],
+      }),
+      listTenantMembers: vi.fn().mockResolvedValue([]),
+      listTenantInvites: vi.fn().mockResolvedValue([]),
+      listAccounts: vi.fn().mockResolvedValue([]),
+      listCategories: vi.fn().mockResolvedValue([]),
+      listTags: vi.fn().mockResolvedValue([]),
+      listTransactions: vi.fn().mockResolvedValue([]),
+      listConnections: vi.fn().mockResolvedValue([]),
+      createTenant: vi.fn(),
+      createTenantInvite: vi.fn(),
+      acceptTenantInvite: vi.fn(),
+      createAccount: vi.fn(),
+      createCategory: vi.fn(),
+      createTag: vi.fn(),
+      createTransaction: vi.fn(),
+      linkTokenConnection: vi.fn(),
+      deleteConnection: vi.fn(),
+      triggerConnectionSync: vi.fn(),
+      triggerFXSync: vi.fn(),
+      previewCSVImport: vi.fn(),
+      confirmCSVImport: vi.fn(),
+      getCSVImportAudit: vi.fn(),
+      getTenant: vi.fn(),
+    })),
+  }
+})
+
 // Mock the auth store so tests can control authentication state
 const mocks = vi.hoisted(() => ({
   isAuthenticated: true,
@@ -129,6 +192,31 @@ describe('App shell', () => {
     expect(screen.getByRole('link', { name: 'Strategies' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Evaluations' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Jobs' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Finance' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Admin' })).toBeInTheDocument()
+  })
+
+  it('renders finance and admin routes when authenticated', async () => {
+    render(App)
+    navigateHash('#/finance')
+    expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument()
+
+    navigateHash('#/admin')
+    expect(await screen.findByRole('heading', { name: 'Admin' })).toBeInTheDocument()
+  })
+
+  it('renders the shared finance transaction editor routes when authenticated', async () => {
+    render(App)
+
+    navigateHash('#/finance/transactions/new')
+    expect(
+      await screen.findByRole('heading', { name: 'Record transaction' }),
+    ).toBeInTheDocument()
+
+    navigateHash('#/finance/transactions/tx-1')
+    expect(
+      await screen.findByRole('heading', { name: 'Edit transaction' }),
+    ).toBeInTheDocument()
   })
 
   it('renders the data browser route shell when authenticated', async () => {
@@ -180,6 +268,20 @@ describe('App shell', () => {
     })
     expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe(
       `/chat/${sessionSlug}`,
+    )
+  })
+
+  it('preserves finance transaction deep links before redirecting to login', async () => {
+    mocks.isAuthenticated = false
+
+    render(App)
+    navigateHash('#/finance/transactions/new')
+
+    await waitFor(() => {
+      expect(window.location.hash).toBe('#/login')
+    })
+    expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe(
+      '/finance/transactions/new',
     )
   })
 

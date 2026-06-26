@@ -107,14 +107,14 @@ describe('Jobs page', () => {
     expect(screen.getAllByRole('link', { name: 'Open job detail' })).toHaveLength(2)
 
     await user.selectOptions(screen.getByLabelText('Status'), 'running')
-    await user.selectOptions(screen.getByLabelText('Job type'), 'historical_raw_candle_backfill')
+    await user.selectOptions(screen.getByLabelText('Job type'), 'data.historical_raw_candle_backfill')
     await user.selectOptions(screen.getByLabelText('Source'), 'agent')
     await user.click(screen.getByRole('button', { name: 'Apply filters' }))
 
     await waitFor(() => {
       expect(mocks.listJobs).toHaveBeenLastCalledWith({
         status: ['running'],
-        jobType: ['historical_raw_candle_backfill'],
+        jobType: ['data.historical_raw_candle_backfill'],
         source: ['agent'],
         limit: 25,
         cursor: '',
@@ -126,7 +126,7 @@ describe('Jobs page', () => {
     await waitFor(() => {
       expect(mocks.listJobs).toHaveBeenNthCalledWith(3, {
         status: ['running'],
-        jobType: ['historical_raw_candle_backfill'],
+        jobType: ['data.historical_raw_candle_backfill'],
         source: ['agent'],
         limit: 25,
         cursor: 'cursor-2',

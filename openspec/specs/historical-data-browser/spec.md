@@ -157,7 +157,7 @@ The historical data browser's browsing and inspection behavior SHALL remain read
 
 #### Scenario: Explicit backfill action creates only a job
 - **WHEN** an operator uses the Data page's clearly labeled `Start historical backfill` action with an explicit scope
-- **THEN** the UI MUST call the durable jobs API to create a `historical_raw_candle_backfill` job and show a link to that job
+- **THEN** the UI MUST call the durable jobs API to create a `data.historical_raw_candle_backfill` job and show a link to that job in the generic admin jobs workspace
 - **AND** the Data page MUST NOT execute ingestion directly or pretend candles are available before the job succeeds and data is reloaded
 
 #### Scenario: UI terminology maps normalized copy to canonical rows
@@ -171,7 +171,7 @@ The Data page SHALL provide an explicit operator entry point for starting histor
 #### Scenario: Operator starts backfill from current data scope
 - **WHEN** an authenticated operator has selected or entered venue, symbol, asset class, timeframe, start, and end on the Data page and activates `Start historical backfill`
 - **THEN** the UI MUST submit those fields plus optional page size/idempotency key to `POST /api/v1/jobs/historical-data-backfills`
-- **AND** successful creation MUST show the created job id/status and a route link to the job detail
+- **AND** successful creation MUST show the created job id/status and a route link to the generic admin job detail
 
 #### Scenario: Backfill entry validates before submit
 - **WHEN** required scope fields are missing, the UTC range is invalid, `start >= end`, or the range exceeds the documented job interval cap known to the client

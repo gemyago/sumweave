@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,42 +15,14 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/runtime/httpapi"
 	"github.com/jaswdr/faker/v2"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-type jobsServiceStub struct {
-	createHistoricalRawCandleBackfillFunc func(context.Context, jobspkg.CreateHistoricalRawCandleBackfillParams) (*jobspkg.Job, error)
-	listFunc                              func(context.Context, jobspkg.ListParams) (jobspkg.ListResult, error)
-	getFunc                               func(context.Context, string) (*jobspkg.Job, error)
-}
-
-func (s *jobsServiceStub) CreateHistoricalRawCandleBackfill(
-	ctx context.Context,
-	params jobspkg.CreateHistoricalRawCandleBackfillParams,
-) (*jobspkg.Job, error) {
-	if s.createHistoricalRawCandleBackfillFunc == nil {
-		return nil, errors.New("unexpected CreateHistoricalRawCandleBackfill call")
-	}
-	return s.createHistoricalRawCandleBackfillFunc(ctx, params)
-}
-
-func (s *jobsServiceStub) List(ctx context.Context, params jobspkg.ListParams) (jobspkg.ListResult, error) {
-	if s.listFunc == nil {
-		return jobspkg.ListResult{}, errors.New("unexpected List call")
-	}
-	return s.listFunc(ctx, params)
-}
-
-func (s *jobsServiceStub) Get(ctx context.Context, jobID string) (*jobspkg.Job, error) {
-	if s.getFunc == nil {
-		return nil, errors.New("unexpected Get call")
-	}
-	return s.getFunc(ctx, jobID)
-}
 
 func TestJobsController(t *testing.T) {
 	fake := faker.New()
@@ -61,20 +34,19 @@ func TestJobsController(t *testing.T) {
 					w.WriteHeader(http.StatusUnauthorized)
 					return
 				}
-				ctx := httpapi.ContextWithCallerIdentity(r.Context(), &testCallerIdentity{userID: userID})
+				ctx := httpapi.ContextWithCallerIdentity(
+					r.Context(),
+					&testCallerIdentity{userID: userID},
+				)
 				next.ServeHTTP(w, r.WithContext(ctx))
 			})
 		}
 	}
 
-	newController := func(service jobsService, userID string) *JobsController {
-		return NewJobsController(JobsControllerDeps{
-			JobsService:    service,
-			AuthMiddleware: makeAuthMiddleware(userID),
-		})
-	}
-
-	newHandler := func(ctrl *JobsController) http.Handler {
+	newHandler := func(service jobsService, userID string) http.Handler {
+		ctrl := NewJobsController(
+			JobsControllerDeps{JobsService: service, AuthMiddleware: makeAuthMiddleware(userID)},
+		)
 		return server.NewTestRootHandler().RegisterJobsRoutes(ctrl)
 	}
 
@@ -83,7 +55,7 @@ func TestJobsController(t *testing.T) {
 		req = req.WithContext(t.Context())
 		req.Header.Set("Content-Type", "application/json")
 		if authenticated {
-			req.Header.Set("Authorization", "Bearer "+fake.Lorem().Word())
+			req.Header.Set("Authorization", "Bearer "+fake.UUID().V4())
 		}
 		return req
 	}
@@ -99,10 +71,8 @@ func TestJobsController(t *testing.T) {
 			JobType: jobspkg.JobTypeHistoricalRawCandleBackfill,
 			Status:  jobspkg.JobStatusSucceeded,
 			Requester: jobspkg.Requester{
-				UserID:         fake.UUID().V4(),
-				Source:         jobspkg.RequesterSourceOperator,
-				AgentSessionID: "",
-				AgentRunID:     "",
+				UserID: fake.UUID().V4(),
+				Source: jobspkg.RequesterSourceOperator,
 			},
 			Input: jobspkg.HistoricalRawCandleBackfillInput{
 				IngestionRunID: fake.UUID().V4(),
@@ -139,87 +109,122 @@ func TestJobsController(t *testing.T) {
 	}
 
 	t.Run("all jobs endpoints require auth", func(t *testing.T) {
-		ctrl := newController(&jobsServiceStub{}, fake.UUID().V4())
-		handler := newHandler(ctrl)
-
-		cases := []struct {
+		handler := newHandler(newMockjobsService(t), fake.UUID().V4())
+		for _, tc := range []struct {
 			method string
 			url    string
 			body   string
 		}{
-			{
-				method: http.MethodPost,
-				url:    "/api/v1/jobs/historical-data-backfills",
-				body:   `{"venue":"hyperliquid-perps","symbol":"BTC","assetClass":"future","timeframe":"1m","start":"2026-06-17T00:00:00Z","end":"2026-06-17T00:03:00Z","pageSize":100}`,
-			},
+			{method: http.MethodPost, url: "/api/v1/jobs/historical-data-backfills", body: `{"venue":"hyperliquid-perps","symbol":"BTC","assetClass":"future","timeframe":"1m","start":"2026-06-17T00:00:00Z","end":"2026-06-17T00:03:00Z","pageSize":100}`},
 			{method: http.MethodGet, url: "/api/v1/jobs"},
 			{method: http.MethodGet, url: "/api/v1/jobs/" + fake.UUID().V4()},
-		}
-
-		for _, tc := range cases {
-			t.Run(tc.method+" "+tc.url, func(t *testing.T) {
-				resp := httptest.NewRecorder()
-				handler.ServeHTTP(resp, newRequest(tc.method, tc.url, tc.body, false))
-				require.Equal(t, http.StatusUnauthorized, resp.Code)
-			})
+		} {
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, newRequest(tc.method, tc.url, tc.body, false))
+			require.Equal(t, http.StatusUnauthorized, resp.Code)
 		}
 	})
 
-	t.Run("create returns immediate queued camelCase payload and derives operator requester", func(t *testing.T) {
+	t.Run("create list and get delegate and return camelCase payloads", func(t *testing.T) {
 		userID := fake.UUID().V4()
 		now := time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC)
-		expectedJob := makeJob(now)
-		expectedJob.Status = jobspkg.JobStatusQueued
-		expectedJob.Result = nil
-		expectedJob.StartedAt = nil
-		expectedJob.CompletedAt = nil
-		expectedJob.LastAttemptAt = nil
-		expectedJob.AttemptCount = 0
-		expectedJob.Requester = jobspkg.Requester{UserID: userID, Source: jobspkg.RequesterSourceOperator}
-
-		ctrl := newController(&jobsServiceStub{
-			createHistoricalRawCandleBackfillFunc: func(
-				_ context.Context,
-				params jobspkg.CreateHistoricalRawCandleBackfillParams,
-			) (*jobspkg.Job, error) {
-				require.Equal(t, userID, params.Requester.UserID)
-				require.Equal(t, jobspkg.RequesterSourceOperator, params.Requester.Source)
-				require.Equal(t, "hyperliquid-perps", params.Venue)
-				require.Equal(t, "future", params.AssetClass)
-				require.Equal(t, 123, params.PageSize)
-				return &expectedJob, nil
+		createdJob := makeJob(now)
+		createdJob.Status = jobspkg.JobStatusQueued
+		createdJob.Result = nil
+		createdJob.StartedAt = nil
+		createdJob.CompletedAt = nil
+		createdJob.LastAttemptAt = nil
+		createdJob.AttemptCount = 0
+		createdJob.Requester = jobspkg.Requester{
+			UserID: userID,
+			Source: jobspkg.RequesterSourceOperator,
+		}
+		listedJob := makeJob(now.Add(time.Hour))
+		service := newMockjobsService(t)
+		service.EXPECT().
+			CreateHistoricalRawCandleBackfill(mock.Anything, mock.Anything).
+			RunAndReturn(
+				func(_ context.Context, params jobspkg.CreateHistoricalRawCandleBackfillParams) (*jobspkg.Job, error) {
+					require.Equal(t, userID, params.Requester.UserID)
+					require.Equal(t, 123, params.PageSize)
+					return &createdJob, nil
+				},
+			)
+		nextCursor := "cursor-" + fake.Lorem().Word()
+		service.EXPECT().List(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params jobspkg.ListParams) (jobspkg.ListResult, error) {
+				require.Equal(t, []jobspkg.JobStatus{jobspkg.JobStatusRunning}, params.Statuses)
+				require.Equal(
+					t,
+					[]jobspkg.JobType{jobspkg.JobTypeHistoricalRawCandleBackfill},
+					params.JobTypes,
+				)
+				require.Equal(
+					t,
+					[]jobspkg.RequesterSource{jobspkg.RequesterSourceOperator},
+					params.Sources,
+				)
+				require.Equal(t, 7, params.Limit)
+				require.Equal(t, nextCursor, params.Cursor)
+				return jobspkg.ListResult{
+					Items:      []jobspkg.Job{listedJob},
+					NextCursor: nextCursor + "-next",
+				}, nil
 			},
-		}, userID)
-		handler := newHandler(ctrl)
+		)
+		service.EXPECT().Get(mock.Anything, listedJob.ID).Return(&listedJob, nil)
+		handler := newHandler(service, userID)
 
-		resp := httptest.NewRecorder()
-		handler.ServeHTTP(resp, newRequest(
-			http.MethodPost,
-			"/api/v1/jobs/historical-data-backfills",
-			fmt.Sprintf(
-				`{"idempotencyKey":"%s","correlationId":"%s","venue":"hyperliquid-perps","symbol":"btc","assetClass":"future","timeframe":"1m","start":"%s","end":"%s","pageSize":123}`,
-				"job-key-"+fake.Lorem().Word(),
-				"corr-"+fake.Lorem().Word(),
-				now.Format(time.RFC3339),
-				now.Add(3*time.Minute).Format(time.RFC3339),
+		createResp := httptest.NewRecorder()
+		handler.ServeHTTP(
+			createResp,
+			newRequest(
+				http.MethodPost,
+				"/api/v1/jobs/historical-data-backfills",
+				fmt.Sprintf(
+					`{"idempotencyKey":"%s","correlationId":"%s","venue":"hyperliquid-perps","symbol":"btc","assetClass":"future","timeframe":"1m","start":"%s","end":"%s","pageSize":123}`,
+					"job-key-"+fake.Lorem().Word(),
+					"corr-"+fake.Lorem().Word(),
+					now.Format(time.RFC3339),
+					now.Add(3*time.Minute).Format(time.RFC3339),
+				),
+				true,
 			),
-			true,
-		))
-		require.Equal(t, http.StatusOK, resp.Code)
+		)
+		require.Equal(t, http.StatusOK, createResp.Code)
+		var createPayload map[string]any
+		require.NoError(t, json.Unmarshal(createResp.Body.Bytes(), &createPayload))
+		require.Equal(t, string(jobspkg.JobStatusQueued), createPayload["status"])
+		require.Equal(t, userID, createPayload["requester"].(map[string]any)["userId"])
 
-		var payload map[string]any
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
-		require.Equal(t, string(jobspkg.JobStatusQueued), payload["status"])
-		require.Equal(t, string(jobspkg.JobTypeHistoricalRawCandleBackfill), payload["jobType"])
-		requester := payload["requester"].(map[string]any)
-		require.Equal(t, userID, requester["userId"])
-		require.Equal(t, string(jobspkg.RequesterSourceOperator), requester["source"])
-		input := payload["input"].(map[string]any)
-		require.Contains(t, input, "ingestionRunId")
-		require.Contains(t, input, "assetClass")
+		listResp := httptest.NewRecorder()
+		handler.ServeHTTP(
+			listResp,
+			newRequest(
+				http.MethodGet,
+				"/api/v1/jobs?status=running&jobType=data.historical_raw_candle_backfill&source=operator&limit=7&cursor="+nextCursor,
+				"",
+				true,
+			),
+		)
+		require.Equal(t, http.StatusOK, listResp.Code)
+		var listPayload map[string]any
+		require.NoError(t, json.Unmarshal(listResp.Body.Bytes(), &listPayload))
+		require.Equal(t, nextCursor+"-next", listPayload["nextCursor"])
+
+		getResp := httptest.NewRecorder()
+		handler.ServeHTTP(
+			getResp,
+			newRequest(http.MethodGet, "/api/v1/jobs/"+listedJob.ID, "", true),
+		)
+		require.Equal(t, http.StatusOK, getResp.Code)
+		var getPayload map[string]any
+		require.NoError(t, json.Unmarshal(getResp.Body.Bytes(), &getPayload))
+		require.Equal(t, listedJob.ID, getPayload["id"])
+		require.Contains(t, getPayload, "lastAttemptAt")
 	})
 
-	t.Run("create allows omitted page size and forwards zero to the service", func(t *testing.T) {
+	t.Run("create allows omitted page size and forwards zero", func(t *testing.T) {
 		userID := fake.UUID().V4()
 		now := time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC)
 		expectedJob := makeJob(now)
@@ -229,20 +234,18 @@ func TestJobsController(t *testing.T) {
 		expectedJob.CompletedAt = nil
 		expectedJob.LastAttemptAt = nil
 		expectedJob.AttemptCount = 0
-
-		ctrl := newController(&jobsServiceStub{
-			createHistoricalRawCandleBackfillFunc: func(
-				_ context.Context,
-				params jobspkg.CreateHistoricalRawCandleBackfillParams,
-			) (*jobspkg.Job, error) {
-				require.Equal(t, userID, params.Requester.UserID)
-				require.Equal(t, 0, params.PageSize)
-				return &expectedJob, nil
-			},
-		}, userID)
-
+		service := newMockjobsService(t)
+		service.EXPECT().
+			CreateHistoricalRawCandleBackfill(mock.Anything, mock.Anything).
+			RunAndReturn(
+				func(_ context.Context, params jobspkg.CreateHistoricalRawCandleBackfillParams) (*jobspkg.Job, error) {
+					require.Equal(t, userID, params.Requester.UserID)
+					require.Equal(t, 0, params.PageSize)
+					return &expectedJob, nil
+				},
+			)
 		resp := httptest.NewRecorder()
-		newHandler(ctrl).ServeHTTP(
+		newHandler(service, userID).ServeHTTP(
 			resp,
 			newRequest(
 				http.MethodPost,
@@ -258,153 +261,124 @@ func TestJobsController(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.Code)
 	})
 
-	t.Run("list supports filters and returns compact camelCase payload", func(t *testing.T) {
-		now := time.Date(2026, time.June, 17, 1, 0, 0, 0, time.UTC)
-		expectedJob := makeJob(now)
-		nextCursor := "cursor-" + fake.Lorem().Word()
+	t.Run(
+		"controller maps validation not found conflict and internal errors safely",
+		func(t *testing.T) {
+			body := `{"venue":"hyperliquid-perps","symbol":"BTC","assetClass":"future","timeframe":"1m","start":"2026-06-17T00:00:00Z","end":"2026-06-17T00:03:00Z","pageSize":100}`
 
-		ctrl := newController(&jobsServiceStub{
-			listFunc: func(_ context.Context, params jobspkg.ListParams) (jobspkg.ListResult, error) {
-				require.Equal(t, []jobspkg.JobStatus{jobspkg.JobStatusRunning}, params.Statuses)
-				require.Equal(t, []jobspkg.JobType{jobspkg.JobTypeHistoricalRawCandleBackfill}, params.JobTypes)
-				require.Equal(t, []jobspkg.RequesterSource{jobspkg.RequesterSourceOperator}, params.Sources)
-				require.Equal(t, 7, params.Limit)
-				require.Equal(t, nextCursor, params.Cursor)
-				return jobspkg.ListResult{Items: []jobspkg.Job{expectedJob}, NextCursor: nextCursor + "-next"}, nil
-			},
-		}, fake.UUID().V4())
-		handler := newHandler(ctrl)
-
-		resp := httptest.NewRecorder()
-		handler.ServeHTTP(
-			resp,
-			newRequest(
-				http.MethodGet,
-				"/api/v1/jobs?status=running&jobType=historical_raw_candle_backfill&source=operator&limit=7&cursor="+nextCursor,
-				"",
-				true,
-			),
-		)
-		require.Equal(t, http.StatusOK, resp.Code)
-
-		var payload map[string]any
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
-		require.Equal(t, nextCursor+"-next", payload["nextCursor"])
-		items := payload["items"].([]any)
-		require.Len(t, items, 1)
-		item := items[0].(map[string]any)
-		require.Contains(t, item, "attemptCount")
-		require.Contains(t, item, "completedAt")
-		require.Contains(t, item, "result")
-		require.Contains(t, item, "input")
-	})
-
-	t.Run("get returns detail payload", func(t *testing.T) {
-		now := time.Date(2026, time.June, 17, 2, 0, 0, 0, time.UTC)
-		expectedJob := makeJob(now)
-
-		ctrl := newController(&jobsServiceStub{
-			getFunc: func(_ context.Context, jobID string) (*jobspkg.Job, error) {
-				require.Equal(t, expectedJob.ID, jobID)
-				return &expectedJob, nil
-			},
-		}, fake.UUID().V4())
-		handler := newHandler(ctrl)
-
-		resp := httptest.NewRecorder()
-		handler.ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/jobs/"+expectedJob.ID, "", true))
-		require.Equal(t, http.StatusOK, resp.Code)
-
-		var payload map[string]any
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
-		require.Equal(t, expectedJob.ID, payload["id"])
-		require.Contains(t, payload, "lastAttemptAt")
-		require.Contains(t, payload, "workerId")
-		require.Contains(t, payload, "error")
-	})
-
-	t.Run("create maps validation not-found conflict and internal errors safely", func(t *testing.T) {
-		body := `{"venue":"hyperliquid-perps","symbol":"BTC","assetClass":"future","timeframe":"1m","start":"2026-06-17T00:00:00Z","end":"2026-06-17T00:03:00Z","pageSize":100}`
-
-		t.Run("validation returns 400", func(t *testing.T) {
-			ctrl := newController(&jobsServiceStub{
-				createHistoricalRawCandleBackfillFunc: func(context.Context, jobspkg.CreateHistoricalRawCandleBackfillParams) (*jobspkg.Job, error) {
-					return nil, app.NewErrInvalidInput("request", "bad")
-				},
-			}, fake.UUID().V4())
-
-			resp := httptest.NewRecorder()
-			newHandler(ctrl).ServeHTTP(
-				resp,
-				newRequest(http.MethodPost, "/api/v1/jobs/historical-data-backfills", body, true),
-			)
-			require.Equal(t, http.StatusBadRequest, resp.Code)
-		})
-
-		t.Run("not found returns 404", func(t *testing.T) {
-			ctrl := newController(&jobsServiceStub{
-				getFunc: func(context.Context, string) (*jobspkg.Job, error) {
-					return nil, app.NewErrNotFound("job", "missing")
-				},
-			}, fake.UUID().V4())
-
-			resp := httptest.NewRecorder()
-			newHandler(ctrl).ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/jobs/missing", "", true))
-			require.Equal(t, http.StatusNotFound, resp.Code)
-		})
-
-		t.Run("idempotency conflict returns 409 with stable code", func(t *testing.T) {
-			store, err := jobspkg.NewStore(":memory:", jobspkg.StoreOpts{})
-			require.NoError(t, err)
-			require.NoError(t, store.AutoMigrate())
-			svc, err := jobspkg.NewService(jobspkg.ServiceDeps{Store: store, IDGenerator: ident.NewDefaultGenerator()})
-			require.NoError(t, err)
-			start := time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC)
-			end := start.Add(3 * time.Minute)
-			idempotencyKey := "key-" + fake.Lorem().Word()
-			_, err = svc.CreateHistoricalRawCandleBackfill(t.Context(), jobspkg.CreateHistoricalRawCandleBackfillParams{
-				Requester:      jobspkg.Requester{UserID: "operator-a", Source: jobspkg.RequesterSourceOperator},
-				IdempotencyKey: idempotencyKey,
-				Venue:          "hyperliquid-perps",
-				Symbol:         "BTC",
-				AssetClass:     "future",
-				Timeframe:      "1m",
-				Start:          start,
-				End:            end,
-				PageSize:       100,
+			t.Run("validation returns 400", func(t *testing.T) {
+				service := newMockjobsService(t)
+				service.EXPECT().CreateHistoricalRawCandleBackfill(
+					mock.Anything,
+					mock.Anything,
+				).Return((*jobspkg.Job)(nil), app.NewErrInvalidInput("request", "bad"))
+				resp := httptest.NewRecorder()
+				newHandler(service, fake.UUID().V4()).ServeHTTP(
+					resp,
+					newRequest(
+						http.MethodPost,
+						"/api/v1/jobs/historical-data-backfills",
+						body,
+						true,
+					),
+				)
+				require.Equal(t, http.StatusBadRequest, resp.Code)
 			})
-			require.NoError(t, err)
 
-			ctrl := newController(svc, "operator-a")
+			t.Run("not found returns 404", func(t *testing.T) {
+				service := newMockjobsService(t)
+				service.EXPECT().Get(
+					mock.Anything,
+					"missing",
+				).Return((*jobspkg.Job)(nil), app.NewErrNotFound("job", "missing"))
+				resp := httptest.NewRecorder()
+				newHandler(
+					service,
+					fake.UUID().V4(),
+				).ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/jobs/missing", "", true))
+				require.Equal(t, http.StatusNotFound, resp.Code)
+			})
 
-			resp := httptest.NewRecorder()
-			newHandler(ctrl).ServeHTTP(resp, newRequest(
-				http.MethodPost,
-				"/api/v1/jobs/historical-data-backfills",
-				fmt.Sprintf(
-					`{"idempotencyKey":"%s","venue":"hyperliquid-perps","symbol":"ETH","assetClass":"future","timeframe":"1m","start":"%s","end":"%s","pageSize":100}`,
-					idempotencyKey,
-					start.Format(time.RFC3339),
-					end.Format(time.RFC3339),
-				),
-				true,
-			))
-			require.Equal(t, http.StatusConflict, resp.Code)
-			var payload map[string]any
-			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
-			require.Equal(t, "idempotency_key_conflict", payload["code"])
-		})
+			t.Run("idempotency conflict returns 409 with stable code", func(t *testing.T) {
+				dsn := filepath.Join(t.TempDir(), "jobs-controller.sqlite")
+				store, err := jobspkg.NewStore(dsn, jobspkg.StoreOpts{})
+				require.NoError(t, err)
+				require.NoError(t, store.AutoMigrate())
+				require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: dsn}))
+				publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: dsn})
+				require.NoError(t, err)
+				defer func() { require.NoError(t, publisher.Close()) }()
+				svc, err := jobspkg.NewService(
+					jobspkg.ServiceDeps{Store: store, Publisher: publisher, IDGenerator: ident.NewDefaultGenerator()},
+				)
+				require.NoError(t, err)
+				start := time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC)
+				end := start.Add(3 * time.Minute)
+				idempotencyKey := "key-" + fake.Lorem().Word()
+				_, err = svc.CreateHistoricalRawCandleBackfill(
+					t.Context(),
+					jobspkg.CreateHistoricalRawCandleBackfillParams{
+						Requester: jobspkg.Requester{
+							UserID: "operator-a",
+							Source: jobspkg.RequesterSourceOperator,
+						},
+						IdempotencyKey: idempotencyKey,
+						Venue:          "hyperliquid-perps",
+						Symbol:         "BTC",
+						AssetClass:     "future",
+						Timeframe:      "1m",
+						Start:          start,
+						End:            end,
+						PageSize:       100,
+					},
+				)
+				require.NoError(t, err)
+				resp := httptest.NewRecorder()
+				newHandler(
+					svc,
+					"operator-a",
+				).ServeHTTP(resp, newRequest(http.MethodPost, "/api/v1/jobs/historical-data-backfills", fmt.Sprintf(`{"idempotencyKey":"%s","venue":"hyperliquid-perps","symbol":"ETH","assetClass":"future","timeframe":"1m","start":"%s","end":"%s","pageSize":100}`, idempotencyKey, start.Format(time.RFC3339), end.Format(time.RFC3339)), true))
+				require.Equal(t, http.StatusConflict, resp.Code)
+				var payload map[string]any
+				require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &payload))
+				require.Equal(t, "idempotency_key_conflict", payload["code"])
+			})
 
-		t.Run("internal error returns 500", func(t *testing.T) {
-			ctrl := newController(&jobsServiceStub{
-				listFunc: func(context.Context, jobspkg.ListParams) (jobspkg.ListResult, error) {
-					return jobspkg.ListResult{}, errors.New("boom")
-				},
-			}, fake.UUID().V4())
+			t.Run("internal error returns 500", func(t *testing.T) {
+				service := newMockjobsService(t)
+				service.EXPECT().
+					List(mock.Anything, mock.Anything).
+					Return(jobspkg.ListResult{}, errors.New("boom"))
+				resp := httptest.NewRecorder()
+				newHandler(
+					service,
+					fake.UUID().V4(),
+				).ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/jobs", "", true))
+				require.Equal(t, http.StatusInternalServerError, resp.Code)
+			})
+		},
+	)
+}
 
-			resp := httptest.NewRecorder()
-			newHandler(ctrl).ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/jobs", "", true))
-			require.Equal(t, http.StatusInternalServerError, resp.Code)
-		})
+func TestOperatorRequesterFromContext(t *testing.T) {
+	fake := faker.New()
+
+	t.Run("returns unauthorized without caller identity", func(t *testing.T) {
+		_, err := operatorRequesterFromContext(t.Context())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unauthorized")
+	})
+
+	t.Run("returns operator requester for authenticated caller", func(t *testing.T) {
+		userID := fake.UUID().V4()
+		requester, err := operatorRequesterFromContext(
+			httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID}),
+		)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			jobspkg.Requester{UserID: userID, Source: jobspkg.RequesterSourceOperator},
+			requester,
+		)
 	})
 }

@@ -2,13 +2,16 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/flows"
@@ -22,34 +25,52 @@ type historicalBackfillRunner interface {
 	) (flows.HistoricalRawCandleBackfillResult, error)
 }
 
+type workerStore interface {
+	Get(context.Context, string) (*Job, error)
+	List(context.Context, ListParams) (ListResult, error)
+	ClaimQueued(context.Context, string, string, time.Time) (*Job, error)
+	MarkSucceeded(context.Context, string, string, any, time.Time) error
+	MarkFailed(context.Context, string, string, *JobError, time.Time) error
+	UpdateProgress(context.Context, string, json.RawMessage, time.Time) error
+	RecoverStaleRunning(context.Context, time.Time, int) error
+}
+
 type WorkerDeps struct {
-	Store    *Store
-	Runner   historicalBackfillRunner
-	Logger   *slog.Logger
-	Clock    func() time.Time
-	Config   WorkerConfig
-	WorkerID string
+	Store          workerStore
+	Runner         historicalBackfillRunner
+	Registry       *Registry
+	Logger         *slog.Logger
+	Clock          func() time.Time
+	Config         WorkerConfig
+	WorkerID       string
+	DispatchConfig DispatchConfig
 }
 
 type Worker struct {
-	store    *Store
-	runner   historicalBackfillRunner
-	logger   *slog.Logger
-	clock    func() time.Time
-	config   WorkerConfig
-	workerID string
-
-	wake chan string
-	wg   sync.WaitGroup
-	stop context.CancelFunc
+	store          workerStore
+	registry       *Registry
+	logger         *slog.Logger
+	clock          func() time.Time
+	config         WorkerConfig
+	workerID       string
+	dispatchConfig DispatchConfig
+	consumer       *appdispatch.Consumer
+	stop           context.CancelFunc
+	wg             sync.WaitGroup
 }
 
 func NewWorker(deps WorkerDeps) (*Worker, error) {
 	if deps.Store == nil {
 		return nil, errors.New("jobs store is required")
 	}
-	if deps.Runner == nil {
-		return nil, errors.New("historical backfill runner is required")
+	if deps.Registry == nil {
+		if deps.Runner == nil {
+			return nil, errors.New("jobs registry is required")
+		}
+		deps.Registry = NewRegistry()
+		if err := RegisterHistoricalBackfillHandler(deps.Registry, deps.Runner); err != nil {
+			return nil, err
+		}
 	}
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
@@ -61,21 +82,14 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 		deps.WorkerID = "jobs-worker"
 	}
 	return &Worker{
-		store:    deps.Store,
-		runner:   deps.Runner,
-		logger:   deps.Logger,
-		clock:    deps.Clock,
-		config:   normalizeWorkerConfig(deps.Config),
-		workerID: deps.WorkerID,
-		wake:     make(chan string, 32),
+		store:          deps.Store,
+		registry:       deps.Registry,
+		logger:         deps.Logger,
+		clock:          deps.Clock,
+		config:         normalizeWorkerConfig(deps.Config),
+		workerID:       deps.WorkerID,
+		dispatchConfig: deps.DispatchConfig,
 	}, nil
-}
-
-func (w *Worker) SignalWake(jobID string) {
-	select {
-	case w.wake <- jobID:
-	default:
-	}
 }
 
 func (w *Worker) Start(ctx context.Context) error {
@@ -85,25 +99,63 @@ func (w *Worker) Start(ctx context.Context) error {
 	if err := w.store.RecoverStaleRunning(ctx, w.clock(), w.config.MaxAttempts); err != nil {
 		return err
 	}
+	if w.usesSQLitePolling() {
+		runCtx, cancel := context.WithCancel(ctx)
+		w.stop = cancel
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			if err := w.runSQLitePollingLoop(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+				w.logger.ErrorContext(runCtx, "jobs worker sqlite polling stopped", "error", err)
+			}
+		}()
+		return nil
+	}
+	if err := w.ensureConsumer(); err != nil {
+		return err
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	w.stop = cancel
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
-		ticker := time.NewTicker(w.config.PollInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-runCtx.Done():
-				return
-			case jobID := <-w.wake:
-				_ = w.ProcessJob(runCtx, jobID)
-			case <-ticker.C:
-				_ = w.pollOnce(runCtx)
-			}
+		if err := w.consumer.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			w.logger.ErrorContext(runCtx, "jobs worker consumer stopped", "error", err)
 		}
 	}()
 	return nil
+}
+
+func (w *Worker) Run(ctx context.Context) error {
+	if err := w.store.RecoverStaleRunning(ctx, w.clock(), w.config.MaxAttempts); err != nil {
+		return err
+	}
+	if w.usesSQLitePolling() {
+		return w.runSQLitePollingLoop(ctx)
+	}
+	if err := w.ensureConsumer(); err != nil {
+		return err
+	}
+	return w.consumer.Run(ctx)
+}
+
+func (w *Worker) RunOnce(ctx context.Context) error {
+	if err := w.store.RecoverStaleRunning(ctx, w.clock(), w.config.MaxAttempts); err != nil {
+		return err
+	}
+	if w.usesSQLitePolling() {
+		return w.runSQLitePollingAvailable(ctx)
+	}
+	if err := w.ensureConsumer(); err != nil {
+		return err
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 2*w.config.PollInterval)
+	defer cancel()
+	err := w.consumer.Run(runCtx)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 func (w *Worker) Stop(_ context.Context) error {
@@ -111,25 +163,87 @@ func (w *Worker) Stop(_ context.Context) error {
 		w.stop()
 	}
 	w.wg.Wait()
-	return nil
+	if w.consumer == nil {
+		return nil
+	}
+	return w.consumer.Close()
 }
 
-func (w *Worker) pollOnce(ctx context.Context) error {
-	result, err := w.store.List(ctx, ListParams{
-		Statuses: []JobStatus{JobStatusQueued},
-		JobTypes: []JobType{JobTypeHistoricalRawCandleBackfill},
-		Limit:    w.config.MaxConcurrentHistoricalBackfill,
-	})
+func (w *Worker) ensureConsumer() error {
+	if w.consumer != nil {
+		return nil
+	}
+	consumer, err := appdispatch.NewConsumer(appdispatch.Config{
+		DatabaseDSN: w.dispatchConfig.DatabaseDSN,
+		TablePrefix: w.dispatchConfig.TablePrefix,
+	}, newWorkerDispatchRegistry(w.registry, &workerExecutor{
+		store:    w.store,
+		registry: w.registry,
+		logger:   w.logger,
+		clock:    w.clock,
+		workerID: w.workerID,
+	}))
 	if err != nil {
 		return err
 	}
-	for _, job := range result.Items {
-		processErr := w.ProcessJob(ctx, job.ID)
-		if processErr != nil {
-			return processErr
+	w.consumer = consumer
+	return nil
+}
+
+func (w *Worker) usesSQLitePolling() bool {
+	dispatchDSN := strings.TrimSpace(w.dispatchConfig.DatabaseDSN)
+	jobsDSN := strings.TrimSpace(w.dispatchConfig.JobsDSN)
+	return dispatchDSN != "" && dispatchDSN == jobsDSN && isSQLiteDSN(dispatchDSN)
+}
+
+func (w *Worker) runSQLitePollingLoop(ctx context.Context) error {
+	if err := w.runSQLitePollingAvailable(ctx); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(w.config.PollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if err := w.runSQLitePollingAvailable(ctx); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+}
+
+func (w *Worker) runSQLitePollingAvailable(ctx context.Context) error {
+	for {
+		processed, err := w.processNextQueuedJob(ctx)
+		if err != nil {
+			return err
+		}
+		if !processed {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+}
+
+func (w *Worker) processNextQueuedJob(ctx context.Context) (bool, error) {
+	result, err := w.store.List(ctx, ListParams{
+		Statuses: []JobStatus{JobStatusQueued},
+		Limit:    1,
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(result.Items) == 0 {
+		return false, nil
+	}
+	if err = w.ProcessJob(ctx, result.Items[0].ID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (w *Worker) ProcessJob(ctx context.Context, jobID string) error {
@@ -140,47 +254,211 @@ func (w *Worker) ProcessJob(ctx context.Context, jobID string) error {
 		}
 		return err
 	}
-	if job.Status == JobStatusSucceeded || job.Status == JobStatusFailed {
-		return nil
+	return w.processEnvelope(ctx, appdispatch.Envelope{
+		Version:         appdispatch.EnvelopeVersionV1,
+		Kind:            dispatchKindForJobType(job.JobType),
+		Payload:         job.InputJSON,
+		ObservableJobID: job.ID,
+	})
+}
+
+type workerExecutor struct {
+	store    workerStore
+	registry *Registry
+	logger   *slog.Logger
+	clock    func() time.Time
+	workerID string
+}
+
+func newWorkerDispatchRegistry(registry *Registry, executor *workerExecutor) *appdispatch.HandlerRegistry {
+	dispatchRegistry := appdispatch.NewHandlerRegistry()
+	registry.mu.RLock()
+	kinds := make([]appdispatch.ExecutionKind, 0, len(registry.dispatchHandlers))
+	for kind := range registry.dispatchHandlers {
+		kinds = append(kinds, kind)
 	}
-	claimed, err := w.store.ClaimQueued(ctx, jobID, w.workerID, w.clock())
+	registry.mu.RUnlock()
+	for _, kind := range kinds {
+		dispatchKind := kind
+		if err := appdispatch.RegisterTypedHandler(dispatchRegistry, appdispatch.TypedHandlerSpec[json.RawMessage]{
+			Kind: dispatchKind,
+			Run: func(ctx context.Context, envelope appdispatch.Envelope, _ json.RawMessage) error {
+				return executor.processEnvelope(ctx, envelope)
+			},
+		}); err != nil {
+			panic(err)
+		}
+	}
+	return dispatchRegistry
+}
+
+func (w *Worker) processEnvelope(ctx context.Context, envelope appdispatch.Envelope) error {
+	executor := &workerExecutor{
+		store:    w.store,
+		registry: w.registry,
+		logger:   w.logger,
+		clock:    w.clock,
+		workerID: w.workerID,
+	}
+	return executor.processEnvelope(ctx, envelope)
+}
+
+func (w *workerExecutor) processEnvelope(ctx context.Context, envelope appdispatch.Envelope) error {
+	handler, err := w.registry.HandlerByExecutionKind(envelope.Kind)
 	if err != nil {
-		if errors.Is(err, ErrJobNotQueued) {
-			return nil
+		if envelope.ObservableJobID != "" {
+			return w.store.MarkFailed(ctx, envelope.ObservableJobID, w.workerID, jobErrorFromExecution(err), w.clock())
 		}
 		return err
 	}
-	request := flows.HistoricalRawCandleBackfillRequest{
-		RunID:      claimed.Input.IngestionRunID,
-		Venue:      domain.Venue(claimed.Input.Venue),
-		Symbol:     domain.Symbol(claimed.Input.Symbol),
-		AssetClass: domain.AssetClass(claimed.Input.AssetClass),
-		Timeframe:  domain.Timeframe(claimed.Input.Timeframe),
-		TimeRange:  claimed.Input.TimeRange,
-		PageSize:   claimed.Input.PageSize,
+	job := Job{JobType: handler.jobType(), InputJSON: envelope.Payload}
+	observableJob, skipExecution, claimErr := w.prepareObservableJob(ctx, envelope.ObservableJobID, handler)
+	if claimErr != nil {
+		return claimErr
 	}
-	runResult, runErr := w.runner.Run(ctx, request)
+	if skipExecution {
+		return nil
+	}
+	if observableJob != nil {
+		job = *observableJob
+		job.InputJSON = envelope.Payload
+	}
+	maxAttempts := job.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = handler.maxAttempts()
+	}
+	if job.AttemptCount > maxAttempts {
+		return w.store.MarkFailed(ctx, job.ID, w.workerID, &JobError{
+			Code:    "job_attempts_exhausted",
+			Summary: "job attempts exhausted",
+			Details: "job exceeded max attempts before execution",
+		}, w.clock())
+	}
+	resultJSON, runErr := handler.execute(ctx, job, func(progressJSON json.RawMessage) error {
+		if envelope.ObservableJobID == "" {
+			return nil
+		}
+		if updateErr := w.store.UpdateProgress(
+			ctx,
+			envelope.ObservableJobID,
+			progressJSON,
+			w.clock(),
+		); updateErr != nil {
+			w.logger.WarnContext(
+				ctx,
+				"job progress observation update failed",
+				"jobId",
+				envelope.ObservableJobID,
+				"error",
+				updateErr,
+			)
+		}
+		return nil
+	})
 	if runErr != nil {
-		return w.store.MarkFailed(ctx, claimed.ID, w.workerID, jobErrorFromExecution(runErr), w.clock())
+		if envelope.ObservableJobID == "" {
+			return runErr
+		}
+		return w.store.MarkFailed(ctx, envelope.ObservableJobID, w.workerID, jobErrorFromExecution(runErr), w.clock())
 	}
-	result := HistoricalRawCandleBackfillResult{
-		IngestionRunID:            runResult.RunID,
-		PersistedCount:            runResult.Report.PersistedCount,
-		ExpectedCount:             runResult.Report.ExpectedCount,
-		MissingIntervalCount:      runResult.Report.MissingIntervalCount,
-		DuplicateNaturalKeyCount:  runResult.Report.DuplicateNaturalKeyCount,
-		FirstPersistedStart:       runResult.Report.FirstPersistedStart,
-		LastPersistedEnd:          runResult.Report.LastPersistedEnd,
-		RawPayloadCount:           runResult.Report.RawPayloadCount,
-		MissingIntervalPreviewCap: runResult.Report.MissingIntervalPreviewLimit,
+	if envelope.ObservableJobID == "" {
+		return nil
 	}
-	for _, interval := range runResult.Report.MissingIntervalPreview {
-		result.MissingIntervalPreview = append(result.MissingIntervalPreview, jobTimeRange{
-			Start: interval.Start.UTC(),
-			End:   interval.End.UTC(),
-		})
+	if markErr := w.store.MarkSucceeded(
+		ctx,
+		envelope.ObservableJobID,
+		w.workerID,
+		resultJSON,
+		w.clock(),
+	); markErr != nil {
+		w.logger.WarnContext(
+			ctx,
+			"job terminal observation update failed after successful work",
+			"jobId",
+			envelope.ObservableJobID,
+			"error",
+			markErr,
+		)
+		return nil
 	}
-	return w.store.MarkSucceeded(ctx, claimed.ID, w.workerID, result, w.clock())
+	return nil
+}
+
+func (w *workerExecutor) prepareObservableJob(
+	ctx context.Context,
+	jobID string,
+	handler typedHandler,
+) (*Job, bool, error) {
+	if jobID == "" {
+		return nil, false, nil
+	}
+	job, err := w.store.Get(ctx, jobID)
+	if err != nil {
+		if errors.Is(err, ErrJobNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if handler.guardDuplicateDelivery() {
+		if job.Status == JobStatusSucceeded || job.Status == JobStatusFailed || job.Status == JobStatusCanceled {
+			return nil, true, nil
+		}
+	}
+	claimed, err := w.store.ClaimQueued(ctx, jobID, w.workerID, w.clock())
+	if err == nil {
+		return claimed, false, nil
+	}
+	if errors.Is(err, ErrJobNotQueued) {
+		return job, false, nil
+	}
+	return nil, false, err
+}
+
+func RegisterHistoricalBackfillHandler(registry *Registry, runner historicalBackfillRunner) error {
+	if runner == nil {
+		return errors.New("historical backfill runner is required")
+	}
+	return RegisterTypedHandler(
+		registry,
+		TypedHandlerSpec[HistoricalRawCandleBackfillInput, HistoricalRawCandleBackfillResult, struct{}]{
+			JobType:     JobTypeHistoricalRawCandleBackfill,
+			MaxAttempts: defaultWorkerMaxAttempts,
+			Run: func(ctx context.Context, input HistoricalRawCandleBackfillInput, _ func(struct{}) error) (HistoricalRawCandleBackfillResult, error) {
+				input = canonicalizeHistoricalInput(input)
+				request := flows.HistoricalRawCandleBackfillRequest{
+					RunID:      input.IngestionRunID,
+					Venue:      domain.Venue(input.Venue),
+					Symbol:     domain.Symbol(input.Symbol),
+					AssetClass: domain.AssetClass(input.AssetClass),
+					Timeframe:  domain.Timeframe(input.Timeframe),
+					TimeRange:  input.TimeRange,
+					PageSize:   input.PageSize,
+				}
+				runResult, err := runner.Run(ctx, request)
+				if err != nil {
+					return HistoricalRawCandleBackfillResult{}, err
+				}
+				result := HistoricalRawCandleBackfillResult{
+					IngestionRunID:            runResult.RunID,
+					PersistedCount:            runResult.Report.PersistedCount,
+					ExpectedCount:             runResult.Report.ExpectedCount,
+					MissingIntervalCount:      runResult.Report.MissingIntervalCount,
+					DuplicateNaturalKeyCount:  runResult.Report.DuplicateNaturalKeyCount,
+					FirstPersistedStart:       runResult.Report.FirstPersistedStart,
+					LastPersistedEnd:          runResult.Report.LastPersistedEnd,
+					RawPayloadCount:           runResult.Report.RawPayloadCount,
+					MissingIntervalPreviewCap: runResult.Report.MissingIntervalPreviewLimit,
+				}
+				for _, interval := range runResult.Report.MissingIntervalPreview {
+					result.MissingIntervalPreview = append(result.MissingIntervalPreview, jobTimeRange{
+						Start: interval.Start.UTC(),
+						End:   interval.End.UTC(),
+					})
+				}
+				return result, nil
+			},
+		},
+	)
 }
 
 func NewHistoricalBackfillRunner(

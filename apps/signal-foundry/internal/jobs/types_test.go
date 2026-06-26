@@ -36,7 +36,7 @@ func TestTypeHelpers(t *testing.T) {
 		assert.Nil(t, jobErrorFromExecution(nil))
 		unsafe := jobErrorFromExecution(errors.New("gorm sql update secrets"))
 		require.NotNil(t, unsafe)
-		assert.Equal(t, "historical backfill execution failed", unsafe.Details)
+		assert.Equal(t, "job execution failed", unsafe.Details)
 		safe := jobErrorFromExecution(errors.New("venue timeout"))
 		require.NotNil(t, safe)
 		assert.Equal(t, "venue timeout", safe.Details)

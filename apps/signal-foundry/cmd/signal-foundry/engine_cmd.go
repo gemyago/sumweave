@@ -10,6 +10,14 @@ import (
 )
 
 func newEngineFromRoot(root *cobra.Command, container *dig.Container) (*signalfoundry.Engine, error) {
+	return newEngineFromRootWithOpts(root, container)
+}
+
+func newEngineFromRootWithOpts(
+	root *cobra.Command,
+	container *dig.Container,
+	engineOpts ...signalfoundry.EngineOpt,
+) (*signalfoundry.Engine, error) {
 	fs := root.PersistentFlags()
 	jsonLogs, err := fs.GetBool("json-logs")
 	if err != nil {
@@ -34,6 +42,7 @@ func newEngineFromRoot(root *cobra.Command, container *dig.Container) (*signalfo
 		signalfoundry.WithEngineDefaultLogLevel(defaultLogLevel),
 		internal.WithEngineContainer(container),
 	}
+	opts = append(opts, engineOpts...)
 	if env != "" {
 		opts = append(opts, signalfoundry.WithEngineEnv(env))
 	}

@@ -84,7 +84,7 @@ func TestEnableBankingAuthCommands(t *testing.T) {
 
 	writePrivateKeyFile := func(t *testing.T) (*rsa.PrivateKey, string) {
 		t.Helper()
-		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
 		require.NoError(t, err)
 		privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
 		require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestEnableBankingAuthCommands(t *testing.T) {
 
 	writeLocalhostTLSCertFiles := func(t *testing.T) (string, string) {
 		t.Helper()
-		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
 		require.NoError(t, err)
 
 		certificateTemplate := &x509.Certificate{

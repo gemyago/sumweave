@@ -26,6 +26,16 @@ func TestUserCmd(t *testing.T) {
 		container *dig.Container
 	}
 
+	newFastHasher := func() *auth.Argon2idHasher {
+		return auth.NewArgon2idHasherWithParams(auth.Argon2idHasherParams{
+			Memory:      8,
+			Time:        1,
+			Parallelism: 1,
+			SaltLen:     16,
+			KeyLen:      32,
+		})
+	}
+
 	makeUserCmdDeps := func(t *testing.T) userCmdDeps {
 		t.Helper()
 		return userCmdDeps{
@@ -34,7 +44,7 @@ func TestUserCmd(t *testing.T) {
 				IDGen:   ident.NewDefaultGenerator(),
 				Logger:  slog.Default(),
 			}),
-			hasher:    auth.NewArgon2idHasher(),
+			hasher:    newFastHasher(),
 			container: dig.New(),
 		}
 	}
@@ -285,7 +295,7 @@ func TestUserCmd(t *testing.T) {
 				IDGen:   ident.NewDefaultGenerator(),
 				Logger:  slog.Default(),
 			})
-			hasher := auth.NewArgon2idHasher()
+			hasher := newFastHasher()
 			username := fake.Internet().User()
 
 			var buf bytes.Buffer

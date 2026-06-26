@@ -5,6 +5,7 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 
@@ -116,9 +117,8 @@ type ValueValidator[TTargetVal any] func(TTargetVal) error
 // There is no easy way to make a truly required validation (e.g if field is present)
 // without a custom marshaler and shadow models, which will impact performance.
 // So keeping a non default validation as a reasonable tradeoff.
-func EnsureNonDefault[TTargetVal comparable](val TTargetVal) error {
-	var empty TTargetVal
-	if val == empty {
+func EnsureNonDefault[TTargetVal any](val TTargetVal) error {
+	if reflect.ValueOf(val).IsZero() {
 		return fmt.Errorf("provided value %v is default for given type and considered empty: %w", val, ErrValueRequired)
 	}
 	return nil

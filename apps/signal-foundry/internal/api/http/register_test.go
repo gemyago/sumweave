@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,9 +16,13 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1controllers"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
+	financepkg "github.com/gemyago/signal-foundry/finance"
+	financedomain "github.com/gemyago/signal-foundry/finance/domain"
+	financepersistence "github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/httpapi"
@@ -120,7 +125,7 @@ func TestSetupV1Routes(t *testing.T) {
 		})
 	})
 
-	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler) {
+	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler, *financepkg.Service, *financepersistence.Store) {
 		t.Helper()
 		strategyDSN := filepath.Join(t.TempDir(), "strategy-workspace.db")
 		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
@@ -145,14 +150,23 @@ func TestSetupV1Routes(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		jobsStore, err := jobspkg.NewStore(filepath.Join(t.TempDir(), "jobs.db"), jobspkg.StoreOpts{})
+		jobsDSN := filepath.Join(t.TempDir(), "jobs.db")
+		jobsStore, err := jobspkg.NewStore(jobsDSN, jobspkg.StoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, jobsStore.AutoMigrate())
+		jobsPublisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: jobsDSN})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, jobsPublisher.Close()) })
 		jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 			Store:       jobsStore,
+			Publisher:   jobsPublisher,
 			IDGenerator: ident.NewDefaultGenerator(),
 		})
 		require.NoError(t, err)
+		financeStore, err := financepersistence.NewStore(filepath.Join(t.TempDir(), "finance.db"))
+		require.NoError(t, err)
+		require.NoError(t, financeStore.Migrate(t.Context()))
+		financeService := financepkg.NewService(financeStore)
 
 		router := server.NewHTTPRouter(server.HTTPRouterDeps{
 			Middleware: func(h http.Handler) http.Handler { return h },
@@ -179,6 +193,10 @@ func TestSetupV1Routes(t *testing.T) {
 			JobsService:    jobsService,
 			AuthMiddleware: passthroughMiddleware,
 		})
+		financeCtrl := v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
+			FinanceService: financeService,
+			AuthMiddleware: passthroughMiddleware,
+		})
 		strategiesCtrl := v1controllers.NewStrategiesController(
 			v1controllers.StrategiesControllerDeps{
 				StrategyWorkspaceService: strategyService,
@@ -197,6 +215,7 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthController:        authCtrl,
 			DataController:        dataCtrl,
 			JobsController:        jobsCtrl,
+			FinanceController:     financeCtrl,
 			StrategiesController:  strategiesCtrl,
 			EvaluationsController: evaluationsCtrl,
 			AuthMiddleware:        passthroughMiddleware,
@@ -204,9 +223,10 @@ func TestSetupV1Routes(t *testing.T) {
 			HTTPRouter:            router,
 			Runtime:               rt,
 			RootLogger:            telemetry.RootTestLogger(),
+			FinanceService:        financeService,
 			UILocation:            uiLocation,
 		})
-		return router, healthCtrl, rootHandler
+		return router, healthCtrl, rootHandler, financeService, financeStore
 	}
 
 	t.Run("should mount agent API routes", func(t *testing.T) {
@@ -261,14 +281,23 @@ func TestSetupV1Routes(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		jobsStore, err := jobspkg.NewStore(filepath.Join(t.TempDir(), "jobs.db"), jobspkg.StoreOpts{})
+		jobsDSN := filepath.Join(t.TempDir(), "jobs.db")
+		jobsStore, err := jobspkg.NewStore(jobsDSN, jobspkg.StoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, jobsStore.AutoMigrate())
+		jobsPublisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: jobsDSN})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, jobsPublisher.Close()) })
 		jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 			Store:       jobsStore,
+			Publisher:   jobsPublisher,
 			IDGenerator: ident.NewDefaultGenerator(),
 		})
 		require.NoError(t, err)
+		financeStore, err := financepersistence.NewStore(filepath.Join(t.TempDir(), "finance.db"))
+		require.NoError(t, err)
+		require.NoError(t, financeStore.Migrate(t.Context()))
+		financeService := financepkg.NewService(financeStore)
 		strategiesCtrl := v1controllers.NewStrategiesController(
 			v1controllers.StrategiesControllerDeps{
 				StrategyWorkspaceService: strategyService,
@@ -285,12 +314,17 @@ func TestSetupV1Routes(t *testing.T) {
 			JobsService:    jobsService,
 			AuthMiddleware: passthroughMiddleware,
 		})
+		financeCtrl := v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
+			FinanceService: financeService,
+			AuthMiddleware: passthroughMiddleware,
+		})
 
 		signalfoundryhttp.SetupV1Routes(signalfoundryhttp.V1RoutesDeps{
 			HealthController:      &v1controllers.HealthController{},
 			AuthController:        authCtrl,
 			DataController:        dataCtrl,
 			JobsController:        jobsCtrl,
+			FinanceController:     financeCtrl,
 			StrategiesController:  strategiesCtrl,
 			EvaluationsController: evaluationsCtrl,
 			AuthMiddleware:        passthroughMiddleware,
@@ -298,6 +332,7 @@ func TestSetupV1Routes(t *testing.T) {
 			HTTPRouter:            router,
 			Runtime:               rt,
 			RootLogger:            telemetry.RootTestLogger(),
+			FinanceService:        financeService,
 		})
 
 		t.Run(
@@ -321,6 +356,8 @@ func TestSetupV1Routes(t *testing.T) {
 				"/api/v1/data/candle-availability",
 				"/api/v1/data/candles?venue=hyperliquid-perps&symbol=BTCUSD&assetClass=crypto&timeframe=1m&start=2026-06-15T12:00:00Z&end=2026-06-15T13:00:00Z",
 				"/api/v1/jobs",
+				"/api/v1/finance/tenants",
+				"/api/v1/finance/fx/diagnostics",
 			} {
 				req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
 				w := httptest.NewRecorder()
@@ -328,11 +365,72 @@ func TestSetupV1Routes(t *testing.T) {
 				require.Equal(t, http.StatusOK, w.Code)
 			}
 		})
+
+		t.Run("generated finance POST routes are registered on the app router", func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/finance/invites/accept", http.NoBody)
+			w := httptest.NewRecorder()
+			rootHandler.ServeHTTP(w, req)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+		})
+
+		t.Run("generated finance DELETE routes are registered on the app router", func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodDelete,
+				"/api/v1/finance/tenants/tenant-a/connections/connection-a",
+				http.NoBody,
+			)
+			w := httptest.NewRecorder()
+			rootHandler.ServeHTTP(w, req)
+			require.NotEqual(t, http.StatusNotFound, w.Code)
+		})
+	})
+
+	t.Run("enable banking callback route redirects back to finance connections", func(t *testing.T) {
+		_, _, rootHandler, _, financeStore := makeSetup(t, "")
+
+		t.Run("redirects provider return params back to the browser route", func(t *testing.T) {
+			pendingStart, err := financeStore.SavePendingBankConnectionLinkStart(
+				t.Context(),
+				financedomain.PendingBankConnectionLinkStart{
+					ID:          "pending-1",
+					TenantID:    "tenant-1",
+					ActorUserID: "user-owner",
+					Provider:    "pko",
+					State:       "state-1",
+					CallbackURL: "http://localhost:5173/#/finance/connections",
+				},
+			)
+			require.NoError(t, err)
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/enable-banking/callback?code=code-1&state="+url.QueryEscape(pendingStart.State),
+				http.NoBody,
+			)
+			w := httptest.NewRecorder()
+			rootHandler.ServeHTTP(w, req)
+			require.Equal(t, http.StatusFound, w.Code)
+			assert.Equal(
+				t,
+				"http://localhost:5173/?code=code-1&state="+url.QueryEscape(pendingStart.State)+"#/finance/connections",
+				w.Header().Get("Location"),
+			)
+		})
+
+		t.Run("rejects invalid callback targets", func(t *testing.T) {
+			req := httptest.NewRequest(
+				http.MethodGet,
+				"/enable-banking/callback?code=code-1&state=missing-state",
+				http.NoBody,
+			)
+			w := httptest.NewRecorder()
+			rootHandler.ServeHTTP(w, req)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+		})
 	})
 
 	t.Run("UI serving", func(t *testing.T) {
 		t.Run("when ui location is empty, server operates in API-only mode", func(t *testing.T) {
-			_, _, rootHandler := makeSetup(t, "")
+			_, _, rootHandler, _, _ := makeSetup(t, "")
 
 			t.Run("GET / returns 404", func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
@@ -363,7 +461,7 @@ func TestSetupV1Routes(t *testing.T) {
 				os.WriteFile(filepath.Join(uiDir, assetName), []byte(wantAssetContent), 0o600),
 			)
 
-			_, _, rootHandler := makeSetup(t, uiDir)
+			_, _, rootHandler, _, _ := makeSetup(t, uiDir)
 
 			t.Run("GET / serves index.html", func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
@@ -399,7 +497,7 @@ func TestSetupV1Routes(t *testing.T) {
 			"when ui location is invalid directory, server operates in API-only mode",
 			func(t *testing.T) {
 				nonExistentDir := filepath.Join(t.TempDir(), fake.Lorem().Word())
-				_, _, rootHandler := makeSetup(t, nonExistentDir)
+				_, _, rootHandler, _, _ := makeSetup(t, nonExistentDir)
 
 				t.Run("GET / returns 404", func(t *testing.T) {
 					req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)

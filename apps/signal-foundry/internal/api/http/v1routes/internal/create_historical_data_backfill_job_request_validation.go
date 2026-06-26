@@ -3,16 +3,18 @@
 package internal
 
 import (
-	. "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1routes/models"
 	"time"
+	. "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1routes/models"
 )
 
 // Below is to workaround unused imports.
 var _ = time.Time{}
 
 func NewCreateHistoricalDataBackfillJobRequestValidator() FieldValidator[*CreateHistoricalDataBackfillJobRequest] {
-	validateIDempotencyKey := NewSimpleFieldValidator[string]()
-	validateCorrelationID := NewSimpleFieldValidator[string]()
+	validateIDempotencyKey := NewSimpleFieldValidator[string](
+	)
+	validateCorrelationID := NewSimpleFieldValidator[string](
+	)
 	validateVenue := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
@@ -31,8 +33,9 @@ func NewCreateHistoricalDataBackfillJobRequestValidator() FieldValidator[*Create
 	validateEnd := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
-	validatePageSize := NewSimpleFieldValidator[int64]()
-
+	validatePageSize := NewSimpleFieldValidator[int64](
+	)
+	
 	return func(bindingCtx *BindingContext, value *CreateHistoricalDataBackfillJobRequest) {
 		validateIDempotencyKey(bindingCtx.Fork("idempotencyKey"), value.IDempotencyKey)
 		validateCorrelationID(bindingCtx.Fork("correlationId"), value.CorrelationID)

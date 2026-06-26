@@ -317,6 +317,14 @@ Each appended round must include:
 6. If final review reports issues, create follow-up fix chunks and run them through the same gate sequence.
 7. Tell the user implementation is ready for review only after final review is clean.
 
+Use these exact sub-agent mappings for the implementation phase:
+
+| Phase | Required sub-agent |
+| --- | --- |
+| Chunk finalization | `openspec-chunk-finalizing` |
+| Whole-change final review | `openspec-implementation-finalizing` |
+| User-review follow-up re-review | `openspec-implementation-finalizing` |
+
 ### Chunk gate sequence
 
 For each planned chunk or follow-up fix chunk:
@@ -325,7 +333,7 @@ For each planned chunk or follow-up fix chunk:
 2. Spawn the implementation sub-agent with exact configured settings when present.
 3. Require `openspec apply`.
 4. Wait for implementation to complete.
-5. Spawn the chunk-finalizing sub-agent.
+5. Spawn the chunk-finalizing sub-agent (`openspec-chunk-finalizing`).
 6. Append or capture the review in `review-chunk-<chunk-slug>.md`.
 7. Require artifact cleanup check.
 8. Require completion protocol status.
@@ -337,7 +345,7 @@ For each planned chunk or follow-up fix chunk:
 
 ### Final review loop
 
-1. Spawn the implementation-finalizing sub-agent for the whole change.
+1. Spawn the implementation-finalizing sub-agent for the whole change (`openspec-implementation-finalizing`).
 2. Append the result to `review-final.md`.
 3. Require completion protocol status.
 4. Require artifact cleanup status.

@@ -156,6 +156,9 @@ func NewVersionRegistryService(
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	if err = gormsignalfoundry.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
+		return nil, err
+	}
 
 	return &VersionRegistryService{
 		db:            db,

@@ -1,0 +1,13 @@
+dir: '{{.InterfaceDirRelative}}'
+template: testify
+template-data:
+  mock-build-tags: '!release'
+  unroll-variadic: true
+
+packages:
+  github.com/gemyago/signal-foundry/finance/internal/providers:
+    interfaces:
+      SyncStateJournal:
+      TargetWindowPolicy:
+      WindowChunkPolicy:
+      WindowExecutor:

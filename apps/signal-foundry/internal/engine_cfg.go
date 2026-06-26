@@ -7,12 +7,13 @@ import (
 
 // EngineCfg is internal only configuration surface for the engine.
 type EngineCfg struct {
-	LogsFormatJSON  bool
-	LogsOutputFile  string
-	DefaultLogLevel *string
-	Env             string
-	Container       *dig.Container
-	Config          *viper.Viper
+	LogsFormatJSON      bool
+	LogsOutputFile      string
+	DefaultLogLevel     *string
+	Env                 string
+	JobsWorkerAutoStart *bool
+	Container           *dig.Container
+	Config              *viper.Viper
 }
 
 func (cfg *EngineCfg) Apply(opts ...EngineOpt) {
@@ -44,5 +45,13 @@ func WithEngineContainer(container *dig.Container) EngineOpt { //nolint:ireturn
 func WithEngineConfig(config *viper.Viper) EngineOpt { //nolint:ireturn
 	return EngineCfgOptFunc(func(opts *EngineCfg) {
 		opts.Config = config
+	})
+}
+
+// WithEngineJobsWorkerAutoStart controls startup-time jobs worker auto-start.
+// Used for internal command-path setup only.
+func WithEngineJobsWorkerAutoStart(autoStart bool) EngineOpt { //nolint:ireturn
+	return EngineCfgOptFunc(func(opts *EngineCfg) {
+		opts.JobsWorkerAutoStart = &autoStart
 	})
 }

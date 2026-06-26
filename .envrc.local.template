@@ -1,0 +1,10 @@
+# Optional local-only overrides for finance sandbox work.
+# Keep real values in `.envrc.local`, never commit them.
+
+# Shared Enable Banking sandbox apps often expose only a subset of banks.
+# If PKO start fails with "Wrong ASPSP name provided", discover an available
+# name with `finance-poc enable-banking aspsps --country PL --json` and set it here.
+# export ENABLE_BANKING_ASPSP_NAME="Mock ASPSP"
+
+# Use when the registered callback origin differs from the active backend host.
+# export ENABLE_BANKING_CALLBACK_BASE_URL="http://localhost:6060"

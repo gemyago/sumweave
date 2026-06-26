@@ -157,6 +157,7 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 		DataIngestionService *data.IngestionService
 		DataReadService      *data.ReadService
 		JobsService          *jobspkg.Service
+		JobsWorker           *jobspkg.Worker
 		Runtime              *Runtime
 		ToolsRegistry        *agent.ToolsRegistry
 		StrategyWorkspace    *appinternal.StrategyWorkspaceService
@@ -172,6 +173,7 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 	require.NotNil(t, deps.DataIngestionService)
 	require.NotNil(t, deps.DataReadService)
 	require.NotNil(t, deps.JobsService)
+	require.NotNil(t, deps.JobsWorker)
 	require.NotNil(t, deps.Runtime)
 	require.NotNil(t, deps.ToolsRegistry)
 	require.NotNil(t, deps.StrategyWorkspace)
@@ -471,18 +473,13 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 		assert.Equal(t, "queued", created.Status)
 		assert.Equal(t, "BTC", created.Input.Symbol)
 
+		require.NoError(t, deps.JobsWorker.ProcessJob(t.Context(), created.ID))
+		terminalResp := httptest.NewRecorder()
+		handler.ServeHTTP(terminalResp, newRequest(http.MethodGet, "/api/v1/jobs/"+created.ID, ""))
+		require.Equal(t, http.StatusOK, terminalResp.Code)
 		var terminal models.JobDetailResponse
-		require.Eventually(t, func() bool {
-			resp := httptest.NewRecorder()
-			handler.ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/jobs/"+created.ID, ""))
-			if resp.Code != http.StatusOK {
-				return false
-			}
-			if err := json.Unmarshal(resp.Body.Bytes(), &terminal); err != nil {
-				return false
-			}
-			return terminal.Status == "succeeded"
-		}, 5*time.Second, 20*time.Millisecond)
+		require.NoError(t, json.Unmarshal(terminalResp.Body.Bytes(), &terminal))
+		require.Equal(t, "succeeded", terminal.Status)
 		require.NotNil(t, terminal.Result)
 		assert.Equal(t, int64(8), terminal.Result.PersistedCount)
 		assert.Equal(t, int64(8), terminal.Result.ExpectedCount)
@@ -491,7 +488,7 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 		listResp := httptest.NewRecorder()
 		handler.ServeHTTP(listResp, newRequest(
 			http.MethodGet,
-			"/api/v1/jobs?status=succeeded&jobType=historical_raw_candle_backfill&source=operator",
+			"/api/v1/jobs?status=succeeded&jobType=data.historical_raw_candle_backfill&source=operator",
 			"",
 		))
 		require.Equal(t, http.StatusOK, listResp.Code)
@@ -580,6 +577,7 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 		require.NotNil(t, toolStart.Job)
 		assert.Equal(t, "queued", toolStart.Job.Status)
 		assert.Equal(t, "agent", toolStart.Job.Requester.Source)
+		require.NoError(t, deps.JobsWorker.ProcessJob(t.Context(), toolStart.Job.ID))
 
 		toolList, err := jobsTools.list(toolCtx, strategyassistant.ListJobsRequest{
 			Statuses: []string{"queued", "running", "succeeded"},
@@ -590,15 +588,10 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 		require.NotNil(t, toolList.Items)
 		assert.NotEmpty(t, toolList.Items)
 
-		var toolTerminal strategyassistant.GetJobResponse
-		require.Eventually(t, func() bool {
-			var getErr error
-			toolTerminal, getErr = jobsTools.get(toolCtx, strategyassistant.GetJobRequest{JobID: toolStart.Job.ID})
-			if getErr != nil || toolTerminal.Job == nil {
-				return false
-			}
-			return toolTerminal.Job.Status == "succeeded"
-		}, 5*time.Second, 20*time.Millisecond)
+		toolTerminal, err := jobsTools.get(toolCtx, strategyassistant.GetJobRequest{JobID: toolStart.Job.ID})
+		require.NoError(t, err)
+		require.NotNil(t, toolTerminal.Job)
+		require.Equal(t, "succeeded", toolTerminal.Job.Status)
 		require.NotNil(t, toolTerminal.Job)
 		require.NotNil(t, toolTerminal.Job.Result)
 		assert.Equal(t, 8, toolTerminal.Job.Result.PersistedCount)

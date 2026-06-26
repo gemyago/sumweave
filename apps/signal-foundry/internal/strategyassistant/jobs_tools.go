@@ -271,6 +271,8 @@ func getJobNextStepHint(status jobspkg.JobStatus) string {
 		return "Keep polling sf_jobs_get until the job reaches a terminal status; do not run evaluation yet."
 	case jobspkg.JobStatusSucceeded:
 		return "Re-check local candle availability for the requested scope, then run synchronous evaluation only after the needed data is present."
+	case jobspkg.JobStatusCanceled:
+		return "Explain that the job was canceled and start a fresh backfill only if the scope still needs data."
 	case jobspkg.JobStatusFailed:
 		return "Summarize the failed bounded job honestly, do not invent data, and only retry with a narrower corrected request if needed."
 	default:

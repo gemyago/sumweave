@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	_ "github.com/glebarez/go-sqlite"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -472,5 +474,49 @@ func TestStrategyArtifactDatabaseStore(t *testing.T) {
 			artifact.CreatedAt.Add(time.Minute),
 		).Error
 		require.Error(t, err)
+	})
+
+	t.Run("sqlite create waits through a transient writer lock", func(t *testing.T) {
+		fake := newFake(t)
+		dsn := t.TempDir() + "/artifact-lock.sqlite"
+		store := makeStore(t, dsn, "test_")
+
+		firstRaw := makeRawPayload(t, fake, 1)
+		firstArtifact, err := NewArtifactFromDSLV0(firstRaw)
+		require.NoError(t, err)
+		_, err = store.Create(t.Context(), firstRaw)
+		require.NoError(t, err)
+
+		locker, err := sql.Open("sqlite", dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, locker.Close()) }()
+		locker.SetMaxOpenConns(1)
+		locker.SetMaxIdleConns(1)
+
+		tx, err := locker.BeginTx(t.Context(), nil)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(
+			t.Context(),
+			"UPDATE test_strategy_artifacts SET schema_version = schema_version WHERE hash = ?",
+			firstArtifact.Hash,
+		)
+		require.NoError(t, err)
+
+		secondRaw := makeRawPayload(t, fake, 2)
+		createCh := make(chan error, 1)
+		go func() {
+			_, createErr := store.Create(t.Context(), secondRaw)
+			createCh <- createErr
+		}()
+
+		time.Sleep(150 * time.Millisecond)
+		require.NoError(t, tx.Commit())
+
+		select {
+		case createErr := <-createCh:
+			require.NoError(t, createErr)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for artifact create to finish")
+		}
 	})
 }
