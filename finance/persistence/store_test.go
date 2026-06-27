@@ -18,24 +18,16 @@ import (
 func TestStore(t *testing.T) {
 	makeStore := func(t *testing.T) *Store {
 		t.Helper()
-
-		fake := faker.New()
-		dsn := fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word())
-
-		store, err := NewStore(dsn)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := NewStore(database)
 		return store
 	}
 
-	t.Run("rejects missing dsn", func(t *testing.T) {
-		_, err := NewStore("   ")
-		require.Error(t, err)
-	})
-
-	t.Run("surfaces database open failures", func(t *testing.T) {
-		_, err := NewStore(fmt.Sprintf("%s/nope/test.sqlite", t.TempDir()))
-		require.Error(t, err)
+	t.Run("uses provided database handle", func(t *testing.T) {
+		database := openTestDatabase(t)
+		store := NewStore(database)
+		require.NotNil(t, store)
+		assert.Same(t, database.db, store.db)
 	})
 
 	t.Run("keeps domain and persistence models separate", func(t *testing.T) {
@@ -77,6 +69,23 @@ func TestStore(t *testing.T) {
 		store := makeStore(t)
 		fake := faker.New()
 		now := time.Date(2026, time.June, 20, 15, 0, 0, 0, time.UTC)
+		autoStampedRecord := domain.CSVImportRecord{
+			ID:        "import-auto-" + fake.UUID().V4(),
+			TenantID:  "tenant-auto-" + fake.UUID().V4(),
+			Type:      domain.CSVImportTypeTransactions,
+			Status:    domain.CSVImportStatusPreviewed,
+			FileName:  "transactions-auto.csv",
+			RawCSV:    "accountName,currency\nwallet,USD\n",
+			Headers:   []string{"accountName", "currency"},
+			Mapping:   map[string]string{"accountName": "accountName"},
+			CreatedAt: time.Time{},
+			UpdatedAt: time.Time{},
+		}
+		autoStampedSaved, err := store.SaveCSVImport(t.Context(), autoStampedRecord)
+		require.NoError(t, err)
+		assert.False(t, autoStampedSaved.CreatedAt.IsZero())
+		assert.Equal(t, autoStampedSaved.CreatedAt, autoStampedSaved.UpdatedAt)
+
 		record := domain.CSVImportRecord{
 			ID:                    "import-" + fake.UUID().V4(),
 			TenantID:              "tenant-" + fake.UUID().V4(),
@@ -678,8 +687,11 @@ func TestStore(t *testing.T) {
 
 	t.Run("returns persistence errors when tables are missing", func(t *testing.T) {
 		fake := faker.New()
-		store, err := NewStore(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()))
+		fakeDatabase, err := OpenDatabase(
+			fmt.Sprintf("file:%s?mode=memory&cache=shared", "missing-tables-"+fake.UUID().V4()),
+		)
 		require.NoError(t, err)
+		store := NewStore(fakeDatabase)
 
 		cipher, err := credentials.NewAESGCMCipher(
 			[]byte("0123456789abcdef0123456789abcdef"),

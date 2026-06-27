@@ -233,9 +233,10 @@ func TestFinanceCommand(t *testing.T) {
 			ScenarioIDs: []string{"realistic-core"},
 		}, summary)
 
-		store, err := persistence.NewStore(runtimeConfig.DatabaseDSN)
+		database, err := persistence.OpenDatabase(runtimeConfig.DatabaseDSN)
 		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
+		store := persistence.NewStore(database)
 		service := financepkg.NewService(
 			store,
 			financepkg.WithNow(func() time.Time { return now }),

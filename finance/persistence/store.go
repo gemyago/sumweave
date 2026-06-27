@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
-	"github.com/glebarez/sqlite"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -23,30 +21,21 @@ type Store struct {
 	now func() time.Time
 }
 
-func NewStore(dsn string) (*Store, error) {
-	trimmedDSN := strings.TrimSpace(dsn)
-	if trimmedDSN == "" {
-		return nil, errors.New("database dsn is required")
-	}
-	dialector := postgres.Open(trimmedDSN)
-	if trimmedDSN == ":memory:" ||
-		strings.HasPrefix(trimmedDSN, "file:") ||
-		strings.HasSuffix(trimmedDSN, ".db") ||
-		strings.HasSuffix(trimmedDSN, ".sqlite") ||
-		strings.Contains(trimmedDSN, "sqlite") {
-		dialector = sqlite.Open(trimmedDSN)
-	}
-	db, err := gorm.Open(dialector, &gorm.Config{TranslateError: true})
-	if err != nil {
-		return nil, fmt.Errorf("open finance database: %w", err)
-	}
-	return &Store{db: db, now: func() time.Time { return time.Now().UTC() }}, nil
+func NewStore(database *Database) *Store {
+	return newStore(database.db, func() time.Time { return time.Now().UTC() })
 }
 
 func (s *Store) WithTransaction(ctx context.Context, fn func(*Store) error) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return fn(&Store{db: tx, now: s.now})
+		return fn(newStore(tx, s.now))
 	})
+}
+
+func newStore(db *gorm.DB, now func() time.Time) *Store {
+	return &Store{
+		db:  db,
+		now: now,
+	}
 }
 
 func (s *Store) DeleteConnectionSecret(ctx context.Context, secretID string) error {

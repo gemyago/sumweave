@@ -62,3 +62,54 @@ func TestStaticConnectorRegistry(t *testing.T) {
 		assert.NotSame(t, duplicateMonobankConnector, resolvedMonobank)
 	})
 }
+
+func TestStaticProviderProfileRegistry(t *testing.T) {
+	t.Run("resolves registered finance provider profiles", func(t *testing.T) {
+		registry := NewStaticProviderProfileRegistry(
+			MonobankProfile(),
+			PKOProfile(),
+		)
+
+		resolvedMonobank, err := registry.Resolve(domain.ProviderIDMonobank)
+		require.NoError(t, err)
+		resolvedPKO, err := registry.Resolve(domain.ProviderIDPKO)
+		require.NoError(t, err)
+
+		assert.Equal(t, MonobankProfile(), resolvedMonobank)
+		assert.Equal(t, PKOProfile(), resolvedPKO)
+	})
+
+	t.Run("returns bounded errors for empty and unknown provider ids", func(t *testing.T) {
+		fake := faker.New()
+		registry := NewStaticProviderProfileRegistry(PKOProfile())
+
+		_, err := registry.Resolve("")
+		require.ErrorIs(t, err, ErrProviderIDRequired)
+
+		unknownProviderID := domain.ProviderID("unknown-" + fake.UUID().V4())
+		_, err = registry.Resolve(unknownProviderID)
+		require.ErrorIs(t, err, ErrProviderNotConfigured)
+		assert.ErrorContains(t, err, string(unknownProviderID))
+	})
+
+	t.Run("skips empty and duplicate provider registrations", func(t *testing.T) {
+		firstMonobankProfile := MonobankProfile()
+		duplicateMonobankProfile := MonobankProfile()
+		duplicateMonobankProfile.DisplayName = "Monobank Duplicate"
+		emptyProviderProfile := ProviderProfile{DisplayName: "empty"}
+
+		registry := NewStaticProviderProfileRegistry(
+			emptyProviderProfile,
+			firstMonobankProfile,
+			duplicateMonobankProfile,
+		)
+
+		resolvedMonobank, err := registry.Resolve(domain.ProviderIDMonobank)
+		require.NoError(t, err)
+		_, err = registry.Resolve(domain.ProviderIDPKO)
+		require.ErrorIs(t, err, ErrProviderNotConfigured)
+
+		assert.Equal(t, firstMonobankProfile, resolvedMonobank)
+		assert.NotEqual(t, duplicateMonobankProfile, resolvedMonobank)
+	})
+}

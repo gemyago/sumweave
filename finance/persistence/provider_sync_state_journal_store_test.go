@@ -19,14 +19,15 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 		t.Helper()
 
 		fake := faker.New()
-		store, err := NewStore(
+		database, err := OpenDatabase(
 			fmt.Sprintf("file:%s?mode=memory&cache=shared", "journal-"+fake.UUID().V4()),
 		)
 		require.NoError(t, err)
+		store := NewStore(database)
 		if now != nil {
 			store.now = now
 		}
-		require.NoError(t, store.Migrate(t.Context()))
+		require.NoError(t, NewMigrator(database).Migrate(t.Context()))
 		return store
 	}
 

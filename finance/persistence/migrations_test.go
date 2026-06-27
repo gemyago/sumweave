@@ -14,15 +14,15 @@ import (
 
 func TestMigrate(t *testing.T) {
 	t.Run("auto-migrates finance schema idempotently", func(t *testing.T) {
-		fake := faker.New()
-		store, err := NewStore(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()))
-		require.NoError(t, err)
+		database := openTestDatabase(t)
+		migrator := NewMigrator(database)
+		store := NewStore(database)
 
-		require.NoError(t, store.Migrate(t.Context()))
-		require.NoError(t, store.Migrate(t.Context()))
+		require.NoError(t, migrator.Migrate(t.Context()))
+		require.NoError(t, migrator.Migrate(t.Context()))
 
 		schemaModels := financeSchemaModels()
-		require.Len(t, schemaModels, 21)
+		require.Len(t, schemaModels, 22)
 
 		sqlDB, err := store.db.DB()
 		require.NoError(t, err)
@@ -46,17 +46,20 @@ func TestMigrate(t *testing.T) {
 		assert.Contains(t, tableNames, "finance_csv_imports")
 		assert.Contains(t, tableNames, "finance_pending_bank_link_starts")
 		assert.Contains(t, tableNames, "finance_provider_sync_state_journal_records")
+		assert.Contains(t, tableNames, "finance_synthetic_provider_states")
 	})
 
 	t.Run("keeps schema initialization portable across sqlite modes", func(t *testing.T) {
 		fake := faker.New()
-		store, err := NewStore(":memory:")
+		database, err := OpenDatabase(":memory:")
 		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		migrator := NewMigrator(database)
+		require.NoError(t, migrator.Migrate(t.Context()))
 
-		fileStore, err := NewStore(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()))
+		fileDatabase, err := OpenDatabase(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()))
 		require.NoError(t, err)
-		require.NoError(t, fileStore.Migrate(t.Context()))
+		fileMigrator := NewMigrator(fileDatabase)
+		require.NoError(t, fileMigrator.Migrate(t.Context()))
 	})
 
 	t.Run("surfaces auto-migrate failures", func(t *testing.T) {
@@ -64,18 +67,18 @@ func TestMigrate(t *testing.T) {
 		path := fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word())
 		require.NoError(t, os.WriteFile(path, []byte{}, 0o600))
 
-		store, err := NewStore(fmt.Sprintf("file:%s?mode=ro", path))
+		database, err := OpenDatabase(fmt.Sprintf("file:%s?mode=ro", path))
 		require.NoError(t, err)
+		migrator := NewMigrator(database)
 
-		err = store.Migrate(t.Context())
+		err = migrator.Migrate(t.Context())
 		require.Error(t, err)
 	})
 
 	t.Run("preserves invite code uniqueness", func(t *testing.T) {
 		fake := faker.New()
-		store, err := NewStore(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()))
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := NewStore(database)
 
 		now := time.Date(2026, time.June, 21, 10, 0, 0, 0, time.UTC)
 		tenant := domain.Tenant{
@@ -85,7 +88,7 @@ func TestMigrate(t *testing.T) {
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
-		_, err = store.SaveTenant(t.Context(), tenant)
+		_, err := store.SaveTenant(t.Context(), tenant)
 		require.NoError(t, err)
 
 		inviteCode := "code-" + fake.UUID().V4()
@@ -111,10 +114,8 @@ func TestMigrate(t *testing.T) {
 	})
 
 	t.Run("preserves prior composite index shapes", func(t *testing.T) {
-		fake := faker.New()
-		store, err := NewStore(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()))
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := NewStore(database)
 
 		assert.Equal(
 			t,

@@ -1,7 +1,6 @@
 package finance
 
 import (
-	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -17,12 +16,8 @@ func TestFocusedCoreServices(t *testing.T) {
 	makeService := func(t *testing.T) *Service {
 		t.Helper()
 
-		fake := faker.New()
-		store, err := persistence.NewStore(
-			fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 
 		return NewService(store)
 	}

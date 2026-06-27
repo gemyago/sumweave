@@ -239,7 +239,7 @@ func TestDatabaseMigrator(t *testing.T) {
 				run: func(m *DatabaseMigrator) error {
 					return m.migrateFinance(t.Context())
 				},
-				want: "create finance store",
+				want: "open finance database",
 			},
 			{
 				name: "strategy artifact store create failure",
@@ -309,7 +309,7 @@ func TestDatabaseMigrator(t *testing.T) {
 				run: func(m *DatabaseMigrator) error {
 					return m.migrateFinance(t.Context())
 				},
-				want: "migrate finance store",
+				want: "migrate finance schema",
 			},
 			{
 				name: "strategy artifact store auto-migrate failure",

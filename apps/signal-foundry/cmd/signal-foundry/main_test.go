@@ -139,11 +139,11 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	financeStore, err := persistence.NewStore(dsn)
+	financeDatabase, err := persistence.OpenDatabase(dsn)
 	if err != nil {
 		return err
 	}
-	migrateErr = financeStore.Migrate(context.Background())
+	migrateErr = persistence.NewMigrator(financeDatabase).Migrate(context.Background())
 	if migrateErr != nil {
 		return migrateErr
 	}

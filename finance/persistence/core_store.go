@@ -444,7 +444,7 @@ func (s *Store) saveTransactionWithDB(db *gorm.DB, model transactionModel) error
 				"status",
 				"kind",
 				"amount_minor",
-				"currency",
+				columnCurrency,
 				"description",
 				"effective_at",
 				"category_id",

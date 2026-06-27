@@ -3,7 +3,17 @@ package persistence
 import (
 	"context"
 	"fmt"
+
+	"gorm.io/gorm"
 )
+
+type Migrator struct {
+	db *gorm.DB
+}
+
+func NewMigrator(database *Database) *Migrator {
+	return &Migrator{db: database.db}
+}
 
 func financeSchemaModels() []any {
 	return []any{
@@ -28,11 +38,12 @@ func financeSchemaModels() []any {
 		&bankConnectionSyncRunModel{},
 		&providerSyncStateJournalModel{},
 		&providerTransactionMatchModel{},
+		&syntheticProviderStateModel{},
 	}
 }
 
-func (s *Store) Migrate(ctx context.Context) error {
-	if err := s.db.WithContext(ctx).AutoMigrate(financeSchemaModels()...); err != nil {
+func (m *Migrator) Migrate(ctx context.Context) error {
+	if err := m.db.WithContext(ctx).AutoMigrate(financeSchemaModels()...); err != nil {
 		return fmt.Errorf("auto-migrate finance schema: %w", err)
 	}
 

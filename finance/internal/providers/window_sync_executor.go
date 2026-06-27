@@ -22,6 +22,7 @@ type WindowSyncRequest struct {
 
 type WindowSyncResult struct {
 	RunID  string
+	Batch  domain.ProviderSyncBatch
 	Stats  domain.ProviderSyncStats
 	Issues []domain.ProviderSyncIssue
 }
@@ -63,14 +64,26 @@ func NewWindowSyncExecutor(opts ...WindowSyncExecutorOption) *WindowSyncExecutor
 	return executor
 }
 
-// Execute is a placeholder seam for later fetch, diff, and apply orchestration.
 func (c *WindowSyncExecutor) Execute(
-	_ context.Context,
+	ctx context.Context,
 	request WindowSyncRequest,
 ) (WindowSyncResult, error) {
-	if err := c.resolveConnector(request.Connection.ConnectorID); err != nil {
+	connector, err := c.resolveConnector(request.Connection.ConnectorID)
+	if err != nil {
 		return WindowSyncResult{}, err
 	}
+
+	batch, err := connector.Fetch(ctx, FetchRequest{
+		Connection:      request.Connection,
+		Secret:          request.Secret,
+		RequestedWindow: request.RequestedWindow,
+		SyncState:       request.SyncState,
+	})
+	if err != nil {
+		return WindowSyncResult{}, fmt.Errorf("fetch sync batch: %w", err)
+	}
+	batch.Connection = request.Connection
+	batch.RequestedWindow = request.RequestedWindow
 
 	runID := request.JobID
 	if c.runIDGenerator != nil {
@@ -82,19 +95,25 @@ func (c *WindowSyncExecutor) Execute(
 
 	return WindowSyncResult{
 		RunID: runID,
-		Stats: domain.ProviderSyncStats{},
+		Batch: batch,
+		Stats: domain.ProviderSyncStats{
+			ObservedAccounts:     len(batch.Accounts),
+			ObservedTransactions: len(batch.Transactions),
+		},
 	}, nil
 }
 
-func (c *WindowSyncExecutor) resolveConnector(connectorID domain.ProviderConnectorID) error {
+//nolint:ireturn // Internal executor flow resolves connectors behind the shared connector seam.
+func (c *WindowSyncExecutor) resolveConnector(connectorID domain.ProviderConnectorID) (Connector, error) {
 	if normalizeConnectorID(connectorID) == "" {
-		return ErrConnectorIDRequired
+		return nil, ErrConnectorIDRequired
 	}
 	if c.connectorRegistry == nil {
-		return fmt.Errorf("%w: %s", ErrConnectorNotConfigured, connectorID)
+		return nil, fmt.Errorf("%w: %s", ErrConnectorNotConfigured, connectorID)
 	}
-	if _, err := c.connectorRegistry.Resolve(connectorID); err != nil {
-		return fmt.Errorf("resolve sync connector: %w", err)
+	connector, err := c.connectorRegistry.Resolve(connectorID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sync connector: %w", err)
 	}
-	return nil
+	return connector, nil
 }

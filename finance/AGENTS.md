@@ -9,6 +9,10 @@ Root Go module for the finance product slice.
 - Use GORM auto-migrate for finance-owned tables; avoid custom SQL migrations.
 - Keep secrets encrypted at rest and never persist plaintext credentials.
 
+## Rules
+
+- Do not extend persistence/store.go with new methods, this is a legacy over-engineered "god object" that should be phased out. Instead create new dedicated stores for each responsibility.
+
 ## Commands
 
 - `make test`

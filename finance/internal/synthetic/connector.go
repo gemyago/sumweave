@@ -1,0 +1,486 @@
+package synthetic
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/signal-foundry/finance/internal/providers"
+)
+
+var (
+	ErrProviderStateStoreRequired = errors.New("synthetic provider state store is required")
+	ErrProviderStateNotFound      = errors.New("synthetic provider state not found")
+	ErrConnectorLinkUnsupported   = errors.New("synthetic connector link operation unsupported")
+)
+
+const (
+	syntheticFirstWindowMaxTransactionsPerDay    = 2
+	syntheticRepeatedWindowMaxTransactionsPerDay = 3
+	syntheticBalanceBaseMinor                    = 100_000
+	syntheticHoursPerDay                         = 24
+	syntheticMinutesPerHour                      = 60
+	syntheticAmountBaseMinor                     = 100
+	syntheticAmountRangeMinor                    = 900
+	syntheticPositiveNegativeRange               = 2
+	syntheticFirstSequence                       = 1
+	syntheticNextSequenceAfterFirst              = 2
+)
+
+type ProviderStateStore interface {
+	SaveSyntheticProviderState(
+		ctx context.Context,
+		state domain.SyntheticProviderState,
+	) (domain.SyntheticProviderState, error)
+	GetSyntheticProviderState(
+		ctx context.Context,
+		connectionID string,
+	) (*domain.SyntheticProviderState, error)
+}
+
+type ConnectorOption func(*Connector)
+
+type Connector struct {
+	stateStore ProviderStateStore
+	logger     *slog.Logger
+	now        func() time.Time
+	randomIntn func(int) int
+}
+
+func WithConnectorLogger(logger *slog.Logger) ConnectorOption {
+	return func(connector *Connector) {
+		connector.logger = logger
+	}
+}
+
+func WithConnectorNow(now func() time.Time) ConnectorOption {
+	return func(connector *Connector) {
+		connector.now = now
+	}
+}
+
+func WithConnectorRandomIntn(randomIntn func(int) int) ConnectorOption {
+	return func(connector *Connector) {
+		connector.randomIntn = randomIntn
+	}
+}
+
+func NewConnector(stateStore ProviderStateStore, opts ...ConnectorOption) *Connector {
+	connector := &Connector{
+		stateStore: stateStore,
+		logger:     slog.New(slog.DiscardHandler),
+		now:        func() time.Time { return time.Now().UTC() },
+		randomIntn: func(_ int) int { return 0 },
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(connector)
+		}
+	}
+	if connector.logger == nil {
+		connector.logger = slog.New(slog.DiscardHandler)
+	}
+	if connector.now == nil {
+		connector.now = func() time.Time { return time.Now().UTC() }
+	}
+	if connector.randomIntn == nil {
+		connector.randomIntn = func(_ int) int { return 0 }
+	}
+	return connector
+}
+
+func (c *Connector) ConnectorID() domain.ProviderConnectorID {
+	return domain.ProviderConnectorIDSynthetic
+}
+
+func (c *Connector) Capabilities() providers.ConnectorCapabilities {
+	return providers.ConnectorCapabilities{SupportsFetch: true}
+}
+
+func (c *Connector) StartLink(
+	_ context.Context,
+	_ providers.StartLinkRequest,
+) (providers.StartLinkResult, error) {
+	return providers.StartLinkResult{}, ErrConnectorLinkUnsupported
+}
+
+func (c *Connector) FinishLink(
+	_ context.Context,
+	_ providers.FinishLinkRequest,
+) (providers.LinkResult, error) {
+	return providers.LinkResult{}, ErrConnectorLinkUnsupported
+}
+
+func (c *Connector) LinkToken(
+	_ context.Context,
+	_ providers.LinkTokenRequest,
+) (providers.LinkResult, error) {
+	return providers.LinkResult{}, ErrConnectorLinkUnsupported
+}
+
+func (c *Connector) Fetch(
+	ctx context.Context,
+	request providers.FetchRequest,
+) (domain.ProviderSyncBatch, error) {
+	if c.stateStore == nil {
+		return domain.ProviderSyncBatch{}, ErrProviderStateStoreRequired
+	}
+	state, err := c.stateStore.GetSyntheticProviderState(ctx, request.Connection.ConnectionID)
+	if err != nil {
+		return domain.ProviderSyncBatch{}, fmt.Errorf("load synthetic provider state: %w", err)
+	}
+	if state == nil {
+		return domain.ProviderSyncBatch{}, ErrProviderStateNotFound
+	}
+
+	windowKey := newWindowKey(request.RequestedWindow)
+	repeatIndex := windowHistoryIndex(state.Envelope.WindowHistory, windowKey)
+	mode := "firstWindow"
+	generationDays := windowDays(windowKey)
+	if repeatIndex >= 0 {
+		mode = "repeatedWindow"
+		if len(generationDays) > 0 {
+			generationDays = generationDays[len(generationDays)-1:]
+		}
+	}
+
+	updatedState := domain.SyntheticProviderState{
+		ConnectionID: state.ConnectionID,
+		Envelope:     cloneEnvelope(state.Envelope),
+		CreatedAt:    state.CreatedAt,
+		UpdatedAt:    c.now().UTC(),
+	}
+	if updatedState.CreatedAt.IsZero() {
+		updatedState.CreatedAt = updatedState.UpdatedAt
+	}
+
+	batch, err := c.generateBatch(
+		request.Connection,
+		windowKey,
+		generationDays,
+		mode,
+		&updatedState.Envelope,
+	)
+	if err != nil {
+		return domain.ProviderSyncBatch{}, err
+	}
+
+	if repeatIndex >= 0 {
+		updatedState.Envelope.WindowHistory[repeatIndex].RepeatCount++
+	} else {
+		updatedState.Envelope.WindowHistory = append(
+			updatedState.Envelope.WindowHistory,
+			domain.SyntheticWindowHistoryEntry{Window: windowKey, RepeatCount: 1},
+		)
+	}
+	c.sortSequenceCounters(updatedState.Envelope.SequenceCounters)
+	_, err = c.stateStore.SaveSyntheticProviderState(ctx, updatedState)
+	if err != nil {
+		return domain.ProviderSyncBatch{}, fmt.Errorf("save synthetic provider state: %w", err)
+	}
+
+	c.logger.InfoContext(
+		ctx,
+		"fetched synthetic sync batch",
+		slog.String("connectionId", request.Connection.ConnectionID),
+		slog.String("generationMode", mode),
+		slog.Int("observedAccounts", len(batch.Accounts)),
+		slog.Int("observedTransactions", len(batch.Transactions)),
+	)
+	return batch, nil
+}
+
+func (c *Connector) generateBatch(
+	connection domain.ProviderConnectionRef,
+	windowKey domain.SyntheticWindowKey,
+	generationDays []time.Time,
+	mode string,
+	envelope *domain.SyntheticProviderStateEnvelope,
+) (domain.ProviderSyncBatch, error) {
+	batch := domain.ProviderSyncBatch{
+		Connection: connection,
+		RequestedWindow: domain.ProviderSyncWindow{
+			Start: windowKey.NormalizedStartUTC,
+			End:   windowKey.NormalizedEndExclusiveUTC,
+		},
+	}
+	sequenceCounters := envelope.SequenceCounters
+	accountTotals := map[string]int64{}
+	for accountIndex, configuredAccount := range envelope.ConfiguredAccounts {
+		providerAccountID := providerAccountID(connection, configuredAccount.Key)
+		batch.Accounts = append(batch.Accounts, domain.ProviderAccountObservation{
+			Connection:        connection,
+			ProviderAccountID: providerAccountID,
+			Name:              configuredAccount.Name,
+			Currency:          configuredAccount.Currency,
+		})
+		accountPayload, err := payloadJSON(map[string]any{
+			"provider":          string(domain.ProviderIDSynthetic),
+			"generationMode":    mode,
+			"providerAccountId": providerAccountID,
+			"accountKey":        configuredAccount.Key,
+			"window":            windowPayload(windowKey),
+		})
+		if err != nil {
+			return domain.ProviderSyncBatch{}, err
+		}
+		batch.RawPayloads = append(batch.RawPayloads, domain.ProviderRawPayloadObservation{
+			Connection:       connection,
+			Scope:            domain.RawPayloadScopeAccount,
+			ProviderObjectID: providerAccountID,
+			PayloadJSON:      accountPayload,
+			CapturedAt:       c.now().UTC(),
+		})
+
+		for _, day := range generationDays {
+			transactionsForDay := syntheticFirstSequence +
+				c.randomBounded(syntheticFirstWindowMaxTransactionsPerDay)
+			if mode == "repeatedWindow" {
+				transactionsForDay = syntheticFirstSequence +
+					c.randomBounded(syntheticRepeatedWindowMaxTransactionsPerDay)
+			}
+			for range transactionsForDay {
+				sequence := nextSequence(&sequenceCounters, configuredAccount.Key, day)
+				transaction, payload, makeTransactionErr := c.makeTransaction(
+					connection,
+					windowKey,
+					mode,
+					configuredAccount,
+					providerAccountID,
+					day,
+					sequence,
+				)
+				if makeTransactionErr != nil {
+					return domain.ProviderSyncBatch{}, makeTransactionErr
+				}
+				batch.Transactions = append(batch.Transactions, transaction)
+				batch.RawPayloads = append(batch.RawPayloads, payload)
+				accountTotals[providerAccountID] += transaction.AmountMinor
+			}
+		}
+		balanceBase := int64((accountIndex + syntheticFirstSequence) * syntheticBalanceBaseMinor)
+		currentBalanceMinor := balanceBase + accountTotals[providerAccountID]
+		batch.Balances = append(batch.Balances, domain.ProviderBalanceObservation{
+			Connection:          connection,
+			ProviderAccountID:   providerAccountID,
+			Currency:            configuredAccount.Currency,
+			CurrentBalanceMinor: currentBalanceMinor,
+			CapturedAt:          c.now().UTC(),
+		})
+	}
+	envelope.SequenceCounters = sequenceCounters
+	return batch, nil
+}
+
+func (c *Connector) makeTransaction(
+	connection domain.ProviderConnectionRef,
+	windowKey domain.SyntheticWindowKey,
+	mode string,
+	configuredAccount domain.SyntheticConfiguredAccount,
+	providerAccountID string,
+	day time.Time,
+	sequence int,
+) (domain.ProviderTransactionObservation, domain.ProviderRawPayloadObservation, error) {
+	hour := c.randomBounded(syntheticHoursPerDay)
+	minute := c.randomBounded(syntheticMinutesPerHour)
+	amountMinor := int64(syntheticAmountBaseMinor + c.randomBounded(syntheticAmountRangeMinor))
+	transactionKind := "credit"
+	if c.randomBounded(syntheticPositiveNegativeRange) == 0 {
+		amountMinor *= -1
+		transactionKind = "debit"
+	}
+	effectiveAt := day.Add(time.Duration(hour) * time.Hour).Add(time.Duration(minute) * time.Minute)
+	description := fmt.Sprintf(
+		"Synthetic %s %s #%d",
+		transactionKind,
+		day.Format(time.DateOnly),
+		sequence,
+	)
+	providerTransactionID := fmt.Sprintf(
+		"synthetic-txn-%s-%s-%06d",
+		sanitizeIDPart(providerAccountID),
+		day.Format("20060102"),
+		sequence,
+	)
+	providerOriginal := &domain.ProviderTransactionOriginal{
+		AmountMinor: amountMinor,
+		Currency:    configuredAccount.Currency,
+		Description: description,
+		EffectiveAt: &effectiveAt,
+	}
+	transaction := domain.ProviderTransactionObservation{
+		Connection:            connection,
+		ProviderAccountID:     providerAccountID,
+		ProviderTransactionID: providerTransactionID,
+		Status:                domain.TransactionStatusBooked,
+		AmountMinor:           amountMinor,
+		Currency:              configuredAccount.Currency,
+		Description:           description,
+		EffectiveAt:           effectiveAt,
+		Fingerprint: fingerprint(
+			connection.ConnectionID,
+			configuredAccount.Key,
+			providerTransactionID,
+			amountMinor,
+			configuredAccount.Currency,
+		),
+		ProviderOriginal: providerOriginal,
+	}
+	payload, err := payloadJSON(map[string]any{
+		"provider":              string(domain.ProviderIDSynthetic),
+		"generationMode":        mode,
+		"window":                windowPayload(windowKey),
+		"providerTransactionId": providerTransactionID,
+		"providerAccountId":     providerAccountID,
+		"accountKey":            configuredAccount.Key,
+		"dayUTC":                day.Format(time.RFC3339),
+		"sequence":              sequence,
+		"amountMinor":           amountMinor,
+		"currency":              configuredAccount.Currency,
+		"description":           description,
+	})
+	if err != nil {
+		return domain.ProviderTransactionObservation{}, domain.ProviderRawPayloadObservation{}, err
+	}
+	return transaction, domain.ProviderRawPayloadObservation{
+		Connection:       connection,
+		Scope:            domain.RawPayloadScopeTransaction,
+		ProviderObjectID: providerTransactionID,
+		PayloadJSON:      payload,
+		CapturedAt:       c.now().UTC(),
+	}, nil
+}
+
+func (c *Connector) randomBounded(bound int) int {
+	if bound <= 0 || c.randomIntn == nil {
+		return 0
+	}
+	value := c.randomIntn(bound)
+	if value < 0 {
+		value = -value
+	}
+	return value % bound
+}
+
+func (c *Connector) sortSequenceCounters(counters []domain.SyntheticAccountDaySequenceCounter) {
+	sort.Slice(counters, func(i int, j int) bool {
+		if counters[i].AccountKey == counters[j].AccountKey {
+			return counters[i].DayUTC.Before(counters[j].DayUTC)
+		}
+		return counters[i].AccountKey < counters[j].AccountKey
+	})
+}
+
+func newWindowKey(window domain.ProviderSyncWindow) domain.SyntheticWindowKey {
+	startUTC := window.Start.UTC()
+	endUTC := window.End.UTC()
+	normalizedStartUTC := startOfUTCDay(startUTC)
+	normalizedEndExclusiveUTC := endUTC
+	if !endUTC.Equal(startOfUTCDay(endUTC)) {
+		normalizedEndExclusiveUTC = startOfUTCDay(endUTC).Add(syntheticHoursPerDay * time.Hour)
+	}
+	return domain.SyntheticWindowKey{
+		NormalizedStartUTC:        normalizedStartUTC,
+		NormalizedEndExclusiveUTC: normalizedEndExclusiveUTC,
+	}
+}
+
+func windowDays(windowKey domain.SyntheticWindowKey) []time.Time {
+	days := make([]time.Time, 0)
+	for day := windowKey.NormalizedStartUTC; day.Before(windowKey.NormalizedEndExclusiveUTC); day = day.Add(syntheticHoursPerDay * time.Hour) {
+		days = append(days, day)
+	}
+	return days
+}
+
+func windowHistoryIndex(
+	history []domain.SyntheticWindowHistoryEntry,
+	windowKey domain.SyntheticWindowKey,
+) int {
+	for index, item := range history {
+		if item.Window == windowKey {
+			return index
+		}
+	}
+	return -1
+}
+
+func nextSequence(
+	counters *[]domain.SyntheticAccountDaySequenceCounter,
+	accountKey string,
+	day time.Time,
+) int {
+	for index := range *counters {
+		if (*counters)[index].AccountKey == accountKey && (*counters)[index].DayUTC.Equal(day) {
+			sequence := (*counters)[index].NextSequence
+			if sequence <= 0 {
+				sequence = 1
+			}
+			(*counters)[index].NextSequence = sequence + 1
+			return sequence
+		}
+	}
+	*counters = append(*counters, domain.SyntheticAccountDaySequenceCounter{
+		AccountKey:   accountKey,
+		DayUTC:       day,
+		NextSequence: syntheticNextSequenceAfterFirst,
+	})
+	return syntheticFirstSequence
+}
+
+func providerAccountID(connection domain.ProviderConnectionRef, accountKey string) string {
+	return fmt.Sprintf(
+		"synthetic-account-%s-%s",
+		sanitizeIDPart(connection.ConnectionID),
+		sanitizeIDPart(accountKey),
+	)
+}
+
+func sanitizeIDPart(value string) string {
+	trimmed := strings.TrimSpace(value)
+	trimmed = strings.ReplaceAll(trimmed, ":", "-")
+	trimmed = strings.ReplaceAll(trimmed, "/", "-")
+	return trimmed
+}
+
+func windowPayload(windowKey domain.SyntheticWindowKey) map[string]string {
+	return map[string]string{
+		"normalizedStartUTC":        windowKey.NormalizedStartUTC.Format(time.RFC3339),
+		"normalizedEndExclusiveUTC": windowKey.NormalizedEndExclusiveUTC.Format(time.RFC3339),
+	}
+}
+
+func payloadJSON(payload any) ([]byte, error) {
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal synthetic payload: %w", err)
+	}
+	return payloadJSON, nil
+}
+
+func cloneEnvelope(envelope domain.SyntheticProviderStateEnvelope) domain.SyntheticProviderStateEnvelope {
+	return domain.SyntheticProviderStateEnvelope{
+		Version:            envelope.Version,
+		ConfiguredAccounts: append([]domain.SyntheticConfiguredAccount{}, envelope.ConfiguredAccounts...),
+		WindowHistory:      append([]domain.SyntheticWindowHistoryEntry{}, envelope.WindowHistory...),
+		SequenceCounters:   append([]domain.SyntheticAccountDaySequenceCounter{}, envelope.SequenceCounters...),
+	}
+}
+
+func fingerprint(parts ...any) string {
+	hash := sha256.Sum256(fmt.Append(nil, parts...))
+	return hex.EncodeToString(hash[:16])
+}
+
+func startOfUTCDay(value time.Time) time.Time {
+	utcValue := value.UTC()
+	return time.Date(utcValue.Year(), utcValue.Month(), utcValue.Day(), 0, 0, 0, 0, time.UTC)
+}

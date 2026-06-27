@@ -163,9 +163,10 @@ func TestSetupV1Routes(t *testing.T) {
 			IDGenerator: ident.NewDefaultGenerator(),
 		})
 		require.NoError(t, err)
-		financeStore, err := financepersistence.NewStore(filepath.Join(t.TempDir(), "finance.db"))
+		financeDatabase, err := financepersistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.db"))
 		require.NoError(t, err)
-		require.NoError(t, financeStore.Migrate(t.Context()))
+		require.NoError(t, financepersistence.NewMigrator(financeDatabase).Migrate(t.Context()))
+		financeStore := financepersistence.NewStore(financeDatabase)
 		financeService := financepkg.NewService(financeStore)
 
 		router := server.NewHTTPRouter(server.HTTPRouterDeps{
@@ -294,9 +295,10 @@ func TestSetupV1Routes(t *testing.T) {
 			IDGenerator: ident.NewDefaultGenerator(),
 		})
 		require.NoError(t, err)
-		financeStore, err := financepersistence.NewStore(filepath.Join(t.TempDir(), "finance.db"))
+		financeDatabase, err := financepersistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.db"))
 		require.NoError(t, err)
-		require.NoError(t, financeStore.Migrate(t.Context()))
+		require.NoError(t, financepersistence.NewMigrator(financeDatabase).Migrate(t.Context()))
+		financeStore := financepersistence.NewStore(financeDatabase)
 		financeService := financepkg.NewService(financeStore)
 		strategiesCtrl := v1controllers.NewStrategiesController(
 			v1controllers.StrategiesControllerDeps{

@@ -18,12 +18,8 @@ func TestService(t *testing.T) {
 	makeService := func(t *testing.T) *Service {
 		t.Helper()
 
-		fake := faker.New()
-		store, err := persistence.NewStore(
-			fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 
 		return NewService(store)
 	}
@@ -556,11 +552,8 @@ func TestService(t *testing.T) {
 			}
 			service := NewService(
 				func() *persistence.Store {
-					store, err := persistence.NewStore(
-						fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-					)
-					require.NoError(t, err)
-					require.NoError(t, store.Migrate(t.Context()))
+					database := openTestDatabase(t)
+					store := persistence.NewStore(database)
 					return store
 				}(),
 				WithNow(func() time.Time { return now }),
@@ -775,11 +768,8 @@ func TestService(t *testing.T) {
 
 	t.Run("surfaces service options and error paths", func(t *testing.T) {
 		fake := faker.New()
-		store, err := persistence.NewStore(
-			fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 
 		now := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)
 		ids := []string{
@@ -804,7 +794,7 @@ func TestService(t *testing.T) {
 			}),
 		)
 
-		_, err = service.CreateTenant(t.Context(), CreateTenantParams{})
+		_, err := service.CreateTenant(t.Context(), CreateTenantParams{})
 		require.Error(t, err)
 
 		ownerUserID := fmt.Sprintf("user-owner-%s", fake.Lorem().Word())

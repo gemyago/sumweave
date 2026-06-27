@@ -5,8 +5,9 @@ import "time"
 type ProviderID string
 
 const (
-	ProviderIDMonobank ProviderID = "monobank"
-	ProviderIDPKO      ProviderID = "pko"
+	ProviderIDMonobank  ProviderID = "monobank"
+	ProviderIDPKO       ProviderID = "pko"
+	ProviderIDSynthetic ProviderID = "synthetic"
 )
 
 type ProviderConnectorID string
@@ -14,6 +15,7 @@ type ProviderConnectorID string
 const (
 	ProviderConnectorIDMonobank      ProviderConnectorID = "monobank"
 	ProviderConnectorIDEnableBanking ProviderConnectorID = "enable-banking"
+	ProviderConnectorIDSynthetic     ProviderConnectorID = "synthetic"
 )
 
 type ProviderConnectionRef struct {

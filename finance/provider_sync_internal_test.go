@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -421,10 +420,8 @@ func (p *redirectBankProvider) Sync(
 func TestProviderSyncInternals(t *testing.T) {
 	makeStore := func(t *testing.T) *persistence.Store {
 		t.Helper()
-		fake := faker.New()
-		store, err := persistence.NewStore(filepath.Join(t.TempDir(), fake.UUID().V4()+".db"))
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 		return store
 	}
 	makeCipher := func(t *testing.T) *credentials.AESGCMCipher {

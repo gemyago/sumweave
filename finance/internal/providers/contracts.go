@@ -21,6 +21,16 @@ type ProviderProfile struct {
 	MarketSegment string
 }
 
+func MonobankProfile() ProviderProfile {
+	return ProviderProfile{
+		ProviderID:    domain.ProviderIDMonobank,
+		ConnectorID:   domain.ProviderConnectorIDMonobank,
+		DisplayName:   "Monobank",
+		CountryCode:   "UA",
+		MarketSegment: "personal",
+	}
+}
+
 // PKOProfile keeps the product-level PKO provider composed with Enable Banking.
 func PKOProfile() ProviderProfile {
 	return ProviderProfile{

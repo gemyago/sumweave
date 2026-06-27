@@ -97,7 +97,10 @@ More detail is in **Testing best practices** below. Common points:
 - **Mocks:** follow the project’s documented approach (codegen tool, hand-written fakes, etc.).
 - Use **`t.Context()`** over `context.Background()` / `context.TODO()` in tests when the Go version supports it.
 - Avoid package-level test helpers; define them inside the relevant `TestXxx` (e.g. as a closure used by nested `t.Run` blocks) or inside a single `t.Run` when only that case needs them.
-- Use test fixtures (e.g `makeRandomSomething`) to construct randomized test data.
+- Always use a test fixture factory function (e.g. `makeRandomSomething`) when randomized test data of the same domain type is constructed more than once.
+- Repeated inline struct literals count as repeated fixture construction, even when nested inside larger request/command literals or when field values differ across subtests.
+- If the same domain struct type appears inline in multiple subtests, extract a local fixture factory by default instead of rebuilding it ad hoc.
+- When related fixtures reference each other, generate shared randomized values once in the factory and reuse them; do not create fresh unrelated IDs or keys for linked fields.
 
 ### Core Principles
 

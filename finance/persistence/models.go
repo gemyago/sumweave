@@ -322,6 +322,17 @@ func (providerTransactionMatchModel) TableName() string {
 	return "finance_provider_transaction_matches"
 }
 
+type syntheticProviderStateModel struct {
+	ConnectionID string    `gorm:"column:connection_id;size:255;not null;primaryKey"`
+	StateJSON    string    `gorm:"column:state_json;type:text;not null"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (syntheticProviderStateModel) TableName() string {
+	return "finance_synthetic_provider_states"
+}
+
 func newConnectionSecretModel(secret domain.ConnectionSecret) connectionSecretModel {
 	return connectionSecretModel{
 		ID:         secret.ID,
@@ -1048,4 +1059,59 @@ func providerTransactionMatchFromModel(
 		CreatedAt:             normalizeUTC(model.CreatedAt),
 		UpdatedAt:             normalizeUTC(model.UpdatedAt),
 	}
+}
+
+func newSyntheticProviderStateModel(
+	state domain.SyntheticProviderState,
+) syntheticProviderStateModel {
+	return syntheticProviderStateModel{
+		ConnectionID: state.ConnectionID,
+		StateJSON:    mustJSON(normalizeSyntheticProviderStateEnvelope(state.Envelope)),
+		CreatedAt:    normalizeUTC(state.CreatedAt),
+		UpdatedAt:    normalizeUTC(state.UpdatedAt),
+	}
+}
+
+func syntheticProviderStateFromModel(
+	model syntheticProviderStateModel,
+) domain.SyntheticProviderState {
+	envelope := domain.SyntheticProviderStateEnvelope{}
+	mustUnmarshalJSON(model.StateJSON, &envelope)
+	return domain.SyntheticProviderState{
+		ConnectionID: model.ConnectionID,
+		Envelope:     normalizeSyntheticProviderStateEnvelope(envelope),
+		CreatedAt:    normalizeUTC(model.CreatedAt),
+		UpdatedAt:    normalizeUTC(model.UpdatedAt),
+	}
+}
+
+func normalizeSyntheticProviderStateEnvelope(
+	envelope domain.SyntheticProviderStateEnvelope,
+) domain.SyntheticProviderStateEnvelope {
+	normalized := domain.SyntheticProviderStateEnvelope{
+		Version:            envelope.Version,
+		ConfiguredAccounts: append([]domain.SyntheticConfiguredAccount(nil), envelope.ConfiguredAccounts...),
+		WindowHistory:      make([]domain.SyntheticWindowHistoryEntry, 0, len(envelope.WindowHistory)),
+		SequenceCounters:   make([]domain.SyntheticAccountDaySequenceCounter, 0, len(envelope.SequenceCounters)),
+	}
+	for _, entry := range envelope.WindowHistory {
+		normalized.WindowHistory = append(normalized.WindowHistory, domain.SyntheticWindowHistoryEntry{
+			Window: domain.SyntheticWindowKey{
+				NormalizedStartUTC:        normalizeUTC(entry.Window.NormalizedStartUTC),
+				NormalizedEndExclusiveUTC: normalizeUTC(entry.Window.NormalizedEndExclusiveUTC),
+			},
+			RepeatCount: entry.RepeatCount,
+		})
+	}
+	for _, counter := range envelope.SequenceCounters {
+		normalized.SequenceCounters = append(
+			normalized.SequenceCounters,
+			domain.SyntheticAccountDaySequenceCounter{
+				AccountKey:   counter.AccountKey,
+				DayUTC:       normalizeUTC(counter.DayUTC),
+				NextSequence: counter.NextSequence,
+			},
+		)
+	}
+	return normalized
 }

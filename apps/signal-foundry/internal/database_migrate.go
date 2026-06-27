@@ -190,12 +190,12 @@ func (m *DatabaseMigrator) migrateJobs(_ context.Context) error {
 }
 
 func (m *DatabaseMigrator) migrateFinance(ctx context.Context) error {
-	store, err := persistence.NewStore(m.dataLayerDatabaseDSN)
+	database, err := persistence.OpenDatabase(m.dataLayerDatabaseDSN)
 	if err != nil {
-		return fmt.Errorf("create finance store: %w", err)
+		return fmt.Errorf("open finance database: %w", err)
 	}
-	if err = store.Migrate(ctx); err != nil {
-		return fmt.Errorf("migrate finance store: %w", err)
+	if err = persistence.NewMigrator(database).Migrate(ctx); err != nil {
+		return fmt.Errorf("migrate finance schema: %w", err)
 	}
 	return nil
 }

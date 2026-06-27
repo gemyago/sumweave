@@ -259,11 +259,8 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("service-backed scenario invokes finance APIs and records stable ids", func(t *testing.T) {
 		fake := faker.New()
-		store, err := persistence.NewStore(
-			fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
 			fixtures.NewService(fixtures.NewPersistenceRepository(store)),
 		)
@@ -297,11 +294,8 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("returns service errors without direct-table fallback", func(t *testing.T) {
 		fake := faker.New()
-		store, err := persistence.NewStore(
-			fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
 			fixtures.NewService(fixtures.NewPersistenceRepository(store)),
 		)
@@ -309,7 +303,7 @@ func TestRealisticScenario(t *testing.T) {
 		spy := makeSpy(fake)
 		spy.linkTokenErr = wantErr
 
-		_, err = fixtures.GenerateRealisticScenario(
+		_, err := fixtures.GenerateRealisticScenario(
 			t.Context(),
 			bootstrap,
 			spy,
@@ -327,17 +321,14 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("returns early service errors from earlier scenario steps", func(t *testing.T) {
 		fake := faker.New()
-		store, err := persistence.NewStore(
-			fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
 			fixtures.NewService(fixtures.NewPersistenceRepository(store)),
 		)
 
 		createTenantErr := errors.New("tenant create failed")
-		_, err = fixtures.GenerateRealisticScenario(
+		_, err := fixtures.GenerateRealisticScenario(
 			t.Context(),
 			bootstrap,
 			&scenarioServiceSpy{createTenantErr: createTenantErr},
@@ -453,11 +444,8 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("returns targeted branch errors across seeded scenario phases", func(t *testing.T) {
 		fake := faker.New()
-		store, err := persistence.NewStore(
-			fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
 			fixtures.NewService(fixtures.NewPersistenceRepository(store)),
 		)
@@ -608,17 +596,14 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("allows auth-aligned owner and member overrides", func(t *testing.T) {
 		fake := faker.New()
-		store, err := persistence.NewStore(
-			fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()),
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
 			fixtures.NewService(fixtures.NewPersistenceRepository(store)),
 		)
 		spy := makeSpy(fake)
 
-		_, err = fixtures.GenerateRealisticScenario(
+		_, err := fixtures.GenerateRealisticScenario(
 			t.Context(),
 			bootstrap,
 			spy,
@@ -635,10 +620,8 @@ func TestRealisticScenario(t *testing.T) {
 		assert.Equal(t, 1, spy.acceptTenantInviteCalls)
 	})
 
-	fake := faker.New()
-	store, err := persistence.NewStore(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()))
-	require.NoError(t, err)
-	require.NoError(t, store.Migrate(t.Context()))
+	database := openTestDatabase(t)
+	store := persistence.NewStore(database)
 	repo := fixtures.NewPersistenceRepository(store)
 	bootstrap := fixtures.NewBootstrapper(fixtures.NewService(repo))
 	now := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)

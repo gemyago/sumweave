@@ -847,6 +847,9 @@ func TestWorker(t *testing.T) {
 			worker, workerErr := NewWorker(WorkerDeps{
 				Store:    store,
 				Registry: registry,
+				Config: WorkerConfig{
+					PollInterval: 50 * time.Millisecond,
+				},
 				DispatchConfig: DispatchConfig{
 					DatabaseDSN: dispatchDSN,
 					TablePrefix: "wrk_",
@@ -895,6 +898,9 @@ func TestWorker(t *testing.T) {
 			worker, workerErr := NewWorker(WorkerDeps{
 				Store:    store,
 				Registry: registry,
+				Config: WorkerConfig{
+					PollInterval: 50 * time.Millisecond,
+				},
 				DispatchConfig: DispatchConfig{
 					DatabaseDSN: dispatchDSN,
 					TablePrefix: "wrk_",

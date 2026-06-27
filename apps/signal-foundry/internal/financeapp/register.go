@@ -62,11 +62,11 @@ type financeServiceDeps struct {
 }
 
 func newFinanceStoreFromDI(deps financeStoreDeps) (*persistence.Store, error) {
-	store, err := persistence.NewStore(deps.DatabaseDSN)
+	database, err := persistence.OpenDatabase(deps.DatabaseDSN)
 	if err != nil {
 		return nil, err
 	}
-	return store, nil
+	return persistence.NewStore(database), nil
 }
 
 func newFinanceServiceFromDI(deps financeServiceDeps) (*financepkg.Service, error) {

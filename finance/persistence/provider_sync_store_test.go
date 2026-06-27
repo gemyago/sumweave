@@ -16,10 +16,8 @@ import (
 func TestProviderSyncStore(t *testing.T) {
 	makeStore := func(t *testing.T) *Store {
 		t.Helper()
-		fake := faker.New()
-		store, err := NewStore(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.UUID().V4()))
-		require.NoError(t, err)
-		require.NoError(t, store.Migrate(t.Context()))
+		database := openTestDatabase(t)
+		store := NewStore(database)
 		return store
 	}
 
@@ -624,8 +622,9 @@ func TestProviderSyncStore(t *testing.T) {
 		fake := faker.New()
 		path := fmt.Sprintf("%s/%s.db", t.TempDir(), fake.UUID().V4())
 		require.NoError(t, os.WriteFile(path, []byte{}, 0o600))
-		store, err := NewStore("file:" + path + "?mode=ro")
+		database, err := OpenDatabase("file:" + path + "?mode=ro")
 		require.NoError(t, err)
+		store := NewStore(database)
 
 		_, err = store.SaveBankConnection(t.Context(), domain.BankConnection{ID: "id"})
 		require.Error(t, err)

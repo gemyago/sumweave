@@ -20,6 +20,7 @@ type stubConnector struct {
 	finishResult     LinkResult
 	tokenResult      LinkResult
 	fetchResult      domain.ProviderSyncBatch
+	fetchErr         error
 	fetchCalls       int
 	lastFetch        FetchRequest
 	lastStart        StartLinkRequest
@@ -56,6 +57,9 @@ func (c *stubConnector) LinkToken(_ context.Context, request LinkTokenRequest) (
 func (c *stubConnector) Fetch(_ context.Context, request FetchRequest) (domain.ProviderSyncBatch, error) {
 	c.fetchCalls++
 	c.lastFetch = request
+	if c.fetchErr != nil {
+		return domain.ProviderSyncBatch{}, c.fetchErr
+	}
 	return c.fetchResult, nil
 }
 
@@ -778,6 +782,8 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 		assert.NotEmpty(t, request.JobID)
 		assert.Equal(t, "manual", request.Reason)
 		assert.NotEmpty(t, result.RunID)
+		assert.Equal(t, connection, result.Batch.Connection)
+		assert.Equal(t, window, result.Batch.RequestedWindow)
 		assert.Equal(t, domain.ProviderSyncStats{}, result.Stats)
 		assert.Nil(t, result.Issues)
 	})

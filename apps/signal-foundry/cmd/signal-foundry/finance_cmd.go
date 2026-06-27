@@ -138,14 +138,15 @@ func runFinanceFixturesGenerate(
 	runtimeConfig financeFixturesRuntimeConfig,
 	params financeFixturesGenerateParams,
 ) (financefixtures.Summary, error) {
-	store, err := persistence.NewStore(strings.TrimSpace(runtimeConfig.DatabaseDSN))
+	database, err := persistence.OpenDatabase(strings.TrimSpace(runtimeConfig.DatabaseDSN))
 	if err != nil {
 		return financefixtures.Summary{}, err
 	}
-	migrateErr := store.Migrate(ctx)
+	migrateErr := persistence.NewMigrator(database).Migrate(ctx)
 	if migrateErr != nil {
 		return financefixtures.Summary{}, migrateErr
 	}
+	store := persistence.NewStore(database)
 	jobsStore, err := jobspkg.NewStore(
 		runtimeConfig.DatabaseDSN,
 		jobspkg.StoreOpts{TablePrefix: strings.TrimSpace(runtimeConfig.JobsTablePrefix)},

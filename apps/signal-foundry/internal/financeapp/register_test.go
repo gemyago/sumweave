@@ -123,11 +123,11 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		}))
 		defer enableServer.Close()
 
-		financeStore, err := newFinanceStoreFromDI(financeStoreDeps{
-			DatabaseDSN: filepath.Join(t.TempDir(), "finance.sqlite"),
-		})
+		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
 		require.NoError(t, err)
-		require.NoError(t, financeStore.Migrate(t.Context()))
+		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
+
+		financeStore := persistence.NewStore(database)
 
 		registry := jobspkg.NewRegistry()
 		jobsService, jobsStore := makeJobsService(
@@ -316,11 +316,10 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		}))
 		defer server.Close()
 
-		financeStore, err := newFinanceStoreFromDI(financeStoreDeps{
-			DatabaseDSN: filepath.Join(t.TempDir(), "finance.sqlite"),
-		})
+		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
 		require.NoError(t, err)
-		require.NoError(t, financeStore.Migrate(t.Context()))
+		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
+		financeStore := persistence.NewStore(database)
 
 		registry := jobspkg.NewRegistry()
 		jobsService, jobsStore := makeJobsService(
@@ -413,11 +412,10 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		}))
 		defer monoServer.Close()
 
-		financeStore, err := newFinanceStoreFromDI(financeStoreDeps{
-			DatabaseDSN: filepath.Join(t.TempDir(), "finance.sqlite"),
-		})
+		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
 		require.NoError(t, err)
-		require.NoError(t, financeStore.Migrate(t.Context()))
+		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
+		financeStore := persistence.NewStore(database)
 
 		registry := jobspkg.NewRegistry()
 		jobsService, jobsStore := makeJobsService(
