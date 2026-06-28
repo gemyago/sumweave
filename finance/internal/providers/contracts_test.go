@@ -158,7 +158,7 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 			Start: time.Date(2026, time.June, 21, 0, 0, 0, 0, time.UTC),
 			End:   time.Date(2026, time.June, 24, 0, 0, 0, 0, time.UTC),
 		}
-		candidateWindow := domain.ProviderSyncWindow{
+		snapshotWindow := domain.ProviderSyncWindow{
 			Start: requestedWindow.Start.Add(-72 * time.Hour),
 			End:   requestedWindow.End.Add(72 * time.Hour),
 		}
@@ -210,11 +210,11 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 			SyncState:       state,
 		}
 		snapshot := ExistingWindowSnapshot{
-			Connection:      connection,
-			CandidateWindow: candidateWindow,
-			Accounts:        []domain.ConnectionProviderAccount{account},
-			Transactions:    []domain.Transaction{transaction},
-			Matches:         []domain.ProviderTransactionMatch{match},
+			Connection:     connection,
+			SnapshotWindow: snapshotWindow,
+			Accounts:       []domain.ConnectionProviderAccount{account},
+			Transactions:   []domain.Transaction{transaction},
+			Matches:        []domain.ProviderTransactionMatch{match},
 		}
 
 		assert.Equal(t, connection, request.Connection)
@@ -223,7 +223,7 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 		require.NotNil(t, request.SyncState)
 		assert.Equal(t, state.RunID, request.SyncState.RunID)
 		assert.Equal(t, connection, snapshot.Connection)
-		assert.Equal(t, candidateWindow, snapshot.CandidateWindow)
+		assert.Equal(t, snapshotWindow, snapshot.SnapshotWindow)
 		require.Len(t, snapshot.Accounts, 1)
 		require.Len(t, snapshot.Transactions, 1)
 		require.Len(t, snapshot.Matches, 1)
@@ -767,12 +767,14 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 			JobID:           "job-" + fake.UUID().V4(),
 			Reason:          "manual",
 		}
-		executor := NewWindowSyncExecutor(
+		executor, err := NewWindowSyncExecutor(
 			WithConnectors(&stubConnector{connectorID: domain.ProviderConnectorIDEnableBanking}),
+			WithSyncRepository(&stubSyncRepository{}),
 			WithRunIDGenerator(func() string {
 				return "run-" + fake.UUID().V4()
 			}),
 		)
+		require.NoError(t, err)
 
 		result, err := executor.Execute(t.Context(), request)
 		require.NoError(t, err)

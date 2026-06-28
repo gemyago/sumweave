@@ -165,9 +165,29 @@ The finance module SHALL support secure provider linking plus explicit async syn
 
 #### Scenario: Provider sync v2 plans diffs before applying writes
 - **WHEN** provider sync v2 compares provider observations with persisted data
-- **THEN** it MUST load an existing-window snapshot for the connection using a candidate lookup window that may be wider than the requested provider sync window
+- **THEN** it MUST load an existing-window snapshot for the connection using a snapshot lookup window that may be wider than the requested provider sync window
 - **AND** it MUST produce an explicit diff plan before persistence writes are applied
 - **AND** the diff planner MUST be pure, deterministic, and free of persistence writes or provider network calls
+
+#### Scenario: Provider sync v2 loads a snapshot lookup window before diffing
+- **WHEN** the window sync executor executes one requested provider sync window
+- **THEN** it MUST derive a snapshot lookup window for loading persisted comparison data before diff planning begins
+- **AND** the snapshot lookup window MAY be wider than the requested provider sync window
+- **AND** the loaded snapshot MUST be the persisted input to diff planning for that requested window
+
+#### Scenario: Provider sync v2 requested-window execution plans before apply handoff
+- **WHEN** the window sync executor receives a fetched provider sync batch and a loaded existing snapshot
+- **THEN** it MUST build a `ProviderDiffPlan`
+- **AND** it MUST build an `ApplyPlan` from that diff plan before requesting persistence writes
+- **AND** it MUST hand the resulting plans to an executor-facing storage seam instead of persisting ledger writes directly inside connector code
+
+#### Scenario: Provider sync v2 rejects invalid requested windows before fetch
+- **WHEN** the window sync executor receives a requested provider sync window whose start is zero, end is zero, or end is not after start
+- **THEN** execution MUST fail with a bounded invalid-window error before connector fetch begins
+
+#### Scenario: Provider sync v2 executor reports apply-planned stats and issues
+- **WHEN** the window sync executor successfully completes fetch, snapshot load, planning, and apply handoff for one requested window
+- **THEN** the result MUST report the requested window batch plus the planned sync stats and issues derived from diff/apply planning
 
 #### Scenario: Provider sync v2 handles ambiguous transaction matches conservatively
 - **WHEN** a provider transaction observation has only weak or ambiguous persisted transaction candidates
@@ -294,4 +314,3 @@ The finance module SHALL support a core-only `synthetic` bank provider through p
 - **WHEN** the synthetic provider is implemented in this iteration
 - **THEN** the system MUST NOT add synthetic provider controls to the finance UI
 - **AND** it MUST NOT expose a public HTTP synthetic-linking workflow or product-facing OpenAPI enum unless a later change explicitly adds that surface
-

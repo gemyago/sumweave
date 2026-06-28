@@ -3,7 +3,6 @@ package providers
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
 )
@@ -24,7 +23,7 @@ func NewStaticProviderProfileRegistry(profiles ...ProviderProfile) *StaticProvid
 		profiles: map[domain.ProviderID]ProviderProfile{},
 	}
 	for _, profile := range profiles {
-		providerID := normalizeProviderID(profile.ProviderID)
+		providerID := profile.ProviderID
 		if providerID == "" {
 			continue
 		}
@@ -38,13 +37,12 @@ func NewStaticProviderProfileRegistry(profiles ...ProviderProfile) *StaticProvid
 }
 
 func (r *StaticProviderProfileRegistry) Resolve(providerID domain.ProviderID) (ProviderProfile, error) {
-	resolvedID := normalizeProviderID(providerID)
-	if resolvedID == "" {
+	if providerID == "" {
 		return ProviderProfile{}, ErrProviderIDRequired
 	}
-	profile, ok := r.profiles[resolvedID]
+	profile, ok := r.profiles[providerID]
 	if !ok {
-		return ProviderProfile{}, fmt.Errorf("%w: %s", ErrProviderNotConfigured, resolvedID)
+		return ProviderProfile{}, fmt.Errorf("%w: %s", ErrProviderNotConfigured, providerID)
 	}
 	return profile, nil
 }
@@ -61,7 +59,7 @@ func NewStaticConnectorRegistry(connectors ...Connector) *StaticConnectorRegistr
 		if connector == nil {
 			continue
 		}
-		connectorID := normalizeConnectorID(connector.ConnectorID())
+		connectorID := connector.ConnectorID()
 		if connectorID == "" {
 			continue
 		}
@@ -75,21 +73,12 @@ func NewStaticConnectorRegistry(connectors ...Connector) *StaticConnectorRegistr
 
 //nolint:ireturn // The registry contract resolves connectors behind the shared interface seam.
 func (r *StaticConnectorRegistry) Resolve(connectorID domain.ProviderConnectorID) (Connector, error) {
-	resolvedID := normalizeConnectorID(connectorID)
-	if resolvedID == "" {
+	if connectorID == "" {
 		return nil, ErrConnectorIDRequired
 	}
-	connector, ok := r.connectors[resolvedID]
+	connector, ok := r.connectors[connectorID]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrConnectorNotConfigured, resolvedID)
+		return nil, fmt.Errorf("%w: %s", ErrConnectorNotConfigured, connectorID)
 	}
 	return connector, nil
-}
-
-func normalizeConnectorID(connectorID domain.ProviderConnectorID) domain.ProviderConnectorID {
-	return domain.ProviderConnectorID(strings.TrimSpace(string(connectorID)))
-}
-
-func normalizeProviderID(providerID domain.ProviderID) domain.ProviderID {
-	return domain.ProviderID(strings.TrimSpace(string(providerID)))
 }

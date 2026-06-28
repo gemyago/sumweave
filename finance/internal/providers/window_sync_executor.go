@@ -2,9 +2,17 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/google/uuid"
+)
+
+var (
+	ErrInvalidRequestedWindow    = errors.New("invalid requested window")
+	ErrConnectorRegistryRequired = errors.New("connector registry is required")
+	ErrSyncRepositoryRequired    = errors.New("sync repository is required")
 )
 
 type ConnectorRegistry interface {
@@ -27,11 +35,24 @@ type WindowSyncResult struct {
 	Issues []domain.ProviderSyncIssue
 }
 
+type SyncRepository interface {
+	LoadExistingWindow(
+		ctx context.Context,
+		connection domain.ProviderConnectionRef,
+		window domain.ProviderSyncWindow,
+	) (ExistingWindowSnapshot, error)
+	ApplySync(ctx context.Context, diffPlan ProviderDiffPlan, applyPlan ApplyPlan) error
+}
+
 type WindowSyncExecutorOption func(*WindowSyncExecutor)
 
 type WindowSyncExecutor struct {
-	connectorRegistry ConnectorRegistry
-	runIDGenerator    func() string
+	connectorRegistry    ConnectorRegistry
+	snapshotWindowPolicy SnapshotWindowPolicy
+	syncRepository       SyncRepository
+	diffPlanner          *DiffPlanner
+	applyPlanner         *ApplyPlanner
+	runIDGenerator       func() string
 }
 
 func WithConnectorRegistry(connectorRegistry ConnectorRegistry) WindowSyncExecutorOption {
@@ -52,25 +73,52 @@ func WithRunIDGenerator(runIDGenerator func() string) WindowSyncExecutorOption {
 	}
 }
 
-func NewWindowSyncExecutor(opts ...WindowSyncExecutorOption) *WindowSyncExecutor {
+func WithSnapshotWindowPolicy(snapshotWindowPolicy SnapshotWindowPolicy) WindowSyncExecutorOption {
+	return func(executor *WindowSyncExecutor) {
+		executor.snapshotWindowPolicy = snapshotWindowPolicy
+	}
+}
+
+func WithSyncRepository(syncRepository SyncRepository) WindowSyncExecutorOption {
+	return func(executor *WindowSyncExecutor) {
+		executor.syncRepository = syncRepository
+	}
+}
+
+func NewWindowSyncExecutor(opts ...WindowSyncExecutorOption) (*WindowSyncExecutor, error) {
 	executor := &WindowSyncExecutor{
-		connectorRegistry: NewStaticConnectorRegistry(),
+		connectorRegistry:    NewStaticConnectorRegistry(),
+		snapshotWindowPolicy: NewRequestedWindowSnapshotPolicy(),
+		diffPlanner:          NewDiffPlanner(),
+		applyPlanner:         NewApplyPlanner(nil),
 	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(executor)
 		}
 	}
-	return executor
+	if executor.runIDGenerator == nil {
+		executor.runIDGenerator = uuid.NewString
+	}
+	if executor.connectorRegistry == nil {
+		return nil, ErrConnectorRegistryRequired
+	}
+	if executor.syncRepository == nil {
+		return nil, ErrSyncRepositoryRequired
+	}
+	return executor, nil
 }
 
 func (c *WindowSyncExecutor) Execute(
 	ctx context.Context,
 	request WindowSyncRequest,
 ) (WindowSyncResult, error) {
-	connector, err := c.resolveConnector(request.Connection.ConnectorID)
-	if err != nil {
+	if err := validateSyncWindow(request.RequestedWindow, ErrInvalidRequestedWindow); err != nil {
 		return WindowSyncResult{}, err
+	}
+	connector, err := c.connectorRegistry.Resolve(request.Connection.ConnectorID)
+	if err != nil {
+		return WindowSyncResult{}, fmt.Errorf("resolve sync connector: %w", err)
 	}
 
 	batch, err := connector.Fetch(ctx, FetchRequest{
@@ -85,35 +133,29 @@ func (c *WindowSyncExecutor) Execute(
 	batch.Connection = request.Connection
 	batch.RequestedWindow = request.RequestedWindow
 
-	runID := request.JobID
-	if c.runIDGenerator != nil {
-		generatedRunID := c.runIDGenerator()
-		if generatedRunID != "" {
-			runID = generatedRunID
-		}
+	snapshotWindow, err := c.snapshotWindowPolicy.Determine(request.RequestedWindow)
+	if err != nil {
+		return WindowSyncResult{}, fmt.Errorf("determine snapshot window: %w", err)
+	}
+	snapshot, err := c.syncRepository.LoadExistingWindow(ctx, request.Connection, snapshotWindow)
+	if err != nil {
+		return WindowSyncResult{}, fmt.Errorf("load existing snapshot: %w", err)
+	}
+
+	diffPlan := c.diffPlanner.Plan(batch, snapshot)
+	applyPlan := c.applyPlanner.Plan(diffPlan)
+	applyErr := c.syncRepository.ApplySync(ctx, diffPlan, applyPlan)
+	if applyErr != nil {
+		return WindowSyncResult{}, fmt.Errorf("apply sync: %w", applyErr)
 	}
 
 	return WindowSyncResult{
-		RunID: runID,
+		RunID: c.runIDGenerator(),
 		Batch: batch,
-		Stats: domain.ProviderSyncStats{
-			ObservedAccounts:     len(batch.Accounts),
-			ObservedTransactions: len(batch.Transactions),
-		},
+		Stats: applyPlan.Stats,
+		Issues: append(
+			[]domain.ProviderSyncIssue(nil),
+			applyPlan.Issues...,
+		),
 	}, nil
-}
-
-//nolint:ireturn // Internal executor flow resolves connectors behind the shared connector seam.
-func (c *WindowSyncExecutor) resolveConnector(connectorID domain.ProviderConnectorID) (Connector, error) {
-	if normalizeConnectorID(connectorID) == "" {
-		return nil, ErrConnectorIDRequired
-	}
-	if c.connectorRegistry == nil {
-		return nil, fmt.Errorf("%w: %s", ErrConnectorNotConfigured, connectorID)
-	}
-	connector, err := c.connectorRegistry.Resolve(connectorID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve sync connector: %w", err)
-	}
-	return connector, nil
 }

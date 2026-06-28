@@ -129,7 +129,7 @@ type ProviderSyncRun struct {
 	JobID           string
 	Reason          string
 	RequestedWindow ProviderSyncWindow
-	CandidateWindow ProviderSyncWindow
+	SnapshotWindow  ProviderSyncWindow
 	Status          ProviderSyncRunStatus
 	StartedAt       time.Time
 	CompletedAt     *time.Time

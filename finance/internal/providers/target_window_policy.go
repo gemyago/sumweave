@@ -56,14 +56,18 @@ func (p *CheckpointTargetWindowPolicy) Determine(
 }
 
 func validateProviderSyncWindow(window domain.ProviderSyncWindow) error {
+	return validateSyncWindow(window, ErrInvalidProviderSyncStateWindow)
+}
+
+func validateSyncWindow(window domain.ProviderSyncWindow, invalidErr error) error {
 	if window.Start.IsZero() {
-		return fmt.Errorf("%w: start is zero", ErrInvalidProviderSyncStateWindow)
+		return fmt.Errorf("%w: start is zero", invalidErr)
 	}
 	if window.End.IsZero() {
-		return fmt.Errorf("%w: end is zero", ErrInvalidProviderSyncStateWindow)
+		return fmt.Errorf("%w: end is zero", invalidErr)
 	}
 	if !window.End.After(window.Start) {
-		return fmt.Errorf("%w: end must be after start", ErrInvalidProviderSyncStateWindow)
+		return fmt.Errorf("%w: end must be after start", invalidErr)
 	}
 
 	return nil

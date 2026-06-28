@@ -82,11 +82,11 @@ type FetchRequest struct {
 }
 
 type ExistingWindowSnapshot struct {
-	Connection      domain.ProviderConnectionRef
-	CandidateWindow domain.ProviderSyncWindow
-	Accounts        []domain.ConnectionProviderAccount
-	Transactions    []domain.Transaction
-	Matches         []domain.ProviderTransactionMatch
+	Connection     domain.ProviderConnectionRef
+	SnapshotWindow domain.ProviderSyncWindow
+	Accounts       []domain.ConnectionProviderAccount
+	Transactions   []domain.Transaction
+	Matches        []domain.ProviderTransactionMatch
 }
 
 type Connector interface {

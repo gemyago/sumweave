@@ -33,7 +33,7 @@ type ProviderTransactionAction struct {
 type ProviderDiffPlan struct {
 	Connection             domain.ProviderConnectionRef
 	RequestedWindow        domain.ProviderSyncWindow
-	CandidateWindow        domain.ProviderSyncWindow
+	SnapshotWindow         domain.ProviderSyncWindow
 	AccountObservations    []domain.ProviderAccountObservation
 	BalanceObservations    []domain.ProviderBalanceObservation
 	TransactionActions     []ProviderTransactionAction
@@ -56,7 +56,7 @@ func (p *DiffPlanner) Plan(
 	plan := ProviderDiffPlan{
 		Connection:             batch.Connection,
 		RequestedWindow:        batch.RequestedWindow,
-		CandidateWindow:        snapshot.CandidateWindow,
+		SnapshotWindow:         snapshot.SnapshotWindow,
 		AccountObservations:    batch.Accounts,
 		BalanceObservations:    batch.Balances,
 		RawPayloadObservations: batch.RawPayloads,

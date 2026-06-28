@@ -41,6 +41,20 @@ func TestStaticConnectorRegistry(t *testing.T) {
 		assert.ErrorContains(t, err, string(unknownConnectorID))
 	})
 
+	t.Run("treats connector ids as literal values without trimming", func(t *testing.T) {
+		registry := NewStaticConnectorRegistry(
+			&stubConnector{connectorID: domain.ProviderConnectorIDMonobank},
+			&stubConnector{connectorID: domain.ProviderConnectorID("   ")},
+		)
+
+		_, err := registry.Resolve(domain.ProviderConnectorID(" " + string(domain.ProviderConnectorIDMonobank) + " "))
+		require.ErrorIs(t, err, ErrConnectorNotConfigured)
+
+		resolvedWhitespace, err := registry.Resolve(domain.ProviderConnectorID("   "))
+		require.NoError(t, err)
+		assert.Equal(t, domain.ProviderConnectorID("   "), resolvedWhitespace.ConnectorID())
+	})
+
 	t.Run("skips nil empty and duplicate connector registrations", func(t *testing.T) {
 		firstMonobankConnector := &stubConnector{connectorID: domain.ProviderConnectorIDMonobank}
 		duplicateMonobankConnector := &stubConnector{connectorID: domain.ProviderConnectorIDMonobank}
@@ -90,6 +104,24 @@ func TestStaticProviderProfileRegistry(t *testing.T) {
 		_, err = registry.Resolve(unknownProviderID)
 		require.ErrorIs(t, err, ErrProviderNotConfigured)
 		assert.ErrorContains(t, err, string(unknownProviderID))
+	})
+
+	t.Run("treats provider ids as literal values without trimming", func(t *testing.T) {
+		whitespaceProfile := ProviderProfile{
+			ProviderID:  domain.ProviderID("   "),
+			DisplayName: "whitespace",
+		}
+		registry := NewStaticProviderProfileRegistry(
+			PKOProfile(),
+			whitespaceProfile,
+		)
+
+		_, err := registry.Resolve(domain.ProviderID(" " + string(domain.ProviderIDPKO) + " "))
+		require.ErrorIs(t, err, ErrProviderNotConfigured)
+
+		resolvedWhitespace, err := registry.Resolve(domain.ProviderID("   "))
+		require.NoError(t, err)
+		assert.Equal(t, whitespaceProfile, resolvedWhitespace)
 	})
 
 	t.Run("skips empty and duplicate provider registrations", func(t *testing.T) {

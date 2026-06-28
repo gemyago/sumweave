@@ -111,6 +111,7 @@ This repo does not maintain an npm/package distribution pipeline.
 AI must always follow the rules and conventions defined in this section. This section defines a project specific rules and conventions. Module level rules and conventions must also be followed.
 
 The rules are:
+- **DO NOT** over engineer or over-complicate. Address problems present now or explicitly requested.
 - Update project rules and conventions when user corrects the behavior of AI.
 - Each rule must aim to be a simple and clear one line (50-80 characters)
 - `docs/ARCHITECTURE.md` is the source of truth for product direction.
@@ -121,11 +122,6 @@ The rules are:
 - Prefer core Go, Go app, and UI as real product scope.
 - Keep package/release pipeline code removed unless explicitly revived.
 - Natural-language approval completes OpenSpec review by default.
-- OpenSpec gates pass only with a clean relevant git status.
-- Preserve outside-flow additions; never revert as contamination.
-- Archive OpenSpec changes before any final submission step.
-- Use `make test-live-compile` for regular live-lane build coverage.
-- Prefer manual browser e2e over new dedicated test modules.
 - Seed/reseed requests default to the first `.local-users` entry.
 - Reseed means replace local seeded data, then reopen the live DB.
 
@@ -137,6 +133,7 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 - components should not be doing nil checks to ensure if dependencies are initialized, this is a job of the DI container or the caller. This may only be justified if the dependency is optional.
 - unless explicitly documented, internal logic do not need to trim or otherwise normalize identifiers. Upper orchestration layer may chose to do it if needed.
 - when logging attributes, use camelCase for keys
+- required component dependencies must be enforced in constructor, not in methods that use them
 
 ### Testing and mocking
 

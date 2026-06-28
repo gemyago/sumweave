@@ -21,10 +21,10 @@ This plan captures what is already present and what still needs to be built to i
 
 - Connector resolution.
   The executor needs a way to pick the right `Connector` from `request.Connection.ConnectorID`.
-- Candidate window policy.
-  The doc requires loading a wider window than the requested one, but there is no policy yet to compute that window. The tests only show an example `-72h/+72h`, not real behavior.
+- Snapshot window policy.
+  The doc requires loading a persisted comparison window for the requested one, and that snapshot window may later widen beyond the requested bounds.
 - Snapshot loading.
-  The executor needs a repository method that loads `ExistingWindowSnapshot` for one connection and one candidate window.
+  The executor needs a repository method that loads `ExistingWindowSnapshot` for one connection and one snapshot window.
 - Atomic apply writer.
   The doc says apply is atomic. There is no executor-side dependency that can persist accounts, balances, transactions, matches, raw payloads, run, and state in one unit.
 - Run/state persistence.
@@ -39,9 +39,9 @@ This plan captures what is already present and what still needs to be built to i
 - No V2 persistence for `ProviderSyncRun` / `ProviderSyncState`.
   The current store only has legacy `BankConnectionSyncRun`, not the new V2 shapes.
 - No bulk match loading API.
-  Diff planning expects all candidate matches, but persistence only supports exact lookup by provider ID or fingerprint in `finance/persistence/provider_sync_store.go:486-577`.
+  Diff planning expects all snapshot-window matches, but persistence only supports exact lookup by provider ID or fingerprint in `finance/persistence/provider_sync_store.go:486-577`.
 - No transaction window query.
-  Current `ListTransactions` does not filter by date window in `finance/persistence/core_store.go:487-519`, but the new flow needs candidate-window loading.
+  Current `ListTransactions` does not filter by date window in `finance/persistence/core_store.go:487-519`, but the new flow needs snapshot-window loading.
 - No executor-facing transaction boundary abstraction.
   The new flow needs one atomic write step; the current APIs are many individual saves.
 
@@ -49,10 +49,10 @@ This plan captures what is already present and what still needs to be built to i
 
 1. Generate `runID`.
 2. Resolve connector from `request.Connection`.
-3. Compute candidate window from `request.RequestedWindow` and maybe `request.SyncState`.
+3. Compute snapshot window from `request.RequestedWindow` and maybe `request.SyncState`.
 4. Persist a `ProviderSyncRun` as `running` and update sync state `LastAttemptAt`.
 5. Call `connector.Fetch(...)`.
-6. Load `ExistingWindowSnapshot` for the candidate window.
+6. Load `ExistingWindowSnapshot` for the snapshot window.
 7. Build `diffPlan` with `DiffPlanner`.
 8. Build `applyPlan` with `ApplyPlanner`.
 9. Persist all writes atomically:
@@ -81,8 +81,8 @@ type ConnectorRegistry interface {
 	Resolve(connectorID domain.ProviderConnectorID) (Connector, error)
 }
 
-type CandidateWindowPolicy interface {
-	Expand(requested domain.ProviderSyncWindow, state *domain.ProviderSyncState) domain.ProviderSyncWindow
+type SnapshotWindowPolicy interface {
+	Determine(requestedWindow domain.ProviderSyncWindow) (domain.ProviderSyncWindow, error)
 }
 
 type SyncRepository interface {
@@ -94,4 +94,4 @@ type SyncRepository interface {
 
 ## Short Answer
 
-To build `Execute`, you do not need more diff/apply logic first. You need orchestration dependencies and persistence support: connector lookup, candidate window calculation, snapshot loading, atomic apply, and V2 run/state storage. The pure planning core is already there.
+To build `Execute`, you do not need more diff/apply logic first. You need orchestration dependencies and persistence support: connector lookup, snapshot window calculation, snapshot loading, atomic apply, and V2 run/state storage. The pure planning core is already there.

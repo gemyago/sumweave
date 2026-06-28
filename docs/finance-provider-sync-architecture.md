@@ -11,7 +11,7 @@ This document explains the finance provider sync flow at a high level.
 - Target window: the overall coverage range the sync session wants to bring up to date.
 - Requested window: the time range one window sync execution asks the provider to return.
 - Chunk window: one requested window produced when a larger target window is split.
-- Candidate window: a wider persisted lookup range used to catch the same transaction when the provider later shifts its timestamp or status.
+- Snapshot window: the persisted snapshot lookup range used to catch the same transaction when the provider later shifts its timestamp or status.
 - Diff plan: the write-free plan describing what should be created or updated.
 - Diff planner: the pure component that builds the diff plan for one requested sync window.
 - Sync orchestrator: the component that loads the latest sync state, chooses the target window, splits it into chunk windows, and coordinates per-window execution.
@@ -97,7 +97,7 @@ This keeps provider data separate from the user-facing finance ledger.
 Before changing anything, the system loads the existing persisted data that may
 match the incoming provider observations.
 
-This lookup window can be a bit wider than the requested sync window.
+This snapshot lookup window can be a bit wider than the requested sync window.
 
 We need that because providers do not always report the same transaction with
 exactly the same timestamp or status over time. A pending transaction may later
