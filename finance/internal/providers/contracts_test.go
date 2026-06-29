@@ -98,12 +98,14 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 				DisplayName:       "PKO " + fake.Company().Name(),
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
 				ExternalID:        "external-" + fake.UUID().V4(),
+				Secret:            "secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
 			tokenResult: LinkResult{
 				DisplayName:       "token-link-" + fake.Lorem().Word(),
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
 				ExternalID:        "external-" + fake.UUID().V4(),
+				Secret:            "secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
 			fetchResult: domain.ProviderSyncBatch{Connection: connection, RequestedWindow: window},
@@ -123,7 +125,7 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 			Start:   startResult,
 		})
 		require.NoError(t, err)
-		_, err = contract.LinkToken(t.Context(), LinkTokenRequest{
+		tokenResult, err := contract.LinkToken(t.Context(), LinkTokenRequest{
 			Profile: profile,
 			Token:   "token-" + fake.UUID().V4(),
 		})
@@ -142,6 +144,8 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 		assert.Equal(t, profile, connector.lastStart.Profile)
 		assert.Equal(t, startResult.State, connector.lastFinish.State)
 		assert.Equal(t, finishResult.ProviderReference, connector.finishResult.ProviderReference)
+		assert.Equal(t, connector.finishResult.Secret, finishResult.Secret)
+		assert.Equal(t, connector.tokenResult.Secret, tokenResult.Secret)
 		assert.Equal(t, batch.Connection, connector.fetchResult.Connection)
 		assert.Equal(t, connection, connector.lastFetch.Connection)
 		assert.Equal(t, secret, connector.lastFetch.Secret)

@@ -6,6 +6,8 @@ import (
 	"github.com/gemyago/signal-foundry/finance/domain"
 )
 
+const marketSegmentPersonal = "personal"
+
 type ConnectorCapabilities struct {
 	SupportsStartLink  bool
 	SupportsFinishLink bool
@@ -21,16 +23,6 @@ type ProviderProfile struct {
 	MarketSegment string
 }
 
-func MonobankProfile() ProviderProfile {
-	return ProviderProfile{
-		ProviderID:    domain.ProviderIDMonobank,
-		ConnectorID:   domain.ProviderConnectorIDMonobank,
-		DisplayName:   "Monobank",
-		CountryCode:   "UA",
-		MarketSegment: "personal",
-	}
-}
-
 // PKOProfile keeps the product-level PKO provider composed with Enable Banking.
 func PKOProfile() ProviderProfile {
 	return ProviderProfile{
@@ -38,7 +30,7 @@ func PKOProfile() ProviderProfile {
 		ConnectorID:   domain.ProviderConnectorIDEnableBanking,
 		DisplayName:   "PKO Bank Polski",
 		CountryCode:   "PL",
-		MarketSegment: "personal",
+		MarketSegment: marketSegmentPersonal,
 	}
 }
 
@@ -70,6 +62,7 @@ type LinkResult struct {
 	DisplayName       string
 	ProviderReference string
 	ExternalID        string
+	Secret            string
 	State             domain.BankConnectionState
 	RawPayloads       []domain.ProviderRawPayloadObservation
 }

@@ -79,18 +79,36 @@ func TestStaticConnectorRegistry(t *testing.T) {
 
 func TestStaticProviderProfileRegistry(t *testing.T) {
 	t.Run("resolves registered finance provider profiles", func(t *testing.T) {
+		monobankProfile := ProviderProfile{
+			ProviderID:    domain.ProviderIDMonobank,
+			ConnectorID:   domain.ProviderConnectorIDMonobank,
+			DisplayName:   "Monobank",
+			CountryCode:   "UA",
+			MarketSegment: marketSegmentPersonal,
+		}
+		syntheticProfile := ProviderProfile{
+			ProviderID:    domain.ProviderIDSynthetic,
+			ConnectorID:   domain.ProviderConnectorIDSynthetic,
+			DisplayName:   "Synthetic",
+			CountryCode:   "ZZ",
+			MarketSegment: "test",
+		}
 		registry := NewStaticProviderProfileRegistry(
-			MonobankProfile(),
+			monobankProfile,
 			PKOProfile(),
+			syntheticProfile,
 		)
 
 		resolvedMonobank, err := registry.Resolve(domain.ProviderIDMonobank)
 		require.NoError(t, err)
 		resolvedPKO, err := registry.Resolve(domain.ProviderIDPKO)
 		require.NoError(t, err)
+		resolvedSynthetic, err := registry.Resolve(domain.ProviderIDSynthetic)
+		require.NoError(t, err)
 
-		assert.Equal(t, MonobankProfile(), resolvedMonobank)
+		assert.Equal(t, monobankProfile, resolvedMonobank)
 		assert.Equal(t, PKOProfile(), resolvedPKO)
+		assert.Equal(t, syntheticProfile, resolvedSynthetic)
 	})
 
 	t.Run("returns bounded errors for empty and unknown provider ids", func(t *testing.T) {
@@ -125,8 +143,14 @@ func TestStaticProviderProfileRegistry(t *testing.T) {
 	})
 
 	t.Run("skips empty and duplicate provider registrations", func(t *testing.T) {
-		firstMonobankProfile := MonobankProfile()
-		duplicateMonobankProfile := MonobankProfile()
+		firstMonobankProfile := ProviderProfile{
+			ProviderID:    domain.ProviderIDMonobank,
+			ConnectorID:   domain.ProviderConnectorIDMonobank,
+			DisplayName:   "Monobank",
+			CountryCode:   "UA",
+			MarketSegment: marketSegmentPersonal,
+		}
+		duplicateMonobankProfile := firstMonobankProfile
 		duplicateMonobankProfile.DisplayName = "Monobank Duplicate"
 		emptyProviderProfile := ProviderProfile{DisplayName: "empty"}
 
