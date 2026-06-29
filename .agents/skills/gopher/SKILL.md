@@ -33,6 +33,7 @@ Nearest project instructions **win** when they conflict with anything below.
 - Methods with more than 3 arguments (context does not count) is a warning sign. Use params struct instead.
 - Names such as "tools", "helpers", "utils" e.t.c are banned. Use descriptive names instead.
 - Prefer **functional options** for optional constructor parameters: a `type FooOption func(*Foo)` (or `*fooConfig`), `WithBar(...)` functions that set fields, and `NewFoo(opts ...FooOption)` applying them in order. Avoid a separate `NewFooWithOpts` when the zero-arg `NewFoo()` case is the default.
+- Do not add additional constructors if they're not intended for real production use. Almost always use a single constructor.
 
 ### Naming constructors
 
@@ -119,7 +120,9 @@ More detail is in **Testing best practices** below. Common points:
 - **Avoid** testing framework internals or standard library functions.
 - Test only logic that exists in the component if mocked dependencies are used
 
-If project documents specific mocking strategy, follow it. If you have to create mock manually, follow these principles:
+If project documents specific mocking strategy, follow it strictly. 
+
+**Only if project doesn't document mocking strategy** follow these principles:
 
 - **Pragmatic mocks** — simplest thing that isolates the unit under test.
 - **Minimal setup** — only what the case needs.

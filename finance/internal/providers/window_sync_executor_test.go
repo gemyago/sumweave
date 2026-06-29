@@ -42,7 +42,7 @@ func (p *stubSnapshotWindowPolicy) Determine(
 	return p.window, nil
 }
 
-type stubSyncRepository struct {
+type stubWindowSyncStore struct {
 	snapshot          ExistingWindowSnapshot
 	loadErr           error
 	applyErr          error
@@ -52,7 +52,7 @@ type stubSyncRepository struct {
 	appliedApplyPlans []ApplyPlan
 }
 
-func (r *stubSyncRepository) LoadExistingWindow(
+func (r *stubWindowSyncStore) LoadExistingWindow(
 	_ context.Context,
 	connection domain.ProviderConnectionRef,
 	window domain.ProviderSyncWindow,
@@ -65,7 +65,7 @@ func (r *stubSyncRepository) LoadExistingWindow(
 	return r.snapshot, nil
 }
 
-func (r *stubSyncRepository) ApplySync(
+func (r *stubWindowSyncStore) ApplySync(
 	_ context.Context,
 	diffPlan ProviderDiffPlan,
 	applyPlan ApplyPlan,
@@ -93,8 +93,8 @@ func TestWindowSyncExecutor(t *testing.T) {
 		}
 	}
 
-	makeRepository := func() *stubSyncRepository {
-		return &stubSyncRepository{
+	makeStore := func() *stubWindowSyncStore {
+		return &stubWindowSyncStore{
 			snapshot: ExistingWindowSnapshot{},
 		}
 	}
@@ -106,11 +106,11 @@ func TestWindowSyncExecutor(t *testing.T) {
 				connector: &stubConnector{connectorID: domain.ProviderConnectorIDMonobank},
 			}
 			request := makeRequest(fake, domain.ProviderIDMonobank, domain.ProviderConnectorIDMonobank)
-			repository := makeRepository()
+			store := makeStore()
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(registry),
-				WithSyncRepository(repository),
+				WithWindowSyncStore(store),
 				WithRunIDGenerator(func() string { return "run-" + fake.UUID().V4() }),
 			)
 			require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 			assert.Equal(t, request.Connection, result.Batch.Connection)
 			assert.Equal(t, request.RequestedWindow, result.Batch.RequestedWindow)
 			assert.Equal(t, domain.ProviderSyncStats{}, result.Stats)
-			assert.Equal(t, []domain.ProviderSyncWindow{request.RequestedWindow}, repository.loadCalls)
+			assert.Equal(t, []domain.ProviderSyncWindow{request.RequestedWindow}, store.loadCalls)
 		})
 
 		t.Run("resolves pko connections through enable banking connector id", func(t *testing.T) {
@@ -131,11 +131,11 @@ func TestWindowSyncExecutor(t *testing.T) {
 				connector: &stubConnector{connectorID: domain.ProviderConnectorIDEnableBanking},
 			}
 			request := makeRequest(fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking)
-			repository := makeRepository()
+			store := makeStore()
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(registry),
-				WithSyncRepository(repository),
+				WithWindowSyncStore(store),
 				WithRunIDGenerator(func() string { return "run-" + fake.UUID().V4() }),
 			)
 			require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(registry),
-				WithSyncRepository(makeRepository()),
+				WithWindowSyncStore(makeStore()),
 			)
 			require.NoError(t, err)
 
@@ -179,7 +179,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(registry),
-				WithSyncRepository(makeRepository()),
+				WithWindowSyncStore(makeStore()),
 			)
 			require.NoError(t, err)
 
@@ -200,7 +200,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(registry),
-				WithSyncRepository(makeRepository()),
+				WithWindowSyncStore(makeStore()),
 			)
 			require.NoError(t, err)
 
@@ -271,7 +271,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 				End:   request.RequestedWindow.End.Add(6 * time.Hour),
 			}
 			snapshotPolicy := &stubSnapshotWindowPolicy{window: snapshotWindow}
-			repository := &stubSyncRepository{
+			store := &stubWindowSyncStore{
 				snapshot: ExistingWindowSnapshot{
 					Connection:     request.Connection,
 					SnapshotWindow: snapshotWindow,
@@ -281,7 +281,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(&stubConnectorRegistry{connector: connector}),
 				WithSnapshotWindowPolicy(snapshotPolicy),
-				WithSyncRepository(repository),
+				WithWindowSyncStore(store),
 				WithRunIDGenerator(func() string { return "run-" + fake.UUID().V4() }),
 			)
 			require.NoError(t, err)
@@ -306,14 +306,14 @@ func TestWindowSyncExecutor(t *testing.T) {
 			assert.Equal(t, transaction, result.Batch.Transactions[0])
 			assert.Equal(t, rawPayload, result.Batch.RawPayloads[0])
 			assert.Equal(t, []domain.ProviderSyncWindow{request.RequestedWindow}, snapshotPolicy.determineCalls)
-			assert.Equal(t, []domain.ProviderConnectionRef{request.Connection}, repository.loadConnections)
-			assert.Equal(t, []domain.ProviderSyncWindow{snapshotWindow}, repository.loadCalls)
-			require.Len(t, repository.appliedDiffPlans, 1)
-			require.Len(t, repository.appliedApplyPlans, 1)
-			assert.Equal(t, request.RequestedWindow, repository.appliedDiffPlans[0].RequestedWindow)
-			assert.Equal(t, snapshotWindow, repository.appliedDiffPlans[0].SnapshotWindow)
-			require.Len(t, repository.appliedDiffPlans[0].TransactionActions, 1)
-			require.Len(t, repository.appliedApplyPlans[0].TransactionWrites, 1)
+			assert.Equal(t, []domain.ProviderConnectionRef{request.Connection}, store.loadConnections)
+			assert.Equal(t, []domain.ProviderSyncWindow{snapshotWindow}, store.loadCalls)
+			require.Len(t, store.appliedDiffPlans, 1)
+			require.Len(t, store.appliedApplyPlans, 1)
+			assert.Equal(t, request.RequestedWindow, store.appliedDiffPlans[0].RequestedWindow)
+			assert.Equal(t, snapshotWindow, store.appliedDiffPlans[0].SnapshotWindow)
+			require.Len(t, store.appliedDiffPlans[0].TransactionActions, 1)
+			require.Len(t, store.appliedApplyPlans[0].TransactionWrites, 1)
 			assert.Equal(
 				t,
 				domain.ProviderSyncStats{
@@ -354,7 +354,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(&stubConnectorRegistry{connector: connector}),
-				WithSyncRepository(makeRepository()),
+				WithWindowSyncStore(makeStore()),
 			)
 			require.NoError(t, err)
 
@@ -364,35 +364,35 @@ func TestWindowSyncExecutor(t *testing.T) {
 			assert.ErrorContains(t, err, "fetch sync batch")
 		})
 
-		t.Run("returns snapshot policy errors before repository load", func(t *testing.T) {
+		t.Run("returns snapshot policy errors before store load", func(t *testing.T) {
 			fake := faker.New()
 			request := makeRequest(fake, domain.ProviderIDSynthetic, domain.ProviderConnectorIDSynthetic)
 			expectedErr := fmt.Errorf("snapshot-policy-%s", fake.UUID().V4())
 			connector := &stubConnector{connectorID: domain.ProviderConnectorIDSynthetic}
 			snapshotPolicy := &stubSnapshotWindowPolicy{err: expectedErr}
-			repository := makeRepository()
+			store := makeStore()
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(&stubConnectorRegistry{connector: connector}),
 				WithSnapshotWindowPolicy(snapshotPolicy),
-				WithSyncRepository(repository),
+				WithWindowSyncStore(store),
 			)
 			require.NoError(t, err)
 
 			_, err = executor.Execute(t.Context(), request)
 			require.ErrorIs(t, err, expectedErr)
 			assert.Equal(t, 1, connector.fetchCalls)
-			assert.Empty(t, repository.loadCalls)
+			assert.Empty(t, store.loadCalls)
 			assert.ErrorContains(t, err, "determine snapshot window")
 		})
 
-		t.Run("fails when the sync repository is missing", func(t *testing.T) {
+		t.Run("fails when the window sync store is missing", func(t *testing.T) {
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(&stubConnectorRegistry{
 					connector: &stubConnector{connectorID: domain.ProviderConnectorIDSynthetic},
 				}),
 			)
-			require.ErrorIs(t, err, ErrSyncRepositoryRequired)
+			require.ErrorIs(t, err, ErrWindowSyncStoreRequired)
 			assert.Nil(t, executor)
 		})
 
@@ -401,17 +401,17 @@ func TestWindowSyncExecutor(t *testing.T) {
 			request := makeRequest(fake, domain.ProviderIDSynthetic, domain.ProviderConnectorIDSynthetic)
 			expectedErr := fmt.Errorf("load-snapshot-%s", fake.UUID().V4())
 			connector := &stubConnector{connectorID: domain.ProviderConnectorIDSynthetic}
-			repository := &stubSyncRepository{loadErr: expectedErr}
+			store := &stubWindowSyncStore{loadErr: expectedErr}
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(&stubConnectorRegistry{connector: connector}),
-				WithSyncRepository(repository),
+				WithWindowSyncStore(store),
 			)
 			require.NoError(t, err)
 
 			_, err = executor.Execute(t.Context(), request)
 			require.ErrorIs(t, err, expectedErr)
-			assert.Equal(t, []domain.ProviderSyncWindow{request.RequestedWindow}, repository.loadCalls)
+			assert.Equal(t, []domain.ProviderSyncWindow{request.RequestedWindow}, store.loadCalls)
 			assert.ErrorContains(t, err, "load existing snapshot")
 		})
 
@@ -435,21 +435,21 @@ func TestWindowSyncExecutor(t *testing.T) {
 					}},
 				},
 			}
-			repository := &stubSyncRepository{
+			store := &stubWindowSyncStore{
 				snapshot: ExistingWindowSnapshot{},
 				applyErr: expectedErr,
 			}
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(&stubConnectorRegistry{connector: connector}),
-				WithSyncRepository(repository),
+				WithWindowSyncStore(store),
 			)
 			require.NoError(t, err)
 
 			_, err = executor.Execute(t.Context(), request)
 			require.ErrorIs(t, err, expectedErr)
-			require.Len(t, repository.appliedDiffPlans, 1)
-			require.Len(t, repository.appliedApplyPlans, 1)
+			require.Len(t, store.appliedDiffPlans, 1)
+			require.Len(t, store.appliedApplyPlans, 1)
 			assert.ErrorContains(t, err, "apply sync")
 		})
 
@@ -480,7 +480,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 					request.RequestedWindow = requestedWindow
 					executor, err := NewWindowSyncExecutor(
 						WithConnectorRegistry(&stubConnectorRegistry{connector: connector}),
-						WithSyncRepository(makeRepository()),
+						WithWindowSyncStore(makeStore()),
 					)
 					require.NoError(t, err)
 
@@ -496,7 +496,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 		t.Run("fails when the connector registry override is nil", func(t *testing.T) {
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(nil),
-				WithSyncRepository(makeRepository()),
+				WithWindowSyncStore(makeStore()),
 			)
 			require.ErrorIs(t, err, ErrConnectorRegistryRequired)
 			assert.Nil(t, executor)
@@ -510,7 +510,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 
 		executor, err := NewWindowSyncExecutor(
 			WithConnectors(monobankConnector, enableBankingConnector, monobankConnector),
-			WithSyncRepository(makeRepository()),
+			WithWindowSyncStore(makeStore()),
 			WithRunIDGenerator(func() string { return "run-" + fake.UUID().V4() }),
 		)
 		require.NoError(t, err)

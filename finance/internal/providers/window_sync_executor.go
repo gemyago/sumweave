@@ -12,7 +12,7 @@ import (
 var (
 	ErrInvalidRequestedWindow    = errors.New("invalid requested window")
 	ErrConnectorRegistryRequired = errors.New("connector registry is required")
-	ErrSyncRepositoryRequired    = errors.New("sync repository is required")
+	ErrWindowSyncStoreRequired   = errors.New("window sync store is required")
 )
 
 type ConnectorRegistry interface {
@@ -35,7 +35,7 @@ type WindowSyncResult struct {
 	Issues []domain.ProviderSyncIssue
 }
 
-type SyncRepository interface {
+type WindowSyncStore interface {
 	LoadExistingWindow(
 		ctx context.Context,
 		connection domain.ProviderConnectionRef,
@@ -49,7 +49,7 @@ type WindowSyncExecutorOption func(*WindowSyncExecutor)
 type WindowSyncExecutor struct {
 	connectorRegistry    ConnectorRegistry
 	snapshotWindowPolicy SnapshotWindowPolicy
-	syncRepository       SyncRepository
+	windowSyncStore      WindowSyncStore
 	diffPlanner          *DiffPlanner
 	applyPlanner         *ApplyPlanner
 	runIDGenerator       func() string
@@ -79,9 +79,9 @@ func WithSnapshotWindowPolicy(snapshotWindowPolicy SnapshotWindowPolicy) WindowS
 	}
 }
 
-func WithSyncRepository(syncRepository SyncRepository) WindowSyncExecutorOption {
+func WithWindowSyncStore(windowSyncStore WindowSyncStore) WindowSyncExecutorOption {
 	return func(executor *WindowSyncExecutor) {
-		executor.syncRepository = syncRepository
+		executor.windowSyncStore = windowSyncStore
 	}
 }
 
@@ -103,8 +103,8 @@ func NewWindowSyncExecutor(opts ...WindowSyncExecutorOption) (*WindowSyncExecuto
 	if executor.connectorRegistry == nil {
 		return nil, ErrConnectorRegistryRequired
 	}
-	if executor.syncRepository == nil {
-		return nil, ErrSyncRepositoryRequired
+	if executor.windowSyncStore == nil {
+		return nil, ErrWindowSyncStoreRequired
 	}
 	return executor, nil
 }
@@ -137,14 +137,14 @@ func (c *WindowSyncExecutor) Execute(
 	if err != nil {
 		return WindowSyncResult{}, fmt.Errorf("determine snapshot window: %w", err)
 	}
-	snapshot, err := c.syncRepository.LoadExistingWindow(ctx, request.Connection, snapshotWindow)
+	snapshot, err := c.windowSyncStore.LoadExistingWindow(ctx, request.Connection, snapshotWindow)
 	if err != nil {
 		return WindowSyncResult{}, fmt.Errorf("load existing snapshot: %w", err)
 	}
 
 	diffPlan := c.diffPlanner.Plan(batch, snapshot)
 	applyPlan := c.applyPlanner.Plan(diffPlan)
-	applyErr := c.syncRepository.ApplySync(ctx, diffPlan, applyPlan)
+	applyErr := c.windowSyncStore.ApplySync(ctx, diffPlan, applyPlan)
 	if applyErr != nil {
 		return WindowSyncResult{}, fmt.Errorf("apply sync: %w", applyErr)
 	}

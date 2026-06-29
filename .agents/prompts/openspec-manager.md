@@ -293,6 +293,7 @@ Each appended round must include:
 - `manager-status.md` exists and reflects planning status.
 - `review-planning.md` contains the planning review verdict.
 - Review verdict says planning is ready.
+- `proposal.md`, `design.md`, and `tasks.md` are consistent; proposal is the scope authority.
 - Chunking preserves parent-task order.
 - Clean planning artifacts are committed, already committed, or explicitly have no remaining changes.
 - Relevant planning files are absent from `git status --short`.
@@ -524,10 +525,15 @@ Review mode:
 - If this is the first review, do the full review.
 - If this is a follow-up re-review, do a lighter pass focused on previous findings and obvious new issues.
 
+Artifact hierarchy (review in this order):
+- `proposal.md` is authoritative for task fit, scope, capabilities, and impact.
+- `design.md` must follow `proposal.md`; flag contradictions or scope not stated in the proposal.
+- `tasks.md` must cover proposal commitments via the design; flag drift between any pair.
+
 Review goals:
-- Confirm the proposal addresses the task.
-- Confirm design decisions fit the project.
-- Confirm `tasks.md` is complete and ordered logically.
+- Confirm `proposal.md` fully addresses the task with clear, bounded scope.
+- Confirm `design.md` follows `proposal.md` and design decisions fit the project.
+- Confirm `tasks.md` is complete, ordered logically, and aligned with proposal and design.
 - Decide implementation chunking.
 - Flag scattered related work across non-consecutive parent tasks as a planning issue.
 

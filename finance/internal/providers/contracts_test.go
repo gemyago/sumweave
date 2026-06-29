@@ -769,7 +769,7 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 		}
 		executor, err := NewWindowSyncExecutor(
 			WithConnectors(&stubConnector{connectorID: domain.ProviderConnectorIDEnableBanking}),
-			WithSyncRepository(&stubSyncRepository{}),
+			WithWindowSyncStore(&stubWindowSyncStore{}),
 			WithRunIDGenerator(func() string {
 				return "run-" + fake.UUID().V4()
 			}),

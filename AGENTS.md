@@ -137,7 +137,7 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 
 ### Testing and mocking
 
-- Mockery is a must choice for mocking dependencies. If you need to create mock manually - justify it and be ready to explain why it's better than using mockery.
+- Mockery is a **must choice** for mocking dependencies. If you need to create mock manually - **justify it** and be ready to explain why it's better than using mockery.
 
 ## Platform Agent Skills
 

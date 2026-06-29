@@ -9,5 +9,7 @@ packages:
     interfaces:
       SyncStateJournal:
       TargetWindowPolicy:
+      WindowSyncApplyStore:
+      WindowSyncPersistence:
       WindowChunkPolicy:
       WindowExecutor:

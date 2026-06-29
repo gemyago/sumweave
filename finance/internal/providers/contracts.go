@@ -89,6 +89,55 @@ type ExistingWindowSnapshot struct {
 	Matches        []domain.ProviderTransactionMatch
 }
 
+type WindowSyncSnapshotReader interface {
+	ListConnectionProviderAccounts(
+		ctx context.Context,
+		connectionID string,
+	) ([]domain.ConnectionProviderAccount, error)
+	ListProviderTransactionsInWindow(
+		ctx context.Context,
+		financeAccountIDs []string,
+		window domain.ProviderSyncWindow,
+	) ([]domain.Transaction, error)
+	ListProviderTransactionMatchesByTransactionIDs(
+		ctx context.Context,
+		connectionID string,
+		transactionIDs []string,
+	) ([]domain.ProviderTransactionMatch, error)
+}
+
+type WindowSyncApplyStore interface {
+	SaveConnectionProviderAccount(
+		ctx context.Context,
+		account domain.ConnectionProviderAccount,
+	) (domain.ConnectionProviderAccount, error)
+	SaveBalanceSnapshot(
+		ctx context.Context,
+		snapshot domain.BalanceSnapshot,
+	) (domain.BalanceSnapshot, error)
+	SaveRawPayload(
+		ctx context.Context,
+		payload domain.RawPayload,
+	) (domain.RawPayload, error)
+	SaveTransaction(
+		ctx context.Context,
+		transaction domain.Transaction,
+	) (domain.Transaction, error)
+	SaveProviderTransactionMatch(
+		ctx context.Context,
+		match domain.ProviderTransactionMatch,
+	) (domain.ProviderTransactionMatch, error)
+}
+
+type WindowSyncTransactor interface {
+	WithTransaction(ctx context.Context, fn func(WindowSyncApplyStore) error) error
+}
+
+type WindowSyncPersistence interface {
+	WindowSyncSnapshotReader
+	WindowSyncTransactor
+}
+
 type Connector interface {
 	ConnectorID() domain.ProviderConnectorID
 	Capabilities() ConnectorCapabilities
