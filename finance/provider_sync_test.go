@@ -317,6 +317,7 @@ func TestFinanceProviderSync(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Equal(t, domain.BankConnectionStateActive, connection.State)
+			assert.Equal(t, domain.ProviderConnectorIDMonobank, connection.ConnectorID)
 			assert.Equal(t, provider.linkResult.ProviderReference, connection.ProviderReference)
 
 			sqlDB, err := store.DB().DB()
@@ -656,6 +657,7 @@ func TestFinanceProviderSync(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, provider.startResult.AuthorizationURL, start.AuthorizationURL)
+		assert.Equal(t, provider.startResult.ProviderReference, start.ProviderReference)
 		connection, err := service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
 			ActorUserID: ownerUserID,
 			TenantID:    tenant.ID,
@@ -666,6 +668,7 @@ func TestFinanceProviderSync(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "pko", connection.Provider)
+		assert.Equal(t, domain.ProviderConnectorIDEnableBanking, connection.ConnectorID)
 		assert.Equal(t, provider.finishResult.ProviderReference, connection.ProviderReference)
 	})
 
@@ -697,6 +700,7 @@ func TestFinanceProviderSync(t *testing.T) {
 			RedirectURL: "https://app.example.test/callback/1",
 		})
 		require.NoError(t, err)
+		assert.Equal(t, provider.startResult.ProviderReference, startOne.ProviderReference)
 		firstConnection, err := service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
 			ActorUserID: ownerUserID,
 			TenantID:    tenant.ID,
@@ -726,6 +730,7 @@ func TestFinanceProviderSync(t *testing.T) {
 			RedirectURL: "https://app.example.test/callback/2",
 		})
 		require.NoError(t, err)
+		assert.Equal(t, provider.startResult.ProviderReference, startTwo.ProviderReference)
 		secondConnection, err := service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
 			ActorUserID: ownerUserID,
 			TenantID:    tenant.ID,
@@ -737,6 +742,7 @@ func TestFinanceProviderSync(t *testing.T) {
 
 		assert.Equal(t, firstConnection.ID, secondConnection.ID)
 		assert.Equal(t, firstConnection.CreatedAt, secondConnection.CreatedAt)
+		assert.Equal(t, domain.ProviderConnectorIDEnableBanking, secondConnection.ConnectorID)
 		assert.Equal(t, provider.finishResult.ProviderReference, secondConnection.ProviderReference)
 
 		connections, err := service.ListBankConnections(t.Context(), ListBankConnectionsParams{
@@ -847,6 +853,7 @@ func TestFinanceProviderSync(t *testing.T) {
 				ID:                "connection-" + fake.UUID().V4(),
 				TenantID:          tenant.ID,
 				Provider:          bankProviderPKO,
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
 				DisplayName:       "PKO " + fake.Company().Name(),
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
 				SecretID:          "secret-" + fake.UUID().V4(),
@@ -1009,6 +1016,12 @@ func TestFinanceProviderSync(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "pko", connection.Provider)
 		assert.Equal(t, providerSecret, mustLoadSecret(t, service, connection.SecretID))
+
+		rawPayloads, err := store.ListRawPayloads(t.Context(), connection.ID)
+		require.NoError(t, err)
+		require.Len(t, rawPayloads, 1)
+		assert.NotContains(t, string(rawPayloads[0].PayloadJSON), providerSecret)
+		assert.NotContains(t, string(rawPayloads[0].PayloadJSON), `"secret"`)
 
 		result, err := provider.Sync(t.Context(), ProviderSyncParams{
 			Secret: providerSecret,

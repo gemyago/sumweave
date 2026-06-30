@@ -36,6 +36,7 @@ func (s *Store) SaveBankConnection(
 			DoUpdates: clause.AssignmentColumns([]string{
 				columnTenantID,
 				"provider",
+				"connector_id",
 				"display_name",
 				"provider_reference",
 				"external_id",

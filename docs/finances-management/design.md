@@ -252,7 +252,7 @@ Minimal admin UI scope:
 Use the same persistence approach as the rest of the product direction:
 
 - GORM
-- explicit migrations
+- GORM auto-migrate for finance-owned tables
 - SQLite for local development
 - PostgreSQL for production when needed
 - UTC-first timestamps
@@ -269,6 +269,13 @@ must be stored for audit, debugging, and future connector bugfixes.
 
 Provider secrets and session credentials are stored in the same database for
 now, encrypted with a system-configured symmetric key.
+
+For provider sync v2 linking, pending redirect starts may keep connector-safe
+start-result data for finish/retry continuity, but successful durable bank
+connections persist only encrypted secret references plus provider/connector
+metadata. Durable raw link evidence should come from the final successful link
+result, not by copying pending redirect-start observations into connection
+evidence.
 
 Required rules:
 
@@ -388,6 +395,11 @@ opening-balance transaction so the ledger remains explainable.
 A bank connection represents provider-level linking credentials and sessions.
 One connection may expose one or more provider accounts.
 
+Provider sync v2 link ownership belongs to a `LinkCoordinator`. It resolves the
+user-facing product provider to the technical connector, coordinates redirect or
+token link flows, persists pending redirect starts for finish/retry, and writes
+final linked connections through encrypted secret storage.
+
 Initial providers:
 
 - Enable Banking / PKO: UI redirect and strong customer authentication flow.
@@ -396,6 +408,7 @@ Initial providers:
 Connections must track:
 
 - provider
+- connector identity
 - tenant
 - credential/session state
 - access expiry or re-authentication state when available

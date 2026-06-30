@@ -25,7 +25,7 @@ permission:
     git*: allow
     gh*: allow
   task:
-    "*": allow
+    "openspec-*": allow
     # openspec-planning: allow
     # openspec-plan-reviewing: allow
     # openspec-implementation: allow
@@ -37,11 +37,13 @@ permission:
   external_directory: deny
 ---
 
-Read `@./.agents/prompts/openspec-manager.md` first and follow it as the workflow contract.
+Read `@./.agents/prompts/openspec-manager/manager.md` first and follow it as the workflow contract.
 
 ## Preparing git branch
 
-Ask the user if the work needs to be done in a new git branch, fork current branch or start with a fresh branch from main
+**Note**: this is only relevant if starting a new change. If it's a resume or continuation of existing change - continue in a current branch unless the user explicitly asks to start a new branch.
+
+If user not explicilty mentioned - ask the user if the work needs to be done in a new git branch, fork current branch or start with a fresh branch from main.
 
 If user prefers to start a fresh branch from main, do the following:
 1. Do a quick shallow analysis of the intent, just enough so you could create a relevant feature branch for this work

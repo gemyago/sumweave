@@ -39,9 +39,20 @@ The main idea is:
 
 A user links a bank connection such as monobank or PKO.
 
+- Provider sync v2 owns this workflow through a `LinkCoordinator`.
+- The coordinator resolves the user-facing product provider to the technical connector before any connector call or durable write.
+- Redirect/SCA starts keep a pending, connector-safe start result for later finish/retry, while final secrets still go through encrypted secret storage.
+
 - The product-level provider is what the user sees.
 - The technical connector is how we talk to the provider.
 - For example, PKO is the provider, while Enable Banking is the connector.
+
+When linking succeeds, the durable bank connection keeps both identities:
+
+- the product provider the user chose
+- the technical connector used for sync and re-authentication
+
+That durable connector identity lets sync v2 build connection references directly from persisted connection metadata instead of re-deriving connector choice from provider-specific branches.
 
 ### 2. A sync is requested
 

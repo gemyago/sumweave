@@ -124,6 +124,7 @@ The rules are:
 - Natural-language approval completes OpenSpec review by default.
 - Seed/reseed requests default to the first `.local-users` entry.
 - Reseed means replace local seeded data, then reopen the live DB.
+- Avoid markdown tables, prefer lists or other formatting. Tables are hard to read by humans. Use tables only when user explicitly requests it.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 
@@ -137,7 +138,8 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 
 ### Testing and mocking
 
-- Mockery is a **must choice** for mocking dependencies. If you need to create mock manually - **justify it** and be ready to explain why it's better than using mockery.
+- Mockery is the default for dependency mocks in tests.
+- Hand-written stubs/fakes/spies need explicit justification.
 
 ## Platform Agent Skills
 

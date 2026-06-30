@@ -47,6 +47,9 @@ func TestMigrate(t *testing.T) {
 		assert.Contains(t, tableNames, "finance_pending_bank_link_starts")
 		assert.Contains(t, tableNames, "finance_provider_sync_state_journal_records")
 		assert.Contains(t, tableNames, "finance_synthetic_provider_states")
+		assert.Contains(t, tableColumns(t, store, "finance_bank_connections"), "connector_id")
+		assert.Contains(t, tableColumns(t, store, "finance_pending_bank_link_starts"), "connector_id")
+		assert.Contains(t, tableColumns(t, store, "finance_pending_bank_link_starts"), "start_result_json")
 	})
 
 	t.Run("keeps schema initialization portable across sqlite modes", func(t *testing.T) {
@@ -125,7 +128,7 @@ func TestMigrate(t *testing.T) {
 		assert.True(t, indexUnique(t, store, "finance_tenant_invites", "idx_finance_tenant_invites_code"))
 		assert.Equal(
 			t,
-			[]string{"tenant_id", "actor_user_id", "provider", "state"},
+			[]string{"tenant_id", "actor_user_id", "provider", "connector_id", "state"},
 			indexColumns(
 				t,
 				store,
@@ -223,4 +226,29 @@ func indexUnique(t *testing.T, store *Store, tableName string, indexName string)
 	require.NoError(t, rows.Err())
 	require.Failf(t, "missing index", "index %s not found on table %s", indexName, tableName)
 	return false
+}
+
+func tableColumns(t *testing.T, store *Store, tableName string) []string {
+	t.Helper()
+
+	sqlDB, err := store.db.DB()
+	require.NoError(t, err)
+
+	rows, err := sqlDB.QueryContext(t.Context(), fmt.Sprintf("PRAGMA table_info('%s')", tableName))
+	require.NoError(t, err)
+	defer rows.Close()
+
+	columns := make([]string, 0)
+	for rows.Next() {
+		var cid int
+		var name string
+		var dataType string
+		var notNull int
+		var defaultValue any
+		var pk int
+		require.NoError(t, rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk))
+		columns = append(columns, name)
+	}
+	require.NoError(t, rows.Err())
+	return columns
 }

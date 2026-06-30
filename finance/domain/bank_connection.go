@@ -20,6 +20,7 @@ type BankConnection struct {
 	ID                   string
 	TenantID             string
 	Provider             string
+	ConnectorID          ProviderConnectorID
 	DisplayName          string
 	ProviderReference    string
 	ExternalID           string
@@ -39,14 +40,22 @@ type PendingBankConnectionLinkStart struct {
 	TenantID          string
 	ActorUserID       string
 	Provider          string
+	ConnectorID       ProviderConnectorID
 	State             string
 	CallbackURL       string
 	AuthorizationURL  string
 	ProviderReference string
+	StartResult       PendingBankConnectionLinkStartResult
 	ExpiresAt         time.Time
 	ConsumedAt        *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+type PendingBankConnectionLinkStartResult struct {
+	State            string
+	AuthorizationURL string
+	RawPayloads      []ProviderRawPayloadObservation
 }
 
 type BankConnectionSchedule struct {

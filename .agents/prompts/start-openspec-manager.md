@@ -26,7 +26,7 @@ The user may specify which flow to use. If unsure, use the default implementatio
 
 ### Default implementation flow
 
-If not otherwise specified, follow the [openspec manager](openspec-manager.md) prompt to start the implementation.
+If not otherwise specified, follow the [openspec manager](openspec-manager/manager.md) prompt to start the implementation.
 
 ### Simple implementation flow
 

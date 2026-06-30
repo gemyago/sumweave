@@ -180,7 +180,7 @@ func (p *EnableBankingProvider) FinishLink(
 		RawPayloads: []ProviderRawPayload{{
 			Scope:            domain.RawPayloadScopeConnection,
 			ProviderObjectID: providerObjectID,
-			PayloadJSON:      mustJSON(body),
+			PayloadJSON:      mustJSON(redactRawPayloadSecrets(body)),
 		}},
 	}, nil
 }

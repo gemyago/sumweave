@@ -9,6 +9,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/credentials"
 	"github.com/gemyago/signal-foundry/finance/domain"
+	providers "github.com/gemyago/signal-foundry/finance/internal/providers"
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,7 @@ type failingProviderSyncStore struct {
 	saveTransactionErr       error
 	saveTransactionMatchErr  error
 	restorePendingStartErr   error
+	getPendingStartErr       error
 	deleteBankConnectionErr  error
 	deleteScheduleErr        error
 	deleteProviderAcctsErr   error
@@ -127,6 +129,30 @@ func (s *failingProviderSyncStore) SaveRawPayload(
 		return domain.RawPayload{}, s.saveRawPayloadErr
 	}
 	return s.Store.SaveRawPayload(ctx, payload)
+}
+
+func (s *failingProviderSyncStore) SavePendingStart(
+	ctx context.Context,
+	start domain.PendingBankConnectionLinkStart,
+) (domain.PendingBankConnectionLinkStart, error) {
+	return persistence.NewProviderLinkPersistence(s.Store).SavePendingStart(ctx, start)
+}
+
+func (s *failingProviderSyncStore) ConsumePendingStart(
+	ctx context.Context,
+	request providers.ConsumePendingStartRequest,
+) (*domain.PendingBankConnectionLinkStart, error) {
+	return persistence.NewProviderLinkPersistence(s.Store).ConsumePendingStart(ctx, request)
+}
+
+func (s *failingProviderSyncStore) RestorePendingStart(
+	ctx context.Context,
+	request providers.RestorePendingStartRequest,
+) error {
+	if s.restorePendingStartErr != nil {
+		return s.restorePendingStartErr
+	}
+	return persistence.NewProviderLinkPersistence(s.Store).RestorePendingStart(ctx, request)
 }
 
 func (s *failingProviderSyncStore) SaveBankConnection(
@@ -370,6 +396,9 @@ func (s *failingProviderSyncStore) GetPendingBankConnectionLinkStartByState(
 	provider string,
 	state string,
 ) (*domain.PendingBankConnectionLinkStart, error) {
+	if s.getPendingStartErr != nil {
+		return nil, s.getPendingStartErr
+	}
 	return s.Store.GetPendingBankConnectionLinkStartByState(ctx, provider, state)
 }
 
@@ -454,6 +483,58 @@ func TestProviderSyncInternals(t *testing.T) {
 		)
 		require.NoError(t, err)
 		return service, tenant, ownerUserID
+	}
+	saveLinkedConnectionForTest := func(
+		ctx context.Context,
+		service *Service,
+		tenantID string,
+		providerName string,
+		result ProviderLinkResult,
+	) error {
+		secretID, err := service.encryptAndSaveConnectionSecret(
+			ctx,
+			providerName,
+			result.ProviderReference,
+			result.Secret,
+		)
+		if err != nil {
+			return err
+		}
+		syncStore, err := service.bankSyncStore()
+		if err != nil {
+			return err
+		}
+		now := service.now().UTC()
+		connection := domain.BankConnection{
+			ID:                service.newID(),
+			TenantID:          tenantID,
+			Provider:          providerName,
+			ProviderReference: result.ProviderReference,
+			ExternalID:        result.ExternalID,
+			SecretID:          secretID,
+			State:             result.State,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
+		saved, err := syncStore.SaveBankConnection(ctx, connection)
+		if err != nil {
+			return err
+		}
+		for _, payload := range result.RawPayloads {
+			_, rawErr := syncStore.SaveRawPayload(ctx, domain.RawPayload{
+				ID:               service.newID(),
+				ConnectionID:     saved.ID,
+				Scope:            payload.Scope,
+				ProviderObjectID: payload.ProviderObjectID,
+				PayloadJSON:      payload.PayloadJSON,
+				CapturedAt:       now,
+			})
+			if rawErr != nil {
+				return rawErr
+			}
+		}
+		_ = saved
+		return nil
 	}
 
 	t.Run("covers delete helper error branches", func(t *testing.T) {
@@ -546,6 +627,63 @@ func TestProviderSyncInternals(t *testing.T) {
 			},
 		)
 		require.Error(t, err)
+
+		monobankRef, refErr := serviceWithProvider.bankProviderForLink(bankProviderMonobank, bankLinkMethodToken)
+		require.NoError(t, refErr)
+		assert.Equal(t, bankProviderMonobank, monobankRef.bankID)
+		assert.Equal(t, bankProviderMonobank, monobankRef.Name())
+
+		pkoProvider := &stubBankProvider{name: bankConnectorEnableBanking}
+		serviceWithRedirectProvider, _, _ := makeService(t, nil, WithBankProviders(pkoProvider))
+		pkoRef, refErr := serviceWithRedirectProvider.bankProviderForLink(bankProviderPKO, bankLinkMethodRedirect)
+		require.NoError(t, refErr)
+		assert.Equal(t, bankProviderPKO, pkoRef.bankID)
+		assert.Equal(t, bankConnectorEnableBanking, pkoRef.Name())
+
+		rawPayloads := []ProviderRawPayload{{
+			Scope:            domain.RawPayloadScopeConnection,
+			ProviderObjectID: " payload-id ",
+			PayloadJSON:      []byte(`{"linked":true}`),
+		}}
+		assert.Equal(t, []domain.ProviderRawPayloadObservation{{
+			Scope:            domain.RawPayloadScopeConnection,
+			ProviderObjectID: "payload-id",
+			PayloadJSON:      []byte(`{"linked":true}`),
+		}}, pendingStartRawPayloadObservations(rawPayloads))
+		assert.Equal(t, []ProviderRawPayload{{
+			Scope:            domain.RawPayloadScopeConnection,
+			ProviderObjectID: "payload-id",
+			PayloadJSON:      []byte(`{"linked":true}`),
+		}}, pendingStartRawPayloads([]domain.ProviderRawPayloadObservation{{
+			Scope:            domain.RawPayloadScopeConnection,
+			ProviderObjectID: " payload-id ",
+			PayloadJSON:      []byte(`{"linked":true}`),
+		}}))
+
+		serviceWithInvalidStore := &Service{store: stubStore{}}
+		_, err = serviceWithInvalidStore.GetPendingBankConnectionLinkStartByState(
+			t.Context(),
+			GetPendingBankConnectionLinkStartByStateParams{
+				Provider: bankProviderPKO,
+				State:    "state",
+			},
+		)
+		require.ErrorContains(t, err, "bank sync store is required")
+
+		serviceWithPendingStartFailure := &Service{
+			store: &failingProviderSyncStore{
+				Store:              makeStore(t),
+				getPendingStartErr: errors.New("pending start failed"),
+			},
+		}
+		_, err = serviceWithPendingStartFailure.GetPendingBankConnectionLinkStartByState(
+			t.Context(),
+			GetPendingBankConnectionLinkStartByStateParams{
+				Provider: bankProviderPKO,
+				State:    "state",
+			},
+		)
+		require.ErrorContains(t, err, "pending start failed")
 	})
 
 	t.Run("surfaces schedule and enqueue validation failures", func(t *testing.T) {
@@ -806,6 +944,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "monobank", connection.Provider)
+		assert.Equal(t, domain.ProviderConnectorIDMonobank, connection.ConnectorID)
 		assert.Equal(t, []string{monobankToken}, monobankProvider.linkedTokens)
 
 		pkoToken := "pko-token-" + fake.UUID().V4()
@@ -828,6 +967,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, enableBankingProvider.startCalls)
 		assert.Zero(t, monobankProvider.startCalls)
+		assert.Equal(t, enableBankingProvider.startResult.ProviderReference, start.ProviderReference)
 
 		redirectConnection, err := service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
 			ActorUserID: ownerUserID,
@@ -839,6 +979,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "pko", redirectConnection.Provider)
+		assert.Equal(t, domain.ProviderConnectorIDEnableBanking, redirectConnection.ConnectorID)
 		assert.Equal(t, 1, enableBankingProvider.finishCalls)
 
 		monobankRedirectURL := "https://app.example.test/callback?secret=" + fake.UUID().V4()
@@ -908,6 +1049,7 @@ func TestProviderSyncInternals(t *testing.T) {
 			Code:        "code-" + fake.UUID().V4(),
 		})
 		require.NoError(t, err)
+		assert.Equal(t, domain.ProviderConnectorIDEnableBanking, connection.ConnectorID)
 
 		_, err = service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
 			ConnectionID: connection.ID,
@@ -1585,8 +1727,9 @@ func TestProviderSyncInternals(t *testing.T) {
 		store.getScheduleForListErr = nil
 
 		serviceWithoutCipher := NewService(store)
-		_, err = serviceWithoutCipher.saveLinkedBankConnection(
+		err = saveLinkedConnectionForTest(
 			t.Context(),
+			serviceWithoutCipher,
 			tenant.ID,
 			provider.name,
 			ProviderLinkResult{},
@@ -1594,8 +1737,9 @@ func TestProviderSyncInternals(t *testing.T) {
 		require.Error(t, err)
 
 		store.saveBankConnectionErr = errors.New("save linked connection failed")
-		_, err = service.saveLinkedBankConnection(
+		err = saveLinkedConnectionForTest(
 			t.Context(),
+			service,
 			tenant.ID,
 			provider.name,
 			ProviderLinkResult{Secret: "secret"},
@@ -1603,8 +1747,9 @@ func TestProviderSyncInternals(t *testing.T) {
 		require.Error(t, err)
 		store.saveBankConnectionErr = nil
 		store.saveRawPayloadErr = errors.New("save linked raw failed")
-		_, err = service.saveLinkedBankConnection(
+		err = saveLinkedConnectionForTest(
 			t.Context(),
+			service,
 			tenant.ID,
 			provider.name,
 			ProviderLinkResult{

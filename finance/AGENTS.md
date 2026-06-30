@@ -18,6 +18,8 @@ Root Go module for the finance product slice.
 - `make test`
 - `make lint`
 
+To fix lint errors, attempt: `golangci-lint run --fix` and then manually fix the remaining errors (if still present).
+
 ## Task Completion Protocol
 
 Repository-level completion protocol must be followed. Always report task completion status as per repository-level protocol.

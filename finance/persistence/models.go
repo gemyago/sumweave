@@ -181,6 +181,7 @@ type bankConnectionModel struct {
 	ID                   string     `gorm:"column:id;size:255;not null;primaryKey"`
 	TenantID             string     `gorm:"column:tenant_id;size:255;not null;index"`
 	Provider             string     `gorm:"column:provider;size:255;not null"`
+	ConnectorID          string     `gorm:"column:connector_id;size:255;not null;default:''"`
 	DisplayName          string     `gorm:"column:display_name;size:255;not null"`
 	ProviderReference    string     `gorm:"column:provider_reference;size:255;not null"`
 	ExternalID           string     `gorm:"column:external_id;size:255;not null;default:''"`
@@ -203,10 +204,12 @@ type pendingBankConnectionLinkStartModel struct {
 	TenantID          string     `gorm:"column:tenant_id;size:255;not null;index:idx_finance_pending_bank_link_starts_lookup,unique,priority:1"`
 	ActorUserID       string     `gorm:"column:actor_user_id;size:255;not null;index:idx_finance_pending_bank_link_starts_lookup,unique,priority:2"`
 	Provider          string     `gorm:"column:provider;size:255;not null;index:idx_finance_pending_bank_link_starts_lookup,unique,priority:3"`
-	State             string     `gorm:"column:state;size:255;not null;index:idx_finance_pending_bank_link_starts_lookup,unique,priority:4"`
+	ConnectorID       string     `gorm:"column:connector_id;size:255;not null;default:'';index:idx_finance_pending_bank_link_starts_lookup,unique,priority:4"`
+	State             string     `gorm:"column:state;size:255;not null;index:idx_finance_pending_bank_link_starts_lookup,unique,priority:5"`
 	CallbackURL       string     `gorm:"column:callback_url;type:text;not null"`
 	AuthorizationURL  string     `gorm:"column:authorization_url;type:text;not null"`
 	ProviderReference string     `gorm:"column:provider_reference;size:255;not null;default:''"`
+	StartResultJSON   string     `gorm:"column:start_result_json;type:text;not null;default:'{}'"`
 	ExpiresAt         time.Time  `gorm:"column:expires_at;not null"`
 	ConsumedAt        *time.Time `gorm:"column:consumed_at"`
 	CreatedAt         time.Time  `gorm:"column:created_at;not null"`
@@ -759,6 +762,7 @@ func newBankConnectionModel(connection domain.BankConnection) bankConnectionMode
 		ID:                   connection.ID,
 		TenantID:             connection.TenantID,
 		Provider:             connection.Provider,
+		ConnectorID:          string(connection.ConnectorID),
 		DisplayName:          connection.DisplayName,
 		ProviderReference:    connection.ProviderReference,
 		ExternalID:           connection.ExternalID,
@@ -783,6 +787,7 @@ func bankConnectionFromModel(model bankConnectionModel) domain.BankConnection {
 		ID:                   model.ID,
 		TenantID:             model.TenantID,
 		Provider:             model.Provider,
+		ConnectorID:          domain.ProviderConnectorID(model.ConnectorID),
 		DisplayName:          model.DisplayName,
 		ProviderReference:    model.ProviderReference,
 		ExternalID:           model.ExternalID,
@@ -812,10 +817,12 @@ func newPendingBankConnectionLinkStartModel(
 		TenantID:          start.TenantID,
 		ActorUserID:       start.ActorUserID,
 		Provider:          start.Provider,
+		ConnectorID:       string(start.ConnectorID),
 		State:             start.State,
 		CallbackURL:       start.CallbackURL,
 		AuthorizationURL:  start.AuthorizationURL,
 		ProviderReference: start.ProviderReference,
+		StartResultJSON:   mustJSON(start.StartResult),
 		ExpiresAt:         normalizeUTC(start.ExpiresAt),
 		ConsumedAt:        normalizeUTCPointer(start.ConsumedAt),
 		CreatedAt:         normalizeUTC(start.CreatedAt),
@@ -826,15 +833,19 @@ func newPendingBankConnectionLinkStartModel(
 func pendingBankConnectionLinkStartFromModel(
 	model pendingBankConnectionLinkStartModel,
 ) domain.PendingBankConnectionLinkStart {
+	var startResult domain.PendingBankConnectionLinkStartResult
+	mustUnmarshalJSON(model.StartResultJSON, &startResult)
 	return domain.PendingBankConnectionLinkStart{
 		ID:                model.ID,
 		TenantID:          model.TenantID,
 		ActorUserID:       model.ActorUserID,
 		Provider:          model.Provider,
+		ConnectorID:       domain.ProviderConnectorID(model.ConnectorID),
 		State:             model.State,
 		CallbackURL:       model.CallbackURL,
 		AuthorizationURL:  model.AuthorizationURL,
 		ProviderReference: model.ProviderReference,
+		StartResult:       startResult,
 		ExpiresAt:         normalizeUTC(model.ExpiresAt),
 		ConsumedAt:        normalizeUTCPointer(model.ConsumedAt),
 		CreatedAt:         normalizeUTC(model.CreatedAt),

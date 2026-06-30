@@ -39,6 +39,7 @@ func TestProviderSyncStore(t *testing.T) {
 				ID:                "connection-" + fake.UUID().V4(),
 				TenantID:          "tenant-" + fake.UUID().V4(),
 				Provider:          "provider-" + fake.Lorem().Word(),
+				ConnectorID:       domain.ProviderConnectorIDMonobank,
 				DisplayName:       "display-" + fake.Lorem().Word(),
 				ProviderReference: "ref-" + fake.UUID().V4(),
 				ExternalID:        "external-" + fake.UUID().V4(),
@@ -52,6 +53,7 @@ func TestProviderSyncStore(t *testing.T) {
 			loadedConnection, err := store.GetBankConnection(t.Context(), connection.ID)
 			require.NoError(t, err)
 			require.NotNil(t, loadedConnection)
+			assert.Equal(t, connection.ConnectorID, loadedConnection.ConnectorID)
 
 			connections, err := store.ListBankConnections(t.Context(), connection.TenantID)
 			require.NoError(t, err)
@@ -455,13 +457,33 @@ func TestProviderSyncStore(t *testing.T) {
 				TenantID:          "tenant-" + fake.UUID().V4(),
 				ActorUserID:       "actor-" + fake.UUID().V4(),
 				Provider:          "pko",
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
 				State:             "state-" + fake.UUID().V4(),
 				CallbackURL:       "http://localhost:5173/#/finance/connections",
 				AuthorizationURL:  "https://example.test/auth/" + fake.UUID().V4(),
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
-				ExpiresAt:         now.Add(15 * time.Minute),
-				CreatedAt:         now,
-				UpdatedAt:         now,
+				StartResult: domain.PendingBankConnectionLinkStartResult{
+					State:            "start-state-" + fake.UUID().V4(),
+					AuthorizationURL: "https://example.test/start/" + fake.UUID().V4(),
+					RawPayloads: []domain.ProviderRawPayloadObservation{
+						{
+							Connection: domain.ProviderConnectionRef{
+								ConnectionID:      "connection-" + fake.UUID().V4(),
+								ProviderID:        domain.ProviderIDPKO,
+								ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+								ProviderReference: "provider-ref-raw-" + fake.UUID().V4(),
+								ExternalID:        "external-raw-" + fake.UUID().V4(),
+							},
+							Scope:            domain.RawPayloadScopeConnection,
+							ProviderObjectID: "payload-" + fake.UUID().V4(),
+							PayloadJSON:      []byte(`{"step":"start"}`),
+							CapturedAt:       now.Add(2 * time.Minute),
+						},
+					},
+				},
+				ExpiresAt: now.Add(15 * time.Minute),
+				CreatedAt: now,
+				UpdatedAt: now,
 			},
 		)
 		require.NoError(t, err)
@@ -473,6 +495,8 @@ func TestProviderSyncStore(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resolved)
 		assert.Equal(t, pendingStart.CallbackURL, resolved.CallbackURL)
+		assert.Equal(t, pendingStart.ConnectorID, resolved.ConnectorID)
+		assert.Equal(t, pendingStart.StartResult, resolved.StartResult)
 		resolved, err = store.GetPendingBankConnectionLinkStartByState(
 			t.Context(),
 			pendingStart.Provider,
@@ -525,6 +549,8 @@ func TestProviderSyncStore(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, consumed)
 		assert.Equal(t, pendingStart.ProviderReference, consumed.ProviderReference)
+		assert.Equal(t, pendingStart.ConnectorID, consumed.ConnectorID)
+		assert.Equal(t, pendingStart.StartResult, consumed.StartResult)
 		require.NotNil(t, consumed.ConsumedAt)
 
 		consumed, err = store.ConsumePendingBankConnectionLinkStart(
@@ -567,6 +593,7 @@ func TestProviderSyncStore(t *testing.T) {
 				TenantID:          "tenant-expired-" + fake.UUID().V4(),
 				ActorUserID:       "actor-expired-" + fake.UUID().V4(),
 				Provider:          "pko",
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
 				State:             "state-expired-" + fake.UUID().V4(),
 				CallbackURL:       "http://localhost:5173/#/finance/connections",
 				AuthorizationURL:  "https://example.test/auth/expired/" + fake.UUID().V4(),
@@ -596,6 +623,7 @@ func TestProviderSyncStore(t *testing.T) {
 				TenantID:          "tenant-default-" + fake.UUID().V4(),
 				ActorUserID:       "actor-default-" + fake.UUID().V4(),
 				Provider:          "pko",
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
 				State:             "state-default-" + fake.UUID().V4(),
 				CallbackURL:       "http://localhost:5173/#/finance/connections",
 				AuthorizationURL:  "https://example.test/auth/default/" + fake.UUID().V4(),

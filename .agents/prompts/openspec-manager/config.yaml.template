@@ -1,0 +1,40 @@
+# Use below to configure sub-agents for openspec manager.
+# Copy the file to .agents/prompts/openspec-manager/config.yaml and modify the configuration.
+# Most of the time you will need to change models.
+# sub_agent_name must match the OpenCode agent id / `.opencode/agents/<sub_agent_name>.md` basename (no extension).
+# model: short label shown when the manager spawns a sub-agent
+# opencode_model: fully-qualified OpenCode model (provider/model) written by openspec-manager/sync-opencode-agents.sh
+# Each role must have a matching instruction file:
+#   .agents/prompts/openspec-manager/agent-<role>.md
+# After editing, run: .agents/prompts/openspec-manager/sync-opencode-agents.sh
+sub-agents:
+  planning:
+    sub_agent_name: openspec-planning
+    model: gpt-5.4
+    opencode_model: openai/gpt-5.4
+    reasoning_effort: high
+  plan-reviewing:
+    sub_agent_name: openspec-plan-reviewing
+    model: gpt-5.4
+    opencode_model: openai/gpt-5.4
+    reasoning_effort: medium
+  implementation:
+    sub_agent_name: openspec-implementation
+    model: gpt-5.4
+    opencode_model: openai/gpt-5.4
+    reasoning_effort: medium
+  chunk-finalizing:
+    sub_agent_name: openspec-chunk-finalizing
+    model: gpt-5.4-mini
+    opencode_model: openai/gpt-5.4-mini
+    reasoning_effort: medium
+  implementation-finalizing:
+    sub_agent_name: openspec-implementation-finalizing
+    model: gpt-5.4
+    opencode_model: openai/gpt-5.4
+    reasoning_effort: high
+  comments-addressing:
+    sub_agent_name: openspec-comments-addressing
+    model: gpt-5.4
+    opencode_model: openai/gpt-5.4
+    reasoning_effort: medium

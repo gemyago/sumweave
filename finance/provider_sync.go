@@ -439,6 +439,7 @@ func (s *Service) StartBankConnectionLink(
 		params.TenantID,
 		params.ActorUserID,
 		provider.bankID,
+		domain.ProviderConnectorID(strings.TrimSpace(provider.Name())),
 		params.BrowserCallbackURL,
 		start,
 	)
@@ -522,7 +523,13 @@ func (s *Service) FinishBankConnectionLink(
 		}
 		return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", err)
 	}
-	connection, err := s.saveLinkedBankConnection(ctx, params.TenantID, provider.bankID, result)
+	connection, err := s.saveLinkedBankConnection(
+		ctx,
+		params.TenantID,
+		provider.bankID,
+		domain.ProviderConnectorID(strings.TrimSpace(provider.Name())),
+		result,
+	)
 	if err != nil {
 		return domain.BankConnection{}, err
 	}
@@ -555,7 +562,13 @@ func (s *Service) LinkTokenBankConnection(
 	if err != nil {
 		return domain.BankConnection{}, fmt.Errorf("link token bank connection: %w", err)
 	}
-	connection, err := s.saveLinkedBankConnection(ctx, params.TenantID, provider.bankID, result)
+	connection, err := s.saveLinkedBankConnection(
+		ctx,
+		params.TenantID,
+		provider.bankID,
+		domain.ProviderConnectorID(strings.TrimSpace(provider.Name())),
+		result,
+	)
 	if err != nil {
 		return domain.BankConnection{}, err
 	}
@@ -1071,6 +1084,7 @@ func (s *Service) saveLinkedBankConnection(
 	ctx context.Context,
 	tenantID string,
 	providerName string,
+	connectorID domain.ProviderConnectorID,
 	result ProviderLinkResult,
 ) (domain.BankConnection, error) {
 	secretID, err := s.encryptAndSaveConnectionSecret(
@@ -1104,6 +1118,7 @@ func (s *Service) saveLinkedBankConnection(
 		ID:                s.newID(),
 		TenantID:          strings.TrimSpace(tenantID),
 		Provider:          providerName,
+		ConnectorID:       connectorID,
 		DisplayName:       strings.TrimSpace(result.DisplayName),
 		ProviderReference: strings.TrimSpace(result.ProviderReference),
 		ExternalID:        strings.TrimSpace(result.ExternalID),
@@ -1141,6 +1156,7 @@ func (s *Service) persistPendingBankConnectionLinkStart(
 	tenantID string,
 	actorUserID string,
 	provider string,
+	connectorID domain.ProviderConnectorID,
 	browserCallbackURL string,
 	start ProviderLinkStart,
 ) error {
@@ -1154,13 +1170,19 @@ func (s *Service) persistPendingBankConnectionLinkStart(
 		TenantID:          strings.TrimSpace(tenantID),
 		ActorUserID:       strings.TrimSpace(actorUserID),
 		Provider:          strings.TrimSpace(provider),
+		ConnectorID:       connectorID,
 		State:             strings.TrimSpace(start.State),
 		CallbackURL:       strings.TrimSpace(browserCallbackURL),
 		AuthorizationURL:  strings.TrimSpace(start.AuthorizationURL),
 		ProviderReference: strings.TrimSpace(start.ProviderReference),
-		ExpiresAt:         now.Add(pendingBankConnectionLinkStartTTL),
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		StartResult: domain.PendingBankConnectionLinkStartResult{
+			State:            strings.TrimSpace(start.State),
+			AuthorizationURL: strings.TrimSpace(start.AuthorizationURL),
+			RawPayloads:      pendingStartRawPayloadObservations(start.RawPayloads),
+		},
+		ExpiresAt: now.Add(pendingBankConnectionLinkStartTTL),
+		CreatedAt: now,
+		UpdatedAt: now,
 	})
 	if err != nil {
 		return fmt.Errorf("persist pending bank connection link start: %w", err)
@@ -1194,9 +1216,10 @@ func (s *Service) consumePendingBankConnectionLinkStart(
 		return ProviderLinkStart{}, fmt.Errorf("consume pending bank connection link start: %w", err)
 	}
 	return ProviderLinkStart{
-		State:             pendingStart.State,
-		AuthorizationURL:  pendingStart.AuthorizationURL,
-		ProviderReference: pendingStart.ProviderReference,
+		State:             pendingStart.StartResult.State,
+		AuthorizationURL:  pendingStart.StartResult.AuthorizationURL,
+		ProviderReference: strings.TrimSpace(pendingStart.ProviderReference),
+		RawPayloads:       pendingStartRawPayloads(pendingStart.StartResult.RawPayloads),
 	}, nil
 }
 
@@ -1288,10 +1311,7 @@ func (s *Service) bankProvider(name string) (*bankProviderRef, error) {
 	return &bankProviderRef{BankConnectionProvider: provider, bankID: trimmedName}, nil
 }
 
-func (s *Service) bankProviderForLink(
-	bankID string,
-	method bankLinkMethod,
-) (*bankProviderRef, error) {
+func (s *Service) bankProviderForLink(bankID string, method bankLinkMethod) (*bankProviderRef, error) {
 	trimmedBankID := strings.TrimSpace(bankID)
 	providerName, err := configuredBankProviderName(trimmedBankID, method)
 	if err != nil {
@@ -1352,6 +1372,30 @@ func unsupportedBankLinkingMethodError(bankID string, method bankLinkMethod) err
 		ErrUnsupportedBankLinkingMethod,
 		bankID,
 	)
+}
+
+func pendingStartRawPayloadObservations(payloads []ProviderRawPayload) []domain.ProviderRawPayloadObservation {
+	observations := make([]domain.ProviderRawPayloadObservation, 0, len(payloads))
+	for _, payload := range payloads {
+		observations = append(observations, domain.ProviderRawPayloadObservation{
+			Scope:            payload.Scope,
+			ProviderObjectID: strings.TrimSpace(payload.ProviderObjectID),
+			PayloadJSON:      payload.PayloadJSON,
+		})
+	}
+	return observations
+}
+
+func pendingStartRawPayloads(payloads []domain.ProviderRawPayloadObservation) []ProviderRawPayload {
+	items := make([]ProviderRawPayload, 0, len(payloads))
+	for _, payload := range payloads {
+		items = append(items, ProviderRawPayload{
+			Scope:            payload.Scope,
+			ProviderObjectID: strings.TrimSpace(payload.ProviderObjectID),
+			PayloadJSON:      payload.PayloadJSON,
+		})
+	}
+	return items
 }
 
 func (s *Service) requireTenantBankConnection(
