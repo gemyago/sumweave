@@ -119,7 +119,12 @@ func primeFinanceJobs(container *dig.Container) error {
 	if container == nil {
 		return nil
 	}
-	if err := container.Invoke(func(*financepkg.Service) {}); err != nil {
+	if err := container.Invoke(func(
+		*financepkg.FXService,
+		*financepkg.CSVImportService,
+		*financepkg.BankSyncService,
+	) {
+	}); err != nil {
 		return fmt.Errorf("prime finance jobs: %w", err)
 	}
 	return nil

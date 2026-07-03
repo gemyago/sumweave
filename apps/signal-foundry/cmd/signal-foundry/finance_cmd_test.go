@@ -235,15 +235,19 @@ func TestFinanceCommand(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
 		store := persistence.NewStore(database)
-		service := financepkg.NewService(
+		tenantService := financepkg.NewTenantService(
 			store,
-			financepkg.WithNow(func() time.Time { return now }),
+			financepkg.WithTenantServiceNow(func() time.Time { return now }),
 		)
-		ownerTenants, err := service.ListTenantsForUser(t.Context(), "owner-e2e")
+		reportingService := financepkg.NewReportingService(
+			store,
+			financepkg.WithReportingServiceNow(func() time.Time { return now }),
+		)
+		ownerTenants, err := tenantService.ListTenantsForUser(t.Context(), "owner-e2e")
 		require.NoError(t, err)
 		require.Len(t, ownerTenants, 1)
 
-		dashboard, err := service.GetDashboard(t.Context(), financepkg.DashboardParams{
+		dashboard, err := reportingService.GetDashboard(t.Context(), financepkg.DashboardParams{
 			ActorUserID: "owner-e2e",
 			TenantID:    ownerTenants[0].Tenant.ID,
 			Preset:      financepkg.DashboardPeriodPresetCustom,
@@ -281,6 +285,11 @@ func TestFinanceCommand(t *testing.T) {
 		syncResult, err := provider.Sync(t.Context(), financepkg.ProviderSyncParams{})
 		require.NoError(t, err)
 		assert.Equal(t, financepkg.ProviderSyncResult{}, syncResult)
+
+		canceledCtx, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, err = provider.LinkToken(canceledCtx, financepkg.ProviderTokenLinkParams{})
+		require.ErrorIs(t, err, context.Canceled)
 	})
 
 	t.Run("run finance fixtures generate writes to configured data-layer path", func(t *testing.T) {

@@ -38,7 +38,6 @@ type V1RoutesDeps struct {
 
 	Runtime               *signalfoundryinternal.Runtime
 	RootLogger            *slog.Logger
-	FinanceService        *financepkg.Service
 	BankConnectionService *financepkg.BankConnectionService
 
 	// UILocation is an optional path to the directory containing pre-built UI static assets.

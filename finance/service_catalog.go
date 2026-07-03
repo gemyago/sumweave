@@ -2,30 +2,134 @@ package finance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/google/uuid"
 )
 
-type catalogService struct {
-	store  serviceStore
-	access *tenantAccessGuard
+type catalogServiceStore interface {
+	IsTenantMember(ctx context.Context, tenantID string, userID string) (bool, error)
+	SaveAccount(ctx context.Context, account domain.Account) (domain.Account, error)
+	GetAccount(ctx context.Context, accountID string) (*domain.Account, error)
+	ListAccounts(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Account, error)
+	SaveCategory(ctx context.Context, category domain.Category) (domain.Category, error)
+	GetCategory(ctx context.Context, categoryID string) (*domain.Category, error)
+	ListCategories(
+		ctx context.Context,
+		tenantID string,
+		includeHidden bool,
+	) ([]domain.Category, error)
+	SaveTag(ctx context.Context, tag domain.Tag) (domain.Tag, error)
+	GetTag(ctx context.Context, tagID string) (*domain.Tag, error)
+	ListTags(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Tag, error)
+}
+
+type CatalogService struct {
+	store  catalogServiceStore
+	access *accessGuard
 	now    func() time.Time
 	newID  func() string
 }
 
-func newCatalogService(
-	store serviceStore,
-	access *tenantAccessGuard,
-	now func() time.Time,
-	newID func() string,
-) *catalogService {
-	return &catalogService{store: store, access: access, now: now, newID: newID}
+type CatalogServiceOption func(*CatalogService)
+
+func WithCatalogServiceNow(now func() time.Time) CatalogServiceOption {
+	return func(service *CatalogService) {
+		service.now = now
+	}
 }
 
-func (s *catalogService) CreateAccount(
+func WithCatalogServiceIDGenerator(newID func() string) CatalogServiceOption {
+	return func(service *CatalogService) {
+		service.newID = newID
+	}
+}
+
+func NewCatalogService(store catalogServiceStore, opts ...CatalogServiceOption) *CatalogService {
+	service := &CatalogService{
+		store:  store,
+		access: newAccessGuard(store),
+		now:    func() time.Time { return time.Now().UTC() },
+		newID:  uuid.NewString,
+	}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
+}
+
+func (s *CatalogService) requireTenantAccount(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+	accountID string,
+) (domain.Account, error) {
+	if err := s.access.requireTenantMember(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(userID)); err != nil {
+		return domain.Account{}, err
+	}
+	account, err := s.store.GetAccount(ctx, strings.TrimSpace(accountID))
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			return domain.Account{}, ErrAccountNotFound
+		}
+		return domain.Account{}, fmt.Errorf("get account: %w", err)
+	}
+	if account.TenantID != strings.TrimSpace(tenantID) {
+		return domain.Account{}, ErrAccountNotFound
+	}
+	return *account, nil
+}
+
+func (s *CatalogService) requireTenantCategory(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+	categoryID string,
+) (domain.Category, error) {
+	if err := s.access.requireTenantMember(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(userID)); err != nil {
+		return domain.Category{}, err
+	}
+	category, err := s.store.GetCategory(ctx, strings.TrimSpace(categoryID))
+	if err != nil {
+		if errors.Is(err, persistence.ErrCategoryNotFound) {
+			return domain.Category{}, ErrCategoryNotFound
+		}
+		return domain.Category{}, fmt.Errorf("get category: %w", err)
+	}
+	if category.TenantID != strings.TrimSpace(tenantID) {
+		return domain.Category{}, ErrCategoryNotFound
+	}
+	return *category, nil
+}
+
+func (s *CatalogService) requireTenantTag(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+	tagID string,
+) (domain.Tag, error) {
+	if err := s.access.requireTenantMember(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(userID)); err != nil {
+		return domain.Tag{}, err
+	}
+	tag, err := s.store.GetTag(ctx, strings.TrimSpace(tagID))
+	if err != nil {
+		if errors.Is(err, persistence.ErrTagNotFound) {
+			return domain.Tag{}, ErrTagNotFound
+		}
+		return domain.Tag{}, fmt.Errorf("get tag: %w", err)
+	}
+	if tag.TenantID != strings.TrimSpace(tenantID) {
+		return domain.Tag{}, ErrTagNotFound
+	}
+	return *tag, nil
+}
+
+func (s *CatalogService) CreateAccount(
 	ctx context.Context,
 	params CreateAccountParams,
 ) (domain.Account, error) {
@@ -49,11 +153,11 @@ func (s *catalogService) CreateAccount(
 	return saved, nil
 }
 
-func (s *catalogService) UpdateAccount(
+func (s *CatalogService) UpdateAccount(
 	ctx context.Context,
 	params UpdateAccountParams,
 ) (domain.Account, error) {
-	account, err := s.access.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
+	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
 	if err != nil {
 		return domain.Account{}, err
 	}
@@ -66,8 +170,8 @@ func (s *catalogService) UpdateAccount(
 	return saved, nil
 }
 
-func (s *catalogService) HideAccount(ctx context.Context, params HideAccountParams) error {
-	account, err := s.access.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
+func (s *CatalogService) HideAccount(ctx context.Context, params HideAccountParams) error {
+	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
 	if err != nil {
 		return err
 	}
@@ -81,11 +185,11 @@ func (s *catalogService) HideAccount(ctx context.Context, params HideAccountPara
 	return nil
 }
 
-func (s *catalogService) AttachLinkedAccount(
+func (s *CatalogService) AttachLinkedAccount(
 	ctx context.Context,
 	params AttachLinkedAccountParams,
 ) (domain.Account, error) {
-	account, err := s.access.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
+	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
 	if err != nil {
 		return domain.Account{}, err
 	}
@@ -102,7 +206,7 @@ func (s *catalogService) AttachLinkedAccount(
 	return saved, nil
 }
 
-func (s *catalogService) ListAccounts(
+func (s *CatalogService) ListAccounts(
 	ctx context.Context,
 	params ListAccountsParams,
 ) ([]domain.Account, error) {
@@ -116,7 +220,7 @@ func (s *catalogService) ListAccounts(
 	return accounts, nil
 }
 
-func (s *catalogService) CreateCategory(
+func (s *CatalogService) CreateCategory(
 	ctx context.Context,
 	params CreateCategoryParams,
 ) (domain.Category, error) {
@@ -139,11 +243,11 @@ func (s *catalogService) CreateCategory(
 	return saved, nil
 }
 
-func (s *catalogService) UpdateCategory(
+func (s *CatalogService) UpdateCategory(
 	ctx context.Context,
 	params UpdateCategoryParams,
 ) (domain.Category, error) {
-	category, err := s.access.requireTenantCategory(ctx, params.TenantID, params.ActorUserID, params.CategoryID)
+	category, err := s.requireTenantCategory(ctx, params.TenantID, params.ActorUserID, params.CategoryID)
 	if err != nil {
 		return domain.Category{}, err
 	}
@@ -156,8 +260,8 @@ func (s *catalogService) UpdateCategory(
 	return saved, nil
 }
 
-func (s *catalogService) HideCategory(ctx context.Context, params HideCategoryParams) error {
-	category, err := s.access.requireTenantCategory(ctx, params.TenantID, params.ActorUserID, params.CategoryID)
+func (s *CatalogService) HideCategory(ctx context.Context, params HideCategoryParams) error {
+	category, err := s.requireTenantCategory(ctx, params.TenantID, params.ActorUserID, params.CategoryID)
 	if err != nil {
 		return err
 	}
@@ -171,7 +275,7 @@ func (s *catalogService) HideCategory(ctx context.Context, params HideCategoryPa
 	return nil
 }
 
-func (s *catalogService) ListCategories(
+func (s *CatalogService) ListCategories(
 	ctx context.Context,
 	params ListCategoriesParams,
 ) ([]domain.Category, error) {
@@ -185,7 +289,7 @@ func (s *catalogService) ListCategories(
 	return items, nil
 }
 
-func (s *catalogService) CreateTag(ctx context.Context, params CreateTagParams) (domain.Tag, error) {
+func (s *CatalogService) CreateTag(ctx context.Context, params CreateTagParams) (domain.Tag, error) {
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.Tag{}, err
 	}
@@ -204,8 +308,8 @@ func (s *catalogService) CreateTag(ctx context.Context, params CreateTagParams) 
 	return saved, nil
 }
 
-func (s *catalogService) UpdateTag(ctx context.Context, params UpdateTagParams) (domain.Tag, error) {
-	tag, err := s.access.requireTenantTag(ctx, params.TenantID, params.ActorUserID, params.TagID)
+func (s *CatalogService) UpdateTag(ctx context.Context, params UpdateTagParams) (domain.Tag, error) {
+	tag, err := s.requireTenantTag(ctx, params.TenantID, params.ActorUserID, params.TagID)
 	if err != nil {
 		return domain.Tag{}, err
 	}
@@ -218,8 +322,8 @@ func (s *catalogService) UpdateTag(ctx context.Context, params UpdateTagParams) 
 	return saved, nil
 }
 
-func (s *catalogService) HideTag(ctx context.Context, params HideTagParams) error {
-	tag, err := s.access.requireTenantTag(ctx, params.TenantID, params.ActorUserID, params.TagID)
+func (s *CatalogService) HideTag(ctx context.Context, params HideTagParams) error {
+	tag, err := s.requireTenantTag(ctx, params.TenantID, params.ActorUserID, params.TagID)
 	if err != nil {
 		return err
 	}
@@ -233,7 +337,7 @@ func (s *catalogService) HideTag(ctx context.Context, params HideTagParams) erro
 	return nil
 }
 
-func (s *catalogService) ListTags(ctx context.Context, params ListTagsParams) ([]domain.Tag, error) {
+func (s *CatalogService) ListTags(ctx context.Context, params ListTagsParams) ([]domain.Tag, error) {
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return nil, err
 	}

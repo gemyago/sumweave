@@ -2,40 +2,148 @@ package finance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/google/uuid"
 )
 
-type ledgerService struct {
-	store  serviceStore
-	access *tenantAccessGuard
+type ledgerServiceStore interface {
+	IsTenantMember(ctx context.Context, tenantID string, userID string) (bool, error)
+	GetAccount(ctx context.Context, accountID string) (*domain.Account, error)
+	GetCategory(ctx context.Context, categoryID string) (*domain.Category, error)
+	SaveTransaction(ctx context.Context, transaction domain.Transaction) (domain.Transaction, error)
+	SaveLinkedTransferPair(
+		ctx context.Context,
+		firstTransaction domain.Transaction,
+		secondTransaction domain.Transaction,
+	) error
+	GetTransaction(ctx context.Context, transactionID string) (*domain.Transaction, error)
+	ListTransactions(
+		ctx context.Context,
+		tenantID string,
+		accountID string,
+		source domain.TransactionSource,
+		status domain.TransactionStatus,
+		includeHidden bool,
+	) ([]domain.Transaction, error)
+}
+
+type LedgerService struct {
+	store  ledgerServiceStore
+	access *accessGuard
 	now    func() time.Time
 	newID  func() string
 }
 
-func newLedgerService(
-	store serviceStore,
-	access *tenantAccessGuard,
-	now func() time.Time,
-	newID func() string,
-) *ledgerService {
-	return &ledgerService{store: store, access: access, now: now, newID: newID}
+type LedgerServiceOption func(*LedgerService)
+
+func WithLedgerServiceNow(now func() time.Time) LedgerServiceOption {
+	return func(service *LedgerService) {
+		service.now = now
+	}
 }
 
-func (s *ledgerService) RecordTransaction(
+func WithLedgerServiceIDGenerator(newID func() string) LedgerServiceOption {
+	return func(service *LedgerService) {
+		service.newID = newID
+	}
+}
+
+func NewLedgerService(store ledgerServiceStore, opts ...LedgerServiceOption) *LedgerService {
+	service := &LedgerService{
+		store:  store,
+		access: newAccessGuard(store),
+		now:    func() time.Time { return time.Now().UTC() },
+		newID:  uuid.NewString,
+	}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
+}
+
+func (s *LedgerService) requireTenantAccount(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+	accountID string,
+) (domain.Account, error) {
+	if err := s.access.requireTenantMember(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(userID)); err != nil {
+		return domain.Account{}, err
+	}
+	account, err := s.store.GetAccount(ctx, strings.TrimSpace(accountID))
+	if err != nil {
+		if errors.Is(err, persistence.ErrAccountNotFound) {
+			return domain.Account{}, ErrAccountNotFound
+		}
+		return domain.Account{}, fmt.Errorf("get account: %w", err)
+	}
+	if account.TenantID != strings.TrimSpace(tenantID) {
+		return domain.Account{}, ErrAccountNotFound
+	}
+	return *account, nil
+}
+
+func (s *LedgerService) requireTenantCategory(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+	categoryID string,
+) (domain.Category, error) {
+	if err := s.access.requireTenantMember(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(userID)); err != nil {
+		return domain.Category{}, err
+	}
+	category, err := s.store.GetCategory(ctx, strings.TrimSpace(categoryID))
+	if err != nil {
+		if errors.Is(err, persistence.ErrCategoryNotFound) {
+			return domain.Category{}, ErrCategoryNotFound
+		}
+		return domain.Category{}, fmt.Errorf("get category: %w", err)
+	}
+	if category.TenantID != strings.TrimSpace(tenantID) {
+		return domain.Category{}, ErrCategoryNotFound
+	}
+	return *category, nil
+}
+
+func (s *LedgerService) requireTenantTransaction(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+	transactionID string,
+) (domain.Transaction, error) {
+	if err := s.access.requireTenantMember(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(userID)); err != nil {
+		return domain.Transaction{}, err
+	}
+	txn, err := s.store.GetTransaction(ctx, strings.TrimSpace(transactionID))
+	if err != nil {
+		if errors.Is(err, persistence.ErrTransactionNotFound) {
+			return domain.Transaction{}, ErrTransactionNotFound
+		}
+		return domain.Transaction{}, fmt.Errorf("get transaction: %w", err)
+	}
+	if txn.TenantID != strings.TrimSpace(tenantID) {
+		return domain.Transaction{}, ErrTransactionNotFound
+	}
+	return *txn, nil
+}
+
+func (s *LedgerService) RecordTransaction(
 	ctx context.Context,
 	params RecordTransactionParams,
 ) (domain.Transaction, error) {
-	account, err := s.access.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
+	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
 	if err != nil {
 		return domain.Transaction{}, err
 	}
 	var categoryID *string
 	if trimmedCategoryID := strings.TrimSpace(params.CategoryID); trimmedCategoryID != "" {
-		category, categoryErr := s.access.requireTenantCategory(
+		category, categoryErr := s.requireTenantCategory(
 			ctx,
 			params.TenantID,
 			params.ActorUserID,
@@ -75,17 +183,17 @@ func (s *ledgerService) RecordTransaction(
 	return saved, nil
 }
 
-func (s *ledgerService) UpdateTransaction(
+func (s *LedgerService) UpdateTransaction(
 	ctx context.Context,
 	params UpdateTransactionParams,
 ) (domain.Transaction, error) {
-	txn, err := s.access.requireTenantTransaction(ctx, params.TenantID, params.ActorUserID, params.TransactionID)
+	txn, err := s.requireTenantTransaction(ctx, params.TenantID, params.ActorUserID, params.TransactionID)
 	if err != nil {
 		return domain.Transaction{}, err
 	}
 	var categoryID *string
 	if trimmedCategoryID := strings.TrimSpace(params.CategoryID); trimmedCategoryID != "" {
-		category, categoryErr := s.access.requireTenantCategory(
+		category, categoryErr := s.requireTenantCategory(
 			ctx,
 			params.TenantID,
 			params.ActorUserID,
@@ -108,19 +216,19 @@ func (s *ledgerService) UpdateTransaction(
 	return saved, nil
 }
 
-func (s *ledgerService) GetTransaction(
+func (s *LedgerService) GetTransaction(
 	ctx context.Context,
 	params GetTransactionParams,
 ) (domain.Transaction, error) {
-	txn, err := s.access.requireTenantTransaction(ctx, params.TenantID, params.ActorUserID, params.TransactionID)
+	txn, err := s.requireTenantTransaction(ctx, params.TenantID, params.ActorUserID, params.TransactionID)
 	if err != nil {
 		return domain.Transaction{}, err
 	}
 	return txn, nil
 }
 
-func (s *ledgerService) HideTransaction(ctx context.Context, params HideTransactionParams) error {
-	txn, err := s.access.requireTenantTransaction(ctx, params.TenantID, params.ActorUserID, params.TransactionID)
+func (s *LedgerService) HideTransaction(ctx context.Context, params HideTransactionParams) error {
+	txn, err := s.requireTenantTransaction(ctx, params.TenantID, params.ActorUserID, params.TransactionID)
 	if err != nil {
 		return err
 	}
@@ -134,8 +242,8 @@ func (s *ledgerService) HideTransaction(ctx context.Context, params HideTransact
 	return nil
 }
 
-func (s *ledgerService) LinkTransfers(ctx context.Context, params LinkTransfersParams) error {
-	firstTransaction, err := s.access.requireTenantTransaction(
+func (s *LedgerService) LinkTransfers(ctx context.Context, params LinkTransfersParams) error {
+	firstTransaction, err := s.requireTenantTransaction(
 		ctx,
 		params.TenantID,
 		params.ActorUserID,
@@ -144,7 +252,7 @@ func (s *ledgerService) LinkTransfers(ctx context.Context, params LinkTransfersP
 	if err != nil {
 		return err
 	}
-	secondTransaction, err := s.access.requireTenantTransaction(
+	secondTransaction, err := s.requireTenantTransaction(
 		ctx,
 		params.TenantID,
 		params.ActorUserID,
@@ -173,7 +281,7 @@ func (s *ledgerService) LinkTransfers(ctx context.Context, params LinkTransfersP
 	return nil
 }
 
-func (s *ledgerService) ListTransactions(
+func (s *LedgerService) ListTransactions(
 	ctx context.Context,
 	params ListTransactionsParams,
 ) ([]domain.Transaction, error) {
@@ -194,11 +302,11 @@ func (s *ledgerService) ListTransactions(
 	return items, nil
 }
 
-func (s *ledgerService) GetAccountBalance(
+func (s *LedgerService) GetAccountBalance(
 	ctx context.Context,
 	params GetAccountBalanceParams,
 ) (domain.AccountBalance, error) {
-	account, err := s.access.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
+	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
 	if err != nil {
 		return domain.AccountBalance{}, err
 	}
@@ -220,7 +328,7 @@ func (s *ledgerService) GetAccountBalance(
 	return balance, nil
 }
 
-func (s *ledgerService) SummarizeTransactions(
+func (s *LedgerService) SummarizeTransactions(
 	ctx context.Context,
 	params SummarizeTransactionsParams,
 ) (domain.TransactionSummary, error) {

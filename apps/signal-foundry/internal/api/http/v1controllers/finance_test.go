@@ -50,7 +50,13 @@ func TestFinanceController(t *testing.T) {
 	) http.Handler {
 		ctrl := NewFinanceController(
 			FinanceControllerDeps{
-				FinanceService:        service,
+				TenantService:         service,
+				CatalogService:        service,
+				LedgerService:         service,
+				BankSyncService:       service,
+				ReportingService:      service,
+				FXService:             service,
+				CSVImportService:      service,
 				BankConnectionService: bankConnections,
 				AuthMiddleware:        auth,
 			},

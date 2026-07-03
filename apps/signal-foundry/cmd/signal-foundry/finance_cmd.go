@@ -5,6 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/gemyago/signal-foundry/finance/domain"
 	financefixtures "github.com/gemyago/signal-foundry/finance/fixtures"
 	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"go.uber.org/dig"
 )
@@ -29,12 +33,14 @@ type financeFixturesGenerateParams struct {
 }
 
 const (
-	financeCommandName          = "finance"
-	financeFixturesCommandName  = "fixtures"
-	financeGenerateCommandName  = "generate"
-	realisticScenarioName       = "realistic"
-	fixtureScenarioProviderName = "scenario-provider"
-	fixtureMonobankProviderName = "monobank"
+	financeCommandName           = "finance"
+	financeFixturesCommandName   = "fixtures"
+	financeGenerateCommandName   = "generate"
+	realisticScenarioName        = "realistic"
+	fixtureScenarioProviderName  = "scenario-provider"
+	fixtureMonobankProviderName  = "monobank"
+	fixturesEnableBankingBaseURL = "https://example.test"
+	fixturesPSUTypePersonal      = "personal"
 )
 
 type financeFixturesCommandDeps struct {
@@ -167,25 +173,14 @@ func runFinanceFixturesGenerate(
 	if err != nil {
 		return financefixtures.Summary{}, err
 	}
-	serviceOpts := []financepkg.ServiceOption{
-		financepkg.WithNow(func() time.Time { return params.Now }),
-		financepkg.WithConnectionSecretCipher(cipher),
-		financepkg.WithBankConnectionSyncScheduleWriter(fixturesScheduleWriter{store: jobsStore}),
-		financepkg.WithFXProviders(financepkg.NewStaticFXProvider(
-			financepkg.FXProviderFrankfurter,
-			financefixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, params.Now),
-		)),
-	}
 	switch strings.TrimSpace(params.ConnectionProvider) {
 	case "", fixtureScenarioProviderName, fixtureMonobankProviderName:
-		serviceOpts = append(serviceOpts, financepkg.WithBankProviders(financeFixturesProvider{}))
 	default:
 		return financefixtures.Summary{}, fmt.Errorf(
 			"unsupported finance fixture connection provider: %s",
 			params.ConnectionProvider,
 		)
 	}
-	service := financepkg.NewService(store, serviceOpts...)
 	bootstrap := financefixtures.NewBootstrapper(
 		financefixtures.NewService(financefixtures.NewPersistenceRepository(store)),
 	)
@@ -198,10 +193,35 @@ func runFinanceFixturesGenerate(
 	if strings.TrimSpace(params.ConnectionProvider) == fixtureScenarioProviderName {
 		params.ConnectionProvider = fixtureMonobankProviderName
 	}
+	monobankServer := newFinanceFixturesMonobankServer()
+	defer monobankServer.Close()
+	monobankBaseURL := strings.TrimSpace(runtimeConfig.MonobankBaseURL)
+	if monobankBaseURL == "" {
+		monobankBaseURL = monobankServer.URL
+	}
+	financeModule, err := newFinanceFixturesModule(
+		database,
+		jobsStore,
+		params,
+		cipher,
+		monobankServer.Client(),
+		monobankBaseURL,
+	)
+	if err != nil {
+		return financefixtures.Summary{}, err
+	}
 	return financefixtures.GenerateRealisticScenario(
 		ctx,
 		bootstrap,
-		service,
+		financeFixturesScenarioService{
+			tenantService:         financeModule.TenantService,
+			catalogService:        financeModule.CatalogService,
+			ledgerService:         financeModule.LedgerService,
+			csvImportService:      financeModule.CSVImportService,
+			bankConnectionService: financeModule.BankConnectionService,
+			bankSyncService:       financeModule.BankSyncService,
+			fxService:             financeModule.FXService,
+		},
 		financefixtures.Config{
 			Seed:               params.Seed,
 			Now:                params.Now,
@@ -211,6 +231,161 @@ func runFinanceFixturesGenerate(
 			ConnectionProvider: params.ConnectionProvider,
 		},
 	)
+}
+
+func newFinanceFixturesModule(
+	database *persistence.Database,
+	jobsStore *jobspkg.Store,
+	params financeFixturesGenerateParams,
+	cipher interface {
+		SealString(string) (credentials.Envelope, error)
+		OpenString(credentials.Envelope) (string, error)
+	},
+	httpClient *http.Client,
+	monobankBaseURL string,
+) (*financepkg.Finance, error) {
+	return financepkg.New(&financepkg.Config{
+		Database:               database,
+		Logger:                 slog.New(slog.DiscardHandler),
+		Now:                    func() time.Time { return params.Now },
+		NewID:                  uuid.NewString,
+		HTTPClient:             httpClient,
+		ConnectionSecretCipher: cipher,
+		FXProviders: []financepkg.FXRatesProvider{financepkg.NewStaticFXProvider(
+			financepkg.FXProviderFrankfurter,
+			financefixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, params.Now),
+		)},
+		DefaultFXProvider:      financepkg.FXProviderFrankfurter,
+		BankSyncScheduleWriter: fixturesScheduleWriter{store: jobsStore},
+		Monobank: financepkg.MonobankConfig{
+			BaseURL: monobankBaseURL,
+		},
+		EnableBanking: financepkg.EnableBankingConfig{
+			BaseURL:        fixturesEnableBankingBaseURL,
+			AppID:          "fixtures-app",
+			PrivateKeyPath: "fixtures-private-key.pem",
+			ASPSPs: []financepkg.EnableBankingASPSP{{
+				ProviderID: domain.ProviderIDPKO,
+				Name:       "Fixtures Bank",
+				Country:    "PL",
+				PSUType:    fixturesPSUTypePersonal,
+				ValidDays:  90,
+			}},
+		},
+	})
+}
+
+type financeFixturesScenarioService struct {
+	tenantService         *financepkg.TenantService
+	catalogService        *financepkg.CatalogService
+	ledgerService         *financepkg.LedgerService
+	csvImportService      *financepkg.CSVImportService
+	bankConnectionService *financepkg.BankConnectionService
+	bankSyncService       *financepkg.BankSyncService
+	fxService             *financepkg.FXService
+}
+
+func (s financeFixturesScenarioService) CreateTenant(
+	ctx context.Context,
+	params financepkg.CreateTenantParams,
+) (domain.Tenant, error) {
+	return s.tenantService.CreateTenant(ctx, params)
+}
+
+func (s financeFixturesScenarioService) CreateTenantInvite(
+	ctx context.Context,
+	params financepkg.CreateTenantInviteParams,
+) (domain.TenantInvite, error) {
+	return s.tenantService.CreateTenantInvite(ctx, params)
+}
+
+func (s financeFixturesScenarioService) AcceptTenantInvite(
+	ctx context.Context,
+	params financepkg.AcceptTenantInviteParams,
+) (domain.TenantMembership, error) {
+	return s.tenantService.AcceptTenantInvite(ctx, params)
+}
+
+func (s financeFixturesScenarioService) CreateAccount(
+	ctx context.Context,
+	params financepkg.CreateAccountParams,
+) (domain.Account, error) {
+	return s.catalogService.CreateAccount(ctx, params)
+}
+
+func (s financeFixturesScenarioService) ListCategories(
+	ctx context.Context,
+	params financepkg.ListCategoriesParams,
+) ([]domain.Category, error) {
+	return s.catalogService.ListCategories(ctx, params)
+}
+
+func (s financeFixturesScenarioService) ListTags(
+	ctx context.Context,
+	params financepkg.ListTagsParams,
+) ([]domain.Tag, error) {
+	return s.catalogService.ListTags(ctx, params)
+}
+
+func (s financeFixturesScenarioService) PreviewCSVImport(
+	ctx context.Context,
+	params financepkg.PreviewCSVImportParams,
+) (financepkg.CSVImportPreview, error) {
+	return s.csvImportService.PreviewCSVImport(ctx, params)
+}
+
+func (s financeFixturesScenarioService) RecordTransaction(
+	ctx context.Context,
+	params financepkg.RecordTransactionParams,
+) (domain.Transaction, error) {
+	return s.ledgerService.RecordTransaction(ctx, params)
+}
+
+func (s financeFixturesScenarioService) HideTransaction(
+	ctx context.Context,
+	params financepkg.HideTransactionParams,
+) error {
+	return s.ledgerService.HideTransaction(ctx, params)
+}
+
+func (s financeFixturesScenarioService) LinkTransfers(
+	ctx context.Context,
+	params financepkg.LinkTransfersParams,
+) error {
+	return s.ledgerService.LinkTransfers(ctx, params)
+}
+
+func (s financeFixturesScenarioService) LinkTokenBankConnection(
+	ctx context.Context,
+	params financepkg.LinkTokenBankConnectionParams,
+) (domain.BankConnection, error) {
+	return s.bankConnectionService.LinkTokenBankConnection(ctx, params)
+}
+
+func (s financeFixturesScenarioService) UpsertBankConnectionSchedule(
+	ctx context.Context,
+	params financepkg.UpsertBankConnectionScheduleParams,
+) (domain.BankConnectionSchedule, error) {
+	return s.bankSyncService.UpsertBankConnectionSchedule(ctx, params)
+}
+
+func (s financeFixturesScenarioService) SyncFXRates(
+	ctx context.Context,
+	params financepkg.SyncFXRatesParams,
+) (financepkg.SyncFXRatesResult, error) {
+	return s.fxService.SyncFXRates(ctx, params)
+}
+
+func newFinanceFixturesMonobankServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/personal/client-info" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(
+			`{"name":"Fixture Connection","accounts":[{"id":"fixture-external","type":"black","currencyCode":980,"balance":101}]}`,
+		))
+	}))
 }
 
 func resolveFinanceFixturesRuntimeConfig(
@@ -295,9 +470,12 @@ func (financeFixturesProvider) FinishLink(
 }
 
 func (financeFixturesProvider) LinkToken(
-	context.Context,
-	financepkg.ProviderTokenLinkParams,
+	ctx context.Context,
+	_ financepkg.ProviderTokenLinkParams,
 ) (financepkg.ProviderTokenLinkResult, error) {
+	if err := ctx.Err(); err != nil {
+		return financepkg.ProviderTokenLinkResult{}, err
+	}
 	return financepkg.ProviderTokenLinkResult{
 		DisplayName:       "Fixture Connection",
 		ProviderReference: "fixture-reference",

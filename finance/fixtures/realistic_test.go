@@ -13,10 +13,225 @@ import (
 	"github.com/gemyago/signal-foundry/finance/domain"
 	"github.com/gemyago/signal-foundry/finance/fixtures"
 	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/google/uuid"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type realisticScenarioFinanceAdapter struct {
+	store      *persistence.Store
+	now        func() time.Time
+	newID      func() string
+	provider   realisticScenarioProvider
+	tenants    *financepkg.TenantService
+	catalog    *financepkg.CatalogService
+	ledger     *financepkg.LedgerService
+	csvImports *financepkg.CSVImportService
+	bankSync   *financepkg.BankSyncService
+	fx         *financepkg.FXService
+	reporting  *financepkg.ReportingService
+	cipher     *credentials.AESGCMCipher
+}
+
+func (s *realisticScenarioFinanceAdapter) CreateTenant(
+	ctx context.Context,
+	params financepkg.CreateTenantParams,
+) (domain.Tenant, error) {
+	return s.tenants.CreateTenant(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) CreateTenantInvite(
+	ctx context.Context,
+	params financepkg.CreateTenantInviteParams,
+) (domain.TenantInvite, error) {
+	return s.tenants.CreateTenantInvite(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) AcceptTenantInvite(
+	ctx context.Context,
+	params financepkg.AcceptTenantInviteParams,
+) (domain.TenantMembership, error) {
+	return s.tenants.AcceptTenantInvite(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) ListTenantsForUser(
+	ctx context.Context,
+	userID string,
+) ([]domain.TenantMembershipView, error) {
+	return s.tenants.ListTenantsForUser(ctx, userID)
+}
+
+func (s *realisticScenarioFinanceAdapter) CreateAccount(
+	ctx context.Context,
+	params financepkg.CreateAccountParams,
+) (domain.Account, error) {
+	return s.catalog.CreateAccount(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) ListCategories(
+	ctx context.Context,
+	params financepkg.ListCategoriesParams,
+) ([]domain.Category, error) {
+	return s.catalog.ListCategories(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) ListAccounts(
+	ctx context.Context,
+	params financepkg.ListAccountsParams,
+) ([]domain.Account, error) {
+	return s.catalog.ListAccounts(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) ListTags(
+	ctx context.Context,
+	params financepkg.ListTagsParams,
+) ([]domain.Tag, error) {
+	return s.catalog.ListTags(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) PreviewCSVImport(
+	ctx context.Context,
+	params financepkg.PreviewCSVImportParams,
+) (financepkg.CSVImportPreview, error) {
+	return s.csvImports.PreviewCSVImport(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) RecordTransaction(
+	ctx context.Context,
+	params financepkg.RecordTransactionParams,
+) (domain.Transaction, error) {
+	return s.ledger.RecordTransaction(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) HideTransaction(
+	ctx context.Context,
+	params financepkg.HideTransactionParams,
+) error {
+	return s.ledger.HideTransaction(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) ListTransactions(
+	ctx context.Context,
+	params financepkg.ListTransactionsParams,
+) ([]domain.Transaction, error) {
+	return s.ledger.ListTransactions(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) LinkTransfers(
+	ctx context.Context,
+	params financepkg.LinkTransfersParams,
+) error {
+	return s.ledger.LinkTransfers(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) LinkTokenBankConnection(
+	ctx context.Context,
+	params financepkg.LinkTokenBankConnectionParams,
+) (domain.BankConnection, error) {
+	result, err := s.provider.LinkToken(ctx, financepkg.ProviderTokenLinkParams{Token: params.Token})
+	if err != nil {
+		return domain.BankConnection{}, err
+	}
+	secretWriter := newTestBankConnectionSecretWriter(s.store, s.cipher, s.now, s.newID)
+	secretID, err := secretWriter.SaveConnectionSecret(
+		ctx,
+		string(domain.ProviderIDMonobank),
+		result.ProviderReference,
+		result.Secret,
+	)
+	if err != nil {
+		return domain.BankConnection{}, err
+	}
+	now := s.now().UTC()
+	return s.store.SaveBankConnection(ctx, domain.BankConnection{
+		ID:                s.newID(),
+		TenantID:          params.TenantID,
+		Provider:          string(domain.ProviderIDMonobank),
+		ConnectorID:       domain.ProviderConnectorIDMonobank,
+		DisplayName:       result.DisplayName,
+		ProviderReference: result.ProviderReference,
+		ExternalID:        result.ExternalID,
+		SecretID:          secretID,
+		State:             result.State,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	})
+}
+
+func (s *realisticScenarioFinanceAdapter) UpsertBankConnectionSchedule(
+	ctx context.Context,
+	params financepkg.UpsertBankConnectionScheduleParams,
+) (domain.BankConnectionSchedule, error) {
+	return s.bankSync.UpsertBankConnectionSchedule(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) ListBankConnections(
+	ctx context.Context,
+	params financepkg.ListBankConnectionsParams,
+) ([]financepkg.BankConnectionView, error) {
+	return s.bankSync.ListBankConnections(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) SyncFXRates(
+	ctx context.Context,
+	params financepkg.SyncFXRatesParams,
+) (financepkg.SyncFXRatesResult, error) {
+	return s.fx.SyncFXRates(ctx, params)
+}
+
+func (s *realisticScenarioFinanceAdapter) GetDashboard(
+	ctx context.Context,
+	params financepkg.DashboardParams,
+) (financepkg.Dashboard, error) {
+	return s.reporting.GetDashboard(ctx, params)
+}
+
+type testBankConnectionSecretWriter struct {
+	store interface {
+		SaveConnectionSecret(context.Context, domain.ConnectionSecret) (domain.ConnectionSecret, error)
+	}
+	cipher *credentials.AESGCMCipher
+	now    func() time.Time
+	newID  func() string
+}
+
+func newTestBankConnectionSecretWriter(
+	store interface {
+		SaveConnectionSecret(context.Context, domain.ConnectionSecret) (domain.ConnectionSecret, error)
+	},
+	cipher *credentials.AESGCMCipher,
+	now func() time.Time,
+	newID func() string,
+) *testBankConnectionSecretWriter {
+	return &testBankConnectionSecretWriter{store: store, cipher: cipher, now: now, newID: newID}
+}
+
+func (w *testBankConnectionSecretWriter) SaveConnectionSecret(
+	ctx context.Context,
+	provider string,
+	reference string,
+	secret string,
+) (string, error) {
+	envelope, err := w.cipher.SealString(secret)
+	if err != nil {
+		return "", err
+	}
+	secretID := w.newID()
+	now := w.now().UTC()
+	_, err = w.store.SaveConnectionSecret(ctx, domain.ConnectionSecret{
+		ID:        secretID,
+		Provider:  provider,
+		Reference: reference,
+		Envelope:  envelope,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	if err != nil {
+		return "", err
+	}
+	return secretID, nil
+}
 
 type scenarioServiceSpy struct {
 	createTenantCalls        int
@@ -630,16 +845,62 @@ func TestRealisticScenario(t *testing.T) {
 		"fixture-key",
 	)
 	require.NoError(t, err)
-	financeService := financepkg.NewService(
+	provider := realisticScenarioProvider{}
+	tenantService := financepkg.NewTenantService(
 		store,
-		financepkg.WithNow(func() time.Time { return now }),
-		financepkg.WithConnectionSecretCipher(cipher),
-		financepkg.WithBankProviders(realisticScenarioProvider{}),
-		financepkg.WithFXProviders(financepkg.NewStaticFXProvider(
+		financepkg.WithTenantServiceNow(func() time.Time { return now }),
+		financepkg.WithTenantServiceIDGenerator(uuid.NewString),
+	)
+	catalogService := financepkg.NewCatalogService(
+		store,
+		financepkg.WithCatalogServiceNow(func() time.Time { return now }),
+		financepkg.WithCatalogServiceIDGenerator(uuid.NewString),
+	)
+	ledgerService := financepkg.NewLedgerService(
+		store,
+		financepkg.WithLedgerServiceNow(func() time.Time { return now }),
+		financepkg.WithLedgerServiceIDGenerator(uuid.NewString),
+	)
+	csvImportService := financepkg.NewCSVImportService(
+		store,
+		catalogService,
+		ledgerService,
+		financepkg.WithCSVImportServiceNow(func() time.Time { return now }),
+		financepkg.WithCSVImportServiceIDGenerator(uuid.NewString),
+	)
+	bankSyncService := financepkg.NewBankSyncService(
+		store,
+		financepkg.WithBankSyncServiceNow(func() time.Time { return now }),
+		financepkg.WithBankSyncServiceIDGenerator(uuid.NewString),
+		financepkg.WithBankSyncServiceConnectionSecretCipher(cipher),
+		financepkg.WithBankSyncServiceProviders(provider),
+	)
+	fxService := financepkg.NewFXService(
+		store,
+		financepkg.WithFXServiceNow(func() time.Time { return now }),
+		financepkg.WithFXServiceProviders(financepkg.NewStaticFXProvider(
 			financepkg.FXProviderFrankfurter,
 			fixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, now),
 		)),
 	)
+	reportingService := financepkg.NewReportingService(
+		store,
+		financepkg.WithReportingServiceNow(func() time.Time { return now }),
+	)
+	financeService := &realisticScenarioFinanceAdapter{
+		store:      store,
+		now:        func() time.Time { return now },
+		newID:      uuid.NewString,
+		provider:   provider,
+		tenants:    tenantService,
+		catalog:    catalogService,
+		ledger:     ledgerService,
+		csvImports: csvImportService,
+		bankSync:   bankSyncService,
+		fx:         fxService,
+		reporting:  reportingService,
+		cipher:     cipher,
+	}
 
 	summary, err := fixtures.GenerateRealisticScenario(
 		t.Context(),

@@ -68,29 +68,7 @@ func newDatabase(deps databaseDeps) (*persistence.Database, error) {
 	return database, nil
 }
 
-func newFinanceServiceFromDI(deps financeServiceDeps) (*financepkg.Service, error) {
-	opts := []financepkg.ServiceOption{
-		financepkg.WithCSVImportJobEnqueuer(csvImportJobEnqueuer{jobs: deps.Jobs}),
-		financepkg.WithBankSyncJobEnqueuer(bankConnectionSyncJobEnqueuer{jobs: deps.Jobs}),
-		financepkg.WithBankConnectionSyncScheduleWriter(bankConnectionSyncScheduleWriter{store: deps.JobsStore}),
-		financepkg.WithFXJobEnqueuer(fxSyncJobEnqueuer{jobs: deps.Jobs}),
-		financepkg.WithLogger(deps.RootLogger),
-	}
-	if cipher, err := makeFinanceCipher(deps.JWT); err != nil {
-		return nil, err
-	} else if cipher != nil {
-		opts = append(opts, financepkg.WithConnectionSecretCipher(cipher))
-	}
-	service := financepkg.NewService(deps.Store, opts...)
-	if err := registerFinanceJobHandlers(deps.Registry, service); err != nil {
-		return nil, err
-	}
-	return service, nil
-}
-
-func newBankConnectionServiceFromDI(
-	deps financeServiceDeps,
-) (*financepkg.BankConnectionService, error) {
+func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error) {
 	cipher, err := makeFinanceCipher(deps.JWT)
 	if err != nil {
 		return nil, err
@@ -102,6 +80,10 @@ func newBankConnectionServiceFromDI(
 		NewID:                  uuid.NewString,
 		HTTPClient:             http.DefaultClient,
 		ConnectionSecretCipher: cipher,
+		CSVImportJobEnqueuer:   csvImportJobEnqueuer{jobs: deps.Jobs},
+		BankSyncJobEnqueuer:    bankConnectionSyncJobEnqueuer{jobs: deps.Jobs},
+		BankSyncScheduleWriter: bankConnectionSyncScheduleWriter{store: deps.JobsStore},
+		FXJobEnqueuer:          fxSyncJobEnqueuer{jobs: deps.Jobs},
 		Monobank: financepkg.MonobankConfig{
 			BaseURL: resolveMonobankBaseURL(deps.MonoURL),
 		},
@@ -110,7 +92,48 @@ func newBankConnectionServiceFromDI(
 	if err != nil {
 		return nil, err
 	}
-	return financeModule.BankConnectionService, nil
+	registerErr := registerFinanceJobHandlers(
+		deps.Registry,
+		financeModule.FXService,
+		financeModule.CSVImportService,
+		financeModule.BankSyncService,
+	)
+	if registerErr != nil {
+		return nil, registerErr
+	}
+	return financeModule, nil
+}
+
+func newTenantServiceFromDI(module *financepkg.Finance) *financepkg.TenantService {
+	return module.TenantService
+}
+
+func newCatalogServiceFromDI(module *financepkg.Finance) *financepkg.CatalogService {
+	return module.CatalogService
+}
+
+func newLedgerServiceFromDI(module *financepkg.Finance) *financepkg.LedgerService {
+	return module.LedgerService
+}
+
+func newReportingServiceFromDI(module *financepkg.Finance) *financepkg.ReportingService {
+	return module.ReportingService
+}
+
+func newFXServiceFromDI(module *financepkg.Finance) *financepkg.FXService {
+	return module.FXService
+}
+
+func newCSVImportServiceFromDI(module *financepkg.Finance) *financepkg.CSVImportService {
+	return module.CSVImportService
+}
+
+func newBankConnectionServiceFromDI(module *financepkg.Finance) *financepkg.BankConnectionService {
+	return module.BankConnectionService
+}
+
+func newBankSyncServiceFromDI(module *financepkg.Finance) *financepkg.BankSyncService {
+	return module.BankSyncService
 }
 
 func buildEnableBankingConfig(deps financeServiceDeps) financepkg.EnableBankingConfig {
@@ -171,98 +194,123 @@ type bankConnectionSyncJobInput struct {
 	WindowEnd    *time.Time `json:"windowEnd,omitempty"`
 }
 
-func registerFinanceJobHandlers(registry *jobspkg.Registry, service *financepkg.Service) error {
-	if registry == nil || service == nil {
+func registerFinanceJobHandlers(
+	registry *jobspkg.Registry,
+	fxService *financepkg.FXService,
+	csvImportService *financepkg.CSVImportService,
+	bankSyncService *financepkg.BankSyncService,
+) error {
+	if registry == nil {
 		return nil
 	}
-	for _, spec := range []struct {
-		jobType  jobspkg.JobType
-		register func() error
-	}{
-		{
-			jobType: jobspkg.JobType(financepkg.CSVImportJobTypeTransactions),
-			register: func() error {
-				return jobspkg.RegisterTypedHandler(
-					registry,
-					jobspkg.TypedHandlerSpec[csvImportJobInput, financepkg.CSVImportRunResult, struct{}]{
-						JobType:       jobspkg.JobType(financepkg.CSVImportJobTypeTransactions),
-						SupportsRetry: true,
-						Run: func(ctx context.Context, input csvImportJobInput, _ func(struct{}) error) (financepkg.CSVImportRunResult, error) {
-							return service.RunCSVImportJob(ctx, financepkg.RunCSVImportJobParams{ImportID: input.ImportID})
-						},
-					},
-				)
-			},
-		},
-		{
-			jobType: jobspkg.JobType(financepkg.CSVImportJobTypeAccounts),
-			register: func() error {
-				return jobspkg.RegisterTypedHandler(
-					registry,
-					jobspkg.TypedHandlerSpec[csvImportJobInput, financepkg.CSVImportRunResult, struct{}]{
-						JobType:       jobspkg.JobType(financepkg.CSVImportJobTypeAccounts),
-						SupportsRetry: true,
-						Run: func(ctx context.Context, input csvImportJobInput, _ func(struct{}) error) (financepkg.CSVImportRunResult, error) {
-							return service.RunCSVImportJob(ctx, financepkg.RunCSVImportJobParams{ImportID: input.ImportID})
-						},
-					},
-				)
-			},
-		},
-		{
-			jobType: jobspkg.JobType(financepkg.BankConnectionSyncJobType),
-			register: func() error {
-				return jobspkg.RegisterTypedHandler(
-					registry,
-					jobspkg.TypedHandlerSpec[bankConnectionSyncJobInput, financepkg.BankConnectionSyncResult, struct{}]{
-						JobType:       jobspkg.JobType(financepkg.BankConnectionSyncJobType),
-						SupportsRetry: true,
-						Run: func(ctx context.Context, input bankConnectionSyncJobInput, _ func(struct{}) error) (financepkg.BankConnectionSyncResult, error) {
-							windowStart := time.Now().UTC().AddDate(0, 0, -30)
-							windowEnd := time.Now().UTC()
-							if input.WindowStart != nil {
-								windowStart = input.WindowStart.UTC()
-							}
-							if input.WindowEnd != nil {
-								windowEnd = input.WindowEnd.UTC()
-							}
-							return service.RunBankConnectionSync(ctx, financepkg.RunBankConnectionSyncParams{
-								ConnectionID: input.ConnectionID,
-								Reason:       input.Reason,
-								WindowStart:  windowStart,
-								WindowEnd:    windowEnd,
-							})
-						},
-					},
-				)
-			},
-		},
-		{
-			jobType: jobspkg.JobType(financepkg.FXSyncJobType),
-			register: func() error {
-				return jobspkg.RegisterTypedHandler(
-					registry,
-					jobspkg.TypedHandlerSpec[financepkg.SyncFXRatesParams, financepkg.SyncFXRatesResult, struct{}]{
-						JobType:       jobspkg.JobType(financepkg.FXSyncJobType),
-						SupportsRetry: true,
-						Run: func(ctx context.Context, input financepkg.SyncFXRatesParams, _ func(struct{}) error) (financepkg.SyncFXRatesResult, error) {
-							return service.SyncFXRates(ctx, input)
-						},
-					},
-				)
-			},
-		},
-	} {
-		if _, err := registry.Handler(spec.jobType); err == nil {
-			continue
-		} else if !errors.Is(err, jobspkg.ErrHandlerNotRegistered) {
-			return err
-		}
-		if err := spec.register(); err != nil {
-			return err
-		}
+	return errors.Join(
+		registerCSVImportJobHandler(
+			registry,
+			jobspkg.JobType(financepkg.CSVImportJobTypeTransactions),
+			csvImportService,
+		),
+		registerCSVImportJobHandler(
+			registry,
+			jobspkg.JobType(financepkg.CSVImportJobTypeAccounts),
+			csvImportService,
+		),
+		registerBankSyncJobHandler(registry, bankSyncService),
+		registerFXSyncJobHandler(registry, fxService),
+	)
+}
+
+func registerCSVImportJobHandler(
+	registry *jobspkg.Registry,
+	jobType jobspkg.JobType,
+	service *financepkg.CSVImportService,
+) error {
+	if service == nil {
+		return nil
 	}
-	return nil
+	return registerFinanceJobHandler(registry, jobType, func() error {
+		return jobspkg.RegisterTypedHandler(
+			registry,
+			jobspkg.TypedHandlerSpec[csvImportJobInput, financepkg.CSVImportRunResult, struct{}]{
+				JobType:       jobType,
+				SupportsRetry: true,
+				Run: func(ctx context.Context, input csvImportJobInput, _ func(struct{}) error) (financepkg.CSVImportRunResult, error) {
+					return service.RunCSVImportJob(ctx, financepkg.RunCSVImportJobParams{ImportID: input.ImportID})
+				},
+			},
+		)
+	})
+}
+
+func registerBankSyncJobHandler(
+	registry *jobspkg.Registry,
+	service *financepkg.BankSyncService,
+) error {
+	if service == nil {
+		return nil
+	}
+	return registerFinanceJobHandler(registry, jobspkg.JobType(financepkg.BankConnectionSyncJobType), func() error {
+		return jobspkg.RegisterTypedHandler(
+			registry,
+			jobspkg.TypedHandlerSpec[bankConnectionSyncJobInput, financepkg.BankConnectionSyncResult, struct{}]{
+				JobType:       jobspkg.JobType(financepkg.BankConnectionSyncJobType),
+				SupportsRetry: true,
+				Run: func(ctx context.Context, input bankConnectionSyncJobInput, _ func(struct{}) error) (financepkg.BankConnectionSyncResult, error) {
+					return service.RunBankConnectionSync(ctx, makeRunBankConnectionSyncParams(input))
+				},
+			},
+		)
+	})
+}
+
+func makeRunBankConnectionSyncParams(input bankConnectionSyncJobInput) financepkg.RunBankConnectionSyncParams {
+	windowStart := time.Now().UTC().AddDate(0, 0, -30)
+	windowEnd := time.Now().UTC()
+	if input.WindowStart != nil {
+		windowStart = input.WindowStart.UTC()
+	}
+	if input.WindowEnd != nil {
+		windowEnd = input.WindowEnd.UTC()
+	}
+	return financepkg.RunBankConnectionSyncParams{
+		ConnectionID: input.ConnectionID,
+		Reason:       input.Reason,
+		WindowStart:  windowStart,
+		WindowEnd:    windowEnd,
+	}
+}
+
+func registerFXSyncJobHandler(
+	registry *jobspkg.Registry,
+	service *financepkg.FXService,
+) error {
+	if service == nil {
+		return nil
+	}
+	return registerFinanceJobHandler(registry, jobspkg.JobType(financepkg.FXSyncJobType), func() error {
+		return jobspkg.RegisterTypedHandler(
+			registry,
+			jobspkg.TypedHandlerSpec[financepkg.SyncFXRatesParams, financepkg.SyncFXRatesResult, struct{}]{
+				JobType:       jobspkg.JobType(financepkg.FXSyncJobType),
+				SupportsRetry: true,
+				Run: func(ctx context.Context, input financepkg.SyncFXRatesParams, _ func(struct{}) error) (financepkg.SyncFXRatesResult, error) {
+					return service.SyncFXRates(ctx, input)
+				},
+			},
+		)
+	})
+}
+
+func registerFinanceJobHandler(
+	registry *jobspkg.Registry,
+	jobType jobspkg.JobType,
+	register func() error,
+) error {
+	if _, err := registry.Handler(jobType); err == nil {
+		return nil
+	} else if !errors.Is(err, jobspkg.ErrHandlerNotRegistered) {
+		return err
+	}
+	return register()
 }
 
 type csvImportJobEnqueuer struct{ jobs *jobspkg.Service }
@@ -372,7 +420,14 @@ func Register(container *dig.Container) error {
 		container,
 		newDatabase,
 		persistence.NewStore,
-		newFinanceServiceFromDI,
+		newFinanceModuleFromDI,
+		newTenantServiceFromDI,
+		newCatalogServiceFromDI,
+		newLedgerServiceFromDI,
+		newReportingServiceFromDI,
+		newFXServiceFromDI,
+		newCSVImportServiceFromDI,
 		newBankConnectionServiceFromDI,
+		newBankSyncServiceFromDI,
 	)
 }

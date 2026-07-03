@@ -129,7 +129,7 @@ func TestSetupV1Routes(t *testing.T) {
 		})
 	})
 
-	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler, *financepkg.Service, *financepkg.BankConnectionService, *financepersistence.Store) {
+	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler, *financepkg.Finance, *financepkg.BankConnectionService, *financepersistence.Store) {
 		t.Helper()
 		strategyDSN := filepath.Join(t.TempDir(), "strategy-workspace.db")
 		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
@@ -171,7 +171,6 @@ func TestSetupV1Routes(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, financepersistence.NewMigrator(financeDatabase).Migrate(t.Context()))
 		financeStore := financepersistence.NewStore(financeDatabase)
-		financeService := financepkg.NewService(financeStore)
 		cipherKey := sha256.Sum256([]byte("http-register-test-cipher"))
 		connectionCipher, err := credentials.NewAESGCMCipher(cipherKey[:], "signal-foundry-finance")
 		require.NoError(t, err)
@@ -227,7 +226,13 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthMiddleware: passthroughMiddleware,
 		})
 		financeCtrl := v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
-			FinanceService:        financeService,
+			TenantService:         financeModule.TenantService,
+			CatalogService:        financeModule.CatalogService,
+			LedgerService:         financeModule.LedgerService,
+			BankSyncService:       financeModule.BankSyncService,
+			ReportingService:      financeModule.ReportingService,
+			FXService:             financeModule.FXService,
+			CSVImportService:      financeModule.CSVImportService,
 			BankConnectionService: bankConnectionService,
 			AuthMiddleware:        passthroughMiddleware,
 		})
@@ -257,11 +262,10 @@ func TestSetupV1Routes(t *testing.T) {
 			HTTPRouter:            router,
 			Runtime:               rt,
 			RootLogger:            telemetry.RootTestLogger(),
-			FinanceService:        financeService,
 			BankConnectionService: bankConnectionService,
 			UILocation:            uiLocation,
 		})
-		return router, healthCtrl, rootHandler, financeService, bankConnectionService, financeStore
+		return router, healthCtrl, rootHandler, financeModule, bankConnectionService, financeStore
 	}
 
 	t.Run("should mount agent API routes", func(t *testing.T) {
@@ -332,8 +336,7 @@ func TestSetupV1Routes(t *testing.T) {
 		financeDatabase, err := financepersistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.db"))
 		require.NoError(t, err)
 		require.NoError(t, financepersistence.NewMigrator(financeDatabase).Migrate(t.Context()))
-		financeStore := financepersistence.NewStore(financeDatabase)
-		financeService := financepkg.NewService(financeStore)
+		_ = financepersistence.NewStore(financeDatabase)
 		cipherKey := sha256.Sum256([]byte("http-register-test-cipher-routes"))
 		connectionCipher, err := credentials.NewAESGCMCipher(cipherKey[:], "signal-foundry-finance")
 		require.NoError(t, err)
@@ -379,7 +382,13 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthMiddleware: passthroughMiddleware,
 		})
 		financeCtrl := v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
-			FinanceService:        financeService,
+			TenantService:         financeModule.TenantService,
+			CatalogService:        financeModule.CatalogService,
+			LedgerService:         financeModule.LedgerService,
+			BankSyncService:       financeModule.BankSyncService,
+			ReportingService:      financeModule.ReportingService,
+			FXService:             financeModule.FXService,
+			CSVImportService:      financeModule.CSVImportService,
 			BankConnectionService: bankConnectionService,
 			AuthMiddleware:        passthroughMiddleware,
 		})
@@ -397,7 +406,6 @@ func TestSetupV1Routes(t *testing.T) {
 			HTTPRouter:            router,
 			Runtime:               rt,
 			RootLogger:            telemetry.RootTestLogger(),
-			FinanceService:        financeService,
 			BankConnectionService: bankConnectionService,
 		})
 

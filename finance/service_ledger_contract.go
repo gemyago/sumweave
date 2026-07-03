@@ -1,0 +1,105 @@
+package finance
+
+import (
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/gemyago/signal-foundry/finance/domain"
+)
+
+var ErrTransactionNotFound = errors.New("transaction not found")
+
+type RecordTransactionParams struct {
+	ActorUserID      string
+	TenantID         string
+	AccountID        string
+	Source           domain.TransactionSource
+	Status           domain.TransactionStatus
+	Kind             domain.TransactionKind
+	AmountMinor      int64
+	Currency         string
+	Description      string
+	EffectiveAt      time.Time
+	CategoryID       string
+	TransferGroupID  string
+	ProviderOriginal *domain.ProviderTransactionOriginal
+}
+
+type UpdateTransactionParams struct {
+	ActorUserID   string
+	TenantID      string
+	TransactionID string
+	Description   string
+	AmountMinor   int64
+	EffectiveAt   time.Time
+	CategoryID    string
+}
+
+type HideTransactionParams struct {
+	ActorUserID   string
+	TenantID      string
+	TransactionID string
+}
+
+type GetTransactionParams struct {
+	ActorUserID   string
+	TenantID      string
+	TransactionID string
+}
+
+type LinkTransfersParams struct {
+	ActorUserID         string
+	TenantID            string
+	FirstTransactionID  string
+	SecondTransactionID string
+}
+
+type ListTransactionsParams struct {
+	ActorUserID   string
+	TenantID      string
+	AccountID     string
+	Source        domain.TransactionSource
+	Status        domain.TransactionStatus
+	IncludeHidden bool
+}
+
+type SummarizeTransactionsParams struct {
+	ActorUserID string
+	TenantID    string
+}
+
+type GetAccountBalanceParams struct {
+	ActorUserID string
+	TenantID    string
+	AccountID   string
+}
+
+func bookedMatchedTransfer(item domain.Transaction) bool {
+	if item.HiddenAt != nil ||
+		item.Status != domain.TransactionStatusBooked ||
+		item.Kind != domain.TransactionKindTransfer {
+		return false
+	}
+	if item.TransferMatchedAt == nil || item.TransferMatchedAt.IsZero() {
+		return false
+	}
+	return item.AmountMinor != 0
+}
+
+func existingTransferGroupID(
+	firstTransaction domain.Transaction,
+	secondTransaction domain.Transaction,
+) string {
+	if firstTransaction.TransferGroupID != nil {
+		if groupID := strings.TrimSpace(*firstTransaction.TransferGroupID); groupID != "" {
+			return groupID
+		}
+	}
+	if secondTransaction.TransferGroupID != nil {
+		if groupID := strings.TrimSpace(*secondTransaction.TransferGroupID); groupID != "" {
+			return groupID
+		}
+	}
+	return ""
+}

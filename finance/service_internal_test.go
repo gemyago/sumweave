@@ -44,7 +44,7 @@ func TestFocusedCoreServices(t *testing.T) {
 			TenantID:    tenant.ID,
 		})
 		require.NoError(t, err)
-		assert.Len(t, categories, len(service.defaultCategories))
+		assert.Len(t, categories, len(defaultTenantCategorySeeds()))
 
 		invite, err := service.CreateTenantInvite(t.Context(), CreateTenantInviteParams{
 			ActorUserID: ownerUserID,
@@ -389,13 +389,13 @@ func TestFocusedCoreServices(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		_, err = service.access.requireTenantCategory(t.Context(), tenant.ID, outsiderUserID, category.ID)
+		_, err = service.catalog.requireTenantCategory(t.Context(), tenant.ID, outsiderUserID, category.ID)
 		require.ErrorIs(t, err, ErrTenantAccessDenied)
 
-		_, err = service.access.requireTenantTag(t.Context(), tenant.ID, outsiderUserID, tag.ID)
+		_, err = service.catalog.requireTenantTag(t.Context(), tenant.ID, outsiderUserID, tag.ID)
 		require.ErrorIs(t, err, ErrTenantAccessDenied)
 
-		_, err = service.access.requireTenantTransaction(t.Context(), tenant.ID, outsiderUserID, txn.ID)
+		_, err = service.ledger.requireTenantTransaction(t.Context(), tenant.ID, outsiderUserID, txn.ID)
 		require.ErrorIs(t, err, ErrTenantAccessDenied)
 
 		assert.False(t, bookedMatchedTransfer(domain.Transaction{Kind: domain.TransactionKindRegular}))
@@ -405,6 +405,14 @@ func TestFocusedCoreServices(t *testing.T) {
 			existingTransferGroupID(
 				domain.Transaction{},
 				domain.Transaction{TransferGroupID: &fallbackGroupID},
+			),
+		)
+		assert.Equal(
+			t,
+			fallbackGroupID,
+			existingTransferGroupID(
+				domain.Transaction{TransferGroupID: &fallbackGroupID},
+				domain.Transaction{},
 			),
 		)
 	})

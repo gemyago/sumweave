@@ -21,7 +21,7 @@ import (
 	"go.uber.org/dig"
 )
 
-type financeService interface {
+type tenantService interface {
 	CreateTenant(context.Context, financepkg.CreateTenantParams) (domain.Tenant, error)
 	ArchiveTenant(context.Context, financepkg.ArchiveTenantParams) (domain.Tenant, error)
 	ListTenantsForUser(context.Context, string) ([]domain.TenantMembershipView, error)
@@ -41,12 +41,18 @@ type financeService interface {
 		context.Context,
 		financepkg.AcceptTenantInviteParams,
 	) (domain.TenantMembership, error)
+}
+
+type catalogService interface {
 	CreateAccount(context.Context, financepkg.CreateAccountParams) (domain.Account, error)
 	ListAccounts(context.Context, financepkg.ListAccountsParams) ([]domain.Account, error)
 	CreateCategory(context.Context, financepkg.CreateCategoryParams) (domain.Category, error)
 	ListCategories(context.Context, financepkg.ListCategoriesParams) ([]domain.Category, error)
 	CreateTag(context.Context, financepkg.CreateTagParams) (domain.Tag, error)
 	ListTags(context.Context, financepkg.ListTagsParams) ([]domain.Tag, error)
+}
+
+type ledgerService interface {
 	RecordTransaction(
 		context.Context,
 		financepkg.RecordTransactionParams,
@@ -63,6 +69,9 @@ type financeService interface {
 		context.Context,
 		financepkg.ListTransactionsParams,
 	) ([]domain.Transaction, error)
+}
+
+type bankSyncService interface {
 	ListBankConnections(
 		context.Context,
 		financepkg.ListBankConnectionsParams,
@@ -72,12 +81,21 @@ type financeService interface {
 		financepkg.TriggerBankConnectionSyncParams,
 	) (financepkg.BankConnectionSyncJobRef, error)
 	DeleteBankConnection(context.Context, financepkg.DeleteBankConnectionParams) error
+}
+
+type reportingService interface {
 	GetDashboard(context.Context, financepkg.DashboardParams) (financepkg.Dashboard, error)
+}
+
+type fxService interface {
 	GetFXAdminDiagnostics(
 		context.Context,
 		financepkg.FXAdminDiagnosticsParams,
 	) (financepkg.FXAdminDiagnostics, error)
 	TriggerFXSync(context.Context, financepkg.TriggerFXSyncParams) (financepkg.FXSyncJobRef, error)
+}
+
+type csvImportService interface {
 	PreviewCSVImport(
 		context.Context,
 		financepkg.PreviewCSVImportParams,
@@ -90,6 +108,16 @@ type financeService interface {
 		context.Context,
 		financepkg.GetCSVImportAuditParams,
 	) (financepkg.CSVImportAudit, error)
+}
+
+type financeService interface {
+	tenantService
+	catalogService
+	ledgerService
+	bankSyncService
+	reportingService
+	fxService
+	csvImportService
 }
 
 type bankConnectionService interface {
@@ -110,7 +138,13 @@ type bankConnectionService interface {
 type FinanceControllerDeps struct {
 	dig.In
 
-	FinanceService               financeService
+	TenantService                tenantService
+	CatalogService               catalogService
+	LedgerService                ledgerService
+	BankSyncService              bankSyncService
+	ReportingService             reportingService
+	FXService                    fxService
+	CSVImportService             csvImportService
 	BankConnectionService        bankConnectionService
 	AuthMiddleware               middleware.AuthMiddleware
 	EnableBankingCallbackBaseURL string `name:"config.finance.providers.enableBanking.callbackBaseURL" optional:"true"`
@@ -136,7 +170,7 @@ func (c *FinanceController) AcceptFinanceTenantInvite(
 			return nil, err
 		}
 
-		membership, err := c.deps.FinanceService.AcceptTenantInvite(
+		membership, err := c.deps.TenantService.AcceptTenantInvite(
 			ctx,
 			financepkg.AcceptTenantInviteParams{ActorUserID: userID, Code: params.Payload.Code},
 		)
@@ -166,7 +200,7 @@ func (c *FinanceController) ConfirmFinanceCsvImport(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.ConfirmCSVImport(
+		item, err := c.deps.CSVImportService.ConfirmCSVImport(
 			ctx,
 			financepkg.ConfirmCSVImportParams{
 				ActorUserID: userID,
@@ -200,7 +234,7 @@ func (c *FinanceController) CreateFinanceAccount(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.CreateAccount(
+		item, err := c.deps.CatalogService.CreateAccount(
 			ctx,
 			financepkg.CreateAccountParams{
 				ActorUserID: userID,
@@ -233,7 +267,7 @@ func (c *FinanceController) CreateFinanceCategory(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.CreateCategory(
+		item, err := c.deps.CatalogService.CreateCategory(
 			ctx,
 			financepkg.CreateCategoryParams{
 				ActorUserID: userID,
@@ -265,7 +299,7 @@ func (c *FinanceController) CreateFinanceTag(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.CreateTag(
+		item, err := c.deps.CatalogService.CreateTag(
 			ctx,
 			financepkg.CreateTagParams{
 				ActorUserID: userID,
@@ -296,7 +330,7 @@ func (c *FinanceController) CreateFinanceTenant(
 			return nil, err
 		}
 
-		tenant, err := c.deps.FinanceService.CreateTenant(
+		tenant, err := c.deps.TenantService.CreateTenant(
 			ctx,
 			financepkg.CreateTenantParams{
 				ActorUserID:     userID,
@@ -336,7 +370,7 @@ func (c *FinanceController) ArchiveFinanceTenant(
 			return err
 		}
 
-		_, err = c.deps.FinanceService.ArchiveTenant(
+		_, err = c.deps.TenantService.ArchiveTenant(
 			ctx,
 			financepkg.ArchiveTenantParams{ActorUserID: userID, TenantID: params.TenantID},
 		)
@@ -361,7 +395,7 @@ func (c *FinanceController) CreateFinanceTenantInvite(
 			return nil, err
 		}
 
-		invite, err := c.deps.FinanceService.CreateTenantInvite(
+		invite, err := c.deps.TenantService.CreateTenantInvite(
 			ctx,
 			financepkg.CreateTenantInviteParams{
 				ActorUserID: userID,
@@ -392,7 +426,7 @@ func (c *FinanceController) CreateFinanceTransaction(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.RecordTransaction(
+		item, err := c.deps.LedgerService.RecordTransaction(
 			ctx,
 			financepkg.RecordTransactionParams{
 				ActorUserID:     userID,
@@ -432,7 +466,7 @@ func (c *FinanceController) GetFinanceTransaction(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.GetTransaction(
+		item, err := c.deps.LedgerService.GetTransaction(
 			ctx,
 			financepkg.GetTransactionParams{
 				ActorUserID:   userID,
@@ -463,7 +497,7 @@ func (c *FinanceController) GetFinanceCsvImportAudit(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.GetCSVImportAudit(
+		item, err := c.deps.CSVImportService.GetCSVImportAudit(
 			ctx,
 			financepkg.GetCSVImportAuditParams{
 				ActorUserID: userID,
@@ -509,7 +543,7 @@ func (c *FinanceController) GetFinanceDashboard(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.GetDashboard(
+		item, err := c.deps.ReportingService.GetDashboard(
 			ctx,
 			financepkg.DashboardParams{
 				ActorUserID: userID,
@@ -537,7 +571,7 @@ func (c *FinanceController) GetFinanceFxDiagnostics(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.GetFXAdminDiagnostics(
+		item, err := c.deps.FXService.GetFXAdminDiagnostics(
 			ctx,
 			financepkg.FXAdminDiagnosticsParams{},
 		)
@@ -577,7 +611,7 @@ func (c *FinanceController) GetFinanceTenant(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListTenantsForUser(ctx, userID)
+		items, err := c.deps.TenantService.ListTenantsForUser(ctx, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -672,7 +706,7 @@ func (c *FinanceController) ListFinanceAccounts(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListAccounts(
+		items, err := c.deps.CatalogService.ListAccounts(
 			ctx,
 			financepkg.ListAccountsParams{
 				ActorUserID:   userID,
@@ -804,7 +838,7 @@ func (c *FinanceController) ListFinanceCategories(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListCategories(
+		items, err := c.deps.CatalogService.ListCategories(
 			ctx,
 			financepkg.ListCategoriesParams{
 				ActorUserID:   userID,
@@ -834,7 +868,7 @@ func (c *FinanceController) ListFinanceConnections(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListBankConnections(
+		items, err := c.deps.BankSyncService.ListBankConnections(
 			ctx,
 			financepkg.ListBankConnectionsParams{ActorUserID: userID, TenantID: params.TenantID},
 		)
@@ -868,7 +902,7 @@ func (c *FinanceController) DeleteFinanceConnection(
 			return err
 		}
 
-		return c.deps.FinanceService.DeleteBankConnection(ctx, financepkg.DeleteBankConnectionParams{
+		return c.deps.BankSyncService.DeleteBankConnection(ctx, financepkg.DeleteBankConnectionParams{
 			ActorUserID:  userID,
 			TenantID:     params.TenantID,
 			ConnectionID: params.ConnectionID,
@@ -890,7 +924,7 @@ func (c *FinanceController) ListFinanceTags(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListTags(
+		items, err := c.deps.CatalogService.ListTags(
 			ctx,
 			financepkg.ListTagsParams{
 				ActorUserID:   userID,
@@ -920,7 +954,7 @@ func (c *FinanceController) ListFinanceTenantInvites(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListTenantInvites(
+		items, err := c.deps.TenantService.ListTenantInvites(
 			ctx,
 			financepkg.ListTenantInvitesParams{ActorUserID: userID, TenantID: params.TenantID},
 		)
@@ -954,7 +988,7 @@ func (c *FinanceController) ListFinanceTenantMembers(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListTenantMembers(
+		items, err := c.deps.TenantService.ListTenantMembers(
 			ctx,
 			financepkg.ListTenantMembersParams{ActorUserID: userID, TenantID: params.TenantID},
 		)
@@ -989,7 +1023,7 @@ func (c *FinanceController) ListFinanceTenants(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListTenantsForUser(ctx, userID)
+		items, err := c.deps.TenantService.ListTenantsForUser(ctx, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -1020,7 +1054,7 @@ func (c *FinanceController) ListFinanceTransactions(
 			return nil, err
 		}
 
-		items, err := c.deps.FinanceService.ListTransactions(
+		items, err := c.deps.LedgerService.ListTransactions(
 			ctx,
 			financepkg.ListTransactionsParams{
 				ActorUserID:   userID,
@@ -1066,7 +1100,7 @@ func (c *FinanceController) UpdateFinanceTransaction(
 			categoryID = *params.Payload.CategoryID
 		}
 
-		item, err := c.deps.FinanceService.UpdateTransaction(
+		item, err := c.deps.LedgerService.UpdateTransaction(
 			ctx,
 			financepkg.UpdateTransactionParams{
 				ActorUserID:   userID,
@@ -1101,7 +1135,7 @@ func (c *FinanceController) PreviewFinanceCsvImport(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.PreviewCSVImport(
+		item, err := c.deps.CSVImportService.PreviewCSVImport(
 			ctx,
 			financepkg.PreviewCSVImportParams{
 				ActorUserID: userID,
@@ -1134,7 +1168,7 @@ func (c *FinanceController) TriggerFinanceConnectionSync(
 			return nil, err
 		}
 
-		jobRef, err := c.deps.FinanceService.TriggerBankConnectionSync(
+		jobRef, err := c.deps.BankSyncService.TriggerBankConnectionSync(
 			ctx,
 			financepkg.TriggerBankConnectionSyncParams{
 				ActorUserID:  userID,
@@ -1167,7 +1201,7 @@ func (c *FinanceController) TriggerFinanceFxSync(
 			return nil, err
 		}
 
-		jobRef, err := c.deps.FinanceService.TriggerFXSync(
+		jobRef, err := c.deps.FXService.TriggerFXSync(
 			ctx,
 			financepkg.TriggerFXSyncParams{
 				RequestedByUserID: userID,

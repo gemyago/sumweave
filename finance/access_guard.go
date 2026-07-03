@@ -2,8 +2,11 @@ package finance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
+
+var ErrTenantAccessDenied = errors.New("tenant access denied")
 
 type accessGuardStore interface {
 	IsTenantMember(ctx context.Context, tenantID string, userID string) (bool, error)

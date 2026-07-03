@@ -9,36 +9,62 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/domain"
 	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/google/uuid"
 )
 
-type tenantService struct {
-	store             serviceStore
-	access            *tenantAccessGuard
-	now               func() time.Time
-	newID             func() string
-	defaultCategories []defaultCategorySeed
-	defaultTags       []string
+type tenantServiceStore interface {
+	IsTenantMember(ctx context.Context, tenantID string, userID string) (bool, error)
+	SaveTenant(ctx context.Context, tenant domain.Tenant) (domain.Tenant, error)
+	SaveTenantMembership(
+		ctx context.Context,
+		membership domain.TenantMembership,
+	) (domain.TenantMembership, error)
+	ListTenantsForUser(ctx context.Context, userID string) ([]domain.TenantMembershipView, error)
+	SaveTenantInvite(ctx context.Context, invite domain.TenantInvite) (domain.TenantInvite, error)
+	GetTenantInviteByCode(ctx context.Context, code string) (*domain.TenantInvite, error)
+	UpdateTenantInvite(ctx context.Context, invite domain.TenantInvite) (domain.TenantInvite, error)
+	ListTenantInvites(ctx context.Context, tenantID string) ([]domain.TenantInvite, error)
+	ListTenantMembers(ctx context.Context, tenantID string) ([]domain.TenantMember, error)
+	GetTenant(ctx context.Context, tenantID string) (*domain.Tenant, error)
+	SaveCategory(ctx context.Context, category domain.Category) (domain.Category, error)
+	SaveTag(ctx context.Context, tag domain.Tag) (domain.Tag, error)
 }
 
-func newTenantService(
-	store serviceStore,
-	access *tenantAccessGuard,
-	now func() time.Time,
-	newID func() string,
-	defaultCategories []defaultCategorySeed,
-	defaultTags []string,
-) *tenantService {
-	return &tenantService{
-		store:             store,
-		access:            access,
-		now:               now,
-		newID:             newID,
-		defaultCategories: append([]defaultCategorySeed{}, defaultCategories...),
-		defaultTags:       append([]string{}, defaultTags...),
+type TenantService struct {
+	store  tenantServiceStore
+	access *accessGuard
+	now    func() time.Time
+	newID  func() string
+}
+
+type TenantServiceOption func(*TenantService)
+
+func WithTenantServiceNow(now func() time.Time) TenantServiceOption {
+	return func(service *TenantService) {
+		service.now = now
 	}
 }
 
-func (s *tenantService) CreateTenant(
+func WithTenantServiceIDGenerator(newID func() string) TenantServiceOption {
+	return func(service *TenantService) {
+		service.newID = newID
+	}
+}
+
+func NewTenantService(store tenantServiceStore, opts ...TenantServiceOption) *TenantService {
+	service := &TenantService{
+		store:  store,
+		access: newAccessGuard(store),
+		now:    func() time.Time { return time.Now().UTC() },
+		newID:  uuid.NewString,
+	}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
+}
+
+func (s *TenantService) CreateTenant(
 	ctx context.Context,
 	params CreateTenantParams,
 ) (domain.Tenant, error) {
@@ -72,7 +98,7 @@ func (s *tenantService) CreateTenant(
 	if _, err := s.store.SaveTenantMembership(ctx, membership); err != nil {
 		return domain.Tenant{}, fmt.Errorf("create tenant: %w", err)
 	}
-	for _, seed := range s.defaultCategories {
+	for _, seed := range defaultTenantCategorySeeds() {
 		_, err := s.store.SaveCategory(ctx, domain.Category{
 			ID:            s.newID(),
 			TenantID:      tenant.ID,
@@ -86,7 +112,7 @@ func (s *tenantService) CreateTenant(
 			return domain.Tenant{}, fmt.Errorf("create tenant: %w", err)
 		}
 	}
-	for _, seed := range s.defaultTags {
+	for _, seed := range defaultTenantTags() {
 		_, err := s.store.SaveTag(ctx, domain.Tag{
 			ID:        s.newID(),
 			TenantID:  tenant.ID,
@@ -101,7 +127,7 @@ func (s *tenantService) CreateTenant(
 	return tenant, nil
 }
 
-func (s *tenantService) ArchiveTenant(
+func (s *TenantService) ArchiveTenant(
 	ctx context.Context,
 	params ArchiveTenantParams,
 ) (domain.Tenant, error) {
@@ -122,7 +148,7 @@ func (s *tenantService) ArchiveTenant(
 	return archived, nil
 }
 
-func (s *tenantService) ListTenantsForUser(
+func (s *TenantService) ListTenantsForUser(
 	ctx context.Context,
 	userID string,
 ) ([]domain.TenantMembershipView, error) {
@@ -133,7 +159,7 @@ func (s *tenantService) ListTenantsForUser(
 	return views, nil
 }
 
-func (s *tenantService) CreateTenantInvite(
+func (s *TenantService) CreateTenantInvite(
 	ctx context.Context,
 	params CreateTenantInviteParams,
 ) (domain.TenantInvite, error) {
@@ -156,7 +182,7 @@ func (s *tenantService) CreateTenantInvite(
 	return created, nil
 }
 
-func (s *tenantService) AcceptTenantInvite(
+func (s *TenantService) AcceptTenantInvite(
 	ctx context.Context,
 	params AcceptTenantInviteParams,
 ) (domain.TenantMembership, error) {
@@ -192,7 +218,7 @@ func (s *tenantService) AcceptTenantInvite(
 	return membership, nil
 }
 
-func (s *tenantService) ListTenantMembers(
+func (s *TenantService) ListTenantMembers(
 	ctx context.Context,
 	params ListTenantMembersParams,
 ) ([]domain.TenantMember, error) {
@@ -206,7 +232,7 @@ func (s *tenantService) ListTenantMembers(
 	return members, nil
 }
 
-func (s *tenantService) ListTenantInvites(
+func (s *TenantService) ListTenantInvites(
 	ctx context.Context,
 	params ListTenantInvitesParams,
 ) ([]domain.TenantInvite, error) {

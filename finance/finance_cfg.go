@@ -37,6 +37,13 @@ type Config struct {
 	NewID                  func() string
 	HTTPClient             *http.Client
 	ConnectionSecretCipher connectionSecretCipher
+	FXProviders            []FXRatesProvider
+	DefaultFXProvider      string
+	FXJobEnqueuer          FXSyncJobEnqueuer
+	FXScheduleWriter       FXSyncScheduleWriter
+	CSVImportJobEnqueuer   CSVImportJobEnqueuer
+	BankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
+	BankSyncScheduleWriter BankConnectionSyncScheduleWriter
 	Monobank               MonobankConfig
 	EnableBanking          EnableBankingConfig
 }

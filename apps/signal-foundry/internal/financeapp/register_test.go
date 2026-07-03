@@ -143,7 +143,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			filepath.Join(t.TempDir(), "jobs.sqlite"),
 		)
 
-		service, err := newFinanceServiceFromDI(financeServiceDeps{
+		financeModule, err := newFinanceModuleFromDI(financeServiceDeps{
 			Database:             database,
 			Store:                financeStore,
 			Jobs:                 jobsService,
@@ -161,26 +161,11 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			EnableValidDays:      90,
 		})
 		require.NoError(t, err)
-		bankConnections, err := newBankConnectionServiceFromDI(financeServiceDeps{
-			Database:             database,
-			Store:                financeStore,
-			Jobs:                 jobsService,
-			JobsStore:            jobsStore,
-			Registry:             registry,
-			RootLogger:           nil,
-			JWT:                  "jwt-key-for-finance-tests",
-			MonoURL:              monoServer.URL,
-			EnableURL:            enableServer.URL,
-			EnableAppID:          "app-123",
-			EnablePrivateKeyPath: enablePrivateKeyPath,
-			EnableASPSPName:      "PKO Bank Polski",
-			EnableCountry:        "PL",
-			EnablePSUType:        "personal",
-			EnableValidDays:      90,
-		})
-		require.NoError(t, err)
+		bankConnections := financeModule.BankConnectionService
+		bankSyncService := financeModule.BankSyncService
+		tenantService := financeModule.TenantService
 
-		tenant, err := service.CreateTenant(t.Context(), financepkg.CreateTenantParams{
+		tenant, err := tenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{
 			ActorUserID:     "user-owner",
 			Name:            "tenant-finance",
 			DisplayCurrency: "PLN",
@@ -225,7 +210,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 
 		connections := []string{monobankConnection.ID, pkoConnection.ID}
 		for _, connectionID := range connections {
-			jobRef, triggerErr := service.TriggerBankConnectionSync(
+			jobRef, triggerErr := bankSyncService.TriggerBankConnectionSync(
 				t.Context(),
 				financepkg.TriggerBankConnectionSyncParams{
 					ActorUserID:  "user-owner",
@@ -244,7 +229,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			require.Equal(t, connectionID, input.ConnectionID)
 		}
 
-		connectionsView, err := service.ListBankConnections(
+		connectionsView, err := bankSyncService.ListBankConnections(
 			t.Context(),
 			financepkg.ListBankConnectionsParams{
 				ActorUserID: "user-owner",
@@ -334,7 +319,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			filepath.Join(t.TempDir(), "jobs.sqlite"),
 		)
 
-		service, err := newFinanceServiceFromDI(financeServiceDeps{
+		financeModule, err := newFinanceModuleFromDI(financeServiceDeps{
 			Database:             database,
 			Store:                financeStore,
 			Jobs:                 jobsService,
@@ -351,25 +336,11 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			EnableValidDays:      90,
 		})
 		require.NoError(t, err)
-		bankConnections, err := newBankConnectionServiceFromDI(financeServiceDeps{
-			Database:             database,
-			Store:                financeStore,
-			Jobs:                 jobsService,
-			JobsStore:            jobsStore,
-			Registry:             registry,
-			RootLogger:           nil,
-			JWT:                  "jwt-key-for-finance-tests",
-			EnableURL:            server.URL,
-			EnableAppID:          "app-123",
-			EnablePrivateKeyPath: privateKeyPath,
-			EnableASPSPName:      "PKO Bank Polski",
-			EnableCountry:        "PL",
-			EnablePSUType:        "personal",
-			EnableValidDays:      90,
-		})
-		require.NoError(t, err)
+		bankConnections := financeModule.BankConnectionService
+		bankSyncService := financeModule.BankSyncService
+		tenantService := financeModule.TenantService
 
-		tenant, err := service.CreateTenant(t.Context(), financepkg.CreateTenantParams{
+		tenant, err := tenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{
 			ActorUserID:     "user-owner",
 			Name:            "tenant-signed-enable-banking",
 			DisplayCurrency: "PLN",
@@ -397,12 +368,15 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "session-123", connection.ExternalID)
 
-		jobRef, err := service.TriggerBankConnectionSync(t.Context(), financepkg.TriggerBankConnectionSyncParams{
-			ActorUserID:  "user-owner",
-			TenantID:     tenant.ID,
-			ConnectionID: connection.ID,
-			Reason:       financepkg.BankConnectionSyncReasonManual,
-		})
+		jobRef, err := bankSyncService.TriggerBankConnectionSync(
+			t.Context(),
+			financepkg.TriggerBankConnectionSyncParams{
+				ActorUserID:  "user-owner",
+				TenantID:     tenant.ID,
+				ConnectionID: connection.ID,
+				Reason:       financepkg.BankConnectionSyncReasonManual,
+			},
+		)
 		require.NoError(t, err)
 
 		job, err := jobsStore.Get(t.Context(), jobRef.ID)
@@ -474,14 +448,17 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			),
 		)
 		require.NoError(t, auth.Register(container))
-		require.NoError(t, container.Provide(newFinanceServiceFromDI))
+		require.NoError(t, container.Provide(newFinanceModuleFromDI))
+		require.NoError(t, container.Provide(newTenantServiceFromDI))
+		require.NoError(t, container.Provide(newBankSyncServiceFromDI))
 		require.NoError(t, container.Provide(newBankConnectionServiceFromDI))
 
 		type resolvedDeps struct {
 			dig.In
 
 			JWTKey                string `name:"auth.jwtKey"`
-			Service               *financepkg.Service
+			TenantService         *financepkg.TenantService
+			BankSyncService       *financepkg.BankSyncService
 			BankConnectionService *financepkg.BankConnectionService
 		}
 
@@ -497,7 +474,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, resolved.JWTKey, string(persistedKey))
 
-		tenant, err := resolved.Service.CreateTenant(t.Context(), financepkg.CreateTenantParams{
+		tenant, err := resolved.TenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{
 			ActorUserID:     "user-owner",
 			Name:            "tenant-fallback",
 			DisplayCurrency: "UAH",
@@ -516,7 +493,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "monobank", connection.Provider)
 
-		connections, err := resolved.Service.ListBankConnections(
+		connections, err := resolved.BankSyncService.ListBankConnections(
 			t.Context(),
 			financepkg.ListBankConnectionsParams{
 				ActorUserID: "user-owner",
@@ -534,7 +511,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
 		financeStore := persistence.NewStore(database)
 
-		_, err = newBankConnectionServiceFromDI(financeServiceDeps{
+		_, err = newFinanceModuleFromDI(financeServiceDeps{
 			Database:        database,
 			Store:           financeStore,
 			JWT:             "jwt-key-for-finance-tests",
