@@ -279,6 +279,13 @@ func (s *Service) AttachLinkedAccount(
 	return s.catalog.AttachLinkedAccount(ctx, params)
 }
 
+func (s *Service) GetAccount(
+	ctx context.Context,
+	params GetAccountParams,
+) (domain.Account, error) {
+	return s.catalog.GetAccount(ctx, params)
+}
+
 func (s *Service) ListAccounts(
 	ctx context.Context,
 	params ListAccountsParams,

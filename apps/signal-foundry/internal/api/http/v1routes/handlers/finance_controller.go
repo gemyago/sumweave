@@ -120,6 +120,16 @@ type FinanceController interface {
 		*FinanceBankConnection,
 	]) http.Handler
 
+	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}
+	//
+	// Request type: GetFinanceAccountParams,
+	//
+	// Response type: FinanceAccount
+	GetFinanceAccount(HandlerBuilder[
+		*GetFinanceAccountParams,
+		*FinanceAccount,
+	]) http.Handler
+
 	// GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 	//
 	// Request type: GetFinanceCsvImportAuditParams,
@@ -333,6 +343,8 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/link-redirect/finish
 // 
+// - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}
+// 
 // - GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/dashboard
@@ -385,6 +397,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/transactions", controller.CreateFinanceTransaction(builder.CreateFinanceTransaction))
 	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}", controller.DeleteFinanceConnection(builder.DeleteFinanceConnection))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/finish", controller.FinishFinanceConnectionRedirectLink(builder.FinishFinanceConnectionRedirectLink))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.GetFinanceAccount(builder.GetFinanceAccount))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports/{importId}", controller.GetFinanceCsvImportAudit(builder.GetFinanceCsvImportAudit))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/dashboard", controller.GetFinanceDashboard(builder.GetFinanceDashboard))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/fx/diagnostics", controller.GetFinanceFxDiagnostics(builder.GetFinanceFxDiagnostics))

@@ -55,15 +55,17 @@ type LinkedAccount struct {
 }
 
 type Account struct {
-	ID            string
-	TenantID      string
-	Name          string
-	Currency      string
-	Kind          AccountKind
-	LinkedAccount *LinkedAccount
-	HiddenAt      *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID                  string
+	TenantID            string
+	Name                string
+	Currency            string
+	Kind                AccountKind
+	BookedBalanceMinor  int64
+	PendingBalanceMinor int64
+	LinkedAccount       *LinkedAccount
+	HiddenAt            *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type CategoryKind string

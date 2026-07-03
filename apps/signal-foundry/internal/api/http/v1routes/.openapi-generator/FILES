@@ -107,6 +107,7 @@ internal/get_data_raw_payload_params_validation.go
 internal/get_evaluation_backtest_evidence_params_validation.go
 internal/get_evaluation_backtest_params_validation.go
 internal/get_evaluation_backtest_report_params_validation.go
+internal/get_finance_account_params_validation.go
 internal/get_finance_csv_import_audit_params_validation.go
 internal/get_finance_dashboard_params_validation.go
 internal/get_finance_tenant_params_validation.go
@@ -253,6 +254,7 @@ models/get_data_raw_payload_params.go
 models/get_evaluation_backtest_evidence_params.go
 models/get_evaluation_backtest_params.go
 models/get_evaluation_backtest_report_params.go
+models/get_finance_account_params.go
 models/get_finance_csv_import_audit_params.go
 models/get_finance_dashboard_params.go
 models/get_finance_tenant_params.go

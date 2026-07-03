@@ -943,6 +943,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}:
+    get:
+      summary: Get finance account detail
+      operationId: getFinanceAccount
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Finance account detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccount"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/v1/finance/tenants/{tenantId}/categories:
     get:
       summary: List finance categories
@@ -2780,13 +2807,15 @@ components:
         kind: { type: string }
     FinanceAccount:
       type: object
-      required: [id, tenantId, name, currency, kind, createdAt, updatedAt]
+      required: [id, tenantId, name, currency, kind, bookedBalanceMinor, pendingBalanceMinor, createdAt, updatedAt]
       properties:
         id: { type: string }
         tenantId: { type: string }
         name: { type: string }
         currency: { type: string }
         kind: { type: string }
+        bookedBalanceMinor: { type: integer, format: int64 }
+        pendingBalanceMinor: { type: integer, format: int64 }
         provider: { type: string }
         providerAccountId: { type: string }
         hiddenAt: { type: string, format: date-time }

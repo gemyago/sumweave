@@ -472,6 +472,26 @@ func TestReportingAndFX(t *testing.T) {
 			assert.Equal(t, int64(280_00), customRange.Settled.NetMinor)
 			assert.Equal(t, int64(170_00), customRange.AccountBalances[0].NativeBookedMinor)
 			assert.Equal(t, int64(0), customRange.AccountBalances[0].NativePendingMinor)
+
+			aggregateStore := persistence.NewAccountBalanceStoreFromStore(store)
+			aggregateBalances, err := aggregateStore.ListAccountBalances(
+				t.Context(),
+				persistence.ListAccountBalancesParams{
+					TenantID:              tenant.ID,
+					AccountIDs:            []string{usdAccount.ID, plnAccount.ID, eurAccount.ID, gbpAccount.ID},
+					EffectiveAtOnOrBefore: &dashboard.Period.EndDate,
+				},
+			)
+			require.NoError(t, err)
+
+			aggregateByAccountID := make(map[string]domain.AccountBalance, len(aggregateBalances))
+			for _, balance := range aggregateBalances {
+				aggregateByAccountID[balance.AccountID] = balance
+			}
+			for _, balance := range dashboard.AccountBalances {
+				assert.Equal(t, aggregateByAccountID[balance.AccountID].BookedBalanceMinor, balance.NativeBookedMinor)
+				assert.Equal(t, aggregateByAccountID[balance.AccountID].PendingBalanceMinor, balance.NativePendingMinor)
+			}
 		},
 	)
 

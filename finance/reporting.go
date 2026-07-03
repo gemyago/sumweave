@@ -120,6 +120,7 @@ type dashboardData struct {
 	period       DashboardPeriod
 	transactions []domain.Transaction
 	accounts     []domain.Account
+	balances     []domain.AccountBalance
 	categories   []domain.Category
 	rateLookup   fxRateLookup
 }
@@ -130,7 +131,6 @@ type dashboardComputation struct {
 	categoryBreakdowns  []DashboardCategoryBreakdown
 	missing             []DashboardMissingFXDiagnostic
 	nativeSettledTotals []DashboardCurrencyTotal
-	accountTransactions map[string][]domain.Transaction
 }
 
 func buildDashboardAlerts(

@@ -3,6 +3,7 @@
 API-only guides:
 
 - [finance-tenants-management-e2e.md](./finance-tenants-management-e2e.md) — create, list, get by id, archive, then verify archived tenants disappear from active list and get-by-id.
+- [finance-account-balances-e2e.md](./finance-account-balances-e2e.md) — create a tenant and accounts, record mixed booked/pending transactions, then verify account balances.
 - [bank-linking-e2e.md](./bank-linking-e2e.md) — bank-linking API e2e guide.
 
 ## Setup

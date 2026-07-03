@@ -124,6 +124,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "accept invite", method: http.MethodPost, target: "/api/v1/finance/invites/accept", body: `{"code":"invite-code"}`},
 			{name: "list accounts", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/accounts?includeHidden=true"},
 			{name: "create account", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/accounts", body: `{"name":"Checking","currency":"USD","kind":"manual"}`},
+			{name: "get account", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/accounts/account-a"},
 			{name: "list categories", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/categories?includeHidden=true"},
 			{name: "create category", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/categories", body: `{"name":"Groceries","kind":"expense"}`},
 			{name: "list tags", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/tags?includeHidden=true"},
@@ -417,14 +418,33 @@ func TestFinanceController(t *testing.T) {
 				require.True(t, params.IncludeHidden)
 				return []domain.Account{
 					{
-						ID:        accountID,
-						TenantID:  tenantID,
-						Name:      "Checking",
-						Currency:  "USD",
-						Kind:      domain.AccountKindManual,
-						CreatedAt: now,
-						UpdatedAt: now,
+						ID:                  accountID,
+						TenantID:            tenantID,
+						Name:                "Checking",
+						Currency:            "USD",
+						Kind:                domain.AccountKindManual,
+						BookedBalanceMinor:  12500,
+						PendingBalanceMinor: -1200,
+						CreatedAt:           now,
+						UpdatedAt:           now,
 					},
+				}, nil
+			})
+		service.EXPECT().
+			GetAccount(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, params financepkg.GetAccountParams) (domain.Account, error) {
+				require.Equal(t, tenantID, params.TenantID)
+				require.Equal(t, accountID, params.AccountID)
+				return domain.Account{
+					ID:                  accountID,
+					TenantID:            tenantID,
+					Name:                "Checking",
+					Currency:            "USD",
+					Kind:                domain.AccountKindManual,
+					BookedBalanceMinor:  12500,
+					PendingBalanceMinor: -1200,
+					CreatedAt:           now,
+					UpdatedAt:           now,
 				}, nil
 			})
 		service.EXPECT().
@@ -613,6 +633,7 @@ func TestFinanceController(t *testing.T) {
 		}{
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/accounts?includeHidden=true", field: "items", want: 1},
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/accounts", body: `{"name":"Checking","currency":"USD","kind":"manual"}`, field: "id", want: accountID},
+			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/accounts/" + accountID, field: "bookedBalanceMinor", want: float64(12500)},
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/categories?includeHidden=true", field: "items", want: 1},
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/categories", body: `{"name":"Groceries","kind":"expense"}`, field: "id", want: categoryID},
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/tags?includeHidden=true", field: "items", want: 1},
@@ -628,6 +649,11 @@ func TestFinanceController(t *testing.T) {
 			payload := decode(t, resp)
 			if tc.field == "items" {
 				assert.Len(t, payload[tc.field].([]any), tc.want.(int))
+				if strings.Contains(tc.target, "/accounts?") {
+					item := payload[tc.field].([]any)[0].(map[string]any)
+					assert.InDelta(t, 12500, item["bookedBalanceMinor"], 0)
+					assert.InDelta(t, -1200, item["pendingBalanceMinor"], 0)
+				}
 				continue
 			}
 			assert.Equal(t, tc.want, payload[tc.field])

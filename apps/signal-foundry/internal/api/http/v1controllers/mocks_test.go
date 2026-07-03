@@ -280,69 +280,6 @@ func (_m *mockfinanceService) EXPECT() *mockfinanceService_Expecter {
 	return &mockfinanceService_Expecter{mock: &_m.Mock}
 }
 
-// ArchiveTenant provides a mock function for the type mockfinanceService
-func (_mock *mockfinanceService) ArchiveTenant(context1 context.Context, archiveTenantParams finance.ArchiveTenantParams) (domain.Tenant, error) {
-	ret := _mock.Called(context1, archiveTenantParams)
-
-	if len(ret) == 0 {
-		panic("no return value specified for ArchiveTenant")
-	}
-
-	var r0 domain.Tenant
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.ArchiveTenantParams) (domain.Tenant, error)); ok {
-		return returnFunc(context1, archiveTenantParams)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.ArchiveTenantParams) domain.Tenant); ok {
-		r0 = returnFunc(context1, archiveTenantParams)
-	} else {
-		r0 = ret.Get(0).(domain.Tenant)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.ArchiveTenantParams) error); ok {
-		r1 = returnFunc(context1, archiveTenantParams)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// mockfinanceService_ArchiveTenant_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ArchiveTenant'
-type mockfinanceService_ArchiveTenant_Call struct {
-	*mock.Call
-}
-
-// ArchiveTenant is a helper method to define mock.On call
-//   - context1 context.Context
-//   - archiveTenantParams finance.ArchiveTenantParams
-func (_e *mockfinanceService_Expecter) ArchiveTenant(context1 interface{}, archiveTenantParams interface{}) *mockfinanceService_ArchiveTenant_Call {
-	return &mockfinanceService_ArchiveTenant_Call{Call: _e.mock.On("ArchiveTenant", context1, archiveTenantParams)}
-}
-
-func (_c *mockfinanceService_ArchiveTenant_Call) Run(run func(context1 context.Context, archiveTenantParams finance.ArchiveTenantParams)) *mockfinanceService_ArchiveTenant_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 finance.ArchiveTenantParams
-		if args[1] != nil {
-			arg1 = args[1].(finance.ArchiveTenantParams)
-		}
-		run(arg0, arg1)
-	})
-	return _c
-}
-
-func (_c *mockfinanceService_ArchiveTenant_Call) Return(tenant domain.Tenant, err error) *mockfinanceService_ArchiveTenant_Call {
-	_c.Call.Return(tenant, err)
-	return _c
-}
-
-func (_c *mockfinanceService_ArchiveTenant_Call) RunAndReturn(run func(context1 context.Context, archiveTenantParams finance.ArchiveTenantParams) (domain.Tenant, error)) *mockfinanceService_ArchiveTenant_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // AcceptTenantInvite provides a mock function for the type mockfinanceService
 func (_mock *mockfinanceService) AcceptTenantInvite(context1 context.Context, acceptTenantInviteParams finance.AcceptTenantInviteParams) (domain.TenantMembership, error) {
 	ret := _mock.Called(context1, acceptTenantInviteParams)
@@ -405,6 +342,72 @@ func (_c *mockfinanceService_AcceptTenantInvite_Call) Return(tenantMembership do
 }
 
 func (_c *mockfinanceService_AcceptTenantInvite_Call) RunAndReturn(run func(context1 context.Context, acceptTenantInviteParams finance.AcceptTenantInviteParams) (domain.TenantMembership, error)) *mockfinanceService_AcceptTenantInvite_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ArchiveTenant provides a mock function for the type mockfinanceService
+func (_mock *mockfinanceService) ArchiveTenant(context1 context.Context, archiveTenantParams finance.ArchiveTenantParams) (domain.Tenant, error) {
+	ret := _mock.Called(context1, archiveTenantParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ArchiveTenant")
+	}
+
+	var r0 domain.Tenant
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.ArchiveTenantParams) (domain.Tenant, error)); ok {
+		return returnFunc(context1, archiveTenantParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.ArchiveTenantParams) domain.Tenant); ok {
+		r0 = returnFunc(context1, archiveTenantParams)
+	} else {
+		r0 = ret.Get(0).(domain.Tenant)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.ArchiveTenantParams) error); ok {
+		r1 = returnFunc(context1, archiveTenantParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockfinanceService_ArchiveTenant_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ArchiveTenant'
+type mockfinanceService_ArchiveTenant_Call struct {
+	*mock.Call
+}
+
+// ArchiveTenant is a helper method to define mock.On call
+//   - context1 context.Context
+//   - archiveTenantParams finance.ArchiveTenantParams
+func (_e *mockfinanceService_Expecter) ArchiveTenant(context1 interface{}, archiveTenantParams interface{}) *mockfinanceService_ArchiveTenant_Call {
+	return &mockfinanceService_ArchiveTenant_Call{Call: _e.mock.On("ArchiveTenant", context1, archiveTenantParams)}
+}
+
+func (_c *mockfinanceService_ArchiveTenant_Call) Run(run func(context1 context.Context, archiveTenantParams finance.ArchiveTenantParams)) *mockfinanceService_ArchiveTenant_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.ArchiveTenantParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.ArchiveTenantParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockfinanceService_ArchiveTenant_Call) Return(tenant domain.Tenant, err error) *mockfinanceService_ArchiveTenant_Call {
+	_c.Call.Return(tenant, err)
+	return _c
+}
+
+func (_c *mockfinanceService_ArchiveTenant_Call) RunAndReturn(run func(context1 context.Context, archiveTenantParams finance.ArchiveTenantParams) (domain.Tenant, error)) *mockfinanceService_ArchiveTenant_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -858,6 +861,72 @@ func (_c *mockfinanceService_DeleteBankConnection_Call) Return(err error) *mockf
 }
 
 func (_c *mockfinanceService_DeleteBankConnection_Call) RunAndReturn(run func(context1 context.Context, deleteBankConnectionParams finance.DeleteBankConnectionParams) error) *mockfinanceService_DeleteBankConnection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetAccount provides a mock function for the type mockfinanceService
+func (_mock *mockfinanceService) GetAccount(context1 context.Context, getAccountParams finance.GetAccountParams) (domain.Account, error) {
+	ret := _mock.Called(context1, getAccountParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAccount")
+	}
+
+	var r0 domain.Account
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.GetAccountParams) (domain.Account, error)); ok {
+		return returnFunc(context1, getAccountParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.GetAccountParams) domain.Account); ok {
+		r0 = returnFunc(context1, getAccountParams)
+	} else {
+		r0 = ret.Get(0).(domain.Account)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.GetAccountParams) error); ok {
+		r1 = returnFunc(context1, getAccountParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockfinanceService_GetAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAccount'
+type mockfinanceService_GetAccount_Call struct {
+	*mock.Call
+}
+
+// GetAccount is a helper method to define mock.On call
+//   - context1 context.Context
+//   - getAccountParams finance.GetAccountParams
+func (_e *mockfinanceService_Expecter) GetAccount(context1 interface{}, getAccountParams interface{}) *mockfinanceService_GetAccount_Call {
+	return &mockfinanceService_GetAccount_Call{Call: _e.mock.On("GetAccount", context1, getAccountParams)}
+}
+
+func (_c *mockfinanceService_GetAccount_Call) Run(run func(context1 context.Context, getAccountParams finance.GetAccountParams)) *mockfinanceService_GetAccount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.GetAccountParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.GetAccountParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockfinanceService_GetAccount_Call) Return(account domain.Account, err error) *mockfinanceService_GetAccount_Call {
+	_c.Call.Return(account, err)
+	return _c
+}
+
+func (_c *mockfinanceService_GetAccount_Call) RunAndReturn(run func(context1 context.Context, getAccountParams finance.GetAccountParams) (domain.Account, error)) *mockfinanceService_GetAccount_Call {
 	_c.Call.Return(run)
 	return _c
 }

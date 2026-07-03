@@ -573,6 +573,84 @@ func TestService(t *testing.T) {
 		assert.NotEmpty(t, groupedUnmatchedTransferOut.ID)
 	})
 
+	t.Run("lists and loads accounts with aggregate balances", func(t *testing.T) {
+		service := makeService(t)
+		fake := faker.New()
+		ownerUserID := "user-owner-" + fake.UUID().V4()
+		tenant := makeTenant(t, service, ownerUserID)
+
+		checking, err := service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+			Name:        "checking-" + fake.Lorem().Word(),
+			Currency:    "USD",
+			Kind:        domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+
+		savings, err := service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+			Name:        "savings-" + fake.Lorem().Word(),
+			Currency:    "USD",
+			Kind:        domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+
+		record := func(accountID string, status domain.TransactionStatus, kind domain.TransactionKind, amount int64) {
+			t.Helper()
+			_, recordErr := service.RecordTransaction(t.Context(), RecordTransactionParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+				AccountID:   accountID,
+				Source:      domain.TransactionSourceManual,
+				Status:      status,
+				Kind:        kind,
+				AmountMinor: amount,
+				Currency:    "USD",
+				Description: "txn-" + fake.Lorem().Word(),
+				EffectiveAt: time.Date(2026, time.July, 3, 9, 0, 0, 0, time.UTC),
+			})
+			require.NoError(t, recordErr)
+		}
+
+		record(checking.ID, domain.TransactionStatusBooked, domain.TransactionKindOpeningBalance, 100_00)
+		record(checking.ID, domain.TransactionStatusBooked, domain.TransactionKindRegular, 25_00)
+		record(checking.ID, domain.TransactionStatusPending, domain.TransactionKindRegular, -12_00)
+		record(savings.ID, domain.TransactionStatusBooked, domain.TransactionKindTransfer, 30_00)
+		record(savings.ID, domain.TransactionStatusBooked, domain.TransactionKindReconciliation, 5_00)
+
+		accounts, err := service.ListAccounts(t.Context(), ListAccountsParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		require.Len(t, accounts, 2)
+
+		assert.Equal(t, int64(125_00), accounts[0].BookedBalanceMinor)
+		assert.Equal(t, int64(-12_00), accounts[0].PendingBalanceMinor)
+		assert.Equal(t, int64(35_00), accounts[1].BookedBalanceMinor)
+		assert.Equal(t, int64(0), accounts[1].PendingBalanceMinor)
+
+		loadedChecking, err := service.GetAccount(t.Context(), GetAccountParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+			AccountID:   checking.ID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(125_00), loadedChecking.BookedBalanceMinor)
+		assert.Equal(t, int64(-12_00), loadedChecking.PendingBalanceMinor)
+
+		balance, err := service.GetAccountBalance(t.Context(), GetAccountBalanceParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+			AccountID:   checking.ID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, int64(125_00), balance.BookedBalanceMinor)
+		assert.Equal(t, int64(-12_00), balance.PendingBalanceMinor)
+	})
+
 	t.Run(
 		"links recorded transfer pairs atomically, persists matched markers, and excludes only matched transfers from summary",
 		func(t *testing.T) {

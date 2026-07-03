@@ -34,13 +34,20 @@ type ledgerServiceStore interface {
 }
 
 type LedgerService struct {
-	store  ledgerServiceStore
-	access *accessGuard
-	now    func() time.Time
-	newID  func() string
+	store        ledgerServiceStore
+	balanceStore accountBalanceReadStore
+	access       *accessGuard
+	now          func() time.Time
+	newID        func() string
 }
 
 type LedgerServiceOption func(*LedgerService)
+
+func WithLedgerServiceAccountBalanceStore(store accountBalanceReadStore) LedgerServiceOption {
+	return func(service *LedgerService) {
+		service.balanceStore = store
+	}
+}
 
 func WithLedgerServiceNow(now func() time.Time) LedgerServiceOption {
 	return func(service *LedgerService) {
@@ -64,6 +71,7 @@ func NewLedgerService(store ledgerServiceStore, opts ...LedgerServiceOption) *Le
 	for _, opt := range opts {
 		opt(service)
 	}
+	assignAccountBalanceReadStore(store, &service.balanceStore)
 	return service
 }
 
@@ -310,20 +318,17 @@ func (s *LedgerService) GetAccountBalance(
 	if err != nil {
 		return domain.AccountBalance{}, err
 	}
-	items, err := s.store.ListTransactions(ctx, account.TenantID, account.ID, "", "", false)
+	items, err := s.balanceStore.ListAccountBalances(ctx, persistence.ListAccountBalancesParams{
+		TenantID:   account.TenantID,
+		AccountIDs: []string{account.ID},
+	})
 	if err != nil {
 		return domain.AccountBalance{}, fmt.Errorf("get account balance: %w", err)
 	}
 	balance := domain.AccountBalance{AccountID: account.ID, Currency: account.Currency}
-	for _, item := range items {
-		if item.HiddenAt != nil {
-			continue
-		}
-		if item.Status == domain.TransactionStatusBooked {
-			balance.BookedBalanceMinor += item.AmountMinor
-			continue
-		}
-		balance.PendingBalanceMinor += item.AmountMinor
+	if len(items) > 0 {
+		balance.BookedBalanceMinor = items[0].BookedBalanceMinor
+		balance.PendingBalanceMinor = items[0].PendingBalanceMinor
 	}
 	return balance, nil
 }

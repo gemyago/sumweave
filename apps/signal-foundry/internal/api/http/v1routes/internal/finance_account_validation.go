@@ -26,6 +26,12 @@ func NewFinanceAccountValidator() FieldValidator[*FinanceAccount] {
 	validateKind := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
+	validateBookedBalanceMinor := NewSimpleFieldValidator[int64](
+		EnsureNonDefault[int64],
+	)
+	validatePendingBalanceMinor := NewSimpleFieldValidator[int64](
+		EnsureNonDefault[int64],
+	)
 	validateProvider := NewSimpleFieldValidator[string](
 	)
 	validateProviderAccountID := NewSimpleFieldValidator[string](
@@ -45,6 +51,8 @@ func NewFinanceAccountValidator() FieldValidator[*FinanceAccount] {
 		validateName(bindingCtx.Fork("name"), value.Name)
 		validateCurrency(bindingCtx.Fork("currency"), value.Currency)
 		validateKind(bindingCtx.Fork("kind"), value.Kind)
+		validateBookedBalanceMinor(bindingCtx.Fork("bookedBalanceMinor"), value.BookedBalanceMinor)
+		validatePendingBalanceMinor(bindingCtx.Fork("pendingBalanceMinor"), value.PendingBalanceMinor)
 		validateProvider(bindingCtx.Fork("provider"), value.Provider)
 		validateProviderAccountID(bindingCtx.Fork("providerAccountId"), value.ProviderAccountID)
 		validateHiddenAt(bindingCtx.Fork("hiddenAt"), value.HiddenAt)

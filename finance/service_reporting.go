@@ -28,12 +28,19 @@ type reportingServiceStore interface {
 
 type ReportingService struct {
 	store             reportingServiceStore
+	balanceStore      accountBalanceReadStore
 	access            *accessGuard
 	now               func() time.Time
 	defaultFXProvider string
 }
 
 type ReportingServiceOption func(*ReportingService)
+
+func WithReportingServiceAccountBalanceStore(store accountBalanceReadStore) ReportingServiceOption {
+	return func(service *ReportingService) {
+		service.balanceStore = store
+	}
+}
 
 func WithReportingServiceNow(now func() time.Time) ReportingServiceOption {
 	return func(service *ReportingService) {
@@ -59,6 +66,7 @@ func NewReportingService(store reportingServiceStore, opts ...ReportingServiceOp
 	for _, opt := range opts {
 		opt(service)
 	}
+	assignAccountBalanceReadStore(store, &service.balanceStore)
 	return service
 }
 
@@ -71,10 +79,7 @@ func (s *ReportingService) GetDashboard(ctx context.Context, params DashboardPar
 		return Dashboard{}, err
 	}
 	computation := s.computeDashboard(data)
-	accountBalances, balanceMissing := s.buildDashboardAccountBalances(
-		data,
-		computation.accountTransactions,
-	)
+	accountBalances, balanceMissing := s.buildDashboardAccountBalances(data)
 	missing := append([]DashboardMissingFXDiagnostic{}, computation.missing...)
 	missing = append(missing, balanceMissing...)
 	return Dashboard{
@@ -107,6 +112,14 @@ func (s *ReportingService) loadDashboardData(
 	if err != nil {
 		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)
 	}
+	balanceItems, err := s.balanceStore.ListAccountBalances(ctx, persistence.ListAccountBalancesParams{
+		TenantID:              tenant.ID,
+		AccountIDs:            accountIDs(accounts),
+		EffectiveAtOnOrBefore: &period.EndDate,
+	})
+	if err != nil {
+		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)
+	}
 	categories, err := s.store.ListCategories(ctx, tenant.ID, true)
 	if err != nil {
 		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)
@@ -123,6 +136,7 @@ func (s *ReportingService) loadDashboardData(
 		period:       period,
 		transactions: transactions,
 		accounts:     accounts,
+		balances:     balanceItems,
 		categories:   categories,
 		rateLookup:   newFXRateLookup(fxRates),
 	}, nil
@@ -138,9 +152,7 @@ func (s *ReportingService) computeDashboard(data dashboardData) dashboardComputa
 	categoryBreakdowns := map[string]*DashboardCategoryBreakdown{}
 	nativeTotals := map[string]*DashboardCurrencyTotal{}
 	missing := make([]DashboardMissingFXDiagnostic, 0)
-	accountTransactions := make(map[string][]domain.Transaction)
 	for _, transaction := range data.transactions {
-		accountTransactions[transaction.AccountID] = append(accountTransactions[transaction.AccountID], transaction)
 		s.processDashboardTransaction(
 			transaction,
 			data,
@@ -160,7 +172,6 @@ func (s *ReportingService) computeDashboard(data dashboardData) dashboardComputa
 		categoryBreakdowns:  sortCategoryBreakdowns(categoryBreakdowns),
 		missing:             missing,
 		nativeSettledTotals: sortCurrencyTotals(nativeTotals),
-		accountTransactions: accountTransactions,
 	}
 }
 
@@ -224,23 +235,23 @@ func (s *ReportingService) processDashboardTransaction(
 
 func (s *ReportingService) buildDashboardAccountBalances(
 	data dashboardData,
-	accountTransactions map[string][]domain.Transaction,
 ) ([]DashboardAccountBalance, []DashboardMissingFXDiagnostic) {
 	accountBalances := make([]DashboardAccountBalance, 0, len(data.accounts))
 	missing := make([]DashboardMissingFXDiagnostic, 0)
 	cutoffDate := startOfDay(data.period.EndDate)
+	balanceByAccountID := make(map[string]domain.AccountBalance, len(data.balances))
+	for _, item := range data.balances {
+		balanceByAccountID[item.AccountID] = item
+	}
 	for _, account := range data.accounts {
-		balance := DashboardAccountBalance{AccountID: account.ID, AccountName: account.Name, Currency: account.Currency}
-		for _, transaction := range accountTransactions[account.ID] {
-			if transaction.HiddenAt != nil || startOfDay(transaction.EffectiveAt).After(cutoffDate) {
-				continue
-			}
-			if transaction.Status == domain.TransactionStatusBooked {
-				balance.NativeBookedMinor += transaction.AmountMinor
-				continue
-			}
-			balance.NativePendingMinor += transaction.AmountMinor
+		balance := DashboardAccountBalance{
+			AccountID:   account.ID,
+			AccountName: account.Name,
+			Currency:    account.Currency,
 		}
+		aggregate := balanceByAccountID[account.ID]
+		balance.NativeBookedMinor = aggregate.BookedBalanceMinor
+		balance.NativePendingMinor = aggregate.PendingBalanceMinor
 		bookedDisplay, bookedOK := convertBalanceAmount(
 			balance.NativeBookedMinor,
 			account.Currency,

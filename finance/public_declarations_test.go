@@ -64,6 +64,7 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 				Provider:          "provider-" + fake.Lorem().Word(),
 				ProviderAccountID: "provider-account-" + fake.UUID().V4(),
 			},
+			GetAccountParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
 			ListAccountsParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), IncludeHidden: true},
 			CreateCategoryParams{
 				ActorUserID: makeUserID(),
@@ -144,7 +145,7 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 			GetAccountBalanceParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
 		}
 
-		require.Len(t, params, 27)
+		require.Len(t, params, 28)
 		assert.Len(t, []error{
 			ErrTenantAccessDenied,
 			ErrInviteNotFound,

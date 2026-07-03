@@ -45,6 +45,7 @@ type tenantService interface {
 
 type catalogService interface {
 	CreateAccount(context.Context, financepkg.CreateAccountParams) (domain.Account, error)
+	GetAccount(context.Context, financepkg.GetAccountParams) (domain.Account, error)
 	ListAccounts(context.Context, financepkg.ListAccountsParams) ([]domain.Account, error)
 	CreateCategory(context.Context, financepkg.CreateCategoryParams) (domain.Category, error)
 	ListCategories(context.Context, financepkg.ListCategoriesParams) ([]domain.Category, error)
@@ -724,6 +725,37 @@ func (c *FinanceController) ListFinanceAccounts(
 	return c.deps.AuthMiddleware(inner)
 }
 
+func (c *FinanceController) GetFinanceAccount(
+	builder handlers.HandlerBuilder[*models.GetFinanceAccountParams, *models.FinanceAccount],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.GetFinanceAccountParams,
+	) (*models.FinanceAccount, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		item, err := c.deps.CatalogService.GetAccount(
+			ctx,
+			financepkg.GetAccountParams{
+				ActorUserID: userID,
+				TenantID:    params.TenantID,
+				AccountID:   params.AccountID,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		mapped := mapAccount(item)
+		return &mapped, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
 func (c *FinanceController) StartFinanceConnectionRedirectLink(
 	builder handlers.HandlerBuilder[*models.StartFinanceConnectionRedirectLinkParams, *models.FinanceConnectionLinkRedirectStartResponse],
 ) http.Handler {
@@ -1351,14 +1383,16 @@ func mapTagsResponse(items []domain.Tag) *models.FinanceTagsResponse {
 
 func mapAccount(item domain.Account) models.FinanceAccount {
 	response := models.FinanceAccount{
-		ID:        item.ID,
-		TenantID:  item.TenantID,
-		Name:      item.Name,
-		Currency:  item.Currency,
-		Kind:      string(item.Kind),
-		HiddenAt:  timeValueOrZero(item.HiddenAt),
-		CreatedAt: item.CreatedAt.UTC(),
-		UpdatedAt: item.UpdatedAt.UTC(),
+		ID:                  item.ID,
+		TenantID:            item.TenantID,
+		Name:                item.Name,
+		Currency:            item.Currency,
+		Kind:                string(item.Kind),
+		BookedBalanceMinor:  item.BookedBalanceMinor,
+		PendingBalanceMinor: item.PendingBalanceMinor,
+		HiddenAt:            timeValueOrZero(item.HiddenAt),
+		CreatedAt:           item.CreatedAt.UTC(),
+		UpdatedAt:           item.UpdatedAt.UTC(),
 	}
 	if item.LinkedAccount != nil {
 		response.Provider = item.LinkedAccount.Provider

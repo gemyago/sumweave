@@ -30,13 +30,20 @@ type catalogServiceStore interface {
 }
 
 type CatalogService struct {
-	store  catalogServiceStore
-	access *accessGuard
-	now    func() time.Time
-	newID  func() string
+	store        catalogServiceStore
+	balanceStore accountBalanceReadStore
+	access       *accessGuard
+	now          func() time.Time
+	newID        func() string
 }
 
 type CatalogServiceOption func(*CatalogService)
+
+func WithCatalogServiceAccountBalanceStore(store accountBalanceReadStore) CatalogServiceOption {
+	return func(service *CatalogService) {
+		service.balanceStore = store
+	}
+}
 
 func WithCatalogServiceNow(now func() time.Time) CatalogServiceOption {
 	return func(service *CatalogService) {
@@ -60,7 +67,30 @@ func NewCatalogService(store catalogServiceStore, opts ...CatalogServiceOption) 
 	for _, opt := range opts {
 		opt(service)
 	}
+	assignAccountBalanceReadStore(store, &service.balanceStore)
 	return service
+}
+
+func (s *CatalogService) GetAccount(
+	ctx context.Context,
+	params GetAccountParams,
+) (domain.Account, error) {
+	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
+	if err != nil {
+		return domain.Account{}, err
+	}
+	balances, err := s.balanceStore.ListAccountBalances(ctx, persistence.ListAccountBalancesParams{
+		TenantID:   account.TenantID,
+		AccountIDs: []string{account.ID},
+	})
+	if err != nil {
+		return domain.Account{}, fmt.Errorf("get account balance aggregate: %w", err)
+	}
+	if len(balances) > 0 {
+		account.BookedBalanceMinor = balances[0].BookedBalanceMinor
+		account.PendingBalanceMinor = balances[0].PendingBalanceMinor
+	}
+	return account, nil
 }
 
 func (s *CatalogService) requireTenantAccount(
@@ -217,7 +247,35 @@ func (s *CatalogService) ListAccounts(
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
+	balances, err := s.balanceStore.ListAccountBalances(ctx, persistence.ListAccountBalancesParams{
+		TenantID:   strings.TrimSpace(params.TenantID),
+		AccountIDs: accountIDs(accounts),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list account balances: %w", err)
+	}
+	applyAccountBalances(accounts, balances)
 	return accounts, nil
+}
+
+func accountIDs(items []domain.Account) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
+}
+
+func applyAccountBalances(accounts []domain.Account, balances []domain.AccountBalance) {
+	balanceByAccountID := make(map[string]domain.AccountBalance, len(balances))
+	for _, balance := range balances {
+		balanceByAccountID[balance.AccountID] = balance
+	}
+	for index := range accounts {
+		balance := balanceByAccountID[accounts[index].ID]
+		accounts[index].BookedBalanceMinor = balance.BookedBalanceMinor
+		accounts[index].PendingBalanceMinor = balance.PendingBalanceMinor
+	}
 }
 
 func (s *CatalogService) CreateCategory(

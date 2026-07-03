@@ -344,6 +344,166 @@ func TestStore(t *testing.T) {
 		require.Len(t, visibleTransactions, 1)
 	})
 
+	t.Run("aggregates account balances for one or many accounts", func(t *testing.T) {
+		store := makeStore(t)
+		balanceStore := NewAccountBalanceStore(&Database{db: store.db})
+		fake := faker.New()
+		now := time.Date(2026, time.July, 3, 10, 0, 0, 0, time.UTC)
+
+		tenant := domain.Tenant{
+			ID:              "tenant-" + fake.UUID().V4(),
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		_, err := store.SaveTenant(t.Context(), tenant)
+		require.NoError(t, err)
+
+		checking := domain.Account{
+			ID:        "account-checking-" + fake.UUID().V4(),
+			TenantID:  tenant.ID,
+			Name:      "checking-" + fake.Lorem().Word(),
+			Currency:  "USD",
+			Kind:      domain.AccountKindManual,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		savings := domain.Account{
+			ID:        "account-savings-" + fake.UUID().V4(),
+			TenantID:  tenant.ID,
+			Name:      "savings-" + fake.Lorem().Word(),
+			Currency:  "USD",
+			Kind:      domain.AccountKindManual,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		_, err = store.SaveAccount(t.Context(), checking)
+		require.NoError(t, err)
+		_, err = store.SaveAccount(t.Context(), savings)
+		require.NoError(t, err)
+
+		saveTransaction := func(
+			accountID string,
+			status domain.TransactionStatus,
+			kind domain.TransactionKind,
+			amount int64,
+			effectiveAt time.Time,
+			hidden bool,
+		) {
+			t.Helper()
+			transaction := domain.Transaction{
+				ID:          "transaction-" + fake.UUID().V4(),
+				TenantID:    tenant.ID,
+				AccountID:   accountID,
+				Source:      domain.TransactionSourceManual,
+				Status:      status,
+				Kind:        kind,
+				AmountMinor: amount,
+				Currency:    "USD",
+				Description: "transaction-" + fake.Lorem().Word(),
+				EffectiveAt: effectiveAt,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+			if hidden {
+				hiddenAt := now.Add(time.Minute)
+				transaction.HiddenAt = &hiddenAt
+			}
+			_, saveErr := store.SaveTransaction(t.Context(), transaction)
+			require.NoError(t, saveErr)
+		}
+
+		saveTransaction(
+			checking.ID,
+			domain.TransactionStatusBooked,
+			domain.TransactionKindOpeningBalance,
+			100_00,
+			now,
+			false,
+		)
+		saveTransaction(checking.ID, domain.TransactionStatusBooked, domain.TransactionKindRefund, 10_00, now, false)
+		saveTransaction(
+			checking.ID,
+			domain.TransactionStatusBooked,
+			domain.TransactionKindTransfer,
+			-30_00,
+			now,
+			false,
+		)
+		saveTransaction(checking.ID, domain.TransactionStatusPending, domain.TransactionKindRegular, -12_00, now, false)
+		saveTransaction(checking.ID, domain.TransactionStatusBooked, domain.TransactionKindRegular, 99_00, now, true)
+		saveTransaction(savings.ID, domain.TransactionStatusBooked, domain.TransactionKindTransfer, 30_00, now, false)
+		saveTransaction(
+			savings.ID,
+			domain.TransactionStatusBooked,
+			domain.TransactionKindReconciliation,
+			5_00,
+			now,
+			false,
+		)
+		saveTransaction(
+			checking.ID,
+			domain.TransactionStatusBooked,
+			domain.TransactionKindRegular,
+			20_00,
+			now.Add(24*time.Hour),
+			false,
+		)
+
+		balances, err := balanceStore.ListAccountBalances(t.Context(), ListAccountBalancesParams{
+			TenantID:   tenant.ID,
+			AccountIDs: []string{checking.ID, savings.ID},
+		})
+		require.NoError(t, err)
+		require.Len(t, balances, 2)
+		assert.Equal(
+			t,
+			domain.AccountBalance{AccountID: checking.ID, BookedBalanceMinor: 100_00, PendingBalanceMinor: -12_00},
+			balances[0],
+		)
+		assert.Equal(
+			t,
+			domain.AccountBalance{AccountID: savings.ID, BookedBalanceMinor: 35_00, PendingBalanceMinor: 0},
+			balances[1],
+		)
+
+		checkingOnly, err := balanceStore.ListAccountBalances(t.Context(), ListAccountBalancesParams{
+			TenantID:   tenant.ID,
+			AccountIDs: []string{checking.ID},
+		})
+		require.NoError(t, err)
+		require.Len(t, checkingOnly, 1)
+		assert.Equal(
+			t,
+			domain.AccountBalance{AccountID: checking.ID, BookedBalanceMinor: 100_00, PendingBalanceMinor: -12_00},
+			checkingOnly[0],
+		)
+
+		allBalances, err := balanceStore.ListAccountBalances(t.Context(), ListAccountBalancesParams{
+			TenantID: tenant.ID,
+		})
+		require.NoError(t, err)
+		require.Len(t, allBalances, 2)
+
+		cutoff := now
+		cutoffBalances, err := balanceStore.ListAccountBalances(t.Context(), ListAccountBalancesParams{
+			TenantID:              tenant.ID,
+			AccountIDs:            []string{checking.ID},
+			EffectiveAtOnOrBefore: &cutoff,
+		})
+		require.NoError(t, err)
+		require.Len(t, cutoffBalances, 1)
+		assert.Equal(t, int64(80_00), cutoffBalances[0].BookedBalanceMinor)
+
+		emptyBalances, err := balanceStore.ListAccountBalances(t.Context(), ListAccountBalancesParams{
+			TenantID:   tenant.ID,
+			AccountIDs: []string{},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, emptyBalances)
+	})
+
 	t.Run("persists tenant archive state without deleting tenant-owned data", func(t *testing.T) {
 		store := makeStore(t)
 		fake := faker.New()

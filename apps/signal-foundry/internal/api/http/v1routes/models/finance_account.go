@@ -19,6 +19,8 @@ type FinanceAccount struct {
 	Name string `json:"name"`
 	Currency string `json:"currency"`
 	Kind string `json:"kind"`
+	BookedBalanceMinor int64 `json:"bookedBalanceMinor"`
+	PendingBalanceMinor int64 `json:"pendingBalanceMinor"`
 	Provider string `json:"provider,omitempty"`
 	ProviderAccountID string `json:"providerAccountId,omitempty"`
 	HiddenAt time.Time `json:"hiddenAt,omitempty"`

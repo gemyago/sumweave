@@ -41,6 +41,12 @@ type AttachLinkedAccountParams struct {
 	ProviderAccountID string
 }
 
+type GetAccountParams struct {
+	ActorUserID string
+	TenantID    string
+	AccountID   string
+}
+
 type ListAccountsParams struct {
 	ActorUserID   string
 	TenantID      string
