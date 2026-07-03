@@ -213,6 +213,46 @@ func TestService(t *testing.T) {
 		require.ErrorIs(t, err, ErrTenantAccessDenied)
 	})
 
+	t.Run("archives tenants for current members and removes them from active flows", func(t *testing.T) {
+		service := makeService(t)
+		fake := faker.New()
+		ownerUserID := "user-owner-" + fake.UUID().V4()
+		outsiderUserID := "user-outsider-" + fake.UUID().V4()
+		tenant := makeTenant(t, service, ownerUserID)
+
+		account, err := service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+			Name:        "account-" + fake.Lorem().Word(),
+			Currency:    "USD",
+			Kind:        domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+
+		archived, err := service.ArchiveTenant(t.Context(), ArchiveTenantParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, archived.ArchivedAt)
+		assert.Equal(t, tenant.ID, archived.ID)
+
+		ownerTenants, err := service.ListTenantsForUser(t.Context(), ownerUserID)
+		require.NoError(t, err)
+		assert.Empty(t, ownerTenants)
+
+		loadedAccount, err := service.store.GetAccount(t.Context(), account.ID)
+		require.NoError(t, err)
+		require.NotNil(t, loadedAccount)
+		assert.Equal(t, account.ID, loadedAccount.ID)
+
+		_, err = service.ArchiveTenant(t.Context(), ArchiveTenantParams{
+			ActorUserID: outsiderUserID,
+			TenantID:    tenant.ID,
+		})
+		require.ErrorIs(t, err, ErrTenantAccessDenied)
+	})
+
 	t.Run("manages ledger driven transaction behavior", func(t *testing.T) {
 		service := makeService(t)
 		fake := faker.New()
@@ -1403,7 +1443,7 @@ func (s stubStore) ListTransactions(
 
 func (s stubStore) GetTenant(ctx context.Context, tenantID string) (*domain.Tenant, error) {
 	if s.getTenantFn == nil {
-		return nil, errStubStoreNotConfigured
+		return &domain.Tenant{ID: tenantID}, nil
 	}
 	return s.getTenantFn(ctx, tenantID)
 }

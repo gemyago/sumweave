@@ -101,6 +101,27 @@ func (s *tenantService) CreateTenant(
 	return tenant, nil
 }
 
+func (s *tenantService) ArchiveTenant(
+	ctx context.Context,
+	params ArchiveTenantParams,
+) (domain.Tenant, error) {
+	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
+		return domain.Tenant{}, err
+	}
+	tenant, err := s.store.GetTenant(ctx, strings.TrimSpace(params.TenantID))
+	if err != nil {
+		return domain.Tenant{}, fmt.Errorf("archive tenant: %w", err)
+	}
+	now := s.now().UTC()
+	tenant.ArchivedAt = &now
+	tenant.UpdatedAt = now
+	archived, err := s.store.SaveTenant(ctx, *tenant)
+	if err != nil {
+		return domain.Tenant{}, fmt.Errorf("archive tenant: %w", err)
+	}
+	return archived, nil
+}
+
 func (s *tenantService) ListTenantsForUser(
 	ctx context.Context,
 	userID string,

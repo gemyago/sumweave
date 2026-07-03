@@ -40,6 +40,32 @@ func newParamsParserFinanceAcceptFinanceTenantInvite(rootHandler *RootHandler) p
 	}
 }
 
+type paramsParserFinanceArchiveFinanceTenant struct {
+	bindTenantID requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceArchiveFinanceTenant) parse(router httpRouter, req *http.Request) (*ArchiveFinanceTenantParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &ArchiveFinanceTenantParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceArchiveFinanceTenant(rootHandler *RootHandler) paramsParser[*ArchiveFinanceTenantParams] {
+	return &paramsParserFinanceArchiveFinanceTenant{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
 type paramsParserFinanceConfirmFinanceCsvImport struct {
 	bindTenantID requestParamBinder[string, string]
 	bindImportID requestParamBinder[string, string]
@@ -1020,6 +1046,18 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*AcceptFinanceTenantInviteParams, *FinanceTenantMember],
 	]
 
+	// POST /api/v1/finance/tenants/{tenantId}/archive
+	//
+	// Request type: ArchiveFinanceTenantParams,
+	//
+	// Response type: none
+	ArchiveFinanceTenant genericHandlerBuilder[
+		*ArchiveFinanceTenantParams,
+		void,
+		handlerActionFuncNoResponse[*ArchiveFinanceTenantParams, void],
+		httpHandlerActionFuncNoResponse[*ArchiveFinanceTenantParams, void],
+	]
+
 	// POST /api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm
 	//
 	// Request type: ConfirmFinanceCsvImportParams,
@@ -1376,6 +1414,27 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinanceAcceptFinanceTenantInvite(app),
+			},
+		),
+
+		// POST /api/v1/finance/tenants/{tenantId}/archive
+		ArchiveFinanceTenant: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*ArchiveFinanceTenantParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*ArchiveFinanceTenantParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*ArchiveFinanceTenantParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceArchiveFinanceTenant(app),
 			},
 		),
 

@@ -344,6 +344,64 @@ func TestStore(t *testing.T) {
 		require.Len(t, visibleTransactions, 1)
 	})
 
+	t.Run("persists tenant archive state without deleting tenant-owned data", func(t *testing.T) {
+		store := makeStore(t)
+		fake := faker.New()
+		now := time.Date(2026, time.July, 3, 8, 0, 0, 0, time.UTC)
+		archivedAt := now.Add(15 * time.Minute)
+
+		tenant := domain.Tenant{
+			ID:              "tenant-" + fake.UUID().V4(),
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		_, err := store.SaveTenant(t.Context(), tenant)
+		require.NoError(t, err)
+
+		membership := domain.TenantMembership{
+			TenantID:  tenant.ID,
+			UserID:    "user-" + fake.UUID().V4(),
+			JoinedAt:  now,
+			CreatedAt: now,
+		}
+		_, err = store.SaveTenantMembership(t.Context(), membership)
+		require.NoError(t, err)
+
+		account := domain.Account{
+			ID:        "account-" + fake.UUID().V4(),
+			TenantID:  tenant.ID,
+			Name:      "account-" + fake.Lorem().Word(),
+			Currency:  "USD",
+			Kind:      domain.AccountKindManual,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		_, err = store.SaveAccount(t.Context(), account)
+		require.NoError(t, err)
+
+		tenant.ArchivedAt = &archivedAt
+		tenant.UpdatedAt = archivedAt
+		_, err = store.SaveTenant(t.Context(), tenant)
+		require.NoError(t, err)
+
+		loadedTenant, err := store.GetTenant(t.Context(), tenant.ID)
+		require.NoError(t, err)
+		require.NotNil(t, loadedTenant)
+		require.NotNil(t, loadedTenant.ArchivedAt)
+		assert.Equal(t, archivedAt, loadedTenant.ArchivedAt.UTC())
+
+		views, err := store.ListTenantsForUser(t.Context(), membership.UserID)
+		require.NoError(t, err)
+		assert.Empty(t, views)
+
+		loadedAccount, err := store.GetAccount(t.Context(), account.ID)
+		require.NoError(t, err)
+		require.NotNil(t, loadedAccount)
+		assert.Equal(t, account.ID, loadedAccount.ID)
+	})
+
 	t.Run(
 		"stores encrypted secrets without plaintext and normalizes timestamps to utc",
 		func(t *testing.T) {

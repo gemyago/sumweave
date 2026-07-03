@@ -79,6 +79,7 @@ Use gopher skill as your primary source of golang coding conventions and best pr
 
 The rules are:
 - Update module rules and conventions when user corrects the behavior of AI.
+- Mutating APIs should not return data unless backend generates needed data.
 - OpenAPI JSON uses camelCase for property names or any other identifiers or keys; regenerate after spec edits.
 - HTTP controller tests use registered routes, not custom builders.
 - Config env overrides use standard APP_ AutomaticEnv mapping only.

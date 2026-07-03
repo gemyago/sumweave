@@ -22,6 +22,15 @@ type FinanceController interface {
 		*FinanceTenantMember,
 	]) http.Handler
 
+	// POST /api/v1/finance/tenants/{tenantId}/archive
+	//
+	// Request type: ArchiveFinanceTenantParams,
+	//
+	// Response type: none
+	ArchiveFinanceTenant(NoResponseHandlerBuilder[
+		*ArchiveFinanceTenantParams,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm
 	//
 	// Request type: ConfirmFinanceCsvImportParams,
@@ -304,6 +313,8 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/invites/accept
 // 
+// - POST /api/v1/finance/tenants/{tenantId}/archive
+// 
 // - POST /api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/accounts
@@ -364,6 +375,7 @@ type FinanceController interface {
 func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceController) *RootHandler {
 	builder := newFinanceControllerBuilder(rootHandler)
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/invites/accept", controller.AcceptFinanceTenantInvite(builder.AcceptFinanceTenantInvite))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/archive", controller.ArchiveFinanceTenant(builder.ArchiveFinanceTenant))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm", controller.ConfirmFinanceCsvImport(builder.ConfirmFinanceCsvImport))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/accounts", controller.CreateFinanceAccount(builder.CreateFinanceAccount))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/categories", controller.CreateFinanceCategory(builder.CreateFinanceCategory))

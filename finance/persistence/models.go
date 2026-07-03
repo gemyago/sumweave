@@ -44,11 +44,12 @@ type fixtureScenarioRecordModel struct {
 func (fixtureScenarioRecordModel) TableName() string { return "finance_fixture_scenario_records" }
 
 type tenantModel struct {
-	ID              string    `gorm:"column:id;size:255;not null;primaryKey"`
-	Name            string    `gorm:"column:name;size:255;not null"`
-	DisplayCurrency string    `gorm:"column:display_currency;size:16;not null"`
-	CreatedAt       time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt       time.Time `gorm:"column:updated_at;not null"`
+	ID              string     `gorm:"column:id;size:255;not null;primaryKey"`
+	Name            string     `gorm:"column:name;size:255;not null"`
+	DisplayCurrency string     `gorm:"column:display_currency;size:16;not null"`
+	ArchivedAt      *time.Time `gorm:"column:archived_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;not null"`
 }
 
 func (tenantModel) TableName() string { return "finance_tenants" }
@@ -494,6 +495,7 @@ func newTenantModel(tenant domain.Tenant) tenantModel {
 		ID:              tenant.ID,
 		Name:            tenant.Name,
 		DisplayCurrency: tenant.DisplayCurrency,
+		ArchivedAt:      timePointerUTC(tenant.ArchivedAt),
 		CreatedAt:       normalizeUTC(tenant.CreatedAt),
 		UpdatedAt:       normalizeUTC(tenant.UpdatedAt),
 	}
@@ -504,9 +506,18 @@ func tenantFromModel(model tenantModel) domain.Tenant {
 		ID:              model.ID,
 		Name:            model.Name,
 		DisplayCurrency: model.DisplayCurrency,
+		ArchivedAt:      timePointerUTC(model.ArchivedAt),
 		CreatedAt:       normalizeUTC(model.CreatedAt),
 		UpdatedAt:       normalizeUTC(model.UpdatedAt),
 	}
+}
+
+func timePointerUTC(val *time.Time) *time.Time {
+	if val == nil {
+		return nil
+	}
+	utc := val.UTC()
+	return &utc
 }
 
 func newTenantMembershipModel(membership domain.TenantMembership) tenantMembershipModel {

@@ -1,6 +1,9 @@
 # Manual E2E
 
-See [bank-linking-e2e.md](./bank-linking-e2e.md) for the bank-linking API e2e guide.
+API-only guides:
+
+- [finance-tenants-management-e2e.md](./finance-tenants-management-e2e.md) — create, list, get by id, archive, then verify archived tenants disappear from active list and get-by-id.
+- [bank-linking-e2e.md](./bank-linking-e2e.md) — bank-linking API e2e guide.
 
 ## Setup
 
@@ -59,3 +62,4 @@ curl -i "http://127.0.0.1:4501/health"
 Get the token:
 ```bash
 IFS=: read -r USER PASS < ".local-users" && ACCESS_TOKEN=$(curl -sS -X POST "http://127.0.0.1:4501/api/v1/auth/login" -H "Content-Type: application/json" --data "{\"username\":\"${USER}\",\"password\":\"${PASS}\"}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])')
+```

@@ -183,6 +183,11 @@ type CreateTenantParams struct {
 	DisplayCurrency string
 }
 
+type ArchiveTenantParams struct {
+	ActorUserID string
+	TenantID    string
+}
+
 type CreateTenantInviteParams struct {
 	ActorUserID string
 	TenantID    string
@@ -357,6 +362,10 @@ type GetAccountBalanceParams struct {
 
 func (s *Service) CreateTenant(ctx context.Context, params CreateTenantParams) (domain.Tenant, error) {
 	return s.tenants.CreateTenant(ctx, params)
+}
+
+func (s *Service) ArchiveTenant(ctx context.Context, params ArchiveTenantParams) (domain.Tenant, error) {
+	return s.tenants.ArchiveTenant(ctx, params)
 }
 
 func (s *Service) ListTenantsForUser(

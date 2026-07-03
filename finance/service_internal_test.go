@@ -206,6 +206,29 @@ func TestFocusedCoreServices(t *testing.T) {
 		assert.Equal(t, tagNames(secondTags), tagNames(secondTagsAfterUpdate))
 	})
 
+	t.Run("tenant service archives tenants and hides them from active tenant lists", func(t *testing.T) {
+		service := makeService(t)
+		fake := faker.New()
+		ownerUserID := "owner-" + fake.UUID().V4()
+		tenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     ownerUserID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+		})
+		require.NoError(t, err)
+
+		archived, err := service.tenants.ArchiveTenant(t.Context(), ArchiveTenantParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, archived.ArchivedAt)
+
+		views, err := service.tenants.ListTenantsForUser(t.Context(), ownerUserID)
+		require.NoError(t, err)
+		assert.Empty(t, views)
+	})
+
 	t.Run("catalog service keeps linked account mutations tenant-scoped", func(t *testing.T) {
 		service := makeService(t)
 		fake := faker.New()

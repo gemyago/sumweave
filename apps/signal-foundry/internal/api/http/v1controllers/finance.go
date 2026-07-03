@@ -23,6 +23,7 @@ import (
 
 type financeService interface {
 	CreateTenant(context.Context, financepkg.CreateTenantParams) (domain.Tenant, error)
+	ArchiveTenant(context.Context, financepkg.ArchiveTenantParams) (domain.Tenant, error)
 	ListTenantsForUser(context.Context, string) ([]domain.TenantMembershipView, error)
 	ListTenantMembers(
 		context.Context,
@@ -318,6 +319,31 @@ func (c *FinanceController) CreateFinanceTenant(
 		})
 
 		return &mapped, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) ArchiveFinanceTenant(
+	builder handlers.NoResponseHandlerBuilder[*models.ArchiveFinanceTenantParams],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.ArchiveFinanceTenantParams,
+	) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
+		_, err = c.deps.FinanceService.ArchiveTenant(
+			ctx,
+			financepkg.ArchiveTenantParams{ActorUserID: userID, TenantID: params.TenantID},
+		)
+		if err != nil {
+			return mapCSVImportError(err)
+		}
+		return nil
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -1237,6 +1263,7 @@ func mapTenantSummary(
 		ID:              item.Tenant.ID,
 		Name:            item.Tenant.Name,
 		DisplayCurrency: item.Tenant.DisplayCurrency,
+		ArchivedAt:      timeValueOrZero(item.Tenant.ArchivedAt),
 		JoinedAt:        item.Membership.JoinedAt.UTC(),
 		CreatedAt:       item.Tenant.CreatedAt.UTC(),
 		UpdatedAt:       item.Tenant.UpdatedAt.UTC(),

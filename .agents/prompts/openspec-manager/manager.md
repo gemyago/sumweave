@@ -15,7 +15,7 @@ Task input
   -> Implementation chunks with openspec apply
   -> Chunk finalization and commit after each clean chunk
   -> Whole-change final review
-  -> User review/corrections
+  -> User review/comment planning, correction chunks, and scoped comment verification
   -> Archive when user confirms all good
   -> Submission unless the user explicitly says to stop before submission
 ```
@@ -120,7 +120,7 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 
 ### You must do
 
-- Use sub-agents for task-specific planning, implementation, fixing, comment-addressing, and review work.
+- Use sub-agents for task-specific planning, implementation, fixing, comment planning, and review work.
 - Start sub-agents with fresh context. Forking is forbidden if your environment supports it.
 - Coordinate the phases in order.
 - Keep a TODO list for the current phase.
@@ -130,7 +130,7 @@ When auto-detecting, briefly tell the user what state was detected and which pha
 - Preserve task-relevant outside-of-flow additions to the same work.
 - Resolve duplicate or still-running sub-agents before starting another run for the same chunk.
 - Close finished sub-agents when needed to free capacity.
-- Enforce `openspec apply` for all implementation, fixing, and comments-addressing work.
+- Enforce `openspec apply` for all implementation, fixing, and user-comment correction chunks.
 - Enforce strict chunk order from the reviewed plan.
 - Verify the relevant git state yourself at every clean gate; relevant untracked files count as pending changes.
 
@@ -262,6 +262,7 @@ Each appended round must include:
 - Scope or chunk reference.
 - Triggering input.
 - Exact user quote when approval, pause, or submission intent is relevant.
+- Exact file path and line or line range for user comments when the user provides them.
 - Findings or comments.
 - Verdict or continue decision.
 - Affected follow-up chunks when relevant.
@@ -277,7 +278,7 @@ Use the registry below as the only manager-side contract. Do not open the instru
   Agent id: `openspec-planning`
   Instruction file: `@./.agents/prompts/openspec-manager/agent-planning.md`
   Durable files: OpenSpec proposal artifacts
-  Manager should expect back: change slug, OpenSpec directory, affected components, artifact paths, blockers, short status
+  Manager should expect back: change slug, OpenSpec directory, affected components, artifact paths, blockers, short status; for comment planning, also updated design/tasks status, ordered comment chunks, artifact cleanup status, and commit status
 - Plan reviewing
   Agent id: `openspec-plan-reviewing`
   Instruction file: `@./.agents/prompts/openspec-manager/agent-plan-reviewing.md`
@@ -297,12 +298,7 @@ Use the registry below as the only manager-side contract. Do not open the instru
   Agent id: `openspec-implementation-finalizing`
   Instruction file: `@./.agents/prompts/openspec-manager/agent-implementation-finalizing.md`
   Durable files: `review-final.md`
-  Manager should expect back: verdict, follow-up chunks, completion protocol status, artifact cleanup status, commit status, notes, short status
-- Comments addressing
-  Agent id: `openspec-comments-addressing`
-  Instruction file: `@./.agents/prompts/openspec-manager/agent-comments-addressing.md`
-  Durable files: `review-final.md`, OpenSpec task artifacts
-  Manager should expect back: files changed, checks run, task updates, artifact cleanup status, unresolved items, short status
+  Manager should expect back: verdict, follow-up chunks, completion protocol status, artifact cleanup status, commit status, notes, short status; for scoped comment verification, also addressed comments and unresolved comments
 
 ## Sub-agent handoff rules
 
@@ -364,7 +360,8 @@ Use these exact sub-agent mappings for the implementation phase:
 
 - Chunk finalization: `openspec-chunk-finalizing`
 - Whole-change final review: `openspec-implementation-finalizing`
-- User-review follow-up re-review: `openspec-implementation-finalizing`
+- User-comment scoped verification: `openspec-implementation-finalizing`
+- User-review correction chunks: `openspec-implementation` then `openspec-chunk-finalizing`
 
 ### Chunk gate sequence
 
@@ -414,18 +411,43 @@ For each planned chunk or follow-up fix chunk:
 1. Wait for user comments.
 2. Append each comment round to `review-final.md`.
 3. Update `manager-status.md`.
-4. Spawn comments-addressing sub-agent with `openspec apply`.
-5. Spawn implementation-finalizing sub-agent in follow-up re-review mode.
-6. Capture the re-review in `review-final.md`.
-7. Require commit status for clean refinement changes.
-8. Repeat until the user says review is complete.
-9. Treat natural-language approval such as `all good`, `looks good`, `approved`, `LGTM`, `ship it`, or `go ahead` as review completion unless the user also says to pause or stop.
-10. When the user confirms all good, continue to archive and then submission unless the user explicitly says no submission is needed.
+4. Run a small comment-planning session before any fixing starts.
+5. In comment planning, require the planning sub-agent to:
+   - extend `design.md` only when the comments require design changes,
+   - update `tasks.md` so user comments are represented as explicit tasks,
+   - split those tasks into strict ordered chunks using the same chunking rules as initial planning,
+   - report the comment chunk list, affected artifacts, artifact cleanup status, commit status, blockers, and short status.
+6. Verify `git status --short -- <comment-planning artifacts>` is clean after the comment-planning commit gate.
+7. Run the standard chunk gate sequence for each comment chunk in order.
+8. Spawn the implementation-finalizing sub-agent in scoped comment-verification mode to verify whether the current user comments were addressed.
+9. Capture the scoped comment verification in `review-final.md`.
+10. Require artifact cleanup status and commit status for pending verification, review, or status artifacts.
+11. If comment verification reports unresolved comments, feed only those unresolved comments into the next comment-planning round.
+12. Do not run a whole-change final review after user-comment chunks unless the user explicitly asks for it; the default verification is scoped to whether the comments were addressed.
+13. After the comment chunks and scoped verification pass, return to user review and wait for approval or more comments.
+14. Repeat comment planning and chunk implementation for each new comment round until the user says review is complete.
+15. Treat natural-language approval such as `all good`, `looks good`, `approved`, `LGTM`, `ship it`, or `go ahead` as review completion unless the user also says to pause or stop.
+16. When the user confirms all good, continue to archive and then submission unless the user explicitly says no submission is needed.
+
+### Comment-planning rules
+
+- Do not jump directly from user comments to verification before planning and correction chunks.
+- Do not collapse a comment round into a single catch-all fixing chunk unless the comment-planning sub-agent explicitly says that is the smallest sensible chunk.
+- Comment planning updates the existing OpenSpec change; it must not create a new change slug unless the user explicitly asks for a separate change.
+- The current user comment round is the planning input; preserve the exact user wording in `review-final.md`.
+- If the user attaches comments to file lines, preserve each file path and line or line range in `review-final.md` and pass those references through planning, implementation, and verification.
+- The planning output is the scope authority for comment chunks until the next user comment round.
+- Comment chunks use the normal implementation sub-agent and chunk-finalizing sub-agent.
+- Chunk finalization is still required for every comment chunk.
+- Whole-change final review is not required after comment chunks; run only scoped comment verification, then return to user review.
 
 ### Exit criteria
 
 - User confirms no more review corrections are needed.
 - Every clean refinement round is committed, already committed, or explicitly has no remaining changes.
+- Every user comment round was planned into tasks and chunks before correction work began.
+- Every user comment chunk passed `implement -> chunk-finalize -> commit-or-explicit-none`.
+- Every addressed user comment round passed scoped comment verification.
 - `review-final.md` and `manager-status.md` are current.
 - The workflow is ready to move to archive.
 - Relevant review and status files are absent from `git status --short`.

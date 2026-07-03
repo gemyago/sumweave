@@ -6,6 +6,7 @@ type Tenant struct {
 	ID              string
 	Name            string
 	DisplayCurrency string
+	ArchivedAt      *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }

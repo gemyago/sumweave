@@ -14,6 +14,7 @@ import (
 const (
 	columnName              = "name"
 	columnHiddenAt          = "hidden_at"
+	columnArchivedAt        = "archived_at"
 	columnKind              = "kind"
 	columnTenantID          = "tenant_id"
 	columnCurrency          = "currency"
@@ -37,8 +38,13 @@ func (s *Store) SaveTenant(ctx context.Context, tenant domain.Tenant) (domain.Te
 	if err := s.db.WithContext(ctx).
 		Table(model.TableName()).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "id"}},
-			DoUpdates: clause.AssignmentColumns([]string{columnName, "display_currency", columnUpdatedAt}),
+			Columns: []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				columnName,
+				"display_currency",
+				columnArchivedAt,
+				columnUpdatedAt,
+			}),
 		}).
 		Create(&model).Error; err != nil {
 		return domain.Tenant{}, fmt.Errorf("save tenant: %w", err)
@@ -82,6 +88,7 @@ func (s *Store) ListTenantsForUser(
 		TenantID          string
 		Name              string
 		DisplayCurrency   string
+		TenantArchivedAt  *time.Time
 		TenantCreatedAt   time.Time
 		TenantUpdatedAt   time.Time
 		MembershipJoined  time.Time
@@ -90,12 +97,13 @@ func (s *Store) ListTenantsForUser(
 	err := s.db.WithContext(ctx).
 		Table("finance_tenant_memberships m").
 		Select(
-			"t.id AS tenant_id, t.name, t.display_currency, "+
+			"t.id AS tenant_id, t.name, t.display_currency, t.archived_at AS tenant_archived_at, "+
 				"t.created_at AS tenant_created_at, t.updated_at AS tenant_updated_at, "+
 				"m.joined_at AS membership_joined, m.created_at AS membership_created",
 		).
 		Joins("JOIN finance_tenants t ON t.id = m.tenant_id").
 		Where("m.user_id = ?", userID).
+		Where("t.archived_at IS NULL").
 		Order("t.created_at ASC").
 		Scan(&rows).Error
 	if err != nil {

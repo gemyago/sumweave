@@ -772,6 +772,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/archive:
+    post:
+      summary: Archive finance tenant
+      operationId: archiveFinanceTenant
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Archived finance tenant
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/v1/finance/tenants/{tenantId}/members:
     get:
       summary: List finance tenant members
@@ -2698,6 +2717,7 @@ components:
         id: { type: string }
         name: { type: string }
         displayCurrency: { type: string }
+        archivedAt: { type: string, format: date-time }
         joinedAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

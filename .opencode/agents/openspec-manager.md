@@ -31,7 +31,6 @@ permission:
     # openspec-implementation: allow
     # openspec-chunk-finalizing: allow
     # openspec-implementation-finalizing: allow
-    # openspec-comments-addressing: allow
   webfetch: deny
   lsp: deny
   external_directory: deny

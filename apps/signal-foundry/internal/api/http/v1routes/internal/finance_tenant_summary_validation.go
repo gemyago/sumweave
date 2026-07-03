@@ -20,6 +20,8 @@ func NewFinanceTenantSummaryValidator() FieldValidator[*FinanceTenantSummary] {
 	validateDisplayCurrency := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
+	validateArchivedAt := NewSimpleFieldValidator[time.Time](
+	)
 	validateJoinedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
@@ -34,6 +36,7 @@ func NewFinanceTenantSummaryValidator() FieldValidator[*FinanceTenantSummary] {
 		validateID(bindingCtx.Fork("id"), value.ID)
 		validateName(bindingCtx.Fork("name"), value.Name)
 		validateDisplayCurrency(bindingCtx.Fork("displayCurrency"), value.DisplayCurrency)
+		validateArchivedAt(bindingCtx.Fork("archivedAt"), value.ArchivedAt)
 		validateJoinedAt(bindingCtx.Fork("joinedAt"), value.JoinedAt)
 		validateCreatedAt(bindingCtx.Fork("createdAt"), value.CreatedAt)
 		validateUpdatedAt(bindingCtx.Fork("updatedAt"), value.UpdatedAt)

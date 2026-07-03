@@ -306,6 +306,88 @@ func TestFinanceController(t *testing.T) {
 		assert.Equal(t, tenantID, decode(t, acceptResp)["tenantId"])
 	})
 
+	t.Run("tenant management routes create list and archive active tenants", func(t *testing.T) {
+		userID := fake.UUID().V4()
+		now := time.Date(2026, time.July, 3, 12, 0, 0, 0, time.UTC)
+		tenantID := "tenant-" + fake.UUID().V4()
+		tenantName := "tenant-" + fake.Lorem().Word()
+		activeViews := []domain.TenantMembershipView{{
+			Tenant: domain.Tenant{
+				ID:              tenantID,
+				Name:            tenantName,
+				DisplayCurrency: "USD",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			},
+			Membership: domain.TenantMembership{
+				TenantID:  tenantID,
+				UserID:    userID,
+				JoinedAt:  now,
+				CreatedAt: now,
+			},
+		}}
+		service := newMockfinanceService(t)
+		handler := newHandler(
+			service,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		)
+
+		service.EXPECT().CreateTenant(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.CreateTenantParams) (domain.Tenant, error) {
+				require.Equal(t, userID, params.ActorUserID)
+				require.Equal(t, tenantName, params.Name)
+				require.Equal(t, "USD", params.DisplayCurrency)
+				return activeViews[0].Tenant, nil
+			},
+		).Once()
+		service.EXPECT().ListTenantsForUser(mock.Anything, userID).Return(activeViews, nil).Once()
+		service.EXPECT().ArchiveTenant(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.ArchiveTenantParams) (domain.Tenant, error) {
+				require.Equal(t, userID, params.ActorUserID)
+				require.Equal(t, tenantID, params.TenantID)
+				return domain.Tenant{ID: tenantID}, nil
+			},
+		).Once()
+		service.EXPECT().ListTenantsForUser(mock.Anything, userID).Return(nil, nil).Once()
+
+		createResp := httptest.NewRecorder()
+		handler.ServeHTTP(
+			createResp,
+			newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants",
+				`{"name":"`+tenantName+`","displayCurrency":"USD"}`,
+				true,
+			),
+		)
+		require.Equal(t, http.StatusOK, createResp.Code)
+		createPayload := decode(t, createResp)
+		assert.Equal(t, tenantID, createPayload["id"])
+		assert.Equal(t, tenantName, createPayload["name"])
+
+		listResp := httptest.NewRecorder()
+		handler.ServeHTTP(listResp, newRequest(http.MethodGet, "/api/v1/finance/tenants", "", true))
+		require.Equal(t, http.StatusOK, listResp.Code)
+		listPayload := decode(t, listResp)
+		items := listPayload["items"].([]any)
+		require.Len(t, items, 1)
+		assert.Equal(t, tenantID, items[0].(map[string]any)["id"])
+
+		archiveResp := httptest.NewRecorder()
+		handler.ServeHTTP(
+			archiveResp,
+			newRequest(http.MethodPost, "/api/v1/finance/tenants/"+tenantID+"/archive", "", true),
+		)
+		require.Equal(t, http.StatusNoContent, archiveResp.Code)
+		assert.Empty(t, archiveResp.Body.String())
+
+		postArchiveListResp := httptest.NewRecorder()
+		handler.ServeHTTP(postArchiveListResp, newRequest(http.MethodGet, "/api/v1/finance/tenants", "", true))
+		require.Equal(t, http.StatusOK, postArchiveListResp.Code)
+		assert.Empty(t, decode(t, postArchiveListResp)["items"].([]any))
+	})
+
 	t.Run("catalog and transaction routes keep camelCase and filters", func(t *testing.T) {
 		userID := fake.UUID().V4()
 		now := time.Date(2026, time.June, 20, 14, 0, 0, 0, time.UTC)
