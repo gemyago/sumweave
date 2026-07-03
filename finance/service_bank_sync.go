@@ -279,10 +279,11 @@ func (s *BankSyncService) RunBankConnectionSync(
 		return BankConnectionSyncResult{}, markErr
 	}
 	result, err := provider.Sync(ctx, ProviderSyncParams{
-		Secret:      secret,
-		ExternalID:  connection.ExternalID,
-		WindowStart: params.WindowStart,
-		WindowEnd:   params.WindowEnd,
+		ConnectionID: connection.ID,
+		Secret:       secret,
+		ExternalID:   connection.ExternalID,
+		WindowStart:  params.WindowStart,
+		WindowEnd:    params.WindowEnd,
 	})
 	if err != nil {
 		return BankConnectionSyncResult{}, s.recordBankConnectionSyncFailure(

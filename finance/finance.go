@@ -155,9 +155,10 @@ func (p connectorBankSyncProvider) Sync(
 ) (ProviderSyncResult, error) {
 	batch, err := p.connector.Fetch(ctx, internalproviders.FetchRequest{
 		Connection: domain.ProviderConnectionRef{
-			ProviderID:  domain.ProviderID(strings.TrimSpace(p.name)),
-			ConnectorID: p.connector.ConnectorID(),
-			ExternalID:  strings.TrimSpace(params.ExternalID),
+			ConnectionID: strings.TrimSpace(params.ConnectionID),
+			ProviderID:   domain.ProviderID(strings.TrimSpace(p.name)),
+			ConnectorID:  p.connector.ConnectorID(),
+			ExternalID:   strings.TrimSpace(params.ExternalID),
 		},
 		Secret: domain.ConnectionSecret{Envelope: credentialsEnvelopeFromPlaintext(params.Secret)},
 		RequestedWindow: domain.ProviderSyncWindow{

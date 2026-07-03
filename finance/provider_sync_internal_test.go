@@ -10,6 +10,7 @@ import (
 	"github.com/gemyago/signal-foundry/finance/credentials"
 	"github.com/gemyago/signal-foundry/finance/domain"
 	providers "github.com/gemyago/signal-foundry/finance/internal/providers"
+	internalsynthetic "github.com/gemyago/signal-foundry/finance/internal/synthetic"
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -557,6 +558,82 @@ func TestProviderSyncInternals(t *testing.T) {
 			TenantID:    tenant.ID,
 		})
 		require.ErrorIs(t, err, ErrTenantAccessDenied)
+	})
+
+	t.Run("syncs synthetic linked connections through connector-backed bank sync path", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		syntheticStateStore := persistence.NewSyntheticProviderStateStoreFromStore(store)
+		now := time.Date(2026, time.July, 3, 12, 0, 0, 0, time.UTC)
+		connector := internalsynthetic.NewConnector(
+			syntheticStateStore,
+			internalsynthetic.WithConnectorNow(func() time.Time { return now }),
+		)
+		provider, ok := newConnectorBankSyncProvider(connector)
+		require.True(t, ok)
+
+		service := NewService(
+			store,
+			WithConnectionSecretCipher(makeCipher(t)),
+			WithBankProviders(provider),
+			WithNow(func() time.Time { return now }),
+		)
+		ownerUserID := "user-owner-" + fake.UUID().V4()
+		tenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     ownerUserID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+		})
+		require.NoError(t, err)
+
+		syncStore, err := service.bankSyncStore()
+		require.NoError(t, err)
+
+		linker := internalsynthetic.NewLinker(internalsynthetic.LinkerDeps{
+			RequireTenantMember: service.requireTenantMember,
+			SaveConnectionSecret: func(ctx context.Context, providerName, reference, secret string) (string, error) {
+				return service.encryptAndSaveConnectionSecret(ctx, providerName, reference, secret)
+			},
+			DeleteConnectionSecret: store.DeleteConnectionSecret,
+			SaveBankConnection:     syncStore.SaveBankConnection,
+			DeleteBankConnectionOwnedMetadata: func(ctx context.Context, connection domain.BankConnection) error {
+				return service.deleteBankConnectionOwnedMetadata(ctx, connection)
+			},
+			SaveSyntheticProviderState: syntheticStateStore.SaveSyntheticProviderState,
+			Now:                        func() time.Time { return now },
+			NewID:                      service.newID,
+		})
+
+		connection, err := linker.LinkConfiguredBankConnection(
+			t.Context(),
+			internalsynthetic.LinkConfiguredBankConnectionParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+				Provider:    string(domain.ProviderIDSynthetic),
+				Accounts: []internalsynthetic.ConfiguredAccount{{
+					Name:     "Checking-" + fake.Lorem().Word(),
+					Currency: "USD",
+				}},
+			},
+		)
+		require.NoError(t, err)
+
+		windowStart := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
+		windowEnd := time.Date(2026, time.June, 4, 0, 0, 0, 0, time.UTC)
+		result, err := service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+			ConnectionID: connection.ID,
+			JobID:        "job-" + fake.UUID().V4(),
+			Reason:       BankConnectionSyncReasonManual,
+			WindowStart:  windowStart,
+			WindowEnd:    windowEnd,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.ImportedAccounts)
+		assert.Positive(t, result.ImportedTransactions)
+
+		accounts, err := store.ListConnectionProviderAccounts(t.Context(), connection.ID)
+		require.NoError(t, err)
+		require.Len(t, accounts, 1)
 	})
 
 	t.Run("covers direct option helpers and provider failures", func(t *testing.T) {
