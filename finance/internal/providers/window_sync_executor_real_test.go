@@ -2,9 +2,15 @@ package providers_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -89,19 +95,24 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 		}))
 		defer monobankServer.Close()
 
-		enableBankingSecretValue := "secret-" + fake.UUID().V4()
-		enableBankingSecret := makeSecret(domain.ProviderIDPKO)
 		enableBankingConnection := makeConnection(domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking)
 		enableBankingAccountID := "pko-account-" + fake.UUID().V4()
 		enableBankingTransactionID := "pko-txn-" + fake.UUID().V4()
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+		require.NoError(t, err)
+		privateKeyPath := filepath.Join(t.TempDir(), "enable-banking-private-key.pem")
+		privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER})
+		require.NoError(t, os.WriteFile(privateKeyPath, privateKeyPEM, 0o600))
 		enableBankingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "Bearer "+enableBankingSecretValue, r.Header.Get("Authorization"))
+			assert.NotEmpty(t, r.Header.Get("Authorization"))
 
 			switch r.URL.Path {
-			case "/accounts":
+			case "/sessions/" + enableBankingConnection.ExternalID:
 				_, _ = fmt.Fprintf(
 					w,
-					`{"accounts":[{"id":"%s","name":"PKO Main","currency":"pln","iban":"PL11111111111111111111111111"}]}`,
+					`{"accounts":[{"uid":"%s","name":"PKO Main","currency":"pln","iban":"PL11111111111111111111111111"}]}`,
 					enableBankingAccountID,
 				)
 			case "/accounts/" + enableBankingAccountID + "/balances":
@@ -130,12 +141,13 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			}),
 		)
 		enableBankingConnector := enablebanking.NewConnector(
-			enablebanking.Args{BaseURL: enableBankingServer.URL, HTTPClient: enableBankingServer.Client()},
+			enablebanking.Args{
+				BaseURL:        enableBankingServer.URL,
+				HTTPClient:     enableBankingServer.Client(),
+				AppID:          "app-" + fake.UUID().V4(),
+				PrivateKeyPath: privateKeyPath,
+			},
 			enablebanking.WithNow(func() time.Time { return capturedAt }),
-			enablebanking.WithSecretResolver(func(_ context.Context, actual domain.ConnectionSecret) (string, error) {
-				assert.Equal(t, enableBankingSecret, actual)
-				return enableBankingSecretValue, nil
-			}),
 		)
 
 		store := NewMockWindowSyncStore(t)
@@ -197,7 +209,6 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 
 		enableBankingResult, err := executor.Execute(t.Context(), providers.WindowSyncRequest{
 			Connection:      enableBankingConnection,
-			Secret:          enableBankingSecret,
 			RequestedWindow: requestedWindow,
 		})
 		require.NoError(t, err)

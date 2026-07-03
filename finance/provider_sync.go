@@ -84,13 +84,6 @@ type ProviderTokenLinkParams struct {
 	Token string
 }
 
-type ProviderLinkStart struct {
-	State             string
-	AuthorizationURL  string
-	ProviderReference string
-	RawPayloads       []ProviderRawPayload
-}
-
 type ProviderLinkResult struct {
 	DisplayName       string
 	ProviderReference string
@@ -125,12 +118,6 @@ type ProviderNormalizedTransaction struct {
 	RawPayloadJSON        []byte
 }
 
-type ProviderRawPayload struct {
-	Scope            domain.RawPayloadScope
-	ProviderObjectID string
-	PayloadJSON      []byte
-}
-
 type ProviderScheduledRunMetadata struct {
 	ScheduledAt time.Time
 	NextRunAt   *time.Time
@@ -150,35 +137,6 @@ type ProviderSyncResult struct {
 	RawPayloads  []ProviderRawPayload
 	Reauth       *domain.ConnectionReauthMetadata
 	ScheduledRun *ProviderScheduledRunMetadata
-}
-
-type LinkTokenBankConnectionParams struct {
-	ActorUserID string
-	TenantID    string
-	Provider    string
-	Token       string
-}
-
-type StartBankConnectionLinkParams struct {
-	ActorUserID        string
-	TenantID           string
-	Provider           string
-	RedirectURL        string
-	BrowserCallbackURL string
-}
-
-type GetPendingBankConnectionLinkStartByStateParams struct {
-	Provider string
-	State    string
-}
-
-type FinishBankConnectionLinkParams struct {
-	ActorUserID string
-	TenantID    string
-	Provider    string
-	State       string
-	Code        string
-	Start       ProviderLinkStart
 }
 
 type UpsertBankConnectionScheduleParams struct {
@@ -414,134 +372,6 @@ type connectionSecretStore interface {
 	) (domain.ConnectionSecret, error)
 	GetConnectionSecret(ctx context.Context, secretID string) (*domain.ConnectionSecret, error)
 	DeleteConnectionSecret(ctx context.Context, secretID string) error
-}
-
-func (s *Service) StartBankConnectionLink(
-	ctx context.Context,
-	params StartBankConnectionLinkParams,
-) (ProviderLinkStart, error) {
-	if err := s.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
-		return ProviderLinkStart{}, err
-	}
-	provider, err := s.bankProviderForLink(params.Provider, bankLinkMethodRedirect)
-	if err != nil {
-		return ProviderLinkStart{}, err
-	}
-	start, err := provider.StartLink(
-		ctx,
-		ProviderStartLinkParams{RedirectURL: strings.TrimSpace(params.RedirectURL)},
-	)
-	if err != nil {
-		return ProviderLinkStart{}, fmt.Errorf("start bank connection link: %w", err)
-	}
-	persistErr := s.persistPendingBankConnectionLinkStart(
-		ctx,
-		params.TenantID,
-		params.ActorUserID,
-		provider.bankID,
-		domain.ProviderConnectorID(strings.TrimSpace(provider.Name())),
-		params.BrowserCallbackURL,
-		start,
-	)
-	if persistErr != nil {
-		return ProviderLinkStart{}, persistErr
-	}
-	return start, nil
-}
-
-func (s *Service) GetPendingBankConnectionLinkStartByState(
-	ctx context.Context,
-	params GetPendingBankConnectionLinkStartByStateParams,
-) (domain.PendingBankConnectionLinkStart, error) {
-	syncStore, err := s.bankSyncStore()
-	if err != nil {
-		return domain.PendingBankConnectionLinkStart{}, err
-	}
-	pendingStart, err := syncStore.GetPendingBankConnectionLinkStartByState(
-		ctx,
-		strings.TrimSpace(params.Provider),
-		strings.TrimSpace(params.State),
-	)
-	if err != nil {
-		if errors.Is(err, persistence.ErrPendingBankConnectionLinkStartNotFound) {
-			return domain.PendingBankConnectionLinkStart{}, ErrPendingBankConnectionLinkStartNotFound
-		}
-		return domain.PendingBankConnectionLinkStart{}, fmt.Errorf(
-			"get pending bank connection link start by state: %w",
-			err,
-		)
-	}
-	return *pendingStart, nil
-}
-
-func (s *Service) FinishBankConnectionLink(
-	ctx context.Context,
-	params FinishBankConnectionLinkParams,
-) (domain.BankConnection, error) {
-	if err := s.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
-		return domain.BankConnection{}, err
-	}
-	provider, err := s.bankProviderForLink(params.Provider, bankLinkMethodRedirect)
-	if err != nil {
-		return domain.BankConnection{}, err
-	}
-	start, err := s.consumePendingBankConnectionLinkStart(
-		ctx,
-		params.TenantID,
-		params.ActorUserID,
-		provider.bankID,
-		params.State,
-	)
-	if err != nil {
-		return domain.BankConnection{}, err
-	}
-	result, err := provider.FinishLink(
-		ctx,
-		ProviderFinishLinkParams{
-			State: strings.TrimSpace(params.State),
-			Code:  strings.TrimSpace(params.Code),
-			Start: start,
-		},
-	)
-	if err != nil {
-		restoreErr := s.restorePendingBankConnectionLinkStart(
-			ctx,
-			params.TenantID,
-			params.ActorUserID,
-			provider.bankID,
-			params.State,
-		)
-		if restoreErr != nil {
-			joinedErr := errors.Join(
-				err,
-				fmt.Errorf("restore pending bank connection link start: %w", restoreErr),
-			)
-			return domain.BankConnection{}, fmt.Errorf(
-				"finish bank connection link: %w",
-				joinedErr,
-			)
-		}
-		return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", err)
-	}
-	connection, err := s.saveLinkedBankConnection(
-		ctx,
-		params.TenantID,
-		provider.bankID,
-		domain.ProviderConnectorID(strings.TrimSpace(provider.Name())),
-		result,
-	)
-	if err != nil {
-		return domain.BankConnection{}, err
-	}
-	s.logger.InfoContext(
-		ctx,
-		"linked bank connection",
-		"connection_id",
-		connection.ID,
-		"provider",
-		connection.Provider,
-	)
-	return connection, nil
 }
 
 func (s *Service) LinkTokenBankConnection(
@@ -1151,106 +981,6 @@ func (s *Service) saveLinkedBankConnection(
 	return saved, nil
 }
 
-func (s *Service) persistPendingBankConnectionLinkStart(
-	ctx context.Context,
-	tenantID string,
-	actorUserID string,
-	provider string,
-	connectorID domain.ProviderConnectorID,
-	browserCallbackURL string,
-	start ProviderLinkStart,
-) error {
-	syncStore, err := s.bankSyncStore()
-	if err != nil {
-		return err
-	}
-	now := s.now().UTC()
-	_, err = syncStore.SavePendingBankConnectionLinkStart(ctx, domain.PendingBankConnectionLinkStart{
-		ID:                s.newID(),
-		TenantID:          strings.TrimSpace(tenantID),
-		ActorUserID:       strings.TrimSpace(actorUserID),
-		Provider:          strings.TrimSpace(provider),
-		ConnectorID:       connectorID,
-		State:             strings.TrimSpace(start.State),
-		CallbackURL:       strings.TrimSpace(browserCallbackURL),
-		AuthorizationURL:  strings.TrimSpace(start.AuthorizationURL),
-		ProviderReference: strings.TrimSpace(start.ProviderReference),
-		StartResult: domain.PendingBankConnectionLinkStartResult{
-			State:            strings.TrimSpace(start.State),
-			AuthorizationURL: strings.TrimSpace(start.AuthorizationURL),
-			RawPayloads:      pendingStartRawPayloadObservations(start.RawPayloads),
-		},
-		ExpiresAt: now.Add(pendingBankConnectionLinkStartTTL),
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-	if err != nil {
-		return fmt.Errorf("persist pending bank connection link start: %w", err)
-	}
-	return nil
-}
-
-func (s *Service) consumePendingBankConnectionLinkStart(
-	ctx context.Context,
-	tenantID string,
-	actorUserID string,
-	provider string,
-	state string,
-) (ProviderLinkStart, error) {
-	syncStore, err := s.bankSyncStore()
-	if err != nil {
-		return ProviderLinkStart{}, err
-	}
-	pendingStart, err := syncStore.ConsumePendingBankConnectionLinkStart(
-		ctx,
-		strings.TrimSpace(tenantID),
-		strings.TrimSpace(actorUserID),
-		strings.TrimSpace(provider),
-		strings.TrimSpace(state),
-		s.now().UTC(),
-	)
-	if err != nil {
-		if errors.Is(err, persistence.ErrPendingBankConnectionLinkStartNotFound) {
-			return ProviderLinkStart{}, ErrPendingBankConnectionLinkStartNotFound
-		}
-		return ProviderLinkStart{}, fmt.Errorf("consume pending bank connection link start: %w", err)
-	}
-	return ProviderLinkStart{
-		State:             pendingStart.StartResult.State,
-		AuthorizationURL:  pendingStart.StartResult.AuthorizationURL,
-		ProviderReference: strings.TrimSpace(pendingStart.ProviderReference),
-		RawPayloads:       pendingStartRawPayloads(pendingStart.StartResult.RawPayloads),
-	}, nil
-}
-
-func (s *Service) restorePendingBankConnectionLinkStart(
-	ctx context.Context,
-	tenantID string,
-	actorUserID string,
-	provider string,
-	state string,
-) error {
-	syncStore, err := s.bankSyncStore()
-	if err != nil {
-		return err
-	}
-	err = syncStore.RestorePendingBankConnectionLinkStart(
-		ctx,
-		strings.TrimSpace(tenantID),
-		strings.TrimSpace(actorUserID),
-		strings.TrimSpace(provider),
-		strings.TrimSpace(state),
-		s.now().UTC(),
-	)
-	if err != nil {
-		if errors.Is(err, persistence.ErrPendingBankConnectionLinkStartNotFound) {
-			return ErrPendingBankConnectionLinkStartNotFound
-		}
-		return fmt.Errorf("restore pending bank connection link start: %w", err)
-	}
-	return nil
-}
-
 func (s *Service) encryptAndSaveConnectionSecret(
 	ctx context.Context,
 	providerName string,
@@ -1372,30 +1102,6 @@ func unsupportedBankLinkingMethodError(bankID string, method bankLinkMethod) err
 		ErrUnsupportedBankLinkingMethod,
 		bankID,
 	)
-}
-
-func pendingStartRawPayloadObservations(payloads []ProviderRawPayload) []domain.ProviderRawPayloadObservation {
-	observations := make([]domain.ProviderRawPayloadObservation, 0, len(payloads))
-	for _, payload := range payloads {
-		observations = append(observations, domain.ProviderRawPayloadObservation{
-			Scope:            payload.Scope,
-			ProviderObjectID: strings.TrimSpace(payload.ProviderObjectID),
-			PayloadJSON:      payload.PayloadJSON,
-		})
-	}
-	return observations
-}
-
-func pendingStartRawPayloads(payloads []domain.ProviderRawPayloadObservation) []ProviderRawPayload {
-	items := make([]ProviderRawPayload, 0, len(payloads))
-	for _, payload := range payloads {
-		items = append(items, ProviderRawPayload{
-			Scope:            payload.Scope,
-			ProviderObjectID: strings.TrimSpace(payload.ProviderObjectID),
-			PayloadJSON:      payload.PayloadJSON,
-		})
-	}
-	return items
 }
 
 func (s *Service) requireTenantBankConnection(

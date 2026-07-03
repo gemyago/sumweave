@@ -799,72 +799,6 @@ func (_c *mockfinanceService_DeleteBankConnection_Call) RunAndReturn(run func(co
 	return _c
 }
 
-// FinishBankConnectionLink provides a mock function for the type mockfinanceService
-func (_mock *mockfinanceService) FinishBankConnectionLink(context1 context.Context, finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams) (domain.BankConnection, error) {
-	ret := _mock.Called(context1, finishBankConnectionLinkParams)
-
-	if len(ret) == 0 {
-		panic("no return value specified for FinishBankConnectionLink")
-	}
-
-	var r0 domain.BankConnection
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.FinishBankConnectionLinkParams) (domain.BankConnection, error)); ok {
-		return returnFunc(context1, finishBankConnectionLinkParams)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.FinishBankConnectionLinkParams) domain.BankConnection); ok {
-		r0 = returnFunc(context1, finishBankConnectionLinkParams)
-	} else {
-		r0 = ret.Get(0).(domain.BankConnection)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.FinishBankConnectionLinkParams) error); ok {
-		r1 = returnFunc(context1, finishBankConnectionLinkParams)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// mockfinanceService_FinishBankConnectionLink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinishBankConnectionLink'
-type mockfinanceService_FinishBankConnectionLink_Call struct {
-	*mock.Call
-}
-
-// FinishBankConnectionLink is a helper method to define mock.On call
-//   - context1 context.Context
-//   - finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams
-func (_e *mockfinanceService_Expecter) FinishBankConnectionLink(context1 interface{}, finishBankConnectionLinkParams interface{}) *mockfinanceService_FinishBankConnectionLink_Call {
-	return &mockfinanceService_FinishBankConnectionLink_Call{Call: _e.mock.On("FinishBankConnectionLink", context1, finishBankConnectionLinkParams)}
-}
-
-func (_c *mockfinanceService_FinishBankConnectionLink_Call) Run(run func(context1 context.Context, finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams)) *mockfinanceService_FinishBankConnectionLink_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 finance.FinishBankConnectionLinkParams
-		if args[1] != nil {
-			arg1 = args[1].(finance.FinishBankConnectionLinkParams)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *mockfinanceService_FinishBankConnectionLink_Call) Return(bankConnection domain.BankConnection, err error) *mockfinanceService_FinishBankConnectionLink_Call {
-	_c.Call.Return(bankConnection, err)
-	return _c
-}
-
-func (_c *mockfinanceService_FinishBankConnectionLink_Call) RunAndReturn(run func(context1 context.Context, finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams) (domain.BankConnection, error)) *mockfinanceService_FinishBankConnectionLink_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // GetCSVImportAudit provides a mock function for the type mockfinanceService
 func (_mock *mockfinanceService) GetCSVImportAudit(context1 context.Context, getCSVImportAuditParams finance.GetCSVImportAuditParams) (finance.CSVImportAudit, error) {
 	ret := _mock.Called(context1, getCSVImportAuditParams)
@@ -1125,72 +1059,6 @@ func (_c *mockfinanceService_GetTransaction_Call) Return(transaction domain.Tran
 }
 
 func (_c *mockfinanceService_GetTransaction_Call) RunAndReturn(run func(context1 context.Context, getTransactionParams finance.GetTransactionParams) (domain.Transaction, error)) *mockfinanceService_GetTransaction_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// LinkTokenBankConnection provides a mock function for the type mockfinanceService
-func (_mock *mockfinanceService) LinkTokenBankConnection(context1 context.Context, linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams) (domain.BankConnection, error) {
-	ret := _mock.Called(context1, linkTokenBankConnectionParams)
-
-	if len(ret) == 0 {
-		panic("no return value specified for LinkTokenBankConnection")
-	}
-
-	var r0 domain.BankConnection
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.LinkTokenBankConnectionParams) (domain.BankConnection, error)); ok {
-		return returnFunc(context1, linkTokenBankConnectionParams)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.LinkTokenBankConnectionParams) domain.BankConnection); ok {
-		r0 = returnFunc(context1, linkTokenBankConnectionParams)
-	} else {
-		r0 = ret.Get(0).(domain.BankConnection)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.LinkTokenBankConnectionParams) error); ok {
-		r1 = returnFunc(context1, linkTokenBankConnectionParams)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// mockfinanceService_LinkTokenBankConnection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LinkTokenBankConnection'
-type mockfinanceService_LinkTokenBankConnection_Call struct {
-	*mock.Call
-}
-
-// LinkTokenBankConnection is a helper method to define mock.On call
-//   - context1 context.Context
-//   - linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams
-func (_e *mockfinanceService_Expecter) LinkTokenBankConnection(context1 interface{}, linkTokenBankConnectionParams interface{}) *mockfinanceService_LinkTokenBankConnection_Call {
-	return &mockfinanceService_LinkTokenBankConnection_Call{Call: _e.mock.On("LinkTokenBankConnection", context1, linkTokenBankConnectionParams)}
-}
-
-func (_c *mockfinanceService_LinkTokenBankConnection_Call) Run(run func(context1 context.Context, linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams)) *mockfinanceService_LinkTokenBankConnection_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 finance.LinkTokenBankConnectionParams
-		if args[1] != nil {
-			arg1 = args[1].(finance.LinkTokenBankConnectionParams)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *mockfinanceService_LinkTokenBankConnection_Call) Return(bankConnection domain.BankConnection, err error) *mockfinanceService_LinkTokenBankConnection_Call {
-	_c.Call.Return(bankConnection, err)
-	return _c
-}
-
-func (_c *mockfinanceService_LinkTokenBankConnection_Call) RunAndReturn(run func(context1 context.Context, linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams) (domain.BankConnection, error)) *mockfinanceService_LinkTokenBankConnection_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1871,72 +1739,6 @@ func (_c *mockfinanceService_RecordTransaction_Call) RunAndReturn(run func(conte
 	return _c
 }
 
-// StartBankConnectionLink provides a mock function for the type mockfinanceService
-func (_mock *mockfinanceService) StartBankConnectionLink(context1 context.Context, startBankConnectionLinkParams finance.StartBankConnectionLinkParams) (finance.ProviderLinkStart, error) {
-	ret := _mock.Called(context1, startBankConnectionLinkParams)
-
-	if len(ret) == 0 {
-		panic("no return value specified for StartBankConnectionLink")
-	}
-
-	var r0 finance.ProviderLinkStart
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.StartBankConnectionLinkParams) (finance.ProviderLinkStart, error)); ok {
-		return returnFunc(context1, startBankConnectionLinkParams)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.StartBankConnectionLinkParams) finance.ProviderLinkStart); ok {
-		r0 = returnFunc(context1, startBankConnectionLinkParams)
-	} else {
-		r0 = ret.Get(0).(finance.ProviderLinkStart)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.StartBankConnectionLinkParams) error); ok {
-		r1 = returnFunc(context1, startBankConnectionLinkParams)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// mockfinanceService_StartBankConnectionLink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StartBankConnectionLink'
-type mockfinanceService_StartBankConnectionLink_Call struct {
-	*mock.Call
-}
-
-// StartBankConnectionLink is a helper method to define mock.On call
-//   - context1 context.Context
-//   - startBankConnectionLinkParams finance.StartBankConnectionLinkParams
-func (_e *mockfinanceService_Expecter) StartBankConnectionLink(context1 interface{}, startBankConnectionLinkParams interface{}) *mockfinanceService_StartBankConnectionLink_Call {
-	return &mockfinanceService_StartBankConnectionLink_Call{Call: _e.mock.On("StartBankConnectionLink", context1, startBankConnectionLinkParams)}
-}
-
-func (_c *mockfinanceService_StartBankConnectionLink_Call) Run(run func(context1 context.Context, startBankConnectionLinkParams finance.StartBankConnectionLinkParams)) *mockfinanceService_StartBankConnectionLink_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 finance.StartBankConnectionLinkParams
-		if args[1] != nil {
-			arg1 = args[1].(finance.StartBankConnectionLinkParams)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *mockfinanceService_StartBankConnectionLink_Call) Return(providerLinkStart finance.ProviderLinkStart, err error) *mockfinanceService_StartBankConnectionLink_Call {
-	_c.Call.Return(providerLinkStart, err)
-	return _c
-}
-
-func (_c *mockfinanceService_StartBankConnectionLink_Call) RunAndReturn(run func(context1 context.Context, startBankConnectionLinkParams finance.StartBankConnectionLinkParams) (finance.ProviderLinkStart, error)) *mockfinanceService_StartBankConnectionLink_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // TriggerBankConnectionSync provides a mock function for the type mockfinanceService
 func (_mock *mockfinanceService) TriggerBankConnectionSync(context1 context.Context, triggerBankConnectionSyncParams finance.TriggerBankConnectionSyncParams) (finance.BankConnectionSyncJobRef, error) {
 	ret := _mock.Called(context1, triggerBankConnectionSyncParams)
@@ -2131,6 +1933,231 @@ func (_c *mockfinanceService_UpdateTransaction_Call) Return(transaction domain.T
 }
 
 func (_c *mockfinanceService_UpdateTransaction_Call) RunAndReturn(run func(context1 context.Context, updateTransactionParams finance.UpdateTransactionParams) (domain.Transaction, error)) *mockfinanceService_UpdateTransaction_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// newMockbankConnectionService creates a new instance of mockbankConnectionService. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
+// The first argument is typically a *testing.T value.
+func newMockbankConnectionService(t interface {
+	mock.TestingT
+	Cleanup(func())
+}) *mockbankConnectionService {
+	mock := &mockbankConnectionService{}
+	mock.Mock.Test(t)
+
+	t.Cleanup(func() { mock.AssertExpectations(t) })
+
+	return mock
+}
+
+// mockbankConnectionService is an autogenerated mock type for the bankConnectionService type
+type mockbankConnectionService struct {
+	mock.Mock
+}
+
+type mockbankConnectionService_Expecter struct {
+	mock *mock.Mock
+}
+
+func (_m *mockbankConnectionService) EXPECT() *mockbankConnectionService_Expecter {
+	return &mockbankConnectionService_Expecter{mock: &_m.Mock}
+}
+
+// FinishBankConnectionLink provides a mock function for the type mockbankConnectionService
+func (_mock *mockbankConnectionService) FinishBankConnectionLink(context1 context.Context, finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams) (domain.BankConnection, error) {
+	ret := _mock.Called(context1, finishBankConnectionLinkParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FinishBankConnectionLink")
+	}
+
+	var r0 domain.BankConnection
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.FinishBankConnectionLinkParams) (domain.BankConnection, error)); ok {
+		return returnFunc(context1, finishBankConnectionLinkParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.FinishBankConnectionLinkParams) domain.BankConnection); ok {
+		r0 = returnFunc(context1, finishBankConnectionLinkParams)
+	} else {
+		r0 = ret.Get(0).(domain.BankConnection)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.FinishBankConnectionLinkParams) error); ok {
+		r1 = returnFunc(context1, finishBankConnectionLinkParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockbankConnectionService_FinishBankConnectionLink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinishBankConnectionLink'
+type mockbankConnectionService_FinishBankConnectionLink_Call struct {
+	*mock.Call
+}
+
+// FinishBankConnectionLink is a helper method to define mock.On call
+//   - context1 context.Context
+//   - finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams
+func (_e *mockbankConnectionService_Expecter) FinishBankConnectionLink(context1 interface{}, finishBankConnectionLinkParams interface{}) *mockbankConnectionService_FinishBankConnectionLink_Call {
+	return &mockbankConnectionService_FinishBankConnectionLink_Call{Call: _e.mock.On("FinishBankConnectionLink", context1, finishBankConnectionLinkParams)}
+}
+
+func (_c *mockbankConnectionService_FinishBankConnectionLink_Call) Run(run func(context1 context.Context, finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams)) *mockbankConnectionService_FinishBankConnectionLink_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.FinishBankConnectionLinkParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.FinishBankConnectionLinkParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockbankConnectionService_FinishBankConnectionLink_Call) Return(bankConnection domain.BankConnection, err error) *mockbankConnectionService_FinishBankConnectionLink_Call {
+	_c.Call.Return(bankConnection, err)
+	return _c
+}
+
+func (_c *mockbankConnectionService_FinishBankConnectionLink_Call) RunAndReturn(run func(context1 context.Context, finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams) (domain.BankConnection, error)) *mockbankConnectionService_FinishBankConnectionLink_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LinkTokenBankConnection provides a mock function for the type mockbankConnectionService
+func (_mock *mockbankConnectionService) LinkTokenBankConnection(context1 context.Context, linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams) (domain.BankConnection, error) {
+	ret := _mock.Called(context1, linkTokenBankConnectionParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LinkTokenBankConnection")
+	}
+
+	var r0 domain.BankConnection
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.LinkTokenBankConnectionParams) (domain.BankConnection, error)); ok {
+		return returnFunc(context1, linkTokenBankConnectionParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.LinkTokenBankConnectionParams) domain.BankConnection); ok {
+		r0 = returnFunc(context1, linkTokenBankConnectionParams)
+	} else {
+		r0 = ret.Get(0).(domain.BankConnection)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.LinkTokenBankConnectionParams) error); ok {
+		r1 = returnFunc(context1, linkTokenBankConnectionParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockbankConnectionService_LinkTokenBankConnection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LinkTokenBankConnection'
+type mockbankConnectionService_LinkTokenBankConnection_Call struct {
+	*mock.Call
+}
+
+// LinkTokenBankConnection is a helper method to define mock.On call
+//   - context1 context.Context
+//   - linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams
+func (_e *mockbankConnectionService_Expecter) LinkTokenBankConnection(context1 interface{}, linkTokenBankConnectionParams interface{}) *mockbankConnectionService_LinkTokenBankConnection_Call {
+	return &mockbankConnectionService_LinkTokenBankConnection_Call{Call: _e.mock.On("LinkTokenBankConnection", context1, linkTokenBankConnectionParams)}
+}
+
+func (_c *mockbankConnectionService_LinkTokenBankConnection_Call) Run(run func(context1 context.Context, linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams)) *mockbankConnectionService_LinkTokenBankConnection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.LinkTokenBankConnectionParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.LinkTokenBankConnectionParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockbankConnectionService_LinkTokenBankConnection_Call) Return(bankConnection domain.BankConnection, err error) *mockbankConnectionService_LinkTokenBankConnection_Call {
+	_c.Call.Return(bankConnection, err)
+	return _c
+}
+
+func (_c *mockbankConnectionService_LinkTokenBankConnection_Call) RunAndReturn(run func(context1 context.Context, linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams) (domain.BankConnection, error)) *mockbankConnectionService_LinkTokenBankConnection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// StartBankConnectionLink provides a mock function for the type mockbankConnectionService
+func (_mock *mockbankConnectionService) StartBankConnectionLink(context1 context.Context, startBankConnectionLinkParams finance.StartBankConnectionLinkParams) (finance.ProviderLinkStart, error) {
+	ret := _mock.Called(context1, startBankConnectionLinkParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StartBankConnectionLink")
+	}
+
+	var r0 finance.ProviderLinkStart
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.StartBankConnectionLinkParams) (finance.ProviderLinkStart, error)); ok {
+		return returnFunc(context1, startBankConnectionLinkParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.StartBankConnectionLinkParams) finance.ProviderLinkStart); ok {
+		r0 = returnFunc(context1, startBankConnectionLinkParams)
+	} else {
+		r0 = ret.Get(0).(finance.ProviderLinkStart)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.StartBankConnectionLinkParams) error); ok {
+		r1 = returnFunc(context1, startBankConnectionLinkParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockbankConnectionService_StartBankConnectionLink_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StartBankConnectionLink'
+type mockbankConnectionService_StartBankConnectionLink_Call struct {
+	*mock.Call
+}
+
+// StartBankConnectionLink is a helper method to define mock.On call
+//   - context1 context.Context
+//   - startBankConnectionLinkParams finance.StartBankConnectionLinkParams
+func (_e *mockbankConnectionService_Expecter) StartBankConnectionLink(context1 interface{}, startBankConnectionLinkParams interface{}) *mockbankConnectionService_StartBankConnectionLink_Call {
+	return &mockbankConnectionService_StartBankConnectionLink_Call{Call: _e.mock.On("StartBankConnectionLink", context1, startBankConnectionLinkParams)}
+}
+
+func (_c *mockbankConnectionService_StartBankConnectionLink_Call) Run(run func(context1 context.Context, startBankConnectionLinkParams finance.StartBankConnectionLinkParams)) *mockbankConnectionService_StartBankConnectionLink_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.StartBankConnectionLinkParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.StartBankConnectionLinkParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockbankConnectionService_StartBankConnectionLink_Call) Return(providerLinkStart finance.ProviderLinkStart, err error) *mockbankConnectionService_StartBankConnectionLink_Call {
+	_c.Call.Return(providerLinkStart, err)
+	return _c
+}
+
+func (_c *mockbankConnectionService_StartBankConnectionLink_Call) RunAndReturn(run func(context1 context.Context, startBankConnectionLinkParams finance.StartBankConnectionLinkParams) (finance.ProviderLinkStart, error)) *mockbankConnectionService_StartBankConnectionLink_Call {
 	_c.Call.Return(run)
 	return _c
 }

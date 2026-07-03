@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -178,21 +177,8 @@ func runFinanceFixturesGenerate(
 		)),
 	}
 	switch strings.TrimSpace(params.ConnectionProvider) {
-	case "", fixtureScenarioProviderName:
+	case "", fixtureScenarioProviderName, fixtureMonobankProviderName:
 		serviceOpts = append(serviceOpts, financepkg.WithBankProviders(financeFixturesProvider{}))
-	case fixtureMonobankProviderName:
-		baseURL := strings.TrimSpace(runtimeConfig.MonobankBaseURL)
-		if baseURL == "" {
-			return financefixtures.Summary{}, errors.New(
-				"finance.providers.monobank.baseURL is required for connection-provider=monobank",
-			)
-		}
-		serviceOpts = append(
-			serviceOpts,
-			financepkg.WithBankProviders(
-				financepkg.NewMonobankProvider(financepkg.MonobankProviderConfig{BaseURL: baseURL}),
-			),
-		)
 	default:
 		return financefixtures.Summary{}, fmt.Errorf(
 			"unsupported finance fixture connection provider: %s",

@@ -43,9 +43,17 @@ func TestFinanceController(t *testing.T) {
 		}
 	}
 
-	newHandler := func(service financeService, auth middleware.AuthMiddleware) http.Handler {
+	newHandler := func(
+		service financeService,
+		bankConnections bankConnectionService,
+		auth middleware.AuthMiddleware,
+	) http.Handler {
 		ctrl := NewFinanceController(
-			FinanceControllerDeps{FinanceService: service, AuthMiddleware: auth},
+			FinanceControllerDeps{
+				FinanceService:        service,
+				BankConnectionService: bankConnections,
+				AuthMiddleware:        auth,
+			},
 		)
 		return server.NewTestRootHandler().RegisterFinanceRoutes(ctrl)
 	}
@@ -68,7 +76,11 @@ func TestFinanceController(t *testing.T) {
 	}
 
 	t.Run("finance endpoints require auth", func(t *testing.T) {
-		handler := newHandler(newMockfinanceService(t), makeAuthMiddleware(fake.UUID().V4()))
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(fake.UUID().V4()),
+		)
 		for _, tc := range []struct {
 			method string
 			target string
@@ -85,7 +97,11 @@ func TestFinanceController(t *testing.T) {
 
 	t.Run("finance routes reject missing caller identity", func(t *testing.T) {
 		service := newMockfinanceService(t)
-		handler := newHandler(service, func(next http.Handler) http.Handler { return next })
+		handler := newHandler(
+			service,
+			newMockbankConnectionService(t),
+			func(next http.Handler) http.Handler { return next },
+		)
 
 		for _, tc := range []struct {
 			name   string
@@ -138,7 +154,11 @@ func TestFinanceController(t *testing.T) {
 		inviteID := "invite-" + fake.UUID().V4()
 		inviteCode := "code-" + fake.UUID().V4()
 		service := newMockfinanceService(t)
-		handler := newHandler(service, makeAuthMiddleware(userID))
+		handler := newHandler(
+			service,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		)
 
 		tenants := []domain.TenantMembershipView{{
 			Tenant: domain.Tenant{
@@ -297,7 +317,11 @@ func TestFinanceController(t *testing.T) {
 		tagID := "tag-" + fake.UUID().V4()
 		transactionID := "tx-" + fake.UUID().V4()
 		service := newMockfinanceService(t)
-		handler := newHandler(service, makeAuthMiddleware(userID))
+		handler := newHandler(
+			service,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		)
 
 		service.EXPECT().
 			ListAccounts(mock.Anything, mock.Anything).
@@ -528,7 +552,11 @@ func TestFinanceController(t *testing.T) {
 		}
 
 		serviceForNullCategory := newMockfinanceService(t)
-		handlerForNullCategory := newHandler(serviceForNullCategory, makeAuthMiddleware(userID))
+		handlerForNullCategory := newHandler(
+			serviceForNullCategory,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		)
 		serviceForNullCategory.EXPECT().
 			UpdateTransaction(mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, params financepkg.UpdateTransactionParams) (domain.Transaction, error) {
@@ -584,7 +612,12 @@ func TestFinanceController(t *testing.T) {
 			connectionID := "connection-" + fake.UUID().V4()
 			importID := "import-" + fake.UUID().V4()
 			service := newMockfinanceService(t)
-			handler := newHandler(service, makeAuthMiddleware(userID))
+			bankConnections := newMockbankConnectionService(t)
+			handler := newHandler(
+				service,
+				bankConnections,
+				makeAuthMiddleware(userID),
+			)
 
 			service.EXPECT().
 				ListBankConnections(mock.Anything, financepkg.ListBankConnectionsParams{ActorUserID: userID, TenantID: tenantID}).
@@ -608,7 +641,7 @@ func TestFinanceController(t *testing.T) {
 						UpdatedAt:    now,
 					},
 				}}, nil)
-			service.EXPECT().
+			bankConnections.EXPECT().
 				LinkTokenBankConnection(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.LinkTokenBankConnectionParams) (domain.BankConnection, error) {
 					require.Equal(t, userID, params.ActorUserID)
@@ -628,7 +661,7 @@ func TestFinanceController(t *testing.T) {
 				})
 			startState := "state-" + fake.UUID().V4()
 			startAuthorizationURL := "https://enable-banking.example.test/sessions/" + fake.UUID().V4()
-			service.EXPECT().
+			bankConnections.EXPECT().
 				StartBankConnectionLink(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.StartBankConnectionLinkParams) (financepkg.ProviderLinkStart, error) {
 					require.Equal(t, userID, params.ActorUserID)
@@ -641,7 +674,7 @@ func TestFinanceController(t *testing.T) {
 						AuthorizationURL: startAuthorizationURL,
 					}, nil
 				})
-			service.EXPECT().
+			bankConnections.EXPECT().
 				FinishBankConnectionLink(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.FinishBankConnectionLinkParams) (domain.BankConnection, error) {
 					require.Equal(t, userID, params.ActorUserID)
@@ -884,7 +917,12 @@ func TestFinanceController(t *testing.T) {
 
 			t.Run("provider and callback validation stay explicit", func(t *testing.T) {
 				validationService := newMockfinanceService(t)
-				validationHandler := newHandler(validationService, makeAuthMiddleware(userID))
+				validationBankConnections := newMockbankConnectionService(t)
+				validationHandler := newHandler(
+					validationService,
+					validationBankConnections,
+					makeAuthMiddleware(userID),
+				)
 
 				for _, tc := range []struct {
 					name   string
@@ -931,7 +969,8 @@ func TestFinanceController(t *testing.T) {
 				} {
 					t.Run(callbackURL, func(t *testing.T) {
 						localValidationService := newMockfinanceService(t)
-						localValidationService.EXPECT().
+						localBankConnections := newMockbankConnectionService(t)
+						localBankConnections.EXPECT().
 							StartBankConnectionLink(mock.Anything, mock.Anything).
 							RunAndReturn(func(_ context.Context, params financepkg.StartBankConnectionLinkParams) (financepkg.ProviderLinkStart, error) {
 								require.Equal(t, "http://example.com/enable-banking/callback", params.RedirectURL)
@@ -942,7 +981,11 @@ func TestFinanceController(t *testing.T) {
 								}, nil
 							})
 						resp := httptest.NewRecorder()
-						newHandler(localValidationService, makeAuthMiddleware(userID)).ServeHTTP(
+						newHandler(
+							localValidationService,
+							localBankConnections,
+							makeAuthMiddleware(userID),
+						).ServeHTTP(
 							resp,
 							newRequest(
 								http.MethodPost,
@@ -969,6 +1012,7 @@ func TestFinanceController(t *testing.T) {
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				newMockbankConnectionService(t),
 				makeAuthMiddleware(userID),
 			).ServeHTTP(resp, newRequest(http.MethodPost, "/api/v1/finance/invites/accept", `{"code":"missing"}`, true))
 			require.Equal(t, http.StatusNotFound, resp.Code)
@@ -982,6 +1026,7 @@ func TestFinanceController(t *testing.T) {
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				newMockbankConnectionService(t),
 				makeAuthMiddleware(userID),
 			).ServeHTTP(resp, newRequest(http.MethodPost, "/api/v1/finance/tenants/tenant-a/imports/import-a/confirm", `{"mapping":{"name":"name"}}`, true))
 			require.Equal(t, http.StatusConflict, resp.Code)
@@ -995,6 +1040,7 @@ func TestFinanceController(t *testing.T) {
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				newMockbankConnectionService(t),
 				makeAuthMiddleware(userID),
 			).ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/finance/tenants/tenant-a/imports/import-a", "", true))
 			require.Equal(t, http.StatusUnauthorized, resp.Code)
@@ -1005,6 +1051,7 @@ func TestFinanceController(t *testing.T) {
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				newMockbankConnectionService(t),
 				makeAuthMiddleware(userID),
 			).ServeHTTP(resp, newRequest(http.MethodPost, "/api/v1/finance/tenants/tenant-a/imports/preview", `{"importType":`, true))
 			require.Equal(t, http.StatusBadRequest, resp.Code)
@@ -1015,6 +1062,7 @@ func TestFinanceController(t *testing.T) {
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				newMockbankConnectionService(t),
 				makeAuthMiddleware(userID),
 			).ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/finance/tenants/tenant-a/dashboard?startDate=bad-date", "", true))
 			require.Equal(t, http.StatusBadRequest, resp.Code)
@@ -1025,6 +1073,7 @@ func TestFinanceController(t *testing.T) {
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				newMockbankConnectionService(t),
 				makeAuthMiddleware(userID),
 			).ServeHTTP(resp, newRequest(http.MethodPost, "/api/v1/finance/tenants", `{"name":`, true))
 			require.Equal(t, http.StatusBadRequest, resp.Code)
@@ -1038,6 +1087,7 @@ func TestFinanceController(t *testing.T) {
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				newMockbankConnectionService(t),
 				makeAuthMiddleware(userID),
 			).ServeHTTP(resp, newRequest(http.MethodPost, "/api/v1/finance/tenants/tenant-a/imports/preview", `{"importType":"transactions","fileName":"demo.csv","csv":"h\n1"}`, true))
 			require.Equal(t, http.StatusInternalServerError, resp.Code)
@@ -1045,13 +1095,15 @@ func TestFinanceController(t *testing.T) {
 
 		t.Run("bank provider errors stay sanitized", func(t *testing.T) {
 			service := newMockfinanceService(t)
+			bankConnections := newMockbankConnectionService(t)
 			secret := "secret-" + fake.UUID().V4()
-			service.EXPECT().
+			bankConnections.EXPECT().
 				StartBankConnectionLink(mock.Anything, mock.Anything).
 				Return(financepkg.ProviderLinkStart{}, errors.New("provider failed with "+secret))
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				bankConnections,
 				makeAuthMiddleware(userID),
 			).ServeHTTP(
 				resp,
@@ -1068,12 +1120,14 @@ func TestFinanceController(t *testing.T) {
 
 		t.Run("unconfigured bank providers return sanitized client error", func(t *testing.T) {
 			service := newMockfinanceService(t)
-			service.EXPECT().
+			bankConnections := newMockbankConnectionService(t)
+			bankConnections.EXPECT().
 				StartBankConnectionLink(mock.Anything, mock.Anything).
 				Return(financepkg.ProviderLinkStart{}, fmt.Errorf("%w: pko -> enable-banking", financepkg.ErrBankProviderNotConfigured))
 			resp := httptest.NewRecorder()
 			newHandler(
 				service,
+				bankConnections,
 				makeAuthMiddleware(userID),
 			).ServeHTTP(
 				resp,
@@ -1283,15 +1337,6 @@ func TestFinanceController(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "http://localhost:6060/enable-banking/callback", callbackURL)
 
-		t.Setenv(enableBankingCallbackBaseURLEnv, "http://localhost:6060")
-		callbackURL, err = buildFinanceProviderRedirectURL(
-			req,
-			"http://localhost:5173/#/finance/connections",
-			"http://localhost:9999",
-		)
-		require.NoError(t, err)
-		assert.Equal(t, "http://localhost:6060/enable-banking/callback", callbackURL)
-
 		_, err = buildEnableBankingCallbackURLFromBase("/relative")
 		require.Error(t, err)
 
@@ -1381,7 +1426,7 @@ func TestFinanceController(t *testing.T) {
 				StatusCode: http.StatusUnprocessableEntity,
 				Message:    "Wrong ASPSP name provided",
 			}),
-			"ENABLE_BANKING_ASPSP_NAME",
+			"APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME",
 		)
 		assert.Contains(
 			t,
@@ -1394,7 +1439,7 @@ func TestFinanceController(t *testing.T) {
 				},
 				"fallback",
 			).Error(),
-			"ENABLE_BANKING_ASPSP_NAME",
+			"APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME",
 		)
 	})
 }

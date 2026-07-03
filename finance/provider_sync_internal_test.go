@@ -402,50 +402,6 @@ func (s *failingProviderSyncStore) GetPendingBankConnectionLinkStartByState(
 	return s.Store.GetPendingBankConnectionLinkStartByState(ctx, provider, state)
 }
 
-type redirectBankProvider struct {
-	name         string
-	startResult  ProviderLinkStart
-	startErr     error
-	finishResult ProviderLinkResult
-	finishErr    error
-}
-
-func (p *redirectBankProvider) Name() string { return p.name }
-
-func (p *redirectBankProvider) StartLink(
-	context.Context,
-	ProviderStartLinkParams,
-) (ProviderLinkStart, error) {
-	if p.startErr != nil {
-		return ProviderLinkStart{}, p.startErr
-	}
-	return p.startResult, nil
-}
-
-func (p *redirectBankProvider) FinishLink(
-	context.Context,
-	ProviderFinishLinkParams,
-) (ProviderLinkResult, error) {
-	if p.finishErr != nil {
-		return ProviderLinkResult{}, p.finishErr
-	}
-	return p.finishResult, nil
-}
-
-func (p *redirectBankProvider) LinkToken(
-	context.Context,
-	ProviderTokenLinkParams,
-) (ProviderTokenLinkResult, error) {
-	return ProviderTokenLinkResult{}, errors.New("unsupported")
-}
-
-func (p *redirectBankProvider) Sync(
-	context.Context,
-	ProviderSyncParams,
-) (ProviderSyncResult, error) {
-	return ProviderSyncResult{}, errors.New("unsupported")
-}
-
 func TestProviderSyncInternals(t *testing.T) {
 	makeStore := func(t *testing.T) *persistence.Store {
 		t.Helper()
@@ -490,7 +446,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		tenantID string,
 		providerName string,
 		result ProviderLinkResult,
-	) error {
+	) (domain.BankConnection, error) {
 		secretID, err := service.encryptAndSaveConnectionSecret(
 			ctx,
 			providerName,
@@ -498,11 +454,11 @@ func TestProviderSyncInternals(t *testing.T) {
 			result.Secret,
 		)
 		if err != nil {
-			return err
+			return domain.BankConnection{}, err
 		}
 		syncStore, err := service.bankSyncStore()
 		if err != nil {
-			return err
+			return domain.BankConnection{}, err
 		}
 		now := service.now().UTC()
 		connection := domain.BankConnection{
@@ -518,7 +474,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		}
 		saved, err := syncStore.SaveBankConnection(ctx, connection)
 		if err != nil {
-			return err
+			return domain.BankConnection{}, err
 		}
 		for _, payload := range result.RawPayloads {
 			_, rawErr := syncStore.SaveRawPayload(ctx, domain.RawPayload{
@@ -530,11 +486,10 @@ func TestProviderSyncInternals(t *testing.T) {
 				CapturedAt:       now,
 			})
 			if rawErr != nil {
-				return rawErr
+				return domain.BankConnection{}, rawErr
 			}
 		}
-		_ = saved
-		return nil
+		return saved, nil
 	}
 
 	t.Run("covers delete helper error branches", func(t *testing.T) {
@@ -614,76 +569,27 @@ func TestProviderSyncInternals(t *testing.T) {
 
 		provider := &stubBankProvider{
 			name:    "monobank",
-			linkErr: errors.New("link failed"),
+			syncErr: errors.New("sync failed"),
 		}
-		serviceWithProvider, tenant, ownerUserID := makeService(t, provider)
-		_, err := serviceWithProvider.LinkTokenBankConnection(
+		serviceWithProvider, tenant, _ := makeService(t, provider)
+		connection, err := saveLinkedConnectionForTest(
 			t.Context(),
-			LinkTokenBankConnectionParams{
-				ActorUserID: ownerUserID,
-				TenantID:    tenant.ID,
-				Provider:    provider.name,
-				Token:       "token",
+			serviceWithProvider,
+			tenant.ID,
+			provider.name,
+			ProviderLinkResult{
+				DisplayName:       "display",
+				ProviderReference: "ref",
+				Secret:            "secret",
+				State:             domain.BankConnectionStateActive,
 			},
+		)
+		require.NoError(t, err)
+		_, err = serviceWithProvider.RunBankConnectionSync(
+			t.Context(),
+			RunBankConnectionSyncParams{ConnectionID: connection.ID, JobID: "job-1"},
 		)
 		require.Error(t, err)
-
-		monobankRef, refErr := serviceWithProvider.bankProviderForLink(bankProviderMonobank, bankLinkMethodToken)
-		require.NoError(t, refErr)
-		assert.Equal(t, bankProviderMonobank, monobankRef.bankID)
-		assert.Equal(t, bankProviderMonobank, monobankRef.Name())
-
-		pkoProvider := &stubBankProvider{name: bankConnectorEnableBanking}
-		serviceWithRedirectProvider, _, _ := makeService(t, nil, WithBankProviders(pkoProvider))
-		pkoRef, refErr := serviceWithRedirectProvider.bankProviderForLink(bankProviderPKO, bankLinkMethodRedirect)
-		require.NoError(t, refErr)
-		assert.Equal(t, bankProviderPKO, pkoRef.bankID)
-		assert.Equal(t, bankConnectorEnableBanking, pkoRef.Name())
-
-		rawPayloads := []ProviderRawPayload{{
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: " payload-id ",
-			PayloadJSON:      []byte(`{"linked":true}`),
-		}}
-		assert.Equal(t, []domain.ProviderRawPayloadObservation{{
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: "payload-id",
-			PayloadJSON:      []byte(`{"linked":true}`),
-		}}, pendingStartRawPayloadObservations(rawPayloads))
-		assert.Equal(t, []ProviderRawPayload{{
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: "payload-id",
-			PayloadJSON:      []byte(`{"linked":true}`),
-		}}, pendingStartRawPayloads([]domain.ProviderRawPayloadObservation{{
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: " payload-id ",
-			PayloadJSON:      []byte(`{"linked":true}`),
-		}}))
-
-		serviceWithInvalidStore := &Service{store: stubStore{}}
-		_, err = serviceWithInvalidStore.GetPendingBankConnectionLinkStartByState(
-			t.Context(),
-			GetPendingBankConnectionLinkStartByStateParams{
-				Provider: bankProviderPKO,
-				State:    "state",
-			},
-		)
-		require.ErrorContains(t, err, "bank sync store is required")
-
-		serviceWithPendingStartFailure := &Service{
-			store: &failingProviderSyncStore{
-				Store:              makeStore(t),
-				getPendingStartErr: errors.New("pending start failed"),
-			},
-		}
-		_, err = serviceWithPendingStartFailure.GetPendingBankConnectionLinkStartByState(
-			t.Context(),
-			GetPendingBankConnectionLinkStartByStateParams{
-				Provider: bankProviderPKO,
-				State:    "state",
-			},
-		)
-		require.ErrorContains(t, err, "pending start failed")
 	})
 
 	t.Run("surfaces schedule and enqueue validation failures", func(t *testing.T) {
@@ -697,23 +603,27 @@ func TestProviderSyncInternals(t *testing.T) {
 			},
 		}
 		service, tenant, ownerUserID := makeService(t, provider)
-		connection, err := service.LinkTokenBankConnection(
+		connection, err := saveLinkedConnectionForTest(
 			t.Context(),
-			LinkTokenBankConnectionParams{
-				ActorUserID: ownerUserID,
-				TenantID:    tenant.ID,
-				Provider:    provider.name,
-				Token:       "token",
+			service,
+			tenant.ID,
+			provider.name,
+			ProviderLinkResult{
+				DisplayName:       "display",
+				ProviderReference: "ref",
+				Secret:            "secret",
+				State:             domain.BankConnectionStateActive,
 			},
 		)
 		require.NoError(t, err)
+		connectionID := connection.ID
 
 		_, err = service.PauseBankConnectionSchedule(
 			t.Context(),
 			PauseBankConnectionScheduleParams{
 				ActorUserID:  ownerUserID,
 				TenantID:     tenant.ID,
-				ConnectionID: connection.ID,
+				ConnectionID: connectionID,
 			},
 		)
 		require.Error(t, err)
@@ -722,7 +632,7 @@ func TestProviderSyncInternals(t *testing.T) {
 			ResumeBankConnectionScheduleParams{
 				ActorUserID:  ownerUserID,
 				TenantID:     tenant.ID,
-				ConnectionID: connection.ID,
+				ConnectionID: connectionID,
 				NextRunAt:    time.Now().UTC(),
 			},
 		)
@@ -732,7 +642,7 @@ func TestProviderSyncInternals(t *testing.T) {
 			TriggerBankConnectionSyncParams{
 				ActorUserID:  ownerUserID,
 				TenantID:     tenant.ID,
-				ConnectionID: connection.ID,
+				ConnectionID: connectionID,
 				Reason:       BankConnectionSyncReasonManual,
 			},
 		)
@@ -742,20 +652,24 @@ func TestProviderSyncInternals(t *testing.T) {
 	t.Run("surfaces sync application failures and missing cipher branches", func(t *testing.T) {
 		fake := faker.New()
 		provider := &stubBankProvider{name: "monobank"}
-		service, tenant, ownerUserID := makeService(t, provider)
-		connection, err := service.LinkTokenBankConnection(
+		service, tenant, _ := makeService(t, provider)
+		connection, err := saveLinkedConnectionForTest(
 			t.Context(),
-			LinkTokenBankConnectionParams{
-				ActorUserID: ownerUserID,
-				TenantID:    tenant.ID,
-				Provider:    provider.name,
-				Token:       "token",
+			service,
+			tenant.ID,
+			provider.name,
+			ProviderLinkResult{
+				DisplayName:       "display",
+				ProviderReference: "ref",
+				Secret:            "secret",
+				State:             domain.BankConnectionStateActive,
 			},
 		)
 		require.NoError(t, err)
+		connectionID := connection.ID
 
 		_, err = service.ApplyProviderSyncResult(t.Context(), ApplyProviderSyncResultParams{
-			ConnectionID: connection.ID,
+			ConnectionID: connectionID,
 			JobID:        "job-1",
 			Result: ProviderSyncResult{
 				SyncKey: "sync-1",
@@ -802,7 +716,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		provider.syncErr = errors.New("sync failed")
 		_, err = service.RunBankConnectionSync(
 			t.Context(),
-			RunBankConnectionSyncParams{ConnectionID: connection.ID, JobID: "job-4"},
+			RunBankConnectionSyncParams{ConnectionID: connectionID, JobID: "job-4"},
 		)
 		require.Error(t, err)
 		provider.syncErr = nil
@@ -855,22 +769,26 @@ func TestProviderSyncInternals(t *testing.T) {
 		}
 		enqueuer := &capturedBankSyncJobEnqueuer{}
 		service, tenant, ownerUserID := makeService(t, provider, WithBankSyncJobEnqueuer(enqueuer))
-		connection, err := service.LinkTokenBankConnection(
+		connection, err := saveLinkedConnectionForTest(
 			t.Context(),
-			LinkTokenBankConnectionParams{
-				ActorUserID: ownerUserID,
-				TenantID:    tenant.ID,
-				Provider:    provider.name,
-				Token:       "token",
+			service,
+			tenant.ID,
+			provider.name,
+			ProviderLinkResult{
+				DisplayName:       "display",
+				ProviderReference: "ref",
+				Secret:            "secret",
+				State:             domain.BankConnectionStateActive,
 			},
 		)
 		require.NoError(t, err)
+		connectionID := connection.ID
 		_, err = service.UpsertBankConnectionSchedule(
 			t.Context(),
 			UpsertBankConnectionScheduleParams{
 				ActorUserID:  ownerUserID,
 				TenantID:     tenant.ID,
-				ConnectionID: connection.ID,
+				ConnectionID: connectionID,
 				Interval:     time.Hour,
 				NextRunAt:    time.Now().UTC(),
 			},
@@ -881,7 +799,7 @@ func TestProviderSyncInternals(t *testing.T) {
 			TriggerBankConnectionSyncParams{
 				ActorUserID:  ownerUserID,
 				TenantID:     tenant.ID,
-				ConnectionID: connection.ID,
+				ConnectionID: connectionID,
 				Reason:       BankConnectionSyncReasonManual,
 			},
 		)
@@ -892,7 +810,7 @@ func TestProviderSyncInternals(t *testing.T) {
 			UpsertBankConnectionScheduleParams{
 				ActorUserID:  ownerUserID,
 				TenantID:     tenant.ID,
-				ConnectionID: connection.ID,
+				ConnectionID: connectionID,
 				Interval:     2 * time.Hour,
 				NextRunAt:    time.Now().UTC().Add(time.Hour),
 			},
@@ -906,338 +824,84 @@ func TestProviderSyncInternals(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("enforces explicit bank provider linking contract", func(t *testing.T) {
+	t.Run("reuses pko linked connections and lists schedules when present", func(t *testing.T) {
 		fake := faker.New()
-		monobankProvider := &stubBankProvider{
-			name: "monobank",
-			linkResult: ProviderTokenLinkResult{
+		service, tenant, ownerUserID := makeService(t, nil)
+
+		monobankConnection, err := service.saveLinkedBankConnection(
+			t.Context(),
+			tenant.ID,
+			bankProviderMonobank,
+			domain.ProviderConnectorIDMonobank,
+			ProviderLinkResult{
 				DisplayName:       "Monobank " + fake.Company().Name(),
 				ProviderReference: "mono-ref-" + fake.UUID().V4(),
 				ExternalID:        "mono-external-" + fake.UUID().V4(),
 				Secret:            "mono-secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
-			},
-		}
-		enableBankingProvider := &stubBankProvider{
-			name: "enable-banking",
-			startResult: ProviderLinkStart{
-				State:             "pko-state-" + fake.UUID().V4(),
-				AuthorizationURL:  "https://example.test/auth",
-				ProviderReference: "pko-ref-" + fake.UUID().V4(),
-			},
-			finishResult: ProviderLinkResult{
-				DisplayName:       "PKO " + fake.Company().Name(),
-				ProviderReference: "pko-session-" + fake.UUID().V4(),
-				ExternalID:        "pko-external-" + fake.UUID().V4(),
-				Secret:            "pko-secret-" + fake.UUID().V4(),
-				State:             domain.BankConnectionStateActive,
-			},
-		}
-		service, tenant, ownerUserID := makeService(t, nil, WithBankProviders(monobankProvider, enableBankingProvider))
-
-		monobankToken := "mono-token-" + fake.UUID().V4()
-		connection, err := service.LinkTokenBankConnection(t.Context(), LinkTokenBankConnectionParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "monobank",
-			Token:       monobankToken,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, "monobank", connection.Provider)
-		assert.Equal(t, domain.ProviderConnectorIDMonobank, connection.ConnectorID)
-		assert.Equal(t, []string{monobankToken}, monobankProvider.linkedTokens)
-
-		pkoToken := "pko-token-" + fake.UUID().V4()
-		_, err = service.LinkTokenBankConnection(t.Context(), LinkTokenBankConnectionParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			Token:       pkoToken,
-		})
-		require.ErrorContains(t, err, "token linking unsupported for bank provider: pko")
-		assert.NotContains(t, err.Error(), pkoToken)
-		assert.Empty(t, enableBankingProvider.linkedTokens)
-
-		start, err := service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			RedirectURL: "https://app.example.test/#/finance/connections",
-		})
-		require.NoError(t, err)
-		assert.Equal(t, 1, enableBankingProvider.startCalls)
-		assert.Zero(t, monobankProvider.startCalls)
-		assert.Equal(t, enableBankingProvider.startResult.ProviderReference, start.ProviderReference)
-
-		redirectConnection, err := service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        "pko-code-" + fake.UUID().V4(),
-			Start:       start,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, "pko", redirectConnection.Provider)
-		assert.Equal(t, domain.ProviderConnectorIDEnableBanking, redirectConnection.ConnectorID)
-		assert.Equal(t, 1, enableBankingProvider.finishCalls)
-
-		monobankRedirectURL := "https://app.example.test/callback?secret=" + fake.UUID().V4()
-		_, err = service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "monobank",
-			RedirectURL: monobankRedirectURL,
-		})
-		require.ErrorContains(t, err, "redirect linking unsupported for bank provider: monobank")
-		assert.NotContains(t, err.Error(), monobankRedirectURL)
-		assert.Zero(t, monobankProvider.startCalls)
-
-		unsupportedProvider := "unsupported-" + fake.UUID().V4()
-		unsupportedToken := "unsupported-token-" + fake.UUID().V4()
-		_, err = service.LinkTokenBankConnection(t.Context(), LinkTokenBankConnectionParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    unsupportedProvider,
-			Token:       unsupportedToken,
-		})
-		require.ErrorContains(t, err, "unsupported bank provider")
-		assert.NotContains(t, err.Error(), unsupportedToken)
-		assert.NotContains(t, err.Error(), "enable-banking")
-	})
-
-	t.Run("routes pko sync through enable banking connector", func(t *testing.T) {
-		fake := faker.New()
-		enableBankingProvider := &stubBankProvider{
-			name: "enable-banking",
-			startResult: ProviderLinkStart{
-				State:             "pko-state-" + fake.UUID().V4(),
-				AuthorizationURL:  "https://example.test/auth",
-				ProviderReference: "pko-ref-" + fake.UUID().V4(),
-			},
-			finishResult: ProviderLinkResult{
-				DisplayName:       "PKO " + fake.Company().Name(),
-				ProviderReference: "pko-session-" + fake.UUID().V4(),
-				ExternalID:        "pko-external-" + fake.UUID().V4(),
-				Secret:            "pko-secret-" + fake.UUID().V4(),
-				State:             domain.BankConnectionStateActive,
-			},
-			syncResults: []ProviderSyncResult{{
-				SyncKey: "sync-" + fake.UUID().V4(),
-				Accounts: []ProviderNormalizedAccount{{
-					ProviderAccountID: "provider-account-" + fake.UUID().V4(),
-					Name:              "PKO Main " + fake.Lorem().Word(),
-					Currency:          "PLN",
+				RawPayloads: []ProviderRawPayload{{
+					Scope:            domain.RawPayloadScopeConnection,
+					ProviderObjectID: "mono-payload-" + fake.UUID().V4(),
+					PayloadJSON:      []byte(`{"provider":"monobank"}`),
 				}},
-			}},
-		}
-		service, tenant, ownerUserID := makeService(t, nil, WithBankProviders(enableBankingProvider))
-
-		start, err := service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			RedirectURL: "https://app.example.test/#/finance/connections",
-		})
-		require.NoError(t, err)
-
-		connection, err := service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        "code-" + fake.UUID().V4(),
-		})
-		require.NoError(t, err)
-		assert.Equal(t, domain.ProviderConnectorIDEnableBanking, connection.ConnectorID)
-
-		_, err = service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
-			ConnectionID: connection.ID,
-			JobID:        "job-" + fake.UUID().V4(),
-			Reason:       BankConnectionSyncReasonManual,
-			WindowStart:  time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
-			WindowEnd:    time.Date(2026, time.June, 2, 0, 0, 0, 0, time.UTC),
-		})
-		require.NoError(t, err)
-		require.Len(t, enableBankingProvider.secrets, 1)
-	})
-
-	t.Run("resolves persisted redirect starts by scoped state and consumes them once", func(t *testing.T) {
-		fake := faker.New()
-		now := time.Date(2026, time.June, 22, 14, 0, 0, 0, time.UTC)
-		currentNow := now
-		provider := &stubBankProvider{
-			name: "enable-banking",
-			startResult: ProviderLinkStart{
-				State:             "pko-state-" + fake.UUID().V4(),
-				AuthorizationURL:  "https://example.test/auth/" + fake.UUID().V4(),
-				ProviderReference: "pko-ref-" + fake.UUID().V4(),
 			},
-			finishResult: ProviderLinkResult{
+		)
+		require.NoError(t, err)
+
+		firstPKOConnection, err := service.saveLinkedBankConnection(
+			t.Context(),
+			tenant.ID,
+			bankProviderPKO,
+			domain.ProviderConnectorIDEnableBanking,
+			ProviderLinkResult{
 				DisplayName:       "PKO " + fake.Company().Name(),
-				ProviderReference: "pko-session-" + fake.UUID().V4(),
-				ExternalID:        "pko-external-" + fake.UUID().V4(),
-				Secret:            "pko-secret-" + fake.UUID().V4(),
+				ProviderReference: "pko-ref-1-" + fake.UUID().V4(),
+				ExternalID:        "pko-external-1-" + fake.UUID().V4(),
+				Secret:            "pko-secret-1-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
-		}
-		service, tenant, ownerUserID := makeService(
-			t,
-			nil,
-			WithNow(func() time.Time { return currentNow }),
-			WithBankProviders(provider),
 		)
-
-		invite, err := service.CreateTenantInvite(t.Context(), CreateTenantInviteParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Recipient:   "member-" + fake.Internet().Email(),
-		})
-		require.NoError(t, err)
-		memberUserID := "user-member-" + fake.UUID().V4()
-		_, err = service.AcceptTenantInvite(t.Context(), AcceptTenantInviteParams{
-			ActorUserID: memberUserID,
-			Code:        invite.Code,
-		})
 		require.NoError(t, err)
 
-		otherTenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
-			ActorUserID:     ownerUserID,
-			Name:            "tenant-other-" + fake.Company().Name(),
-			DisplayCurrency: "USD",
-		})
-		require.NoError(t, err)
-
-		start, err := service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			RedirectURL: "https://app.example.test/#/finance/connections",
-		})
-		require.NoError(t, err)
-
-		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: memberUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        "code-member-" + fake.UUID().V4(),
-			Start: ProviderLinkStart{
-				State:             start.State,
-				ProviderReference: "tampered-member-" + fake.UUID().V4(),
-			},
-		})
-		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
-		assert.Zero(t, provider.finishCalls)
-
-		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    otherTenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        "code-tenant-" + fake.UUID().V4(),
-		})
-		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
-		assert.Zero(t, provider.finishCalls)
-
-		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       "missing-state-" + fake.UUID().V4(),
-			Code:        "code-state-" + fake.UUID().V4(),
-		})
-		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
-		assert.Zero(t, provider.finishCalls)
-
-		connection, err := service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        "code-owner-" + fake.UUID().V4(),
-			Start: ProviderLinkStart{
-				State:             start.State,
-				ProviderReference: "tampered-owner-" + fake.UUID().V4(),
-			},
-		})
-		require.NoError(t, err)
-		require.Len(t, provider.finishParams, 1)
-		assert.Equal(t, provider.startResult.ProviderReference, provider.finishParams[0].Start.ProviderReference)
-		assert.NotEqual(t, provider.finishResult.Secret, connection.SecretID)
-
-		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        "code-duplicate-" + fake.UUID().V4(),
-		})
-		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
-		require.Len(t, provider.finishParams, 1)
-
-		provider.startResult.State = "state-expired-" + fake.UUID().V4()
-		provider.startResult.ProviderReference = "ref-expired-" + fake.UUID().V4()
-
-		startExpired, err := service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			RedirectURL: "https://app.example.test/#/finance/connections?expired=1",
-		})
-		require.NoError(t, err)
-
-		currentNow = currentNow.Add(pendingBankConnectionLinkStartTTL + time.Minute)
-		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       startExpired.State,
-			Code:        "code-expired-" + fake.UUID().V4(),
-		})
-		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
-		require.Len(t, provider.finishParams, 1)
-	})
-
-	t.Run("loads pending redirect starts by provider state for callback handoff", func(t *testing.T) {
-		fake := faker.New()
-		provider := &stubBankProvider{
-			name: "enable-banking",
-			startResult: ProviderLinkStart{
-				State:             "pko-state-" + fake.UUID().V4(),
-				AuthorizationURL:  "https://example.test/auth/" + fake.UUID().V4(),
-				ProviderReference: "pko-ref-" + fake.UUID().V4(),
-			},
-		}
-		service, tenant, ownerUserID := makeService(t, nil, WithBankProviders(provider))
-
-		_, err := service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID:        ownerUserID,
-			TenantID:           tenant.ID,
-			Provider:           "pko",
-			RedirectURL:        "https://backend.example.test/enable-banking/callback",
-			BrowserCallbackURL: "http://localhost:5173/#/finance/connections",
-		})
-		require.NoError(t, err)
-
-		pendingStart, err := service.GetPendingBankConnectionLinkStartByState(
+		secondPKOConnection, err := service.saveLinkedBankConnection(
 			t.Context(),
-			GetPendingBankConnectionLinkStartByStateParams{
-				Provider: "pko",
-				State:    provider.startResult.State,
+			tenant.ID,
+			bankProviderPKO,
+			domain.ProviderConnectorIDEnableBanking,
+			ProviderLinkResult{
+				DisplayName:       "PKO again " + fake.Company().Name(),
+				ProviderReference: "pko-ref-2-" + fake.UUID().V4(),
+				ExternalID:        "pko-external-2-" + fake.UUID().V4(),
+				Secret:            "pko-secret-2-" + fake.UUID().V4(),
+				State:             domain.BankConnectionStateActive,
 			},
 		)
 		require.NoError(t, err)
-		assert.Equal(t, "http://localhost:5173/#/finance/connections", pendingStart.CallbackURL)
+		assert.Equal(t, firstPKOConnection.ID, secondPKOConnection.ID)
+		assert.Equal(t, firstPKOConnection.CreatedAt, secondPKOConnection.CreatedAt)
 
-		_, err = service.GetPendingBankConnectionLinkStartByState(
-			t.Context(),
-			GetPendingBankConnectionLinkStartByStateParams{
-				Provider: "pko",
-				State:    "missing-state-" + fake.UUID().V4(),
-			},
-		)
-		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
+		_, err = service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
+			ActorUserID:  ownerUserID,
+			TenantID:     tenant.ID,
+			ConnectionID: secondPKOConnection.ID,
+			Interval:     time.Hour,
+			NextRunAt:    time.Now().UTC().Add(time.Hour),
+		})
+		require.NoError(t, err)
+
+		views, err := service.ListBankConnections(t.Context(), ListBankConnectionsParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		require.Len(t, views, 2)
+		viewsByID := map[string]BankConnectionView{}
+		for _, view := range views {
+			viewsByID[view.Connection.ID] = view
+		}
+		assert.Nil(t, viewsByID[monobankConnection.ID].Schedule)
+		require.NotNil(t, viewsByID[secondPKOConnection.ID].Schedule)
+		assert.Equal(t, secondPKOConnection.ID, viewsByID[secondPKOConnection.ID].Schedule.ConnectionID)
 	})
 
 	t.Run("keeps helper ids safe for nil values", func(t *testing.T) {
@@ -1245,160 +909,47 @@ func TestProviderSyncInternals(t *testing.T) {
 		assert.Empty(t, matchID(nil))
 		assert.NotNil(t, defaultLogger())
 		assert.Contains(t, fmt.Sprintf("%T", defaultLogger()), "Logger")
+
+		serviceWithNonSyncStore := NewService(stubStore{
+			isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+		})
+		_, err := serviceWithNonSyncStore.ListBankConnections(
+			t.Context(),
+			ListBankConnectionsParams{ActorUserID: "user-1", TenantID: "tenant-1"},
+		)
+		require.ErrorContains(t, err, "bank sync store is required")
+
+		serviceWithNonSecretStore := NewService(stubStore{}, WithConnectionSecretCipher(makeCipher(t)))
+		_, err = serviceWithNonSecretStore.connectionSecretsStore()
+		require.ErrorContains(t, err, "connection secret store is required")
 	})
 
-	t.Run("covers redirect link and scheduled metadata helper branches", func(t *testing.T) {
+	t.Run("covers scheduled metadata helper branches", func(t *testing.T) {
 		fake := faker.New()
-		provider := &redirectBankProvider{
+		provider := &stubBankProvider{
 			name: "enable-banking",
-			startResult: ProviderLinkStart{
-				State:             "state-" + fake.UUID().V4(),
-				AuthorizationURL:  "https://example.com/auth",
-				ProviderReference: "ref-" + fake.UUID().V4(),
-			},
-			finishResult: ProviderLinkResult{
-				DisplayName:       "display",
-				ProviderReference: "ref-" + fake.UUID().V4(),
-				ExternalID:        "external-" + fake.UUID().V4(),
-				Secret:            "secret-" + fake.UUID().V4(),
-				State:             domain.BankConnectionStateActive,
-			},
+			syncResults: []ProviderSyncResult{{
+				SyncKey: "sync-" + fake.UUID().V4(),
+			}},
 		}
 		service, tenant, ownerUserID := makeService(t, provider)
-		var err error
-		finishCode := "finish-" + fake.UUID().V4()
-		_, err = service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "missing-" + fake.UUID().V4(),
-			RedirectURL: "https://example.com/callback",
-		})
-		require.Error(t, err)
-		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "missing-" + fake.UUID().V4(),
-		})
-		require.Error(t, err)
-
-		_, err = service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: "outsider-" + fake.UUID().V4(),
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			RedirectURL: "https://example.com/callback",
-		})
-		require.ErrorIs(t, err, ErrTenantAccessDenied)
-
-		provider.startErr = errors.New("start failed")
-		_, err = service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			RedirectURL: "https://example.com/callback",
-		})
-		require.Error(t, err)
-		provider.startErr = nil
-
-		start, err := service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			RedirectURL: "https://example.com/callback",
-		})
-		require.NoError(t, err)
-
-		provider.finishErr = errors.New("finish failed")
-		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        finishCode,
-			Start:       start,
-		})
-		require.Error(t, err)
-		provider.finishErr = nil
-
-		connection, err := service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        finishCode,
-			Start:       start,
-		})
-		require.NoError(t, err)
-		assert.NotEmpty(t, connection.ID)
-
-		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        finishCode,
-			Start:       start,
-		})
-		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
-
-		storeRef := service.store.(*persistence.Store)
-		failingService := NewService(
-			&failingProviderSyncStore{
-				Store:                  storeRef,
-				restorePendingStartErr: errors.New("restore pending start failed"),
-			},
-			WithConnectionSecretCipher(makeCipher(t)),
-			WithBankProviders(provider),
-		)
-		provider.startResult.State = "state-restore-failure-" + fake.UUID().V4()
-		provider.startResult.ProviderReference = "ref-restore-failure-" + fake.UUID().V4()
-
-		startRestoreFailure, err := failingService.StartBankConnectionLink(
+		connection, err := saveLinkedConnectionForTest(
 			t.Context(),
-			StartBankConnectionLinkParams{
-				ActorUserID: ownerUserID,
-				TenantID:    tenant.ID,
-				Provider:    "pko",
-				RedirectURL: "https://example.com/callback?restore-failure=1",
+			service,
+			tenant.ID,
+			provider.name,
+			ProviderLinkResult{
+				DisplayName:       "display",
+				ProviderReference: "ref",
+				ExternalID:        "external",
+				Secret:            "secret",
+				State:             domain.BankConnectionStateActive,
 			},
 		)
 		require.NoError(t, err)
-		provider.finishErr = errors.New("finish failed again")
-		_, err = failingService.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       startRestoreFailure.State,
-			Code:        finishCode,
-			Start:       startRestoreFailure,
-		})
-		require.Error(t, err)
-		require.ErrorContains(t, err, "finish bank connection link")
-		require.ErrorContains(t, err, "restore pending bank connection link start")
-		provider.finishErr = nil
-
-		provider.startResult.State = "state-retry-" + fake.UUID().V4()
-		provider.startResult.ProviderReference = "ref-retry-" + fake.UUID().V4()
-
-		start, err = service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			RedirectURL: "https://example.com/callback?retry=1",
-		})
-		require.NoError(t, err)
-
-		connection, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        finishCode,
-			Start:       start,
-		})
-		require.NoError(t, err)
-
 		syncStore, err := service.bankSyncStore()
 		require.NoError(t, err)
+
 		metadata, ok, err := service.makeScheduledRunMetadata(
 			t.Context(),
 			syncStore,
@@ -1515,16 +1066,20 @@ func TestProviderSyncInternals(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		connection, err := service.LinkTokenBankConnection(
+		connection, err := saveLinkedConnectionForTest(
 			t.Context(),
-			LinkTokenBankConnectionParams{
-				ActorUserID: ownerUserID,
-				TenantID:    tenant.ID,
-				Provider:    provider.name,
-				Token:       "token",
+			service,
+			tenant.ID,
+			provider.name,
+			ProviderLinkResult{
+				DisplayName:       "display",
+				ProviderReference: "ref",
+				Secret:            "secret",
+				State:             domain.BankConnectionStateActive,
 			},
 		)
 		require.NoError(t, err)
+		connectionID := connection.ID
 
 		store.getScheduleErr = errors.New("schedule read failed")
 		_, err = service.UpsertBankConnectionSchedule(
@@ -1532,7 +1087,7 @@ func TestProviderSyncInternals(t *testing.T) {
 			UpsertBankConnectionScheduleParams{
 				ActorUserID:  ownerUserID,
 				TenantID:     tenant.ID,
-				ConnectionID: connection.ID,
+				ConnectionID: connectionID,
 				Interval:     time.Hour,
 				NextRunAt:    time.Now().UTC(),
 			},
@@ -1727,7 +1282,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		store.getScheduleForListErr = nil
 
 		serviceWithoutCipher := NewService(store)
-		err = saveLinkedConnectionForTest(
+		_, err = saveLinkedConnectionForTest(
 			t.Context(),
 			serviceWithoutCipher,
 			tenant.ID,
@@ -1737,7 +1292,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		require.Error(t, err)
 
 		store.saveBankConnectionErr = errors.New("save linked connection failed")
-		err = saveLinkedConnectionForTest(
+		_, err = saveLinkedConnectionForTest(
 			t.Context(),
 			service,
 			tenant.ID,
@@ -1747,7 +1302,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		require.Error(t, err)
 		store.saveBankConnectionErr = nil
 		store.saveRawPayloadErr = errors.New("save linked raw failed")
-		err = saveLinkedConnectionForTest(
+		_, err = saveLinkedConnectionForTest(
 			t.Context(),
 			service,
 			tenant.ID,

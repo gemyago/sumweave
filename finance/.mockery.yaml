@@ -5,6 +5,9 @@ template-data:
   unroll-variadic: true
 
 packages:
+  github.com/gemyago/signal-foundry/finance:
+    interfaces:
+      accessGuardStore:
   github.com/gemyago/signal-foundry/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:

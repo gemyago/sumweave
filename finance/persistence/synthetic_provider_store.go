@@ -21,6 +21,13 @@ func NewSyntheticProviderStateStore(database *Database) *SyntheticProviderStateS
 	return &SyntheticProviderStateStore{db: database.db}
 }
 
+func NewSyntheticProviderStateStoreFromStore(store *Store) *SyntheticProviderStateStore {
+	if store == nil {
+		return nil
+	}
+	return &SyntheticProviderStateStore{db: store.db}
+}
+
 func (s *SyntheticProviderStateStore) SaveSyntheticProviderState(
 	ctx context.Context,
 	state domain.SyntheticProviderState,

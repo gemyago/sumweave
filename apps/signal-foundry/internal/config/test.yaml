@@ -5,3 +5,14 @@ httpServer:
 dataLayer:
   database:
     dsn: ":memory:"
+
+finance:
+  providers:
+    enableBanking:
+      baseURL: "https://enable-banking.test"
+      appID: "app-test"
+      privateKeyPath: "data/test-enable-banking-private-key.pem"
+      aspspName: "Mock ASPSP"
+      country: "PL"
+      psuType: "personal"
+      validDays: 90

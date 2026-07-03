@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -67,18 +66,6 @@ type financeService interface {
 		context.Context,
 		financepkg.ListBankConnectionsParams,
 	) ([]financepkg.BankConnectionView, error)
-	LinkTokenBankConnection(
-		context.Context,
-		financepkg.LinkTokenBankConnectionParams,
-	) (domain.BankConnection, error)
-	StartBankConnectionLink(
-		context.Context,
-		financepkg.StartBankConnectionLinkParams,
-	) (financepkg.ProviderLinkStart, error)
-	FinishBankConnectionLink(
-		context.Context,
-		financepkg.FinishBankConnectionLinkParams,
-	) (domain.BankConnection, error)
 	TriggerBankConnectionSync(
 		context.Context,
 		financepkg.TriggerBankConnectionSyncParams,
@@ -104,12 +91,28 @@ type financeService interface {
 	) (financepkg.CSVImportAudit, error)
 }
 
+type bankConnectionService interface {
+	LinkTokenBankConnection(
+		context.Context,
+		financepkg.LinkTokenBankConnectionParams,
+	) (domain.BankConnection, error)
+	StartBankConnectionLink(
+		context.Context,
+		financepkg.StartBankConnectionLinkParams,
+	) (financepkg.ProviderLinkStart, error)
+	FinishBankConnectionLink(
+		context.Context,
+		financepkg.FinishBankConnectionLinkParams,
+	) (domain.BankConnection, error)
+}
+
 type FinanceControllerDeps struct {
 	dig.In
 
 	FinanceService               financeService
+	BankConnectionService        bankConnectionService
 	AuthMiddleware               middleware.AuthMiddleware
-	EnableBankingCallbackBaseURL string `name:"finance.enableBankingCallbackBaseURL" optional:"true"`
+	EnableBankingCallbackBaseURL string `name:"config.finance.providers.enableBanking.callbackBaseURL" optional:"true"`
 }
 
 type FinanceController struct{ deps FinanceControllerDeps }
@@ -578,7 +581,7 @@ func (c *FinanceController) LinkFinanceConnectionToken(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.LinkTokenBankConnection(
+		item, err := c.deps.BankConnectionService.LinkTokenBankConnection(
 			ctx,
 			financepkg.LinkTokenBankConnectionParams{
 				ActorUserID: userID,
@@ -610,7 +613,7 @@ func (c *FinanceController) FinishFinanceConnectionRedirectLink(
 			return nil, err
 		}
 
-		item, err := c.deps.FinanceService.FinishBankConnectionLink(
+		item, err := c.deps.BankConnectionService.FinishBankConnectionLink(
 			ctx,
 			financepkg.FinishBankConnectionLinkParams{
 				ActorUserID: userID,
@@ -682,7 +685,7 @@ func (c *FinanceController) StartFinanceConnectionRedirectLink(
 			return nil, callbackErr
 		}
 
-		item, err := c.deps.FinanceService.StartBankConnectionLink(
+		item, err := c.deps.BankConnectionService.StartBankConnectionLink(
 			req.Context(),
 			financepkg.StartBankConnectionLinkParams{
 				ActorUserID:        userID,
@@ -714,10 +717,7 @@ func buildFinanceProviderRedirectURL(
 	if err := ValidateFinanceRedirectCallbackURL(browserCallbackURL); err != nil {
 		return "", err
 	}
-	if override := firstNonEmptyTrimmedString(
-		envValue(enableBankingCallbackBaseURLEnv),
-		configuredBaseURL,
-	); override != "" {
+	if override := firstNonEmptyTrimmedString(configuredBaseURL); override != "" {
 		return buildEnableBankingCallbackURLFromBase(override)
 	}
 	host := forwardedRequestHost(req)
@@ -733,9 +733,8 @@ func buildFinanceProviderRedirectURL(
 }
 
 const (
-	urlSchemeHTTP                   = "http"
-	urlSchemeHTTPS                  = "https"
-	enableBankingCallbackBaseURLEnv = "ENABLE_BANKING_CALLBACK_BASE_URL"
+	urlSchemeHTTP  = "http"
+	urlSchemeHTTPS = "https"
 )
 
 func buildEnableBankingCallbackURLFromBase(rawBaseURL string) (string, error) {
@@ -756,10 +755,6 @@ func buildEnableBankingCallbackURLFromBase(rawBaseURL string) (string, error) {
 		return "", errors.New("enable banking callback base URL must target the origin root")
 	}
 	return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: "/enable-banking/callback"}).String(), nil
-}
-
-func envValue(key string) string {
-	return strings.TrimSpace(os.Getenv(key))
 }
 
 func firstNonEmptyTrimmedString(values ...string) string {
@@ -1694,7 +1689,7 @@ func humanizeProviderResponseError(err *financepkg.ProviderResponseError) string
 		return "provider request failed"
 	}
 	if err.IsEnableBankingWrongASPSP() {
-		return "Enable Banking rejected the configured ASPSP name; this sandbox app may not expose PKO, so discover an available ASPSP and set ENABLE_BANKING_ASPSP_NAME (for example, Mock ASPSP)"
+		return "Enable Banking rejected the configured ASPSP name; this sandbox app may not expose PKO, so discover an available ASPSP and set finance.providers.enableBanking.aspspName (for example via APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME=Mock ASPSP)"
 	}
 	return err.Message
 }

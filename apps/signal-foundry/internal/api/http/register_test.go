@@ -2,6 +2,7 @@ package http_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal"
 	signalfoundryhttp "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http"
@@ -21,12 +23,14 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	financepkg "github.com/gemyago/signal-foundry/finance"
+	"github.com/gemyago/signal-foundry/finance/credentials"
 	financedomain "github.com/gemyago/signal-foundry/finance/domain"
 	financepersistence "github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/httpapi"
 	rtstrategy "github.com/gemyago/signal-foundry/runtime/strategy"
+	"github.com/google/uuid"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -125,7 +129,7 @@ func TestSetupV1Routes(t *testing.T) {
 		})
 	})
 
-	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler, *financepkg.Service, *financepersistence.Store) {
+	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler, *financepkg.Service, *financepkg.BankConnectionService, *financepersistence.Store) {
 		t.Helper()
 		strategyDSN := filepath.Join(t.TempDir(), "strategy-workspace.db")
 		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
@@ -168,6 +172,34 @@ func TestSetupV1Routes(t *testing.T) {
 		require.NoError(t, financepersistence.NewMigrator(financeDatabase).Migrate(t.Context()))
 		financeStore := financepersistence.NewStore(financeDatabase)
 		financeService := financepkg.NewService(financeStore)
+		cipherKey := sha256.Sum256([]byte("http-register-test-cipher"))
+		connectionCipher, err := credentials.NewAESGCMCipher(cipherKey[:], "signal-foundry-finance")
+		require.NoError(t, err)
+		financeModule, err := financepkg.New(&financepkg.Config{
+			Database:               financeDatabase,
+			Logger:                 telemetry.RootTestLogger(),
+			Now:                    time.Now,
+			NewID:                  uuid.NewString,
+			HTTPClient:             http.DefaultClient,
+			ConnectionSecretCipher: connectionCipher,
+			Monobank: financepkg.MonobankConfig{
+				BaseURL: "https://api.monobank.ua",
+			},
+			EnableBanking: financepkg.EnableBankingConfig{
+				BaseURL:        "https://api.enablebanking.com",
+				AppID:          "app-" + fake.UUID().V4(),
+				PrivateKeyPath: "enable-banking-private-key-" + fake.UUID().V4() + ".pem",
+				ASPSPs: []financepkg.EnableBankingASPSP{{
+					ProviderID: financedomain.ProviderIDPKO,
+					Name:       "Mock ASPSP",
+					Country:    "PL",
+					PSUType:    "personal",
+					ValidDays:  90,
+				}},
+			},
+		})
+		require.NoError(t, err)
+		bankConnectionService := financeModule.BankConnectionService
 
 		router := server.NewHTTPRouter(server.HTTPRouterDeps{
 			Middleware: func(h http.Handler) http.Handler { return h },
@@ -195,8 +227,9 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthMiddleware: passthroughMiddleware,
 		})
 		financeCtrl := v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
-			FinanceService: financeService,
-			AuthMiddleware: passthroughMiddleware,
+			FinanceService:        financeService,
+			BankConnectionService: bankConnectionService,
+			AuthMiddleware:        passthroughMiddleware,
 		})
 		strategiesCtrl := v1controllers.NewStrategiesController(
 			v1controllers.StrategiesControllerDeps{
@@ -225,9 +258,10 @@ func TestSetupV1Routes(t *testing.T) {
 			Runtime:               rt,
 			RootLogger:            telemetry.RootTestLogger(),
 			FinanceService:        financeService,
+			BankConnectionService: bankConnectionService,
 			UILocation:            uiLocation,
 		})
-		return router, healthCtrl, rootHandler, financeService, financeStore
+		return router, healthCtrl, rootHandler, financeService, bankConnectionService, financeStore
 	}
 
 	t.Run("should mount agent API routes", func(t *testing.T) {
@@ -300,6 +334,34 @@ func TestSetupV1Routes(t *testing.T) {
 		require.NoError(t, financepersistence.NewMigrator(financeDatabase).Migrate(t.Context()))
 		financeStore := financepersistence.NewStore(financeDatabase)
 		financeService := financepkg.NewService(financeStore)
+		cipherKey := sha256.Sum256([]byte("http-register-test-cipher-routes"))
+		connectionCipher, err := credentials.NewAESGCMCipher(cipherKey[:], "signal-foundry-finance")
+		require.NoError(t, err)
+		financeModule, err := financepkg.New(&financepkg.Config{
+			Database:               financeDatabase,
+			Logger:                 telemetry.RootTestLogger(),
+			Now:                    time.Now,
+			NewID:                  uuid.NewString,
+			HTTPClient:             http.DefaultClient,
+			ConnectionSecretCipher: connectionCipher,
+			Monobank: financepkg.MonobankConfig{
+				BaseURL: "https://api.monobank.ua",
+			},
+			EnableBanking: financepkg.EnableBankingConfig{
+				BaseURL:        "https://api.enablebanking.com",
+				AppID:          "app-" + fake.UUID().V4(),
+				PrivateKeyPath: "enable-banking-private-key-" + fake.UUID().V4() + ".pem",
+				ASPSPs: []financepkg.EnableBankingASPSP{{
+					ProviderID: financedomain.ProviderIDPKO,
+					Name:       "Mock ASPSP",
+					Country:    "PL",
+					PSUType:    "personal",
+					ValidDays:  90,
+				}},
+			},
+		})
+		require.NoError(t, err)
+		bankConnectionService := financeModule.BankConnectionService
 		strategiesCtrl := v1controllers.NewStrategiesController(
 			v1controllers.StrategiesControllerDeps{
 				StrategyWorkspaceService: strategyService,
@@ -317,8 +379,9 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthMiddleware: passthroughMiddleware,
 		})
 		financeCtrl := v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
-			FinanceService: financeService,
-			AuthMiddleware: passthroughMiddleware,
+			FinanceService:        financeService,
+			BankConnectionService: bankConnectionService,
+			AuthMiddleware:        passthroughMiddleware,
 		})
 
 		signalfoundryhttp.SetupV1Routes(signalfoundryhttp.V1RoutesDeps{
@@ -335,6 +398,7 @@ func TestSetupV1Routes(t *testing.T) {
 			Runtime:               rt,
 			RootLogger:            telemetry.RootTestLogger(),
 			FinanceService:        financeService,
+			BankConnectionService: bankConnectionService,
 		})
 
 		t.Run(
@@ -388,7 +452,7 @@ func TestSetupV1Routes(t *testing.T) {
 	})
 
 	t.Run("enable banking callback route redirects back to finance connections", func(t *testing.T) {
-		_, _, rootHandler, _, financeStore := makeSetup(t, "")
+		_, _, rootHandler, _, bankConnectionService, financeStore := makeSetup(t, "")
 
 		t.Run("redirects provider return params back to the browser route", func(t *testing.T) {
 			pendingStart, err := financeStore.SavePendingBankConnectionLinkStart(
@@ -403,6 +467,15 @@ func TestSetupV1Routes(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
+			resolvedStart, err := bankConnectionService.GetPendingBankConnectionLinkStartByState(
+				t.Context(),
+				financepkg.GetPendingBankConnectionLinkStartByStateParams{
+					Provider: "pko",
+					State:    pendingStart.State,
+				},
+			)
+			require.NoError(t, err)
+			require.Equal(t, pendingStart.CallbackURL, resolvedStart.CallbackURL)
 			req := httptest.NewRequest(
 				http.MethodGet,
 				"/enable-banking/callback?code=code-1&state="+url.QueryEscape(pendingStart.State),
@@ -432,7 +505,7 @@ func TestSetupV1Routes(t *testing.T) {
 
 	t.Run("UI serving", func(t *testing.T) {
 		t.Run("when ui location is empty, server operates in API-only mode", func(t *testing.T) {
-			_, _, rootHandler, _, _ := makeSetup(t, "")
+			_, _, rootHandler, _, _, _ := makeSetup(t, "")
 
 			t.Run("GET / returns 404", func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
@@ -463,7 +536,7 @@ func TestSetupV1Routes(t *testing.T) {
 				os.WriteFile(filepath.Join(uiDir, assetName), []byte(wantAssetContent), 0o600),
 			)
 
-			_, _, rootHandler, _, _ := makeSetup(t, uiDir)
+			_, _, rootHandler, _, _, _ := makeSetup(t, uiDir)
 
 			t.Run("GET / serves index.html", func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
@@ -499,7 +572,7 @@ func TestSetupV1Routes(t *testing.T) {
 			"when ui location is invalid directory, server operates in API-only mode",
 			func(t *testing.T) {
 				nonExistentDir := filepath.Join(t.TempDir(), fake.Lorem().Word())
-				_, _, rootHandler, _, _ := makeSetup(t, nonExistentDir)
+				_, _, rootHandler, _, _, _ := makeSetup(t, nonExistentDir)
 
 				t.Run("GET / returns 404", func(t *testing.T) {
 					req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)

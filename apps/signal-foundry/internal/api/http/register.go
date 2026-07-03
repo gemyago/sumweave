@@ -36,9 +36,10 @@ type V1RoutesDeps struct {
 	HTTPRouter     *server.HTTPRouter
 	AuthMiddleware middleware.AuthMiddleware
 
-	Runtime        *signalfoundryinternal.Runtime
-	RootLogger     *slog.Logger
-	FinanceService *financepkg.Service
+	Runtime               *signalfoundryinternal.Runtime
+	RootLogger            *slog.Logger
+	FinanceService        *financepkg.Service
+	BankConnectionService *financepkg.BankConnectionService
 
 	// UILocation is an optional path to the directory containing pre-built UI static assets.
 	// When set and the directory is readable, the backend serves index.html at GET /
@@ -64,7 +65,7 @@ func SetupV1Routes(deps V1RoutesDeps) { // coverage-ignore // Little value in te
 	deps.HTTPRouter.HandleRoute(
 		http.MethodGet,
 		enableBankingCallbackPath,
-		newEnableBankingCallbackHandler(deps.FinanceService),
+		newEnableBankingCallbackHandler(deps.BankConnectionService),
 	)
 
 	mountUIRoutes(deps.RootLogger, deps.HTTPRouter, deps.UILocation)

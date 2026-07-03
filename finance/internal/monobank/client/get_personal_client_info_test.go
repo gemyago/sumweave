@@ -124,4 +124,33 @@ func TestClient_GetPersonalClientInfo(t *testing.T) {
 		require.ErrorContains(t, err, "status 500")
 		assert.NotContains(t, err.Error(), token)
 	})
+
+	t.Run("request build error", func(t *testing.T) {
+		client := NewClient(Args{BaseURL: ":bad"})
+
+		actual, err := client.GetPersonalClientInfo(
+			t.Context(),
+			GetPersonalClientInfoParams{Token: "token-" + fake.UUID().V4()},
+		)
+
+		require.ErrorContains(t, err, "build request")
+		assert.Nil(t, actual)
+	})
+
+	t.Run("decode error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("{"))
+		}))
+		defer server.Close()
+
+		client := makeClient(t, server)
+
+		actual, err := client.GetPersonalClientInfo(
+			t.Context(),
+			GetPersonalClientInfoParams{Token: "token-" + fake.UUID().V4()},
+		)
+
+		require.ErrorContains(t, err, "decode response")
+		assert.Nil(t, actual)
+	})
 }

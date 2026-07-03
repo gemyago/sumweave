@@ -98,6 +98,14 @@ func (p *ProviderLinkPersistence) RestorePendingStart(
 	return nil
 }
 
+func (p *ProviderLinkPersistence) GetPendingStartByState(
+	ctx context.Context,
+	providerID domain.ProviderID,
+	state string,
+) (*domain.PendingBankConnectionLinkStart, error) {
+	return p.Store.GetPendingBankConnectionLinkStartByState(ctx, string(providerID), state)
+}
+
 func (p *ProviderLinkPersistence) SaveBankConnection(
 	ctx context.Context,
 	connection domain.BankConnection,

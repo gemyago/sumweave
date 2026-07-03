@@ -36,11 +36,12 @@ type publisherStub struct{}
 func (publisherStub) PublishInTx(context.Context, *sql.Tx, appdispatch.Envelope) error { return nil }
 
 func TestNewFinanceStoreFromDI(t *testing.T) {
-	store, err := newFinanceStoreFromDI(financeStoreDeps{
+	database, err := newDatabase(databaseDeps{
 		DatabaseDSN: filepath.Join(t.TempDir(), "finance.sqlite"),
 	})
 	require.NoError(t, err)
 
+	store := persistence.NewStore(database)
 	_, err = store.ListTenantsForUser(t.Context(), "user-no-auto-migrate")
 	require.Error(t, err)
 	require.ErrorContains(t, err, "no such table")
@@ -66,15 +67,21 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		return service, store
 	}
 
-	t.Run("registers monobank and pko product choices and keeps sync job-backed", func(t *testing.T) {
-		t.Setenv(enableBankingEnvAppID, "")
-		t.Setenv(enableBankingEnvPrivateKeyPath, "")
-		t.Setenv(enableBankingEnvBaseURL, "")
-		t.Setenv(enableBankingEnvASPSPName, "")
-		t.Setenv(enableBankingEnvCountry, "")
-		t.Setenv(enableBankingEnvPSUType, "")
-		t.Setenv(enableBankingEnvValidDays, "")
+	makePrivateKeyPath := func(t *testing.T) string {
+		t.Helper()
 
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+		require.NoError(t, err)
+		privateKeyPath := filepath.Join(t.TempDir(), "enable-banking-private-key.pem")
+		privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER})
+		require.NoError(t, os.WriteFile(privateKeyPath, privateKeyPEM, 0o600))
+
+		return privateKeyPath
+	}
+
+	t.Run("registers monobank and pko product choices and keeps sync job-backed", func(t *testing.T) {
 		monoToken := "mono-token-test"
 		monoClientInfoBody := `{"name":"mono","accounts":[{"id":"mono-acc-1","type":"black","currencyCode":980,"iban":"UA123","balance":101}]}`
 		monoTransactionsBody := `[{"id":"mono-txn-1","time":1717203600,"description":"mono txn","currencyCode":980,"amount":-250}]`
@@ -96,22 +103,22 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		}))
 		defer monoServer.Close()
 
-		enableSecret := "enable-secret-test"
-		enableAuthBody := `{"authorizationUrl":"https://bank.example/auth","providerReference":"provider-ref-1"}`
-		enableSessionBody := `{"externalId":"session-1","secret":"` + enableSecret + `","displayName":"PKO","state":"active"}`
-		enableAccountsBody := `{"accounts":[{"id":"pko-acc-1","name":"PKO","currency":"PLN","iban":"PL123"}]}`
-		enableBalancesBody := `{"balances":[{"currentBalanceMinor":1200,"availableBalanceMinor":1100,"currency":"PLN"}]}`
-		enableTransactionsBody := `{"transactions":[{"transactionId":"pko-txn-1","status":"booked","amountMinor":-500,"currency":"PLN","description":"pko txn","effectiveAt":"2026-06-02T10:00:00Z"}]}`
+		enablePrivateKeyPath := makePrivateKeyPath(t)
+		enableAuthBody := `{"authorizationUrl":"https://bank.example/auth","id":"provider-ref-1"}`
+		enableSessionBody := `{"id":"session-1","displayName":"PKO","state":"active"}`
+		enableAccountsBody := `{"id":"session-1","accounts":[{"uid":"pko-acc-1","name":"PKO","currency":"PLN","iban":"PL123"}]}`
+		enableBalancesBody := `{"balances":[{"balance_amount":{"amount":"12.00","currency":"PLN"},"type":"closingBooked"},{"balance_amount":{"amount":"11.00","currency":"PLN"},"type":"interimAvailable"}]}`
+		enableTransactionsBody := `{"transactions":[{"id":"pko-txn-1","status":"booked","amount":{"amount":"5.00","currency":"PLN"},"credit_debit_indicator":"DBIT","remittance_information_unstructured":"pko txn","booking_date":"2026-06-02"}]}`
 		enableServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if got := request.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
+				t.Errorf("enable banking authorization header = %q", got)
+			}
 			switch {
 			case request.Method == http.MethodPost && request.URL.Path == "/auth":
 				_, _ = writer.Write([]byte(enableAuthBody))
 			case request.Method == http.MethodPost && request.URL.Path == "/sessions":
 				_, _ = writer.Write([]byte(enableSessionBody))
-			case request.Method == http.MethodGet && request.URL.Path == "/accounts":
-				if got := request.Header.Get("Authorization"); got != "Bearer "+enableSecret {
-					t.Errorf("enable banking auth header = %q, want %q", got, "Bearer "+enableSecret)
-				}
+			case request.Method == http.MethodGet && request.URL.Path == "/sessions/session-1":
 				_, _ = writer.Write([]byte(enableAccountsBody))
 			case request.Method == http.MethodGet && request.URL.Path == "/accounts/pko-acc-1/balances":
 				_, _ = writer.Write([]byte(enableBalancesBody))
@@ -137,14 +144,39 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		)
 
 		service, err := newFinanceServiceFromDI(financeServiceDeps{
-			Store:      financeStore,
-			Jobs:       jobsService,
-			JobsStore:  jobsStore,
-			Registry:   registry,
-			RootLogger: nil,
-			JWT:        "jwt-key-for-finance-tests",
-			MonoURL:    monoServer.URL,
-			EnableURL:  enableServer.URL,
+			Database:             database,
+			Store:                financeStore,
+			Jobs:                 jobsService,
+			JobsStore:            jobsStore,
+			Registry:             registry,
+			RootLogger:           nil,
+			JWT:                  "jwt-key-for-finance-tests",
+			MonoURL:              monoServer.URL,
+			EnableURL:            enableServer.URL,
+			EnableAppID:          "app-123",
+			EnablePrivateKeyPath: enablePrivateKeyPath,
+			EnableASPSPName:      "PKO Bank Polski",
+			EnableCountry:        "PL",
+			EnablePSUType:        "personal",
+			EnableValidDays:      90,
+		})
+		require.NoError(t, err)
+		bankConnections, err := newBankConnectionServiceFromDI(financeServiceDeps{
+			Database:             database,
+			Store:                financeStore,
+			Jobs:                 jobsService,
+			JobsStore:            jobsStore,
+			Registry:             registry,
+			RootLogger:           nil,
+			JWT:                  "jwt-key-for-finance-tests",
+			MonoURL:              monoServer.URL,
+			EnableURL:            enableServer.URL,
+			EnableAppID:          "app-123",
+			EnablePrivateKeyPath: enablePrivateKeyPath,
+			EnableASPSPName:      "PKO Bank Polski",
+			EnableCountry:        "PL",
+			EnablePSUType:        "personal",
+			EnableValidDays:      90,
 		})
 		require.NoError(t, err)
 
@@ -155,7 +187,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		monobankConnection, err := service.LinkTokenBankConnection(
+		monobankConnection, err := bankConnections.LinkTokenBankConnection(
 			t.Context(),
 			financepkg.LinkTokenBankConnectionParams{
 				ActorUserID: "user-owner",
@@ -167,7 +199,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "monobank", monobankConnection.Provider)
 
-		start, err := service.StartBankConnectionLink(
+		start, err := bankConnections.StartBankConnectionLink(
 			t.Context(),
 			financepkg.StartBankConnectionLinkParams{
 				ActorUserID: "user-owner",
@@ -178,7 +210,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		pkoConnection, err := service.FinishBankConnectionLink(
+		pkoConnection, err := bankConnections.FinishBankConnectionLink(
 			t.Context(),
 			financepkg.FinishBankConnectionLinkParams{
 				ActorUserID: "user-owner",
@@ -191,8 +223,6 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "pko", pkoConnection.Provider)
 
-		windowStart := time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC)
-		windowEnd := time.Date(2024, time.June, 2, 0, 0, 0, 0, time.UTC)
 		connections := []string{monobankConnection.ID, pkoConnection.ID}
 		for _, connectionID := range connections {
 			jobRef, triggerErr := service.TriggerBankConnectionSync(
@@ -202,8 +232,6 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 					TenantID:     tenant.ID,
 					ConnectionID: connectionID,
 					Reason:       financepkg.BankConnectionSyncReasonManual,
-					WindowStart:  &windowStart,
-					WindowEnd:    &windowEnd,
 				},
 			)
 			require.NoError(t, triggerErr)
@@ -213,29 +241,8 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 
 			var input bankConnectionSyncJobInput
 			require.NoError(t, json.Unmarshal(job.InputJSON, &input))
-
-			_, runErr := service.RunBankConnectionSync(
-				t.Context(),
-				financepkg.RunBankConnectionSyncParams{
-					ConnectionID: input.ConnectionID,
-					JobID:        job.ID,
-					Reason:       input.Reason,
-					WindowStart:  *input.WindowStart,
-					WindowEnd:    *input.WindowEnd,
-				},
-			)
-			require.NoError(t, runErr)
+			require.Equal(t, connectionID, input.ConnectionID)
 		}
-
-		transactions, err := service.ListTransactions(
-			t.Context(),
-			financepkg.ListTransactionsParams{
-				ActorUserID: "user-owner",
-				TenantID:    tenant.ID,
-			},
-		)
-		require.NoError(t, err)
-		require.Len(t, transactions, 2)
 
 		connectionsView, err := service.ListBankConnections(
 			t.Context(),
@@ -259,17 +266,16 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.Contains(t, states, domain.BankConnectionStateActive)
 	})
 
-	t.Run("enables signed enable banking provider from environment defaults", func(t *testing.T) {
-		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	t.Run("enables signed enable banking provider from injected config", func(t *testing.T) {
+		privateKeyPath := makePrivateKeyPath(t)
+		privateKeyPEM, err := os.ReadFile(privateKeyPath)
 		require.NoError(t, err)
-		privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+		block, _ := pem.Decode(privateKeyPEM)
+		require.NotNil(t, block)
+		parsedKey, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 		require.NoError(t, err)
-		privateKeyPath := filepath.Join(t.TempDir(), "enable-banking-private-key.pem")
-		privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER})
-		require.NoError(t, os.WriteFile(privateKeyPath, privateKeyPEM, 0o600))
-
-		t.Setenv(enableBankingEnvAppID, "app-123")
-		t.Setenv(enableBankingEnvPrivateKeyPath, privateKeyPath)
+		privateKey, ok := parsedKey.(*rsa.PrivateKey)
+		require.True(t, ok)
 
 		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			authorization := strings.TrimSpace(request.Header.Get("Authorization"))
@@ -329,13 +335,37 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		)
 
 		service, err := newFinanceServiceFromDI(financeServiceDeps{
-			Store:      financeStore,
-			Jobs:       jobsService,
-			JobsStore:  jobsStore,
-			Registry:   registry,
-			RootLogger: nil,
-			JWT:        "jwt-key-for-finance-tests",
-			EnableURL:  server.URL,
+			Database:             database,
+			Store:                financeStore,
+			Jobs:                 jobsService,
+			JobsStore:            jobsStore,
+			Registry:             registry,
+			RootLogger:           nil,
+			JWT:                  "jwt-key-for-finance-tests",
+			EnableURL:            server.URL,
+			EnableAppID:          "app-123",
+			EnablePrivateKeyPath: privateKeyPath,
+			EnableASPSPName:      "PKO Bank Polski",
+			EnableCountry:        "PL",
+			EnablePSUType:        "personal",
+			EnableValidDays:      90,
+		})
+		require.NoError(t, err)
+		bankConnections, err := newBankConnectionServiceFromDI(financeServiceDeps{
+			Database:             database,
+			Store:                financeStore,
+			Jobs:                 jobsService,
+			JobsStore:            jobsStore,
+			Registry:             registry,
+			RootLogger:           nil,
+			JWT:                  "jwt-key-for-finance-tests",
+			EnableURL:            server.URL,
+			EnableAppID:          "app-123",
+			EnablePrivateKeyPath: privateKeyPath,
+			EnableASPSPName:      "PKO Bank Polski",
+			EnableCountry:        "PL",
+			EnablePSUType:        "personal",
+			EnableValidDays:      90,
 		})
 		require.NoError(t, err)
 
@@ -346,7 +376,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		start, err := service.StartBankConnectionLink(t.Context(), financepkg.StartBankConnectionLinkParams{
+		start, err := bankConnections.StartBankConnectionLink(t.Context(), financepkg.StartBankConnectionLinkParams{
 			ActorUserID: "user-owner",
 			TenantID:    tenant.ID,
 			Provider:    "pko",
@@ -354,25 +384,24 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		connection, err := service.FinishBankConnectionLink(t.Context(), financepkg.FinishBankConnectionLinkParams{
-			ActorUserID: "user-owner",
-			TenantID:    tenant.ID,
-			Provider:    "pko",
-			State:       start.State,
-			Code:        "code-1",
-		})
+		connection, err := bankConnections.FinishBankConnectionLink(
+			t.Context(),
+			financepkg.FinishBankConnectionLinkParams{
+				ActorUserID: "user-owner",
+				TenantID:    tenant.ID,
+				Provider:    "pko",
+				State:       start.State,
+				Code:        "code-1",
+			},
+		)
 		require.NoError(t, err)
 		require.Equal(t, "session-123", connection.ExternalID)
 
-		windowStart := time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC)
-		windowEnd := time.Date(2026, time.June, 2, 0, 0, 0, 0, time.UTC)
 		jobRef, err := service.TriggerBankConnectionSync(t.Context(), financepkg.TriggerBankConnectionSyncParams{
 			ActorUserID:  "user-owner",
 			TenantID:     tenant.ID,
 			ConnectionID: connection.ID,
 			Reason:       financepkg.BankConnectionSyncReasonManual,
-			WindowStart:  &windowStart,
-			WindowEnd:    &windowEnd,
 		})
 		require.NoError(t, err)
 
@@ -380,21 +409,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, err)
 		var input bankConnectionSyncJobInput
 		require.NoError(t, json.Unmarshal(job.InputJSON, &input))
-		_, err = service.RunBankConnectionSync(t.Context(), financepkg.RunBankConnectionSyncParams{
-			ConnectionID: input.ConnectionID,
-			JobID:        job.ID,
-			Reason:       input.Reason,
-			WindowStart:  *input.WindowStart,
-			WindowEnd:    *input.WindowEnd,
-		})
-		require.NoError(t, err)
-
-		transactions, err := service.ListTransactions(t.Context(), financepkg.ListTransactionsParams{
-			ActorUserID: "user-owner",
-			TenantID:    tenant.ID,
-		})
-		require.NoError(t, err)
-		require.Len(t, transactions, 1)
+		require.Equal(t, connection.ID, input.ConnectionID)
 	})
 
 	t.Run("uses auth signing key fallback for monobank token linking", func(t *testing.T) {
@@ -411,6 +426,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			))
 		}))
 		defer monoServer.Close()
+		enablePrivateKeyPath := makePrivateKeyPath(t)
 
 		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
 		require.NoError(t, err)
@@ -426,28 +442,47 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 
 		dataDir := t.TempDir()
 		container := dig.New()
-		require.NoError(t, di.ProvideAll(container,
-			di.ProvideValue("", dig.Name("config.auth.jwtSigningKey")),
-			di.ProvideValue(24*time.Hour, dig.Name("config.auth.accessTokenTTL")),
-			di.ProvideValue(7*24*time.Hour, dig.Name("config.auth.refreshTokenTTL")),
-			di.ProvideValue(dataDir, dig.Name("config.dataDir")),
-			slog.Default,
-			func() *persistence.Store { return financeStore },
-			func() *jobspkg.Service { return jobsService },
-			func() *jobspkg.Store { return jobsStore },
-			func() *jobspkg.Registry { return registry },
-			di.ProvideValue(monoServer.URL, dig.Name("finance.monobankBaseURL")),
-			di.ProvideValue(time.Duration(0), dig.Name("finance.monobankSleepBetweenRequests")),
-			di.ProvideValue("", dig.Name("finance.enableBankingBaseURL")),
-		))
+		require.NoError(
+			t,
+			di.ProvideAll(
+				container,
+				di.ProvideValue("", dig.Name("config.auth.jwtSigningKey")),
+				di.ProvideValue(24*time.Hour, dig.Name("config.auth.accessTokenTTL")),
+				di.ProvideValue(7*24*time.Hour, dig.Name("config.auth.refreshTokenTTL")),
+				di.ProvideValue(dataDir, dig.Name("config.dataDir")),
+				slog.Default,
+				func() *persistence.Database { return database },
+				func() *persistence.Store { return financeStore },
+				func() *jobspkg.Service { return jobsService },
+				func() *jobspkg.Store { return jobsStore },
+				func() *jobspkg.Registry { return registry },
+				di.ProvideValue(monoServer.URL, dig.Name("config.finance.providers.monobank.baseURL")),
+				di.ProvideValue(time.Duration(0), dig.Name("config.finance.providers.monobank.sleepBetweenRequests")),
+				di.ProvideValue(
+					"https://api.enablebanking.com",
+					dig.Name("config.finance.providers.enableBanking.baseURL"),
+				),
+				di.ProvideValue("app-auth-fallback", dig.Name("config.finance.providers.enableBanking.appID")),
+				di.ProvideValue(
+					enablePrivateKeyPath,
+					dig.Name("config.finance.providers.enableBanking.privateKeyPath"),
+				),
+				di.ProvideValue("Mock ASPSP", dig.Name("config.finance.providers.enableBanking.aspspName")),
+				di.ProvideValue("PL", dig.Name("config.finance.providers.enableBanking.country")),
+				di.ProvideValue("personal", dig.Name("config.finance.providers.enableBanking.psuType")),
+				di.ProvideValue(90, dig.Name("config.finance.providers.enableBanking.validDays")),
+			),
+		)
 		require.NoError(t, auth.Register(container))
 		require.NoError(t, container.Provide(newFinanceServiceFromDI))
+		require.NoError(t, container.Provide(newBankConnectionServiceFromDI))
 
 		type resolvedDeps struct {
 			dig.In
 
-			JWTKey  string `name:"auth.jwtKey"`
-			Service *financepkg.Service
+			JWTKey                string `name:"auth.jwtKey"`
+			Service               *financepkg.Service
+			BankConnectionService *financepkg.BankConnectionService
 		}
 
 		var resolved resolvedDeps
@@ -455,6 +490,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			resolved = deps
 		}))
 		require.NotEmpty(t, resolved.JWTKey)
+		require.NotNil(t, resolved.BankConnectionService)
 
 		persistedKeyPath := filepath.Join(dataDir, "auth", "jwt-signing-key")
 		persistedKey, err := os.ReadFile(persistedKeyPath)
@@ -468,7 +504,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		connection, err := resolved.Service.LinkTokenBankConnection(
+		connection, err := resolved.BankConnectionService.LinkTokenBankConnection(
 			t.Context(),
 			financepkg.LinkTokenBankConnectionParams{
 				ActorUserID: "user-owner",
@@ -490,5 +526,24 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, connections, 1)
 		require.Equal(t, "monobank", connections[0].Connection.Provider)
+	})
+
+	t.Run("rejects omitted enable banking credentials", func(t *testing.T) {
+		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
+		require.NoError(t, err)
+		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
+		financeStore := persistence.NewStore(database)
+
+		_, err = newBankConnectionServiceFromDI(financeServiceDeps{
+			Database:        database,
+			Store:           financeStore,
+			JWT:             "jwt-key-for-finance-tests",
+			EnableURL:       "https://api.enablebanking.com",
+			EnableASPSPName: "Mock ASPSP",
+			EnableCountry:   "PL",
+			EnablePSUType:   "personal",
+			EnableValidDays: 90,
+		})
+		require.ErrorContains(t, err, "validate enable banking config: app ID is required")
 	})
 }

@@ -7,8 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"strconv"
+	"net/http"
 	"strings"
 	"time"
 
@@ -16,18 +15,10 @@ import (
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	financepkg "github.com/gemyago/signal-foundry/finance"
 	"github.com/gemyago/signal-foundry/finance/credentials"
+	"github.com/gemyago/signal-foundry/finance/domain"
 	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/google/uuid"
 	"go.uber.org/dig"
-)
-
-const (
-	enableBankingEnvAppID          = "ENABLE_BANKING_APP_ID"
-	enableBankingEnvPrivateKeyPath = "ENABLE_BANKING_PRIVATE_KEY_PATH"
-	enableBankingEnvBaseURL        = "ENABLE_BANKING_BASE_URL"
-	enableBankingEnvASPSPName      = "ENABLE_BANKING_ASPSP_NAME"
-	enableBankingEnvCountry        = "ENABLE_BANKING_COUNTRY"
-	enableBankingEnvPSUType        = "ENABLE_BANKING_PSU_TYPE"
-	enableBankingEnvValidDays      = "ENABLE_BANKING_VALID_DAYS"
 )
 
 type disabledFinanceCipher struct{}
@@ -40,7 +31,7 @@ func (disabledFinanceCipher) OpenString(credentials.Envelope) (string, error) {
 	return "", errors.New("finance connection secret cipher is not configured")
 }
 
-type financeStoreDeps struct {
+type databaseDeps struct {
 	dig.In
 
 	DatabaseDSN string `name:"config.dataLayer.database.dsn"`
@@ -50,23 +41,31 @@ type financeStoreDeps struct {
 type financeServiceDeps struct {
 	dig.In
 
-	Store      *persistence.Store
-	Jobs       *jobspkg.Service
-	JobsStore  *jobspkg.Store
-	Registry   *jobspkg.Registry
-	RootLogger *slog.Logger
-	JWT        string        `name:"auth.jwtKey" optional:"true"`
-	MonoURL    string        `name:"finance.monobankBaseURL" optional:"true"`
-	MonoSleep  time.Duration `name:"finance.monobankSleepBetweenRequests" optional:"true"`
-	EnableURL  string        `name:"finance.enableBankingBaseURL" optional:"true"`
+	Database             *persistence.Database
+	Store                *persistence.Store
+	Jobs                 *jobspkg.Service
+	JobsStore            *jobspkg.Store
+	Registry             *jobspkg.Registry
+	RootLogger           *slog.Logger
+	JWT                  string        `name:"auth.jwtKey" optional:"true"`
+	MonoURL              string        `name:"config.finance.providers.monobank.baseURL" optional:"true"`
+	MonoSleep            time.Duration `name:"config.finance.providers.monobank.sleepBetweenRequests" optional:"true"`
+	EnableURL            string        `name:"config.finance.providers.enableBanking.baseURL" optional:"true"`
+	EnableAppID          string        `name:"config.finance.providers.enableBanking.appID" optional:"true"`
+	EnablePrivateKeyPath string        `name:"config.finance.providers.enableBanking.privateKeyPath" optional:"true"`
+	EnableASPSPName      string        `name:"config.finance.providers.enableBanking.aspspName" optional:"true"`
+	EnableCountry        string        `name:"config.finance.providers.enableBanking.country" optional:"true"`
+	EnablePSUType        string        `name:"config.finance.providers.enableBanking.psuType" optional:"true"`
+	EnableValidDays      int           `name:"config.finance.providers.enableBanking.validDays" optional:"true"`
 }
 
-func newFinanceStoreFromDI(deps financeStoreDeps) (*persistence.Store, error) {
+func newDatabase(deps databaseDeps) (*persistence.Database, error) {
+	// TODO: We should make the DSN finance module specific
 	database, err := persistence.OpenDatabase(deps.DatabaseDSN)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open finance database: %w", err)
 	}
-	return persistence.NewStore(database), nil
+	return database, nil
 }
 
 func newFinanceServiceFromDI(deps financeServiceDeps) (*financepkg.Service, error) {
@@ -76,27 +75,6 @@ func newFinanceServiceFromDI(deps financeServiceDeps) (*financepkg.Service, erro
 		financepkg.WithBankConnectionSyncScheduleWriter(bankConnectionSyncScheduleWriter{store: deps.JobsStore}),
 		financepkg.WithFXJobEnqueuer(fxSyncJobEnqueuer{jobs: deps.Jobs}),
 		financepkg.WithLogger(deps.RootLogger),
-	}
-	providers := []financepkg.BankConnectionProvider{}
-	if strings.TrimSpace(deps.MonoURL) != "" {
-		providers = append(providers, financepkg.NewMonobankProvider(financepkg.MonobankProviderConfig{
-			BaseURL:              deps.MonoURL,
-			SleepBetweenRequests: deps.MonoSleep,
-		}))
-	}
-	if enableConfig, enabled := resolveEnableBankingProviderConfig(deps.EnableURL); enabled {
-		providers = append(providers, financepkg.NewEnableBankingProvider(financepkg.EnableBankingProviderConfig{
-			BaseURL:        enableConfig.BaseURL,
-			AppID:          enableConfig.AppID,
-			PrivateKeyPath: enableConfig.PrivateKeyPath,
-			ASPSPName:      enableConfig.ASPSPName,
-			Country:        enableConfig.Country,
-			PSUType:        enableConfig.PSUType,
-			ValidDays:      enableConfig.ValidDays,
-		}))
-	}
-	if len(providers) > 0 {
-		opts = append(opts, financepkg.WithBankProviders(providers...))
 	}
 	if cipher, err := makeFinanceCipher(deps.JWT); err != nil {
 		return nil, err
@@ -110,49 +88,59 @@ func newFinanceServiceFromDI(deps financeServiceDeps) (*financepkg.Service, erro
 	return service, nil
 }
 
-type enableBankingProviderEnvConfig struct {
-	BaseURL        string
-	AppID          string
-	PrivateKeyPath string
-	ASPSPName      string
-	Country        string
-	PSUType        string
-	ValidDays      int
+func newBankConnectionServiceFromDI(
+	deps financeServiceDeps,
+) (*financepkg.BankConnectionService, error) {
+	cipher, err := makeFinanceCipher(deps.JWT)
+	if err != nil {
+		return nil, err
+	}
+	financeModule, err := financepkg.New(&financepkg.Config{
+		Database:               deps.Database,
+		Logger:                 resolveFinanceLogger(deps.RootLogger),
+		Now:                    time.Now,
+		NewID:                  uuid.NewString,
+		HTTPClient:             http.DefaultClient,
+		ConnectionSecretCipher: cipher,
+		Monobank: financepkg.MonobankConfig{
+			BaseURL: resolveMonobankBaseURL(deps.MonoURL),
+		},
+		EnableBanking: buildEnableBankingConfig(deps),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return financeModule.BankConnectionService, nil
 }
 
-func resolveEnableBankingProviderConfig(baseURL string) (enableBankingProviderEnvConfig, bool) {
-	config := enableBankingProviderEnvConfig{
-		BaseURL:        firstNonEmptyString(strings.TrimSpace(baseURL), envValue(enableBankingEnvBaseURL)),
-		AppID:          envValue(enableBankingEnvAppID),
-		PrivateKeyPath: envValue(enableBankingEnvPrivateKeyPath),
-		ASPSPName:      envValue(enableBankingEnvASPSPName),
-		Country:        envValue(enableBankingEnvCountry),
-		PSUType:        envValue(enableBankingEnvPSUType),
-		ValidDays:      financepkg.EnableBankingDefaultValidDays,
+func buildEnableBankingConfig(deps financeServiceDeps) financepkg.EnableBankingConfig {
+	return financepkg.EnableBankingConfig{
+		BaseURL:        strings.TrimSpace(deps.EnableURL),
+		AppID:          strings.TrimSpace(deps.EnableAppID),
+		PrivateKeyPath: strings.TrimSpace(deps.EnablePrivateKeyPath),
+		ASPSPs: []financepkg.EnableBankingASPSP{{
+			ProviderID: domain.ProviderIDPKO,
+			Name:       strings.TrimSpace(deps.EnableASPSPName),
+			Country:    strings.TrimSpace(deps.EnableCountry),
+			PSUType:    strings.TrimSpace(deps.EnablePSUType),
+			ValidDays:  deps.EnableValidDays,
+		}},
 	}
-	if rawValidDays := envValue(enableBankingEnvValidDays); rawValidDays != "" {
-		parsed, err := strconv.Atoi(rawValidDays)
-		if err == nil && parsed > 0 {
-			config.ValidDays = parsed
-		}
-	}
-	if config.BaseURL == "" && (config.AppID != "" || config.PrivateKeyPath != "") {
-		config.BaseURL = financepkg.EnableBankingDefaultBaseURL
-	}
-	return config, config.BaseURL != ""
 }
 
-func envValue(key string) string {
-	return strings.TrimSpace(os.Getenv(key))
+func resolveFinanceLogger(logger *slog.Logger) *slog.Logger {
+	if logger == nil {
+		return slog.New(slog.DiscardHandler)
+	}
+	return logger
 }
 
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
+func resolveMonobankBaseURL(baseURL string) string {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
+		return "https://api.monobank.ua"
 	}
-	return ""
+	return trimmed
 }
 
 func makeFinanceCipher(jwtKey string) (
@@ -380,5 +368,11 @@ func (e fxSyncJobEnqueuer) EnqueueFXSync(
 }
 
 func Register(container *dig.Container) error {
-	return di.ProvideAll(container, newFinanceStoreFromDI, newFinanceServiceFromDI)
+	return di.ProvideAll(
+		container,
+		newDatabase,
+		persistence.NewStore,
+		newFinanceServiceFromDI,
+		newBankConnectionServiceFromDI,
+	)
 }

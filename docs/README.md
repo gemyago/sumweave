@@ -15,7 +15,8 @@ Use these documents as the active documentation set for this repository.
 - Evaluation replay flow: [evaluation-backtest-flow-v0.md](./evaluation-backtest-flow-v0.md)
 - Go coding conventions: [golang-coding-guide.md](./golang-coding-guide.md)
 - Generic testing guidance: [testing-best-practices.md](./testing-best-practices.md)
-- Manual browser e2e runbook: [manual-e2e.md](./manual-e2e.md)
+- Manual e2e index: [manual-e2e/README.md](./manual-e2e/README.md)
+- Bank linking v2 manual e2e (API-first): [manual-e2e/bank-linking-e2e.md](./manual-e2e/bank-linking-e2e.md)
 - Hyperliquid venue reference: [hyperliquid.md](./hyperliquid.md)
 - Hyperliquid live smoke runbook: [live-hyperliquid-smoke.md](./live-hyperliquid-smoke.md)
 

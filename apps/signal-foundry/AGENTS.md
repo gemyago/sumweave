@@ -28,6 +28,9 @@ Notable layout parts of `apps/signal-foundry`:
 └── project.json      # Nx project
 ```
 
+Rules for some files:
+- internal/config/load_test.go - testing generic config loading, not specific variables
+
 ## API Routes
 
 API Routes are generated using [apigen](https://github.com/gemyago/apigen) which follows openapi first approach.Steps to add new routes:
@@ -78,6 +81,10 @@ The rules are:
 - Update module rules and conventions when user corrects the behavior of AI.
 - OpenAPI JSON uses camelCase for property names or any other identifiers or keys; regenerate after spec edits.
 - HTTP controller tests use registered routes, not custom builders.
+- Config env overrides use standard APP_ AutomaticEnv mapping only.
+- Config load tests cover app logic, not Viper env binding.
+- Put required test defaults in test.yaml, not per-test env.
+- Keep files referenced by test.yaml as committed test fixtures, never use real secrets or ssh keys, generate fake random values instead.
 
 ## Purpose (directional)
 

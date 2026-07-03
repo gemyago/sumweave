@@ -25,5 +25,6 @@ packages:
   github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1controllers:
     interfaces:
       AuthenticatingService:
+      bankConnectionService:
       financeService:
       jobsService:

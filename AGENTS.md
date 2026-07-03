@@ -130,6 +130,7 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 
 ## Golang
 
+- **Always** load and use gopher skill when working with Go code.
 - viper should only be used for config wireup, it should never leak into the codebase outside of the entrypoints or wireup paths.
 - components should not be doing nil checks to ensure if dependencies are initialized, this is a job of the DI container or the caller. This may only be justified if the dependency is optional.
 - unless explicitly documented, internal logic do not need to trim or otherwise normalize identifiers. Upper orchestration layer may chose to do it if needed.
@@ -139,7 +140,7 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 ### Testing and mocking
 
 - Mockery is the default for dependency mocks in tests.
-- Hand-written stubs/fakes/spies need explicit justification.
+- Hand-written stubs/fakes/spies are forbidden without user approval.
 
 ## Platform Agent Skills
 

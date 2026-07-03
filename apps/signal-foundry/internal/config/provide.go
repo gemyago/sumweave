@@ -141,19 +141,12 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "finance.providers.monobank.sleepBetweenRequests").asDuration(),
 		provideConfigValue(cfg, "finance.providers.enableBanking.baseURL").asString(),
 		provideConfigValue(cfg, "finance.providers.enableBanking.callbackBaseURL").asString(),
-		di.ProvideValue(cfg.GetString("finance.providers.monobank.baseURL"), dig.Name("finance.monobankBaseURL")),
-		di.ProvideValue(
-			cfg.GetDuration("finance.providers.monobank.sleepBetweenRequests"),
-			dig.Name("finance.monobankSleepBetweenRequests"),
-		),
-		di.ProvideValue(
-			cfg.GetString("finance.providers.enableBanking.baseURL"),
-			dig.Name("finance.enableBankingBaseURL"),
-		),
-		di.ProvideValue(
-			cfg.GetString("finance.providers.enableBanking.callbackBaseURL"),
-			dig.Name("finance.enableBankingCallbackBaseURL"),
-		),
+		provideConfigValue(cfg, "finance.providers.enableBanking.appID").asString(),
+		provideConfigValue(cfg, "finance.providers.enableBanking.privateKeyPath").asString(),
+		provideConfigValue(cfg, "finance.providers.enableBanking.aspspName").asString(),
+		provideConfigValue(cfg, "finance.providers.enableBanking.country").asString(),
+		provideConfigValue(cfg, "finance.providers.enableBanking.psuType").asString(),
+		provideConfigValue(cfg, "finance.providers.enableBanking.validDays").asInt(),
 
 		// skills config
 		provideConfigValue(cfg, "skills.enabled").asBool(),

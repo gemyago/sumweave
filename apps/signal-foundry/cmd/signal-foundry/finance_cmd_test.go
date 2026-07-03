@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -307,70 +305,6 @@ func TestFinanceCommand(t *testing.T) {
 		_, statErr := os.Stat(filepath.Join(workdir, "data", "data-layer.db"))
 		require.NoError(t, statErr)
 	})
-
-	t.Run(
-		"run finance fixtures generate rejects monobank provider without base url",
-		func(t *testing.T) {
-			runtimeConfig := financeFixturesRuntimeConfig{
-				DatabaseDSN:     filepath.Join(t.TempDir(), "fixtures.db"),
-				JobsTablePrefix: "signal_foundry_data_jobs_",
-			}
-			_, err := runFinanceFixturesGenerate(
-				t.Context(),
-				runtimeConfig,
-				financeFixturesGenerateParams{
-					Seed:               7,
-					Scenario:           realisticScenarioName,
-					Now:                time.Date(2026, time.June, 21, 12, 0, 0, 0, time.UTC),
-					ConnectionProvider: fixtureMonobankProviderName,
-				},
-			)
-			require.ErrorContains(t, err, "finance.providers.monobank.baseURL")
-		},
-	)
-
-	t.Run(
-		"run finance fixtures generate supports monobank provider with configured base url",
-		func(t *testing.T) {
-			server := httptest.NewServer(
-				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, "/personal/client-info", r.URL.Path)
-					assert.Equal(t, "fixture-token", r.Header.Get("X-Token"))
-					_, err := w.Write(
-						[]byte(`{"name":"mono-user","accounts":[{"id":"mono-account-1"}]}`),
-					)
-					assert.NoError(t, err)
-				}),
-			)
-			defer server.Close()
-
-			runtimeConfig := financeFixturesRuntimeConfig{
-				DatabaseDSN:     filepath.Join(t.TempDir(), "fixtures.db"),
-				JobsTablePrefix: "signal_foundry_data_jobs_",
-				MonobankBaseURL: server.URL,
-			}
-			summary, err := runFinanceFixturesGenerate(
-				t.Context(),
-				runtimeConfig,
-				financeFixturesGenerateParams{
-					Seed:               10,
-					Scenario:           realisticScenarioName,
-					Now:                time.Date(2026, time.June, 21, 12, 0, 0, 0, time.UTC),
-					ConnectionProvider: fixtureMonobankProviderName,
-				},
-			)
-			require.NoError(t, err)
-			assert.Equal(
-				t,
-				financefixtures.Summary{
-					Seed:        10,
-					Scenario:    realisticScenarioName,
-					ScenarioIDs: []string{"realistic-core"},
-				},
-				summary,
-			)
-		},
-	)
 
 	t.Run(
 		"run finance fixtures generate rejects unsupported connection provider",

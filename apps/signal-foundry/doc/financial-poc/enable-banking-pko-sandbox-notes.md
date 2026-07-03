@@ -10,12 +10,13 @@ Use this as the short operator runbook for sandbox work. It complements
   need it.
 - Keep the private key outside the repo and never commit it.
 - `ENABLE_BANKING_APP_ID` must match the registered app id; it is the JWT `kid`.
-- Local app redirect start also reads optional `ENABLE_BANKING_CALLBACK_BASE_URL`
+- Local app redirect start also reads optional
+  `APP_FINANCE_PROVIDERS_ENABLEBANKING_CALLBACKBASEURL`
   when the registered callback origin differs from the current backend host.
-- Local app redirect start defaults to PKO, but the current shared sandbox flow
-  should override it with `ENABLE_BANKING_ASPSP_NAME="Mock ASPSP"`.
+- Local app redirect start defaults to the current shared sandbox ASPSP,
+  `Mock ASPSP`.
 - If the shared sandbox app changes, rediscover the exposed ASPSP names and
-  update `ENABLE_BANKING_ASPSP_NAME` before testing again.
+  update `APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME` before testing again.
 - JWT `iss` is always `enablebanking.com` and `aud` is always
   `api.enablebanking.com`.
 - Use `ENABLE_BANKING_BASE_URL` only when you need a sandbox or fake-provider
@@ -57,15 +58,16 @@ Use this as the short operator runbook for sandbox work. It complements
 
 - AI agents cannot complete external bank SCA.
 - Current shared sandbox/operator access uses `Mock ASPSP` instead of PKO; keep
-  `ENABLE_BANKING_ASPSP_NAME="Mock ASPSP"` set unless `aspsps --country PL`
+  `APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME="Mock ASPSP"` set unless
+  `aspsps --country PL`
   shows the sandbox inventory changed.
 - The backend-driven callback URL `http://localhost:6060/enable-banking/callback`
   is accepted by the current shared sandbox; if start still fails before redirect,
   the usual cause is the ASPSP name, not the callback URL.
 - For the current shared sandbox app, `PKO Bank Polski` may be unavailable while
   `Mock ASPSP` or `Bank Millennium` is available. Set
-  `ENABLE_BANKING_ASPSP_NAME` to the discovered sandbox entry before running the
-  UI flow.
+  `APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME` to the discovered sandbox
+  entry before running the UI flow.
 - Mock-bank sandbox flow can still require an Enable Banking sign-in and CAPTCHA,
   which is external to the repo and blocks unattended completion.
 - If local HTTPS is blocked, use the manual `start-auth` / `finish-session`

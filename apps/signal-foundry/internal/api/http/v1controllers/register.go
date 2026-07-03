@@ -20,6 +20,7 @@ func Register(container *dig.Container) error {
 		di.ProvideImplementation[*data.ReadService, replayReadService],
 		di.ProvideImplementation[*data.LineageService, lineageBrowserService],
 		di.ProvideImplementation[*financepkg.Service, financeService],
+		di.ProvideImplementation[*financepkg.BankConnectionService, bankConnectionService],
 		NewAuthController,
 		NewDataController,
 		NewJobsController,

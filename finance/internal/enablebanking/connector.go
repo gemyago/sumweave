@@ -21,9 +21,6 @@ import (
 )
 
 const (
-	defaultASPSPName = "PKO Bank Polski"
-	defaultCountry   = "PL"
-	defaultPSUType   = "personal"
 	defaultValidDays = 90
 	fieldState       = "state"
 	fieldCode        = "code"
@@ -39,7 +36,6 @@ var (
 	ErrConnectorTokenLinkUnsupported   = errors.New("enable banking connector token link unsupported")
 	ErrConnectorUnsupportedAuthBranch  = errors.New("enable banking connector unsupported auth branch")
 	ErrConnectorUnsupportedFetchBranch = errors.New("enable banking connector unsupported fetch branch")
-	ErrSecretResolverRequired          = errors.New("enable banking connector secret resolver required")
 
 	privateKeyPattern = regexp.MustCompile(
 		`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----`,
@@ -49,8 +45,6 @@ var (
 	jsonTokenPattern = regexp.MustCompile(`(?i)("(?:token|secret)"\s*:\s*")([^"]*)(")`)
 	tokenPattern     = regexp.MustCompile(`(?i)\b(token|secret)\b([=:]\s*|\s+)([^\s,;]+)`)
 )
-
-type secretResolver func(ctx context.Context, secret domain.ConnectionSecret) (string, error)
 
 type apiClient interface {
 	DoRawObject(ctx context.Context, params enablebankingclient.DoRawJSONParams) (map[string]any, error)
@@ -82,16 +76,7 @@ type Connector struct {
 	psuType        string
 	validDays      int
 	now            func() time.Time
-	secretResolver secretResolver
 }
-
-type authBranch int
-
-const (
-	authBranchUnsupported authBranch = iota
-	authBranchLegacy
-	authBranchOfficial
-)
 
 func WithNow(now func() time.Time) Option {
 	return func(connector *Connector) {
@@ -105,14 +90,6 @@ func WithAPI(api apiClient) Option {
 	return func(connector *Connector) {
 		if api != nil {
 			connector.api = api
-		}
-	}
-}
-
-func WithSecretResolver(resolver func(context.Context, domain.ConnectionSecret) (string, error)) Option {
-	return func(connector *Connector) {
-		if resolver != nil {
-			connector.secretResolver = resolver
 		}
 	}
 }
@@ -148,9 +125,9 @@ func NewConnector(args Args, opts ...Option) *Connector {
 		stateProvider:  stateProvider,
 		appID:          strings.TrimSpace(args.AppID),
 		privateKeyPath: strings.TrimSpace(args.PrivateKeyPath),
-		aspspName:      firstNonEmpty(args.ASPSPName, defaultASPSPName),
-		country:        firstNonEmpty(args.Country, defaultCountry),
-		psuType:        firstNonEmpty(args.PSUType, defaultPSUType),
+		aspspName:      strings.TrimSpace(args.ASPSPName),
+		country:        strings.TrimSpace(args.Country),
+		psuType:        strings.TrimSpace(args.PSUType),
 		validDays:      validDays,
 		now:            now,
 	}
@@ -178,22 +155,15 @@ func (c *Connector) StartLink(
 	ctx context.Context,
 	request providers.StartLinkRequest,
 ) (providers.StartLinkResult, error) {
-	branch := c.selectedAuthBranch()
-	if branch == authBranchUnsupported {
+	if !c.hasOfficialCredentials() {
 		return providers.StartLinkResult{}, ErrConnectorUnsupportedAuthBranch
 	}
 	state, err := c.stateProvider()
 	if err != nil {
 		return providers.StartLinkResult{}, fmt.Errorf("enable banking start link: %w", err)
 	}
-	payload := map[string]any{
-		"redirectUrl": strings.TrimSpace(request.RedirectURL),
-		fieldState:    strings.TrimSpace(state),
-	}
-	if branch == authBranchOfficial {
-		payload = c.buildOfficialStartLinkPayload(strings.TrimSpace(request.RedirectURL), strings.TrimSpace(state))
-	}
-	raw, err := c.doJSON(ctx, http.MethodPost, "/auth", nil, payload, "")
+	payload := c.buildOfficialStartLinkPayload(strings.TrimSpace(request.RedirectURL), strings.TrimSpace(state))
+	raw, err := c.doJSON(ctx, http.MethodPost, "/auth", nil, payload)
 	if err != nil {
 		return providers.StartLinkResult{}, err
 	}
@@ -225,25 +195,11 @@ func (c *Connector) FinishLink(
 	ctx context.Context,
 	request providers.FinishLinkRequest,
 ) (providers.LinkResult, error) {
-	branch := c.selectedAuthBranch()
-	if branch == authBranchUnsupported {
+	if !c.hasOfficialCredentials() {
 		return providers.LinkResult{}, ErrConnectorUnsupportedAuthBranch
 	}
 	payload := map[string]any{fieldCode: strings.TrimSpace(request.Code)}
-	if branch == authBranchLegacy {
-		providerReference := providerReferenceFromStart(request.Start)
-		if providerReference == "" ||
-			strings.TrimSpace(request.State) == "" ||
-			strings.TrimSpace(request.Code) == "" {
-			return providers.LinkResult{}, ErrConnectorUnsupportedAuthBranch
-		}
-		payload = map[string]any{
-			fieldState:          strings.TrimSpace(request.State),
-			fieldCode:           strings.TrimSpace(request.Code),
-			"providerReference": providerReference,
-		}
-	}
-	raw, err := c.doJSON(ctx, http.MethodPost, "/sessions", nil, payload, "")
+	raw, err := c.doJSON(ctx, http.MethodPost, "/sessions", nil, payload)
 	if err != nil {
 		return providers.LinkResult{}, err
 	}
@@ -258,13 +214,6 @@ func (c *Connector) FinishLink(
 		stringValue(raw, "providerReference", "provider_reference"),
 		externalID,
 	)
-	if branch == authBranchLegacy {
-		providerReference = firstNonEmpty(
-			stringValue(raw, "providerReference", "provider_reference"),
-			providerReferenceFromStart(request.Start),
-			externalID,
-		)
-	}
 	providerObjectID := firstNonEmpty(externalID, providerReference, "session")
 	return providers.LinkResult{
 		DisplayName: firstNonEmpty(
@@ -296,35 +245,10 @@ func (c *Connector) Fetch(
 	ctx context.Context,
 	request providers.FetchRequest,
 ) (domain.ProviderSyncBatch, error) {
-	branch := c.selectedAuthBranch()
-	switch branch {
-	case authBranchLegacy:
-		return c.fetchLegacy(ctx, request)
-	case authBranchOfficial:
-		return c.fetchOfficial(ctx, request)
-	case authBranchUnsupported:
-		return domain.ProviderSyncBatch{}, ErrConnectorUnsupportedFetchBranch
-	default:
+	if !c.hasOfficialCredentials() {
 		return domain.ProviderSyncBatch{}, ErrConnectorUnsupportedFetchBranch
 	}
-}
-
-func (c *Connector) fetchLegacy(
-	ctx context.Context,
-	request providers.FetchRequest,
-) (domain.ProviderSyncBatch, error) {
-	secret, err := c.resolveSecret(ctx, request.Secret)
-	if err != nil {
-		return domain.ProviderSyncBatch{}, err
-	}
-	if secret == "" {
-		return domain.ProviderSyncBatch{}, ErrConnectorUnsupportedFetchBranch
-	}
-	accountsRaw, err := c.doJSON(ctx, http.MethodGet, "/accounts", nil, nil, secret)
-	if err != nil {
-		return domain.ProviderSyncBatch{}, err
-	}
-	return c.mapBatch(ctx, request, secret, accountsRaw, false)
+	return c.fetchOfficial(ctx, request)
 }
 
 func (c *Connector) fetchOfficial(
@@ -342,20 +266,17 @@ func (c *Connector) fetchOfficial(
 		"/sessions/"+url.PathEscape(strings.TrimSpace(request.Connection.ExternalID)),
 		nil,
 		nil,
-		"",
 	)
 	if err != nil {
 		return domain.ProviderSyncBatch{}, err
 	}
-	return c.mapBatch(ctx, request, "", sessionRaw, true)
+	return c.mapBatch(ctx, request, sessionRaw)
 }
 
 func (c *Connector) mapBatch(
 	ctx context.Context,
 	request providers.FetchRequest,
-	secret string,
 	connectionRaw map[string]any,
-	official bool,
 ) (domain.ProviderSyncBatch, error) {
 	capturedAt := c.now().UTC()
 	accountItems := objectSlice(connectionRaw, "accounts")
@@ -368,7 +289,7 @@ func (c *Connector) mapBatch(
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
 			Connection:       request.Connection,
 			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: connectionPayloadProviderObjectID(request.Connection, official),
+			ProviderObjectID: firstNonEmpty(request.Connection.ExternalID, "session"),
 			PayloadJSON:      mustJSON(redactRawPayload(connectionRaw)),
 			CapturedAt:       capturedAt,
 		}},
@@ -387,7 +308,6 @@ func (c *Connector) mapBatch(
 			"/accounts/"+url.PathEscape(accountID)+"/balances",
 			nil,
 			nil,
-			secret,
 		)
 		if err != nil {
 			return domain.ProviderSyncBatch{}, err
@@ -402,7 +322,7 @@ func (c *Connector) mapBatch(
 			CapturedAt:       capturedAt,
 		})
 
-		transactionPages, transactionsRaw, err := c.fetchTransactionPages(ctx, request, accountID, secret, official)
+		transactionPages, transactionsRaw, err := c.fetchTransactionPages(ctx, request, accountID)
 		if err != nil {
 			return domain.ProviderSyncBatch{}, err
 		}
@@ -429,23 +349,7 @@ func (c *Connector) fetchTransactionPages(
 	ctx context.Context,
 	request providers.FetchRequest,
 	accountID string,
-	secret string,
-	official bool,
 ) ([]map[string]any, []map[string]any, error) {
-	if !official {
-		page, err := c.doJSON(
-			ctx,
-			http.MethodGet,
-			"/accounts/"+url.PathEscape(accountID)+"/transactions",
-			nil,
-			nil,
-			secret,
-		)
-		if err != nil {
-			return nil, nil, err
-		}
-		return []map[string]any{page}, objectSlice(page, "transactions"), nil
-	}
 	pages := make([]map[string]any, 0, 1)
 	transactions := make([]map[string]any, 0)
 	continuationKey := ""
@@ -466,7 +370,6 @@ func (c *Connector) fetchTransactionPages(
 			"/accounts/"+url.PathEscape(accountID)+"/transactions",
 			query,
 			nil,
-			"",
 		)
 		if err != nil {
 			return nil, nil, err
@@ -487,11 +390,7 @@ func (c *Connector) doJSON(
 	path string,
 	query url.Values,
 	payload any,
-	secret string,
 ) (map[string]any, error) {
-	if strings.TrimSpace(secret) != "" {
-		ctx = enablebankingclient.WithBearerToken(ctx, secret)
-	}
 	raw, err := c.api.DoRawObject(ctx, enablebankingclient.DoRawJSONParams{
 		Method: method,
 		Path:   path,
@@ -504,17 +403,8 @@ func (c *Connector) doJSON(
 	return raw, nil
 }
 
-func (c *Connector) selectedAuthBranch() authBranch {
-	hasAppID := c.appID != ""
-	hasPrivateKey := c.privateKeyPath != ""
-	switch {
-	case !hasAppID && !hasPrivateKey:
-		return authBranchLegacy
-	case hasAppID && hasPrivateKey:
-		return authBranchOfficial
-	default:
-		return authBranchUnsupported
-	}
+func (c *Connector) hasOfficialCredentials() bool {
+	return c.appID != "" && c.privateKeyPath != ""
 }
 
 func (c *Connector) buildOfficialStartLinkPayload(redirectURL string, state string) map[string]any {
@@ -529,20 +419,6 @@ func (c *Connector) buildOfficialStartLinkPayload(redirectURL string, state stri
 		"redirect_url": redirectURL,
 		"psu_type":     c.psuType,
 	}
-}
-
-func (c *Connector) resolveSecret(ctx context.Context, secret domain.ConnectionSecret) (string, error) {
-	if c.secretResolver == nil {
-		if secret.ID == "" && secret.Reference == "" {
-			return "", ErrConnectorUnsupportedFetchBranch
-		}
-		return "", ErrSecretResolverRequired
-	}
-	resolved, err := c.secretResolver(ctx, secret)
-	if err != nil {
-		return "", fmt.Errorf("resolve enable banking access secret: %w", err)
-	}
-	return strings.TrimSpace(resolved), nil
 }
 
 func normalizeAccount(
@@ -625,33 +501,6 @@ func normalizeTransaction(
 		Fingerprint:           providerFingerprint(accountID, description, amountMinor, currency, effectiveAt),
 		ProviderOriginal:      providerOriginal,
 	}
-}
-
-func connectionPayloadProviderObjectID(connection domain.ProviderConnectionRef, official bool) string {
-	if official {
-		return firstNonEmpty(connection.ExternalID, "session")
-	}
-	return firstNonEmpty(connection.ExternalID, "accounts")
-}
-
-func providerReferenceFromStart(start providers.StartLinkResult) string {
-	for _, rawPayload := range start.RawPayloads {
-		if rawPayload.Scope != domain.RawPayloadScopeConnection {
-			continue
-		}
-		var raw map[string]any
-		if err := json.Unmarshal(rawPayload.PayloadJSON, &raw); err != nil {
-			continue
-		}
-		providerReference := firstNonEmpty(
-			stringValue(raw, "providerReference", "provider_reference"),
-			extractSessionIdentifier(raw, "authorization_id", "auth_id", "id", "session_id"),
-		)
-		if providerReference != "" {
-			return providerReference
-		}
-	}
-	return ""
 }
 
 func sanitizeClientError(err error) error {

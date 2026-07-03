@@ -115,135 +115,6 @@ func TestConnector(t *testing.T) {
 		require.ErrorIs(t, err, ErrConnectorTokenLinkUnsupported)
 	})
 
-	t.Run("start link supports the legacy redirect auth branch", func(t *testing.T) {
-		redirectURL := "https://app.example.test/callback/" + fake.UUID().V4()
-		state := "state-" + fake.UUID().V4()
-		authorizationURL := "https://bank.example.test/auth/" + fake.UUID().V4()
-		providerReference := "authorization-" + fake.UUID().V4()
-		authResponse := fmt.Sprintf(
-			`{"authorizationUrl":"%s","providerReference":"%s"}`,
-			authorizationURL,
-			providerReference,
-		)
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-			assert.Equal(t, http.MethodPost, request.Method)
-			assert.Equal(t, "/auth", request.URL.Path)
-			assert.Empty(t, request.Header.Get("Authorization"))
-
-			payload := decodeBody(t, request)
-			assert.Equal(t, redirectURL, payload["redirectUrl"])
-			assert.Equal(t, state, payload["state"])
-			assert.NotContains(t, payload, "redirect_url")
-
-			_, _ = w.Write([]byte(authResponse))
-		}))
-		defer server.Close()
-
-		connector := NewConnector(
-			Args{
-				BaseURL:    server.URL,
-				HTTPClient: server.Client(),
-				StateProvider: func() (string, error) {
-					return state, nil
-				},
-			},
-		)
-
-		result, err := connector.StartLink(t.Context(), providers.StartLinkRequest{
-			Profile:     providers.PKOProfile(),
-			RedirectURL: redirectURL,
-		})
-		require.NoError(t, err)
-
-		assert.Equal(t, state, result.State)
-		assert.Equal(t, authorizationURL, result.AuthorizationURL)
-		require.Len(t, result.RawPayloads, 1)
-		assert.Equal(t, domain.RawPayloadScopeConnection, result.RawPayloads[0].Scope)
-		assert.Equal(t, providerReference, result.RawPayloads[0].ProviderObjectID)
-		assertPayloadJSON(
-			t,
-			result.RawPayloads[0].PayloadJSON,
-			`{"authorizationUrl":"`+authorizationURL+`","providerReference":"`+providerReference+`"}`,
-		)
-	})
-
-	t.Run("finish link supports the legacy redirect auth branch and redacts secrets", func(t *testing.T) {
-		redirectURL := "https://app.example.test/callback/" + fake.UUID().V4()
-		state := "state-" + fake.UUID().V4()
-		code := "code-" + fake.UUID().V4()
-		providerReference := "authorization-" + fake.UUID().V4()
-		sessionID := "session-" + fake.UUID().V4()
-		secretValue := "secret-" + fake.UUID().V4()
-		authResponse := fmt.Sprintf(
-			`{"authorizationUrl":"https://bank.example.test/auth","providerReference":"%s"}`,
-			providerReference,
-		)
-		sessionResponse := fmt.Sprintf(
-			`{"externalId":"%s","providerReference":"%s","displayName":"PKO legacy","secret":"%s","state":"active"}`,
-			sessionID,
-			providerReference,
-			secretValue,
-		)
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-			switch request.URL.Path {
-			case "/auth":
-				_, _ = w.Write([]byte(authResponse))
-			case "/sessions":
-				assert.Equal(t, http.MethodPost, request.Method)
-				assert.Empty(t, request.Header.Get("Authorization"))
-
-				payload := decodeBody(t, request)
-				assert.Equal(t, state, payload["state"])
-				assert.Equal(t, code, payload["code"])
-				assert.Equal(t, providerReference, payload["providerReference"])
-
-				_, _ = w.Write([]byte(sessionResponse))
-			default:
-				http.NotFound(w, request)
-			}
-		}))
-		defer server.Close()
-
-		connector := NewConnector(
-			Args{
-				BaseURL:    server.URL,
-				HTTPClient: server.Client(),
-				StateProvider: func() (string, error) {
-					return state, nil
-				},
-			},
-		)
-
-		start, err := connector.StartLink(t.Context(), providers.StartLinkRequest{
-			Profile:     providers.PKOProfile(),
-			RedirectURL: redirectURL,
-		})
-		require.NoError(t, err)
-
-		result, err := connector.FinishLink(t.Context(), providers.FinishLinkRequest{
-			Profile: providers.PKOProfile(),
-			State:   state,
-			Code:    code,
-			Start:   start,
-		})
-		require.NoError(t, err)
-
-		assert.Equal(t, "PKO legacy", result.DisplayName)
-		assert.Equal(t, providerReference, result.ProviderReference)
-		assert.Equal(t, sessionID, result.ExternalID)
-		assert.Equal(t, secretValue, result.Secret)
-		assert.Equal(t, domain.BankConnectionStateActive, result.State)
-		require.Len(t, result.RawPayloads, 1)
-		assert.NotContains(t, string(result.RawPayloads[0].PayloadJSON), secretValue)
-		assertPayloadJSON(
-			t,
-			result.RawPayloads[0].PayloadJSON,
-			`{"displayName":"PKO legacy","externalId":"`+sessionID+`","providerReference":"`+providerReference+`","state":"active"}`,
-		)
-	})
-
 	t.Run("start link supports the signed official redirect auth branch", func(t *testing.T) {
 		redirectURL := "https://app.example.test/callback/" + fake.UUID().V4()
 		state := "state-" + fake.UUID().V4()
@@ -286,6 +157,9 @@ func TestConnector(t *testing.T) {
 			StateProvider:  func() (string, error) { return state, nil },
 			AppID:          "app-" + fake.UUID().V4(),
 			PrivateKeyPath: privateKeyPath,
+			ASPSPName:      "PKO Bank Polski",
+			Country:        "PL",
+			PSUType:        "personal",
 			Now:            func() time.Time { return now },
 			ValidDays:      validDays,
 		})
@@ -342,6 +216,9 @@ func TestConnector(t *testing.T) {
 			StateProvider:  func() (string, error) { return state, nil },
 			AppID:          "app-" + fake.UUID().V4(),
 			PrivateKeyPath: privateKeyPath,
+			ASPSPName:      "PKO Bank Polski",
+			Country:        "PL",
+			PSUType:        "personal",
 		})
 
 		start, err := connector.StartLink(t.Context(), providers.StartLinkRequest{
@@ -387,8 +264,14 @@ func TestConnector(t *testing.T) {
 		)
 		require.ErrorIs(t, err, ErrConnectorUnsupportedAuthBranch)
 
-		legacyConnector := NewConnector(Args{BaseURL: "https://example.test"})
-		_, err = legacyConnector.Fetch(
+		credentiallessConnector := NewConnector(Args{BaseURL: "https://example.test"})
+		_, err = credentiallessConnector.StartLink(
+			t.Context(),
+			providers.StartLinkRequest{RedirectURL: "https://example.test/callback"},
+		)
+		require.ErrorIs(t, err, ErrConnectorUnsupportedAuthBranch)
+
+		_, err = credentiallessConnector.Fetch(
 			t.Context(),
 			providers.FetchRequest{Connection: makeConnection()},
 		)
@@ -418,198 +301,6 @@ func TestConnector(t *testing.T) {
 			providers.FetchRequest{Connection: missingSessionConnection},
 		)
 		require.ErrorIs(t, err, ErrConnectorUnsupportedFetchBranch)
-	})
-
-	t.Run("fetch maps the legacy bearer-secret branch into v2 observations", func(t *testing.T) {
-		secretValue := "secret-" + fake.UUID().V4()
-		secret := makeSecret("reference-" + fake.UUID().V4())
-		connection := makeConnection()
-		capturedAt := time.Date(2026, time.June, 30, 9, 45, 0, 0, time.UTC)
-		requestedWindow := domain.ProviderSyncWindow{
-			Start: time.Date(2026, time.June, 1, 12, 0, 0, 0, time.FixedZone("UTC+3", 3*60*60)),
-			End:   time.Date(2026, time.June, 3, 8, 30, 0, 0, time.FixedZone("UTC-4", -4*60*60)),
-		}
-		firstAccountID := "account-1-" + fake.UUID().V4()
-		secondAccountID := "account-2-" + fake.UUID().V4()
-		firstTransactionID := "txn-1-" + fake.UUID().V4()
-		secondTransactionID := "txn-2-" + fake.UUID().V4()
-		thirdTransactionID := "txn-3-" + fake.UUID().V4()
-		accountsResponse := fmt.Sprintf(
-			`{"accounts":[{"id":"%s","name":"Main account","currency":"pln","iban":" PL11111111111111111111111111 "},{"uid":"%s","currency":"eur","iban":" PL22222222222222222222222222 "}]}`,
-			firstAccountID,
-			secondAccountID,
-		)
-		firstBalancesResponse := `{"balances":[{"type":"closingBooked","balance_amount":{"amount":"1234.56","currency":"pln"}},{"type":"available","balance_amount":{"amount":"1200.01","currency":"pln"}}]}`
-		secondBalancesResponse := `{"balances":[{"type":"available","balance_amount":{"amount":"50.05","currency":"eur"}}]}`
-		firstTransactionsResponse := fmt.Sprintf(
-			`{"transactions":[{"transactionId":"%s","status":"pending","amountMinor":-5050,"currency":"pln","description":"groceries","effectiveAt":"2026-06-01T09:15:00Z"},{"transactionId":"%s","amountMinor":250000,"currency":"pln","description":"salary","effectiveAt":"2026-06-02T18:05:00Z"}]}`,
-			firstTransactionID,
-			secondTransactionID,
-		)
-		secondTransactionsResponse := fmt.Sprintf(
-			`{"transactions":[{"id":"%s","status":"booked","amountMinor":-1200,"currency":"eur","remittanceInformationUnstructured":"fuel","bookingDate":"2026-06-02"}]}`,
-			thirdTransactionID,
-		)
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-			assert.Equal(t, "Bearer "+secretValue, request.Header.Get("Authorization"))
-
-			switch request.URL.Path {
-			case "/accounts":
-				_, _ = w.Write([]byte(accountsResponse))
-			case "/accounts/" + firstAccountID + "/balances":
-				_, _ = w.Write([]byte(firstBalancesResponse))
-			case "/accounts/" + secondAccountID + "/balances":
-				_, _ = w.Write([]byte(secondBalancesResponse))
-			case "/accounts/" + firstAccountID + "/transactions":
-				_, _ = w.Write([]byte(firstTransactionsResponse))
-			case "/accounts/" + secondAccountID + "/transactions":
-				_, _ = w.Write([]byte(secondTransactionsResponse))
-			default:
-				http.NotFound(w, request)
-			}
-		}))
-		defer server.Close()
-
-		resolverCalls := 0
-		connector := NewConnector(
-			Args{BaseURL: server.URL, HTTPClient: server.Client()},
-			WithNow(func() time.Time { return capturedAt }),
-			WithSecretResolver(func(_ context.Context, actual domain.ConnectionSecret) (string, error) {
-				resolverCalls++
-				assert.Equal(t, secret, actual)
-				return secretValue, nil
-			}),
-		)
-
-		batch, err := connector.Fetch(t.Context(), providers.FetchRequest{
-			Connection:      connection,
-			Secret:          secret,
-			RequestedWindow: requestedWindow,
-		})
-		require.NoError(t, err)
-
-		assert.Equal(t, 1, resolverCalls)
-		assert.Equal(t, connection, batch.Connection)
-		assert.Equal(t, requestedWindow, batch.RequestedWindow)
-		require.Len(t, batch.Accounts, 2)
-		require.Len(t, batch.Balances, 2)
-		require.Len(t, batch.Transactions, 3)
-		require.Len(t, batch.RawPayloads, 5)
-
-		assert.Equal(t, domain.ProviderAccountObservation{
-			Connection:        connection,
-			ProviderAccountID: firstAccountID,
-			Name:              "Main account",
-			Currency:          "PLN",
-			IBAN:              "PL11111111111111111111111111",
-		}, batch.Accounts[0])
-		assert.Equal(t, domain.ProviderAccountObservation{
-			Connection:        connection,
-			ProviderAccountID: secondAccountID,
-			Name:              secondAccountID,
-			Currency:          "EUR",
-			IBAN:              "PL22222222222222222222222222",
-		}, batch.Accounts[1])
-
-		firstAvailable := int64(120001)
-		secondAvailable := int64(5005)
-		assert.Equal(t, domain.ProviderBalanceObservation{
-			Connection:            connection,
-			ProviderAccountID:     firstAccountID,
-			Currency:              "PLN",
-			CurrentBalanceMinor:   123456,
-			AvailableBalanceMinor: &firstAvailable,
-			CapturedAt:            capturedAt,
-		}, batch.Balances[0])
-		assert.Equal(t, domain.ProviderBalanceObservation{
-			Connection:            connection,
-			ProviderAccountID:     secondAccountID,
-			Currency:              "EUR",
-			CurrentBalanceMinor:   5005,
-			AvailableBalanceMinor: &secondAvailable,
-			CapturedAt:            capturedAt,
-		}, batch.Balances[1])
-
-		firstEffectiveAt := time.Date(2026, time.June, 1, 9, 15, 0, 0, time.UTC)
-		secondEffectiveAt := time.Date(2026, time.June, 2, 18, 5, 0, 0, time.UTC)
-		thirdEffectiveAt := time.Date(2026, time.June, 2, 0, 0, 0, 0, time.UTC)
-		assert.Equal(t, domain.ProviderTransactionObservation{
-			Connection:            connection,
-			ProviderAccountID:     firstAccountID,
-			ProviderTransactionID: firstTransactionID,
-			Status:                domain.TransactionStatusPending,
-			AmountMinor:           -5050,
-			Currency:              "PLN",
-			Description:           "groceries",
-			EffectiveAt:           firstEffectiveAt,
-			Fingerprint: providerFingerprint(
-				firstAccountID,
-				"groceries",
-				int64(-5050),
-				"PLN",
-				firstEffectiveAt,
-			),
-			ProviderOriginal: &domain.ProviderTransactionOriginal{
-				AmountMinor: -5050,
-				Currency:    "PLN",
-				Description: "groceries",
-				EffectiveAt: &firstEffectiveAt,
-			},
-		}, batch.Transactions[0])
-		assert.Equal(t, domain.ProviderTransactionObservation{
-			Connection:            connection,
-			ProviderAccountID:     firstAccountID,
-			ProviderTransactionID: secondTransactionID,
-			Status:                domain.TransactionStatusBooked,
-			AmountMinor:           250000,
-			Currency:              "PLN",
-			Description:           "salary",
-			EffectiveAt:           secondEffectiveAt,
-			Fingerprint: providerFingerprint(
-				firstAccountID,
-				"salary",
-				int64(250000),
-				"PLN",
-				secondEffectiveAt,
-			),
-			ProviderOriginal: &domain.ProviderTransactionOriginal{
-				AmountMinor: 250000,
-				Currency:    "PLN",
-				Description: "salary",
-				EffectiveAt: &secondEffectiveAt,
-			},
-		}, batch.Transactions[1])
-		assert.Equal(t, domain.ProviderTransactionObservation{
-			Connection:            connection,
-			ProviderAccountID:     secondAccountID,
-			ProviderTransactionID: thirdTransactionID,
-			Status:                domain.TransactionStatusBooked,
-			AmountMinor:           -1200,
-			Currency:              "EUR",
-			Description:           "fuel",
-			EffectiveAt:           thirdEffectiveAt,
-			Fingerprint: providerFingerprint(
-				secondAccountID,
-				"fuel",
-				int64(-1200),
-				"EUR",
-				thirdEffectiveAt,
-			),
-			ProviderOriginal: &domain.ProviderTransactionOriginal{
-				AmountMinor: -1200,
-				Currency:    "EUR",
-				Description: "fuel",
-				EffectiveAt: &thirdEffectiveAt,
-			},
-		}, batch.Transactions[2])
-
-		assert.Equal(t, connection.ExternalID, batch.RawPayloads[0].ProviderObjectID)
-		assert.Equal(t, capturedAt, batch.RawPayloads[0].CapturedAt)
-		assert.Equal(t, firstAccountID, batch.RawPayloads[1].ProviderObjectID)
-		assert.Equal(t, firstAccountID, batch.RawPayloads[2].ProviderObjectID)
-		assert.Equal(t, secondAccountID, batch.RawPayloads[3].ProviderObjectID)
-		assert.Equal(t, secondAccountID, batch.RawPayloads[4].ProviderObjectID)
 	})
 
 	t.Run("fetch maps the signed official session branch into v2 observations", func(t *testing.T) {
@@ -765,9 +456,12 @@ func TestConnector(t *testing.T) {
 
 	t.Run("covers helper and error branches", func(t *testing.T) {
 		t.Run("start and finish return bounded validation errors", func(t *testing.T) {
+			privateKeyPath := makeSignedKeyPath(t)
 			connector := NewConnector(
 				Args{
-					BaseURL: "https://example.test",
+					BaseURL:        "https://example.test",
+					AppID:          "app-" + fake.UUID().V4(),
+					PrivateKeyPath: privateKeyPath,
 					StateProvider: func() (string, error) {
 						return "", assert.AnError
 					},
@@ -782,7 +476,11 @@ func TestConnector(t *testing.T) {
 			require.ErrorIs(t, err, assert.AnError)
 
 			connector = NewConnector(
-				Args{BaseURL: "https://example.test"},
+				Args{
+					BaseURL:        "https://example.test",
+					AppID:          "app-" + fake.UUID().V4(),
+					PrivateKeyPath: privateKeyPath,
+				},
 				WithAPI(&stubAPIClient{response: map[string]any{"id": "auth-1"}}),
 			)
 			_, err = connector.StartLink(
@@ -792,7 +490,11 @@ func TestConnector(t *testing.T) {
 			require.ErrorContains(t, err, "missing authorization URL")
 
 			connector = NewConnector(
-				Args{BaseURL: "https://example.test"},
+				Args{
+					BaseURL:        "https://example.test",
+					AppID:          "app-" + fake.UUID().V4(),
+					PrivateKeyPath: privateKeyPath,
+				},
 				WithAPI(&stubAPIClient{response: map[string]any{}}),
 			)
 			_, err = connector.FinishLink(
@@ -810,7 +512,11 @@ func TestConnector(t *testing.T) {
 			)
 			require.ErrorContains(t, err, "missing session ID")
 
-			_, err = connector.FinishLink(
+			missingCredentialsConnector := NewConnector(
+				Args{BaseURL: "https://example.test"},
+				WithAPI(&stubAPIClient{response: map[string]any{}}),
+			)
+			_, err = missingCredentialsConnector.FinishLink(
 				t.Context(),
 				providers.FinishLinkRequest{
 					State: "state",
@@ -825,39 +531,17 @@ func TestConnector(t *testing.T) {
 			connection := makeConnection()
 			capturedAt := time.Date(2026, time.July, 2, 11, 0, 0, 0, time.UTC)
 
-			assert.Equal(t, authBranchLegacy, NewConnector(Args{}).selectedAuthBranch())
-			assert.Equal(
-				t,
-				authBranchOfficial,
-				NewConnector(Args{AppID: "app", PrivateKeyPath: makeSignedKeyPath(t)}).selectedAuthBranch(),
-			)
-			assert.Equal(
-				t,
-				authBranchUnsupported,
-				NewConnector(Args{AppID: "app"}).selectedAuthBranch(),
-			)
-
 			payload := NewConnector(
-				Args{Now: func() time.Time { return capturedAt }, ValidDays: 1},
+				Args{
+					ASPSPName: "PKO Bank Polski",
+					Country:   "PL",
+					PSUType:   "personal",
+					Now:       func() time.Time { return capturedAt },
+					ValidDays: 1,
+				},
 			).buildOfficialStartLinkPayload("https://redirect", "state")
 			assert.Equal(t, "state", payload["state"])
 			assert.Equal(t, "https://redirect", payload["redirect_url"])
-
-			secretConnector := NewConnector(Args{})
-			_, err := secretConnector.resolveSecret(t.Context(), makeSecret("reference-1"))
-			require.ErrorIs(t, err, ErrSecretResolverRequired)
-
-			_, err = secretConnector.resolveSecret(t.Context(), domain.ConnectionSecret{})
-			require.ErrorIs(t, err, ErrConnectorUnsupportedFetchBranch)
-
-			secretConnector = NewConnector(
-				Args{},
-				WithSecretResolver(func(context.Context, domain.ConnectionSecret) (string, error) {
-					return "", assert.AnError
-				}),
-			)
-			_, err = secretConnector.resolveSecret(t.Context(), makeSecret("reference-2"))
-			require.ErrorIs(t, err, assert.AnError)
 
 			account := normalizeAccount(
 				connection,
@@ -960,22 +644,6 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, "fallback", firstNonEmpty("", " fallback "))
 			assert.Equal(t, int64(7), firstNonZeroInt64(0, 7, 9))
 			require.JSONEq(t, `{"key":"value"}`, string(mustJSON(map[string]string{"key": "value"})))
-
-			providerReference := providerReferenceFromStart(providers.StartLinkResult{
-				RawPayloads: []domain.ProviderRawPayloadObservation{
-					{
-						Scope:       domain.RawPayloadScopeConnection,
-						PayloadJSON: []byte(`{"providerReference":"provider-ref"}`),
-					},
-					{
-						Scope:       domain.RawPayloadScopeAccount,
-						PayloadJSON: []byte(`{"providerReference":"ignored"}`),
-					},
-				},
-			})
-			assert.Equal(t, "provider-ref", providerReference)
-			assert.Equal(t, "accounts", connectionPayloadProviderObjectID(domain.ProviderConnectionRef{}, false))
-			assert.Equal(t, "session", connectionPayloadProviderObjectID(domain.ProviderConnectionRef{}, true))
 
 			redacted := redactRawPayload(map[string]any{
 				"secret": "raw-secret",

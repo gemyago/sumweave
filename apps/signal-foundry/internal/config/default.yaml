@@ -131,8 +131,18 @@ finance:
       baseURL: "https://api.monobank.ua"
       sleepBetweenRequests: 0s
     enableBanking:
-      baseURL: ""
-      callbackBaseURL: ""
+      # Enable Banking sandbox apps use the same API host; sandbox/live is selected by the app registration.
+      baseURL: "https://api.enablebanking.com"
+      # Origin used to build http://localhost:4501/enable-banking/callback for local redirect-link flows.
+      callbackBaseURL: "http://localhost:4501"
+      # Set via APP_FINANCE_PROVIDERS_ENABLEBANKING_APPID.
+      appID: ""
+      # Set via APP_FINANCE_PROVIDERS_ENABLEBANKING_PRIVATEKEYPATH.
+      privateKeyPath: ""
+      aspspName: "Mock ASPSP"
+      country: "PL"
+      psuType: "personal"
+      validDays: 90
 
 skills:
   # Set to true to enable skill discovery and tool registration.

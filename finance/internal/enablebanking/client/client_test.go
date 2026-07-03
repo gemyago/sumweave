@@ -135,6 +135,9 @@ func TestClient_InternalHelpers(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, items, 1)
 
+		_, err = client.DoRawArray(ctx, DoRawJSONParams{Method: http.MethodGet, Path: "/bad-json"})
+		require.ErrorContains(t, err, "enable banking response decode")
+
 		_, err = client.DoRawObject(ctx, DoRawJSONParams{Method: http.MethodGet, Path: "/bad-status"})
 		require.Error(t, err)
 		var responseErr *ResponseError
@@ -183,5 +186,17 @@ func TestClient_InternalHelpers(t *testing.T) {
 		assert.Empty(t, message)
 		assert.Empty(t, code)
 		assert.Nil(t, extractSessionAccess(map[string]any{"access": map[string]any{}}))
+
+		client = makeTestClient("https://provider.example.test", func(args *Args) {
+			args.PrivateKeyPath = filepath.Join(t.TempDir(), "missing-app-id.pem")
+		})
+		_, err := client.DoRawObject(t.Context(), DoRawJSONParams{Method: http.MethodGet, Path: authPath})
+		require.ErrorContains(t, err, "enable banking app ID is required")
+
+		client = makeTestClient("https://provider.example.test", func(args *Args) {
+			args.AppID = "app-1"
+		})
+		_, err = client.DoRawObject(t.Context(), DoRawJSONParams{Method: http.MethodGet, Path: authPath})
+		require.ErrorContains(t, err, "enable banking private key path is required")
 	})
 }

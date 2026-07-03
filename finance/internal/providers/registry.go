@@ -71,7 +71,7 @@ func NewStaticConnectorRegistry(connectors ...Connector) *StaticConnectorRegistr
 	return registry
 }
 
-//nolint:ireturn // The registry contract resolves connectors behind the shared interface seam.
+//nolint:ireturn // The registry contract resolves configured connectors behind an interface seam.
 func (r *StaticConnectorRegistry) Resolve(connectorID domain.ProviderConnectorID) (Connector, error) {
 	if connectorID == "" {
 		return nil, ErrConnectorIDRequired

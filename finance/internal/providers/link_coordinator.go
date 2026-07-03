@@ -291,7 +291,7 @@ func (c *LinkCoordinator) LinkToken(
 	return connection, nil
 }
 
-//nolint:ireturn // the connector contract is intentionally resolved behind interface seam.
+//nolint:ireturn // The connector contract is intentionally resolved behind an interface seam.
 func (c *LinkCoordinator) resolveConnector(
 	providerID domain.ProviderID,
 ) (ProviderProfile, Connector, error) {

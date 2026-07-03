@@ -1,10 +1,14 @@
 # Optional local-only overrides for finance sandbox work.
 # Keep real values in `.envrc.local`, never commit them.
 
+# Required for app-driven Enable Banking redirect/link flows.
+# export APP_FINANCE_PROVIDERS_ENABLEBANKING_APPID="..."
+# export APP_FINANCE_PROVIDERS_ENABLEBANKING_PRIVATEKEYPATH="$PWD/apps/signal-foundry/tmp/enable-banking.pem"
+
 # Shared Enable Banking sandbox apps often expose only a subset of banks.
 # If PKO start fails with "Wrong ASPSP name provided", discover an available
 # name with `finance-poc enable-banking aspsps --country PL --json` and set it here.
-# export ENABLE_BANKING_ASPSP_NAME="Mock ASPSP"
+# export APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME="Mock ASPSP"
 
 # Use when the registered callback origin differs from the active backend host.
-# export ENABLE_BANKING_CALLBACK_BASE_URL="http://localhost:6060"
+# export APP_FINANCE_PROVIDERS_ENABLEBANKING_CALLBACKBASEURL="http://localhost:4501"
