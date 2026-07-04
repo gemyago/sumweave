@@ -24,6 +24,7 @@ vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'tok
 
 describe('Finance tenants page', () => {
   beforeEach(() => {
+    window.localStorage.clear()
     const now = new Date('2026-06-20T12:00:00Z')
     Object.values(mocks).forEach((mock) => mock.mockReset())
     mocks.listTenants.mockResolvedValue([{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now }])

@@ -3,6 +3,7 @@
   import Router, { replace, router } from 'svelte-spa-router'
   import { wrap } from 'svelte-spa-router/wrap'
   import Nav from './components/Nav.svelte'
+  import FinanceShell from './components/FinanceShell.svelte'
   import { themeStore } from './lib/theme/theme-store.svelte'
   import {
     LOGIN_ROUTE,
@@ -163,6 +164,10 @@
     typeof router.location === 'string' && router.location.startsWith('/chat'),
   )
 
+  const isFinanceRoute = $derived(
+    typeof router.location === 'string' && router.location.startsWith('/finance'),
+  )
+
   const isWideWorkspaceRoute = $derived(
     typeof router.location === 'string' &&
       (router.location.startsWith('/strategies') ||
@@ -184,17 +189,24 @@
 {:else}
   <div class="shell" class:shell--chat={isChatRoute}>
     <span class="sr-only" aria-hidden="true">{themeStore.preference}</span>
-    {#if authStore.isAuthenticated}
+    {#if authStore.isAuthenticated && !isFinanceRoute}
       <Nav />
     {/if}
-    <main class="main" class:main--chat={isChatRoute}>
+    <main class="main" class:main--chat={isChatRoute} class:main--finance={isFinanceRoute}>
       <!-- Inner column: DESIGN.md ~800–900px reading width; `/chat` uses full width (see `.main-inner--chat`). -->
       <div
         class="main-inner"
         class:main-inner--chat={isChatRoute}
         class:main-inner--wide={isWideWorkspaceRoute}
+        class:main-inner--finance={isFinanceRoute}
       >
-        <Router {routes} onConditionsFailed={handleConditionsFailed} />
+        {#if isFinanceRoute}
+          <FinanceShell currentPath={router.location}>
+            <Router {routes} onConditionsFailed={handleConditionsFailed} />
+          </FinanceShell>
+        {:else}
+          <Router {routes} onConditionsFailed={handleConditionsFailed} />
+        {/if}
       </div>
     </main>
   </div>
@@ -233,6 +245,11 @@
     min-height: 0;
   }
 
+  .main--finance {
+    padding: 0;
+    min-height: 0;
+  }
+
   .main-inner {
     width: 100%;
     max-width: var(--content-max-width);
@@ -253,6 +270,11 @@
 
   .main-inner--wide {
     max-width: 1100px;
+  }
+
+  .main-inner--finance {
+    max-width: none;
+    margin-inline: 0;
   }
 
   .loading {

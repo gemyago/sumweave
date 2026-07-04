@@ -9,6 +9,7 @@ lint:
 	$(MAKE) check-api
 
 test:
+	mkdir -p coverage/.tmp
 	npm run test:run
 
 generate-api:

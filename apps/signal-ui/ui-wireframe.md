@@ -283,25 +283,33 @@
 **Shared shape**
 
 - Finance routes stay visually distinct from trading/data routes and always render a finance sub-navigation strip first.
+- Finance routes use a wider shell canvas than the default reading column so the rail, dashboard grids, ledger tables, and inspectors can breathe.
 - Tenant-aware finance routes share one client-side active-tenant workspace choice via local storage.
 - If the operator belongs to exactly one finance tenant, tenant-scoped finance routes auto-select it and continue without an extra step.
 - If the operator belongs to multiple finance tenants and no active tenant is stored yet, tenant-scoped finance routes stop on the requested route and require one explicit tenant choice there before loading tenant data.
 - After selection, the active tenant is reused across `#/finance`, `#/finance/accounts`, `#/finance/accounts/:accountId`, `#/finance/transactions`, `#/finance/transactions/new`, `#/finance/transactions/:transactionId`, `#/finance/categories`, `#/finance/connections`, `#/finance/imports`, and `#/finance/jobs/:jobId` until changed.
 - Tenant-aware routes keep a visible selected-tenant control near the top of the page.
+- Multi-tenant tenant selection is shell-owned and compact; dashboard/content routes do not repeat tenant picker panels or tenant-workspace explainer blocks.
+- Single-tenant tenant-scoped finance routes do not show a tenant selector in normal shell chrome.
 - Finance detail flows prefer separate routes over split panes; the first slice uses `/finance/accounts/:accountId` and `/finance/jobs/:jobId` for that purpose.
 - Finance user-facing dates render in browser-local date or date-time format instead of raw ISO strings.
+- At `<=960px`, the finance rail collapses to a compact current-route summary plus an explicit menu toggle; navigation and secondary workspace links stay hidden until opened so the dashboard or route content remains near the top of the first viewport.
+- At narrow mobile widths, the utility row keeps only compact route/tenant/auth controls and hides non-essential explainer copy.
 
 **Dashboard (`/finance`)**
 
 - Header: **Finance** heading + short tenant-workspace copy.
-- Top controls: tenant picker, previous/current/next period controls, and a custom date-range form.
+- Top area: compact dashboard header plus direct links into accounts and transactions.
+- Controls area: period summary, previous/current/next period controls, and a compact custom date-range disclosure. Tenant control is not repeated here.
 - In `current_month` mode, the visible start/end date controls stay populated with the active month bounds on first load and after **Current month** is clicked.
 - Previous period, next period, and custom-range actions keep the visible date inputs synchronized with the reporting window returned by the dashboard API.
 - Body order:
   - KPI cards for settled net, pending net, and alert count
-  - alerts + missing-FX stack with a deep link to `#/admin/finance/fx`
-  - account balance summaries with a link to `#/finance/accounts`
-  - category breakdown summaries with a link to `#/finance/transactions`
+  - two-column analytics row for cash-flow totals and alerts/missing-FX; each panel includes a compact chart plus list/detail state, and alerts retain the deep link to `#/admin/finance/fx`
+  - two-column analytics row for account balance summaries and category breakdown summaries; each panel includes a compact chart plus links into the dedicated browse routes
+  - two-column activity row for recent transactions and connection/sync activity with links into transactions and connections
+- When dashboard data is available, the first useful viewport should read in this order: compact header and period context, primary booked-balance story, compact income/expense/pending summaries, one primary visual summary, then recent activity and attention states.
+- Responsive behavior preserves the same balance-first order on narrow screens; shell chrome, tenant chrome, and route actions should not push the money summary below the first viewport.
 
 **Tenants (`/finance/tenants`)**
 
@@ -317,8 +325,9 @@
 
 **Transactions (`/finance/transactions`, `/finance/transactions/new`, `/finance/transactions/:transactionId`)**
 
-- Transactions browse route: tenant/account/status/source/sort filters plus a clear **Create transaction** action.
-- Browse results: stacked cards with explicit state badges for pending, hidden, transfer, refund, and reconciliation signals plus direct **Open transaction** links.
+- Transactions browse route: tenant/account/status/source/sort filters, route-level action links, and visible summary chips.
+- Browse results: table-first ledger with explicit state badges for pending, hidden, transfer, refund, and reconciliation signals plus direct **Open transaction** links.
+- Desktop browse route also shows a contextual inspector for the currently selected transaction while keeping the full edit flow on the dedicated detail route.
 - Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly layout, explicit save/cancel actions, and visible transaction state context.
 - Edit route: loads one tenant-scoped transaction directly, keeps finance navigation context intact, and shows provider-original values when present so synced data stays distinguishable from operator edits.
 

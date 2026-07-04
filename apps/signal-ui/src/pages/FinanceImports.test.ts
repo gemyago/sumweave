@@ -22,6 +22,7 @@ vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'tok
 
 describe('Finance imports page', () => {
   beforeEach(() => {
+    window.localStorage.clear()
     const now = new Date('2026-06-20T12:00:00Z')
     Object.values(mocks).forEach((mock) => mock.mockReset())
     mocks.listTenants.mockResolvedValue([{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now }])
@@ -59,6 +60,14 @@ describe('Finance imports page', () => {
     render(FinanceImports)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('imports exploded')
+  })
+
+  it('falls back to a generic imports error when bootstrap rejects without an Error', async () => {
+    mocks.listTenants.mockRejectedValueOnce('boom')
+
+    render(FinanceImports)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load imports')
   })
 
   it('renders a no-tenant state with preview disabled', async () => {

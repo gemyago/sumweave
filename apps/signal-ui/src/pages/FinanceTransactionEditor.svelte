@@ -1,37 +1,34 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { link } from 'svelte-spa-router'
-  import FinanceSubnav from '../components/FinanceSubnav.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
     createSignalFinanceApiForAuth,
     type FinanceAccount,
     type FinanceCategory,
-    type FinanceTenantSummary,
     type FinanceTransaction,
   } from '../lib/finance/api'
   import { formatFinanceDateTime } from '../lib/finance/format'
-  import { chooseFinanceTenantId, setPreferredFinanceTenantId } from '../lib/finance/tenant-selection'
+  import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   let { params = {} } = $props<{ params?: { transactionId?: string } }>()
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
   const isCreateMode = $derived(!params.transactionId)
+  const financeShell = useFinanceShellState()
 
   let loading = $state(true)
   let saving = $state(false)
   let error = $state<string | null>(null)
   let saveMessage = $state<string | null>(null)
-  let tenants = $state<FinanceTenantSummary[]>([])
-  let selectedTenantId = $state('')
   let accounts = $state<FinanceAccount[]>([])
   let categories = $state<FinanceCategory[]>([])
   let transaction = $state<FinanceTransaction | null>(null)
   let form = $state(makeBlankForm())
+  let reactiveReady = $state(false)
+  let skipNextReactiveLoad = false
 
-  const selectedTenant = $derived(tenants.find((item) => item.id === selectedTenantId) ?? null)
-  const needsTenantSelection = $derived(tenants.length > 1 && !selectedTenantId)
   const stateFlags = $derived(makeTransactionFlags())
 
   onMount(() => {
@@ -98,33 +95,34 @@
     loading = true
     error = null
     saveMessage = null
+    reactiveReady = false
     try {
-      tenants = await financeApi.listTenants()
-      selectedTenantId = chooseFinanceTenantId(tenants)
-      if (!selectedTenantId) {
+      await financeShell.initialize()
+      if (!financeShell.selectedTenantId) {
         accounts = []
         categories = []
         transaction = null
         form = makeBlankForm()
         return
       }
-      setPreferredFinanceTenantId(selectedTenantId)
       await loadEditorData()
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load transaction editor'
     } finally {
+      skipNextReactiveLoad = true
+      reactiveReady = true
       loading = false
     }
   }
 
   async function loadEditorData() {
-    if (!selectedTenantId) {
+    if (!financeShell.selectedTenantId) {
       return
     }
     saveMessage = null
     ;[accounts, categories] = await Promise.all([
-      financeApi.listAccounts({ tenantId: selectedTenantId }),
-      financeApi.listCategories({ tenantId: selectedTenantId }),
+      financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
+      financeApi.listCategories({ tenantId: financeShell.selectedTenantId }),
     ])
     if (isCreateMode) {
       transaction = null
@@ -136,15 +134,10 @@
       return
     }
     transaction = await financeApi.getTransaction({
-      tenantId: selectedTenantId,
+      tenantId: financeShell.selectedTenantId,
       transactionId: params.transactionId ?? '',
     })
     fillFormFromTransaction(transaction)
-  }
-
-  async function onTenantChange() {
-    setPreferredFinanceTenantId(selectedTenantId)
-    await loadEditorData()
   }
 
   function syncCurrencyWithAccount() {
@@ -156,7 +149,7 @@
 
   async function saveTransaction(event: SubmitEvent) {
     event.preventDefault()
-    if (!selectedTenantId) {
+    if (!financeShell.selectedTenantId) {
       return
     }
     saving = true
@@ -165,7 +158,7 @@
     try {
       if (isCreateMode) {
         const created = await financeApi.createTransaction({
-          tenantId: selectedTenantId,
+          tenantId: financeShell.selectedTenantId,
           accountId: form.accountId,
           source: form.source,
           status: form.status,
@@ -182,7 +175,7 @@
         fillFormFromTransaction(created)
       } else {
         transaction = await financeApi.updateTransaction({
-          tenantId: selectedTenantId,
+          tenantId: financeShell.selectedTenantId,
           transactionId: params.transactionId ?? '',
           description: form.description,
           amountMinor: Number(form.amountMinor),
@@ -200,6 +193,17 @@
       saving = false
     }
   }
+
+  $effect(() => {
+    if (financeShell.loading || !reactiveReady) return
+    void financeShell.selectedTenantId
+    void params.transactionId
+    if (skipNextReactiveLoad) {
+      skipNextReactiveLoad = false
+      return
+    }
+    void loadEditorData()
+  })
 </script>
 
 <section class="page" aria-labelledby="finance-transaction-editor-heading">
@@ -219,8 +223,6 @@
     <a href="/finance/transactions" use:link>Back to transactions</a>
   </header>
 
-  <FinanceSubnav current="/finance/transactions" tenantName={selectedTenant?.name ?? ''} />
-
   {#if error}
     <p class="error" role="alert">{error}</p>
   {/if}
@@ -230,28 +232,32 @@
 
   {#if loading}
     <p class="muted" role="status">Loading transaction editor…</p>
-  {:else}
+  {:else if financeShell.needsTenantSelection}
     <section class="panel">
-      <label>
-        <span>Tenant</span>
-        <select bind:value={selectedTenantId} onchange={() => void onTenantChange()} aria-label="Tenant">
-          <option value="">Select tenant</option>
-          {#each tenants as tenant (tenant.id)}
-            <option value={tenant.id}>{tenant.name}</option>
-          {/each}
-        </select>
-      </label>
+      {#if !financeShell.embedded}
+        <label>
+          <span>Tenant</span>
+          <select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant">
+            <option value="">Select tenant</option>
+            {#each financeShell.tenants as tenant (tenant.id)}
+              <option value={tenant.id}>{tenant.name}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+      <p>Select an active tenant to continue on this finance route.</p>
     </section>
+  {:else if !financeShell.selectedTenantId}
+    <section class="panel">
+      <p>Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before editing transactions.</p>
+    </section>
+  {:else}
+    {#if !financeShell.embedded}
+      <section class="panel">
+        <label><span>Tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name}</option>{/each}</select></label>
+      </section>
+    {/if}
 
-    {#if needsTenantSelection}
-      <section class="panel">
-        <p>Select an active tenant to continue on this finance route.</p>
-      </section>
-    {:else if !selectedTenantId}
-      <section class="panel">
-        <p>Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before editing transactions.</p>
-      </section>
-    {:else}
       <section class="panel context-panel">
         <div>
           <h2>Transaction context</h2>
@@ -370,13 +376,12 @@
         </label>
 
         <div class="action-row">
-          <button class="primary" type="submit" disabled={saving || !selectedTenantId}>
+          <button class="primary" type="submit" disabled={saving || !financeShell.selectedTenantId}>
             {#if saving}Saving…{:else}Save transaction{/if}
           </button>
           <a href="/finance/transactions" use:link>Cancel</a>
         </div>
       </form>
-    {/if}
   {/if}
 </section>
 
@@ -441,6 +446,12 @@
   .muted {
     margin: 0;
     color: var(--text-muted);
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
   }
 
   .error {

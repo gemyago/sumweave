@@ -1,40 +1,11 @@
 <script lang="ts">
   import {link, replace} from 'svelte-spa-router'
-  import Monitor from '@lucide/svelte/icons/monitor'
-  import Moon from '@lucide/svelte/icons/moon'
-  import Sun from '@lucide/svelte/icons/sun'
-  import { themeStore, type ThemePreference } from '../lib/theme/theme-store.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
+  import ThemeSegmentedControl from './ThemeSegmentedControl.svelte'
 
   function signOut(): void {
     authStore.clearAuth()
     replace('/login')
-  }
-
-  const themeOptions: {
-    value: ThemePreference
-    label: string
-    icon: typeof Monitor
-  }[] = [
-    { value: 'auto', label: 'Auto', icon: Monitor },
-    { value: 'light', label: 'Light', icon: Sun },
-    { value: 'dark', label: 'Dark', icon: Moon },
-  ]
-
-  function setTheme(pref: ThemePreference): void {
-    themeStore.setPreference(pref)
-  }
-
-  function onThemeKeydown(e: KeyboardEvent, index: number): void {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
-    e.preventDefault()
-    const delta = e.key === 'ArrowRight' ? 1 : -1
-    const next = (index + delta + themeOptions.length) % themeOptions.length
-    const pref = themeOptions[next].value
-    setTheme(pref)
-    queueMicrotask(() => {
-      document.getElementById(`theme-opt-${pref}`)?.focus()
-    })
   }
 </script>
 
@@ -52,30 +23,7 @@
   </ul>
   <div class="nav-end">
     <button type="button" class="sign-out" onclick={signOut}>Sign out</button>
-    <div
-      class="theme-seg"
-      role="radiogroup"
-      aria-label="Theme"
-    >
-      {#each themeOptions as o, i (o.value)}
-        {@const Icon = o.icon}
-        {@const checked = themeStore.preference === o.value}
-        <button
-          id="theme-opt-{o.value}"
-          type="button"
-          class="theme-seg__btn"
-          role="radio"
-          aria-checked={checked}
-          aria-label={o.label}
-          tabindex={checked ? 0 : -1}
-          title={o.label}
-          onclick={() => setTheme(o.value)}
-          onkeydown={(e) => onThemeKeydown(e, i)}
-        >
-          <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
-        </button>
-      {/each}
-    </div>
+    <ThemeSegmentedControl />
   </div>
 </nav>
 
@@ -171,56 +119,6 @@
     outline: 2px solid var(--color-accent-blue);
     outline-offset: 1px;
   }
-
-  /* Theme: compact icon-only utility */
-  .theme-seg {
-    display: flex;
-    align-items: stretch;
-    padding: 1px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: transparent;
-    box-sizing: border-box;
-    opacity: 0.92;
-  }
-
-  .theme-seg__btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 0;
-    width: 1.75rem;
-    height: 1.625rem;
-    padding: 0;
-    border: none;
-    border-radius: 999px;
-    color: var(--text-muted);
-    background: transparent;
-    cursor: pointer;
-    transition:
-      background 0.1s ease,
-      color 0.1s ease,
-      opacity 0.1s ease;
-  }
-
-  .theme-seg__btn + .theme-seg__btn {
-    box-shadow: -1px 0 0 var(--border);
-  }
-
-  .theme-seg__btn[aria-checked='true'] {
-    color: var(--text-h);
-    background: var(--secondary-hover-bg);
-  }
-
-  .theme-seg__btn:hover:not([aria-checked='true']) {
-    color: var(--text);
-  }
-
-  .theme-seg__btn:focus-visible {
-    outline: 2px solid var(--color-accent-blue);
-    outline-offset: 1px;
-  }
-
   @media (max-width: 700px) {
     .app-nav {
       grid-template-columns: minmax(0, 1fr) auto;

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterEach, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterEach, afterAll, vi } from 'vitest'
 import { faker } from '@faker-js/faker'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -8,7 +8,14 @@ import {
 } from './client'
 import { parseAgentSseJsonStream } from './sse'
 import { buildAgentRunSseSampleStream } from './testFixtures'
-import type { AgentRunRequest, CreateProviderRequest, ProviderResponse, UpdateProviderRequest } from './types'
+import type {
+  AgentProfileListResponse,
+  AgentRunRequest,
+  CreateProviderRequest,
+  ModelListResponse,
+  ProviderResponse,
+  UpdateProviderRequest,
+} from './types'
 
 describe('createSignalAgentApi / streaming and providers (MSW)', () => {
   function makeAgentRunSampleFixture(): {
@@ -258,6 +265,47 @@ describe('createSignalAgentApi / streaming and providers (MSW)', () => {
       await api.deleteProvider({ providerName })
       expect(requestUrl).toBe(`${baseUrl}/providers/${providerName}`)
     })
+
+    it('listModels and listAgentProfiles: return API payloads', async () => {
+      const port = faker.internet.port()
+      const baseUrl = `http://127.0.0.1:${port}`
+      const models: ModelListResponse = {
+        models: [
+          {
+            provider: faker.word.noun().toLowerCase(),
+            name: faker.word.noun().toLowerCase(),
+            displayName: faker.company.name(),
+          },
+        ],
+      }
+      const profiles: AgentProfileListResponse = {
+        profiles: [
+          {
+            name: faker.word.noun().toLowerCase(),
+            displayName: faker.person.jobTitle(),
+            role: faker.word.noun(),
+            instructions: faker.lorem.sentence(),
+            toolRefs: [faker.word.noun().toLowerCase()],
+            executionSettings: {
+              defaultModel: `${faker.word.noun().toLowerCase()}/${faker.word.noun().toLowerCase()}`,
+            },
+            createdAt: faker.date.past().toISOString(),
+            updatedAt: faker.date.recent().toISOString(),
+          },
+        ],
+      }
+      server.use(
+        http.get(`${baseUrl}/models`, () => HttpResponse.json(models, { status: 200 })),
+        http.get(`${baseUrl}/agent-profiles`, () =>
+          HttpResponse.json(profiles, { status: 200 }),
+        ),
+      )
+
+      const api = createSignalAgentApi({ baseUrl })
+
+      await expect(api.listModels()).resolves.toEqual(models)
+      await expect(api.listAgentProfiles()).resolves.toEqual(profiles)
+    })
   })
 
   describe('listSessions (MSW)', () => {
@@ -321,6 +369,27 @@ describe('createSignalAgentApi / streaming and providers (MSW)', () => {
   })
 
   describe('error responses', () => {
+    it('listProviders: throws string errors using primitive fallback message', async () => {
+      vi.resetModules()
+      vi.doMock('openapi-fetch', () => ({
+        default: () => ({
+          GET: vi.fn().mockResolvedValue({ error: 'bad gateway' }),
+        }),
+      }))
+
+      try {
+        const { createSignalAgentApi: createMockedSignalAgentApi } = await import('./client')
+        const api = createMockedSignalAgentApi({ baseUrl: faker.internet.url() })
+
+        await expect(api.listProviders()).rejects.toThrow(
+          'Agent API GET /providers failed: bad gateway',
+        )
+      } finally {
+        vi.doUnmock('openapi-fetch')
+        vi.resetModules()
+      }
+    })
+
     it('400 returns application/problem+json (openapi-fetch parses error; response body consumed)', async () => {
       const { sampleBody } = makeAgentRunSampleFixture()
       const port = faker.internet.port()

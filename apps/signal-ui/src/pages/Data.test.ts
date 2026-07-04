@@ -74,23 +74,25 @@ function baseAvailabilityItem() {
   const latestEnd = faker.date.soon({ refDate: latestStart })
   const earlierStart = faker.date.past({ years: 1, refDate: latestStart })
   const earlierEnd = faker.date.soon({ refDate: earlierStart })
+  const earlierCount = symbolId * 10 + 100
+  const latestCount = earlierCount + 5
 
-    return {
-      venue: 'hyperliquid-perps',
-      symbol: `COIN${symbolId}USD`,
-      assetClass: 'crypto',
+  return {
+    venue: 'hyperliquid-perps',
+    symbol: `COIN${symbolId}USD`,
+    assetClass: 'crypto',
     timeframes: [
       {
         timeframe: '1m',
         start: earlierStart,
         end: earlierEnd,
-        count: faker.number.int({ min: 1, max: 500 }),
+        count: earlierCount,
       },
       {
         timeframe: '5m',
         start: latestStart,
         end: latestEnd,
-        count: faker.number.int({ min: 1, max: 500 }),
+        count: latestCount,
       },
     ],
     defaultSlice: {

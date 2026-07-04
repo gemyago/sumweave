@@ -73,4 +73,26 @@ describe('finance/admin wrapper pages', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Finance job detail' })).toBeInTheDocument())
   })
+
+  it('shows the join-tenant route hint when no finance tenants exist yet', async () => {
+    mocks.listTenants.mockResolvedValueOnce([])
+
+    render(FinanceJobDetail, { params: { jobId: 'job-1' } })
+
+    expect(await screen.findByRole('link', { name: 'Finance tenants' })).toHaveAttribute(
+      'href',
+      '/finance/tenants',
+    )
+    expect(
+      screen.getByText(/before opening this finance job detail route\./),
+    ).toBeInTheDocument()
+  })
+
+  it('surfaces finance workspace loading failures for finance job deep links', async () => {
+    mocks.listTenants.mockRejectedValueOnce('boom')
+
+    render(FinanceJobDetail, { params: { jobId: 'job-1' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load finance workspace')
+  })
 })

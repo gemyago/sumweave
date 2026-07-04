@@ -9,6 +9,7 @@ vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'tok
 
 describe('Finance accounts page', () => {
   beforeEach(() => {
+    window.localStorage.clear()
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTenants.mockResolvedValue([{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now }])
     mocks.listAccounts.mockResolvedValue([{ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now }])
@@ -63,9 +64,35 @@ describe('Finance accounts page', () => {
     await waitFor(() => expect(mocks.listAccounts).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', includeHidden: false }))
   })
 
+  it('returns to the no-tenant state when the standalone tenant selection is cleared', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.listTenants.mockResolvedValueOnce([
+      { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
+      { id: 'tenant-2', name: 'Travel', displayCurrency: 'EUR', joinedAt: now, createdAt: now, updatedAt: now },
+    ])
+    const user = userEvent.setup()
+    render(FinanceAccounts)
+
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Tenant' }), 'tenant-2')
+    await waitFor(() => expect(mocks.listAccounts).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', includeHidden: false }))
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), '')
+
+    expect(await screen.findByRole('button', { name: 'Create account' })).toBeDisabled()
+    expect(screen.getByText('No accounts yet.')).toBeInTheDocument()
+  })
+
   it('renders an error state when account loading fails', async () => {
     mocks.listTenants.mockRejectedValueOnce(new Error('accounts exploded'))
     render(FinanceAccounts)
     expect(await screen.findByRole('alert')).toHaveTextContent('accounts exploded')
+  })
+
+  it('falls back to a generic accounts error when workspace loading rejects without an Error', async () => {
+    mocks.listTenants.mockRejectedValueOnce('boom')
+
+    render(FinanceAccounts)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load accounts')
   })
 })

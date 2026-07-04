@@ -1,35 +1,31 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { link } from 'svelte-spa-router'
-  import FinanceSubnav from '../components/FinanceSubnav.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
     createSignalFinanceApiForAuth,
     type FinanceBankConnection,
-    type FinanceTenantSummary,
   } from '../lib/finance/api'
   import { formatFinanceDateTime } from '../lib/finance/format'
-  import { chooseFinanceTenantId, setPreferredFinanceTenantId } from '../lib/finance/tenant-selection'
+  import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
+  const financeShell = useFinanceShellState()
   const monobankProvider = 'monobank'
   const pkoProvider = 'pko'
   const syntheticProvider = 'synthetic'
 
   let loading = $state(true)
   let error = $state<string | null>(null)
-  let tenants = $state<FinanceTenantSummary[]>([])
-  let selectedTenantId = $state('')
   let connections = $state<FinanceBankConnection[]>([])
   let token = $state('')
   let lastJobId = $state('')
   let finishingRedirect = false
   let deletingConnectionId = $state('')
   let confirmDeleteConnectionId = $state('')
-
-  const selectedTenant = $derived(tenants.find((item) => item.id === selectedTenantId) ?? null)
-
+  let reactiveReady = $state(false)
+  let skipNextReactiveLoad = false
   onMount(() => {
     void loadPage()
   })
@@ -37,34 +33,36 @@
   async function loadPage() {
     loading = true
     error = null
+    reactiveReady = false
     try {
-      tenants = await financeApi.listTenants()
-      selectedTenantId = chooseFinanceTenantId(tenants)
-      if (selectedTenantId) {
-        setPreferredFinanceTenantId(selectedTenantId)
+      await financeShell.initialize()
+      if (financeShell.selectedTenantId) {
         await loadConnections()
         await finishRedirectIfReturned()
       }
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load connections'
     } finally {
+      skipNextReactiveLoad = true
+      reactiveReady = true
       loading = false
     }
   }
 
   async function loadConnections() {
-    if (!selectedTenantId) {
+    if (!financeShell.selectedTenantId) {
+      connections = []
       return
     }
     confirmDeleteConnectionId = ''
-    connections = await financeApi.listConnections({ tenantId: selectedTenantId })
+    connections = await financeApi.listConnections({ tenantId: financeShell.selectedTenantId })
   }
 
   async function linkMonobankToken(event: SubmitEvent) {
     event.preventDefault()
     error = null
     try {
-      await financeApi.linkTokenConnection({ tenantId: selectedTenantId, provider: monobankProvider, token })
+      await financeApi.linkTokenConnection({ tenantId: financeShell.selectedTenantId, provider: monobankProvider, token })
       token = ''
       await loadConnections()
     } catch (linkError) {
@@ -73,13 +71,13 @@
   }
 
   async function startPkoRedirect() {
-    if (!selectedTenantId) {
+    if (!financeShell.selectedTenantId) {
       return
     }
     error = null
     try {
       const started = await financeApi.startRedirectConnection({
-        tenantId: selectedTenantId,
+        tenantId: financeShell.selectedTenantId,
         provider: pkoProvider,
         callbackUrl: `${window.location.origin}/#/finance/connections`,
       })
@@ -90,13 +88,13 @@
   }
 
   async function startSyntheticSetup() {
-    if (!selectedTenantId) {
+    if (!financeShell.selectedTenantId) {
       return
     }
     error = null
     try {
       const started = await financeApi.startRedirectConnection({
-        tenantId: selectedTenantId,
+        tenantId: financeShell.selectedTenantId,
         provider: syntheticProvider,
         callbackUrl: `${window.location.origin}/#/finance/connections`,
       })
@@ -107,7 +105,7 @@
   }
 
   async function finishRedirectIfReturned() {
-    if (finishingRedirect || !selectedTenantId || window.location.hash !== '#/finance/connections') {
+    if (finishingRedirect || !financeShell.selectedTenantId || window.location.hash !== '#/finance/connections') {
       return
     }
     const params = new URLSearchParams(window.location.search)
@@ -119,7 +117,7 @@
 
     finishingRedirect = true
     try {
-      await financeApi.finishRedirectConnection({ tenantId: selectedTenantId, provider: pkoProvider, code, state })
+      await financeApi.finishRedirectConnection({ tenantId: financeShell.selectedTenantId, provider: pkoProvider, code, state })
       clearConsumedRedirectQuery()
     } catch (finishError) {
       error = finishError instanceof Error ? finishError.message : 'Failed to finish PKO connection'
@@ -146,7 +144,7 @@
   }
 
   async function triggerSync(connectionId: string) {
-    const job = await financeApi.triggerConnectionSync({ tenantId: selectedTenantId, connectionId, reason: 'operator_ui' })
+    const job = await financeApi.triggerConnectionSync({ tenantId: financeShell.selectedTenantId, connectionId, reason: 'operator_ui' })
     lastJobId = job.jobId
     await loadConnections()
   }
@@ -176,7 +174,7 @@
     error = null
     deletingConnectionId = connection.id
     try {
-      await financeApi.deleteConnection({ tenantId: selectedTenantId, connectionId: connection.id })
+      await financeApi.deleteConnection({ tenantId: financeShell.selectedTenantId, connectionId: connection.id })
       connections = connections.filter((item) => item.id !== connection.id)
       confirmDeleteConnectionId = ''
     } catch (deleteError) {
@@ -185,6 +183,17 @@
       deletingConnectionId = ''
     }
   }
+
+  $effect(() => {
+    if (financeShell.loading || !reactiveReady) return
+    void financeShell.selectedTenantId
+    if (skipNextReactiveLoad) {
+      skipNextReactiveLoad = false
+      return
+    }
+    void loadConnections()
+    void finishRedirectIfReturned()
+  })
 </script>
 
 <section class="page" aria-labelledby="finance-connections-heading">
@@ -192,34 +201,27 @@
       <h1 id="finance-connections-heading">Finance connections</h1>
       <p class="muted">Use provider-specific monobank token linking, PKO bank-login linking, or synthetic local setup here while keeping connection schedules and sync history visible. Deleting a link removes only local connection metadata and scheduled sync state.</p>
   </header>
-
-  <FinanceSubnav current="/finance/connections" tenantName={selectedTenant?.name ?? ''} />
-
   {#if error}
     <p class="error" role="alert">{error}</p>
   {/if}
 
   {#if loading}
     <p class="muted" role="status">Loading connections…</p>
-  {:else}
+  {:else if financeShell.needsTenantSelection}
     <section class="panel">
-      <label>
-        <span>Tenant</span>
-        <select
-          bind:value={selectedTenantId}
-          onchange={() => {
-            setPreferredFinanceTenantId(selectedTenantId)
-            void loadConnections()
-          }}
-          aria-label="Tenant"
-        >
-          <option value="">Select tenant</option>
-          {#each tenants as tenant (tenant.id)}
-            <option value={tenant.id}>{tenant.name}</option>
-          {/each}
-        </select>
-      </label>
+      {#if !financeShell.embedded}
+        <label><span>Tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name}</option>{/each}</select></label>
+      {/if}
+      <p>Select an active tenant to continue on this finance route.</p>
     </section>
+  {:else if !financeShell.selectedTenantId}
+    <section class="panel"><p>Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before linking finance providers.</p></section>
+  {:else}
+    {#if !financeShell.embedded}
+      <section class="panel">
+        <label><span>Tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name}</option>{/each}</select></label>
+      </section>
+    {/if}
 
     <div class="grid">
       <form class="panel" onsubmit={linkMonobankToken}>
@@ -228,14 +230,14 @@
           <span>Token</span>
           <input bind:value={token} aria-label="Monobank token" required />
         </label>
-        <button class="primary" type="submit" disabled={!selectedTenantId}>Link monobank</button>
+        <button class="primary" type="submit" disabled={!financeShell.selectedTenantId}>Link monobank</button>
         <p class="muted">This flow always submits a monobank token for the selected tenant.</p>
       </form>
 
       <section class="panel">
         <h2>Connect PKO</h2>
         <p class="muted">Start the PKO bank-login flow, complete consent in Enable Banking, and return here to finish linking in the browser.</p>
-        <button class="primary" type="button" disabled={!selectedTenantId} onclick={() => void startPkoRedirect()}>
+        <button class="primary" type="button" disabled={!financeShell.selectedTenantId} onclick={() => void startPkoRedirect()}>
           Connect PKO with bank login
         </button>
       </section>
@@ -243,7 +245,7 @@
       <section class="panel">
         <h2>Configure synthetic provider</h2>
         <p class="muted">Start the local synthetic setup flow, configure one or more synthetic accounts, then finish the link back in finance connections.</p>
-        <button class="primary" type="button" disabled={!selectedTenantId} onclick={() => void startSyntheticSetup()}>
+        <button class="primary" type="button" disabled={!financeShell.selectedTenantId} onclick={() => void startSyntheticSetup()}>
           Start synthetic setup
         </button>
       </section>
@@ -375,6 +377,12 @@
   .muted {
     margin: 0;
     color: var(--text-muted);
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
   }
 
   .error {

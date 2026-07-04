@@ -27,6 +27,7 @@ data/financial-poc/
 .cursor
 .opencode
 .codex
+.codex-artifacts
 
 # Node stuff
 node_modules

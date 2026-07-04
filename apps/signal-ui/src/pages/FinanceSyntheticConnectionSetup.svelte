@@ -1,19 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { link, replace } from 'svelte-spa-router'
-  import FinanceSubnav from '../components/FinanceSubnav.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
     createSignalFinanceApiForAuth,
     type FinanceSyntheticLinkState,
     type FinanceSyntheticLinkStateConfiguredAccount,
-    type FinanceTenantSummary,
   } from '../lib/finance/api'
-  import { chooseFinanceTenantId, setPreferredFinanceTenantId } from '../lib/finance/tenant-selection'
+  import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
   const syntheticProvider = 'synthetic'
+  const financeShell = useFinanceShellState()
 
   type ConfiguredAccountRow = {
     rowId: string
@@ -27,15 +26,12 @@
   let finishing = $state(false)
   let error = $state<string | null>(null)
   let saveMessage = $state<string | null>(null)
-  let tenants = $state<FinanceTenantSummary[]>([])
-  let selectedTenantId = $state('')
   let setupStateKey = $state('')
   let syntheticLinkState = $state<FinanceSyntheticLinkState | null>(null)
   let configuredAccounts = $state<ConfiguredAccountRow[]>([])
   let nextRowId = 0
-
-  const selectedTenant = $derived(tenants.find((item) => item.id === selectedTenantId) ?? null)
-  const needsTenantSelection = $derived(tenants.length > 1 && !selectedTenantId)
+  let reactiveReady = $state(false)
+  let skipNextReactiveLoad = false
 
   onMount(() => {
     void loadPage()
@@ -81,42 +77,33 @@
     error = null
     saveMessage = null
     setupStateKey = readSetupStateFromHash()
+    reactiveReady = false
     try {
-      tenants = await financeApi.listTenants()
-      selectedTenantId = chooseFinanceTenantId(tenants)
-      if (!selectedTenantId || !setupStateKey) {
+      await financeShell.initialize()
+      if (!financeShell.selectedTenantId || !setupStateKey) {
         if (!setupStateKey) {
           configuredAccounts = [createBlankAccountRow()]
         }
         return
       }
-      setPreferredFinanceTenantId(selectedTenantId)
       await loadSyntheticLinkState()
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load synthetic setup'
     } finally {
+      skipNextReactiveLoad = true
+      reactiveReady = true
       loading = false
     }
   }
 
   async function loadSyntheticLinkState() {
-    if (!selectedTenantId || !setupStateKey) {
+    if (!financeShell.selectedTenantId || !setupStateKey) {
       return
     }
     error = null
     saveMessage = null
-    syntheticLinkState = await financeApi.getSyntheticLinkState({ tenantId: selectedTenantId, state: setupStateKey })
+    syntheticLinkState = await financeApi.getSyntheticLinkState({ tenantId: financeShell.selectedTenantId, state: setupStateKey })
     configuredAccounts = mapConfiguredAccounts(syntheticLinkState.configuredAccounts)
-  }
-
-  async function onTenantChange() {
-    setPreferredFinanceTenantId(selectedTenantId)
-    if (!selectedTenantId) {
-      syntheticLinkState = null
-      configuredAccounts = [createBlankAccountRow()]
-      return
-    }
-    await loadSyntheticLinkState()
   }
 
   function updateConfiguredAccount(rowId: string, field: 'name' | 'currency', value: string) {
@@ -164,7 +151,7 @@
 
   async function saveConfiguration(event?: SubmitEvent) {
     event?.preventDefault()
-    if (!selectedTenantId || !setupStateKey || saving) {
+    if (!financeShell.selectedTenantId || !setupStateKey || saving) {
       return false
     }
     const normalized = normalizeConfiguredAccounts()
@@ -176,7 +163,7 @@
     saveMessage = null
     try {
       syntheticLinkState = await financeApi.saveSyntheticLinkState({
-        tenantId: selectedTenantId,
+        tenantId: financeShell.selectedTenantId,
         state: setupStateKey,
         configuredAccounts: normalized,
       })
@@ -192,7 +179,7 @@
   }
 
   async function finishLink() {
-    if (!selectedTenantId || !setupStateKey || finishing) {
+    if (!financeShell.selectedTenantId || !setupStateKey || finishing) {
       return
     }
     finishing = true
@@ -204,7 +191,7 @@
     }
     try {
       await financeApi.finishRedirectConnection({
-        tenantId: selectedTenantId,
+        tenantId: financeShell.selectedTenantId,
         provider: syntheticProvider,
         state: setupStateKey,
       })
@@ -215,6 +202,20 @@
       finishing = false
     }
   }
+
+  $effect(() => {
+    if (financeShell.loading || !reactiveReady) return
+    if (!financeShell.selectedTenantId) {
+      syntheticLinkState = null
+      configuredAccounts = [createBlankAccountRow()]
+      return
+    }
+    if (skipNextReactiveLoad) {
+      skipNextReactiveLoad = false
+      return
+    }
+    void loadSyntheticLinkState()
+  })
 </script>
 
 <section class="page" aria-labelledby="finance-synthetic-setup-heading">
@@ -225,9 +226,6 @@
     </div>
     <a href="/finance/connections" use:link>Back to connections</a>
   </header>
-
-  <FinanceSubnav current="/finance/connections" tenantName={selectedTenant?.name ?? ''} />
-
   {#if error}
     <p class="error" role="alert">{error}</p>
   {/if}
@@ -238,31 +236,28 @@
 
   {#if loading}
     <p class="muted" role="status">Loading synthetic setup…</p>
+  {:else if financeShell.needsTenantSelection}
+    <section class="panel">
+      {#if !financeShell.embedded}
+        <label><span>Tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name}</option>{/each}</select></label>
+      {/if}
+      <p>Select an active tenant to continue on this finance route.</p>
+    </section>
+  {:else if !financeShell.selectedTenantId}
+    <section class="panel">
+      <p>Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before linking a synthetic provider.</p>
+    </section>
   {:else}
     <section class="panel">
-      <label>
-        <span>Tenant</span>
-        <select bind:value={selectedTenantId} onchange={() => void onTenantChange()} aria-label="Tenant">
-          <option value="">Select tenant</option>
-          {#each tenants as tenant (tenant.id)}
-            <option value={tenant.id}>{tenant.name}</option>
-          {/each}
-        </select>
-      </label>
+      {#if !financeShell.embedded}
+        <label><span>Tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name}</option>{/each}</select></label>
+      {/if}
       {#if setupStateKey}
         <p class="muted">Pending setup state: {setupStateKey}</p>
       {/if}
     </section>
 
-    {#if needsTenantSelection}
-      <section class="panel">
-        <p>Select an active tenant to continue on this finance route.</p>
-      </section>
-    {:else if !selectedTenantId}
-      <section class="panel">
-        <p>Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before linking a synthetic provider.</p>
-      </section>
-    {:else if !setupStateKey}
+    {#if !setupStateKey}
       <section class="panel">
         <p>Start synthetic setup from <a href="/finance/connections" use:link>Finance connections</a> to get a valid pending state.</p>
       </section>
@@ -304,10 +299,10 @@
 
         <div class="action-row">
           <button class="secondary" type="button" onclick={addConfiguredAccount}>Add account</button>
-          <button class="primary" type="submit" disabled={saving || finishing || !selectedTenantId}>
+          <button class="primary" type="submit" disabled={saving || finishing || !financeShell.selectedTenantId}>
             {#if saving}Saving…{:else}Save configuration{/if}
           </button>
-          <button class="primary" type="button" onclick={() => void finishLink()} disabled={saving || finishing || !selectedTenantId}>
+          <button class="primary" type="button" onclick={() => void finishLink()} disabled={saving || finishing || !financeShell.selectedTenantId}>
             {#if finishing}Finishing…{:else}Finish link{/if}
           </button>
         </div>
@@ -378,6 +373,12 @@
   .muted {
     margin: 0;
     color: var(--text-muted);
+  }
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
   }
 
   .error {

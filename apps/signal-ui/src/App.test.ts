@@ -48,6 +48,8 @@ const financeApiMocks = vi.hoisted(() => ({
   listTags: vi.fn(),
   listTransactions: vi.fn(),
   listConnections: vi.fn(),
+  getTransaction: vi.fn(),
+  updateTransaction: vi.fn(),
   createTenant: vi.fn(),
   createTenantInvite: vi.fn(),
   acceptTenantInvite: vi.fn(),
@@ -121,6 +123,7 @@ describe('App shell', () => {
   beforeEach(() => {
     const now = new Date('2026-06-20T12:00:00Z')
     vi.clearAllMocks()
+    window.localStorage.clear()
     window.sessionStorage.clear()
     window.location.hash = ''
     mocks.isAuthenticated = true
@@ -165,6 +168,26 @@ describe('App shell', () => {
     financeApiMocks.listTags.mockResolvedValue([])
     financeApiMocks.listTransactions.mockResolvedValue([])
     financeApiMocks.listConnections.mockResolvedValue([])
+    financeApiMocks.getTransaction.mockResolvedValue({
+      id: 'tx-1',
+      tenantId: 'tenant-1',
+      accountId: 'account-1',
+      source: 'provider',
+      status: 'pending',
+      kind: 'expense',
+      amountMinor: 1200,
+      currency: 'USD',
+      description: 'Coffee',
+      effectiveAt: now,
+      categoryId: null,
+      transferGroupId: null,
+      transferMatchedAt: null,
+      hiddenAt: null,
+      providerOriginal: null,
+      createdAt: now,
+      updatedAt: now,
+    })
+    financeApiMocks.updateTransaction.mockResolvedValue(undefined)
     financeApiMocks.createTenant.mockResolvedValue(undefined)
     financeApiMocks.createTenantInvite.mockResolvedValue(undefined)
     financeApiMocks.acceptTenantInvite.mockResolvedValue(undefined)
@@ -260,6 +283,177 @@ describe('App shell', () => {
 
     navigateHash('#/admin')
     expect(await screen.findByRole('heading', { name: 'Admin' })).toBeInTheDocument()
+  })
+
+  it('renders all supported finance routes inside the dedicated finance shell', async () => {
+    render(App)
+
+    const cases = [
+      ['#/finance', 'Finance'],
+      ['#/finance/tenants', 'Finance tenants'],
+      ['#/finance/accounts', 'Finance accounts'],
+      ['#/finance/accounts/account-1', 'Finance account detail'],
+      ['#/finance/connections', 'Finance connections'],
+      ['#/finance/connections/synthetic?state=state-1', 'Synthetic setup'],
+      ['#/finance/transactions', 'Finance transactions'],
+      ['#/finance/transactions/new', 'Record transaction'],
+      ['#/finance/transactions/tx-1', 'Edit transaction'],
+      ['#/finance/categories', 'Finance categories and tags'],
+      ['#/finance/imports', 'Finance imports'],
+      ['#/finance/jobs/job-1', 'Finance job route'],
+    ] as const
+
+    for (const [hash, heading] of cases) {
+      navigateHash(hash)
+      expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument()
+      expect(screen.getByLabelText('Finance navigation')).toBeInTheDocument()
+      expect(screen.getByLabelText('Finance utilities')).toBeInTheDocument()
+      expect(screen.queryByRole('combobox', { name: 'Active tenant' })).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Main')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Finance sections')).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Rules' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument()
+    }
+  })
+
+  it('reuses one compact shell-level tenant control across tenant-aware finance routes', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    financeApiMocks.listTenants.mockResolvedValueOnce([
+      {
+        id: 'tenant-1',
+        name: 'Household',
+        displayCurrency: 'USD',
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'tenant-2',
+        name: 'Travel',
+        displayCurrency: 'EUR',
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ])
+    const user = userEvent.setup()
+    render(App)
+    navigateHash('#/finance')
+
+    expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument()
+    expect(screen.getAllByRole('combobox', { name: 'Active tenant' })).toHaveLength(1)
+    expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Active tenant' }), 'tenant-2')
+
+    const cases = [
+      ['#/finance', 'Finance'],
+      ['#/finance/accounts', 'Finance accounts'],
+      ['#/finance/accounts/account-1', 'Finance account detail'],
+      ['#/finance/transactions', 'Finance transactions'],
+      ['#/finance/transactions/new', 'Record transaction'],
+      ['#/finance/transactions/tx-1', 'Edit transaction'],
+      ['#/finance/categories', 'Finance categories and tags'],
+      ['#/finance/connections', 'Finance connections'],
+      ['#/finance/imports', 'Finance imports'],
+      ['#/finance/jobs/job-1', 'Finance job route'],
+    ] as const
+
+    for (const [hash, heading] of cases) {
+      navigateHash(hash)
+      expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument()
+      expect(screen.getAllByRole('combobox', { name: 'Active tenant' })).toHaveLength(1)
+      expect(screen.getByRole('combobox', { name: 'Active tenant' })).toHaveValue('tenant-2')
+      expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
+      expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
+    }
+  })
+
+  it('preserves tenant-scoped finance deep links while waiting for explicit tenant selection', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    const cases = [
+      ['#/finance', 'Finance'],
+      ['#/finance/accounts', 'Finance accounts'],
+      ['#/finance/accounts/account-1', 'Finance account detail'],
+      ['#/finance/transactions', 'Finance transactions'],
+      ['#/finance/transactions/new', 'Record transaction'],
+      ['#/finance/transactions/tx-1', 'Edit transaction'],
+      ['#/finance/categories', 'Finance categories and tags'],
+      ['#/finance/connections', 'Finance connections'],
+      ['#/finance/connections/synthetic?state=state-1', 'Synthetic setup'],
+      ['#/finance/imports', 'Finance imports'],
+      ['#/finance/jobs/job-1', 'Finance job route'],
+    ] as const
+
+    for (const [hash, heading] of cases) {
+      financeApiMocks.listTenants.mockResolvedValueOnce([
+        {
+          id: 'tenant-1',
+          name: 'Household',
+          displayCurrency: 'USD',
+          joinedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: 'tenant-2',
+          name: 'Travel',
+          displayCurrency: 'EUR',
+          joinedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ])
+      const user = userEvent.setup()
+      const app = render(App)
+
+      navigateHash(hash)
+
+      expect(await screen.findByText('Select an active tenant to continue on this finance route.')).toBeInTheDocument()
+      expect(window.location.hash).toBe(hash)
+
+      await user.selectOptions(screen.getByRole('combobox', { name: 'Active tenant' }), 'tenant-2')
+
+      await waitFor(() => {
+        expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
+      })
+      expect(window.location.hash).toBe(hash)
+
+      app.unmount()
+      window.localStorage.clear()
+      window.location.hash = ''
+    }
+  })
+
+  it('reuses a previously selected tenant across direct finance deep links', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    window.localStorage.setItem('signal-ui-finance-tenant-id', 'tenant-2')
+    financeApiMocks.listTenants.mockResolvedValueOnce([
+      {
+        id: 'tenant-1',
+        name: 'Household',
+        displayCurrency: 'USD',
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'tenant-2',
+        name: 'Travel',
+        displayCurrency: 'EUR',
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ])
+
+    render(App)
+    navigateHash('#/finance/transactions/tx-1')
+
+    expect(await screen.findByRole('heading', { name: 'Edit transaction' })).toBeInTheDocument()
+    expect(screen.queryByText('Select an active tenant to continue on this finance route.')).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Active tenant' })).toHaveValue('tenant-2')
   })
 
   it('renders the shared finance transaction editor routes when authenticated', async () => {

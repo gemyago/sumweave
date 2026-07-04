@@ -41,6 +41,26 @@ describe('Finance account detail page', () => {
     expect(await screen.findByText('Account not found for the selected tenant.')).toBeInTheDocument()
   })
 
+  it('shows the join-tenant route hint when no finance tenants are available', async () => {
+    mocks.listTenants.mockResolvedValueOnce([])
+
+    render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
+
+    expect(await screen.findByRole('link', { name: 'Finance tenants' })).toHaveAttribute(
+      'href',
+      '#/finance/tenants',
+    )
+    expect(screen.getByText(/before opening this account detail route\./)).toBeInTheDocument()
+  })
+
+  it('falls back to a generic account-detail error when workspace loading rejects without an Error', async () => {
+    mocks.listTenants.mockRejectedValueOnce('boom')
+
+    render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load account detail')
+  })
+
   it('requires an explicit tenant choice for deep links when multiple tenants are joined', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     const user = userEvent.setup()

@@ -22,7 +22,8 @@ schema: spec-driven
 rules:
   tasks:
     - Tests must be integral part of the task, do not split them
-    - Tasks must follow TDD flow (write test -> implement -> verify)
+    - Most tasks must follow TDD flow (write test -> implement -> verify). This may not apply to UI/Visual tasks.
+    - UI/Visual tasks must follow visual verification flow (adjust design -> verify)
     - Task description must start with a summary of what to do and then mention that is must follow TDD flow
     - Any manual step must be documented on design level only
     - Any obligatory manual step must be considered as blocker and must be resolved by user interaction

@@ -1,60 +1,57 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import FinanceSubnav from '../components/FinanceSubnav.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
-  import { createSignalFinanceApiForAuth, type FinanceTenantInvite, type FinanceTenantMember, type FinanceTenantSummary } from '../lib/finance/api'
-  import { chooseFinanceTenantId, setPreferredFinanceTenantId } from '../lib/finance/tenant-selection'
+  import { createSignalFinanceApiForAuth, type FinanceTenantInvite, type FinanceTenantMember } from '../lib/finance/api'
   import { formatFinanceDateTime } from '../lib/finance/format'
+  import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
+  const financeShell = useFinanceShellState()
 
   let loading = $state(true)
   let error = $state<string | null>(null)
-  let tenants = $state<FinanceTenantSummary[]>([])
-  let selectedTenantId = $state('')
   let members = $state<FinanceTenantMember[]>([])
   let invites = $state<FinanceTenantInvite[]>([])
   let createName = $state('')
   let createCurrency = $state('USD')
   let inviteRecipient = $state('')
   let inviteCode = $state('')
-
-  const selectedTenant = $derived(tenants.find((item) => item.id === selectedTenantId) ?? null)
-
+  let reactiveReady = $state(false)
+  let skipNextReactiveLoad = false
   onMount(() => { void loadPage() })
 
   async function loadPage() {
     loading = true
     error = null
+    reactiveReady = false
     try {
-      tenants = await financeApi.listTenants()
-      selectedTenantId = chooseFinanceTenantId(tenants)
-      if (selectedTenantId) {
-        setPreferredFinanceTenantId(selectedTenantId)
+      await financeShell.initialize()
+      if (financeShell.selectedTenantId) {
         await loadTenantDetails()
       }
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load tenants'
     } finally {
+      skipNextReactiveLoad = true
+      reactiveReady = true
       loading = false
     }
   }
 
   async function loadTenantDetails() {
-    if (!selectedTenantId) {
+    if (!financeShell.selectedTenantId) {
       members = []
       invites = []
       return
     }
     ;[members, invites] = await Promise.all([
-      financeApi.listTenantMembers({ tenantId: selectedTenantId }),
-      financeApi.listTenantInvites({ tenantId: selectedTenantId }),
+      financeApi.listTenantMembers({ tenantId: financeShell.selectedTenantId }),
+      financeApi.listTenantInvites({ tenantId: financeShell.selectedTenantId }),
     ])
   }
 
   async function onTenantChange() {
-    setPreferredFinanceTenantId(selectedTenantId)
     await loadTenantDetails()
   }
 
@@ -62,13 +59,14 @@
     event.preventDefault()
     await financeApi.createTenant({ name: createName, displayCurrency: createCurrency })
     createName = ''
-    await loadPage()
+    await financeShell.refreshTenants()
+    await loadTenantDetails()
   }
 
   async function createInvite(event: SubmitEvent) {
     event.preventDefault()
-    if (!selectedTenantId) return
-    await financeApi.createTenantInvite({ tenantId: selectedTenantId, recipient: inviteRecipient })
+    if (!financeShell.selectedTenantId) return
+    await financeApi.createTenantInvite({ tenantId: financeShell.selectedTenantId, recipient: inviteRecipient })
     inviteRecipient = ''
     await loadTenantDetails()
   }
@@ -77,17 +75,27 @@
     event.preventDefault()
     await financeApi.acceptTenantInvite({ code: inviteCode })
     inviteCode = ''
-    await loadPage()
+    await financeShell.refreshTenants()
+    await loadTenantDetails()
   }
+
+  $effect(() => {
+    if (financeShell.loading || !reactiveReady) return
+    void financeShell.selectedTenantId
+    if (skipNextReactiveLoad) {
+      skipNextReactiveLoad = false
+      return
+    }
+    void onTenantChange()
+  })
 </script>
 
 <section class="page" aria-labelledby="finance-tenants-heading">
   <header><h1 id="finance-tenants-heading">Finance tenants</h1><p class="muted">Select the active tenant, create a new one, issue invites, or join with an invite code.</p></header>
-  <FinanceSubnav current="/finance/tenants" tenantName={selectedTenant?.name ?? ''} />
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if loading}<p class="muted" role="status">Loading finance tenants…</p>{:else}
     <section class="panel">
-      <label><span>Selected tenant</span><select bind:value={selectedTenantId} onchange={() => void onTenantChange()} aria-label="Selected tenant"><option value="">Select tenant</option>{#each tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name} · {tenant.displayCurrency}</option>{/each}</select></label>
+      <label><span>Selected tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Selected tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name} · {tenant.displayCurrency}</option>{/each}</select></label>
     </section>
     <div class="grid">
       <form class="panel" onsubmit={createTenant}>
@@ -102,7 +110,7 @@
         <button class="primary" type="submit">Accept invite</button>
       </form>
     </div>
-    {#if selectedTenantId}
+    {#if financeShell.selectedTenantId}
       <div class="grid">
         <section class="panel">
           <h2>Members</h2>

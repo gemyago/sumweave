@@ -112,6 +112,8 @@ AI must always follow the rules and conventions defined in this section. This se
 
 The rules are:
 - **DO NOT** over engineer or over-complicate. Address problems present now or explicitly requested.
+- Never go outside of the project root
+- Store temp files in a project scoped tmp directory (e.g ${PWD}/tmp/...)
 - Update project rules and conventions when user corrects the behavior of AI.
 - Each rule must aim to be a simple and clear one line (50-80 characters)
 - `docs/ARCHITECTURE.md` is the source of truth for product direction.
