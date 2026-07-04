@@ -27,6 +27,7 @@ func Register(container *dig.Container) error {
 		di.ProvideImplementation[*financepkg.CSVImportService, csvImportService],
 		di.ProvideImplementation[*financepkg.BankSyncService, bankSyncService],
 		di.ProvideImplementation[*financepkg.BankConnectionService, bankConnectionService],
+		di.ProvideImplementation[*financepkg.SyntheticLinkStateService, syntheticLinkStateService],
 		NewAuthController,
 		NewDataController,
 		NewJobsController,

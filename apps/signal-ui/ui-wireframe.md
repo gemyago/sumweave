@@ -60,6 +60,7 @@
 | `/finance/accounts` | Finance account list and create route. Protected. |
 | `/finance/accounts/:accountId` | Finance account detail route. Protected. Separate detail route with recent transaction context. |
 | `/finance/connections` | Finance connection list/link/sync route. Protected. Schedule and last/next sync visibility stay here, and operators can locally delete a link without removing imported ledger history. |
+| `/finance/connections/synthetic` | Finance synthetic setup route. Protected. Loads pending synthetic setup by returned `state`, allows save/reload/add/remove account rows, finishes the local link, and returns to `/finance/connections`. |
 | `/finance/transactions` | Finance transactions browse/filter route. Protected. Card-first state cues plus explicit create/edit entry points. |
 | `/finance/transactions/new` | Dedicated protected transaction create editor route with a single-record mobile-friendly layout. |
 | `/finance/transactions/:transactionId` | Dedicated protected transaction edit route that reuses the transaction editor and loads tenant-scoped detail directly. |
@@ -328,11 +329,21 @@
 
 **Connections (`/finance/connections`)**
 
-- Header copy calls out the only supported bank-link choices: monobank token linking and PKO bank login via Enable Banking.
+- Header copy calls out the only supported bank-link choices: monobank token linking, PKO bank login via Enable Banking, and synthetic local setup.
 - The route does not render a free-text provider field or ask operators to enter connector names such as `enable-banking`.
-- Panels: tenant picker, monobank token form, PKO bank-login start panel, operator notes, then stacked connection cards.
+- Panels: tenant picker, monobank token form, PKO bank-login start panel, synthetic setup start panel, operator notes, then stacked connection cards.
 - PKO start sends the browser route `{origin}/#/finance/connections` to the backend, the backend derives `/enable-banking/callback` for the provider redirect and looks up the stored browser handoff by returned `state`, and the browser return is handed back to `{origin}/?code=...&state=...#/finance/connections`; the page clears the consumed query string only after a successful finish, keeps the hash route active, and preserves failed return params for a retry on refresh/re-open.
+- Synthetic start also sends `{origin}/#/finance/connections` to the backend, but the returned authorization URL is the fixed local route `#/finance/connections/synthetic?state=...`; the browser stays in-app, pushes that hash route immediately, and the setup screen uses the returned `state` for load/save/finish calls.
 - Each connection card shows provider/state plus a stable secondary identifier (provider reference, external id, or created timestamp), along with last sync outcome, schedule visibility, job deep links, and an in-card delete confirmation that repeats the selected row identifier before removing it immediately after a successful delete.
+
+**Synthetic setup (`/finance/connections/synthetic`)**
+
+- Header: **Synthetic setup** heading, back link to Connections, finance sub-navigation, tenant picker, and visible pending setup `state`.
+- The route reads `state` from `#/finance/connections/synthetic?state=...`; opening the route without that query does not guess or create a new state and instead points the operator back to Connections to start the flow.
+- Main form shows one or more configured-account rows with labeled **name** and **currency** inputs plus explicit **Add account**, per-row **Remove configured account N**, **Reload pending setup**, **Save configuration**, and **Finish link** actions.
+- Saving sends the current configured rows to the synthetic link-state API and re-renders from the API response so stable synthetic account keys keep duplicate rows distinct after save/reload.
+- Finish validates at least one complete configured row, saves the latest form values, calls synthetic redirect finish with the same `state`, then returns to `#/finance/connections` where the resulting synthetic connection is visible in the normal connection list.
+- Save or finish validation/API failures stay on the synthetic setup route and use inline alert/status messaging instead of dropping the pending state.
 
 **Imports (`/finance/imports`)**
 

@@ -17,10 +17,15 @@ type FinanceBankLinkRedirectProvider string
 // List of FinanceBankLinkRedirectProvider values.
 const (
 	FinanceBankLinkRedirectProviderPko FinanceBankLinkRedirectProvider = "pko"
+	FinanceBankLinkRedirectProviderSynthetic FinanceBankLinkRedirectProvider = "synthetic"
 )
 
 func(v FinanceBankLinkRedirectProvider) IsPko() bool {
   return v == FinanceBankLinkRedirectProviderPko
+}
+
+func(v FinanceBankLinkRedirectProvider) IsSynthetic() bool {
+  return v == FinanceBankLinkRedirectProviderSynthetic
 }
 
 func(v FinanceBankLinkRedirectProvider) String() string {
@@ -29,6 +34,7 @@ func(v FinanceBankLinkRedirectProvider) String() string {
 
 type assignableFinanceBankLinkRedirectProvider interface {
 	IsPko() bool
+	IsSynthetic() bool
 	String() string
 }
 
@@ -40,6 +46,8 @@ func ParseFinanceBankLinkRedirectProvider(str string, target *FinanceBankLinkRed
 	switch str {
 	case "pko":
 		*target = FinanceBankLinkRedirectProviderPko
+	case "synthetic":
+		*target = FinanceBankLinkRedirectProviderSynthetic
 	default:
 		return fmt.Errorf("unexpected FinanceBankLinkRedirectProvider value: %s", str)
 	}
@@ -57,5 +65,6 @@ func (v *FinanceBankLinkRedirectProvider) UnmarshalJSON(data []byte) error {
 // All allowed values of FinanceBankLinkRedirectProvider enum.
 var AllowableFinanceBankLinkRedirectProviderValues = []FinanceBankLinkRedirectProvider{
 	FinanceBankLinkRedirectProviderPko,
+	FinanceBankLinkRedirectProviderSynthetic,
 }
 

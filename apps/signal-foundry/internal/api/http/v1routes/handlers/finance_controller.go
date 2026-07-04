@@ -159,6 +159,16 @@ type FinanceController interface {
 		*FinanceFxDiagnosticsResponse,
 	]) http.Handler
 
+	// GET /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+	//
+	// Request type: GetFinanceSyntheticLinkStateParams,
+	//
+	// Response type: FinanceSyntheticLinkStateResponse
+	GetFinanceSyntheticLinkState(HandlerBuilder[
+		*GetFinanceSyntheticLinkStateParams,
+		*FinanceSyntheticLinkStateResponse,
+	]) http.Handler
+
 	// GET /api/v1/finance/tenants/{tenantId}
 	//
 	// Request type: GetFinanceTenantParams,
@@ -278,6 +288,16 @@ type FinanceController interface {
 		*FinanceCsvImportPreviewResponse,
 	]) http.Handler
 
+	// PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+	//
+	// Request type: PutFinanceSyntheticLinkStateParams,
+	//
+	// Response type: FinanceSyntheticLinkStateResponse
+	PutFinanceSyntheticLinkState(HandlerBuilder[
+		*PutFinanceSyntheticLinkStateParams,
+		*FinanceSyntheticLinkStateResponse,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/connections/link-redirect/start
 	//
 	// Request type: StartFinanceConnectionRedirectLinkParams,
@@ -351,6 +371,8 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/fx/diagnostics
 // 
+// - GET /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+// 
 // - GET /api/v1/finance/tenants/{tenantId}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}
@@ -374,6 +396,8 @@ type FinanceController interface {
 // - GET /api/v1/finance/tenants/{tenantId}/transactions
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/imports/preview
+// 
+// - PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/link-redirect/start
 // 
@@ -401,6 +425,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports/{importId}", controller.GetFinanceCsvImportAudit(builder.GetFinanceCsvImportAudit))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/dashboard", controller.GetFinanceDashboard(builder.GetFinanceDashboard))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/fx/diagnostics", controller.GetFinanceFxDiagnostics(builder.GetFinanceFxDiagnostics))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}", controller.GetFinanceSyntheticLinkState(builder.GetFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}", controller.GetFinanceTenant(builder.GetFinanceTenant))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}", controller.GetFinanceTransaction(builder.GetFinanceTransaction))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-token", controller.LinkFinanceConnectionToken(builder.LinkFinanceConnectionToken))
@@ -413,6 +438,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants", controller.ListFinanceTenants(builder.ListFinanceTenants))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions", controller.ListFinanceTransactions(builder.ListFinanceTransactions))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/imports/preview", controller.PreviewFinanceCsvImport(builder.PreviewFinanceCsvImport))
+	rootHandler.router.HandleRoute("PUT", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}", controller.PutFinanceSyntheticLinkState(builder.PutFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/start", controller.StartFinanceConnectionRedirectLink(builder.StartFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync", controller.TriggerFinanceConnectionSync(builder.TriggerFinanceConnectionSync))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/fx/sync", controller.TriggerFinanceFxSync(builder.TriggerFinanceFxSync))

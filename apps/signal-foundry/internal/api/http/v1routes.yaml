@@ -1301,6 +1301,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}:
+    get:
+      summary: Get pending synthetic finance link-state configuration
+      operationId: getFinanceSyntheticLinkState
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pending synthetic finance link-state configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceSyntheticLinkStateResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      summary: Save pending synthetic finance link-state configuration
+      operationId: putFinanceSyntheticLinkState
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: state
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceSyntheticLinkStateUpdateRequest"
+      responses:
+        '200':
+          description: Saved pending synthetic finance link-state configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceSyntheticLinkStateResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/v1/finance/tenants/{tenantId}/connections/{connectionId}:
     delete:
       summary: Delete finance bank connection
@@ -2959,14 +3018,45 @@ components:
         state: { type: string }
     FinanceConnectionLinkRedirectFinishRequest:
       type: object
-      required: [provider, code, state]
+      required: [provider, state]
       properties:
         provider: { $ref: "#/components/schemas/FinanceBankLinkRedirectProvider" }
         code: { type: string }
         state: { type: string }
     FinanceBankLinkRedirectProvider:
       type: string
-      enum: [pko]
+      enum: [pko, synthetic]
+    FinanceSyntheticLinkStateConfiguredAccountRequest:
+      type: object
+      required: [name, currency]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        currency: { type: string }
+    FinanceSyntheticLinkStateUpdateRequest:
+      type: object
+      required: [configuredAccounts]
+      properties:
+        configuredAccounts:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceSyntheticLinkStateConfiguredAccountRequest" }
+    FinanceSyntheticLinkStateConfiguredAccountResponse:
+      type: object
+      required: [key, name, currency]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        currency: { type: string }
+    FinanceSyntheticLinkStateResponse:
+      type: object
+      required: [provider, state, configuredAccounts, canFinish]
+      properties:
+        provider: { type: string }
+        state: { type: string }
+        configuredAccounts:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceSyntheticLinkStateConfiguredAccountResponse" }
+        canFinish: { type: boolean }
     FinanceConnectionSyncRequest:
       type: object
       properties:

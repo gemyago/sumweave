@@ -80,13 +80,15 @@ The finance module SHALL support secure provider linking plus explicit async syn
 #### Scenario: Provider credentials are encrypted and redacted
 - **WHEN** bank connections or provider sessions are stored and later surfaced through logs, APIs, jobs, or admin screens
 - **THEN** provider credentials and decrypted secrets MUST be encrypted at rest, MUST NOT be logged or returned by default, and MUST keep enough metadata to expose re-authentication needs
+- **AND** provider references that identify local provider setup state MUST NOT be treated as decrypted credentials unless the provider explicitly marks them as secret material
 
 #### Scenario: Supported bank linking methods are explicit
 - **WHEN** a tenant member starts a bank-linking workflow
 - **THEN** the system MUST expose monobank as a token-based bank connection option
-- **AND** the system MUST expose PKO as a redirect/SCA bank connection option implemented through Enable Banking
+- **AND** the system MUST expose PKO as an external redirect/SCA bank connection option implemented through Enable Banking
+- **AND** the system MUST expose synthetic as a local redirect-style configured bank connection option
 - **AND** token linking MUST reject any bank provider other than monobank before storing secrets or calling a provider
-- **AND** redirect/SCA linking MUST reject any bank provider other than PKO before storing secrets or calling a provider
+- **AND** redirect link start/finish MUST reject any bank provider other than PKO or synthetic before storing secrets or calling a provider
 - **AND** local or fake-provider PKO redirect/SCA validation MUST NOT require a browser-trusted HTTPS certificate when the callback URL uses localhost or a loopback address
 
 #### Scenario: PKO redirect link is completed from a pending start
@@ -95,60 +97,16 @@ The finance module SHALL support secure provider linking plus explicit async syn
 - **AND** the system MUST create the bank connection through the Enable Banking finish-link path
 - **AND** the system MUST consume or expire the pending link start so the same state cannot create duplicate connections
 
+#### Scenario: Synthetic local redirect link is completed from configured pending state
+- **WHEN** a tenant member finishes a synthetic link with a valid pending state
+- **THEN** the system MUST resolve the server-side pending synthetic link start for the same tenant and actor
+- **AND** it MUST require configured synthetic account state with at least one valid account before creating the bank connection
+- **AND** it MUST create an active synthetic bank connection whose `ProviderReference` is the synthetic state key
+- **AND** it MUST consume or expire the pending link start so the same state cannot create duplicate connections
+
 #### Scenario: Bank sync remains idempotent and job-backed
-- **WHEN** a tenant member triggers or schedules a bank sync for a linked monobank or PKO connection
+- **WHEN** a tenant member triggers or schedules a bank sync for a linked monobank, PKO, or synthetic connection
 - **THEN** the system MUST execute the sync through durable finance jobs, persist normalized accounts/transactions, balance snapshots, provider-original identifiers, and raw payloads, and deduplicate by provider/connection/account/provider-transaction identity plus safe fallback fingerprints when needed
-
-#### Scenario: Provider sync v2 models observations separately from ledger records
-- **WHEN** the finance module defines provider sync v2 data shapes
-- **THEN** provider connectors MUST return normalized provider account, balance, transaction, and raw payload observations rather than directly returning ledger transaction persistence models
-- **AND** provider observation types MUST be clearly named with `Provider` or `ProviderSync` prefixes so they remain distinct from user-facing finance ledger types
-- **AND** provider connectors MUST NOT persist finance records directly
-
-#### Scenario: Provider sync v2 tracks per-connection state
-- **WHEN** provider sync v2 records sync progress
-- **THEN** sync state MUST be scoped to a bank connection
-- **AND** it MUST keep attempt time, success time, successful window coverage, run or job identity, error summary, and aggregate sync stats where available
-
-#### Scenario: Provider sync v2 plans diffs before applying writes
-- **WHEN** provider sync v2 compares provider observations with persisted data
-- **THEN** it MUST load an existing-window snapshot for the connection using a candidate lookup window that may be wider than the requested provider sync window
-- **AND** it MUST produce an explicit diff plan before persistence writes are applied
-- **AND** the diff planner MUST be pure, deterministic, and free of persistence writes or provider network calls
-
-#### Scenario: Provider sync v2 handles ambiguous transaction matches conservatively
-- **WHEN** a provider transaction observation has only weak or ambiguous persisted transaction candidates
-- **THEN** the diff plan MUST create a new transaction action instead of merging into an existing transaction
-- **AND** the sync stats MUST count the action as an ambiguous-created transaction
-
-#### Scenario: Provider sync v2 preserves user-edited transaction fields
-- **WHEN** a provider transaction observation strongly matches an existing provider-synced transaction
-- **THEN** provider-original fields MUST be refreshed from the new observation
-- **AND** a user-facing transaction field MUST be updated from the provider observation only when the current field value still matches the previous provider-original value
-- **AND** a user-facing transaction field MUST be preserved when it differs from the previous provider-original value
-
-#### Scenario: Provider sync v2 separates product providers from technical connectors
-- **WHEN** PKO sync is represented in provider sync v2
-- **THEN** PKO MUST be modeled as product provider `pko`
-- **AND** Enable Banking MUST be modeled as technical connector `enable-banking`
-- **AND** the relation between PKO and Enable Banking MUST be composition through a provider profile rather than inheritance or user-facing connector exposure
-
-#### Scenario: Provider sync v2 real-bank connectors stay independent from legacy provider implementations
-- **WHEN** finance composes the `monobank` or `enable-banking` provider sync v2 connectors
-- **THEN** each connector MUST implement its own link and fetch behavior inside the v2 connector seam rather than wrapping legacy root `finance` bank-provider implementations
-- **AND** the legacy root bank-provider implementations MUST remain removable after runtime cutover without changing the v2 connector contract
-
-#### Scenario: Provider sync v2 Monobank connector stays token-based
-- **WHEN** finance composes the `monobank` provider sync v2 connector
-- **THEN** that connector MUST support token linking and requested-window fetch
-- **AND** it MUST reject redirect start and redirect finish operations as unsupported for Monobank
-- **AND** requested-window fetch MUST return provider account, transaction, and raw-payload observations without direct ledger persistence
-
-#### Scenario: Provider sync v2 Enable Banking connector stays redirect-based
-- **WHEN** finance composes the `enable-banking` provider sync v2 connector for PKO
-- **THEN** that connector MUST support redirect start, redirect finish, and requested-window fetch
-- **AND** it MUST reject token linking as unsupported for Enable Banking
-- **AND** requested-window fetch MUST return provider account, balance, transaction, and raw-payload observations without direct ledger persistence
 
 #### Scenario: Scheduled sync management scope stays explicit
 - **WHEN** finance scheduling features are surfaced
@@ -168,20 +126,15 @@ The backend application SHALL expose finance APIs through the existing app under
 - **THEN** the system MUST reject the request as unauthorized
 - **AND** when an authenticated caller accesses finance endpoints, tenant-scoped reads and writes MUST remain isolated to the caller's joined tenants
 
-#### Scenario: Finance transaction detail API preserves tenant scope and editor context
-- **WHEN** an authenticated tenant member calls `GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}`
-- **THEN** the system MUST return the selected transaction in camelCase JSON with `providerOriginal` included when present
-- **AND** the read flow MUST reject transaction identifiers that do not belong to the selected tenant
-
-#### Scenario: Finance transaction update API preserves tenant scope and reporting semantics
-- **WHEN** an authenticated tenant member calls `PATCH /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}`
-- **THEN** the system MUST update only the transaction's user-editable reporting fields `description`, `amountMinor`, `effectiveAt`, and nullable `categoryId`
-- **AND** the response MUST return the updated transaction in camelCase JSON with `providerOriginal` included when present
-- **AND** the update flow MUST reject transaction or category identifiers that do not belong to the selected tenant
+#### Scenario: Synthetic pending link configuration is tenant and actor scoped
+- **WHEN** an authenticated tenant member reads or updates synthetic link-state configuration for a pending state
+- **THEN** the API MUST verify the state belongs to the selected tenant, authenticated actor, and provider `synthetic`
+- **AND** the API MUST reject expired, consumed, wrong-tenant, wrong-actor, or non-synthetic pending states without exposing another user's setup data
+- **AND** configuration responses MUST use camelCase JSON and MUST NOT include decrypted credentials
 
 #### Scenario: Finance API covers required product areas
 - **WHEN** the first finance slice is implemented
-- **THEN** the API surface MUST cover tenants, tenant members/invites, accounts, bank connections, transactions including list/detail/create/update flows, categories, tags, dashboard/reporting, FX diagnostics and sync, CSV import preview/confirm/status, and finance-related job deep-linking
+- **THEN** the API surface MUST cover tenants, tenant members/invites, accounts, bank connections, synthetic link-state configuration, transactions including list/detail/create/update flows, categories, tags, dashboard/reporting, FX diagnostics and sync, CSV import preview/confirm/status, and finance-related job deep-linking
 - **AND** all operator-facing JSON fields MUST use camelCase
 
 ### Requirement: Finance Schema Is Prepared Explicitly
@@ -216,18 +169,24 @@ The finance module SHALL resolve the provider sync v2 fetch connector from the p
 - **AND** the failure MUST identify connector resolution as the cause without exposing secrets or raw provider payload content
 
 ### Requirement: Provider Sync V2 Supports Synthetic Provider Storage And Generation
-The finance module SHALL support a core-only `synthetic` bank provider through provider sync v2, including provider-owned linking configuration and dedicated synthetic-provider storage for generation history.
+The finance module SHALL support a configured `synthetic` bank provider through provider sync v2, including provider-owned linking configuration and dedicated synthetic-provider storage for generation history.
 
-#### Scenario: Synthetic connection is linked from configured accounts
-- **WHEN** core finance code links a synthetic bank connection with a list of account names and currencies
-- **THEN** the system MUST create an active bank connection with product provider `synthetic` and connector `synthetic`
-- **AND** the account configuration MUST require each generated account to have a non-empty display name and currency
-- **AND** the account configuration MUST be persisted as provider-owned connection data without adding a user-facing UI or public HTTP linking surface
+#### Scenario: Synthetic setup starts as a local redirect link
+- **WHEN** a tenant member starts a synthetic bank connection link
+- **THEN** the system MUST create a pending link start for product provider `synthetic` and connector `synthetic`
+- **AND** the start result MUST include a generated state key and a local UI authorization URL that routes the operator to synthetic setup
+- **AND** the generated state key MUST become the provider reference for pending and finished synthetic state
+
+#### Scenario: Synthetic pending state is configured through API
+- **WHEN** a tenant member configures pending synthetic setup
+- **THEN** the account configuration MUST require at least one generated account with non-empty display name and currency before finish can succeed
+- **AND** the account configuration MUST be persisted as provider-owned state keyed by provider reference
+- **AND** duplicate configured accounts with the same display name and currency MUST remain distinct through stable synthetic account keys
 
 #### Scenario: Synthetic storage round-trips generation state
-- **WHEN** core finance code saves synthetic-provider state for a linked synthetic connection
-- **THEN** the system MUST persist configured accounts, generated-window history, repeat counters, and transaction sequence counters in synthetic-owned storage scoped to that connection
-- **AND** loading synthetic-provider state for the connection MUST return the same provider-owned state without requiring provider-specific fields in the common provider sync state journal
+- **WHEN** core finance code saves synthetic-provider state for a synthetic provider reference
+- **THEN** the system MUST persist configured accounts, generated-window history, repeat counters, and transaction sequence counters in synthetic-owned storage scoped to that provider reference
+- **AND** loading synthetic-provider state for the provider reference MUST return the same provider-owned state without requiring provider-specific fields in the common provider sync state journal
 
 #### Scenario: Common provider sync journal remains provider-agnostic
 - **WHEN** provider sync v2 appends a sync state row for a synthetic connection
@@ -236,8 +195,8 @@ The finance module SHALL support a core-only `synthetic` bank provider through p
 
 #### Scenario: Synthetic fetch uses dedicated synthetic storage
 - **WHEN** provider sync v2 executes a sync window for a synthetic connection
-- **THEN** the synthetic provider MUST load configured accounts and generation history from synthetic-owned storage
-- **AND** after generating observations it MUST persist updated generation history back to synthetic-owned storage
+- **THEN** the synthetic provider MUST load configured accounts and generation history from synthetic-owned storage by provider reference
+- **AND** after generating observations it MUST persist updated generation history back to synthetic-owned storage by provider reference
 - **AND** it MUST NOT persist normalized finance ledger records directly from the connector
 
 #### Scenario: Synthetic first run generates daily account transactions
@@ -253,11 +212,6 @@ The finance module SHALL support a core-only `synthetic` bank provider through p
 - **AND** it MUST generate from 1 to 3 booked transaction observations for each configured account only for the requested window's last UTC day
 - **AND** repeated-run transaction provider IDs MUST be unique from transactions generated by earlier runs for the same connection, account, and day
 - **AND** the updated provider-specific state MUST preserve prior generated-window history while advancing transaction sequence information
-
-#### Scenario: Synthetic provider remains core-only
-- **WHEN** the synthetic provider is implemented in this iteration
-- **THEN** the system MUST NOT add synthetic provider controls to the finance UI
-- **AND** it MUST NOT expose a public HTTP synthetic-linking workflow or product-facing OpenAPI enum unless a later change explicitly adds that surface
 
 ### Requirement: Provider Sync V2 Coordinates Bank Link Persistence
 The finance module SHALL coordinate provider sync v2 bank-link workflows through product provider profiles, technical connectors, encrypted connection-secret persistence, and durable bank connection metadata.

@@ -452,14 +452,16 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, container.Provide(newTenantServiceFromDI))
 		require.NoError(t, container.Provide(newBankSyncServiceFromDI))
 		require.NoError(t, container.Provide(newBankConnectionServiceFromDI))
+		require.NoError(t, container.Provide(newSyntheticLinkStateServiceFromDI))
 
 		type resolvedDeps struct {
 			dig.In
 
-			JWTKey                string `name:"auth.jwtKey"`
-			TenantService         *financepkg.TenantService
-			BankSyncService       *financepkg.BankSyncService
-			BankConnectionService *financepkg.BankConnectionService
+			JWTKey                    string `name:"auth.jwtKey"`
+			TenantService             *financepkg.TenantService
+			BankSyncService           *financepkg.BankSyncService
+			BankConnectionService     *financepkg.BankConnectionService
+			SyntheticLinkStateService *financepkg.SyntheticLinkStateService
 		}
 
 		var resolved resolvedDeps
@@ -468,6 +470,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		}))
 		require.NotEmpty(t, resolved.JWTKey)
 		require.NotNil(t, resolved.BankConnectionService)
+		require.NotNil(t, resolved.SyntheticLinkStateService)
 
 		persistedKeyPath := filepath.Join(dataDir, "auth", "jwt-signing-key")
 		persistedKey, err := os.ReadFile(persistedKeyPath)

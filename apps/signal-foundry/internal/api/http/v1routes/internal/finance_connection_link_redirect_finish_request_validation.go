@@ -15,7 +15,6 @@ func NewFinanceConnectionLinkRedirectFinishRequestValidator() FieldValidator[*Fi
 		EnsureNonDefault[FinanceBankLinkRedirectProvider],
 	)
 	validateCode := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
 	)
 	validateState := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],

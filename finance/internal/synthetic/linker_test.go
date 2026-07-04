@@ -138,6 +138,7 @@ func TestLinker(t *testing.T) {
 		assert.Equal(t, deps.saveConnectionSecretID, connection.SecretID)
 		assert.Equal(t, string(domain.ProviderIDSynthetic), deps.savedConnectionSecretProvider)
 		assert.Empty(t, deps.savedConnectionSecretValue)
+		assert.Equal(t, connection.ProviderReference, deps.savedSyntheticProviderState.ProviderReference)
 		require.Len(t, deps.savedSyntheticProviderState.Envelope.ConfiguredAccounts, 2)
 		assert.Equal(
 			t,

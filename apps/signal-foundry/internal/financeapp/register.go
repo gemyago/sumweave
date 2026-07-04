@@ -132,6 +132,10 @@ func newBankConnectionServiceFromDI(module *financepkg.Finance) *financepkg.Bank
 	return module.BankConnectionService
 }
 
+func newSyntheticLinkStateServiceFromDI(module *financepkg.Finance) *financepkg.SyntheticLinkStateService {
+	return module.SyntheticLinkStateService
+}
+
 func newBankSyncServiceFromDI(module *financepkg.Finance) *financepkg.BankSyncService {
 	return module.BankSyncService
 }
@@ -428,6 +432,7 @@ func Register(container *dig.Container) error {
 		newFXServiceFromDI,
 		newCSVImportServiceFromDI,
 		newBankConnectionServiceFromDI,
+		newSyntheticLinkStateServiceFromDI,
 		newBankSyncServiceFromDI,
 	)
 }

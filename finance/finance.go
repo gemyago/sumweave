@@ -15,14 +15,15 @@ import (
 )
 
 type Finance struct {
-	TenantService         *TenantService
-	CatalogService        *CatalogService
-	LedgerService         *LedgerService
-	ReportingService      *ReportingService
-	FXService             *FXService
-	CSVImportService      *CSVImportService
-	BankConnectionService *BankConnectionService
-	BankSyncService       *BankSyncService
+	TenantService             *TenantService
+	CatalogService            *CatalogService
+	LedgerService             *LedgerService
+	ReportingService          *ReportingService
+	FXService                 *FXService
+	CSVImportService          *CSVImportService
+	BankConnectionService     *BankConnectionService
+	SyntheticLinkStateService *SyntheticLinkStateService
+	BankSyncService           *BankSyncService
 }
 
 func New(cfg *Config) (*Finance, error) {
@@ -57,7 +58,12 @@ func New(cfg *Config) (*Finance, error) {
 		FXService:             services.FXService,
 		CSVImportService:      services.CSVImportService,
 		BankConnectionService: bankConnectionService,
-		BankSyncService:       services.BankSyncService,
+		SyntheticLinkStateService: NewSyntheticLinkStateService(
+			store,
+			WithSyntheticLinkStateServiceNow(cfg.Now),
+			WithSyntheticLinkStateServiceIDGenerator(cfg.NewID),
+		),
+		BankSyncService: services.BankSyncService,
 	}, nil
 }
 
@@ -70,6 +76,7 @@ func newConnectors(
 			persistence.NewSyntheticProviderStateStoreFromStore(store),
 			internalsynthetic.WithConnectorLogger(cfg.Logger),
 			internalsynthetic.WithConnectorNow(cfg.Now),
+			internalsynthetic.WithConnectorStateGenerator(cfg.NewID),
 		),
 		internalmonobank.NewConnector(internalmonobank.Args{
 			BaseURL:    cfg.Monobank.BaseURL,
@@ -155,10 +162,11 @@ func (p connectorBankSyncProvider) Sync(
 ) (ProviderSyncResult, error) {
 	batch, err := p.connector.Fetch(ctx, internalproviders.FetchRequest{
 		Connection: domain.ProviderConnectionRef{
-			ConnectionID: strings.TrimSpace(params.ConnectionID),
-			ProviderID:   domain.ProviderID(strings.TrimSpace(p.name)),
-			ConnectorID:  p.connector.ConnectorID(),
-			ExternalID:   strings.TrimSpace(params.ExternalID),
+			ConnectionID:      strings.TrimSpace(params.ConnectionID),
+			ProviderID:        domain.ProviderID(strings.TrimSpace(p.name)),
+			ConnectorID:       p.connector.ConnectorID(),
+			ProviderReference: strings.TrimSpace(params.ProviderReference),
+			ExternalID:        strings.TrimSpace(params.ExternalID),
 		},
 		Secret: domain.ConnectionSecret{Envelope: credentialsEnvelopeFromPlaintext(params.Secret)},
 		RequestedWindow: domain.ProviderSyncWindow{

@@ -18,6 +18,7 @@
   import FinanceTransactionEditor from './pages/FinanceTransactionEditor.svelte'
   import FinanceCategories from './pages/FinanceCategories.svelte'
   import FinanceConnections from './pages/FinanceConnections.svelte'
+  import FinanceSyntheticConnectionSetup from './pages/FinanceSyntheticConnectionSetup.svelte'
   import FinanceImports from './pages/FinanceImports.svelte'
   import FinanceJobDetail from './pages/FinanceJobDetail.svelte'
   import EvaluationDetail from './pages/EvaluationDetail.svelte'
@@ -68,6 +69,10 @@
     }),
     '/finance/accounts': wrap({
       component: FinanceAccounts,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/connections/synthetic': wrap({
+      component: FinanceSyntheticConnectionSetup,
       conditions: [() => authStore.isAuthenticated],
     }),
     '/finance/connections': wrap({

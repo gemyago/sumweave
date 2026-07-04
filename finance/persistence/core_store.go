@@ -20,6 +20,7 @@ const (
 	columnCurrency          = "currency"
 	columnUpdatedAt         = "updated_at"
 	columnProvider          = "provider"
+	columnProviderReference = "provider_reference"
 	columnState             = "state"
 	columnConnectionID      = "connection_id"
 	columnProviderAccountID = "provider_account_id"

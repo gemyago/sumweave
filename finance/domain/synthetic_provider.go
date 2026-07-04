@@ -5,10 +5,10 @@ import "time"
 const SyntheticProviderStateVersion1 = 1
 
 type SyntheticProviderState struct {
-	ConnectionID string
-	Envelope     SyntheticProviderStateEnvelope
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ProviderReference string
+	Envelope          SyntheticProviderStateEnvelope
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type SyntheticProviderStateEnvelope struct {

@@ -8,12 +8,12 @@ import (
 )
 
 type syntheticProviderStateFixture struct {
-	connectionID     string
-	accounts         []domain.SyntheticConfiguredAccount
-	windowHistory    []domain.SyntheticWindowHistoryEntry
-	sequenceCounters []domain.SyntheticAccountDaySequenceCounter
-	createdAt        time.Time
-	updatedAt        time.Time
+	providerReference string
+	accounts          []domain.SyntheticConfiguredAccount
+	windowHistory     []domain.SyntheticWindowHistoryEntry
+	sequenceCounters  []domain.SyntheticAccountDaySequenceCounter
+	createdAt         time.Time
+	updatedAt         time.Time
 }
 
 type syntheticProviderStateOption func(*syntheticProviderStateFixture)
@@ -23,7 +23,7 @@ func defaultSyntheticProviderStateFixture(fake faker.Faker) syntheticProviderSta
 	createdAt := time.Date(2026, time.June, 24, 12, 30, 0, 0, time.FixedZone("EEST", 3*60*60))
 
 	return syntheticProviderStateFixture{
-		connectionID: "connection-" + fake.UUID().V4(),
+		providerReference: "provider-ref-" + fake.UUID().V4(),
 		accounts: []domain.SyntheticConfiguredAccount{
 			makeRandomSyntheticConfiguredAccount(fake, "checking", "USD"),
 			makeRandomSyntheticConfiguredAccount(fake, "checking", "USD"),
@@ -55,7 +55,7 @@ func makeRandomSyntheticProviderState(
 	}
 
 	return domain.SyntheticProviderState{
-		ConnectionID: fixture.connectionID,
+		ProviderReference: fixture.providerReference,
 		Envelope: domain.SyntheticProviderStateEnvelope{
 			Version:            domain.SyntheticProviderStateVersion1,
 			ConfiguredAccounts: fixture.accounts,
@@ -67,13 +67,13 @@ func makeRandomSyntheticProviderState(
 	}
 }
 
-func makeRandomSyntheticConnectionID(fake faker.Faker) string {
-	return "connection-" + fake.UUID().V4()
+func makeRandomSyntheticProviderReference(fake faker.Faker) string {
+	return "provider-ref-" + fake.UUID().V4()
 }
 
-func withSyntheticProviderConnectionID(connectionID string) syntheticProviderStateOption {
+func withSyntheticProviderReference(providerReference string) syntheticProviderStateOption {
 	return func(fixture *syntheticProviderStateFixture) {
-		fixture.connectionID = connectionID
+		fixture.providerReference = providerReference
 	}
 }
 
@@ -86,20 +86,6 @@ func withSyntheticProviderCreatedAt(createdAt time.Time) syntheticProviderStateO
 func withSyntheticProviderUpdatedAt(updatedAt time.Time) syntheticProviderStateOption {
 	return func(fixture *syntheticProviderStateFixture) {
 		fixture.updatedAt = updatedAt
-	}
-}
-
-func withSyntheticProviderSingleAccount(
-	fake faker.Faker,
-	namePrefix string,
-	currency string,
-) syntheticProviderStateOption {
-	return func(fixture *syntheticProviderStateFixture) {
-		fixture.accounts = []domain.SyntheticConfiguredAccount{
-			makeRandomSyntheticConfiguredAccount(fake, namePrefix, currency),
-		}
-		fixture.windowHistory = nil
-		fixture.sequenceCounters = nil
 	}
 }
 

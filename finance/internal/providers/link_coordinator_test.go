@@ -501,6 +501,7 @@ func TestLinkCoordinator(t *testing.T) {
 		})
 		require.ErrorIs(t, err, ErrRedirectLinkUnsupported)
 		assert.Zero(t, monobankConnector.startCalls)
+		assert.Empty(t, secretWriter.saved)
 
 		_, err = coordinator.LinkToken(t.Context(), TokenLinkRequest{
 			TenantID:    "tenant-" + fake.UUID().V4(),
@@ -510,6 +511,7 @@ func TestLinkCoordinator(t *testing.T) {
 		})
 		require.ErrorIs(t, err, ErrTokenLinkUnsupported)
 		assert.Zero(t, enableBankingConnector.tokenCalls)
+		assert.Empty(t, secretWriter.saved)
 
 		connection, err := coordinator.LinkToken(t.Context(), TokenLinkRequest{
 			TenantID:    "tenant-token-" + fake.UUID().V4(),
@@ -544,6 +546,116 @@ func TestLinkCoordinator(t *testing.T) {
 		})
 		require.ErrorIs(t, err, ErrProviderNotConfigured)
 		assert.Equal(t, 1, monobankConnector.tokenCalls)
+	})
+
+	t.Run("supports connector-declared redirect lifecycle requirements", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.June, 29, 15, 0, 0, 0, time.UTC)
+		syntheticState := "synthetic-state-" + fake.UUID().V4()
+		syntheticConnector := newLinkConnectorFixture(t, linkConnectorFixture{
+			connectorID: domain.ProviderConnectorIDSynthetic,
+			capabilities: ConnectorCapabilities{
+				SupportsStartLink:  true,
+				SupportsFinishLink: true,
+			},
+			startResult: StartLinkResult{
+				State:             syntheticState,
+				ProviderReference: syntheticState,
+				AuthorizationURL:  "#/finance/connections/synthetic?state=" + syntheticState,
+			},
+			finishResult: LinkResult{
+				DisplayName:       "Synthetic",
+				ProviderReference: syntheticState,
+				State:             domain.BankConnectionStateActive,
+			},
+		})
+		pkoState := "pko-state-" + fake.UUID().V4()
+		pkoConnector := newLinkConnectorFixture(t, linkConnectorFixture{
+			connectorID:  domain.ProviderConnectorIDEnableBanking,
+			capabilities: ConnectorCapabilities{SupportsFinishLink: true, RequiresRedirectCode: true},
+			finishResult: LinkResult{
+				DisplayName:       "PKO " + fake.Company().Name(),
+				ProviderReference: "provider-ref-" + fake.UUID().V4(),
+				Secret:            "secret-" + fake.UUID().V4(),
+				State:             domain.BankConnectionStateActive,
+			},
+		})
+		pendingStore := newPendingStartStoreFixture(t, pendingStartStoreFixture{
+			savedByState: map[string]domain.PendingBankConnectionLinkStart{
+				pkoState: {
+					ID:          "pending-pko-" + fake.UUID().V4(),
+					TenantID:    "tenant-pko-" + fake.UUID().V4(),
+					ActorUserID: "actor-pko-" + fake.UUID().V4(),
+					Provider:    string(domain.ProviderIDPKO),
+					ConnectorID: domain.ProviderConnectorIDEnableBanking,
+					State:       pkoState,
+					StartResult: domain.PendingBankConnectionLinkStartResult{State: pkoState},
+					ExpiresAt:   now.Add(15 * time.Minute),
+				},
+			},
+		})
+		secretWriter := newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
+			secretID: "secret-" + fake.UUID().V4(),
+		})
+		connectionStore := newConnectionStoreFixture(t, connectionStoreFixture{})
+		coordinator, err := NewLinkCoordinator(LinkCoordinatorArgs{
+			ProviderProfileRegistry: NewStaticProviderProfileRegistry(
+				PKOProfile(),
+				ProviderProfile{
+					ProviderID:  domain.ProviderIDSynthetic,
+					ConnectorID: domain.ProviderConnectorIDSynthetic,
+				},
+			),
+			ConnectorRegistry:      NewStaticConnectorRegistry(syntheticConnector.mock, pkoConnector.mock),
+			PendingStartStore:      pendingStore.mock,
+			ConnectionSecretWriter: secretWriter.mock,
+			ConnectionStore:        connectionStore.mock,
+			RawPayloadWriter:       newRawPayloadWriterFixture(t).mock,
+			Now:                    func() time.Time { return now },
+			NewID:                  func() string { return "id-" + fake.UUID().V4() },
+		})
+		require.NoError(t, err)
+
+		started, err := coordinator.StartRedirectLink(t.Context(), RedirectLinkStartRequest{
+			TenantID:           "tenant-synthetic-" + fake.UUID().V4(),
+			ActorUserID:        "actor-synthetic-" + fake.UUID().V4(),
+			ProviderID:         domain.ProviderIDSynthetic,
+			RedirectURL:        "https://backend.example.test/callback/" + fake.UUID().V4(),
+			BrowserCallbackURL: "http://localhost:5173/#/finance/connections",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, syntheticState, started.State)
+		require.Len(t, pendingStore.saved, 1)
+		assert.Equal(t, syntheticState, pendingStore.saved[0].ProviderReference)
+		assert.Equal(t, "#/finance/connections/synthetic?state="+syntheticState, pendingStore.saved[0].AuthorizationURL)
+
+		finished, err := coordinator.FinishRedirectLink(t.Context(), RedirectLinkFinishRequest{
+			TenantID:    pendingStore.saved[0].TenantID,
+			ActorUserID: pendingStore.saved[0].ActorUserID,
+			ProviderID:  domain.ProviderIDSynthetic,
+			State:       syntheticState,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, syntheticState, syntheticConnector.lastFinish.State)
+		assert.Empty(t, syntheticConnector.lastFinish.Code)
+		assert.Equal(t, syntheticState, finished.ProviderReference)
+		assert.Equal(t, domain.BankConnectionStateActive, finished.State)
+		require.Len(t, secretWriter.saved, 1)
+		assert.Equal(t, syntheticState, secretWriter.saved[0].reference)
+		assert.Empty(t, secretWriter.saved[0].secret)
+
+		consumedBeforePKOFinish := len(pendingStore.consumed)
+		_, err = coordinator.FinishRedirectLink(t.Context(), RedirectLinkFinishRequest{
+			TenantID:    pendingStore.savedByState[pkoState].TenantID,
+			ActorUserID: pendingStore.savedByState[pkoState].ActorUserID,
+			ProviderID:  domain.ProviderIDPKO,
+			State:       pkoState,
+		})
+		require.ErrorContains(t, err, "redirect code is required")
+		assert.Zero(t, pkoConnector.finishCalls)
+		assert.Len(t, pendingStore.consumed, consumedBeforePKOFinish)
+		assert.Contains(t, pendingStore.savedByState, pkoState)
+		assert.Len(t, secretWriter.saved, 1)
 	})
 
 	t.Run("surfaces link coordinator resolver, unsupported, and persistence edge errors", func(t *testing.T) {

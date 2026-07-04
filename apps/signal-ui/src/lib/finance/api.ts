@@ -255,6 +255,19 @@ export interface FinanceConnectionRedirectStart {
   state: string
 }
 
+export interface FinanceSyntheticLinkStateConfiguredAccount {
+  key: string
+  name: string
+  currency: string
+}
+
+export interface FinanceSyntheticLinkState {
+  provider: string
+  state: string
+  configuredAccounts: FinanceSyntheticLinkStateConfiguredAccount[]
+  canFinish: boolean
+}
+
 export interface SignalFinanceApi {
   listTenants(): Promise<FinanceTenantSummary[]>
   createTenant(body: { name: string; displayCurrency: string }): Promise<FinanceTenantSummary>
@@ -301,7 +314,17 @@ export interface SignalFinanceApi {
   listConnections(params: { tenantId: string }): Promise<FinanceBankConnection[]>
   linkTokenConnection(params: { tenantId: string; provider: string; token: string }): Promise<FinanceBankConnection>
   startRedirectConnection(params: { tenantId: string; provider: string; callbackUrl: string }): Promise<FinanceConnectionRedirectStart>
-  finishRedirectConnection(params: { tenantId: string; provider: string; code: string; state: string }): Promise<FinanceBankConnection>
+  finishRedirectConnection(params: { tenantId: string; provider: string; code?: string; state: string }): Promise<FinanceBankConnection>
+  getSyntheticLinkState(params: { tenantId: string; state: string }): Promise<FinanceSyntheticLinkState>
+  saveSyntheticLinkState(params: {
+    tenantId: string
+    state: string
+    configuredAccounts: Array<{
+      key?: string
+      name: string
+      currency: string
+    }>
+  }): Promise<FinanceSyntheticLinkState>
   deleteConnection(params: { tenantId: string; connectionId: string }): Promise<void>
   triggerConnectionSync(params: {
     tenantId: string
@@ -345,7 +368,7 @@ export class FinanceApiError extends Error {
 
 export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLike }): SignalFinanceApi {
   const request = async <T>(requestParams: {
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+      method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
     path: string
     query?: URLSearchParams
     body?: unknown
@@ -528,6 +551,30 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         }),
       )
     },
+    async getSyntheticLinkState({ tenantId, state }) {
+      return mapSyntheticLinkState(
+        await request<RawSyntheticLinkState>({
+          method: 'GET',
+          path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/synthetic-link-states/${encodeURIComponent(state)}`,
+        }),
+      )
+    },
+    async saveSyntheticLinkState({ tenantId, state, configuredAccounts }) {
+      return mapSyntheticLinkState(
+        await request<RawSyntheticLinkState>({
+          method: 'PUT',
+          path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/synthetic-link-states/${encodeURIComponent(state)}`,
+          body: {
+            configuredAccounts: configuredAccounts.map((account) => {
+              if (account.key) {
+                return account
+              }
+              return { name: account.name, currency: account.currency }
+            }),
+          },
+        }),
+      )
+    },
     async deleteConnection({ tenantId, connectionId }) {
       await request<void>({
         method: 'DELETE',
@@ -601,6 +648,13 @@ interface RawTransaction { id: string; tenantId: string; accountId: string; sour
 interface RawConnectionSchedule { connectionId: string; intervalSeconds: number; nextRunAt?: string | null; lastScheduledAt?: string | null; lastStartedAt?: string | null; lastCompletedAt?: string | null; lastJobId?: string; enabled: boolean; createdAt: string; updatedAt: string }
 interface RawConnection { id: string; tenantId: string; provider: string; displayName: string; providerReference: string; externalId: string; state: string; lastSyncJobId?: string; lastSyncStartedAt?: string | null; lastSuccessfulSyncAt?: string | null; lastSyncError?: string; createdAt: string; updatedAt: string; schedule?: RawConnectionSchedule | null }
 interface RawConnectionRedirectStart { provider: string; authorizationUrl: string; state: string }
+interface RawSyntheticLinkStateConfiguredAccount { key: string; name: string; currency: string }
+interface RawSyntheticLinkState {
+  provider: string
+  state: string
+  configuredAccounts?: RawSyntheticLinkStateConfiguredAccount[]
+  canFinish: boolean
+}
 interface RawDashboardPeriodWindow { startDate: string; endDate: string }
 interface RawDashboardPeriod { preset: string; startDate: string; endDate: string; previous: RawDashboardPeriodWindow; next: RawDashboardPeriodWindow }
 interface RawMoneySummary { displayCurrency: string; incomeMinor: number; expenseMinor: number; netMinor: number; transactionCount: number; complete: boolean }
@@ -657,6 +711,12 @@ function mapConnection(item: RawConnection): FinanceBankConnection {
   }
 }
 function mapConnectionRedirectStart(item: RawConnectionRedirectStart): FinanceConnectionRedirectStart { return item }
+function mapSyntheticLinkState(item: RawSyntheticLinkState): FinanceSyntheticLinkState {
+  return {
+    ...item,
+    configuredAccounts: item.configuredAccounts ?? [],
+  }
+}
 function mapDashboard(item: RawDashboard): FinanceDashboard {
   return {
     period: {

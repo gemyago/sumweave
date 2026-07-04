@@ -106,9 +106,10 @@ func TestConnector(t *testing.T) {
 
 		assert.Equal(t, domain.ProviderConnectorIDEnableBanking, connector.ConnectorID())
 		assert.Equal(t, providers.ConnectorCapabilities{
-			SupportsStartLink:  true,
-			SupportsFinishLink: true,
-			SupportsFetch:      true,
+			SupportsStartLink:    true,
+			SupportsFinishLink:   true,
+			RequiresRedirectCode: true,
+			SupportsFetch:        true,
 		}, connector.Capabilities())
 
 		_, err := connector.LinkToken(t.Context(), providers.LinkTokenRequest{Token: "token-" + fake.UUID().V4()})
@@ -171,6 +172,7 @@ func TestConnector(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, state, result.State)
+		assert.Empty(t, result.ProviderReference)
 		assert.Equal(t, authorizationURL, result.AuthorizationURL)
 		require.Len(t, result.RawPayloads, 1)
 		assert.Equal(t, providerReference, result.RawPayloads[0].ProviderObjectID)

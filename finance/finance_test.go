@@ -79,6 +79,7 @@ func TestFinance(t *testing.T) {
 		require.NotNil(t, financeModule.FXService)
 		require.NotNil(t, financeModule.CSVImportService)
 		require.NotNil(t, financeModule.BankConnectionService)
+		require.NotNil(t, financeModule.SyntheticLinkStateService)
 		require.NotNil(t, financeModule.BankSyncService)
 
 		connection, err := financeModule.BankConnectionService.LinkTokenBankConnection(

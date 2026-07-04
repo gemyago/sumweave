@@ -164,6 +164,64 @@ describe('finance api', () => {
     ).rejects.toThrow('callbackUrl must target /#/finance/connections')
   })
 
+  it('loads and saves synthetic link state while preserving distinct duplicate configured accounts', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const responses = [
+      {
+        ok: true,
+        json: {
+          provider: 'synthetic',
+          state: 'state-1',
+          configuredAccounts: [
+            { key: 'dup-1', name: 'Cash', currency: 'USD' },
+            { key: 'dup-2', name: 'Cash', currency: 'USD' },
+          ],
+          canFinish: true,
+        },
+      },
+      {
+        ok: true,
+        json: {
+          provider: 'synthetic',
+          state: 'state-1',
+          configuredAccounts: [
+            { key: 'dup-1', name: 'Cash', currency: 'USD' },
+            { key: 'dup-3', name: 'Brokerage', currency: 'EUR' },
+          ],
+          canFinish: true,
+        },
+      },
+    ]
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      const next = responses.shift()
+      return {
+        ok: next?.ok ?? true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => next?.json,
+      } as Response
+    })
+
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+    const loaded = await api.getSyntheticLinkState({ tenantId: 'tenant-1', state: 'state-1' })
+    const saved = await api.saveSyntheticLinkState({
+      tenantId: 'tenant-1',
+      state: 'state-1',
+      configuredAccounts: [
+        { key: 'dup-1', name: 'Cash', currency: 'USD' },
+        { name: 'Brokerage', currency: 'EUR' },
+      ],
+    })
+
+    expect(loaded.configuredAccounts).toHaveLength(2)
+    expect(loaded.configuredAccounts[0].key).toBe('dup-1')
+    expect(loaded.configuredAccounts[1].key).toBe('dup-2')
+    expect(saved.configuredAccounts[1].key).toBe('dup-3')
+    expect(new URL(String(calls[0].input)).pathname).toBe('/api/v1/finance/tenants/tenant-1/connections/synthetic-link-states/state-1')
+    expect(String(calls[1].init?.body)).toBe('{"configuredAccounts":[{"key":"dup-1","name":"Cash","currency":"USD"},{"name":"Brokerage","currency":"EUR"}]}')
+  })
+
   it('maps provider-original detail responses and submits nullable transaction patch payloads', async () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
     const responses = [

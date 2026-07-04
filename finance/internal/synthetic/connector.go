@@ -14,12 +14,14 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/domain"
 	"github.com/gemyago/signal-foundry/finance/internal/providers"
+	"github.com/google/uuid"
 )
 
 var (
-	ErrProviderStateStoreRequired = errors.New("synthetic provider state store is required")
-	ErrProviderStateNotFound      = errors.New("synthetic provider state not found")
-	ErrConnectorLinkUnsupported   = errors.New("synthetic connector link operation unsupported")
+	ErrProviderStateStoreRequired       = errors.New("synthetic provider state store is required")
+	ErrProviderStateNotFound            = errors.New("synthetic provider state not found")
+	ErrConfiguredSyntheticStateRequired = errors.New("configured synthetic state is required")
+	ErrConnectorLinkUnsupported         = errors.New("synthetic connector link operation unsupported")
 )
 
 const (
@@ -42,7 +44,7 @@ type ProviderStateStore interface {
 	) (domain.SyntheticProviderState, error)
 	GetSyntheticProviderState(
 		ctx context.Context,
-		connectionID string,
+		providerReference string,
 	) (*domain.SyntheticProviderState, error)
 }
 
@@ -52,6 +54,7 @@ type Connector struct {
 	stateStore ProviderStateStore
 	logger     *slog.Logger
 	now        func() time.Time
+	stateID    func() string
 	randomIntn func(int) int
 }
 
@@ -73,11 +76,18 @@ func WithConnectorRandomIntn(randomIntn func(int) int) ConnectorOption {
 	}
 }
 
+func WithConnectorStateGenerator(stateID func() string) ConnectorOption {
+	return func(connector *Connector) {
+		connector.stateID = stateID
+	}
+}
+
 func NewConnector(stateStore ProviderStateStore, opts ...ConnectorOption) *Connector {
 	connector := &Connector{
 		stateStore: stateStore,
 		logger:     slog.New(slog.DiscardHandler),
 		now:        func() time.Time { return time.Now().UTC() },
+		stateID:    uuid.NewString,
 		randomIntn: func(_ int) int { return 0 },
 	}
 	for _, opt := range opts {
@@ -91,6 +101,9 @@ func NewConnector(stateStore ProviderStateStore, opts ...ConnectorOption) *Conne
 	if connector.now == nil {
 		connector.now = func() time.Time { return time.Now().UTC() }
 	}
+	if connector.stateID == nil {
+		connector.stateID = uuid.NewString
+	}
 	if connector.randomIntn == nil {
 		connector.randomIntn = func(_ int) int { return 0 }
 	}
@@ -102,21 +115,51 @@ func (c *Connector) ConnectorID() domain.ProviderConnectorID {
 }
 
 func (c *Connector) Capabilities() providers.ConnectorCapabilities {
-	return providers.ConnectorCapabilities{SupportsFetch: true}
+	return providers.ConnectorCapabilities{
+		SupportsStartLink:  true,
+		SupportsFinishLink: true,
+		SupportsFetch:      true,
+	}
 }
 
 func (c *Connector) StartLink(
 	_ context.Context,
 	_ providers.StartLinkRequest,
 ) (providers.StartLinkResult, error) {
-	return providers.StartLinkResult{}, ErrConnectorLinkUnsupported
+	state := strings.TrimSpace(c.stateID())
+	if state == "" {
+		state = uuid.NewString()
+	}
+	return providers.StartLinkResult{
+		State:             state,
+		ProviderReference: state,
+		AuthorizationURL:  "#/finance/connections/synthetic?state=" + state,
+	}, nil
 }
 
 func (c *Connector) FinishLink(
-	_ context.Context,
-	_ providers.FinishLinkRequest,
+	ctx context.Context,
+	request providers.FinishLinkRequest,
 ) (providers.LinkResult, error) {
-	return providers.LinkResult{}, ErrConnectorLinkUnsupported
+	if c.stateStore == nil {
+		return providers.LinkResult{}, ErrProviderStateStoreRequired
+	}
+	providerReference := strings.TrimSpace(request.State)
+	state, err := c.stateStore.GetSyntheticProviderState(ctx, providerReference)
+	if err != nil {
+		return providers.LinkResult{}, fmt.Errorf("load synthetic provider state: %w", err)
+	}
+	if state == nil {
+		return providers.LinkResult{}, ErrProviderStateNotFound
+	}
+	if !hasConfiguredAccounts(state.Envelope.ConfiguredAccounts) {
+		return providers.LinkResult{}, ErrConfiguredSyntheticStateRequired
+	}
+	return providers.LinkResult{
+		DisplayName:       ConnectionDisplayName,
+		ProviderReference: providerReference,
+		State:             domain.BankConnectionStateActive,
+	}, nil
 }
 
 func (c *Connector) LinkToken(
@@ -133,7 +176,7 @@ func (c *Connector) Fetch(
 	if c.stateStore == nil {
 		return domain.ProviderSyncBatch{}, ErrProviderStateStoreRequired
 	}
-	state, err := c.stateStore.GetSyntheticProviderState(ctx, request.Connection.ConnectionID)
+	state, err := c.stateStore.GetSyntheticProviderState(ctx, request.Connection.ProviderReference)
 	if err != nil {
 		return domain.ProviderSyncBatch{}, fmt.Errorf("load synthetic provider state: %w", err)
 	}
@@ -153,10 +196,10 @@ func (c *Connector) Fetch(
 	}
 
 	updatedState := domain.SyntheticProviderState{
-		ConnectionID: state.ConnectionID,
-		Envelope:     cloneEnvelope(state.Envelope),
-		CreatedAt:    state.CreatedAt,
-		UpdatedAt:    c.now().UTC(),
+		ProviderReference: state.ProviderReference,
+		Envelope:          cloneEnvelope(state.Envelope),
+		CreatedAt:         state.CreatedAt,
+		UpdatedAt:         c.now().UTC(),
 	}
 	if updatedState.CreatedAt.IsZero() {
 		updatedState.CreatedAt = updatedState.UpdatedAt
@@ -483,4 +526,16 @@ func fingerprint(parts ...any) string {
 func startOfUTCDay(value time.Time) time.Time {
 	utcValue := value.UTC()
 	return time.Date(utcValue.Year(), utcValue.Month(), utcValue.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func hasConfiguredAccounts(accounts []domain.SyntheticConfiguredAccount) bool {
+	if len(accounts) == 0 {
+		return false
+	}
+	for _, account := range accounts {
+		if strings.TrimSpace(account.Name) == "" || strings.TrimSpace(account.Currency) == "" {
+			return false
+		}
+	}
+	return true
 }

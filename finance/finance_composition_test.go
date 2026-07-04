@@ -103,10 +103,11 @@ func TestFinanceComposition(t *testing.T) {
 		require.True(t, ok)
 
 		result, err := provider.Sync(t.Context(), ProviderSyncParams{
-			Secret:      "mono-token",
-			ExternalID:  "acc-1",
-			WindowStart: windowStart,
-			WindowEnd:   windowEnd,
+			ProviderReference: "mono-ref-1",
+			Secret:            "mono-token",
+			ExternalID:        "acc-1",
+			WindowStart:       windowStart,
+			WindowEnd:         windowEnd,
 		})
 		require.NoError(t, err)
 		require.Len(t, result.Accounts, 1)

@@ -36,7 +36,7 @@ func (s *SyntheticProviderStateStore) SaveSyntheticProviderState(
 	if err := s.db.WithContext(ctx).
 		Table(model.TableName()).
 		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: columnConnectionID}},
+			Columns: []clause.Column{{Name: columnProviderReference}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"state_json",
 				columnUpdatedAt,
@@ -50,12 +50,12 @@ func (s *SyntheticProviderStateStore) SaveSyntheticProviderState(
 
 func (s *SyntheticProviderStateStore) GetSyntheticProviderState(
 	ctx context.Context,
-	connectionID string,
+	providerReference string,
 ) (*domain.SyntheticProviderState, error) {
 	var model syntheticProviderStateModel
 	if err := s.db.WithContext(ctx).
 		Table(model.TableName()).
-		Where("connection_id = ?", strings.TrimSpace(connectionID)).
+		Where("provider_reference = ?", strings.TrimSpace(providerReference)).
 		First(&model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrSyntheticProviderStateNotFound
@@ -68,11 +68,11 @@ func (s *SyntheticProviderStateStore) GetSyntheticProviderState(
 
 func (s *SyntheticProviderStateStore) DeleteSyntheticProviderState(
 	ctx context.Context,
-	connectionID string,
+	providerReference string,
 ) error {
 	if err := s.db.WithContext(ctx).
 		Table((syntheticProviderStateModel{}).TableName()).
-		Where("connection_id = ?", strings.TrimSpace(connectionID)).
+		Where("provider_reference = ?", strings.TrimSpace(providerReference)).
 		Delete(&syntheticProviderStateModel{}).Error; err != nil {
 		return fmt.Errorf("delete synthetic provider state: %w", err)
 	}

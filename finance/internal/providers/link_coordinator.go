@@ -20,6 +20,7 @@ var (
 	ErrConnectionStoreRequired         = errors.New("connection store is required")
 	ErrRawPayloadWriterRequired        = errors.New("raw payload writer is required")
 	ErrRedirectLinkUnsupported         = errors.New("redirect link unsupported")
+	ErrRedirectCodeRequired            = errors.New("redirect code is required")
 	ErrTokenLinkUnsupported            = errors.New("token link unsupported")
 	ErrPendingStartNotFound            = errors.New("pending start not found")
 )
@@ -178,7 +179,8 @@ func (c *LinkCoordinator) StartRedirectLink(
 	if err != nil {
 		return StartLinkResult{}, err
 	}
-	if !connector.Capabilities().SupportsStartLink {
+	capabilities := connector.Capabilities()
+	if !capabilities.SupportsStartLink {
 		return StartLinkResult{}, ErrRedirectLinkUnsupported
 	}
 
@@ -193,14 +195,15 @@ func (c *LinkCoordinator) StartRedirectLink(
 
 	now := c.now().UTC()
 	_, err = c.pendingStartStore.SavePendingStart(ctx, domain.PendingBankConnectionLinkStart{
-		ID:               c.newID(),
-		TenantID:         strings.TrimSpace(request.TenantID),
-		ActorUserID:      strings.TrimSpace(request.ActorUserID),
-		Provider:         string(profile.ProviderID),
-		ConnectorID:      profile.ConnectorID,
-		State:            strings.TrimSpace(result.State),
-		CallbackURL:      strings.TrimSpace(request.BrowserCallbackURL),
-		AuthorizationURL: strings.TrimSpace(result.AuthorizationURL),
+		ID:                c.newID(),
+		TenantID:          strings.TrimSpace(request.TenantID),
+		ActorUserID:       strings.TrimSpace(request.ActorUserID),
+		Provider:          string(profile.ProviderID),
+		ConnectorID:       profile.ConnectorID,
+		State:             strings.TrimSpace(result.State),
+		CallbackURL:       strings.TrimSpace(request.BrowserCallbackURL),
+		AuthorizationURL:  strings.TrimSpace(result.AuthorizationURL),
+		ProviderReference: strings.TrimSpace(result.ProviderReference),
 		StartResult: domain.PendingBankConnectionLinkStartResult{
 			State:            strings.TrimSpace(result.State),
 			AuthorizationURL: strings.TrimSpace(result.AuthorizationURL),
@@ -224,8 +227,12 @@ func (c *LinkCoordinator) FinishRedirectLink(
 	if err != nil {
 		return domain.BankConnection{}, err
 	}
-	if !connector.Capabilities().SupportsFinishLink {
+	capabilities := connector.Capabilities()
+	if !capabilities.SupportsFinishLink {
 		return domain.BankConnection{}, ErrRedirectLinkUnsupported
+	}
+	if capabilities.RequiresRedirectCode && strings.TrimSpace(request.Code) == "" {
+		return domain.BankConnection{}, ErrRedirectCodeRequired
 	}
 
 	now := c.now().UTC()

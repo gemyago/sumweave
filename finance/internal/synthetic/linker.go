@@ -115,7 +115,7 @@ func (l *Linker) LinkConfiguredBankConnection(
 		return domain.BankConnection{}, fmt.Errorf("save bank connection: %w", err)
 	}
 	_, err = l.deps.SaveSyntheticProviderState(ctx, domain.SyntheticProviderState{
-		ConnectionID: savedConnection.ID,
+		ProviderReference: providerReference,
 		Envelope: domain.SyntheticProviderStateEnvelope{
 			Version:            domain.SyntheticProviderStateVersion1,
 			ConfiguredAccounts: configuredAccounts,

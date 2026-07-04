@@ -3,12 +3,14 @@ package http_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,17 +122,29 @@ func (s *testEvaluationWorkspaceService) GetEvaluationEvidence(
 
 func TestSetupV1Routes(t *testing.T) {
 	fake := faker.New()
-
-	// passthroughMiddleware is an AuthMiddleware that injects a test identity.
-	passthroughMiddleware := middleware.AuthMiddleware(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := httpapi.ContextWithCallerIdentity(r.Context(), &registerTestCallerIdentity{userID: fake.UUID().V4()})
-			next.ServeHTTP(w, r.WithContext(ctx))
+	makePassthroughMiddleware := func(userID string) middleware.AuthMiddleware {
+		return middleware.AuthMiddleware(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				resolvedUserID := userID
+				if resolvedUserID == "" {
+					resolvedUserID = fake.UUID().V4()
+				}
+				ctx := httpapi.ContextWithCallerIdentity(
+					r.Context(),
+					&registerTestCallerIdentity{userID: resolvedUserID},
+				)
+				next.ServeHTTP(w, r.WithContext(ctx))
+			})
 		})
-	})
+	}
 
-	makeSetup := func(t *testing.T, uiLocation string) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler, *financepkg.Finance, *financepkg.BankConnectionService, *financepersistence.Store) {
+	makeSetup := func(
+		t *testing.T,
+		uiLocation string,
+		authUserID string,
+	) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler, *financepkg.Finance, *financepkg.BankConnectionService, *financepersistence.Store) {
 		t.Helper()
+		passthroughMiddleware := makePassthroughMiddleware(authUserID)
 		strategyDSN := filepath.Join(t.TempDir(), "strategy-workspace.db")
 		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
 			strategyDSN,
@@ -226,15 +240,16 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthMiddleware: passthroughMiddleware,
 		})
 		financeCtrl := v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
-			TenantService:         financeModule.TenantService,
-			CatalogService:        financeModule.CatalogService,
-			LedgerService:         financeModule.LedgerService,
-			BankSyncService:       financeModule.BankSyncService,
-			ReportingService:      financeModule.ReportingService,
-			FXService:             financeModule.FXService,
-			CSVImportService:      financeModule.CSVImportService,
-			BankConnectionService: bankConnectionService,
-			AuthMiddleware:        passthroughMiddleware,
+			TenantService:             financeModule.TenantService,
+			CatalogService:            financeModule.CatalogService,
+			LedgerService:             financeModule.LedgerService,
+			BankSyncService:           financeModule.BankSyncService,
+			ReportingService:          financeModule.ReportingService,
+			FXService:                 financeModule.FXService,
+			CSVImportService:          financeModule.CSVImportService,
+			BankConnectionService:     bankConnectionService,
+			SyntheticLinkStateService: financeModule.SyntheticLinkStateService,
+			AuthMiddleware:            passthroughMiddleware,
 		})
 		strategiesCtrl := v1controllers.NewStrategiesController(
 			v1controllers.StrategiesControllerDeps{
@@ -270,6 +285,7 @@ func TestSetupV1Routes(t *testing.T) {
 
 	t.Run("should mount agent API routes", func(t *testing.T) {
 		calls := []string{}
+		passthroughMiddleware := makePassthroughMiddleware("")
 		router := server.NewHTTPRouter(server.HTTPRouterDeps{
 			Middleware: func(h http.Handler) http.Handler {
 				calls = append(calls, "middleware")
@@ -382,15 +398,16 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthMiddleware: passthroughMiddleware,
 		})
 		financeCtrl := v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
-			TenantService:         financeModule.TenantService,
-			CatalogService:        financeModule.CatalogService,
-			LedgerService:         financeModule.LedgerService,
-			BankSyncService:       financeModule.BankSyncService,
-			ReportingService:      financeModule.ReportingService,
-			FXService:             financeModule.FXService,
-			CSVImportService:      financeModule.CSVImportService,
-			BankConnectionService: bankConnectionService,
-			AuthMiddleware:        passthroughMiddleware,
+			TenantService:             financeModule.TenantService,
+			CatalogService:            financeModule.CatalogService,
+			LedgerService:             financeModule.LedgerService,
+			BankSyncService:           financeModule.BankSyncService,
+			ReportingService:          financeModule.ReportingService,
+			FXService:                 financeModule.FXService,
+			CSVImportService:          financeModule.CSVImportService,
+			BankConnectionService:     bankConnectionService,
+			SyntheticLinkStateService: financeModule.SyntheticLinkStateService,
+			AuthMiddleware:            passthroughMiddleware,
 		})
 
 		signalfoundryhttp.SetupV1Routes(signalfoundryhttp.V1RoutesDeps{
@@ -459,8 +476,55 @@ func TestSetupV1Routes(t *testing.T) {
 		})
 	})
 
+	t.Run("synthetic link-state routes are registered on the app router", func(t *testing.T) {
+		userID := fake.UUID().V4()
+		_, _, rootHandler, financeModule, _, _ := makeSetup(t, "", userID)
+		tenant, err := financeModule.TenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{
+			ActorUserID:     userID,
+			Name:            "tenant-" + fake.UUID().V4(),
+			DisplayCurrency: "USD",
+		})
+		require.NoError(t, err)
+
+		startReq := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenant.ID+"/connections/link-redirect/start",
+			strings.NewReader(
+				`{"provider":"synthetic","callbackUrl":"https://app.example.test/#/finance/connections"}`,
+			),
+		)
+		startReq.Header.Set("Content-Type", "application/json")
+		startResp := httptest.NewRecorder()
+		rootHandler.ServeHTTP(startResp, startReq)
+		require.Equal(t, http.StatusOK, startResp.Code)
+
+		var startPayload struct {
+			State string `json:"state"`
+		}
+		require.NoError(t, json.Unmarshal(startResp.Body.Bytes(), &startPayload))
+		require.NotEmpty(t, startPayload.State)
+
+		for _, req := range []*http.Request{
+			httptest.NewRequest(
+				http.MethodGet,
+				"/api/v1/finance/tenants/"+tenant.ID+"/connections/synthetic-link-states/"+startPayload.State,
+				http.NoBody,
+			),
+			httptest.NewRequest(
+				http.MethodPut,
+				"/api/v1/finance/tenants/"+tenant.ID+"/connections/synthetic-link-states/"+startPayload.State,
+				strings.NewReader(`{"configuredAccounts":[{"name":"Checking","currency":"USD"}]}`),
+			),
+		} {
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			rootHandler.ServeHTTP(resp, req)
+			require.NotEqual(t, http.StatusNotFound, resp.Code)
+		}
+	})
+
 	t.Run("enable banking callback route redirects back to finance connections", func(t *testing.T) {
-		_, _, rootHandler, _, bankConnectionService, financeStore := makeSetup(t, "")
+		_, _, rootHandler, _, bankConnectionService, financeStore := makeSetup(t, "", "")
 
 		t.Run("redirects provider return params back to the browser route", func(t *testing.T) {
 			pendingStart, err := financeStore.SavePendingBankConnectionLinkStart(
@@ -513,7 +577,7 @@ func TestSetupV1Routes(t *testing.T) {
 
 	t.Run("UI serving", func(t *testing.T) {
 		t.Run("when ui location is empty, server operates in API-only mode", func(t *testing.T) {
-			_, _, rootHandler, _, _, _ := makeSetup(t, "")
+			_, _, rootHandler, _, _, _ := makeSetup(t, "", "")
 
 			t.Run("GET / returns 404", func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
@@ -544,7 +608,7 @@ func TestSetupV1Routes(t *testing.T) {
 				os.WriteFile(filepath.Join(uiDir, assetName), []byte(wantAssetContent), 0o600),
 			)
 
-			_, _, rootHandler, _, _, _ := makeSetup(t, uiDir)
+			_, _, rootHandler, _, _, _ := makeSetup(t, uiDir, "")
 
 			t.Run("GET / serves index.html", func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
@@ -580,7 +644,7 @@ func TestSetupV1Routes(t *testing.T) {
 			"when ui location is invalid directory, server operates in API-only mode",
 			func(t *testing.T) {
 				nonExistentDir := filepath.Join(t.TempDir(), fake.Lorem().Word())
-				_, _, rootHandler, _, _, _ := makeSetup(t, nonExistentDir)
+				_, _, rootHandler, _, _, _ := makeSetup(t, nonExistentDir, "")
 
 				t.Run("GET / returns 404", func(t *testing.T) {
 					req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)

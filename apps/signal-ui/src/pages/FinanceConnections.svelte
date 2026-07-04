@@ -15,6 +15,7 @@
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
   const monobankProvider = 'monobank'
   const pkoProvider = 'pko'
+  const syntheticProvider = 'synthetic'
 
   let loading = $state(true)
   let error = $state<string | null>(null)
@@ -82,9 +83,26 @@
         provider: pkoProvider,
         callbackUrl: `${window.location.origin}/#/finance/connections`,
       })
-      window.location.assign(started.authorizationUrl)
+      navigateToAuthorizationUrl(started.authorizationUrl)
     } catch (startError) {
       error = startError instanceof Error ? startError.message : 'Failed to start PKO connection'
+    }
+  }
+
+  async function startSyntheticSetup() {
+    if (!selectedTenantId) {
+      return
+    }
+    error = null
+    try {
+      const started = await financeApi.startRedirectConnection({
+        tenantId: selectedTenantId,
+        provider: syntheticProvider,
+        callbackUrl: `${window.location.origin}/#/finance/connections`,
+      })
+      navigateToAuthorizationUrl(started.authorizationUrl)
+    } catch (startError) {
+      error = startError instanceof Error ? startError.message : 'Failed to start synthetic setup'
     }
   }
 
@@ -115,6 +133,16 @@
 
   function clearConsumedRedirectQuery() {
     window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`)
+  }
+
+  function navigateToAuthorizationUrl(authorizationUrl: string) {
+    const target = new URL(authorizationUrl, window.location.href)
+    if (target.origin === window.location.origin && target.hash.startsWith('#/finance/')) {
+      window.history.pushState({}, '', `${target.pathname}${target.search}${target.hash}`)
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+      return
+    }
+    window.location.assign(target.toString())
   }
 
   async function triggerSync(connectionId: string) {
@@ -162,7 +190,7 @@
 <section class="page" aria-labelledby="finance-connections-heading">
   <header>
       <h1 id="finance-connections-heading">Finance connections</h1>
-      <p class="muted">Use provider-specific monobank token linking or start PKO bank-login linking here, while keeping connection schedules and sync history visible. Deleting a link removes only local connection metadata and scheduled sync state.</p>
+      <p class="muted">Use provider-specific monobank token linking, PKO bank-login linking, or synthetic local setup here while keeping connection schedules and sync history visible. Deleting a link removes only local connection metadata and scheduled sync state.</p>
   </header>
 
   <FinanceSubnav current="/finance/connections" tenantName={selectedTenant?.name ?? ''} />
@@ -209,6 +237,14 @@
         <p class="muted">Start the PKO bank-login flow, complete consent in Enable Banking, and return here to finish linking in the browser.</p>
         <button class="primary" type="button" disabled={!selectedTenantId} onclick={() => void startPkoRedirect()}>
           Connect PKO with bank login
+        </button>
+      </section>
+
+      <section class="panel">
+        <h2>Configure synthetic provider</h2>
+        <p class="muted">Start the local synthetic setup flow, configure one or more synthetic accounts, then finish the link back in finance connections.</p>
+        <button class="primary" type="button" disabled={!selectedTenantId} onclick={() => void startSyntheticSetup()}>
+          Start synthetic setup
         </button>
       </section>
 

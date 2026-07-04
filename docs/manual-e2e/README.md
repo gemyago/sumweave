@@ -5,7 +5,8 @@ Manual guides:
 - [finance-tenants-management-e2e.md](./finance-tenants-management-e2e.md) — create, list, get by id, archive, then verify archived tenants disappear from active list and get-by-id.
 - [finance-account-balances-e2e.md](./finance-account-balances-e2e.md) — create a tenant and accounts, record mixed booked/pending transactions, then verify account balances.
 - [bank-linking-e2e.md](./bank-linking-e2e.md) — bank-linking API e2e guide.
-- [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) — link a core-only synthetic provider connection, trigger sync, then verify linked account and provider transactions.
+- [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) — start synthetic redirect linking over HTTP, save pending configured accounts, finish the link, trigger sync, then verify linked accounts and provider transactions.
+- [synthetic-provider-ui-e2e.md](./synthetic-provider-ui-e2e.md) — sign in to the UI, start synthetic setup from Finance connections, save duplicate configured accounts, reload pending state, finish the link, and confirm the new connection card appears.
 
 ## Setup
 

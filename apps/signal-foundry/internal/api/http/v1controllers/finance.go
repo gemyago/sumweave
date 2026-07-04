@@ -136,6 +136,17 @@ type bankConnectionService interface {
 	) (domain.BankConnection, error)
 }
 
+type syntheticLinkStateService interface {
+	GetPendingSyntheticLinkState(
+		context.Context,
+		financepkg.GetPendingSyntheticLinkStateParams,
+	) (financepkg.PendingSyntheticLinkState, error)
+	SavePendingSyntheticLinkState(
+		context.Context,
+		financepkg.SavePendingSyntheticLinkStateParams,
+	) (financepkg.PendingSyntheticLinkState, error)
+}
+
 type FinanceControllerDeps struct {
 	dig.In
 
@@ -147,6 +158,7 @@ type FinanceControllerDeps struct {
 	FXService                    fxService
 	CSVImportService             csvImportService
 	BankConnectionService        bankConnectionService
+	SyntheticLinkStateService    syntheticLinkStateService
 	AuthMiddleware               middleware.AuthMiddleware
 	EnableBankingCallbackBaseURL string `name:"config.finance.providers.enableBanking.callbackBaseURL" optional:"true"`
 }
@@ -689,6 +701,69 @@ func (c *FinanceController) FinishFinanceConnectionRedirectLink(
 		}
 
 		mapped := mapConnection(financepkg.BankConnectionView{Connection: item})
+		return &mapped, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) GetFinanceSyntheticLinkState(
+	builder handlers.HandlerBuilder[*models.GetFinanceSyntheticLinkStateParams, *models.FinanceSyntheticLinkStateResponse],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.GetFinanceSyntheticLinkStateParams,
+	) (*models.FinanceSyntheticLinkStateResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		item, err := c.deps.SyntheticLinkStateService.GetPendingSyntheticLinkState(
+			ctx,
+			financepkg.GetPendingSyntheticLinkStateParams{
+				ActorUserID: userID,
+				TenantID:    params.TenantID,
+				State:       params.State,
+			},
+		)
+		if err != nil {
+			return nil, mapSyntheticLinkStateError(err)
+		}
+
+		mapped := mapSyntheticLinkState(item)
+		return &mapped, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) PutFinanceSyntheticLinkState(
+	builder handlers.HandlerBuilder[*models.PutFinanceSyntheticLinkStateParams, *models.FinanceSyntheticLinkStateResponse],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.PutFinanceSyntheticLinkStateParams,
+	) (*models.FinanceSyntheticLinkStateResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		item, err := c.deps.SyntheticLinkStateService.SavePendingSyntheticLinkState(
+			ctx,
+			financepkg.SavePendingSyntheticLinkStateParams{
+				ActorUserID:        userID,
+				TenantID:           params.TenantID,
+				State:              params.State,
+				ConfiguredAccounts: mapSyntheticLinkStateAccountsRequest(params.Payload.ConfiguredAccounts),
+			},
+		)
+		if err != nil {
+			return nil, mapSyntheticLinkStateError(err)
+		}
+
+		mapped := mapSyntheticLinkState(item)
 		return &mapped, nil
 	})
 
@@ -1490,6 +1565,47 @@ func mapConnection(
 	return response
 }
 
+func mapSyntheticLinkState(
+	item financepkg.PendingSyntheticLinkState,
+) models.FinanceSyntheticLinkStateResponse {
+	response := models.FinanceSyntheticLinkStateResponse{
+		Provider: item.Provider,
+		State:    item.State,
+		ConfiguredAccounts: make(
+			[]*models.FinanceSyntheticLinkStateConfiguredAccountResponse,
+			0,
+			len(item.ConfiguredAccounts),
+		),
+		CanFinish: item.CanFinish,
+	}
+	for _, account := range item.ConfiguredAccounts {
+		mapped := models.FinanceSyntheticLinkStateConfiguredAccountResponse{
+			Key:      account.Key,
+			Name:     account.Name,
+			Currency: account.Currency,
+		}
+		response.ConfiguredAccounts = append(response.ConfiguredAccounts, &mapped)
+	}
+	return response
+}
+
+func mapSyntheticLinkStateAccountsRequest(
+	items []*models.FinanceSyntheticLinkStateConfiguredAccountRequest,
+) []financepkg.SyntheticLinkStateAccount {
+	result := make([]financepkg.SyntheticLinkStateAccount, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		result = append(result, financepkg.SyntheticLinkStateAccount{
+			Key:      item.Key,
+			Name:     item.Name,
+			Currency: item.Currency,
+		})
+	}
+	return result
+}
+
 func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { //nolint:funlen
 	response := models.FinanceDashboardResponse{
 		Period: models.FinanceDashboardPeriod{
@@ -1777,6 +1893,22 @@ func sanitizeBankConnectionError(err error, fallback string) error {
 	default:
 		return errors.New(fallback)
 	}
+}
+
+func mapSyntheticLinkStateError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, financepkg.ErrPendingSyntheticLinkStateNotFound) {
+		return app.NewErrInvalidInput("state", "pending synthetic link state not found or expired")
+	}
+	if errors.Is(err, financepkg.ErrSyntheticConfiguredAccountNameRequired) {
+		return app.NewErrInvalidInput("configuredAccounts", "configured account name is required")
+	}
+	if errors.Is(err, financepkg.ErrSyntheticConfiguredAccountCurrencyRequired) {
+		return app.NewErrInvalidInput("configuredAccounts", "configured account currency is required")
+	}
+	return sanitizeBankConnectionError(err, "synthetic link state failed")
 }
 
 func humanizeProviderResponseError(err *financepkg.ProviderResponseError) string {

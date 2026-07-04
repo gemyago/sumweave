@@ -9,10 +9,11 @@ import (
 const marketSegmentPersonal = "personal"
 
 type ConnectorCapabilities struct {
-	SupportsStartLink  bool
-	SupportsFinishLink bool
-	SupportsTokenLink  bool
-	SupportsFetch      bool
+	SupportsStartLink    bool
+	SupportsFinishLink   bool
+	RequiresRedirectCode bool
+	SupportsTokenLink    bool
+	SupportsFetch        bool
 }
 
 type ProviderProfile struct {
@@ -41,9 +42,10 @@ type StartLinkRequest struct {
 }
 
 type StartLinkResult struct {
-	State            string
-	AuthorizationURL string
-	RawPayloads      []domain.ProviderRawPayloadObservation
+	State             string
+	ProviderReference string
+	AuthorizationURL  string
+	RawPayloads       []domain.ProviderRawPayloadObservation
 }
 
 type FinishLinkRequest struct {

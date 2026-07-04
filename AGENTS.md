@@ -142,6 +142,10 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 - Mockery is the default for dependency mocks in tests.
 - Hand-written stubs/fakes/spies are forbidden without user approval.
 
+## Manual E2E Testing
+
+When user asks to e2e test something, usually this means following the steps in the relevant [manual e2e testing guide](./docs/manual-e2e/README.md).
+
 ## Platform Agent Skills
 
 Platform-internal skills live under `.platform-agents/skills`.

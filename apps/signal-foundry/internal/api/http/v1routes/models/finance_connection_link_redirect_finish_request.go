@@ -15,6 +15,6 @@ var _ = fmt.Sprint
 
 type FinanceConnectionLinkRedirectFinishRequest struct { 
 	Provider FinanceBankLinkRedirectProvider `json:"provider"`
-	Code string `json:"code"`
+	Code string `json:"code,omitempty"`
 	State string `json:"state"`
 }

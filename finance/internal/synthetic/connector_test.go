@@ -24,9 +24,9 @@ type stubProviderStateStore struct {
 
 func (s *stubProviderStateStore) GetSyntheticProviderState(
 	_ context.Context,
-	connectionID string,
+	providerReference string,
 ) (*domain.SyntheticProviderState, error) {
-	s.getCalls = append(s.getCalls, connectionID)
+	s.getCalls = append(s.getCalls, providerReference)
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
@@ -85,23 +85,25 @@ func TestConnector(t *testing.T) {
 	t.Run("fetch generates first-window account balance transaction and raw payload observations", func(t *testing.T) {
 		fake := faker.New()
 		connection := makeConnection(fake)
+		duplicateName := "wallet-" + fake.Lorem().Word()
+		duplicateCurrency := "USD"
 		requestedWindow := domain.ProviderSyncWindow{
 			Start: time.Date(2026, time.June, 20, 15, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60)),
 			End:   time.Date(2026, time.June, 22, 8, 45, 0, 0, time.FixedZone("UTC-4", -4*60*60)),
 		}
 		stateStore := &stubProviderStateStore{
 			state: &domain.SyntheticProviderState{
-				ConnectionID: connection.ConnectionID,
+				ProviderReference: connection.ProviderReference,
 				Envelope: domain.SyntheticProviderStateEnvelope{
 					Version: domain.SyntheticProviderStateVersion1,
 					ConfiguredAccounts: []domain.SyntheticConfiguredAccount{{
 						Key:      "synthetic-account-a-" + fake.UUID().V4(),
-						Name:     "wallet-a-" + fake.Lorem().Word(),
-						Currency: "USD",
+						Name:     duplicateName,
+						Currency: duplicateCurrency,
 					}, {
 						Key:      "synthetic-account-b-" + fake.UUID().V4(),
-						Name:     "wallet-b-" + fake.Lorem().Word(),
-						Currency: "EUR",
+						Name:     duplicateName,
+						Currency: duplicateCurrency,
 					}},
 				},
 				CreatedAt: time.Date(2026, time.June, 18, 9, 0, 0, 0, time.UTC),
@@ -126,6 +128,7 @@ func TestConnector(t *testing.T) {
 			RequestedWindow: requestedWindow,
 		})
 		require.NoError(t, err)
+		assert.Equal(t, []string{connection.ProviderReference}, stateStore.getCalls)
 
 		require.Len(t, batch.Accounts, 2)
 		require.Len(t, batch.Balances, 2)
@@ -146,6 +149,9 @@ func TestConnector(t *testing.T) {
 			accountCurrencies[account.ProviderAccountID] = account.Currency
 			assert.Contains(t, account.ProviderAccountID, connection.ConnectionID)
 		}
+		assert.NotEqual(t, batch.Accounts[0].ProviderAccountID, batch.Accounts[1].ProviderAccountID)
+		assert.Equal(t, batch.Accounts[0].Name, batch.Accounts[1].Name)
+		assert.Equal(t, batch.Accounts[0].Currency, batch.Accounts[1].Currency)
 
 		seenTransactionIDs := map[string]struct{}{}
 		seenDaysByAccount := map[string]map[string]int{}
@@ -175,6 +181,7 @@ func TestConnector(t *testing.T) {
 		}
 
 		require.NotNil(t, stateStore.savedState)
+		assert.Equal(t, connection.ProviderReference, stateStore.savedState.ProviderReference)
 		require.Len(t, stateStore.savedState.Envelope.WindowHistory, 1)
 		assert.Equal(t, normalizedWindow, stateStore.savedState.Envelope.WindowHistory[0].Window)
 		assert.Equal(t, 1, stateStore.savedState.Envelope.WindowHistory[0].RepeatCount)
@@ -194,7 +201,7 @@ func TestConnector(t *testing.T) {
 		firstAccountKey := "synthetic-account-a-" + fake.UUID().V4()
 		secondAccountKey := "synthetic-account-b-" + fake.UUID().V4()
 		stateStore := &stubProviderStateStore{state: &domain.SyntheticProviderState{
-			ConnectionID: connection.ConnectionID,
+			ProviderReference: connection.ProviderReference,
 			Envelope: domain.SyntheticProviderStateEnvelope{
 				Version: domain.SyntheticProviderStateVersion1,
 				ConfiguredAccounts: []domain.SyntheticConfiguredAccount{
@@ -243,14 +250,69 @@ func TestConnector(t *testing.T) {
 		_, err = connectorWithoutStore.Fetch(t.Context(), providers.FetchRequest{Connection: connection})
 		require.ErrorIs(t, err, ErrProviderStateStoreRequired)
 
-		_, err = connectorWithoutStore.StartLink(t.Context(), providers.StartLinkRequest{})
-		require.ErrorIs(t, err, ErrConnectorLinkUnsupported)
+		startResult, err := connectorWithoutStore.StartLink(t.Context(), providers.StartLinkRequest{})
+		require.NoError(t, err)
+		assert.NotEmpty(t, startResult.State)
+		assert.Equal(t, startResult.State, startResult.ProviderReference)
+		assert.Equal(t, "#/finance/connections/synthetic?state="+startResult.State, startResult.AuthorizationURL)
 		_, err = connectorWithoutStore.FinishLink(t.Context(), providers.FinishLinkRequest{})
-		require.ErrorIs(t, err, ErrConnectorLinkUnsupported)
+		require.ErrorIs(t, err, ErrProviderStateStoreRequired)
 		_, err = connectorWithoutStore.LinkToken(t.Context(), providers.LinkTokenRequest{})
 		require.ErrorIs(t, err, ErrConnectorLinkUnsupported)
 		assert.Equal(t, domain.ProviderConnectorIDSynthetic, connectorWithoutStore.ConnectorID())
-		assert.Equal(t, providers.ConnectorCapabilities{SupportsFetch: true}, connectorWithoutStore.Capabilities())
+		assert.Equal(t, providers.ConnectorCapabilities{
+			SupportsStartLink:  true,
+			SupportsFinishLink: true,
+			SupportsFetch:      true,
+		}, connectorWithoutStore.Capabilities())
+	})
+
+	t.Run("supports local synthetic start and finish lifecycle", func(t *testing.T) {
+		fake := faker.New()
+		state := "state-" + fake.UUID().V4()
+		stateStore := &stubProviderStateStore{}
+		connector := NewConnector(
+			stateStore,
+			WithConnectorStateGenerator(func() string { return state }),
+		)
+
+		startResult, err := connector.StartLink(t.Context(), providers.StartLinkRequest{
+			BrowserCallbackURL: "http://localhost:5173/#/finance/connections",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, state, startResult.State)
+		assert.Equal(t, state, startResult.ProviderReference)
+		assert.Equal(t, "#/finance/connections/synthetic?state="+state, startResult.AuthorizationURL)
+		assert.Equal(t, providers.ConnectorCapabilities{
+			SupportsStartLink:  true,
+			SupportsFinishLink: true,
+			SupportsFetch:      true,
+		}, connector.Capabilities())
+
+		stateStore.state = &domain.SyntheticProviderState{ProviderReference: state}
+		_, err = connector.FinishLink(t.Context(), providers.FinishLinkRequest{State: state})
+		require.ErrorContains(t, err, "configured synthetic state")
+		assert.Equal(t, []string{state}, stateStore.getCalls)
+
+		stateStore.state = &domain.SyntheticProviderState{
+			ProviderReference: state,
+			Envelope: domain.SyntheticProviderStateEnvelope{
+				Version: domain.SyntheticProviderStateVersion1,
+				ConfiguredAccounts: []domain.SyntheticConfiguredAccount{{
+					Key:      "synthetic-account-" + fake.UUID().V4(),
+					Name:     "wallet-" + fake.Lorem().Word(),
+					Currency: "USD",
+				}},
+			},
+		}
+
+		finishResult, err := connector.FinishLink(t.Context(), providers.FinishLinkRequest{State: state})
+		require.NoError(t, err)
+		assert.Equal(t, ConnectionDisplayName, finishResult.DisplayName)
+		assert.Equal(t, state, finishResult.ProviderReference)
+		assert.Empty(t, finishResult.Secret)
+		assert.Equal(t, domain.BankConnectionStateActive, finishResult.State)
+		assert.Equal(t, []string{state, state}, stateStore.getCalls)
 	})
 
 	t.Run("wraps provider state errors and keeps helpers deterministic", func(t *testing.T) {
@@ -258,7 +320,7 @@ func TestConnector(t *testing.T) {
 		connection := makeConnection(fake)
 		stateStore := &stubProviderStateStore{
 			state: &domain.SyntheticProviderState{
-				ConnectionID: connection.ConnectionID,
+				ProviderReference: connection.ProviderReference,
 				Envelope: domain.SyntheticProviderStateEnvelope{
 					Version: domain.SyntheticProviderStateVersion1,
 					ConfiguredAccounts: []domain.SyntheticConfiguredAccount{{

@@ -123,11 +123,12 @@ type ProviderScheduledRunMetadata struct {
 }
 
 type ProviderSyncParams struct {
-	ConnectionID string
-	Secret       string
-	ExternalID   string
-	WindowStart  time.Time
-	WindowEnd    time.Time
+	ConnectionID      string
+	ProviderReference string
+	Secret            string
+	ExternalID        string
+	WindowStart       time.Time
+	WindowEnd         time.Time
 }
 
 type ProviderSyncResult struct {

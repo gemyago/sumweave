@@ -37,66 +37,43 @@ vi.mock('./lib/jobs/api', async (importOriginal) => {
   }
 })
 
+const financeApiMocks = vi.hoisted(() => ({
+  listTenants: vi.fn(),
+  getDashboard: vi.fn(),
+  getFXDiagnostics: vi.fn(),
+  listTenantMembers: vi.fn(),
+  listTenantInvites: vi.fn(),
+  listAccounts: vi.fn(),
+  listCategories: vi.fn(),
+  listTags: vi.fn(),
+  listTransactions: vi.fn(),
+  listConnections: vi.fn(),
+  createTenant: vi.fn(),
+  createTenantInvite: vi.fn(),
+  acceptTenantInvite: vi.fn(),
+  createAccount: vi.fn(),
+  createCategory: vi.fn(),
+  createTag: vi.fn(),
+  createTransaction: vi.fn(),
+  linkTokenConnection: vi.fn(),
+  startRedirectConnection: vi.fn(),
+  finishRedirectConnection: vi.fn(),
+  getSyntheticLinkState: vi.fn(),
+  saveSyntheticLinkState: vi.fn(),
+  deleteConnection: vi.fn(),
+  triggerConnectionSync: vi.fn(),
+  triggerFXSync: vi.fn(),
+  previewCSVImport: vi.fn(),
+  confirmCSVImport: vi.fn(),
+  getCSVImportAudit: vi.fn(),
+  getTenant: vi.fn(),
+}))
+
 vi.mock('./lib/finance/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lib/finance/api')>()
-  const now = new Date('2026-06-20T12:00:00Z')
   return {
     ...actual,
-    createSignalFinanceApiForAuth: vi.fn(() => ({
-      listTenants: vi.fn().mockResolvedValue([
-        {
-          id: 'tenant-1',
-          name: 'Household',
-          displayCurrency: 'USD',
-          joinedAt: now,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ]),
-      getDashboard: vi.fn().mockResolvedValue({
-        period: {
-          preset: 'current_month',
-          startDate: now,
-          endDate: now,
-          previous: { startDate: now, endDate: now },
-          next: { startDate: now, endDate: now },
-        },
-        settled: { displayCurrency: 'USD', incomeMinor: 10000, expenseMinor: 5000, netMinor: 5000, transactionCount: 2, complete: true },
-        pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1000, netMinor: -1000, transactionCount: 1, complete: true },
-        categoryBreakdowns: [],
-        accountBalances: [],
-        alerts: [],
-        missingFx: [],
-        nativeSettledTotals: [],
-      }),
-      getFXDiagnostics: vi.fn().mockResolvedValue({
-        defaultProvider: 'frankfurter',
-        storedRatesCount: 12,
-        providers: [{ name: 'frankfurter', default: true, ready: true }],
-      }),
-      listTenantMembers: vi.fn().mockResolvedValue([]),
-      listTenantInvites: vi.fn().mockResolvedValue([]),
-      listAccounts: vi.fn().mockResolvedValue([]),
-      listCategories: vi.fn().mockResolvedValue([]),
-      listTags: vi.fn().mockResolvedValue([]),
-      listTransactions: vi.fn().mockResolvedValue([]),
-      listConnections: vi.fn().mockResolvedValue([]),
-      createTenant: vi.fn(),
-      createTenantInvite: vi.fn(),
-      acceptTenantInvite: vi.fn(),
-      createAccount: vi.fn(),
-      createCategory: vi.fn(),
-      createTag: vi.fn(),
-      createTransaction: vi.fn(),
-      linkTokenConnection: vi.fn(),
-      deleteConnection: vi.fn(),
-      triggerConnectionSync: vi.fn(),
-      triggerFXSync: vi.fn(),
-      previewCSVImport: vi.fn(),
-      confirmCSVImport: vi.fn(),
-      getCSVImportAudit: vi.fn(),
-      getTenant: vi.fn(),
-    })),
+    createSignalFinanceApiForAuth: vi.fn(() => financeApiMocks),
   }
 })
 
@@ -119,14 +96,94 @@ function navigateHash(hash: string) {
   window.dispatchEvent(new HashChangeEvent('hashchange'))
 }
 
+function createFinanceConnectionFixture(overrides: Record<string, unknown> = {}) {
+  const now = new Date('2026-06-20T12:00:00Z')
+  return {
+    id: 'connection-1',
+    tenantId: 'tenant-1',
+    provider: 'synthetic',
+    displayName: 'Synthetic household',
+    providerReference: 'state-1',
+    externalId: '',
+    state: 'active',
+    lastSyncJobId: '',
+    lastSyncStartedAt: null,
+    lastSuccessfulSyncAt: null,
+    lastSyncError: '',
+    createdAt: now,
+    updatedAt: now,
+    schedule: null,
+    ...overrides,
+  }
+}
+
 describe('App shell', () => {
   beforeEach(() => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    vi.clearAllMocks()
     window.sessionStorage.clear()
     window.location.hash = ''
     mocks.isAuthenticated = true
     mocks.restoring = false
     mocks.tryRestoreSession.mockResolvedValue(undefined)
     mocks.accessToken = faker.string.alphanumeric(32)
+    financeApiMocks.listTenants.mockResolvedValue([
+      {
+        id: 'tenant-1',
+        name: 'Household',
+        displayCurrency: 'USD',
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ])
+    financeApiMocks.getDashboard.mockResolvedValue({
+      period: {
+        preset: 'current_month',
+        startDate: now,
+        endDate: now,
+        previous: { startDate: now, endDate: now },
+        next: { startDate: now, endDate: now },
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 10000, expenseMinor: 5000, netMinor: 5000, transactionCount: 2, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1000, netMinor: -1000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [],
+      accountBalances: [],
+      alerts: [],
+      missingFx: [],
+      nativeSettledTotals: [],
+    })
+    financeApiMocks.getFXDiagnostics.mockResolvedValue({
+      defaultProvider: 'frankfurter',
+      storedRatesCount: 12,
+      providers: [{ name: 'frankfurter', default: true, ready: true }],
+    })
+    financeApiMocks.listTenantMembers.mockResolvedValue([])
+    financeApiMocks.listTenantInvites.mockResolvedValue([])
+    financeApiMocks.listAccounts.mockResolvedValue([])
+    financeApiMocks.listCategories.mockResolvedValue([])
+    financeApiMocks.listTags.mockResolvedValue([])
+    financeApiMocks.listTransactions.mockResolvedValue([])
+    financeApiMocks.listConnections.mockResolvedValue([])
+    financeApiMocks.createTenant.mockResolvedValue(undefined)
+    financeApiMocks.createTenantInvite.mockResolvedValue(undefined)
+    financeApiMocks.acceptTenantInvite.mockResolvedValue(undefined)
+    financeApiMocks.createAccount.mockResolvedValue(undefined)
+    financeApiMocks.createCategory.mockResolvedValue(undefined)
+    financeApiMocks.createTag.mockResolvedValue(undefined)
+    financeApiMocks.createTransaction.mockResolvedValue(undefined)
+    financeApiMocks.linkTokenConnection.mockResolvedValue(undefined)
+    financeApiMocks.startRedirectConnection.mockResolvedValue({ provider: 'pko', authorizationUrl: 'https://bank.example.test/authorize', state: 'state-1' })
+    financeApiMocks.finishRedirectConnection.mockResolvedValue(createFinanceConnectionFixture())
+    financeApiMocks.getSyntheticLinkState.mockResolvedValue({ provider: 'synthetic', state: 'state-1', configuredAccounts: [], canFinish: false })
+    financeApiMocks.saveSyntheticLinkState.mockResolvedValue({ provider: 'synthetic', state: 'state-1', configuredAccounts: [], canFinish: false })
+    financeApiMocks.deleteConnection.mockResolvedValue(undefined)
+    financeApiMocks.triggerConnectionSync.mockResolvedValue({ jobId: 'job-1', jobType: 'finance.bank_connection_sync' })
+    financeApiMocks.triggerFXSync.mockResolvedValue({ jobId: 'job-2', jobType: 'finance.fx_rates_sync', provider: 'frankfurter' })
+    financeApiMocks.previewCSVImport.mockResolvedValue(undefined)
+    financeApiMocks.confirmCSVImport.mockResolvedValue(undefined)
+    financeApiMocks.getCSVImportAudit.mockResolvedValue(undefined)
+    financeApiMocks.getTenant.mockResolvedValue(undefined)
   })
 
   it('shows Chat heading on initial load when authenticated', async () => {
@@ -217,6 +274,44 @@ describe('App shell', () => {
     expect(
       await screen.findByRole('heading', { name: 'Edit transaction' }),
     ).toBeInTheDocument()
+  })
+
+  it('renders the synthetic finance setup route when authenticated', async () => {
+    render(App)
+
+    navigateHash('#/finance/connections/synthetic?state=state-1')
+
+    expect(await screen.findByRole('heading', { name: 'Synthetic setup' })).toBeInTheDocument()
+  })
+
+  it('completes synthetic setup and returns to connections with the new link visible', async () => {
+    const user = userEvent.setup()
+    financeApiMocks.listConnections
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([createFinanceConnectionFixture()])
+    financeApiMocks.startRedirectConnection.mockResolvedValueOnce({
+      provider: 'synthetic',
+      authorizationUrl: '#/finance/connections/synthetic?state=state-1',
+      state: 'state-1',
+    })
+    financeApiMocks.saveSyntheticLinkState.mockResolvedValueOnce({
+      provider: 'synthetic',
+      state: 'state-1',
+      configuredAccounts: [{ key: 'account-1', name: 'Cash', currency: 'USD' }],
+      canFinish: true,
+    })
+    financeApiMocks.finishRedirectConnection.mockResolvedValueOnce(createFinanceConnectionFixture())
+
+    render(App)
+    navigateHash('#/finance/connections')
+
+    await user.click(await screen.findByRole('button', { name: 'Start synthetic setup' }))
+    await user.type(await screen.findByLabelText('Account name 1'), 'Cash')
+    await user.type(screen.getByLabelText('Account currency 1'), 'USD')
+    await user.click(screen.getByRole('button', { name: 'Finish link' }))
+
+    expect(await screen.findByRole('heading', { name: 'Finance connections' })).toBeInTheDocument()
+    expect(await screen.findByText('Synthetic household')).toBeInTheDocument()
   })
 
   it('renders the data browser route shell when authenticated', async () => {

@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   linkTokenConnection: vi.fn(),
   startRedirectConnection: vi.fn(),
   finishRedirectConnection: vi.fn(),
+  getSyntheticLinkState: vi.fn(),
+  saveSyntheticLinkState: vi.fn(),
   deleteConnection: vi.fn(),
   triggerConnectionSync: vi.fn(),
 }))
@@ -69,6 +71,8 @@ describe('Finance connections page', () => {
     mocks.linkTokenConnection.mockResolvedValue(createConnectionFixture())
     mocks.startRedirectConnection.mockResolvedValue({ provider: 'pko', authorizationUrl: 'https://bank.example/authorize', state: 'state-1' })
     mocks.finishRedirectConnection.mockResolvedValue(createConnectionFixture())
+    mocks.getSyntheticLinkState.mockResolvedValue({ provider: 'synthetic', state: 'state-1', configuredAccounts: [], canFinish: false })
+    mocks.saveSyntheticLinkState.mockResolvedValue({ provider: 'synthetic', state: 'state-1', configuredAccounts: [], canFinish: false })
     mocks.deleteConnection.mockResolvedValue(undefined)
     mocks.triggerConnectionSync.mockResolvedValue({ jobId: 'job-2', jobType: 'finance.bank_connection_sync' })
   })
@@ -212,6 +216,39 @@ describe('Finance connections page', () => {
     await user.click(await screen.findByRole('button', { name: 'Connect PKO with bank login' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('PKO start failed')
+  })
+
+  it('starts synthetic setup and navigates to the fixed synthetic route returned by state', async () => {
+    const user = userEvent.setup()
+    mocks.startRedirectConnection.mockResolvedValueOnce({
+      provider: 'synthetic',
+      authorizationUrl: '#/finance/connections/synthetic?state=state-1',
+      state: 'state-1',
+    })
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Start synthetic setup' }))
+
+    await waitFor(() =>
+      expect(mocks.startRedirectConnection).toHaveBeenCalledWith({
+        tenantId: 'tenant-1',
+        provider: 'synthetic',
+        callbackUrl: `${window.location.origin}/#/finance/connections`,
+      }),
+    )
+    expect(window.location.hash).toBe('#/finance/connections/synthetic?state=state-1')
+  })
+
+  it('surfaces synthetic start failures in the page error state', async () => {
+    const user = userEvent.setup()
+    mocks.startRedirectConnection.mockRejectedValueOnce(new Error('Synthetic start failed'))
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Start synthetic setup' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Synthetic start failed')
   })
 
   it('uses the fallback PKO error message for non-Error start failures', async () => {

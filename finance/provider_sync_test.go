@@ -59,6 +59,7 @@ type stubBankProvider struct {
 	syncResults  []ProviderSyncResult
 	syncErr      error
 	syncCalls    int
+	syncParams   []ProviderSyncParams
 	startCalls   int
 	finishCalls  int
 	linkedTokens []string
@@ -123,6 +124,7 @@ func (p *stubBankProvider) Sync(
 	if p.syncErr != nil {
 		return ProviderSyncResult{}, p.syncErr
 	}
+	p.syncParams = append(p.syncParams, params)
 	p.secrets = append(p.secrets, params.Secret)
 	if p.syncCalls >= len(p.syncResults) {
 		return ProviderSyncResult{}, errors.New("no stub sync result")
@@ -444,6 +446,8 @@ func TestFinanceProviderSync(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, 1, firstSync.ImportedAccounts)
 			assert.Equal(t, 1, firstSync.ImportedTransactions)
+			require.Len(t, provider.syncParams, 1)
+			assert.Equal(t, connection.ProviderReference, provider.syncParams[0].ProviderReference)
 
 			duplicateSync, err := service.ApplyProviderSyncResult(
 				t.Context(),
@@ -466,6 +470,8 @@ func TestFinanceProviderSync(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Equal(t, 1, secondSync.UpdatedTransactions)
+			require.Len(t, provider.syncParams, 2)
+			assert.Equal(t, connection.ProviderReference, provider.syncParams[1].ProviderReference)
 
 			connections, err := service.ListBankConnections(t.Context(), ListBankConnectionsParams{
 				ActorUserID: ownerUserID,

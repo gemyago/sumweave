@@ -327,10 +327,10 @@ func (providerTransactionMatchModel) TableName() string {
 }
 
 type syntheticProviderStateModel struct {
-	ConnectionID string    `gorm:"column:connection_id;size:255;not null;primaryKey"`
-	StateJSON    string    `gorm:"column:state_json;type:text;not null"`
-	CreatedAt    time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt    time.Time `gorm:"column:updated_at;not null"`
+	ProviderReference string    `gorm:"column:provider_reference;size:255;not null;primaryKey"`
+	StateJSON         string    `gorm:"column:state_json;type:text;not null"`
+	CreatedAt         time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt         time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (syntheticProviderStateModel) TableName() string {
@@ -1087,10 +1087,10 @@ func newSyntheticProviderStateModel(
 	state domain.SyntheticProviderState,
 ) syntheticProviderStateModel {
 	return syntheticProviderStateModel{
-		ConnectionID: state.ConnectionID,
-		StateJSON:    mustJSON(normalizeSyntheticProviderStateEnvelope(state.Envelope)),
-		CreatedAt:    normalizeUTC(state.CreatedAt),
-		UpdatedAt:    normalizeUTC(state.UpdatedAt),
+		ProviderReference: state.ProviderReference,
+		StateJSON:         mustJSON(normalizeSyntheticProviderStateEnvelope(state.Envelope)),
+		CreatedAt:         normalizeUTC(state.CreatedAt),
+		UpdatedAt:         normalizeUTC(state.UpdatedAt),
 	}
 }
 
@@ -1100,10 +1100,10 @@ func syntheticProviderStateFromModel(
 	envelope := domain.SyntheticProviderStateEnvelope{}
 	mustUnmarshalJSON(model.StateJSON, &envelope)
 	return domain.SyntheticProviderState{
-		ConnectionID: model.ConnectionID,
-		Envelope:     normalizeSyntheticProviderStateEnvelope(envelope),
-		CreatedAt:    normalizeUTC(model.CreatedAt),
-		UpdatedAt:    normalizeUTC(model.UpdatedAt),
+		ProviderReference: model.ProviderReference,
+		Envelope:          normalizeSyntheticProviderStateEnvelope(envelope),
+		CreatedAt:         normalizeUTC(model.CreatedAt),
+		UpdatedAt:         normalizeUTC(model.UpdatedAt),
 	}
 }
 

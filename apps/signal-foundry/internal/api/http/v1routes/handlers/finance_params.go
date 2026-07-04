@@ -519,6 +519,42 @@ func newParamsParserFinanceGetFinanceDashboard(rootHandler *RootHandler) paramsP
 	}
 }
 
+type paramsParserFinanceGetFinanceSyntheticLinkState struct {
+	bindTenantID requestParamBinder[string, string]
+	bindState requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceGetFinanceSyntheticLinkState) parse(router httpRouter, req *http.Request) (*GetFinanceSyntheticLinkStateParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &GetFinanceSyntheticLinkStateParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindState(pathParamsCtx.Fork("state"), readPathValue("state", router, req), &reqParams.State)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceGetFinanceSyntheticLinkState(rootHandler *RootHandler) paramsParser[*GetFinanceSyntheticLinkStateParams] {
+	return &paramsParserFinanceGetFinanceSyntheticLinkState{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindState: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
 type paramsParserFinanceGetFinanceTenant struct {
 	bindTenantID requestParamBinder[string, string]
 }
@@ -917,6 +953,52 @@ func newParamsParserFinancePreviewFinanceCsvImport(rootHandler *RootHandler) par
 	}
 }
 
+type paramsParserFinancePutFinanceSyntheticLinkState struct {
+	bindTenantID requestParamBinder[string, string]
+	bindState requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceSyntheticLinkStateUpdateRequest]
+}
+
+func (p *paramsParserFinancePutFinanceSyntheticLinkState) parse(router httpRouter, req *http.Request) (*PutFinanceSyntheticLinkStateParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &PutFinanceSyntheticLinkStateParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindState(pathParamsCtx.Fork("state"), readPathValue("state", router, req), &reqParams.State)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinancePutFinanceSyntheticLinkState(rootHandler *RootHandler) paramsParser[*PutFinanceSyntheticLinkStateParams] {
+	return &paramsParserFinancePutFinanceSyntheticLinkState{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindState: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceSyntheticLinkStateUpdateRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceSyntheticLinkStateUpdateRequest],
+			),
+			validateValue: NewFinanceSyntheticLinkStateUpdateRequestValidator(),
+		}),
+	}
+}
+
 type paramsParserFinanceStartFinanceConnectionRedirectLink struct {
 	bindTenantID requestParamBinder[string, string]
 	bindPayload requestParamBinder[*http.Request, *FinanceConnectionLinkRedirectStartRequest]
@@ -1250,6 +1332,18 @@ type financeControllerBuilder struct {
 		httpHandlerActionFuncNoParams[void, *FinanceFxDiagnosticsResponse],
 	]
 
+	// GET /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+	//
+	// Request type: GetFinanceSyntheticLinkStateParams,
+	//
+	// Response type: FinanceSyntheticLinkStateResponse
+	GetFinanceSyntheticLinkState genericHandlerBuilder[
+		*GetFinanceSyntheticLinkStateParams,
+		*FinanceSyntheticLinkStateResponse,
+		handlerActionFunc[*GetFinanceSyntheticLinkStateParams, *FinanceSyntheticLinkStateResponse],
+		httpHandlerActionFunc[*GetFinanceSyntheticLinkStateParams, *FinanceSyntheticLinkStateResponse],
+	]
+
 	// GET /api/v1/finance/tenants/{tenantId}
 	//
 	// Request type: GetFinanceTenantParams,
@@ -1392,6 +1486,18 @@ type financeControllerBuilder struct {
 		*FinanceCsvImportPreviewResponse,
 		handlerActionFunc[*PreviewFinanceCsvImportParams, *FinanceCsvImportPreviewResponse],
 		httpHandlerActionFunc[*PreviewFinanceCsvImportParams, *FinanceCsvImportPreviewResponse],
+	]
+
+	// PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+	//
+	// Request type: PutFinanceSyntheticLinkStateParams,
+	//
+	// Response type: FinanceSyntheticLinkStateResponse
+	PutFinanceSyntheticLinkState genericHandlerBuilder[
+		*PutFinanceSyntheticLinkStateParams,
+		*FinanceSyntheticLinkStateResponse,
+		handlerActionFunc[*PutFinanceSyntheticLinkStateParams, *FinanceSyntheticLinkStateResponse],
+		httpHandlerActionFunc[*PutFinanceSyntheticLinkStateParams, *FinanceSyntheticLinkStateResponse],
 	]
 
 	// POST /api/v1/finance/tenants/{tenantId}/connections/link-redirect/start
@@ -1747,6 +1853,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
+		// GET /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+		GetFinanceSyntheticLinkState: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*GetFinanceSyntheticLinkStateParams,
+				*FinanceSyntheticLinkStateResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*GetFinanceSyntheticLinkStateParams,
+				*FinanceSyntheticLinkStateResponse,
+			](),
+			makeActionBuilderParams[
+				*GetFinanceSyntheticLinkStateParams,
+				*FinanceSyntheticLinkStateResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserFinanceGetFinanceSyntheticLinkState(app),
+			},
+		),
+
 		// GET /api/v1/finance/tenants/{tenantId}
 		GetFinanceTenant: newGenericHandlerBuilder(
 			app,
@@ -1984,6 +2110,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinancePreviewFinanceCsvImport(app),
+			},
+		),
+
+		// PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+		PutFinanceSyntheticLinkState: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*PutFinanceSyntheticLinkStateParams,
+				*FinanceSyntheticLinkStateResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*PutFinanceSyntheticLinkStateParams,
+				*FinanceSyntheticLinkStateResponse,
+			](),
+			makeActionBuilderParams[
+				*PutFinanceSyntheticLinkStateParams,
+				*FinanceSyntheticLinkStateResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserFinancePutFinanceSyntheticLinkState(app),
 			},
 		),
 

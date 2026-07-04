@@ -2,7 +2,7 @@
 
 Follow preparation steps in [README.md](./README.md) and get the API token before starting.
 
-This guide is mostly API-only. The only non-API step is the synthetic link itself because the synthetic provider is still core-only and does not yet have a public HTTP linking route.
+This guide stays on the public HTTP API only. It replaces the old temporary Go helper with the real synthetic start/configure/finish endpoints.
 
 ## 1. Create a fresh finance tenant
 
@@ -17,108 +17,71 @@ Expected:
 - `200`
 - response includes a new tenant `id`
 
-## 2. Resolve the authenticated user id
-
-The synthetic link helper needs the real backend user id, not only the username.
+## 2. Start synthetic setup
 
 ```bash
-ME_STATUS=$(curl -sS -o /tmp/synthetic-provider-auth-me.json -w "%{http_code}" "http://127.0.0.1:4501/api/v1/auth/me" -H "Authorization: Bearer ${ACCESS_TOKEN}") && test "$ME_STATUS" = "200" && USER_ID=$(python3 -c 'import json; print(json.load(open("/tmp/synthetic-provider-auth-me.json"))["id"])') && printf 'userId=%s\n' "$USER_ID"
+START_STATUS=$(curl -sS -o /tmp/synthetic-provider-start.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections/link-redirect/start" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"provider":"synthetic","callbackUrl":"http://127.0.0.1:5173/#/finance/connections"}') && test "$START_STATUS" = "200" && STATE=$(python3 -c 'import json; data=json.load(open("/tmp/synthetic-provider-start.json")); assert data["provider"] == "synthetic"; assert "#/finance/connections/synthetic?state=" in data["authorizationUrl"]; print(data["state"])') && printf 'state=%s\n' "$STATE"
 ```
 
 Expected:
 
 - `200`
-- response includes `id` and `username`
+- response includes `provider="synthetic"`
+- response includes a local `authorizationUrl` under `#/finance/connections/synthetic?state=...`
+- response includes non-empty `state`
 
-## 3. Link one synthetic connection
-
-The command below writes a temporary Go test file under `finance/`, runs it once, prints the created connection id, and removes the file again.
+## 3. Confirm the pending state is empty before save
 
 ```bash
-ACCOUNT_NAME="Synthetic Checking ${RUN_TAG}" && cat > finance/manual_synthetic_provider_link_tmp_test.go <<'EOF'
-package finance
-
-import (
-	"context"
-	"crypto/sha256"
-	"os"
-	"path/filepath"
-	"testing"
-
-	"github.com/gemyago/signal-foundry/finance/credentials"
-	"github.com/gemyago/signal-foundry/finance/domain"
-	internalsynthetic "github.com/gemyago/signal-foundry/finance/internal/synthetic"
-	"github.com/gemyago/signal-foundry/finance/persistence"
-	"github.com/stretchr/testify/require"
-)
-
-func TestManualSyntheticProviderLink(t *testing.T) {
-	repoRoot := os.Getenv("SIGNAL_FOUNDRY_REPO_ROOT")
-	userID := os.Getenv("SYNTHETIC_E2E_USER_ID")
-	tenantID := os.Getenv("SYNTHETIC_E2E_TENANT_ID")
-	accountName := os.Getenv("SYNTHETIC_E2E_ACCOUNT_NAME")
-	require.NotEmpty(t, repoRoot)
-	require.NotEmpty(t, userID)
-	require.NotEmpty(t, tenantID)
-	require.NotEmpty(t, accountName)
-
-	database, err := persistence.OpenDatabase(filepath.Join(repoRoot, "apps/signal-foundry/data/data-layer.db"))
-	require.NoError(t, err)
-	store := persistence.NewStore(database)
-
-	jwtKey, err := os.ReadFile(filepath.Join(repoRoot, "apps/signal-foundry/data/auth/jwt-signing-key"))
-	require.NoError(t, err)
-	key := sha256.Sum256(jwtKey)
-	cipher, err := credentials.NewAESGCMCipher(key[:], "signal-foundry-finance")
-	require.NoError(t, err)
-
-	syntheticStateStore := persistence.NewSyntheticProviderStateStoreFromStore(store)
-	connector := internalsynthetic.NewConnector(syntheticStateStore)
-	provider, ok := newConnectorBankSyncProvider(connector)
-	require.True(t, ok)
-
-	service := NewService(store, WithConnectionSecretCipher(cipher), WithBankProviders(provider))
-	syncStore, err := service.bankSyncStore()
-	require.NoError(t, err)
-
-	linker := internalsynthetic.NewLinker(internalsynthetic.LinkerDeps{
-		RequireTenantMember: service.requireTenantMember,
-		SaveConnectionSecret: func(ctx context.Context, providerName, reference, secret string) (string, error) {
-			return service.encryptAndSaveConnectionSecret(ctx, providerName, reference, secret)
-		},
-		DeleteConnectionSecret: store.DeleteConnectionSecret,
-		SaveBankConnection:     syncStore.SaveBankConnection,
-		DeleteBankConnectionOwnedMetadata: func(ctx context.Context, connection domain.BankConnection) error {
-			return service.deleteBankConnectionOwnedMetadata(ctx, connection)
-		},
-		SaveSyntheticProviderState: syntheticStateStore.SaveSyntheticProviderState,
-		Now:                        service.now,
-		NewID:                      service.newID,
-	})
-
-	connection, err := linker.LinkConfiguredBankConnection(t.Context(), internalsynthetic.LinkConfiguredBankConnectionParams{
-		ActorUserID: userID,
-		TenantID:    tenantID,
-		Provider:    "synthetic",
-		Accounts: []internalsynthetic.ConfiguredAccount{{
-			Name:     accountName,
-			Currency: "USD",
-		}},
-	})
-	require.NoError(t, err)
-	t.Logf("connection_id=%s", connection.ID)
-	t.Logf("account_name=%s", accountName)
-}
-EOF
-SIGNAL_FOUNDRY_REPO_ROOT="$PWD" SYNTHETIC_E2E_USER_ID="$USER_ID" SYNTHETIC_E2E_TENANT_ID="$TENANT_ID" SYNTHETIC_E2E_ACCOUNT_NAME="$ACCOUNT_NAME" go test ./finance -run TestManualSyntheticProviderLink -count=1 -v | tee /tmp/synthetic-provider-link.out && CONNECTION_ID=$(python3 -c 'import pathlib,re; text=pathlib.Path("/tmp/synthetic-provider-link.out").read_text(); print(re.search(r"connection_id=(\S+)", text).group(1))') && rm -f finance/manual_synthetic_provider_link_tmp_test.go && printf 'connectionId=%s\n' "$CONNECTION_ID"
+GET_STATE_STATUS=$(curl -sS -o /tmp/synthetic-provider-state-initial.json -w "%{http_code}" "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections/synthetic-link-states/${STATE}" -H "Authorization: Bearer ${ACCESS_TOKEN}") && test "$GET_STATE_STATUS" = "200" && python3 -c 'import json; data=json.load(open("/tmp/synthetic-provider-state-initial.json")); assert data["provider"] == "synthetic"; assert data["state"]; assert data["configuredAccounts"] == []; assert data["canFinish"] is False; print("canFinish=false")'
 ```
 
 Expected:
 
-- `go test` passes
-- output contains `connection_id=<uuid>`
+- `200`
+- `configuredAccounts` is empty
+- `canFinish=false`
 
-## 4. Verify the linked synthetic connection exists before sync
+## 4. Save duplicate configured accounts
+
+Use duplicate `name` and `currency` values to confirm the API keeps them distinct with stable synthetic account keys.
+
+```bash
+SAVE_STATUS=$(curl -sS -o /tmp/synthetic-provider-state-saved.json -w "%{http_code}" -X PUT "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections/synthetic-link-states/${STATE}" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"configuredAccounts":[{"name":"Synthetic Checking","currency":"USD"},{"name":"Synthetic Checking","currency":"USD"}]}') && test "$SAVE_STATUS" = "200" && python3 -c 'import json; data=json.load(open("/tmp/synthetic-provider-state-saved.json")); items=data["configuredAccounts"]; assert len(items) == 2; assert items[0]["key"]; assert items[1]["key"]; assert items[0]["key"] != items[1]["key"]; assert data["canFinish"] is True; print("configuredKeys=" + ",".join(item["key"] for item in items))'
+```
+
+Expected:
+
+- `200`
+- response includes two configured accounts
+- each configured account has non-empty `key`
+- duplicate rows keep distinct keys
+- `canFinish=true`
+
+## 5. Reload and re-save the pending state
+
+```bash
+GET_RELOADED_STATUS=$(curl -sS -o /tmp/synthetic-provider-state-reloaded.json -w "%{http_code}" "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections/synthetic-link-states/${STATE}" -H "Authorization: Bearer ${ACCESS_TOKEN}") && test "$GET_RELOADED_STATUS" = "200" && python3 -c 'import json; saved=json.load(open("/tmp/synthetic-provider-state-saved.json")); print(json.dumps({"configuredAccounts": saved["configuredAccounts"]}))' > /tmp/synthetic-provider-state-resave-payload.json && RESAVE_STATUS=$(curl -sS -o /tmp/synthetic-provider-state-resaved.json -w "%{http_code}" -X PUT "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections/synthetic-link-states/${STATE}" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data @/tmp/synthetic-provider-state-resave-payload.json) && test "$RESAVE_STATUS" = "200" && python3 -c 'import json; saved=json.load(open("/tmp/synthetic-provider-state-saved.json"))["configuredAccounts"]; reloaded=json.load(open("/tmp/synthetic-provider-state-reloaded.json"))["configuredAccounts"]; resaved=json.load(open("/tmp/synthetic-provider-state-resaved.json"))["configuredAccounts"]; assert [item["key"] for item in saved] == [item["key"] for item in reloaded]; assert [item["key"] for item in saved] == [item["key"] for item in resaved]; print("stableKeysConfirmed")'
+```
+
+Expected:
+
+- both reload and re-save return `200`
+- both duplicate rows keep the same keys across reload and save
+
+## 6. Finish the synthetic link
+
+```bash
+FINISH_STATUS=$(curl -sS -o /tmp/synthetic-provider-finish.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections/link-redirect/finish" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data "{\"provider\":\"synthetic\",\"state\":\"${STATE}\"}") && test "$FINISH_STATUS" = "200" && CONNECTION_ID=$(STATE="$STATE" python3 -c 'import json, os; data=json.load(open("/tmp/synthetic-provider-finish.json")); assert data["provider"] == "synthetic"; assert data["providerReference"] == os.environ["STATE"]; print(data["id"])') && printf 'connectionId=%s\n' "$CONNECTION_ID"
+```
+
+Expected:
+
+- `200`
+- response includes a new connection `id`
+- response `providerReference` matches `${STATE}`
+
+## 7. Verify the linked synthetic connection exists before sync
 
 ```bash
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections" -H "Authorization: Bearer ${ACCESS_TOKEN}"
@@ -130,12 +93,12 @@ Expected:
 - one item matches `${CONNECTION_ID}`
 - that item has `provider="synthetic"`, `displayName="Synthetic"`, and `state="active"`
 
-## 5. Trigger one manual sync
+## 8. Trigger one manual sync
 
 Use a fixed window so repeated checks are easy to compare.
 
 ```bash
-SYNC_STATUS=$(curl -sS -o /tmp/synthetic-provider-sync-trigger.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections/${CONNECTION_ID}/sync" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"reason":"manual","windowStart":"2026-06-01T00:00:00Z","windowEnd":"2026-06-04T00:00:00Z"}') && test "$SYNC_STATUS" = "200" && python3 -c 'import json; data=json.load(open("/tmp/synthetic-provider-sync-trigger.json")); assert data["jobId"]; assert data["jobType"]=="finance.bank_connection_sync"; print("jobId=" + data["jobId"])'
+SYNC_STATUS=$(curl -sS -o /tmp/synthetic-provider-sync-trigger.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections/${CONNECTION_ID}/sync" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"reason":"manual","windowStart":"2026-06-01T00:00:00Z","windowEnd":"2026-06-04T00:00:00Z"}') && test "$SYNC_STATUS" = "200" && python3 -c 'import json; data=json.load(open("/tmp/synthetic-provider-sync-trigger.json")); assert data["jobId"]; assert data["jobType"] == "finance.bank_connection_sync"; print("jobId=" + data["jobId"])'
 ```
 
 Expected:
@@ -144,14 +107,14 @@ Expected:
 - response includes `jobId`
 - response `jobType` is `finance.bank_connection_sync`
 
-## 6. Wait for sync completion
+## 9. Wait for sync completion
 
 The sync runs asynchronously. Poll the connection until `lastSuccessfulSyncAt` is no longer the zero timestamp.
 
 ```bash
 for attempt in 1 2 3 4 5 6 7 8 9 10; do curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-connections-after-sync.json && CONNECTION_ID="$CONNECTION_ID" python3 - <<'PY'
 import json, os, sys
-connection_id = os.environ["CONNECTION_ID"]
+connection_id = os.environ['CONNECTION_ID']
 items = json.load(open('/tmp/synthetic-provider-connections-after-sync.json'))['items']
 item = next((x for x in items if x['id'] == connection_id), None)
 assert item is not None, 'connection missing during poll'
@@ -170,7 +133,7 @@ Expected:
 - the poll exits successfully within a few attempts
 - the connection now shows non-zero `lastSyncStartedAt` and `lastSuccessfulSyncAt`
 
-## 7. Verify the linked account and provider transactions
+## 10. Verify linked accounts and provider transactions
 
 List accounts:
 
@@ -187,39 +150,39 @@ curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/transactions
 Optional one-shot assertion:
 
 ```bash
-curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-accounts.json && curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/transactions?source=provider" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-transactions.json && ACCOUNT_NAME="$ACCOUNT_NAME" python3 - <<'PY'
-import json, os
-account_name = os.environ['ACCOUNT_NAME']
+curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-accounts.json && curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/transactions?source=provider" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-transactions.json && python3 - <<'PY'
+import json
 accounts = json.load(open('/tmp/synthetic-provider-accounts.json'))['items']
 transactions = json.load(open('/tmp/synthetic-provider-transactions.json'))['items']
-assert len(accounts) == 1, accounts
-account = accounts[0]
-assert account['name'] == account_name, account
-assert account['provider'] == 'synthetic', account
-assert account['providerAccountId'], account
+assert len(accounts) == 2, accounts
+assert {item['name'] for item in accounts} == {'Synthetic Checking'}, accounts
+assert len({item['providerAccountId'] for item in accounts}) == 2, accounts
+assert all(item['provider'] == 'synthetic' for item in accounts), accounts
+account_ids = {item['id'] for item in accounts}
 assert len(transactions) > 0, transactions
 assert all(item['source'] == 'provider' for item in transactions), transactions
-assert all(item['accountId'] == account['id'] for item in transactions), transactions
+assert all(item['accountId'] in account_ids for item in transactions), transactions
 assert all(item.get('providerOriginal') for item in transactions), transactions
-print(f"accountId={account['id']}")
-print(f"bookedBalanceMinor={account['bookedBalanceMinor']}")
-print(f"providerTransactions={len(transactions)}")
+print(f'accountCount={len(accounts)}')
+print(f'providerTransactions={len(transactions)}')
 PY
 ```
 
 Expected:
 
-- account list returns one linked account for this flow
-- linked account has `provider="synthetic"` and non-empty `providerAccountId`
+- account list returns two linked accounts for this flow
+- duplicate configured accounts stay distinct through different `providerAccountId` values
 - provider transaction list is non-empty
-- provider transactions all point to the linked account and include `providerOriginal`
+- provider transactions all point to the linked accounts and include `providerOriginal`
 
-## 8. If anything is wrong, report it
+## 11. If anything is wrong, report it
 
 Capture:
 
-- tenant id and connection id
-- the link helper output
+- tenant id, state, and connection id
+- start response
+- initial, saved, reloaded, and re-saved synthetic state responses
+- finish response
 - sync trigger response
 - connection list after sync
 - account list response

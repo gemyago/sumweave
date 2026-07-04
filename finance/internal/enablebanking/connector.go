@@ -145,9 +145,10 @@ func (c *Connector) ConnectorID() domain.ProviderConnectorID {
 
 func (c *Connector) Capabilities() providers.ConnectorCapabilities {
 	return providers.ConnectorCapabilities{
-		SupportsStartLink:  true,
-		SupportsFinishLink: true,
-		SupportsFetch:      true,
+		SupportsStartLink:    true,
+		SupportsFinishLink:   true,
+		RequiresRedirectCode: true,
+		SupportsFetch:        true,
 	}
 }
 
