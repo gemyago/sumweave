@@ -26,6 +26,7 @@
   let loadingList = $state(false)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+
   const visibleTransactions = $derived(
     [...transactions].sort((a, b) =>
       sortOrder === 'asc'
@@ -33,21 +34,13 @@
         : b.effectiveAt.getTime() - a.effectiveAt.getTime(),
     ),
   )
-  const accountNameById = $derived.by(
-    () => new Map(accounts.map((account) => [account.id, account.name])),
-  )
+  const accountNameById = $derived.by(() => new Map(accounts.map((account) => [account.id, account.name])))
   const selectedTransaction = $derived.by(
     () => visibleTransactions.find((item) => item.id === selectedTransactionId) ?? visibleTransactions[0] ?? null,
   )
-  const visiblePendingCount = $derived(
-    visibleTransactions.filter((item) => item.status === 'pending').length,
-  )
-  const visibleHiddenCount = $derived(
-    visibleTransactions.filter((item) => item.hiddenAt !== null).length,
-  )
-  const activeFilterCount = $derived(
-    [accountFilter, statusFilter, sourceFilter].filter(Boolean).length,
-  )
+  const visiblePendingCount = $derived(visibleTransactions.filter((item) => item.status === 'pending').length)
+  const visibleHiddenCount = $derived(visibleTransactions.filter((item) => item.hiddenAt !== null).length)
+  const activeFilterCount = $derived([accountFilter, statusFilter, sourceFilter].filter(Boolean).length)
 
   onMount(() => {
     void loadPage()
@@ -57,6 +50,7 @@
     loading = true
     error = null
     reactiveReady = false
+
     try {
       await financeShell.initialize()
       if (financeShell.selectedTenantId) {
@@ -81,8 +75,10 @@
       selectedTransactionId = ''
       return
     }
+
     loadingList = true
     error = null
+
     try {
       const [loadedAccounts, loadedTransactions] = await Promise.all([
         financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
@@ -121,6 +117,14 @@
     selectedTransactionId = id
   }
 
+  function badgeClass(flag: string): string {
+    if (flag === 'pending') return 'text-bg-warning'
+    if (flag === 'hidden') return 'text-bg-secondary'
+    if (flag === 'refund') return 'text-bg-success'
+    if (flag === 'reconciliation') return 'text-bg-primary'
+    return 'text-bg-light border text-body'
+  }
+
   $effect(() => {
     const ids = visibleTransactions.map((item) => item.id)
     if (ids.length === 0) {
@@ -146,599 +150,262 @@
   })
 </script>
 
-<section class="page" aria-labelledby="finance-transactions-heading">
-  <header class="hero panel">
-    <div class="hero-copy">
-      <p class="eyebrow">Transactions workspace</p>
-      <h1 id="finance-transactions-heading">Finance transactions</h1>
-      <p class="muted">
-        Review a wider ledger table, keep filter context visible, and open the selected record in a dedicated editor route.
-      </p>
-    </div>
-
-    <div class="hero-actions">
-      <a href="/finance/imports" use:link>Import CSV</a>
-      <a class="primary action-link" href="/finance/transactions/new" use:link>Create transaction</a>
-    </div>
-  </header>
-
-  {#if error}
-    <p class="error" role="alert">{error}</p>
-  {/if}
-
-  {#if loading}
-    <p class="muted" role="status">Loading transactions…</p>
-  {:else if financeShell.needsTenantSelection}
-    <section class="panel stack">
-      {#if !financeShell.embedded}
-        <label>
-          <span>Tenant</span>
-          <select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant">
-            <option value="">Select tenant</option>
-            {#each financeShell.tenants as tenant (tenant.id)}
-              <option value={tenant.id}>{tenant.name}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
-      <p>Select an active tenant to continue on this finance route.</p>
-    </section>
-  {:else if !financeShell.selectedTenantId}
-    <section class="panel"><p>Select a finance tenant to load transaction history and editor links.</p></section>
-  {:else}
-    <section class="panel filters-panel">
-      <div class="filters-header">
-        <div>
-          <p class="eyebrow">Filters</p>
-          <p class="muted">Keep browse context visible while switching between the ledger and the selected transaction inspector.</p>
-        </div>
-
-        <div class="summary-chips" aria-label="Transaction summaries">
-          <span>{visibleTransactions.length} visible</span>
-          <span>{visiblePendingCount} pending</span>
-          <span>{visibleHiddenCount} hidden</span>
-          <span>{activeFilterCount} filters</span>
-        </div>
-      </div>
-
-      <div class="filters">
-        {#if !financeShell.embedded}
-          <label>
-            <span>Tenant</span>
-            <select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant">
-              <option value="">Select tenant</option>
-              {#each financeShell.tenants as tenant (tenant.id)}
-                <option value={tenant.id}>{tenant.name}</option>
-              {/each}
-            </select>
-          </label>
-        {/if}
-        <label>
-          <span>Account</span>
-          <select bind:value={accountFilter} onchange={() => void loadTenantData()} aria-label="Account filter">
-            <option value="">Any account</option>
-            {#each accounts as account (account.id)}
-              <option value={account.id}>{account.name}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          <span>Status</span>
-          <select bind:value={statusFilter} onchange={() => void loadTenantData()} aria-label="Transaction status filter">
-            <option value="">Any status</option>
-            <option value="pending">pending</option>
-            <option value="booked">booked</option>
-          </select>
-        </label>
-        <label>
-          <span>Source</span>
-          <select bind:value={sourceFilter} onchange={() => void loadTenantData()} aria-label="Transaction source filter">
-            <option value="">Any source</option>
-            <option value="manual">manual</option>
-            <option value="provider">provider</option>
-            <option value="csv">csv</option>
-            <option value="system">system</option>
-          </select>
-        </label>
-        <label>
-          <span>Sort</span>
-          <select bind:value={sortOrder} aria-label="Sort order">
-            <option value="desc">Newest first</option>
-            <option value="asc">Oldest first</option>
-          </select>
-        </label>
-      </div>
-    </section>
-
-    <section class="transactions-layout">
-      <article class="panel ledger-panel">
-        <div class="ledger-header">
+<section class="container-fluid px-0" aria-labelledby="finance-transactions-heading">
+  <div class="d-grid gap-4">
+    <header class="card border-0 shadow-sm">
+      <div class="card-body p-4 p-xl-5 d-grid gap-4">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
           <div>
-            <p class="eyebrow">Ledger</p>
-            <h2>Transactions</h2>
+            <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Transactions workspace</p>
+            <h1 id="finance-transactions-heading" class="h3 mb-2">Finance transactions</h1>
+            <p class="text-body-secondary mb-0">
+              Browse a ledger table, keep filter context visible, and open dedicated create or edit routes when needed.
+            </p>
           </div>
-          {#if loadingList}
-            <p class="muted" role="status">Refreshing transactions…</p>
-          {/if}
+
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary" href="/finance/imports" use:link>Import CSV</a>
+            <a class="btn btn-primary" href="/finance/transactions/new" use:link>Create transaction</a>
+          </div>
         </div>
 
-        {#if visibleTransactions.length === 0}
-          <p class="muted">No transactions matched the current filters.</p>
-        {:else}
-          <div class="ledger-table-scroll">
-            <table class="ledger-table" aria-label="Transactions ledger">
-              <thead>
-                <tr>
-                  <th scope="col">Description</th>
-                  <th scope="col">Effective</th>
-                  <th scope="col">Account</th>
-                  <th scope="col">Category</th>
-                  <th scope="col">Source</th>
-                  <th scope="col">Amount</th>
-                  <th scope="col">State</th>
-                  <th scope="col">Open</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each visibleTransactions as item (item.id)}
-                  <tr class:selected={selectedTransaction?.id === item.id}>
-                    <td data-label="Description">
-                      <button
-                        type="button"
-                        class="row-button"
-                        aria-pressed={selectedTransaction?.id === item.id}
-                        onclick={() => selectTransaction(item.id)}
-                      >
-                        <span class="row-title">{item.description || item.kind}</span>
-                        <span class="row-subtitle">{item.kind} · {item.status}</span>
-                      </button>
-                    </td>
-                    <td data-label="Effective">{formatFinanceDateTime(item.effectiveAt)}</td>
-                    <td data-label="Account">{accountName(item.accountId)}</td>
-                    <td data-label="Category">{item.categoryId || '—'}</td>
-                    <td data-label="Source">{item.source}</td>
-                    <td data-label="Amount" class="amount-cell">{formatFinanceMoney(item.amountMinor, item.currency)}</td>
-                    <td data-label="State">
-                      <div class="flags" aria-label="Transaction state flags">
-                        {#each transactionFlags(item) as flag (flag)}
-                          <span>{flag}</span>
-                        {/each}
-                        {#if transactionFlags(item).length === 0}
-                          <span class="flag-empty">clear</span>
-                        {/if}
-                      </div>
-                    </td>
-                    <td data-label="Open">
-                      <a href={`/finance/transactions/${item.id}`} use:link>Open record</a>
-                    </td>
-                  </tr>
+        <div class="d-flex flex-wrap gap-2" aria-label="Transaction summaries">
+          <span class="badge text-bg-secondary">{visibleTransactions.length} visible</span>
+          <span class="badge text-bg-warning">{visiblePendingCount} pending</span>
+          <span class="badge text-bg-dark">{visibleHiddenCount} hidden</span>
+          <span class="badge text-bg-light border text-body">{activeFilterCount} filters</span>
+        </div>
+      </div>
+    </header>
+
+    {#if error}
+      <div class="alert alert-danger mb-0" role="alert">{error}</div>
+    {/if}
+
+    {#if loading}
+      <div class="alert alert-secondary mb-0" role="status">Loading transactions…</div>
+    {:else if financeShell.needsTenantSelection}
+      <section class="card shadow-sm">
+        <div class="card-body p-4 d-grid gap-3">
+          {#if !financeShell.embedded}
+            <div class="col-12 col-lg-5 px-0">
+              <label class="form-label" for="finance-transactions-tenant">Tenant</label>
+              <select
+                id="finance-transactions-tenant"
+                class="form-select"
+                value={financeShell.selectedTenantId}
+                onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                aria-label="Tenant"
+              >
+                <option value="">Select tenant</option>
+                {#each financeShell.tenants as tenant (tenant.id)}
+                  <option value={tenant.id}>{tenant.name}</option>
                 {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
-      </article>
-
-      <aside class="panel inspector-panel" aria-label="Selected transaction details">
-        {#if selectedTransaction}
-          <div class="inspector-header">
-            <div>
-              <p class="eyebrow">Selected transaction</p>
-              <h2>{selectedTransaction.description || selectedTransaction.kind}</h2>
+              </select>
             </div>
-            <a href={`/finance/transactions/${selectedTransaction.id}`} use:link>Open transaction</a>
-          </div>
-
-          <p class="inspector-amount">{formatFinanceMoney(selectedTransaction.amountMinor, selectedTransaction.currency)}</p>
-
-          <div class="summary-chips summary-chips--compact">
-            <span>{selectedTransaction.status}</span>
-            <span>{selectedTransaction.source}</span>
-            <span>{selectedTransaction.kind}</span>
-          </div>
-
-          <dl class="inspector-meta">
-            <div>
-              <dt>Effective</dt>
-              <dd>{formatFinanceDateTime(selectedTransaction.effectiveAt)}</dd>
-            </div>
-            <div>
-              <dt>Account</dt>
-              <dd>{accountName(selectedTransaction.accountId)}</dd>
-            </div>
-            <div>
-              <dt>Category</dt>
-              <dd>{selectedTransaction.categoryId || '—'}</dd>
-            </div>
-            <div>
-              <dt>Transfer group</dt>
-              <dd>{selectedTransaction.transferGroupId || '—'}</dd>
-            </div>
-            <div>
-              <dt>Hidden</dt>
-              <dd>{selectedTransaction.hiddenAt ? 'Yes' : 'No'}</dd>
-            </div>
-            <div>
-              <dt>Updated</dt>
-              <dd>{formatFinanceDateTime(selectedTransaction.updatedAt)}</dd>
-            </div>
-          </dl>
-
-          {#if selectedTransaction.providerOriginal}
-            <section class="provider-original">
-              <p class="eyebrow">Provider original</p>
-              <dl class="inspector-meta">
-                <div>
-                  <dt>Amount</dt>
-                  <dd>{formatFinanceMoney(selectedTransaction.providerOriginal.amountMinor, selectedTransaction.providerOriginal.currency)}</dd>
-                </div>
-                <div>
-                  <dt>Description</dt>
-                  <dd>{selectedTransaction.providerOriginal.description || '—'}</dd>
-                </div>
-                <div>
-                  <dt>Effective</dt>
-                  <dd>{formatFinanceDateTime(selectedTransaction.providerOriginal.effectiveAt)}</dd>
-                </div>
-              </dl>
-            </section>
           {/if}
 
-          <div class="inspector-actions">
-            <a href={`/finance/accounts/${selectedTransaction.accountId}`} use:link>Open account</a>
-            <a href={`/finance/transactions/${selectedTransaction.id}`} use:link>Edit transaction</a>
+          <div class="alert alert-warning mb-0" role="status">Select an active tenant to continue on this finance route.</div>
+        </div>
+      </section>
+    {:else if !financeShell.selectedTenantId}
+      <div class="alert alert-light border mb-0" role="status">Select a finance tenant to load transaction history and editor links.</div>
+    {:else}
+      <section class="card shadow-sm">
+        <div class="card-body p-4 d-grid gap-3">
+          <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+            <div>
+              <h2 class="h5 mb-1">Browse filters</h2>
+              <p class="text-body-secondary mb-0">Adjust the tenant-local ledger scope without leaving the transactions route.</p>
+            </div>
+
+            {#if loadingList}
+              <span class="badge text-bg-secondary" role="status">Refreshing transactions…</span>
+            {/if}
           </div>
-        {:else}
-          <p class="muted">Select a transaction row to inspect it here.</p>
-        {/if}
-      </aside>
-    </section>
-  {/if}
+
+          <div class="row g-3 align-items-end">
+            {#if !financeShell.embedded}
+              <div class="col-12 col-md-6 col-xl-3">
+                <label class="form-label" for="finance-transactions-tenant-filter">Tenant</label>
+                <select
+                  id="finance-transactions-tenant-filter"
+                  class="form-select"
+                  value={financeShell.selectedTenantId}
+                  onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                  aria-label="Tenant"
+                >
+                  <option value="">Select tenant</option>
+                  {#each financeShell.tenants as tenant (tenant.id)}
+                    <option value={tenant.id}>{tenant.name}</option>
+                  {/each}
+                </select>
+              </div>
+            {/if}
+
+            <div class="col-12 col-md-6 col-xl-3">
+              <label class="form-label" for="finance-transactions-account-filter">Account</label>
+              <select id="finance-transactions-account-filter" class="form-select" bind:value={accountFilter} onchange={() => void loadTenantData()} aria-label="Account filter">
+                <option value="">Any account</option>
+                {#each accounts as account (account.id)}
+                  <option value={account.id}>{account.name}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-2">
+              <label class="form-label" for="finance-transactions-status-filter">Status</label>
+              <select id="finance-transactions-status-filter" class="form-select" bind:value={statusFilter} onchange={() => void loadTenantData()} aria-label="Transaction status filter">
+                <option value="">Any status</option>
+                <option value="pending">pending</option>
+                <option value="booked">booked</option>
+              </select>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-2">
+              <label class="form-label" for="finance-transactions-source-filter">Source</label>
+              <select id="finance-transactions-source-filter" class="form-select" bind:value={sourceFilter} onchange={() => void loadTenantData()} aria-label="Transaction source filter">
+                <option value="">Any source</option>
+                <option value="manual">manual</option>
+                <option value="provider">provider</option>
+                <option value="csv">csv</option>
+                <option value="system">system</option>
+              </select>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-2">
+              <label class="form-label" for="finance-transactions-sort-order">Sort</label>
+              <select id="finance-transactions-sort-order" class="form-select" bind:value={sortOrder} aria-label="Sort order">
+                <option value="desc">Newest first</option>
+                <option value="asc">Oldest first</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="row g-4 align-items-start">
+        <div class="col-12 col-xl-7">
+          <section class="card shadow-sm h-100">
+            <div class="card-body p-4 d-grid gap-3">
+              <div>
+                <h2 class="h5 mb-1">Ledger</h2>
+                <p class="text-body-secondary mb-0">Select a row to keep transaction context visible beside the browse results.</p>
+              </div>
+
+              {#if visibleTransactions.length === 0}
+                <div class="alert alert-light border mb-0" role="status">No transactions matched the current filters.</div>
+              {:else}
+                <div class="table-responsive">
+                  <table class="table table-hover align-middle mb-0" aria-label="Transactions ledger">
+                    <thead>
+                      <tr>
+                        <th scope="col">Description</th>
+                        <th scope="col">Effective</th>
+                        <th scope="col">Account</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Source</th>
+                        <th scope="col">Amount</th>
+                        <th scope="col">State</th>
+                        <th scope="col">Open</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each visibleTransactions as item (item.id)}
+                        <tr class:table-active={selectedTransaction?.id === item.id}>
+                          <td>
+                            <button
+                              type="button"
+                              class="btn btn-link p-0 text-start text-decoration-none"
+                              aria-pressed={selectedTransaction?.id === item.id}
+                              onclick={() => selectTransaction(item.id)}
+                            >
+                              <span class="d-block fw-semibold text-body">{item.description || item.kind}</span>
+                              <span class="small text-body-secondary">{item.kind} · {item.status}</span>
+                            </button>
+                          </td>
+                          <td>{formatFinanceDateTime(item.effectiveAt)}</td>
+                          <td>{accountName(item.accountId)}</td>
+                          <td>{item.categoryId || '—'}</td>
+                          <td>{item.source}</td>
+                          <td>{formatFinanceMoney(item.amountMinor, item.currency)}</td>
+                          <td>
+                            <div class="d-flex flex-wrap gap-1">
+                              {#each transactionFlags(item) as flag (flag)}
+                                <span class={`badge ${badgeClass(flag)}`}>{flag}</span>
+                              {/each}
+                              {#if transactionFlags(item).length === 0}
+                                <span class="badge text-bg-light border text-body">clear</span>
+                              {/if}
+                            </div>
+                          </td>
+                          <td>
+                            <a href={`/finance/transactions/${item.id}`} use:link>Open record</a>
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {/if}
+            </div>
+          </section>
+        </div>
+
+        <div class="col-12 col-xl-5">
+          <aside class="card shadow-sm h-100" aria-label="Selected transaction details">
+            <div class="card-body p-4 d-grid gap-3">
+              {#if selectedTransaction}
+                <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+                  <div>
+                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Selected transaction</p>
+                    <h2 class="h5 mb-1">{selectedTransaction.description || selectedTransaction.kind}</h2>
+                  </div>
+
+                  <a class="btn btn-outline-secondary btn-sm align-self-start align-self-md-center" href={`/finance/transactions/${selectedTransaction.id}`} use:link>
+                    Open transaction
+                  </a>
+                </div>
+
+                <p class="display-6 mb-0">{formatFinanceMoney(selectedTransaction.amountMinor, selectedTransaction.currency)}</p>
+
+                <div class="d-flex flex-wrap gap-2">
+                  <span class="badge text-bg-secondary">{selectedTransaction.status}</span>
+                  <span class="badge text-bg-light border text-body">{selectedTransaction.source}</span>
+                  <span class="badge text-bg-light border text-body">{selectedTransaction.kind}</span>
+                </div>
+
+                <div class="row g-3">
+                  <div class="col-12 col-sm-6"><strong>Effective</strong><div>{formatFinanceDateTime(selectedTransaction.effectiveAt)}</div></div>
+                  <div class="col-12 col-sm-6"><strong>Account</strong><div>{accountName(selectedTransaction.accountId)}</div></div>
+                  <div class="col-12 col-sm-6"><strong>Category</strong><div>{selectedTransaction.categoryId || '—'}</div></div>
+                  <div class="col-12 col-sm-6"><strong>Transfer group</strong><div>{selectedTransaction.transferGroupId || '—'}</div></div>
+                  <div class="col-12 col-sm-6"><strong>Hidden</strong><div>{selectedTransaction.hiddenAt ? 'Yes' : 'No'}</div></div>
+                  <div class="col-12 col-sm-6"><strong>Updated</strong><div>{formatFinanceDateTime(selectedTransaction.updatedAt)}</div></div>
+                </div>
+
+                {#if selectedTransaction.providerOriginal}
+                  <section class="border rounded-3 p-3 bg-body-tertiary">
+                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Provider original</p>
+                    <div class="row g-3">
+                      <div class="col-12"><strong>Description</strong><div>{selectedTransaction.providerOriginal.description || '—'}</div></div>
+                      <div class="col-12 col-sm-6"><strong>Amount</strong><div>{formatFinanceMoney(selectedTransaction.providerOriginal.amountMinor, selectedTransaction.providerOriginal.currency)}</div></div>
+                      <div class="col-12 col-sm-6"><strong>Effective</strong><div>{formatFinanceDateTime(selectedTransaction.providerOriginal.effectiveAt)}</div></div>
+                    </div>
+                  </section>
+                {/if}
+
+                <div class="d-flex flex-wrap gap-2">
+                  <a class="btn btn-outline-secondary btn-sm" href={`/finance/accounts/${selectedTransaction.accountId}`} use:link>Open account</a>
+                  <a class="btn btn-primary btn-sm" href={`/finance/transactions/${selectedTransaction.id}`} use:link>Edit transaction</a>
+                </div>
+              {:else}
+                <div class="alert alert-light border mb-0" role="status">Select a transaction row to inspect it here.</div>
+              {/if}
+            </div>
+          </aside>
+        </div>
+      </div>
+    {/if}
+  </div>
 </section>
-
-<style>
-  .page,
-  .filters-panel,
-  .hero-copy,
-  .filters-header,
-  .ledger-panel,
-  .inspector-panel,
-  .provider-original {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-12);
-  }
-
-  .hero,
-  .hero-actions,
-  .filters,
-  .transactions-layout,
-  .ledger-header,
-  .inspector-header,
-  .inspector-actions,
-  .summary-chips,
-  .flags {
-    display: flex;
-    gap: var(--space-16);
-  }
-
-  .hero,
-  .ledger-header,
-  .inspector-header {
-    justify-content: space-between;
-    align-items: flex-start;
-  }
-
-  .panel {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-12);
-    padding: var(--space-18);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--surface-raised);
-  }
-
-  .hero {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .filters {
-    grid-template-columns: minmax(200px, 1.2fr) repeat(4, minmax(140px, 1fr));
-    align-items: end;
-  }
-
-  .filters-panel {
-    gap: var(--space-14);
-  }
-
-  .filters-header {
-    justify-content: space-between;
-    gap: var(--space-12);
-  }
-
-  .flags {
-    flex-wrap: wrap;
-    gap: var(--space-8);
-    align-items: center;
-  }
-
-  .flags span {
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-size: var(--font-size-caption);
-  }
-
-  .flag-empty {
-    color: var(--text-muted);
-  }
-
-  .summary-chips {
-    flex-wrap: wrap;
-  }
-
-  .summary-chips span {
-    display: inline-flex;
-    align-items: center;
-    min-height: 1.7rem;
-    padding: 0 var(--space-8);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    font-size: var(--font-size-caption);
-  }
-
-  .summary-chips--compact {
-    gap: var(--space-8);
-  }
-
-  .action-link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 2.25rem;
-    padding: var(--space-4) var(--space-20);
-    border: 1px solid var(--btn-primary-border);
-    border-radius: 4px;
-    background: var(--btn-primary-bg);
-    color: var(--btn-primary-fg);
-    text-decoration: none;
-  }
-
-  .panel h2,
-  .hero h1 {
-    margin: 0;
-  }
-
-  .hero-actions {
-    align-items: center;
-    gap: var(--space-12);
-  }
-
-  .muted {
-    margin: 0;
-    color: var(--text-muted);
-  }
-
-  .eyebrow {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-size-caption);
-  }
-
-  .transactions-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1.55fr) minmax(360px, 1fr);
-    align-items: start;
-  }
-
-  .filters {
-    display: grid;
-  }
-
-  .ledger-table-scroll {
-    overflow-x: auto;
-  }
-
-  .ledger-table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 820px;
-  }
-
-  .ledger-table th,
-  .ledger-table td {
-    padding: 0.625rem var(--space-8);
-    border-bottom: 1px solid var(--border);
-    text-align: left;
-    vertical-align: top;
-  }
-
-  .ledger-table th {
-    color: var(--text-muted);
-    font-size: var(--font-size-caption);
-    font-weight: 500;
-  }
-
-  .ledger-table tbody tr.selected {
-    background: color-mix(in srgb, var(--bg) 45%, var(--surface-raised));
-  }
-
-  .row-button {
-    width: 100%;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: inherit;
-    text-align: left;
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .row-title,
-  .inspector-amount {
-    display: block;
-    color: var(--text-h);
-  }
-
-  .row-subtitle {
-    display: block;
-    color: var(--text-muted);
-    font-size: var(--font-size-caption);
-  }
-
-  .amount-cell {
-    white-space: nowrap;
-    color: var(--text-h);
-  }
-
-  .inspector-panel {
-    position: sticky;
-    top: var(--space-16);
-  }
-
-  .inspector-amount {
-    margin: 0;
-    font-size: clamp(1.5rem, 2vw, 2.25rem);
-    line-height: 1.1;
-  }
-
-  .inspector-meta {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-12) var(--space-16);
-    margin: 0;
-  }
-
-  .inspector-meta div {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: var(--space-12);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-  }
-
-  .inspector-meta dt {
-    color: var(--text-muted);
-    font-size: var(--font-size-caption);
-  }
-
-  .inspector-meta dd {
-    margin: 0;
-    color: var(--text-h);
-  }
-
-  .inspector-actions {
-    flex-wrap: wrap;
-  }
-
-  .filters label {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-  }
-
-  .error {
-    margin: 0;
-    padding: var(--space-12) var(--space-16);
-    border: 1px solid var(--danger-border);
-    border-radius: 4px;
-    background: var(--danger-bg);
-    color: var(--color-danger);
-  }
-
-  @media (max-width: 1100px) {
-    .filters {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .transactions-layout {
-      grid-template-columns: 1fr;
-    }
-
-    .inspector-panel {
-      position: static;
-    }
-  }
-
-  @media (max-width: 720px) {
-    .hero,
-    .filters-header,
-    .ledger-header,
-    .inspector-header {
-      flex-direction: column;
-    }
-
-    .hero-actions {
-      width: 100%;
-      justify-content: flex-start;
-    }
-
-    .filters {
-      grid-template-columns: 1fr;
-    }
-
-    .ledger-table,
-    .ledger-table tbody,
-    .ledger-table tr,
-    .ledger-table td {
-      display: block;
-      min-width: 0;
-    }
-
-    .ledger-table {
-      min-width: 0;
-    }
-
-    .ledger-table thead {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip: rect(0, 0, 0, 0);
-      white-space: nowrap;
-    }
-
-    .ledger-table tbody {
-      display: grid;
-      gap: var(--space-12);
-    }
-
-    .ledger-table tbody tr {
-      padding: var(--space-12);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      background: var(--bg);
-    }
-
-    .ledger-table td {
-      padding: 0;
-      border: none;
-    }
-
-    .ledger-table td + td {
-      margin-top: var(--space-8);
-    }
-
-    .ledger-table td::before {
-      content: attr(data-label);
-      display: block;
-      margin-bottom: 0.125rem;
-      color: var(--text-muted);
-      font-size: var(--font-size-caption);
-    }
-
-    .ledger-table td:first-child::before {
-      content: none;
-    }
-
-    .inspector-meta {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>

@@ -4,11 +4,9 @@
   import { wrap } from 'svelte-spa-router/wrap'
   import Nav from './components/Nav.svelte'
   import FinanceShell from './components/FinanceShell.svelte'
-  import V2FinanceShell from './components/V2FinanceShell.svelte'
   import { themeStore } from './lib/theme/theme-store.svelte'
   import {
     LOGIN_ROUTE,
-    V2_LOGIN_ROUTE,
     rememberCurrentPostLoginDestination,
   } from './lib/routing/post-login-destination'
   import Chat from './pages/Chat.svelte'
@@ -27,7 +25,6 @@
   import EvaluationDetail from './pages/EvaluationDetail.svelte'
   import Evaluations from './pages/Evaluations.svelte'
   import Login from './pages/Login.svelte'
-  import V2Login from './pages/V2Login.svelte'
   import Admin from './pages/Admin.svelte'
   import AdminJobs from './pages/AdminJobs.svelte'
   import AdminJobDetail from './pages/AdminJobDetail.svelte'
@@ -38,12 +35,10 @@
   import Providers from './pages/Providers.svelte'
   import RedirectToDefaultRoute from './pages/RedirectToDefaultRoute.svelte'
   import Strategies from './pages/Strategies.svelte'
-  import V2Finance from './pages/V2Finance.svelte'
   import { authStore } from './lib/auth/auth-store.svelte'
 
   const routes = {
     [LOGIN_ROUTE]: Login,
-    [V2_LOGIN_ROUTE]: V2Login,
     '/': RedirectToDefaultRoute,
     '/chat/:sessionId?': wrap({
       component: Chat,
@@ -109,10 +104,6 @@
       component: Finance,
       conditions: [() => authStore.isAuthenticated],
     }),
-    '/v2/finance': wrap({
-      component: V2Finance,
-      conditions: [() => authStore.isAuthenticated],
-    }),
     '/admin/jobs/:jobId': wrap({
       component: AdminJobDetail,
       conditions: [() => authStore.isAuthenticated],
@@ -161,7 +152,7 @@
 
   function handleConditionsFailed() {
     rememberCurrentPostLoginDestination()
-    replace(router.location.startsWith('/v2/') ? V2_LOGIN_ROUTE : LOGIN_ROUTE)
+    replace(LOGIN_ROUTE)
   }
 
   onMount(async () => {
@@ -177,22 +168,15 @@
     typeof router.location === 'string' && router.location.startsWith('/finance'),
   )
 
-  const isV2FinanceRoute = $derived(
-    typeof router.location === 'string' && router.location.startsWith('/v2/finance'),
-  )
-
   const showsFinanceShell = $derived(authStore.isAuthenticated && isFinanceRoute)
 
-  const showsV2FinanceShell = $derived(authStore.isAuthenticated && isV2FinanceRoute)
-
-  const usesFinanceShell = $derived(showsFinanceShell || showsV2FinanceShell)
+  const usesFinanceShell = $derived(showsFinanceShell)
 
   const isWideWorkspaceRoute = $derived(
     typeof router.location === 'string' &&
       (router.location.startsWith('/strategies') ||
         router.location.startsWith('/evaluations') ||
         router.location.startsWith('/finance') ||
-        router.location.startsWith('/v2/finance') ||
         router.location.startsWith('/admin')),
   )
 
@@ -224,10 +208,6 @@
           <FinanceShell currentPath={router.location}>
             <Router {routes} onConditionsFailed={handleConditionsFailed} />
           </FinanceShell>
-        {:else if showsV2FinanceShell}
-          <V2FinanceShell currentPath={router.location}>
-            <Router {routes} onConditionsFailed={handleConditionsFailed} />
-          </V2FinanceShell>
         {:else}
           <Router {routes} onConditionsFailed={handleConditionsFailed} />
         {/if}

@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceShell from './FinanceShell.svelte'
-
-let compactViewport = false
+import FinanceShellSource from './FinanceShell.svelte?raw'
 
 const mocks = vi.hoisted(() => {
   const shellState = {
@@ -30,6 +29,11 @@ const mocks = vi.hoisted(() => {
     shellState,
     clearAuth: vi.fn(),
     replace: vi.fn(),
+    themeStore: {
+      preference: 'auto',
+      effective: 'dark',
+      setPreference: vi.fn(),
+    },
   }
 })
 
@@ -54,23 +58,13 @@ vi.mock('../lib/finance/shell-state.svelte', async (importOriginal) => {
   }
 })
 
+vi.mock('../lib/theme/theme-store.svelte', () => ({
+  themeStore: mocks.themeStore,
+}))
+
 describe('FinanceShell', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    compactViewport = false
-    vi.stubGlobal(
-      'matchMedia',
-      vi.fn(() => ({
-        matches: compactViewport,
-        media: '(max-width: 960px)',
-        onchange: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })),
-    )
     mocks.shellState.loading = false
     mocks.shellState.selectedTenantId = 'tenant-1'
     mocks.shellState.tenants = [
@@ -81,6 +75,32 @@ describe('FinanceShell', () => {
       },
     ]
     mocks.shellState.hasTenants = true
+    mocks.themeStore.preference = 'auto'
+    mocks.themeStore.effective = 'dark'
+  })
+
+  it('renders the shared bootstrap finance shell without the legacy finance subnav', () => {
+    const { container } = render(FinanceShell, {
+      currentPath: '/finance',
+    })
+
+    expect(mocks.shellState.initialize).toHaveBeenCalledTimes(1)
+    expect(container.firstElementChild).toHaveAttribute('data-bootstrap-finance-shell', 'true')
+    expect(container.firstElementChild).toHaveAttribute('data-bs-theme', 'dark')
+    expect(screen.getByRole('link', { name: 'Signal Foundry' })).toHaveAttribute('href', '#/finance')
+    expect(screen.getByLabelText('Finance navigation')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Dashboard', current: 'page' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Transactions' })).toHaveAttribute('href', '#/finance/transactions')
+    expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '#/finance/accounts')
+    expect(screen.getByRole('link', { name: 'Categories' })).toHaveAttribute('href', '#/finance/categories')
+    expect(screen.getByRole('link', { name: 'Connections & sync' })).toHaveAttribute('href', '#/finance/connections')
+    expect(screen.getByRole('link', { name: 'Imports' })).toHaveAttribute('href', '#/finance/imports')
+    expect(screen.getByRole('link', { name: 'Tenants' })).toHaveAttribute('href', '#/finance/tenants')
+    expect(screen.getByLabelText('Finance utilities')).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Finance sections')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Bootstrap pilot')).not.toBeInTheDocument()
   })
 
   it('hides the shared tenant selector on the tenants route', () => {
@@ -88,84 +108,35 @@ describe('FinanceShell', () => {
       currentPath: '/finance/tenants',
     })
 
-    expect(mocks.shellState.initialize).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('combobox', { name: 'Active tenant' })).not.toBeInTheDocument()
   })
 
-  it('keeps unsupported paths out of the rail active state', () => {
+  it('keeps unsupported paths out of the nav active state', () => {
     render(FinanceShell, {
       currentPath: '/outside-finance',
     })
 
-    expect(screen.getByLabelText('Finance navigation')).toBeInTheDocument()
     expect(screen.queryByRole('link', { current: 'page' })).not.toBeInTheDocument()
+    expect(screen.getByText('Finance / Workspace')).toBeInTheDocument()
   })
 
-  it('keeps parent destinations active for nested finance detail routes', () => {
-    render(FinanceShell, {
+  it('keeps parent destinations active for nested finance detail and synthetic routes', () => {
+    const { rerender } = render(FinanceShell, {
       currentPath: '/finance/accounts/account-1',
     })
 
     expect(screen.getByRole('link', { name: 'Accounts', current: 'page' })).toBeInTheDocument()
-  })
 
-  it('keeps connections active for the nested synthetic setup route', () => {
-    render(FinanceShell, {
-      currentPath: '/finance/connections/synthetic',
-    })
-
+    rerender({ currentPath: '/finance/connections/synthetic?state=state-1' })
     expect(
       screen.getByRole('link', { name: 'Connections & sync', current: 'page' }),
     ).toBeInTheDocument()
-  })
 
-  it('keeps connections active for the nested synthetic setup route with query state', () => {
-    render(FinanceShell, {
-      currentPath: '/finance/connections/synthetic?state=state-1',
-    })
-
-    expect(screen.getByRole('link', { name: 'Connections & sync', current: 'page' })).toBeInTheDocument()
-  })
-
-  it('keeps transactions active for nested transaction mutation routes', () => {
-    render(FinanceShell, {
-      currentPath: '/finance/transactions/new',
-    })
-
+    rerender({ currentPath: '/finance/transactions/new' })
     expect(screen.getByRole('link', { name: 'Transactions', current: 'page' })).toBeInTheDocument()
   })
 
-  it('shows the loading disabled selector and empty-state tenant copy when no tenants are available', () => {
-    mocks.shellState.loading = true
-    mocks.shellState.selectedTenantId = ''
-    mocks.shellState.tenants = []
-    mocks.shellState.hasTenants = false
-
-    render(FinanceShell, {
-      currentPath: '/finance',
-    })
-
-    expect(screen.queryByRole('combobox', { name: 'Active tenant' })).not.toBeInTheDocument()
-  })
-
-  it('hides the shared selector when the workspace resolves to a single tenant', () => {
-    mocks.shellState.selectedTenantId = ''
-    mocks.shellState.tenants = [
-      {
-        id: 'tenant-1',
-        name: 'Household',
-        displayCurrency: 'USD',
-      },
-    ]
-
-    render(FinanceShell, {
-      currentPath: '/finance/accounts',
-    })
-
-    expect(screen.queryByRole('combobox', { name: 'Active tenant' })).not.toBeInTheDocument()
-  })
-
-  it('shows the select-tenant placeholder when multiple tenant options exist but none is active yet', () => {
+  it('shows the shell-level tenant chooser only for multi-tenant tenant-scoped routes', () => {
     mocks.shellState.selectedTenantId = ''
     mocks.shellState.tenants = [
       {
@@ -184,11 +155,12 @@ describe('FinanceShell', () => {
       currentPath: '/finance/accounts',
     })
 
-    expect(screen.getByRole('option', { name: 'Select tenant' })).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Active tenant' })).toBeEnabled()
+    expect(screen.getByRole('option', { name: 'Select tenant' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
   })
 
-  it('lets the user change tenants and sign out from the shell utility row', async () => {
+  it('lets the user change tenants, switch theme, and sign out from the bootstrap shell', async () => {
     const user = userEvent.setup()
     mocks.shellState.tenants = [
       {
@@ -207,43 +179,18 @@ describe('FinanceShell', () => {
       currentPath: '/finance/accounts',
     })
 
-    expect(screen.getByRole('option', { name: 'Operations · EUR' })).toBeInTheDocument()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Active tenant' }), 'tenant-2')
+    await user.click(screen.getByRole('radio', { name: 'Light' }))
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
 
     expect(mocks.shellState.selectTenant).toHaveBeenCalledWith('tenant-2')
+    expect(mocks.themeStore.setPreference).toHaveBeenCalledWith('light')
     expect(mocks.clearAuth).toHaveBeenCalledTimes(1)
     expect(mocks.replace).toHaveBeenCalledWith('/login')
   })
 
-  it('collapses finance navigation behind a compact route menu on narrow viewports', async () => {
-    const user = userEvent.setup()
-    compactViewport = true
-    mocks.shellState.tenants = [
-      {
-        id: 'tenant-1',
-        name: 'Household',
-        displayCurrency: 'USD',
-      },
-      {
-        id: 'tenant-2',
-        name: 'Operations',
-        displayCurrency: 'EUR',
-      },
-    ]
-
-    render(FinanceShell, {
-      currentPath: '/finance/transactions',
-    })
-
-    expect(screen.getAllByText('Finance / Transactions').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: 'Open menu' })).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('link', { name: 'Connections & sync' })).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Open menu' }))
-
-    expect(screen.getByRole('button', { name: 'Close menu' })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('link', { name: 'Connections & sync' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Active tenant' })).toBeInTheDocument()
+  it('does not define route-local styles or style attributes', () => {
+    expect(FinanceShellSource).not.toMatch(/<style[\s>]/)
+    expect(FinanceShellSource).not.toMatch(/\sstyle=/)
   })
 })

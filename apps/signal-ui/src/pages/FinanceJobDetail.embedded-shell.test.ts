@@ -34,6 +34,6 @@ describe('Finance job detail inside the embedded shell', () => {
       await screen.findByText('Select an active tenant to continue on this finance route.'),
     ).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Finance job detail' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Summary' })).not.toBeInTheDocument()
   })
 })

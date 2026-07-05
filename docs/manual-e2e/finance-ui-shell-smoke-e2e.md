@@ -2,148 +2,120 @@
 
 Follow preparation steps in [README.md](./README.md) first.
 
-Use this guide after `restructure-finance-ui-shell` lands. It is the smoke runbook for the canonical finance shell, dashboard, transactions workspace, and the parallel Bootstrap V2 pilot route boundary introduced by `adopt-bootstrap-ui-rails`.
+Use this guide after `adopt-finance-bootstrap-default`. It is the canonical smoke runbook for Bootstrap `#/login`, default authenticated landing on `#/finance`, the shared Finance shell, dashboard and route groups, responsive behavior, and a quick non-finance regression pass. This change supersedes `restructure-finance-ui-shell` for Finance/login styling; keep only the older behavior lessons such as tenant continuity and route preservation.
 
-## 0. Bootstrap V2 pilot boundary note
+## 0. Scope note
 
-- In this chunk, `#/v2/login` is a real Bootstrap pilot login page and `#/v2/finance` is a real Bootstrap pilot dashboard boundary.
-- Canonical `#/login` and `#/finance` remain the real operator paths in this change.
-- Do not treat the V2 routes as promoted or feature-complete yet.
+- Treat `#/login` and tenant-facing `#/finance*` routes as the supported canonical Bootstrap surfaces.
+- Treat retired `#/v2/*` finance/login hashes as unsupported; this smoke run does not cover or preserve them.
+- Keep one quick non-finance regression pass in this run so Finance promotion does not silently spill into Chat, Data, Jobs, Providers, or other non-finance surfaces.
 
-## 1. Sign in
+## 1. Sign in and confirm default Finance landing
 
 1. Open `http://127.0.0.1:5173/#/login`.
-2. Sign in with the first local user from repo-root `.local-users` unless you intentionally prepared another user.
-3. Confirm the app redirects into the authenticated UI instead of staying on `#/login`.
-4. Open `#/v2/login` and confirm the Bootstrap pilot login form loads without a crash.
+2. Confirm the page shows the canonical Bootstrap login card with labeled username/password fields, inline error space, and one primary submit action.
+3. Sign in with the first local user from repo-root `.local-users` unless you intentionally prepared another user.
+4. Confirm successful sign-in lands on `#/finance` by default.
+5. Open `#/` while still authenticated and confirm the app resolves back to `#/finance`.
 
 Expected:
 
-- login succeeds
-- an authenticated app shell loads without console or network failures
-- `#/v2/login` is reachable as a parallel public route and shows the Bootstrap pilot login form
+- no pilot or parallel-product naming appears on canonical login
+- login succeeds without console or network failures
+- the default authenticated destination is `#/finance`
 
-## 2. Confirm the active finance tenant
+## 2. Confirm Finance shell and tenant context
 
-1. Open `#/finance`.
-2. If the finance shell asks for tenant selection, choose the seeded or existing tenant you want to use for the run.
+1. Stay on `#/finance`.
+2. If the Finance shell asks for tenant selection, choose the seeded or existing tenant you want to use for the run.
 3. If no usable tenant exists yet, create one with [finance-tenants-management-e2e.md](./finance-tenants-management-e2e.md) or reseed the normal local finance data before continuing.
+4. Confirm the Finance shell is the primary chrome on the route:
+   - desktop left rail for supported Finance destinations
+   - compact Finance utility header in the content column
+   - shell-level theme and sign-out controls
+   - at most one compact shell-level tenant selector when multiple tenants exist
 
 Expected:
 
-- the finance shell shows one active tenant context
-- the selected tenant stays visible in shared finance shell chrome
-- the route remains inside the intended finance destination while tenant selection resolves
+- the selected tenant stays in shared shell state while the requested route resolves
+- sole-tenant users do not see a redundant tenant switcher on tenant-scoped routes
+- unsupported dead links such as `Rules` or `Settings` are not shown
 
 ## 3. Dashboard smoke
 
 1. Stay on `#/finance`.
-2. Verify the finance-only shell is present:
-   - persistent left rail on desktop
-   - compact top utility row
-   - supported finance navigation only
-3. Confirm the dashboard hierarchy is visible for the selected tenant:
+2. Confirm the dashboard hierarchy is visible for the selected tenant:
    - compact page header
-   - visible reporting period summary with previous/current/next controls
+   - visible reporting-period summary with previous/current/next controls
    - balance-first summary with booked balance before secondary sections
-   - compact income, expense, and pending summary chips
+   - compact income, expense, and pending summaries
    - one primary cash-flow or equivalent summary visual in the first viewport
-   - account summary section
+   - account snapshot section
    - category or spending summary section
    - recent transactions section
-   - alerts or insights section
-   - sync activity section
-4. Change the reporting range if that control is available and confirm the page updates without losing shell state.
+   - compact needs-attention or follow-up states
+3. Change the reporting range if that control is available and confirm the page updates without losing shell state.
 
 Expected:
 
-- the page reads as a finance dashboard, not the old subnav-plus-cards page
-- finance shell chrome stays visually secondary to the dashboard money summary
-- if the signed-in user belongs to one tenant, no visible tenant selector appears on tenant-scoped finance routes
-- if the signed-in user belongs to multiple tenants, only one compact shell-level tenant selector appears
-- unsupported dead links such as `Rules` or `Settings` are not shown
-- empty sections, if any, are honest and styled as normal product states rather than fake data placeholders
+- the page reads as the canonical Finance dashboard, not the older custom-shell/subnav layout
+- shell chrome stays visually secondary to the money summary
+- empty or reduced sections remain honest product states rather than fake placeholders
 
-## 3a. Bootstrap V2 finance boundary smoke
+## 4. Finance route-group smoke
 
-1. While still signed in, open `#/v2/finance`.
-2. Confirm the canonical app nav is not the primary chrome for this route.
-3. Confirm a Bootstrap-specific shell boundary is visible with:
-   - finance navigation in the left column or top stack
-   - shell-level theme control
-   - shell-level sign-out action
-   - shell-level tenant selector only when multiple finance tenants exist
-   - visible handoff links back to canonical finance routes
-4. Confirm the page content reads as a real pilot dashboard with:
-   - compact header and period context
-   - booked balance story before secondary sections
-   - compact income, expense, and pending summaries
-   - one primary cash-flow visual region
-   - category or spending section
-   - account snapshot
-   - recent transactions
-   - attention states
+1. Use the Finance shell navigation to visit the supported route groups:
+   - `#/finance/transactions`
+   - `#/finance/accounts`
+   - `#/finance/categories`
+   - `#/finance/connections`
+   - `#/finance/imports`
+   - `#/finance/tenants`
+2. Confirm each route keeps the shared Finance shell active and renders Bootstrap-first headings, actions, forms, cards, lists, tables, alerts, and empty/loading/error states appropriate to the page.
+3. From Accounts, open one account detail route and confirm `#/finance/accounts/:accountId` preserves Finance context.
+4. From Transactions, open the dedicated create route and, if seeded data exists, one existing edit route. Confirm the browse page remains table-first and detail/editor flows stay on dedicated routes.
+5. From Connections, start the synthetic flow if safe for the environment and confirm the app reaches `#/finance/connections/synthetic`; if no pending `state` exists, confirm the route shows guidance instead of crashing.
+6. If Imports or Connections exposes a Finance job deep link, open it and confirm `#/finance/jobs/:jobId` stays inside Finance context after tenant resolution.
 
 Expected:
 
-- `#/v2/finance` is recognized as a protected route
-- tenant state still comes from shared finance shell behavior
-- the pilot remains parallel and does not replace canonical `#/finance`
-- Bootstrap-first dashboard sections are visible without reusing canonical `FinanceShell.svelte` or `Nav.svelte` chrome
-
-## 4. Transactions smoke
-
-1. Open `#/finance/transactions`.
-2. Confirm the same finance shell remains active and the transactions destination is highlighted.
-3. Verify the transactions workspace shows:
-   - page header
-   - route actions such as import, sync, or new transaction when implemented for the route
-   - search or date or filter toolbar
-   - summary chips
-   - ledger table with transaction columns
-4. Select a transaction row.
-5. On a desktop-width viewport, confirm a right-side contextual inspector opens for the selected row.
-6. Verify the inspector shows the selected transaction context, such as merchant, amount, type, metadata, category or status controls, notes or tags state, and supported quick actions.
-7. Open the dedicated create or edit route if those actions are present and confirm the route handoff still works.
-
-Expected:
-
-- the browse route is table-first rather than card-first
-- the inspector reflects the selected row without breaking the list state
-- dedicated create or edit routes remain the full-record mutation flow
+- supported Finance routes stay on real product paths under `#/finance*`
+- tenant-aware deep links preserve the requested destination instead of bouncing to another Finance page
+- route groups do not fall back to generic app nav as their primary chrome
 
 ## 5. Responsive and visual smoke
 
-1. Check the finance shell at a desktop viewport such as `1280x900`.
+1. Check the Finance shell at a desktop viewport such as `1280x900`.
 2. Check the same routes at a narrow viewport such as `390x844`.
 3. On both `#/finance` and `#/finance/transactions`, look for:
-   - on narrow viewports, the rail is collapsed to a compact current-route summary and menu trigger before the main content
-   - tenant switching, when present, stays compact and shell-owned rather than becoming a large page-level block
-   - the dashboard first viewport still shows the balance story before long navigation or utility chrome
-   - wrapped headings or buttons that should stay readable on one line
-   - overlapping rail, toolbar, table, or inspector regions
-   - clipped content, horizontal overflow, or unusable action rows
-   - large empty gutters that waste screen space
+    - the desktop rail uses the wider workspace well
+    - on narrow viewports, the full Finance nav stacks above the utility header and page content as a full-width section
+    - the utility header wraps compactly below the stacked nav without introducing a menu-toggle-only state
+    - tenant switching, when present, stays shell-owned rather than becoming a large page-level block
+    - the dashboard still reads cleanly after the stacked shell chrome without overlap or clipped controls
+    - headings, actions, and filter rows remain readable
+    - no overlapping shell, toolbar, table, or inspector regions
+    - no clipped content, horizontal overflow, or unusable action rows
 
 Expected:
 
-- desktop keeps the rail and uses the wider workspace well
-- narrow layouts remain readable and operable even when the inspector cannot stay side-by-side
-- the terminal-native design language still matches the existing app tokens
+- desktop and narrow layouts remain readable and operable
+- the stacked narrow-shell layout remains readable without overlap, clipping, or a missing navigation state
 
-## 6. Implementation iteration expectation
+## 6. Non-finance regression smoke
 
-During implementation, a sub-agent should run this guide after each meaningful shell, dashboard, or transactions slice.
+1. Sign out if needed, then open a protected non-finance route such as `#/jobs`.
+2. Confirm the app redirects to `#/login`.
+3. Sign in again and confirm the remembered protected destination wins over the default Finance landing.
+4. While authenticated on the non-finance route, open one or two other non-finance destinations such as `#/chat`, `#/data`, or `#/providers`.
+5. Confirm those routes still use the existing generic app nav and non-finance styling stack.
+6. Use the Finance link from the generic nav and confirm the app switches back to the Finance shell at `#/finance`.
 
-If anything fails:
+Expected:
 
-- report the exact route or hash
-- capture a screenshot or snapshot
-- capture browser console errors or warnings
-- capture failed network requests with status and a short response summary
-- note the selected tenant and viewport size
-
-The implementer should fix the issue, then the sub-agent should rerun the same guide until the flow is clean.
+- default authenticated landing is Finance only when no remembered protected route exists
+- non-finance routes remain on their existing shell/styling stack
+- switching between non-finance routes and Finance changes shell chrome in the expected direction
 
 ## 7. If anything is wrong, report it
 
@@ -154,4 +126,4 @@ Capture:
 - screenshots or short recordings of the failure
 - console errors or warnings
 - failed network requests and response details
-- which dashboard or transactions section did not match the expected shell behavior
+- which login, shell, dashboard, route-group, responsive, or non-finance-regression expectation did not match

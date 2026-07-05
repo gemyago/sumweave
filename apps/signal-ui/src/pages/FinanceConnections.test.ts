@@ -251,6 +251,40 @@ describe('Finance connections page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Synthetic start failed')
   })
 
+  it('renders failed connection state badges', async () => {
+    mocks.listConnections.mockResolvedValueOnce([
+      createConnectionFixture({ state: 'failed', providerReference: '', externalId: 'failed-ext' }),
+    ])
+
+    renderPage()
+
+    const failedBadge = await screen.findByText('failed')
+    expect(failedBadge).toHaveClass('text-bg-danger')
+  })
+
+  it('renders fallback connection state badges for non-active states', async () => {
+    mocks.listConnections.mockResolvedValueOnce([
+      createConnectionFixture({ state: 'paused', providerReference: '', externalId: 'paused-ext' }),
+    ])
+
+    renderPage()
+
+    const pausedBadge = await screen.findByText('paused')
+    expect(pausedBadge).toHaveClass('text-bg-secondary')
+  })
+
+  it('surfaces sync trigger failures with the fallback error message', async () => {
+    const user = userEvent.setup()
+    mocks.triggerConnectionSync.mockRejectedValueOnce('boom')
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Sync now' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to trigger sync')
+    expect(screen.queryByRole('link', { name: 'Open latest finance job' })).not.toBeInTheDocument()
+  })
+
   it('uses the fallback PKO error message for non-Error start failures', async () => {
     const user = userEvent.setup()
     mocks.startRedirectConnection.mockRejectedValueOnce('boom')

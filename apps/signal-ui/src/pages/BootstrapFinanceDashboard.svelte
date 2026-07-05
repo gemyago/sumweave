@@ -279,7 +279,6 @@
     if (!dashboard) return []
 
     const activeDashboard = dashboard
-
     const items: AttentionItem[] = []
 
     if (activeDashboard.pending.transactionCount > 0) {
@@ -302,7 +301,7 @@
         value: `${activeDashboard.missingFx.length} gap${activeDashboard.missingFx.length === 1 ? '' : 's'}`,
         tone: 'warning',
         href: '/admin/finance/fx',
-        hrefLabel: 'Open FX diagnostics',
+        hrefLabel: 'Review in admin FX diagnostics',
       })
     }
 
@@ -463,14 +462,18 @@
   }
 </script>
 
-<section class="container-fluid px-0" aria-labelledby="v2-finance-heading" data-v2-finance-page="true">
+<section
+  class="container-fluid px-0"
+  aria-labelledby="finance-dashboard-heading"
+  data-bootstrap-finance-dashboard="true"
+>
   <div class="d-grid gap-4">
     <header class="card border-0 shadow-sm">
       <div class="card-body p-4 p-xl-5">
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
           <div>
             <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Finance overview</p>
-            <h1 id="v2-finance-heading" class="h3 mb-2">Finance dashboard</h1>
+            <h1 id="finance-dashboard-heading" class="h3 mb-2">Finance dashboard</h1>
             <p class="text-body-secondary mb-0">
               Balances, cash flow, and recent activity for the selected reporting window.
             </p>
@@ -489,14 +492,12 @@
 
         <div class="row g-4 align-items-start">
           <div class="col-12 col-xl-5">
-            <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Period context</p>
+            <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Reporting period</p>
             {#if dashboard}
               <h2 class="h5 mb-1">
                 {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(dashboard.period.endDate)}
               </h2>
-              <p class="text-body-secondary mb-2">
-                Preset: {dashboard.period.preset || 'custom'}
-              </p>
+              <p class="text-body-secondary mb-2">Preset: {dashboard.period.preset || 'custom'}</p>
             {:else}
               <h2 class="h5 mb-1">Choose a tenant and period</h2>
               <p class="text-body-secondary mb-2">Use the header tenant selector to load this dashboard.</p>
@@ -520,12 +521,12 @@
               <summary class="fw-semibold">Custom range</summary>
               <form class="row g-3 mt-1" onsubmit={applyCustomRange}>
                 <div class="col-12 col-md-4">
-                  <label class="form-label" for="v2-finance-start-date">Custom start date</label>
-                  <input id="v2-finance-start-date" class="form-control" type="date" bind:value={customStartDate} aria-label="Custom start date" />
+                  <label class="form-label" for="finance-start-date">Custom start date</label>
+                  <input id="finance-start-date" class="form-control" type="date" bind:value={customStartDate} aria-label="Custom start date" />
                 </div>
                 <div class="col-12 col-md-4">
-                  <label class="form-label" for="v2-finance-end-date">Custom end date</label>
-                  <input id="v2-finance-end-date" class="form-control" type="date" bind:value={customEndDate} aria-label="Custom end date" />
+                  <label class="form-label" for="finance-end-date">Custom end date</label>
+                  <input id="finance-end-date" class="form-control" type="date" bind:value={customEndDate} aria-label="Custom end date" />
                 </div>
                 <div class="col-12 col-md-4 d-grid align-content-end">
                   <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId}>
@@ -568,14 +569,15 @@
             <div class="card-body p-4 d-grid gap-4">
               <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-start">
                 <div>
-                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Booked balance story</p>
+                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Balance-first summary</p>
+                  <h2 class="h5 mb-2">Booked balance story</h2>
                   {#if balanceSummary && balanceSummary.accountCount > 0}
-                    <h2 class="display-6 mb-1">{formatFinanceMoney(balanceSummary.bookedMinor, balanceSummary.currency)}</h2>
+                    <p class="display-6 mb-1">{formatFinanceMoney(balanceSummary.bookedMinor, balanceSummary.currency)}</p>
                     <p class="text-body-secondary mb-0">
                       {balanceSummary.accountCount} accounts · pending movement {formatFinanceMoney(balanceSummary.pendingMinor, balanceSummary.currency)}
                     </p>
                   {:else}
-                    <h2 class="h4 mb-1">No booked balances yet</h2>
+                    <p class="h4 mb-1">No booked balances yet</p>
                     <p class="text-body-secondary mb-0">
                       Connect or create accounts to start tracking balances here.
                     </p>
@@ -610,7 +612,7 @@
                 </div>
                 <div class="col-12 col-md-4">
                   <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
-                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Pending</p>
+                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Pending delta</p>
                     <p class="fs-5 fw-semibold mb-1">
                       {formatFinanceMoney(dashboard.pending.netMinor, dashboard.pending.displayCurrency)}
                     </p>
@@ -645,7 +647,7 @@
           <div class="card shadow-sm h-100">
             <div class="card-body p-4 d-grid gap-4">
               <div>
-                <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Cash flow visual</p>
+                <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Cash-flow visual</p>
                 <h2 class="h5 mb-1">Period flow</h2>
                 <p class="text-body-secondary mb-0">Booked and pending movement for the current reporting window.</p>
               </div>
@@ -703,7 +705,7 @@
               <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
                 <div>
                   <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Spending focus</p>
-                  <h2 class="h5 mb-1">Category breakdown</h2>
+                  <h2 class="h5 mb-1">Top categories</h2>
                   <p class="text-body-secondary mb-0">Largest income and expense categories for the selected period.</p>
                 </div>
                 <a class="btn btn-outline-secondary btn-sm" href="/finance/categories" use:link>View all categories</a>
@@ -860,7 +862,7 @@
             <div class="card-body p-4 d-grid gap-4">
               <div>
                 <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Attention states</p>
-                <h2 class="h5 mb-1">What still needs review</h2>
+                <h2 class="h5 mb-1">Needs attention</h2>
                 <p class="text-body-secondary mb-0">Alerts, FX gaps, and sync issues stay visible near the first activity viewport.</p>
               </div>
 

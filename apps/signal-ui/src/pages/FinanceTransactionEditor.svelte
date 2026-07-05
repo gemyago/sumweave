@@ -8,7 +8,7 @@
     type FinanceCategory,
     type FinanceTransaction,
   } from '../lib/finance/api'
-  import { formatFinanceDateTime } from '../lib/finance/format'
+  import { formatFinanceDateTime, formatFinanceMoney } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   let { params = {} } = $props<{ params?: { transactionId?: string } }>()
@@ -83,6 +83,7 @@
         transaction.kind === 'reconciliation' ? 'reconciliation' : '',
       ].filter(Boolean)
     }
+
     return [
       form.status === 'pending' ? 'pending' : '',
       form.transferGroupId ? 'transfer' : '',
@@ -91,11 +92,20 @@
     ].filter(Boolean)
   }
 
+  function flagBadgeClass(flag: string): string {
+    if (flag === 'pending') return 'text-bg-warning'
+    if (flag === 'hidden') return 'text-bg-secondary'
+    if (flag === 'refund') return 'text-bg-success'
+    if (flag === 'reconciliation') return 'text-bg-primary'
+    return 'text-bg-light border text-body'
+  }
+
   async function loadPage() {
     loading = true
     error = null
     saveMessage = null
     reactiveReady = false
+
     try {
       await financeShell.initialize()
       if (!financeShell.selectedTenantId) {
@@ -119,11 +129,13 @@
     if (!financeShell.selectedTenantId) {
       return
     }
+
     saveMessage = null
     ;[accounts, categories] = await Promise.all([
       financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
       financeApi.listCategories({ tenantId: financeShell.selectedTenantId }),
     ])
+
     if (isCreateMode) {
       transaction = null
       form = makeBlankForm()
@@ -133,6 +145,7 @@
       }
       return
     }
+
     transaction = await financeApi.getTransaction({
       tenantId: financeShell.selectedTenantId,
       transactionId: params.transactionId ?? '',
@@ -152,9 +165,11 @@
     if (!financeShell.selectedTenantId) {
       return
     }
+
     saving = true
     error = null
     saveMessage = null
+
     try {
       if (isCreateMode) {
         const created = await financeApi.createTransaction({
@@ -206,268 +221,222 @@
   })
 </script>
 
-<section class="page" aria-labelledby="finance-transaction-editor-heading">
-  <header class="hero">
-    <div>
-      <h1 id="finance-transaction-editor-heading">
-        {#if isCreateMode}Record transaction{:else}Edit transaction{/if}
-      </h1>
-      <p class="muted">
-        {#if isCreateMode}
-          Dedicated single-record entry screen for finance transactions.
-        {:else}
-          Focused edit route with provider-original context preserved alongside user-controlled reporting fields.
-        {/if}
-      </p>
-    </div>
-    <a href="/finance/transactions" use:link>Back to transactions</a>
-  </header>
-
-  {#if error}
-    <p class="error" role="alert">{error}</p>
-  {/if}
-  {#if saveMessage}
-    <p class="success" role="status">{saveMessage}</p>
-  {/if}
-
-  {#if loading}
-    <p class="muted" role="status">Loading transaction editor…</p>
-  {:else if financeShell.needsTenantSelection}
-    <section class="panel">
-      {#if !financeShell.embedded}
-        <label>
-          <span>Tenant</span>
-          <select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant">
-            <option value="">Select tenant</option>
-            {#each financeShell.tenants as tenant (tenant.id)}
-              <option value={tenant.id}>{tenant.name}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
-      <p>Select an active tenant to continue on this finance route.</p>
-    </section>
-  {:else if !financeShell.selectedTenantId}
-    <section class="panel">
-      <p>Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before editing transactions.</p>
-    </section>
-  {:else}
-    {#if !financeShell.embedded}
-      <section class="panel">
-        <label><span>Tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name}</option>{/each}</select></label>
-      </section>
-    {/if}
-
-      <section class="panel context-panel">
+<section class="container-fluid px-0" aria-labelledby="finance-transaction-editor-heading">
+  <div class="d-grid gap-4">
+    <header class="card border-0 shadow-sm">
+      <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
         <div>
-          <h2>Transaction context</h2>
-          <p class="muted">
-            {#if transaction}
-              {transaction.source} · {transaction.status} · {transaction.kind} · {transaction.currency}
+          <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Transaction editor</p>
+          <h1 id="finance-transaction-editor-heading" class="h3 mb-2">
+            {#if isCreateMode}Record transaction{:else}Edit transaction{/if}
+          </h1>
+          <p class="text-body-secondary mb-0">
+            {#if isCreateMode}
+              Dedicated single-record entry screen for finance transactions.
             {:else}
-              {form.source} · {form.status} · {form.kind} · {form.currency}
+              Focused edit route with provider-original context preserved beside operator-controlled reporting fields.
             {/if}
           </p>
         </div>
-        <div class="flags" aria-label="Transaction state flags">
-          {#each stateFlags as flag (flag)}
-            <span>{flag}</span>
-          {/each}
+
+        <a class="btn btn-outline-secondary align-self-start align-self-lg-center" href="/finance/transactions" use:link>
+          Back to transactions
+        </a>
+      </div>
+    </header>
+
+    {#if error}
+      <div class="alert alert-danger mb-0" role="alert">{error}</div>
+    {/if}
+
+    {#if saveMessage}
+      <div class="alert alert-success mb-0" role="status">{saveMessage}</div>
+    {/if}
+
+    {#if loading}
+      <div class="alert alert-secondary mb-0" role="status">Loading transaction editor…</div>
+    {:else if financeShell.needsTenantSelection}
+      <section class="card shadow-sm">
+        <div class="card-body p-4 d-grid gap-3">
+          {#if !financeShell.embedded}
+            <div class="col-12 col-lg-5 px-0">
+              <label class="form-label" for="finance-transaction-editor-tenant">Tenant</label>
+              <select
+                id="finance-transaction-editor-tenant"
+                class="form-select"
+                value={financeShell.selectedTenantId}
+                onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                aria-label="Tenant"
+              >
+                <option value="">Select tenant</option>
+                {#each financeShell.tenants as tenant (tenant.id)}
+                  <option value={tenant.id}>{tenant.name}</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
+
+          <div class="alert alert-warning mb-0" role="status">Select an active tenant to continue on this finance route.</div>
+        </div>
+      </section>
+    {:else if !financeShell.selectedTenantId}
+      <div class="alert alert-light border mb-0" role="status">
+        Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before editing transactions.
+      </div>
+    {:else}
+      {#if !financeShell.embedded}
+        <section class="card shadow-sm">
+          <div class="card-body p-4">
+            <div class="col-12 col-lg-5 px-0">
+              <label class="form-label" for="finance-transaction-editor-selected-tenant">Tenant</label>
+              <select
+                id="finance-transaction-editor-selected-tenant"
+                class="form-select"
+                value={financeShell.selectedTenantId}
+                onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                aria-label="Tenant"
+              >
+                <option value="">Select tenant</option>
+                {#each financeShell.tenants as tenant (tenant.id)}
+                  <option value={tenant.id}>{tenant.name}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+        </section>
+      {/if}
+
+      <section class="card shadow-sm">
+        <div class="card-body p-4 d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
+          <div>
+            <h2 class="h5 mb-1">Transaction context</h2>
+            <p class="text-body-secondary mb-0">
+              {#if transaction}
+                {transaction.source} · {transaction.status} · {transaction.kind} · {transaction.currency}
+              {:else}
+                {form.source} · {form.status} · {form.kind} · {form.currency}
+              {/if}
+            </p>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2" aria-label="Transaction state flags">
+            {#each stateFlags as flag (flag)}
+              <span class={`badge ${flagBadgeClass(flag)}`}>{flag}</span>
+            {/each}
+          </div>
         </div>
       </section>
 
       {#if transaction?.providerOriginal}
-        <section class="panel provider-panel">
-          <h2>Provider original</h2>
-          <p class="muted">Description {transaction.providerOriginal.description}</p>
-          <p class="muted">
-            Amount {transaction.providerOriginal.currency} {transaction.providerOriginal.amountMinor}
-          </p>
-          <p class="muted">
-            Effective
-            {transaction.providerOriginal.effectiveAt
-              ? formatFinanceDateTime(transaction.providerOriginal.effectiveAt)
-              : '—'}
-          </p>
+        <section class="card shadow-sm">
+          <div class="card-body p-4 d-grid gap-3">
+            <div>
+              <h2 class="h5 mb-1">Provider original</h2>
+              <p class="text-body-secondary mb-0">Original synced values remain visible next to editable reporting fields.</p>
+            </div>
+
+            <div class="row g-3">
+              <div class="col-12"><strong>Description</strong><div>{transaction.providerOriginal.description || '—'}</div></div>
+              <div class="col-12 col-md-6"><strong>Amount</strong><div>{formatFinanceMoney(transaction.providerOriginal.amountMinor, transaction.providerOriginal.currency)}</div></div>
+              <div class="col-12 col-md-6"><strong>Effective</strong><div>{transaction.providerOriginal.effectiveAt ? formatFinanceDateTime(transaction.providerOriginal.effectiveAt) : '—'}</div></div>
+            </div>
+          </div>
         </section>
       {/if}
 
-      <form class="panel editor-form" onsubmit={saveTransaction}>
-        <h2>{#if isCreateMode}Create details{:else}Editable reporting fields{/if}</h2>
+      <form class="card shadow-sm" onsubmit={saveTransaction}>
+        <div class="card-body p-4 d-grid gap-4">
+          <div>
+            <h2 class="h5 mb-1">{#if isCreateMode}Create details{:else}Editable reporting fields{/if}</h2>
+            <p class="text-body-secondary mb-0">
+              Shared single-record editor for both dedicated create and dedicated edit routes.
+            </p>
+          </div>
 
-        <label>
-          <span>Account</span>
-          <select
-            bind:value={form.accountId}
-            onchange={syncCurrencyWithAccount}
-            aria-label="Transaction account"
-            disabled={!isCreateMode}
-            required
-          >
-            <option value="">Select account</option>
-            {#each accounts as account (account.id)}
-              <option value={account.id}>{account.name}</option>
-            {/each}
-          </select>
-        </label>
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="finance-transaction-account">Account</label>
+              <select id="finance-transaction-account" class="form-select" bind:value={form.accountId} onchange={syncCurrencyWithAccount} aria-label="Transaction account" disabled={!isCreateMode} required>
+                <option value="">Select account</option>
+                {#each accounts as account (account.id)}
+                  <option value={account.id}>{account.name}</option>
+                {/each}
+              </select>
+            </div>
 
-        <label>
-          <span>Category</span>
-          <select bind:value={form.categoryId} aria-label="Transaction category">
-            <option value="">No category</option>
-            {#each categories as category (category.id)}
-              <option value={category.id}>{category.name}</option>
-            {/each}
-          </select>
-        </label>
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="finance-transaction-category">Category</label>
+              <select id="finance-transaction-category" class="form-select" bind:value={form.categoryId} aria-label="Transaction category">
+                <option value="">No category</option>
+                {#each categories as category (category.id)}
+                  <option value={category.id}>{category.name}</option>
+                {/each}
+              </select>
+            </div>
 
-        <label>
-          <span>Kind</span>
-          <select bind:value={form.kind} aria-label="Transaction kind" disabled={!isCreateMode}>
-            <option value="expense">expense</option>
-            <option value="income">income</option>
-            <option value="refund">refund</option>
-            <option value="transfer">transfer</option>
-            <option value="reconciliation">reconciliation</option>
-          </select>
-        </label>
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="finance-transaction-kind">Kind</label>
+              <select id="finance-transaction-kind" class="form-select" bind:value={form.kind} aria-label="Transaction kind" disabled={!isCreateMode}>
+                <option value="expense">expense</option>
+                <option value="income">income</option>
+                <option value="refund">refund</option>
+                <option value="transfer">transfer</option>
+                <option value="reconciliation">reconciliation</option>
+              </select>
+            </div>
 
-        <label>
-          <span>Status</span>
-          <select bind:value={form.status} aria-label="Transaction status" disabled={!isCreateMode}>
-            <option value="booked">booked</option>
-            <option value="pending">pending</option>
-          </select>
-        </label>
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="finance-transaction-status">Status</label>
+              <select id="finance-transaction-status" class="form-select" bind:value={form.status} aria-label="Transaction status" disabled={!isCreateMode}>
+                <option value="booked">booked</option>
+                <option value="pending">pending</option>
+              </select>
+            </div>
 
-        <label>
-          <span>Source</span>
-          <select bind:value={form.source} aria-label="Transaction source" disabled={!isCreateMode}>
-            <option value="manual">manual</option>
-            <option value="provider">provider</option>
-            <option value="csv">csv</option>
-            <option value="system">system</option>
-          </select>
-        </label>
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="finance-transaction-source">Source</label>
+              <select id="finance-transaction-source" class="form-select" bind:value={form.source} aria-label="Transaction source" disabled={!isCreateMode}>
+                <option value="manual">manual</option>
+                <option value="provider">provider</option>
+                <option value="csv">csv</option>
+                <option value="system">system</option>
+              </select>
+            </div>
 
-        <label>
-          <span>Currency</span>
-          <input bind:value={form.currency} aria-label="Transaction currency" disabled={!isCreateMode} required />
-        </label>
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="finance-transaction-currency">Currency</label>
+              <input id="finance-transaction-currency" class="form-control" bind:value={form.currency} aria-label="Transaction currency" disabled={!isCreateMode} required />
+            </div>
 
-        <label>
-          <span>Amount minor</span>
-          <input bind:value={form.amountMinor} aria-label="Amount minor" type="number" required />
-        </label>
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="finance-transaction-amount">Amount minor</label>
+              <input id="finance-transaction-amount" class="form-control" bind:value={form.amountMinor} aria-label="Amount minor" type="number" required />
+            </div>
 
-        <label>
-          <span>Description</span>
-          <input bind:value={form.description} aria-label="Transaction description" />
-        </label>
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="finance-transaction-transfer-group">Transfer group</label>
+              <input id="finance-transaction-transfer-group" class="form-control" bind:value={form.transferGroupId} aria-label="Transfer group" disabled={!isCreateMode} />
+            </div>
 
-        <label>
-          <span>Effective at</span>
-          <input bind:value={form.effectiveAt} aria-label="Transaction effective at" type="datetime-local" required />
-        </label>
+            <div class="col-12">
+              <label class="form-label" for="finance-transaction-description">Description</label>
+              <input id="finance-transaction-description" class="form-control" bind:value={form.description} aria-label="Transaction description" />
+            </div>
 
-        <label>
-          <span>Transfer group</span>
-          <input bind:value={form.transferGroupId} aria-label="Transfer group" disabled={!isCreateMode} />
-        </label>
+            <div class="col-12 col-lg-6">
+              <label class="form-label" for="finance-transaction-effective-at">Effective at</label>
+              <input id="finance-transaction-effective-at" class="form-control" bind:value={form.effectiveAt} aria-label="Transaction effective at" type="datetime-local" required />
+            </div>
+          </div>
 
-        <div class="action-row">
-          <button class="primary" type="submit" disabled={saving || !financeShell.selectedTenantId}>
-            {#if saving}Saving…{:else}Save transaction{/if}
-          </button>
-          <a href="/finance/transactions" use:link>Cancel</a>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary" type="submit" disabled={saving || !financeShell.selectedTenantId}>
+              {#if saving}Saving…{:else}Save transaction{/if}
+            </button>
+            <a class="btn btn-outline-secondary" href="/finance/transactions" use:link>Cancel</a>
+          </div>
         </div>
       </form>
-  {/if}
+    {/if}
+  </div>
 </section>
-
-<style>
-  .page {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-16);
-  }
-
-  .hero,
-  .context-panel,
-  .action-row {
-    display: flex;
-    gap: var(--space-16);
-  }
-
-  .hero,
-  .context-panel {
-    justify-content: space-between;
-    align-items: flex-start;
-  }
-
-  .panel {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-12);
-    padding: var(--space-16);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-elevated, var(--bg));
-  }
-
-  .editor-form {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-16);
-  }
-
-  .flags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-8);
-  }
-
-  .flags span {
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-  }
-
-  .action-row {
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .hero h1,
-  .panel h2 {
-    margin: 0;
-  }
-
-  .muted {
-    margin: 0;
-    color: var(--text-muted);
-  }
-
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-  }
-
-  .error {
-    color: var(--color-danger-red);
-  }
-
-  .success {
-    color: var(--color-success-green);
-  }
-
-  @media (max-width: 640px) {
-    .hero,
-    .context-panel,
-    .action-row {
-      flex-direction: column;
-      align-items: stretch;
-    }
-  }
-</style>

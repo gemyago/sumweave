@@ -153,7 +153,7 @@ describe('Finance transaction editor page', () => {
         transactionId: 'tx-1',
       }),
     )
-    await screen.findByText('Description Provider refund')
+    await screen.findByText('Provider refund')
     expect(screen.getAllByText('pending').length).toBeGreaterThan(0)
     expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
 
@@ -202,7 +202,7 @@ describe('Finance transaction editor page', () => {
     render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
 
     const tenantsLink = await screen.findByRole('link', { name: 'Finance tenants' })
-    expect(tenantsLink.closest('p')).toHaveTextContent(
+    expect(tenantsLink.closest('[role="status"]')).toHaveTextContent(
       'Create or join a tenant from Finance tenants before editing transactions.',
     )
     expect(mocks.listAccounts).not.toHaveBeenCalled()

@@ -8,7 +8,7 @@
   })
 </script>
 
-<p class="muted" role="status">Opening data…</p>
+<p class="muted" role="status">Opening finance…</p>
 
 <style>
   .muted {

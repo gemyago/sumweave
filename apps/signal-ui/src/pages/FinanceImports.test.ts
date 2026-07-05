@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/svelte'
+import { render, screen, waitFor, within } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceImports from './FinanceImports.svelte'
 
@@ -36,7 +36,10 @@ describe('Finance imports page', () => {
     render(FinanceImports)
 
     await user.click(await screen.findByRole('button', { name: 'Preview import' }))
-    expect(await screen.findByText(/Would create accounts: Checking/)).toBeInTheDocument()
+    const previewCard = await screen.findByRole('heading', { name: 'Preview result' })
+    expect(previewCard).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Would create accounts' })).toBeInTheDocument()
+    expect(screen.getByText('Checking')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Confirm import' }))
     await waitFor(() => expect(mocks.confirmCSVImport).toHaveBeenCalled())
@@ -85,8 +88,17 @@ describe('Finance imports page', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Preview import' }))
     expect(await screen.findByText(/headers —/)).toBeInTheDocument()
-    expect(screen.getByText('Would create accounts: —')).toBeInTheDocument()
-    expect(screen.getByText('Would create categories: —')).toBeInTheDocument()
-    expect(screen.getByText('Would create tags: —')).toBeInTheDocument()
+
+    const accountsCard = screen.getByRole('heading', { name: 'Would create accounts' }).closest('div')
+    const categoriesCard = screen.getByRole('heading', { name: 'Would create categories' }).closest('div')
+    const tagsCard = screen.getByRole('heading', { name: 'Would create tags' }).closest('div')
+
+    expect(accountsCard).not.toBeNull()
+    expect(categoriesCard).not.toBeNull()
+    expect(tagsCard).not.toBeNull()
+
+    expect(within(accountsCard as HTMLElement).getByText('—')).toBeInTheDocument()
+    expect(within(categoriesCard as HTMLElement).getByText('—')).toBeInTheDocument()
+    expect(within(tagsCard as HTMLElement).getByText('—')).toBeInTheDocument()
   })
 })

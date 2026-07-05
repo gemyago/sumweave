@@ -3,6 +3,7 @@ import { faker } from '@faker-js/faker'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import Login from './Login.svelte'
+import LoginSource from './Login.svelte?raw'
 import {
   POST_LOGIN_DESTINATION_KEY,
   rememberPostLoginDestination,
@@ -42,11 +43,17 @@ describe('Login', () => {
     mocks.setAuth.mockReset()
   })
 
-  it('renders username and password inputs with a sign-in button', () => {
+  it('renders the canonical bootstrap login form without pilot naming', () => {
     render(Login)
+
     expect(screen.getByLabelText('Username')).toBeInTheDocument()
     expect(screen.getByLabelText('Password')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Username')).toHaveClass('form-control')
+    expect(screen.getByLabelText('Password')).toHaveClass('form-control')
+    expect(screen.getByRole('button', { name: 'Sign in' })).toHaveClass('btn', 'btn-primary')
+    expect(screen.queryByText('Bootstrap pilot')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Use canonical login' })).not.toBeInTheDocument()
   })
 
   it('submit is disabled when fields are empty', () => {
@@ -54,7 +61,7 @@ describe('Login', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeDisabled()
   })
 
-  it('on successful login, calls setAuth and redirects to /data by default', async () => {
+  it('on successful login, calls setAuth and redirects to /finance by default', async () => {
     const user = userEvent.setup()
     const response = makeLoginResponse()
     mocks.loginApi.mockResolvedValue(response)
@@ -71,7 +78,7 @@ describe('Login', () => {
         response.refreshToken,
         response.user,
       )
-      expect(mocks.push).toHaveBeenCalledWith('/data')
+      expect(mocks.push).toHaveBeenCalledWith('/finance')
     })
   })
 
@@ -108,5 +115,37 @@ describe('Login', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Invalid username or password.')
     })
     expect(mocks.push).not.toHaveBeenCalled()
+  })
+
+  it('shows loading state and keeps fields disabled while submit is in flight', async () => {
+    const user = userEvent.setup()
+    let resolveLogin: ((value: ReturnType<typeof makeLoginResponse>) => void) | undefined
+    mocks.loginApi.mockReturnValue(
+      new Promise((resolve) => {
+        resolveLogin = resolve
+      }),
+    )
+
+    render(Login)
+
+    await user.type(screen.getByLabelText('Username'), faker.internet.username())
+    await user.type(screen.getByLabelText('Password'), faker.internet.password())
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
+    })
+    expect(screen.getByLabelText('Username')).toBeDisabled()
+    expect(screen.getByLabelText('Password')).toBeDisabled()
+
+    resolveLogin?.(makeLoginResponse())
+
+    await waitFor(() => {
+      expect(mocks.push).toHaveBeenCalledWith('/finance')
+    })
+  })
+
+  it('does not define a route-local style block', () => {
+    expect(LoginSource).not.toMatch(/<style[\s>]/)
   })
 })

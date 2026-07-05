@@ -134,7 +134,8 @@ describe('finance synthetic setup page', () => {
 
     renderPage()
 
-    expect(await screen.findByText(/Start synthetic setup from/)).toBeInTheDocument()
+    expect(await screen.findByText(/No pending synthetic setup state is present/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Finance connections' })).toHaveAttribute('href', '#/finance/connections')
   })
 
   it('requires explicit tenant selection when multiple tenants are available', async () => {

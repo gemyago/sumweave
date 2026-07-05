@@ -217,14 +217,26 @@ describe('App shell', () => {
     ).toBeInTheDocument()
   })
 
-  it('redirects the authenticated root route to data', async () => {
+  it('redirects the authenticated root route to finance', async () => {
     window.location.hash = ''
 
     render(App)
 
-    expect(
-      await screen.findByRole('heading', { name: 'Historical data' }),
-    ).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
+  })
+
+  it('renders the canonical login route as a public bootstrap login page', async () => {
+    mocks.isAuthenticated = false
+
+    render(App)
+    navigateHash('#/login')
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByText('Bootstrap pilot')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Use canonical login' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Main')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Chat' })).not.toBeInTheDocument()
   })
 
   it('navigates to Providers when Providers link is clicked', async () => {
@@ -279,78 +291,47 @@ describe('App shell', () => {
   it('renders finance and admin routes when authenticated', async () => {
     render(App)
     navigateHash('#/finance')
-    expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
 
     navigateHash('#/admin')
     expect(await screen.findByRole('heading', { name: 'Admin' })).toBeInTheDocument()
   })
 
-  it('renders the v2 login route as a public bootstrap pilot login page', async () => {
+  it('does not register the retired v2 login route', async () => {
     mocks.isAuthenticated = false
+    window.location.hash = '#/v2/login'
 
     render(App)
-    navigateHash('#/v2/login')
 
-    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
-    expect(screen.queryByText('Bootstrap pilot')).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Use canonical login' })).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.tryRestoreSession).toHaveBeenCalledTimes(1)
+    })
+
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Main')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Chat' })).not.toBeInTheDocument()
   })
 
-  it('renders the v2 finance route inside the dedicated finance shell when authenticated', async () => {
-    render(App)
-    navigateHash('#/v2/finance')
-
-    expect(
-      await screen.findByRole('heading', { name: 'Finance dashboard' }),
-    ).toBeInTheDocument()
-    expect(screen.getByLabelText('Finance navigation')).toBeInTheDocument()
-    expect(screen.getByLabelText('Finance utilities')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Accounts' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
-    expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument()
-    expect(screen.queryByLabelText('Main')).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Finance' })).not.toBeInTheDocument()
-  })
-
-  it('keeps one shell-level tenant selector for the v2 finance route when multiple tenants exist', async () => {
-    const now = new Date('2026-06-20T12:00:00Z')
-    financeApiMocks.listTenants.mockResolvedValueOnce([
-      {
-        id: 'tenant-1',
-        name: 'Household',
-        displayCurrency: 'USD',
-        joinedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      },
-      {
-        id: 'tenant-2',
-        name: 'Travel',
-        displayCurrency: 'EUR',
-        joinedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      },
-    ])
+  it('does not register the retired v2 finance route', async () => {
+    window.location.hash = '#/v2/finance'
 
     render(App)
-    navigateHash('#/v2/finance')
 
-    expect(await screen.findByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
-    expect(screen.getAllByRole('combobox', { name: 'Active tenant' })).toHaveLength(1)
-    expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
-    expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(mocks.tryRestoreSession).toHaveBeenCalledTimes(1)
+    })
+
+    expect(screen.getByLabelText('Main')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Finance dashboard' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Finance navigation')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-bootstrap-finance-shell="true"]')).toBeNull()
   })
 
-  it('renders all supported finance routes inside the dedicated finance shell', async () => {
+  it('renders all supported finance routes inside the shared bootstrap finance shell', async () => {
     render(App)
 
     const cases = [
-      ['#/finance', 'Finance'],
+      ['#/finance', 'Finance dashboard'],
       ['#/finance/tenants', 'Finance tenants'],
       ['#/finance/accounts', 'Finance accounts'],
       ['#/finance/accounts/account-1', 'Finance account detail'],
@@ -359,16 +340,18 @@ describe('App shell', () => {
       ['#/finance/transactions', 'Finance transactions'],
       ['#/finance/transactions/new', 'Record transaction'],
       ['#/finance/transactions/tx-1', 'Edit transaction'],
-      ['#/finance/categories', 'Finance categories and tags'],
+      ['#/finance/categories', 'Finance categories'],
       ['#/finance/imports', 'Finance imports'],
-      ['#/finance/jobs/job-1', 'Finance job route'],
+      ['#/finance/jobs/job-1', 'Finance job detail'],
     ] as const
 
     for (const [hash, heading] of cases) {
       navigateHash(hash)
       expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument()
+      expect(document.querySelector('[data-bootstrap-finance-shell="true"]')).toBeTruthy()
       expect(screen.getByLabelText('Finance navigation')).toBeInTheDocument()
       expect(screen.getByLabelText('Finance utilities')).toBeInTheDocument()
+      expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument()
       expect(screen.queryByRole('combobox', { name: 'Active tenant' })).not.toBeInTheDocument()
       expect(screen.queryByLabelText('Main')).not.toBeInTheDocument()
       expect(screen.queryByLabelText('Finance sections')).not.toBeInTheDocument()
@@ -401,7 +384,8 @@ describe('App shell', () => {
     render(App)
     navigateHash('#/finance')
 
-    expect(await screen.findByRole('heading', { name: 'Finance' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
+    expect(document.querySelector('[data-bootstrap-finance-shell="true"]')).toBeTruthy()
     expect(screen.getAllByRole('combobox', { name: 'Active tenant' })).toHaveLength(1)
     expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
     expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
@@ -409,16 +393,16 @@ describe('App shell', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Active tenant' }), 'tenant-2')
 
     const cases = [
-      ['#/finance', 'Finance'],
+      ['#/finance', 'Finance dashboard'],
       ['#/finance/accounts', 'Finance accounts'],
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/transactions', 'Finance transactions'],
       ['#/finance/transactions/new', 'Record transaction'],
       ['#/finance/transactions/tx-1', 'Edit transaction'],
-      ['#/finance/categories', 'Finance categories and tags'],
+      ['#/finance/categories', 'Finance categories'],
       ['#/finance/connections', 'Finance connections'],
       ['#/finance/imports', 'Finance imports'],
-      ['#/finance/jobs/job-1', 'Finance job route'],
+      ['#/finance/jobs/job-1', 'Finance job detail'],
     ] as const
 
     for (const [hash, heading] of cases) {
@@ -434,17 +418,17 @@ describe('App shell', () => {
   it('preserves tenant-scoped finance deep links while waiting for explicit tenant selection', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     const cases = [
-      ['#/finance', 'Finance'],
+      ['#/finance', 'Finance dashboard'],
       ['#/finance/accounts', 'Finance accounts'],
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/transactions', 'Finance transactions'],
       ['#/finance/transactions/new', 'Record transaction'],
       ['#/finance/transactions/tx-1', 'Edit transaction'],
-      ['#/finance/categories', 'Finance categories and tags'],
+      ['#/finance/categories', 'Finance categories'],
       ['#/finance/connections', 'Finance connections'],
       ['#/finance/connections/synthetic?state=state-1', 'Synthetic setup'],
       ['#/finance/imports', 'Finance imports'],
-      ['#/finance/jobs/job-1', 'Finance job route'],
+      ['#/finance/jobs/job-1', 'Finance job detail'],
     ] as const
 
     for (const [hash, heading] of cases) {
@@ -635,16 +619,16 @@ describe('App shell', () => {
     )
   })
 
-  it('preserves v2 finance pilot deep links before redirecting to v2 login', async () => {
+  it('does not remember retired v2 finance hashes as protected destinations', async () => {
     mocks.isAuthenticated = false
 
     render(App)
     navigateHash('#/v2/finance')
 
     await waitFor(() => {
-      expect(window.location.hash).toBe('#/v2/login')
+      expect(mocks.tryRestoreSession).toHaveBeenCalledTimes(1)
     })
-    expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe('/v2/finance')
+    expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBeNull()
   })
 
   it('shows loading indicator while session is restoring', async () => {

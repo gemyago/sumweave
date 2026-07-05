@@ -1,16 +1,16 @@
-# Design System (terminal-native with Bootstrap V2 pilot)
+# Design System (terminal-native app with canonical Bootstrap Finance/login)
 
-## Bootstrap V2 pilot boundary
+## Canonical Bootstrap finance/login boundary
 
-- The default app design system remains terminal-native for canonical routes.
-- Accepted pilot routes under `#/v2/*` use Bootstrap classes as their primary visual API.
-- This change does not promote or restyle canonical `#/login` or `#/finance`.
-- V2 pilot pages must avoid route-local `<style>` blocks and normal `style=` layout/styling attributes.
-- If Bootstrap needs help, keep the exception in a shared stylesheet and add a short reason comment for shell containment, widget sizing, bridge variables, or a11y/browser fixes.
+- Canonical `#/login` and tenant-facing `#/finance*` routes use Bootstrap classes as their primary visual API.
+- Non-finance routes remain on the existing terminal-native stack unless a later change explicitly promotes them.
+- `adopt-finance-bootstrap-default` supersedes `restructure-finance-ui-shell` for Finance/login styling; only behavior-level shell lessons carry forward.
+- Canonical Bootstrap finance/login pages must avoid route-local `<style>` blocks and normal `style=` layout/styling attributes.
+- If Bootstrap needs help, keep the exception in a shared stylesheet and add a short reason comment for shell containment, widget sizing, bridge variables, accessibility needs, or browser fixes.
 
 ## 1. Visual Theme & Atmosphere
 
-The system targets a **terminal-native, monospace-first** aesthetic: agent and CLI-adjacent tools, code-forward UI, and a warm (not pure neutral) palette. The default dark appearance uses a near-black background (`#201d1d`) with warm off-white text (`#fdfcfc`). This is not a generic gray dark theme — the slight reddish-brown in the darks and the warm tint in the lights (see the red channel in `#201d1d`, rgb(32, 29, 29)) keep the interface cohesive and readable.
+The broader app targets a **terminal-native, monospace-first** aesthetic: agent and CLI-adjacent tools, code-forward UI, and a warm (not pure neutral) palette. Canonical login and Finance now use Bootstrap layout and components as their primary markup contract, but they should still respect the shared theme, flat-surface, and warm-palette principles where shared app styles apply. The default dark appearance uses a near-black background (`#201d1d`) with warm off-white text (`#fdfcfc`). This is not a generic gray dark theme — the slight reddish-brown in the darks and the warm tint in the lights (see the red channel in `#201d1d`, rgb(32, 29, 29)) keep the interface cohesive and readable.
 
 Berkeley Mono is the sole typeface, establishing an unapologetic monospace identity. Every element -- headings, body text, buttons, navigation -- shares this single font family, creating a unified "everything is code" philosophy. The heading at 38px bold with 1.50 line-height is generous and readable, while body text at 16px with weight 500 provides a slightly heavier-than-normal reading weight that enhances legibility on screen. The monospace grid naturally enforces alignment and rhythm across the layout.
 
@@ -185,6 +185,7 @@ The color system is deliberately minimal. The primary palette consists of just t
 - Max content width: approximately 800-900px (narrow, reading-optimized)
 - Single-column layout as the primary pattern
 - Centered content with generous horizontal margins
+- Canonical Finance is the accepted wider-layout exception: desktop rail + utility row + roomy content canvas, collapsing to a compact utility-first stack on narrow screens
 - Hero section: full-width dark terminal element
 - Feature sections: single-column text blocks
 - Footer: multi-column link grid
@@ -322,7 +323,7 @@ The **CSS design system** is this document reflected in code: **two layers**, al
 | **Prefixed patterns** | **`ds-*`** classes: hero/section/nav, forms, cards, button variants (`ds-btn--*`), typography samples, palette/spacing/radius/elevation demos. |
 | **Rule** | Does **not** fork the palette — uses **`var(--…)`** from layer 1 (plus a few local surface vars for cards/demos where noted in file comments). |
 
-**Using layer 2:** Add **`ds-*`** class names when you want these **composed patterns** (marketing sections, internal design galleries, rich button variants). The main chat/shell may use **layer 1 + Svelte `<style>`** with tokens only — still **inside** this design system, not beside it.
+**Using layer 2:** Add **`ds-*`** class names when you want these **composed patterns** (marketing sections, internal design galleries, rich button variants). Legacy non-finance shell routes may still use **layer 1 + Svelte `<style>`** with tokens only — still **inside** this design system, not beside it. Canonical login and tenant-facing Finance routes should stay Bootstrap-first and avoid new route-local style blocks.
 
 **`button.*` vs `ds-btn--*`:** Same token source. **`button.primary` / `secondary` / `danger`** = global shell shortcuts already in markup. **`ds-btn--*`** = prefixed kit (more variants, different hover details in places). Prefer **`ds-btn--*`** for new UI that should match the spec’s named button row; migrate **`button.*`** over time if you want one class API. Otherwise use **tokens** in scoped CSS.
 

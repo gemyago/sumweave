@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-05
+goal: Make Bootstrap the default UI stack for the Finance app while keeping
+  non-finance surfaces on the current stack.

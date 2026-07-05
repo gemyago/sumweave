@@ -73,13 +73,14 @@ Module-specific rules. Project-level rules in root [AGENTS.md](../../AGENTS.md) 
 The rules are:
 - Update module rules when user corrects AI behavior.
 - Follow [DESIGN.md](./DESIGN.md) for all UI styling changes.
-- For accepted Bootstrap V2 pilot routes, prefer vanilla Bootstrap classes and native HTML/Svelte markup over custom CSS.
-- Bootstrap V2 pilot remains parallel under `#/v2/*`; do not promote canonical routes here.
-- Bootstrap V2 pilot pages must not add route-local `<style>` blocks or `style=` layout/styling attributes.
-- Bootstrap V2 pilot custom CSS exceptions must live in shared stylesheets with a short reason comment.
-- Bootstrap V2 pilot CSS exceptions are limited to shell containment, widget sizing, bridge vars, and a11y/browser fixes.
-- Do not add Svelte Bootstrap wrappers or another utility CSS framework for Bootstrap V2 pilot work.
-- Keep canonical routes unchanged when adding Bootstrap V2 pilot routes unless promotion is explicitly approved.
+- For canonical `#/login` and tenant-facing `#/finance*`, prefer vanilla Bootstrap classes and native HTML/Svelte markup over custom CSS.
+- Treat Bootstrap Finance/login as canonical; do not restore `restructure-finance-ui-shell` custom-shell styling as the default direction.
+- Canonical Bootstrap login and Finance pages must not add route-local `<style>` blocks or `style=` layout/styling attributes.
+- Canonical Bootstrap CSS exceptions must live in shared stylesheets with a short reason comment.
+- Canonical Bootstrap CSS exceptions are limited to shell containment, widget sizing, bridge vars, and a11y/browser fixes.
+- Do not add Svelte Bootstrap wrappers or another utility CSS framework for canonical Finance/login work.
+- Keep non-finance routes on the existing stack unless broader Bootstrap promotion is explicitly approved.
+- Do not preserve legacy `#/v2/*` finance/login routes or docs without explicit approval.
 - Read [ui-wireframe.md](./ui-wireframe.md) before changing UI; update it when screens, routing, or user-visible behavior change.
 - Prefer separate detail routes over dense split-pane workspaces.
 - Prefer stacked summaries over oversized multi-column tables.
@@ -116,7 +117,8 @@ Repository level task completion protocol **MUST ALWAYS** be followed. If you di
 ### UI Task Completion Protocol
 
 In addition to coding task completion protocol, you must also follow the UI task completion protocol if any UI changed:
-- Follow manual e2e runbook in [manual-e2e.md](../../docs/manual-e2e.md) to understand how to interact with the UI.
+- Follow manual e2e runbook in [manual-e2e/README.md](../../docs/manual-e2e/README.md) to understand how to interact with the UI.
+- For canonical login/Finance work, run [finance-ui-shell-smoke-e2e.md](../../docs/manual-e2e/finance-ui-shell-smoke-e2e.md) so default Finance landing, shell/dashboard, route-group, responsive, and non-finance-regression smoke paths stay covered.
 - Do a smoke test of the the UI changes by checking the common user flow that was changed, confirm everything is operational.
 - Do a visual assessment if the UI/UX changes are visually correct and functional
 - Signs of poor UI/UX experience:

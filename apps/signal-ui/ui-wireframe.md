@@ -6,16 +6,19 @@
 
 - Vite + Svelte 5 SPA, `svelte-spa-router`.
 
-**Shell (`Nav` + `<main>`)**
+**Authenticated shells (`Nav`, Finance shell, and `<main>`)**
 
+- **Generic authenticated shell:** Non-finance authenticated routes keep the existing top `Nav` plus the centered `main-inner` content column.
 - **Nav — left:** Brand label **Signal Foundry** → `/chat`.
 - **Nav — center:** **Chat** / **Data** / **Jobs** / **Finance** / **Providers** / **Strategies** / **Evaluations** / **Admin** share the same centered max-width column as `main-inner` on non-chat routes; the nav’s first grid column is content-sized so the brand does not overlap those links on narrow viewports.
-- **Nav — right:** **Sign out** (text) **to the left of** the compact **Theme** segmented control; both **end-aligned** in the right margin; only when authenticated.
+- **Nav — right:** **Sign out** (text) **to the left of** the compact **Theme** segmented control; both **end-aligned** in the right margin; only when the generic authenticated shell is active.
 - **≤700px Nav:** brand + auth controls stay on the first row; route links wrap onto a dedicated second row instead of colliding with the brand or sign-out cluster.
-- **`<main>`:** Centered content wrapper `main-inner` (~800–900px max width) with `Router` inside.
+- **Canonical Finance shell:** `#/finance*` replaces the generic `Nav` with one shared Bootstrap Finance shell: desktop left rail for supported Finance destinations, finance utility header in the content column, shell-owned sign out and theme controls, and at most one compact shell-owned tenant switcher when multiple tenants exist.
+- **Finance shell responsive shape:** At narrow widths, the Finance shell keeps the full Bootstrap navigation visible by stacking the aside as a full-width section above the utility header and route content; the utility controls wrap compactly below it with no menu-toggle state.
+- **`<main>`:** Centered content wrapper `main-inner` (~800–900px max width) with `Router` inside; Finance/admin/strategy/evaluation routes can widen it.
 - **`/chat`:** `main-inner` is full width so the session rail can sit at the viewport’s left inset; shell is viewport-height with **no page scrollbar** — only the transcript strip scrolls.
 - **Sign out:** `authStore.clearAuth()` (removes refresh token from `localStorage`, clears in-memory session) and `replace('/login')` so the user lands on the public login route without stacking authenticated history entries.
-- **Unauthenticated routes:** No `Nav`; stored theme still applies to the global shell on load.
+- **Unauthenticated routes:** No authenticated shell chrome; stored theme still applies to the global shell on load, and canonical public entry is `#/login`.
 
 **Theme**
 
@@ -37,13 +40,11 @@
 
 **Route guarding**
 
-- `/chat`, `/data`, `/jobs*`, `/providers`, `/strategies*`, and `/evaluations*`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
+- `/chat`, `/data`, `/jobs*`, `/finance*`, `/admin*`, `/providers`, `/strategies*`, and `/evaluations*`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
 - If `authStore.isAuthenticated` is false: `conditionsFailed` stores the requested protected route and then `replace('/login')`.
-- `#/v2/finance` is also protected; failed access stores the requested route and redirects to `#/v2/login`.
 - `/login` is public.
-- `/v2/login` is public.
 - Nav is hidden when unauthenticated.
-- `#/v2/finance` uses a Bootstrap-specific shell boundary instead of the generic `Nav` or canonical `FinanceShell` visuals.
+- `#/finance*` uses one shared Bootstrap Finance shell instead of the generic `Nav`.
 
 ---
 
@@ -51,22 +52,20 @@
 
 | Path | Behavior |
 | :--- | :--- |
-| `/` | `replace('/data')` on mount; brief status text. |
-| `/login` | Login page; username + password form. On success, sets auth tokens and `push()`es the remembered protected destination or `/data`. On failure, shows inline error alert. |
-| `/v2/login` | Bootstrap pilot login route. Public route with the same auth submit, inline error, loading/disabled, and remembered-destination behavior as canonical `#/login`, but rendered as a stripped-back Bootstrap card with only the sign-in heading, fields, inline error, and primary submit action. Canonical `#/login` stays unchanged. |
+| `/` | `replace('/finance')` on mount; brief status text. |
+| `/login` | Canonical Bootstrap login page; username + password form inside a compact Bootstrap card. On success, sets auth tokens and `push()`es the remembered protected destination or `/finance`. On failure, shows inline error alert. |
 | `/chat/:sessionId?` | Chat; optional id in URL after `sessionBound` (`replace`). One route entry so binding the id does not remount the page or abort the stream. |
 | `/data` | Historical data browser. Protected (auth required). Browse-first availability loads on open, then exact candle reads stay editable. |
 | `/jobs` | Durable historical ingestion job list. Protected. Summary-first stacked cards with filters, refresh, and open-detail actions. |
 | `/jobs/:jobId` | Durable historical ingestion job detail. Protected. Separate route with request, timeline, worker, result, and safe error sections plus back links to Jobs and Data. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
-| `/finance` | Finance dashboard. Protected. Tenant-aware KPI, alert, missing-FX, and account/category summary route. |
-| `/v2/finance` | Bootstrap finance dashboard. Protected. Uses a Bootstrap-specific shell that reuses finance auth and tenant-workspace behavior, keeps shell-level tenant/sign-out controls and a compact Bootstrap theme button group in one utility row, provides overview/accounts/transactions/connections navigation, and renders a balance-first dashboard with period context, booked balance story, compact summary cards, a cash-flow visual region, category or spending focus, account snapshot, recent transactions, and attention states. |
+| `/finance` | Canonical Bootstrap finance dashboard. Protected. Uses the shared Finance shell, keeps balance-first summaries in the first viewport, exposes previous/current/next/custom reporting-period controls, caps account/category/recent-transaction sections, and keeps missing-FX plus sync/import follow-up in a compact needs-attention area. |
 | `/finance/tenants` | Finance tenant selection/create/invite/join/member route. Protected. |
 | `/finance/accounts` | Finance account list and create route. Protected. |
 | `/finance/accounts/:accountId` | Finance account detail route. Protected. Separate detail route with recent transaction context. |
 | `/finance/connections` | Finance connection list/link/sync route. Protected. Schedule and last/next sync visibility stay here, and operators can locally delete a link without removing imported ledger history. |
 | `/finance/connections/synthetic` | Finance synthetic setup route. Protected. Loads pending synthetic setup by returned `state`, allows save/reload/add/remove account rows, finishes the local link, and returns to `/finance/connections`. |
-| `/finance/transactions` | Finance transactions browse/filter route. Protected. Card-first state cues plus explicit create/edit entry points. |
+| `/finance/transactions` | Finance transactions browse/filter route. Protected. Table-first ledger browsing with explicit create/edit entry points. |
 | `/finance/transactions/new` | Dedicated protected transaction create editor route with a single-record mobile-friendly layout. |
 | `/finance/transactions/:transactionId` | Dedicated protected transaction edit route that reuses the transaction editor and loads tenant-scoped detail directly. |
 | `/finance/categories` | Finance categories and tags management route. Protected. |
@@ -287,65 +286,67 @@
 
 **Shared shape**
 
-- Finance routes stay visually distinct from trading/data routes and always render a finance sub-navigation strip first.
+- Finance routes stay visually distinct from trading/data routes and always render inside one shared Bootstrap Finance shell.
+- The Bootstrap Finance shell supersedes `restructure-finance-ui-shell` as the styling direction; only its behavior lessons such as route-preserving tenant selection and avoiding dead links carry forward.
 - Finance routes use a wider shell canvas than the default reading column so the rail, dashboard grids, ledger tables, and inspectors can breathe.
+- Returning to non-finance routes restores the generic authenticated nav and the existing non-finance styling stack.
 - Tenant-aware finance routes share one client-side active-tenant workspace choice via local storage.
 - If the operator belongs to exactly one finance tenant, tenant-scoped finance routes auto-select it and continue without an extra step.
 - If the operator belongs to multiple finance tenants and no active tenant is stored yet, tenant-scoped finance routes stop on the requested route and require one explicit tenant choice there before loading tenant data.
 - After selection, the active tenant is reused across `#/finance`, `#/finance/accounts`, `#/finance/accounts/:accountId`, `#/finance/transactions`, `#/finance/transactions/new`, `#/finance/transactions/:transactionId`, `#/finance/categories`, `#/finance/connections`, `#/finance/imports`, and `#/finance/jobs/:jobId` until changed.
-- Tenant-aware routes keep a visible selected-tenant control near the top of the page.
+- Tenant-aware routes keep one visible selected-tenant control in shell chrome near the top of the page.
 - Multi-tenant tenant selection is shell-owned and compact; dashboard/content routes do not repeat tenant picker panels or tenant-workspace explainer blocks.
 - Single-tenant tenant-scoped finance routes do not show a tenant selector in normal shell chrome.
 - Finance detail flows prefer separate routes over split panes; the first slice uses `/finance/accounts/:accountId` and `/finance/jobs/:jobId` for that purpose.
 - Finance user-facing dates render in browser-local date or date-time format instead of raw ISO strings.
-- At `<=960px`, the finance rail collapses to a compact current-route summary plus an explicit menu toggle; navigation and secondary workspace links stay hidden until opened so the dashboard or route content remains near the top of the first viewport.
+- At narrow widths, the finance rail remains fully visible but stacks above the utility header and route body as a full-width Bootstrap aside; there is no separate menu-toggle state.
 - At narrow mobile widths, the utility row keeps only compact route/tenant/auth controls and hides non-essential explainer copy.
 
 **Dashboard (`/finance`)**
 
-- Header: **Finance** heading + short workspace-oriented copy.
+- Header: **Finance dashboard** heading + short workspace-oriented copy.
+- This is the default authenticated landing when there is no remembered protected route.
 - Top area: compact dashboard header plus direct links into accounts and transactions.
-- Controls area: period summary, previous/current/next period controls, and a compact custom date-range disclosure. Tenant control is not repeated here.
+- Controls area: reporting-period summary, previous/current/next period controls, and a compact custom date-range disclosure. Tenant control is not repeated here.
 - In `current_month` mode, the visible start/end date controls stay populated with the active month bounds on first load and after **Current month** is clicked.
 - Previous period, next period, and custom-range actions keep the visible date inputs synchronized with the reporting window returned by the dashboard API.
 - Body order:
-  - KPI cards for settled net, pending net, and alert count
-  - two-column analytics row for cash-flow totals and alerts/missing-FX; each panel includes a compact chart plus list/detail state, and alerts retain the deep link to `#/admin/finance/fx`
-  - two-column analytics row for account balance summaries and category breakdown summaries; each panel includes a compact chart plus links into the dedicated browse routes
-  - two-column activity row for recent transactions and connection/sync activity with links into transactions and connections
-- When dashboard data is available, the first useful viewport should read in this order: compact header and period context, primary booked-balance story, compact income/expense/pending summaries, one primary visual summary, then recent activity and attention states.
+  - first row: booked-balance story plus compact income/expense/pending delta summaries beside the primary cash-flow visual
+  - second row: capped top-category section and capped account snapshot section with links into the dedicated browse/detail routes
+  - third row: capped recent-transactions table plus compact needs-attention cards for pending activity, missing FX, sync failures, and import follow-up
+- When dashboard data is available, the first useful viewport should read in this order: compact header and period context, primary booked-balance story, compact income/expense/pending summaries, one primary visual summary, then capped activity and attention states.
 - Responsive behavior preserves the same balance-first order on narrow screens; shell chrome, tenant chrome, and route actions should not push the money summary below the first viewport.
 
 **Tenants (`/finance/tenants`)**
 
 - Header: **Finance tenants** heading + copy that explains select/create/invite/join flow.
-- Panels: selected-tenant picker, create-tenant form, accept-invite form, members list, invites list, create-invite form.
+- Layout: Bootstrap card-first sections for selected-tenant picker, create-tenant form, join-by-invite form, members list, and invite create/list states.
 
 **Accounts (`/finance/accounts`, `/finance/accounts/:accountId`)**
 
-- Accounts list: tenant picker, include-hidden toggle, create-account form, stacked account summary cards, and explicit **Open account detail** links.
-- Account detail: one focused account summary panel plus a recent-transactions stack and backlinks to Accounts and Transactions.
+- Accounts list: tenant picker, include-hidden toggle, create-account form card, Bootstrap list/card account summaries, and explicit **Open account detail** links.
+- Account detail: one focused account summary card plus a recent-transactions table and backlinks to Accounts and Transactions.
 - Direct entry to `#/finance/accounts/:accountId` preserves the requested route after tenant resolution instead of bouncing to another finance page.
 - If multiple tenants are joined and no active tenant is stored yet, the detail route shows a tenant selector plus an explicit “select active tenant” message before loading account data.
 
 **Transactions (`/finance/transactions`, `/finance/transactions/new`, `/finance/transactions/:transactionId`)**
 
-- Transactions browse route: tenant/account/status/source/sort filters, route-level action links, and visible summary chips.
+- Transactions browse route: Bootstrap filter card, tenant/account/status/source/sort filters, route-level action links, and visible summary chips.
 - Browse results: table-first ledger with explicit state badges for pending, hidden, transfer, refund, and reconciliation signals plus direct **Open transaction** links.
-- Desktop browse route also shows a contextual inspector for the currently selected transaction while keeping the full edit flow on the dedicated detail route.
-- Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly layout, explicit save/cancel actions, and visible transaction state context.
+- Wide viewports also show a contextual selected-transaction inspector card while keeping the full edit flow on the dedicated detail route.
+- Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly form, explicit save/cancel actions, visible transaction state context, and provider-original values when present.
 - Edit route: loads one tenant-scoped transaction directly, keeps finance navigation context intact, and shows provider-original values when present so synced data stays distinguishable from operator edits.
 
 **Categories / tags (`/finance/categories`)**
 
-- Two stacked management panels: one for categories, one for tags.
-- Each panel includes a create form and a simple stacked list of existing tenant-local items.
+- Two Bootstrap management cards: one for categories, one for tags.
+- Each card includes a create form and a simple list-group view of existing tenant-local items.
 
 **Connections (`/finance/connections`)**
 
 - Header copy calls out the only supported bank-link choices: monobank token linking, PKO bank login via Enable Banking, and synthetic local setup.
 - The route does not render a free-text provider field or ask operators to enter connector names such as `enable-banking`.
-- Panels: tenant picker, monobank token form, PKO bank-login start panel, synthetic setup start panel, operator notes, then stacked connection cards.
+- Panels: tenant picker, monobank token form, PKO bank-login start panel, synthetic setup start panel, operator notes, then Bootstrap connection cards with in-card sync/delete actions.
 - PKO start sends the browser route `{origin}/#/finance/connections` to the backend, the backend derives `/enable-banking/callback` for the provider redirect and looks up the stored browser handoff by returned `state`, and the browser return is handed back to `{origin}/?code=...&state=...#/finance/connections`; the page clears the consumed query string only after a successful finish, keeps the hash route active, and preserves failed return params for a retry on refresh/re-open.
 - Synthetic start also sends `{origin}/#/finance/connections` to the backend, but the returned authorization URL is the fixed local route `#/finance/connections/synthetic?state=...`; the browser stays in-app, pushes that hash route immediately, and the setup screen uses the returned `state` for load/save/finish calls.
 - Each connection card shows provider/state plus a stable secondary identifier (provider reference, external id, or created timestamp), along with last sync outcome, schedule visibility, job deep links, and an in-card delete confirmation that repeats the selected row identifier before removing it immediately after a successful delete.
@@ -354,22 +355,22 @@
 
 - Header: **Synthetic setup** heading, back link to Connections, finance sub-navigation, tenant picker, and visible pending setup `state`.
 - The route reads `state` from `#/finance/connections/synthetic?state=...`; opening the route without that query does not guess or create a new state and instead points the operator back to Connections to start the flow.
-- Main form shows one or more configured-account rows with labeled **name** and **currency** inputs plus explicit **Add account**, per-row **Remove configured account N**, **Reload pending setup**, **Save configuration**, and **Finish link** actions.
+- Main form shows one or more Bootstrap configured-account rows with labeled **name** and **currency** inputs plus explicit **Add account**, per-row **Remove configured account N**, **Reload pending setup**, **Save configuration**, and **Finish link** actions.
 - Saving sends the current configured rows to the synthetic link-state API and re-renders from the API response so stable synthetic account keys keep duplicate rows distinct after save/reload.
 - Finish validates at least one complete configured row, saves the latest form values, calls synthetic redirect finish with the same `state`, then returns to `#/finance/connections` where the resulting synthetic connection is visible in the normal connection list.
 - Save or finish validation/API failures stay on the synthetic setup route and use inline alert/status messaging instead of dropping the pending state.
 
 **Imports (`/finance/imports`)**
 
-- Workflow stays step-by-step: preview form → preview/mapping panel → import audit panel.
-- Preview panel shows resolved headers, editable mapping fields, would-create lists, and confirm action.
-- Audit panel exposes import status and a deep link to `#/finance/jobs/:jobId`.
+- Workflow stays step-by-step: preview form → preview/mapping card → import audit card.
+- Preview card shows resolved headers, editable mapping fields, would-create lists, and confirm action.
+- Audit card exposes import status and a deep link to `#/finance/jobs/:jobId`.
 
 **Finance job detail (`/finance/jobs/:jobId`)**
 
 - Direct entry preserves the requested finance job route after tenant resolution.
 - If multiple tenants are joined and no active tenant is stored yet, the route shows a tenant selector and explicit active-tenant prompt before rendering job detail content.
-- Once the active tenant is resolved, the page renders the shared job-detail content with finance-local back links and local date-time formatting.
+- Once the active tenant is resolved, the page renders Bootstrap summary, input, timeline, result, and safe-error cards with finance-local back links and local date-time formatting.
 
 ---
 

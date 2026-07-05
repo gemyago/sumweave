@@ -26,6 +26,7 @@
   let confirmDeleteConnectionId = $state('')
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+
   onMount(() => {
     void loadPage()
   })
@@ -34,6 +35,7 @@
     loading = true
     error = null
     reactiveReady = false
+
     try {
       await financeShell.initialize()
       if (financeShell.selectedTenantId) {
@@ -54,6 +56,7 @@
       connections = []
       return
     }
+
     confirmDeleteConnectionId = ''
     connections = await financeApi.listConnections({ tenantId: financeShell.selectedTenantId })
   }
@@ -61,8 +64,13 @@
   async function linkMonobankToken(event: SubmitEvent) {
     event.preventDefault()
     error = null
+
     try {
-      await financeApi.linkTokenConnection({ tenantId: financeShell.selectedTenantId, provider: monobankProvider, token })
+      await financeApi.linkTokenConnection({
+        tenantId: financeShell.selectedTenantId,
+        provider: monobankProvider,
+        token,
+      })
       token = ''
       await loadConnections()
     } catch (linkError) {
@@ -71,10 +79,9 @@
   }
 
   async function startPkoRedirect() {
-    if (!financeShell.selectedTenantId) {
-      return
-    }
+    if (!financeShell.selectedTenantId) return
     error = null
+
     try {
       const started = await financeApi.startRedirectConnection({
         tenantId: financeShell.selectedTenantId,
@@ -88,10 +95,9 @@
   }
 
   async function startSyntheticSetup() {
-    if (!financeShell.selectedTenantId) {
-      return
-    }
+    if (!financeShell.selectedTenantId) return
     error = null
+
     try {
       const started = await financeApi.startRedirectConnection({
         tenantId: financeShell.selectedTenantId,
@@ -108,16 +114,23 @@
     if (finishingRedirect || !financeShell.selectedTenantId || window.location.hash !== '#/finance/connections') {
       return
     }
+
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
     const state = params.get('state')
+
     if (!code || !state) {
       return
     }
 
     finishingRedirect = true
     try {
-      await financeApi.finishRedirectConnection({ tenantId: financeShell.selectedTenantId, provider: pkoProvider, code, state })
+      await financeApi.finishRedirectConnection({
+        tenantId: financeShell.selectedTenantId,
+        provider: pkoProvider,
+        code,
+        state,
+      })
       clearConsumedRedirectQuery()
     } catch (finishError) {
       error = finishError instanceof Error ? finishError.message : 'Failed to finish PKO connection'
@@ -144,9 +157,20 @@
   }
 
   async function triggerSync(connectionId: string) {
-    const job = await financeApi.triggerConnectionSync({ tenantId: financeShell.selectedTenantId, connectionId, reason: 'operator_ui' })
-    lastJobId = job.jobId
-    await loadConnections()
+    if (!financeShell.selectedTenantId) return
+    error = null
+
+    try {
+      const job = await financeApi.triggerConnectionSync({
+        tenantId: financeShell.selectedTenantId,
+        connectionId,
+        reason: 'operator_ui',
+      })
+      lastJobId = job.jobId
+      await loadConnections()
+    } catch (syncError) {
+      error = syncError instanceof Error ? syncError.message : 'Failed to trigger sync'
+    }
   }
 
   function getConnectionSecondaryIdentifier(connection: FinanceBankConnection) {
@@ -171,10 +195,15 @@
   }
 
   async function deleteConnection(connection: FinanceBankConnection) {
+    if (!financeShell.selectedTenantId) return
     error = null
     deletingConnectionId = connection.id
+
     try {
-      await financeApi.deleteConnection({ tenantId: financeShell.selectedTenantId, connectionId: connection.id })
+      await financeApi.deleteConnection({
+        tenantId: financeShell.selectedTenantId,
+        connectionId: connection.id,
+      })
       connections = connections.filter((item) => item.id !== connection.id)
       confirmDeleteConnectionId = ''
     } catch (deleteError) {
@@ -182,6 +211,12 @@
     } finally {
       deletingConnectionId = ''
     }
+  }
+
+  function badgeClass(state: string) {
+    if (state === 'active') return 'text-bg-success'
+    if (state === 'failed') return 'text-bg-danger'
+    return 'text-bg-secondary'
   }
 
   $effect(() => {
@@ -196,196 +231,257 @@
   })
 </script>
 
-<section class="page" aria-labelledby="finance-connections-heading">
-  <header>
-      <h1 id="finance-connections-heading">Finance connections</h1>
-      <p class="muted">Use provider-specific monobank token linking, PKO bank-login linking, or synthetic local setup here while keeping connection schedules and sync history visible. Deleting a link removes only local connection metadata and scheduled sync state.</p>
-  </header>
-  {#if error}
-    <p class="error" role="alert">{error}</p>
-  {/if}
+<section class="container-fluid px-0" aria-labelledby="finance-connections-heading">
+  <div class="d-grid gap-4">
+    <header class="card border-0 shadow-sm">
+      <div class="card-body p-4 p-xl-5 d-grid gap-3">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
+          <div>
+            <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Connections and sync</p>
+            <h1 id="finance-connections-heading" class="h3 mb-2">Finance connections</h1>
+            <p class="text-body-secondary mb-0">
+              Link monobank with a token, start PKO bank login through Enable Banking, or finish synthetic local setup without exposing raw provider payloads.
+            </p>
+          </div>
 
-  {#if loading}
-    <p class="muted" role="status">Loading connections…</p>
-  {:else if financeShell.needsTenantSelection}
-    <section class="panel">
-      {#if !financeShell.embedded}
-        <label><span>Tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name}</option>{/each}</select></label>
-      {/if}
-      <p>Select an active tenant to continue on this finance route.</p>
-    </section>
-  {:else if !financeShell.selectedTenantId}
-    <section class="panel"><p>Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before linking finance providers.</p></section>
-  {:else}
-    {#if !financeShell.embedded}
-      <section class="panel">
-        <label><span>Tenant</span><select value={financeShell.selectedTenantId} onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)} aria-label="Tenant"><option value="">Select tenant</option>{#each financeShell.tenants as tenant (tenant.id)}<option value={tenant.id}>{tenant.name}</option>{/each}</select></label>
-      </section>
+          {#if lastJobId}
+            <a class="btn btn-outline-secondary align-self-start align-self-lg-center" href={`/finance/jobs/${encodeURIComponent(lastJobId)}`} use:link>
+              Open latest finance job
+            </a>
+          {/if}
+        </div>
+      </div>
+    </header>
+
+    {#if error}
+      <div class="alert alert-danger mb-0" role="alert">{error}</div>
     {/if}
 
-    <div class="grid">
-      <form class="panel" onsubmit={linkMonobankToken}>
-        <h2>Link monobank</h2>
-        <label>
-          <span>Token</span>
-          <input bind:value={token} aria-label="Monobank token" required />
-        </label>
-        <button class="primary" type="submit" disabled={!financeShell.selectedTenantId}>Link monobank</button>
-        <p class="muted">This flow always submits a monobank token for the selected tenant.</p>
-      </form>
-
-      <section class="panel">
-        <h2>Connect PKO</h2>
-        <p class="muted">Start the PKO bank-login flow, complete consent in Enable Banking, and return here to finish linking in the browser.</p>
-        <button class="primary" type="button" disabled={!financeShell.selectedTenantId} onclick={() => void startPkoRedirect()}>
-          Connect PKO with bank login
-        </button>
-      </section>
-
-      <section class="panel">
-        <h2>Configure synthetic provider</h2>
-        <p class="muted">Start the local synthetic setup flow, configure one or more synthetic accounts, then finish the link back in finance connections.</p>
-        <button class="primary" type="button" disabled={!financeShell.selectedTenantId} onclick={() => void startSyntheticSetup()}>
-          Start synthetic setup
-        </button>
-      </section>
-
-      <section class="panel">
-        <h2>Operator notes</h2>
-        <p class="muted">Use per-connection schedule state, last job id, and next run visibility here. Admin diagnostics stay cross-cutting and sanitized.</p>
-        {#if lastJobId}
-          <p><a href={`/finance/jobs/${encodeURIComponent(lastJobId)}`} use:link>Open latest finance job</a></p>
-        {/if}
-      </section>
-    </div>
-
-    <div class="stack">
-      {#each connections as connection (connection.id)}
-        <article class="panel">
-          <div class="row">
-            <div>
-              <h2>{connection.displayName}</h2>
-              <p class="muted">{connection.provider} · {connection.state}</p>
-              <p class="muted">{getConnectionSecondaryIdentifier(connection)}</p>
-            </div>
-            <div class="actions">
-              <button class="primary" type="button" onclick={() => void triggerSync(connection.id)} disabled={deletingConnectionId === connection.id}>Sync now</button>
-              <button class="secondary" type="button" onclick={() => requestDeleteConnection(connection.id)} disabled={deletingConnectionId === connection.id || confirmDeleteConnectionId === connection.id}>
-                Delete link
-              </button>
-            </div>
-          </div>
-
-          <div class="schedule muted">
-            <span>Last started: {formatFinanceDateTime(connection.lastSyncStartedAt)}</span>
-            <span>Last success: {formatFinanceDateTime(connection.lastSuccessfulSyncAt)}</span>
-            <span>Next run: {formatFinanceDateTime(connection.schedule?.nextRunAt ?? null)}</span>
-          </div>
-
-          {#if connection.schedule}
-            <div class="schedule muted">
-              <span>Schedule: {connection.schedule.enabled ? 'enabled' : 'disabled'}</span>
-              <span>Interval: {connection.schedule.intervalSeconds}s</span>
+    {#if loading}
+      <div class="alert alert-secondary mb-0" role="status">Loading connections…</div>
+    {:else if financeShell.needsTenantSelection}
+      <section class="card shadow-sm">
+        <div class="card-body p-4 d-grid gap-3">
+          {#if !financeShell.embedded}
+            <div class="col-12 col-lg-5 px-0">
+              <label class="form-label" for="finance-connections-tenant">Tenant</label>
+              <select
+                id="finance-connections-tenant"
+                class="form-select"
+                value={financeShell.selectedTenantId}
+                onchange={(event) =>
+                  financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                aria-label="Tenant"
+              >
+                <option value="">Select tenant</option>
+                {#each financeShell.tenants as tenant (tenant.id)}
+                  <option value={tenant.id}>{tenant.name}</option>
+                {/each}
+              </select>
             </div>
           {/if}
 
-          {#if connection.lastSyncJobId}
-            <p><a href={`/finance/jobs/${encodeURIComponent(connection.lastSyncJobId)}`} use:link>Open last sync job</a></p>
-          {/if}
+          <div class="alert alert-warning mb-0" role="status">Select an active tenant to continue on this finance route.</div>
+        </div>
+      </section>
+    {:else if !financeShell.selectedTenantId}
+      <div class="alert alert-light border mb-0" role="status">
+        Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before linking finance providers.
+      </div>
+    {:else}
+      {#if !financeShell.embedded}
+        <section class="card shadow-sm">
+          <div class="card-body p-4">
+            <div class="col-12 col-lg-5 px-0">
+              <label class="form-label" for="finance-connections-selected-tenant">Tenant</label>
+              <select
+                id="finance-connections-selected-tenant"
+                class="form-select"
+                value={financeShell.selectedTenantId}
+                onchange={(event) =>
+                  financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                aria-label="Tenant"
+              >
+                <option value="">Select tenant</option>
+                {#each financeShell.tenants as tenant (tenant.id)}
+                  <option value={tenant.id}>{tenant.name}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+        </section>
+      {/if}
 
-          {#if confirmDeleteConnectionId === connection.id}
-            <div class="delete-confirmation" aria-live="polite">
-              <p>Delete {connection.displayName} ({getConnectionSecondaryIdentifier(connection)})? This removes only the local link metadata and schedule. Imported ledger history stays.</p>
-              <div class="actions">
-                <button class="danger" type="button" onclick={() => void deleteConnection(connection)} disabled={deletingConnectionId === connection.id}>
-                  {deletingConnectionId === connection.id ? 'Deleting…' : 'Confirm delete'}
+      <div class="row g-4">
+        <div class="col-12 col-xl-6 col-xxl-3">
+          <form class="card shadow-sm h-100" onsubmit={linkMonobankToken}>
+            <div class="card-body p-4 d-grid gap-3">
+              <div>
+                <h2 class="h5 mb-1">Link monobank</h2>
+                <p class="text-body-secondary mb-0">Submit a monobank token for the active tenant.</p>
+              </div>
+
+              <div>
+                <label class="form-label" for="finance-monobank-token">Token</label>
+                <input id="finance-monobank-token" class="form-control" bind:value={token} aria-label="Monobank token" required />
+              </div>
+
+              <div>
+                <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId}>
+                  Link monobank
                 </button>
-                <button class="secondary" type="button" onclick={cancelDeleteConnection} disabled={deletingConnectionId === connection.id}>
-                  Cancel
+              </div>
+
+              <p class="small text-body-secondary mb-0">This route never asks for a generic provider name field.</p>
+            </div>
+          </form>
+        </div>
+
+        <div class="col-12 col-xl-6 col-xxl-3">
+          <section class="card shadow-sm h-100">
+            <div class="card-body p-4 d-grid gap-3">
+              <div>
+                <h2 class="h5 mb-1">Connect PKO</h2>
+                <p class="text-body-secondary mb-0">Start the Enable Banking redirect and return here to finish linking.</p>
+              </div>
+
+              <div>
+                <button class="btn btn-primary" type="button" disabled={!financeShell.selectedTenantId} onclick={() => void startPkoRedirect()}>
+                  Connect PKO with bank login
                 </button>
               </div>
             </div>
+          </section>
+        </div>
+
+        <div class="col-12 col-xl-6 col-xxl-3">
+          <section class="card shadow-sm h-100">
+            <div class="card-body p-4 d-grid gap-3">
+              <div>
+                <h2 class="h5 mb-1">Synthetic setup</h2>
+                <p class="text-body-secondary mb-0">Stay in-app, configure accounts locally, and finish the link back on Finance connections.</p>
+              </div>
+
+              <div>
+                <button class="btn btn-primary" type="button" disabled={!financeShell.selectedTenantId} onclick={() => void startSyntheticSetup()}>
+                  Start synthetic setup
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="col-12 col-xl-6 col-xxl-3">
+          <section class="card shadow-sm h-100">
+            <div class="card-body p-4 d-grid gap-3">
+              <div>
+                <h2 class="h5 mb-1">Operator notes</h2>
+                <p class="text-body-secondary mb-0">Connection cards below keep schedule state, last sync, and durable job links visible.</p>
+              </div>
+
+              <ul class="small text-body-secondary mb-0 ps-3 d-grid gap-2">
+                <li>Imported ledger history stays after local link deletion.</li>
+                <li>Schedule visibility remains tenant-local on this route.</li>
+                <li>Admin diagnostics stay cross-cutting and sanitized.</li>
+              </ul>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <section class="card shadow-sm">
+        <div class="card-body p-4 d-grid gap-3">
+          <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+            <div>
+              <h2 class="h5 mb-1">Linked connections</h2>
+              <p class="text-body-secondary mb-0">Review provider state, sync timing, and retry or delete supported links.</p>
+            </div>
+
+            <span class="badge text-bg-secondary align-self-start align-self-md-center">
+              {connections.length} connection{connections.length === 1 ? '' : 's'}
+            </span>
+          </div>
+
+          {#if connections.length === 0}
+            <div class="alert alert-light border mb-0" role="status">No connections yet.</div>
+          {:else}
+            <div class="d-grid gap-3">
+              {#each connections as connection (connection.id)}
+                <article class="card border">
+                  <div class="card-body d-grid gap-3">
+                    <div class="d-flex flex-column flex-xl-row justify-content-between gap-3 align-items-xl-start">
+                      <div class="d-grid gap-2">
+                        <div>
+                          <h3 class="h6 mb-1">{connection.displayName}</h3>
+                          <div class="d-flex flex-wrap gap-2">
+                            <span class="badge text-bg-secondary">{connection.provider}</span>
+                            <span class={`badge ${badgeClass(connection.state)}`}>{connection.state}</span>
+                          </div>
+                        </div>
+
+                        <p class="small text-body-secondary mb-0">{getConnectionSecondaryIdentifier(connection)}</p>
+                      </div>
+
+                      <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-primary btn-sm" type="button" onclick={() => void triggerSync(connection.id)} disabled={deletingConnectionId === connection.id}>
+                          Sync now
+                        </button>
+                        <button
+                          class="btn btn-outline-danger btn-sm"
+                          type="button"
+                          onclick={() => requestDeleteConnection(connection.id)}
+                          disabled={deletingConnectionId === connection.id || confirmDeleteConnectionId === connection.id}
+                        >
+                          Delete link
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="row g-3 small text-body-secondary">
+                      <div class="col-12 col-md-4">Last started: {formatFinanceDateTime(connection.lastSyncStartedAt)}</div>
+                      <div class="col-12 col-md-4">Last success: {formatFinanceDateTime(connection.lastSuccessfulSyncAt)}</div>
+                      <div class="col-12 col-md-4">Next run: {formatFinanceDateTime(connection.schedule?.nextRunAt ?? null)}</div>
+                    </div>
+
+                    {#if connection.schedule}
+                      <div class="d-flex flex-wrap gap-2">
+                        <span class="badge text-bg-light border text-body">
+                          Schedule {connection.schedule.enabled ? 'enabled' : 'disabled'}
+                        </span>
+                        <span class="badge text-bg-light border text-body">
+                          Interval {connection.schedule.intervalSeconds}s
+                        </span>
+                      </div>
+                    {/if}
+
+                    {#if connection.lastSyncJobId}
+                      <div>
+                        <a href={`/finance/jobs/${encodeURIComponent(connection.lastSyncJobId)}`} use:link>Open last sync job</a>
+                      </div>
+                    {/if}
+
+                    {#if confirmDeleteConnectionId === connection.id}
+                      <div class="alert alert-danger mb-0" aria-live="polite">
+                        <p class="mb-2">
+                          Delete {connection.displayName} ({getConnectionSecondaryIdentifier(connection)})? This removes only the local link metadata and schedule. Imported ledger history stays.
+                        </p>
+                        <div class="d-flex flex-wrap gap-2">
+                          <button class="btn btn-danger btn-sm" type="button" onclick={() => void deleteConnection(connection)} disabled={deletingConnectionId === connection.id}>
+                            {deletingConnectionId === connection.id ? 'Deleting…' : 'Confirm delete'}
+                          </button>
+                          <button class="btn btn-outline-secondary btn-sm" type="button" onclick={cancelDeleteConnection} disabled={deletingConnectionId === connection.id}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+                </article>
+              {/each}
+            </div>
           {/if}
-        </article>
-      {:else}
-        <p class="muted">No connections yet.</p>
-      {/each}
-    </div>
-  {/if}
+        </div>
+      </section>
+    {/if}
+  </div>
 </section>
-
-<style>
-  .page,
-  .stack {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-16);
-  }
-
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: var(--space-16);
-  }
-
-  .panel {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-12);
-    padding: var(--space-16);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg-elevated, var(--bg));
-  }
-
-  .row {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--space-12);
-    align-items: flex-start;
-  }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-8);
-    justify-content: flex-end;
-  }
-
-  .schedule {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-12);
-  }
-
-  .delete-confirmation {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-    padding: var(--space-12);
-    border: 1px solid var(--danger-border);
-    border-radius: 4px;
-    background: var(--danger-bg);
-    color: var(--text-h);
-  }
-
-  .panel h2,
-  header h1 {
-    margin: 0;
-  }
-
-  .muted {
-    margin: 0;
-    color: var(--text-muted);
-  }
-
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-8);
-  }
-
-  .error {
-    color: var(--color-danger-red);
-  }
-</style>

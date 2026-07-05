@@ -1,8 +1,5 @@
-# finance-operator-ui Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change add-finance-management-slice. Update Purpose after archive.
-## Requirements
 ### Requirement: Distinct Protected Finance Area
 The operator UI SHALL provide a distinct protected Finance area rather than mixing finance workflows into trading/operator routes.
 
@@ -48,19 +45,6 @@ The Finance area SHALL expose the first end-user workflows required by the finan
 - **AND** the shared transaction editor MUST provide explicit save and cancel actions, show provider-original values when present so operator-edited reporting fields remain distinguishable from synced provider data, and remain usable in a mobile-friendly single-record layout
 - **AND** full-record mutation flows MUST stay on dedicated create and edit routes even when the browse route offers contextual review or supported quick actions
 
-### Requirement: Admin Diagnostics And Finance Job Deep Links
-The UI SHALL provide utilitarian admin diagnostics and connect finance workflows to generic jobs visibility.
-
-#### Scenario: Finance screens deep-link to relevant job detail
-- **WHEN** a finance sync, FX refresh, or import creates a durable job
-- **THEN** the finance workflow MUST expose job status plus a route link to a finance-focused job detail or the generic admin job detail without losing operator context
-
-#### Scenario: Admin diagnostics expose sanitized operational state
-- **WHEN** an authenticated operator opens `#/admin`, `#/admin/finance/fx`, or `#/admin/finance/providers`
-- **THEN** the UI MUST show operational diagnostics such as failed jobs, missing FX coverage, stale connections, provider health, and manual sync/retry affordances where supported
-- **AND** admin diagnostics MUST make scheduler state and recent scheduled-run visibility observable without replacing tenant-facing bank-connection schedule management
-- **AND** it MUST NOT display decrypted secrets or raw provider payloads by default
-
 ### Requirement: Active Tenant Workspace Context
 The Finance area SHALL keep one active tenant workspace context across tenant-scoped finance routes and finance-context deep links.
 
@@ -78,16 +62,8 @@ The Finance area SHALL keep one active tenant workspace context across tenant-sc
 - **AND** the shared Bootstrap Finance shell MUST expose at most one compact workspace switcher for changing tenants on normal finance routes
 - **AND** dashboard panels and route bodies MUST NOT reintroduce unrelated duplicate tenant picker or tenant workspace chrome
 
-### Requirement: Local Finance Dates And Synchronized Current-Month Controls
-The Finance area SHALL present human-readable local dates while keeping the existing reporting request semantics deterministic.
+## REMOVED Requirements
 
-#### Scenario: Finance views render local dates instead of raw ISO strings
-- **WHEN** a finance page shows operator-facing dates or timestamps such as reporting periods, invite times, missing-FX diagnostics, connection schedule times, or similar finance metadata
-- **THEN** the UI MUST render those values using a standard user-local date or date-time format rather than raw ISO strings
-- **AND** the underlying API and persistence semantics MUST remain unchanged
-
-#### Scenario: Current-month mode keeps visible date controls aligned
-- **WHEN** the finance dashboard is in `current_month` mode on first load or after the operator reactivates that mode
-- **THEN** the visible start and end date controls MUST show the current month's active reporting bounds
-- **AND** the visible picker state MUST stay synchronized when the operator switches to previous month, next month, or a custom range
-
+### Requirement: V2 Bootstrap Finance Dashboard Pilot
+**Reason**: The Bootstrap Finance dashboard is being promoted into the canonical Finance app instead of remaining a parallel pilot.
+**Migration**: Use canonical `#/finance` for the Bootstrap dashboard and canonical `#/finance*` routes for related Finance workflows.

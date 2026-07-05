@@ -67,11 +67,11 @@ describe('finance/admin wrapper pages', () => {
     render(FinanceJobDetail, { params: { jobId: 'job-1' } })
 
     expect(await screen.findByText('Select an active tenant to continue on this finance route.')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Finance job detail' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Summary' })).not.toBeInTheDocument()
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), 'tenant-2')
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Finance job detail' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Summary' })).toBeInTheDocument())
   })
 
   it('shows the join-tenant route hint when no finance tenants exist yet', async () => {
@@ -81,7 +81,7 @@ describe('finance/admin wrapper pages', () => {
 
     expect(await screen.findByRole('link', { name: 'Finance tenants' })).toHaveAttribute(
       'href',
-      '/finance/tenants',
+      '#/finance/tenants',
     )
     expect(
       screen.getByText(/before opening this finance job detail route\./),
