@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-04
+goal: Adopt vanilla Bootstrap rails for the login and finance dashboard pilot
+  with minimal custom CSS and enforceable agent rules

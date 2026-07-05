@@ -73,6 +73,13 @@ Module-specific rules. Project-level rules in root [AGENTS.md](../../AGENTS.md) 
 The rules are:
 - Update module rules when user corrects AI behavior.
 - Follow [DESIGN.md](./DESIGN.md) for all UI styling changes.
+- For accepted Bootstrap V2 pilot routes, prefer vanilla Bootstrap classes and native HTML/Svelte markup over custom CSS.
+- Bootstrap V2 pilot remains parallel under `#/v2/*`; do not promote canonical routes here.
+- Bootstrap V2 pilot pages must not add route-local `<style>` blocks or `style=` layout/styling attributes.
+- Bootstrap V2 pilot custom CSS exceptions must live in shared stylesheets with a short reason comment.
+- Bootstrap V2 pilot CSS exceptions are limited to shell containment, widget sizing, bridge vars, and a11y/browser fixes.
+- Do not add Svelte Bootstrap wrappers or another utility CSS framework for Bootstrap V2 pilot work.
+- Keep canonical routes unchanged when adding Bootstrap V2 pilot routes unless promotion is explicitly approved.
 - Read [ui-wireframe.md](./ui-wireframe.md) before changing UI; update it when screens, routing, or user-visible behavior change.
 - Prefer separate detail routes over dense split-pane workspaces.
 - Prefer stacked summaries over oversized multi-column tables.
@@ -82,6 +89,14 @@ The rules are:
 - Tests: one branch, one test; avoid excessive coverage.
 - Tests: prefer per-test fixture functions over global setup (comment required if globals are unavoidable).
 - Tests: use **`@faker-js/faker`** for generated sample data; exception — literals that match production (labels, routes, theme keys, domain enums).
+
+## Important UI Verification Flow
+
+When AI is working in bigger autonomous iterations, it must always follow the important UI verification flow in the end:
+- Run relevant sub-agent to review new/updated UI using relevant UI/UX design review skill
+- In case of any findings, run another sub-agent to address the findings
+- Re-run UI verification agent to confirm the findings were addressed
+
 
 ## Using third-party packages
 

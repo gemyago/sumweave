@@ -285,6 +285,67 @@ describe('App shell', () => {
     expect(await screen.findByRole('heading', { name: 'Admin' })).toBeInTheDocument()
   })
 
+  it('renders the v2 login route as a public bootstrap pilot login page', async () => {
+    mocks.isAuthenticated = false
+
+    render(App)
+    navigateHash('#/v2/login')
+
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByText('Bootstrap pilot')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Use canonical login' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Main')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Chat' })).not.toBeInTheDocument()
+  })
+
+  it('renders the v2 finance route inside the dedicated finance shell when authenticated', async () => {
+    render(App)
+    navigateHash('#/v2/finance')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Finance dashboard' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Finance navigation')).toBeInTheDocument()
+    expect(screen.getByLabelText('Finance utilities')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Accounts' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Theme' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Main')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Finance' })).not.toBeInTheDocument()
+  })
+
+  it('keeps one shell-level tenant selector for the v2 finance route when multiple tenants exist', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    financeApiMocks.listTenants.mockResolvedValueOnce([
+      {
+        id: 'tenant-1',
+        name: 'Household',
+        displayCurrency: 'USD',
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'tenant-2',
+        name: 'Travel',
+        displayCurrency: 'EUR',
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ])
+
+    render(App)
+    navigateHash('#/v2/finance')
+
+    expect(await screen.findByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
+    expect(screen.getAllByRole('combobox', { name: 'Active tenant' })).toHaveLength(1)
+    expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
+  })
+
   it('renders all supported finance routes inside the dedicated finance shell', async () => {
     render(App)
 
@@ -572,6 +633,18 @@ describe('App shell', () => {
     expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe(
       '/finance/transactions/new',
     )
+  })
+
+  it('preserves v2 finance pilot deep links before redirecting to v2 login', async () => {
+    mocks.isAuthenticated = false
+
+    render(App)
+    navigateHash('#/v2/finance')
+
+    await waitFor(() => {
+      expect(window.location.hash).toBe('#/v2/login')
+    })
+    expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe('/v2/finance')
   })
 
   it('shows loading indicator while session is restoring', async () => {

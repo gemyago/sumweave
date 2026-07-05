@@ -2,18 +2,26 @@
 
 Follow preparation steps in [README.md](./README.md) first.
 
-Use this guide after `restructure-finance-ui-shell` lands. It is the smoke runbook for the finance shell, dashboard, and transactions workspace introduced by that change.
+Use this guide after `restructure-finance-ui-shell` lands. It is the smoke runbook for the canonical finance shell, dashboard, transactions workspace, and the parallel Bootstrap V2 pilot route boundary introduced by `adopt-bootstrap-ui-rails`.
+
+## 0. Bootstrap V2 pilot boundary note
+
+- In this chunk, `#/v2/login` is a real Bootstrap pilot login page and `#/v2/finance` is a real Bootstrap pilot dashboard boundary.
+- Canonical `#/login` and `#/finance` remain the real operator paths in this change.
+- Do not treat the V2 routes as promoted or feature-complete yet.
 
 ## 1. Sign in
 
 1. Open `http://127.0.0.1:5173/#/login`.
 2. Sign in with the first local user from repo-root `.local-users` unless you intentionally prepared another user.
 3. Confirm the app redirects into the authenticated UI instead of staying on `#/login`.
+4. Open `#/v2/login` and confirm the Bootstrap pilot login form loads without a crash.
 
 Expected:
 
 - login succeeds
 - an authenticated app shell loads without console or network failures
+- `#/v2/login` is reachable as a parallel public route and shows the Bootstrap pilot login form
 
 ## 2. Confirm the active finance tenant
 
@@ -55,6 +63,33 @@ Expected:
 - if the signed-in user belongs to multiple tenants, only one compact shell-level tenant selector appears
 - unsupported dead links such as `Rules` or `Settings` are not shown
 - empty sections, if any, are honest and styled as normal product states rather than fake data placeholders
+
+## 3a. Bootstrap V2 finance boundary smoke
+
+1. While still signed in, open `#/v2/finance`.
+2. Confirm the canonical app nav is not the primary chrome for this route.
+3. Confirm a Bootstrap-specific shell boundary is visible with:
+   - finance navigation in the left column or top stack
+   - shell-level theme control
+   - shell-level sign-out action
+   - shell-level tenant selector only when multiple finance tenants exist
+   - visible handoff links back to canonical finance routes
+4. Confirm the page content reads as a real pilot dashboard with:
+   - compact header and period context
+   - booked balance story before secondary sections
+   - compact income, expense, and pending summaries
+   - one primary cash-flow visual region
+   - category or spending section
+   - account snapshot
+   - recent transactions
+   - attention states
+
+Expected:
+
+- `#/v2/finance` is recognized as a protected route
+- tenant state still comes from shared finance shell behavior
+- the pilot remains parallel and does not replace canonical `#/finance`
+- Bootstrap-first dashboard sections are visible without reusing canonical `FinanceShell.svelte` or `Nav.svelte` chrome
 
 ## 4. Transactions smoke
 

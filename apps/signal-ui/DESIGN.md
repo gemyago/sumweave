@@ -1,4 +1,12 @@
-# Design System (terminal-native)
+# Design System (terminal-native with Bootstrap V2 pilot)
+
+## Bootstrap V2 pilot boundary
+
+- The default app design system remains terminal-native for canonical routes.
+- Accepted pilot routes under `#/v2/*` use Bootstrap classes as their primary visual API.
+- This change does not promote or restyle canonical `#/login` or `#/finance`.
+- V2 pilot pages must avoid route-local `<style>` blocks and normal `style=` layout/styling attributes.
+- If Bootstrap needs help, keep the exception in a shared stylesheet and add a short reason comment for shell containment, widget sizing, bridge variables, or a11y/browser fixes.
 
 ## 1. Visual Theme & Atmosphere
 
@@ -338,4 +346,3 @@ Signal UI ships reusable classes in **`src/styles/design-system.css`** (imported
 | Spacing / radius / elevation demos | `ds-spacing-row`, `ds-spacing-bar` + `--ds-space`, `ds-radius-box--4`, `ds-radius-box--6`, `ds-elevation-card--*` |
 
 Prefer these classes over ad-hoc inline styles for new UI that should match the spec.
-

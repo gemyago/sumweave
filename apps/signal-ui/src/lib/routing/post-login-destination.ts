@@ -1,5 +1,6 @@
 export const DEFAULT_AUTHENTICATED_ROUTE = '/data'
 export const LOGIN_ROUTE = '/login'
+export const V2_LOGIN_ROUTE = '/v2/login'
 export const POST_LOGIN_DESTINATION_KEY = 'signal-ui-post-login-destination'
 
 const PROTECTED_ROUTE_PREFIXES = [
@@ -8,6 +9,7 @@ const PROTECTED_ROUTE_PREFIXES = [
   '/providers',
   '/jobs',
   '/finance',
+  '/v2/finance',
   '/strategies',
   '/evaluations',
   '/admin',

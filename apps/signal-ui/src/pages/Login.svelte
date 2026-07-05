@@ -1,42 +1,21 @@
 <script lang="ts">
-  import { push } from 'svelte-spa-router'
-  import { loginApi } from '../lib/auth/auth-api'
-  import { authStore } from '../lib/auth/auth-store.svelte'
-  import { resolvePostLoginDestination } from '../lib/routing/post-login-destination'
+  import { createLoginFormState } from '../lib/auth/login-form.svelte'
 
-  let username = $state('')
-  let password = $state('')
-  let submitting = $state(false)
-  let error = $state<string | null>(null)
-
-  async function handleSubmit(e: Event) {
-    e.preventDefault()
-    error = null
-    submitting = true
-    try {
-      const res = await loginApi({ username, password })
-      authStore.setAuth(res.accessToken, res.refreshToken, res.user)
-      push(resolvePostLoginDestination())
-    } catch {
-      error = 'Invalid username or password.'
-    } finally {
-      submitting = false
-    }
-  }
+  const form = createLoginFormState()
 </script>
 
 <section class="page" aria-labelledby="login-heading">
   <h1 id="login-heading">Sign in</h1>
 
-  <form class="form" onsubmit={handleSubmit}>
+  <form class="form" onsubmit={(event) => form.submit(event)}>
     <div class="field">
       <label for="login-username">Username</label>
       <input
         id="login-username"
         type="text"
         autocomplete="username"
-        bind:value={username}
-        disabled={submitting}
+        bind:value={form.username}
+        disabled={form.submitting}
         required
       />
     </div>
@@ -47,18 +26,18 @@
         id="login-password"
         type="password"
         autocomplete="current-password"
-        bind:value={password}
-        disabled={submitting}
+        bind:value={form.password}
+        disabled={form.submitting}
         required
       />
     </div>
 
-    {#if error}
-      <p class="error" role="alert">{error}</p>
+    {#if form.error}
+      <p class="error" role="alert">{form.error}</p>
     {/if}
 
-    <button type="submit" class="primary" disabled={submitting || !username || !password}>
-      {submitting ? 'Signing in…' : 'Sign in'}
+    <button type="submit" class="primary" disabled={form.submitDisabled}>
+      {form.submitting ? 'Signing in…' : 'Sign in'}
     </button>
   </form>
 </section>

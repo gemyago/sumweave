@@ -39,8 +39,11 @@
 
 - `/chat`, `/data`, `/jobs*`, `/providers`, `/strategies*`, and `/evaluations*`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
 - If `authStore.isAuthenticated` is false: `conditionsFailed` stores the requested protected route and then `replace('/login')`.
+- `#/v2/finance` is also protected; failed access stores the requested route and redirects to `#/v2/login`.
 - `/login` is public.
+- `/v2/login` is public.
 - Nav is hidden when unauthenticated.
+- `#/v2/finance` uses a Bootstrap-specific shell boundary instead of the generic `Nav` or canonical `FinanceShell` visuals.
 
 ---
 
@@ -50,12 +53,14 @@
 | :--- | :--- |
 | `/` | `replace('/data')` on mount; brief status text. |
 | `/login` | Login page; username + password form. On success, sets auth tokens and `push()`es the remembered protected destination or `/data`. On failure, shows inline error alert. |
+| `/v2/login` | Bootstrap pilot login route. Public route with the same auth submit, inline error, loading/disabled, and remembered-destination behavior as canonical `#/login`, but rendered as a stripped-back Bootstrap card with only the sign-in heading, fields, inline error, and primary submit action. Canonical `#/login` stays unchanged. |
 | `/chat/:sessionId?` | Chat; optional id in URL after `sessionBound` (`replace`). One route entry so binding the id does not remount the page or abort the stream. |
 | `/data` | Historical data browser. Protected (auth required). Browse-first availability loads on open, then exact candle reads stay editable. |
 | `/jobs` | Durable historical ingestion job list. Protected. Summary-first stacked cards with filters, refresh, and open-detail actions. |
 | `/jobs/:jobId` | Durable historical ingestion job detail. Protected. Separate route with request, timeline, worker, result, and safe error sections plus back links to Jobs and Data. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
 | `/finance` | Finance dashboard. Protected. Tenant-aware KPI, alert, missing-FX, and account/category summary route. |
+| `/v2/finance` | Bootstrap finance dashboard. Protected. Uses a Bootstrap-specific shell that reuses finance auth and tenant-workspace behavior, keeps shell-level tenant/sign-out controls and a compact Bootstrap theme button group in one utility row, provides overview/accounts/transactions/connections navigation, and renders a balance-first dashboard with period context, booked balance story, compact summary cards, a cash-flow visual region, category or spending focus, account snapshot, recent transactions, and attention states. |
 | `/finance/tenants` | Finance tenant selection/create/invite/join/member route. Protected. |
 | `/finance/accounts` | Finance account list and create route. Protected. |
 | `/finance/accounts/:accountId` | Finance account detail route. Protected. Separate detail route with recent transaction context. |
@@ -298,7 +303,7 @@
 
 **Dashboard (`/finance`)**
 
-- Header: **Finance** heading + short tenant-workspace copy.
+- Header: **Finance** heading + short workspace-oriented copy.
 - Top area: compact dashboard header plus direct links into accounts and transactions.
 - Controls area: period summary, previous/current/next period controls, and a compact custom date-range disclosure. Tenant control is not repeated here.
 - In `current_month` mode, the visible start/end date controls stay populated with the active month bounds on first load and after **Current month** is clicked.
