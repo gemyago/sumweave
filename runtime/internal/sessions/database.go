@@ -65,10 +65,8 @@ func NewDatabaseSessionMetadataStore(
 	if dsn == "" {
 		return nil, errors.New("dsn is required")
 	}
-	gormCfg := gormsignalfoundry.NewGormConfigForSignalFoundryTables(gormsignalfoundry.GormSignalFoundryTablesOpts{
-		TablePrefix:    opts.TablePrefix,
-		TranslateError: true,
-	})
+	opts.TranslateError = true
+	gormCfg := gormsignalfoundry.NewGormConfigForSignalFoundryTables(opts)
 	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), gormCfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)

@@ -30,10 +30,29 @@ Nearest project instructions **win** when they conflict with anything below.
 - Define **interfaces next to the consumer** (same file by default); split only when size or reuse demands it.
 - Use **`log/slog`** (or the project’s logging facade) as an injected dependency — avoid global loggers unless the project already standardized on them.
 - Wrap errors: `fmt.Errorf("context: %w", err)` (or the project’s error helpers).
+- Avoid hiding error details. If you return error, always wrap it and include original error details.
 - Methods with more than 3 arguments (context does not count) is a warning sign. Use params struct instead.
 - Names such as "tools", "helpers", "utils" e.t.c are banned. Use descriptive names instead.
 - Prefer **functional options** for optional constructor parameters: a `type FooOption func(*Foo)` (or `*fooConfig`), `WithBar(...)` functions that set fields, and `NewFoo(opts ...FooOption)` applying them in order. Avoid a separate `NewFooWithOpts` when the zero-arg `NewFoo()` case is the default.
 - Do not add additional constructors if they're not intended for real production use. Almost always use a single constructor.
+
+**Example of error hiding & wrapping**
+```go
+// Bad, original error is hidden
+if err != nil {
+  return nil, errors.New("failed to do something")
+}
+
+// Still bad, not wrapped
+if err != nil {
+  return nil, err
+}
+
+// Good
+if err != nil {
+  return nil, fmt.Errorf("failed to do something: %w", err)
+}
+```
 
 ### Naming constructors
 

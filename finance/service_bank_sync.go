@@ -35,6 +35,11 @@ type BankSyncService struct {
 	logger                 *slog.Logger
 }
 
+const (
+	bankSyncInitialBackfillYears = 3
+	bankSyncRecentRefreshDays    = 30
+)
+
 type BankSyncServiceOption func(*BankSyncService)
 
 func WithBankSyncServiceNow(now func() time.Time) BankSyncServiceOption {
@@ -270,6 +275,7 @@ func (s *BankSyncService) RunBankConnectionSync(
 		return BankConnectionSyncResult{}, err
 	}
 	now := s.now().UTC()
+	windowStart, windowEnd := resolveBankConnectionSyncWindow(*connection, params, now)
 	scheduledRun, hasScheduledRun, err := s.makeScheduledRunMetadata(ctx, *connection, params, now)
 	if err != nil {
 		return BankConnectionSyncResult{}, err
@@ -283,8 +289,8 @@ func (s *BankSyncService) RunBankConnectionSync(
 		ProviderReference: connection.ProviderReference,
 		Secret:            secret,
 		ExternalID:        connection.ExternalID,
-		WindowStart:       params.WindowStart,
-		WindowEnd:         params.WindowEnd,
+		WindowStart:       windowStart,
+		WindowEnd:         windowEnd,
 	})
 	if err != nil {
 		return BankConnectionSyncResult{}, s.recordBankConnectionSyncFailure(
@@ -315,6 +321,29 @@ func (s *BankSyncService) RunBankConnectionSync(
 		)
 	}
 	return applyResult, nil
+}
+
+func resolveBankConnectionSyncWindow(
+	connection domain.BankConnection,
+	params RunBankConnectionSyncParams,
+	now time.Time,
+) (time.Time, time.Time) {
+	windowEnd := now.UTC()
+	if !params.WindowEnd.IsZero() {
+		windowEnd = params.WindowEnd.UTC()
+	}
+	if !params.WindowStart.IsZero() {
+		return params.WindowStart.UTC(), windowEnd
+	}
+	recentStart := windowEnd.AddDate(0, 0, -bankSyncRecentRefreshDays)
+	if connection.LastSuccessfulSyncAt == nil {
+		return windowEnd.AddDate(-bankSyncInitialBackfillYears, 0, 0), windowEnd
+	}
+	checkpoint := connection.LastSuccessfulSyncAt.UTC()
+	if checkpoint.Before(recentStart) {
+		return checkpoint, windowEnd
+	}
+	return recentStart, windowEnd
 }
 
 func (s *BankSyncService) ApplyProviderSyncResult(

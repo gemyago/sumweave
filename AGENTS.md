@@ -136,6 +136,7 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 - viper should only be used for config wireup, it should never leak into the codebase outside of the entrypoints or wireup paths.
 - components should not be doing nil checks to ensure if dependencies are initialized, this is a job of the DI container or the caller. This may only be justified if the dependency is optional.
 - unless explicitly documented, internal logic do not need to trim or otherwise normalize identifiers. Upper orchestration layer may chose to do it if needed.
+- system must have reasonable logging that allows to troubleshoot problems and understand the flow of the system.
 - when logging attributes, use camelCase for keys
 - required component dependencies must be enforced in constructor, not in methods that use them
 
@@ -143,6 +144,7 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 
 - Mockery is the default for dependency mocks in tests.
 - Hand-written stubs/fakes/spies are forbidden without user approval.
+- Avoid unit testing logger statements unless it's part of a business logic (which is rare).
 
 ## Manual E2E Testing
 

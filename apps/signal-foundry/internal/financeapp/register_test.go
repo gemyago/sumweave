@@ -49,6 +49,26 @@ func TestNewFinanceStoreFromDI(t *testing.T) {
 
 //nolint:cyclop,gocyclo // Keeps closely related DI integration scenarios together.
 func TestNewFinanceServiceFromDI(t *testing.T) {
+	t.Run("make run bank connection sync params keeps omitted windows unset", func(t *testing.T) {
+		params := makeRunBankConnectionSyncParams(bankConnectionSyncJobInput{
+			ConnectionID: "connection-1",
+			Reason:       "manual",
+		})
+		assert.True(t, params.WindowStart.IsZero())
+		assert.True(t, params.WindowEnd.IsZero())
+
+		windowStart := time.Date(2026, time.June, 1, 9, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60))
+		windowEnd := time.Date(2026, time.June, 15, 18, 0, 0, 0, time.FixedZone("UTC-5", -5*60*60))
+		params = makeRunBankConnectionSyncParams(bankConnectionSyncJobInput{
+			ConnectionID: "connection-2",
+			Reason:       "manual",
+			WindowStart:  &windowStart,
+			WindowEnd:    &windowEnd,
+		})
+		assert.Equal(t, windowStart.UTC(), params.WindowStart)
+		assert.Equal(t, windowEnd.UTC(), params.WindowEnd)
+	})
+
 	makeJobsService := func(t *testing.T, registry *jobspkg.Registry, dsn string) (*jobspkg.Service, *jobspkg.Store) {
 		t.Helper()
 

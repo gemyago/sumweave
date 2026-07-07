@@ -61,7 +61,7 @@ Use this as the short operator runbook for sandbox work. It complements
   `APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME="Mock ASPSP"` set unless
   `aspsps --country PL`
   shows the sandbox inventory changed.
-- The backend-driven callback URL `http://localhost:6060/enable-banking/callback`
+- The backend-driven callback URL `http://localhost:4501/enable-banking/callback`
   is accepted by the current shared sandbox; if start still fails before redirect,
   the usual cause is the ASPSP name, not the callback URL.
 - For the current shared sandbox app, `PKO Bank Polski` may be unavailable while

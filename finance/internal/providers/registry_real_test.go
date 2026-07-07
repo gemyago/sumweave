@@ -1,6 +1,7 @@
 package providers_test
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
@@ -15,7 +16,10 @@ func TestStaticRegistriesRealConnectorComposition(t *testing.T) {
 	t.Run("keeps technical connectors and product profiles aligned", func(t *testing.T) {
 		connectorRegistry := providers.NewStaticConnectorRegistry(
 			monobank.NewConnector(monobank.Args{BaseURL: "https://example.test"}),
-			enablebanking.NewConnector(enablebanking.Args{BaseURL: "https://example.test"}),
+			enablebanking.NewConnector(enablebanking.Args{
+				BaseURL: "https://example.test",
+				Logger:  slog.New(slog.DiscardHandler),
+			}),
 		)
 
 		resolvedMonobank, err := connectorRegistry.Resolve(domain.ProviderConnectorIDMonobank)

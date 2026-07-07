@@ -1,7 +1,11 @@
 package gormsignalfoundry
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
@@ -30,6 +34,24 @@ func TestNewGormConfigForSignalFoundryTables(t *testing.T) {
 		require.True(t, cfg.TranslateError)
 		ns := requireNamingStrategy(t, cfg)
 		require.Empty(t, ns.TablePrefix)
+	})
+
+	t.Run("logger enables slog-backed GORM logging", func(t *testing.T) {
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&logs, nil))
+		cfg := NewGormConfigForSignalFoundryTables(GormSignalFoundryTablesOpts{Logger: logger})
+
+		require.NotNil(t, cfg.Logger)
+
+		cfg.Logger.Trace(
+			context.Background(),
+			time.Now().Add(-2*time.Second),
+			func() (string, int64) { return "SELECT ? FROM test WHERE id = ?", 1 },
+			nil,
+		)
+
+		require.Contains(t, logs.String(), `"gorm"`)
+		require.Contains(t, logs.String(), `"sql":"SELECT ? FROM test WHERE id = ?"`)
 	})
 }
 

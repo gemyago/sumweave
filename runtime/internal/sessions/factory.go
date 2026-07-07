@@ -47,6 +47,7 @@ func NewSessionsStorage(
 	if deps.UseDatabaseStorage {
 		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsignalfoundry.GormSignalFoundryTablesOpts{
 			TablePrefix: deps.DatabaseTablePrefix,
+			Logger:      deps.RootLogger,
 		})
 		if err != nil {
 			return nil, err
@@ -67,6 +68,7 @@ func NewSessionsStorage(
 	case sessionStorageTypeDatabase:
 		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsignalfoundry.GormSignalFoundryTablesOpts{
 			TablePrefix: deps.DatabaseTablePrefix,
+			Logger:      deps.RootLogger,
 		})
 	case sessionStorageTypeFile:
 		raw, err = NewFileSessionsStorage(deps.SessionStorageBaseDir, deps.RootLogger)

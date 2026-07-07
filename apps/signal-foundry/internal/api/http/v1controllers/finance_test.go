@@ -1863,12 +1863,12 @@ func TestFinanceController(t *testing.T) {
 		assert.Same(
 			t,
 			invalidInputErr,
-			sanitizeBankConnectionError(invalidInputErr, "fallback"),
+			mapBankConnectionError(invalidInputErr, "fallback"),
 		)
-		require.NoError(t, sanitizeBankConnectionError(nil, "fallback"))
+		require.NoError(t, mapBankConnectionError(nil, "fallback"))
 		assert.Contains(
 			t,
-			sanitizeBankConnectionError(
+			mapBankConnectionError(
 				financepkg.ErrUnsupportedBankProvider,
 				"fallback",
 			).Error(),
@@ -1876,7 +1876,7 @@ func TestFinanceController(t *testing.T) {
 		)
 		assert.Contains(
 			t,
-			sanitizeBankConnectionError(
+			mapBankConnectionError(
 				financepkg.ErrUnsupportedBankLinkingMethod,
 				"fallback",
 			).Error(),
@@ -1884,7 +1884,7 @@ func TestFinanceController(t *testing.T) {
 		)
 		assert.Contains(
 			t,
-			sanitizeBankConnectionError(
+			mapBankConnectionError(
 				financepkg.ErrPendingBankConnectionLinkStartNotFound,
 				"fallback",
 			).Error(),
@@ -1892,7 +1892,7 @@ func TestFinanceController(t *testing.T) {
 		)
 		assert.Contains(
 			t,
-			sanitizeBankConnectionError(
+			mapBankConnectionError(
 				financepkg.ErrBankConnectionNotFound,
 				"fallback",
 			).Error(),
@@ -1910,7 +1910,7 @@ func TestFinanceController(t *testing.T) {
 		)
 		assert.Contains(
 			t,
-			sanitizeBankConnectionError(
+			mapBankConnectionError(
 				&financepkg.ProviderResponseError{
 					Provider:   "enable-banking",
 					Code:       "WRONG_ASPSP_PROVIDED",

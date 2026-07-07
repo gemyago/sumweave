@@ -56,6 +56,7 @@ func NewDatabaseAgentProfilesService(
 	cfg := gormsignalfoundry.NewGormConfigForSignalFoundryTables(gormsignalfoundry.GormSignalFoundryTablesOpts{
 		TablePrefix:    tablePrefix,
 		TranslateError: true,
+		Logger:         logger,
 	})
 	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), cfg)
 	if err != nil {

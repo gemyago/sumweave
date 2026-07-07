@@ -190,7 +190,10 @@ func (m *DatabaseMigrator) migrateJobs(_ context.Context) error {
 }
 
 func (m *DatabaseMigrator) migrateFinance(ctx context.Context) error {
-	database, err := persistence.OpenDatabase(m.dataLayerDatabaseDSN)
+	database, err := persistence.OpenDatabase(
+		m.dataLayerDatabaseDSN,
+		persistence.WithLogger(m.rootLogger),
+	)
 	if err != nil {
 		return fmt.Errorf("open finance database: %w", err)
 	}

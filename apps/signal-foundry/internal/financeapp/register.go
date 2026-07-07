@@ -35,6 +35,7 @@ type databaseDeps struct {
 	dig.In
 
 	DatabaseDSN string `name:"config.dataLayer.database.dsn"`
+	RootLogger  *slog.Logger
 }
 
 //nolint:golines // dig tags stay clearer inline on the dependency struct.
@@ -61,7 +62,7 @@ type financeServiceDeps struct {
 
 func newDatabase(deps databaseDeps) (*persistence.Database, error) {
 	// TODO: We should make the DSN finance module specific
-	database, err := persistence.OpenDatabase(deps.DatabaseDSN)
+	database, err := persistence.OpenDatabase(deps.DatabaseDSN, persistence.WithLogger(deps.RootLogger))
 	if err != nil {
 		return nil, fmt.Errorf("open finance database: %w", err)
 	}
@@ -267,8 +268,8 @@ func registerBankSyncJobHandler(
 }
 
 func makeRunBankConnectionSyncParams(input bankConnectionSyncJobInput) financepkg.RunBankConnectionSyncParams {
-	windowStart := time.Now().UTC().AddDate(0, 0, -30)
-	windowEnd := time.Now().UTC()
+	var windowStart time.Time
+	var windowEnd time.Time
 	if input.WindowStart != nil {
 		windowStart = input.WindowStart.UTC()
 	}

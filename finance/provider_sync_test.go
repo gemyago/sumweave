@@ -628,6 +628,66 @@ func TestFinanceProviderSync(t *testing.T) {
 		assert.Nil(t, storedConnection.LastSuccessfulSyncAt)
 	})
 
+	t.Run("uses checkpoint-based default sync windows when no window was requested", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		currentTime := time.Date(2026, time.July, 6, 12, 0, 0, 0, time.UTC)
+		provider := &stubBankProvider{
+			name: bankConnectorEnableBanking,
+			linkResult: ProviderTokenLinkResult{
+				DisplayName:       "PKO " + fake.Company().Name(),
+				ProviderReference: "provider-ref-" + fake.UUID().V4(),
+				ExternalID:        "external-" + fake.UUID().V4(),
+				Secret:            "secret-" + fake.UUID().V4(),
+				State:             domain.BankConnectionStateActive,
+			},
+			syncResults: []ProviderSyncResult{{}, {}},
+		}
+		service := NewService(
+			store,
+			WithConnectionSecretCipher(makeCipher(t)),
+			WithBankProviders(provider),
+			WithNow(func() time.Time { return currentTime }),
+		)
+		ownerUserID := "user-owner-" + fake.UUID().V4()
+		tenant := makeTenant(t, service, ownerUserID)
+		connection := saveLinkedConnectionForTest(
+			t,
+			service,
+			tenant.ID,
+			bankProviderPKO,
+			domain.ProviderConnectorIDEnableBanking,
+			ProviderLinkResult{
+				DisplayName:       provider.linkResult.DisplayName,
+				ProviderReference: provider.linkResult.ProviderReference,
+				ExternalID:        provider.linkResult.ExternalID,
+				Secret:            provider.linkResult.Secret,
+				State:             provider.linkResult.State,
+			},
+		)
+
+		_, err := service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+			ConnectionID: connection.ID,
+			JobID:        "job-fresh-" + fake.UUID().V4(),
+			Reason:       BankConnectionSyncReasonManual,
+		})
+		require.NoError(t, err)
+		require.Len(t, provider.syncParams, 1)
+		assert.Equal(t, currentTime.AddDate(-3, 0, 0), provider.syncParams[0].WindowStart)
+		assert.Equal(t, currentTime, provider.syncParams[0].WindowEnd)
+
+		currentTime = currentTime.Add(48 * time.Hour)
+		_, err = service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+			ConnectionID: connection.ID,
+			JobID:        "job-refresh-" + fake.UUID().V4(),
+			Reason:       BankConnectionSyncReasonManual,
+		})
+		require.NoError(t, err)
+		require.Len(t, provider.syncParams, 2)
+		assert.Equal(t, currentTime.AddDate(0, 0, -30), provider.syncParams[1].WindowStart)
+		assert.Equal(t, currentTime, provider.syncParams[1].WindowEnd)
+	})
+
 	t.Run("surfaces schedule writer failures", func(t *testing.T) {
 		failureFake := faker.New()
 		failureStore := makeStore(t)

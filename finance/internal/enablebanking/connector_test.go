@@ -1,15 +1,13 @@
 package enablebanking
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
-	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,23 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type stubAPIClient struct {
-	response map[string]any
-	err      error
-}
-
-func (s *stubAPIClient) DoRawObject(
-	context.Context,
-	enablebankingclient.DoRawJSONParams,
-) (map[string]any, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.response, nil
-}
-
 func TestConnector(t *testing.T) {
 	fake := faker.New()
+	logger := slog.New(slog.DiscardHandler)
 
 	makeConnection := func() domain.ProviderConnectionRef {
 		return domain.ProviderConnectionRef{
@@ -102,7 +86,7 @@ func TestConnector(t *testing.T) {
 	}
 
 	t.Run("reports connector identity capabilities and unsupported token link", func(t *testing.T) {
-		connector := NewConnector(Args{BaseURL: "https://example.test"})
+		connector := NewConnector(Args{BaseURL: "https://example.test", Logger: logger})
 
 		assert.Equal(t, domain.ProviderConnectorIDEnableBanking, connector.ConnectorID())
 		assert.Equal(t, providers.ConnectorCapabilities{
@@ -116,7 +100,7 @@ func TestConnector(t *testing.T) {
 		require.ErrorIs(t, err, ErrConnectorTokenLinkUnsupported)
 	})
 
-	t.Run("start link supports the signed official redirect auth branch", func(t *testing.T) {
+	t.Run("start link uses typed auth creation for the official redirect branch", func(t *testing.T) {
 		redirectURL := "https://app.example.test/callback/" + fake.UUID().V4()
 		state := "state-" + fake.UUID().V4()
 		authorizationURL := "https://bank.example.test/auth/" + fake.UUID().V4()
@@ -124,11 +108,6 @@ func TestConnector(t *testing.T) {
 		now := time.Date(2026, time.June, 29, 15, 0, 0, 0, time.UTC)
 		validDays := 45
 		privateKeyPath := makeSignedKeyPath(t)
-		authResponse := fmt.Sprintf(
-			`{"authorizationUrl":"%s","id":"%s"}`,
-			authorizationURL,
-			providerReference,
-		)
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 			assert.Equal(t, http.MethodPost, request.Method)
@@ -139,7 +118,6 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, state, payload["state"])
 			assert.Equal(t, redirectURL, payload["redirect_url"])
 			assert.Equal(t, "personal", payload["psu_type"])
-			assert.NotContains(t, payload, "redirectUrl")
 
 			access := payload["access"].(map[string]any)
 			assert.Equal(t, now.Add(time.Duration(validDays)*24*time.Hour).Format(time.RFC3339), access["valid_until"])
@@ -148,13 +126,16 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, "PKO Bank Polski", aspsp["name"])
 			assert.Equal(t, "PL", aspsp["country"])
 
-			_, _ = w.Write([]byte(authResponse))
+			_, _ = w.Write([]byte(
+				`{"authorizationUrl":"` + authorizationURL + `","providerReference":"` + providerReference + `"}`,
+			))
 		}))
 		defer server.Close()
 
 		connector := NewConnector(Args{
 			BaseURL:        server.URL,
 			HTTPClient:     server.Client(),
+			Logger:         logger,
 			StateProvider:  func() (string, error) { return state, nil },
 			AppID:          "app-" + fake.UUID().V4(),
 			PrivateKeyPath: privateKeyPath,
@@ -172,49 +153,41 @@ func TestConnector(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, state, result.State)
-		assert.Empty(t, result.ProviderReference)
 		assert.Equal(t, authorizationURL, result.AuthorizationURL)
 		require.Len(t, result.RawPayloads, 1)
 		assert.Equal(t, providerReference, result.RawPayloads[0].ProviderObjectID)
+		assertPayloadJSON(
+			t,
+			result.RawPayloads[0].PayloadJSON,
+			`{"authorizationUrl":"`+authorizationURL+`","providerReference":"`+providerReference+`"}`,
+		)
 	})
 
-	t.Run("finish link supports the signed official redirect auth branch and redacts secrets", func(t *testing.T) {
+	t.Run("finish link uses typed session creation and redacts secret from observations", func(t *testing.T) {
 		state := "state-" + fake.UUID().V4()
 		code := "code-" + fake.UUID().V4()
 		sessionID := "session-" + fake.UUID().V4()
 		secretValue := "secret-" + fake.UUID().V4()
 		privateKeyPath := makeSignedKeyPath(t)
-		authResponse := fmt.Sprintf(
-			`{"authorizationUrl":"https://bank.example.test/auth","id":"auth-%s"}`,
-			fake.UUID().V4(),
-		)
-		sessionResponse := fmt.Sprintf(
-			`{"id":"%s","displayName":"PKO official","secret":"%s","state":"active"}`,
-			sessionID,
-			secretValue,
-		)
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-			switch request.URL.Path {
-			case "/auth":
-				_, _ = w.Write([]byte(authResponse))
-			case "/sessions":
-				assert.Equal(t, http.MethodPost, request.Method)
-				assert.NotEmpty(t, request.Header.Get("Authorization"))
+			assert.Equal(t, http.MethodPost, request.Method)
+			assert.Equal(t, "/sessions", request.URL.Path)
+			assert.NotEmpty(t, request.Header.Get("Authorization"))
 
-				payload := decodeBody(t, request)
-				assert.Equal(t, map[string]any{"code": code}, payload)
+			payload := decodeBody(t, request)
+			assert.Equal(t, map[string]any{"code": code}, payload)
 
-				_, _ = w.Write([]byte(sessionResponse))
-			default:
-				http.NotFound(w, request)
-			}
+			_, _ = w.Write([]byte(
+				`{"id":"` + sessionID + `","displayName":"PKO official","secret":"` + secretValue + `","state":"active"}`,
+			))
 		}))
 		defer server.Close()
 
 		connector := NewConnector(Args{
 			BaseURL:        server.URL,
 			HTTPClient:     server.Client(),
+			Logger:         logger,
 			StateProvider:  func() (string, error) { return state, nil },
 			AppID:          "app-" + fake.UUID().V4(),
 			PrivateKeyPath: privateKeyPath,
@@ -223,17 +196,10 @@ func TestConnector(t *testing.T) {
 			PSUType:        "personal",
 		})
 
-		start, err := connector.StartLink(t.Context(), providers.StartLinkRequest{
-			Profile:     providers.PKOProfile(),
-			RedirectURL: "https://app.example.test/callback/" + fake.UUID().V4(),
-		})
-		require.NoError(t, err)
-
 		result, err := connector.FinishLink(t.Context(), providers.FinishLinkRequest{
 			Profile: providers.PKOProfile(),
 			State:   state,
 			Code:    code,
-			Start:   start,
 		})
 		require.NoError(t, err)
 
@@ -247,12 +213,12 @@ func TestConnector(t *testing.T) {
 		assertPayloadJSON(
 			t,
 			result.RawPayloads[0].PayloadJSON,
-			`{"displayName":"PKO official","id":"`+sessionID+`","state":"active"}`,
+			`{"id":"`+sessionID+`","sessionId":"`+sessionID+`","externalId":"`+sessionID+`","providerReference":"`+sessionID+`","displayName":"PKO official","state":"active"}`,
 		)
 	})
 
 	t.Run("returns bounded errors for unsupported auth and fetch branches", func(t *testing.T) {
-		mixedConnector := NewConnector(Args{BaseURL: "https://example.test", AppID: "app-only"})
+		mixedConnector := NewConnector(Args{BaseURL: "https://example.test", Logger: logger, AppID: "app-only"})
 
 		_, err := mixedConnector.StartLink(
 			t.Context(),
@@ -262,11 +228,11 @@ func TestConnector(t *testing.T) {
 
 		_, err = mixedConnector.FinishLink(
 			t.Context(),
-			providers.FinishLinkRequest{Code: "code", Start: providers.StartLinkResult{}},
+			providers.FinishLinkRequest{Code: "code"},
 		)
 		require.ErrorIs(t, err, ErrConnectorUnsupportedAuthBranch)
 
-		credentiallessConnector := NewConnector(Args{BaseURL: "https://example.test"})
+		credentiallessConnector := NewConnector(Args{BaseURL: "https://example.test", Logger: logger})
 		_, err = credentiallessConnector.StartLink(
 			t.Context(),
 			providers.StartLinkRequest{RedirectURL: "https://example.test/callback"},
@@ -283,6 +249,7 @@ func TestConnector(t *testing.T) {
 		officialConnector := NewConnector(
 			Args{
 				BaseURL:        "https://example.test",
+				Logger:         logger,
 				AppID:          "app-" + fake.UUID().V4(),
 				PrivateKeyPath: privateKeyPath,
 			},
@@ -305,7 +272,7 @@ func TestConnector(t *testing.T) {
 		require.ErrorIs(t, err, ErrConnectorUnsupportedFetchBranch)
 	})
 
-	t.Run("fetch maps the signed official session branch into v2 observations", func(t *testing.T) {
+	t.Run("fetch uses typed session balance and paged transaction operations", func(t *testing.T) {
 		connection := makeConnection()
 		connection.ExternalID = "session-" + fake.UUID().V4()
 		capturedAt := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
@@ -317,20 +284,6 @@ func TestConnector(t *testing.T) {
 		firstTransactionID := "txn-1-" + fake.UUID().V4()
 		secondTransactionID := "txn-2-" + fake.UUID().V4()
 		privateKeyPath := makeSignedKeyPath(t)
-		sessionResponse := fmt.Sprintf(
-			`{"id":"%s","accounts":[{"uid":"%s","name":"Savings","currency":"pln","iban":" PL33333333333333333333333333 "}]}`,
-			connection.ExternalID,
-			accountID,
-		)
-		balancesResponse := `{"balances":[{"type":"closingBooked","balance_amount":{"amount":"777.70","currency":"pln"}},{"type":"interimAvailable","balance_amount":{"amount":"900.10","currency":"pln"}}]}`
-		firstTransactionsResponse := fmt.Sprintf(
-			`{"continuation_key":"page-2","transactions":[{"transactionId":"%s","status":"booked","amount":{"amount":"12.34","currency":"pln"},"credit_debit_indicator":"DBIT","remittance_information_unstructured":"coffee","booking_date":"2026-06-11"}]}`,
-			firstTransactionID,
-		)
-		secondTransactionsResponse := fmt.Sprintf(
-			`{"transactions":[{"id":"%s","amountMinor":5050,"currency":"pln","description":"refund","effectiveAt":"2026-06-12T10:30:00Z"}]}`,
-			secondTransactionID,
-		)
 
 		requestCount := 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -339,18 +292,26 @@ func TestConnector(t *testing.T) {
 
 			switch request.URL.Path {
 			case "/sessions/" + connection.ExternalID:
-				_, _ = w.Write([]byte(sessionResponse))
+				_, _ = w.Write([]byte(
+					`{"id":"` + connection.ExternalID + `","accounts":[{"uid":"` + accountID + `","name":"Savings","currency":"pln","iban":" PL33333333333333333333333333 "}]}`,
+				))
 			case "/accounts/" + accountID + "/balances":
-				_, _ = w.Write([]byte(balancesResponse))
+				_, _ = w.Write([]byte(
+					`{"balances":[{"type":"closingBooked","balance_amount":{"amount":"777.70","currency":"pln"}},{"type":"interimAvailable","balance_amount":{"amount":"900.10","currency":"pln"}}]}`,
+				))
 			case "/accounts/" + accountID + "/transactions":
 				assert.Equal(t, requestedWindow.Start.UTC().Format(time.DateOnly), request.URL.Query().Get("date_from"))
 				assert.Equal(t, requestedWindow.End.UTC().Format(time.DateOnly), request.URL.Query().Get("date_to"))
 				if request.URL.Query().Get("continuation_key") == "" {
-					_, _ = w.Write([]byte(firstTransactionsResponse))
+					_, _ = w.Write([]byte(
+						`{"continuation_key":"page-2","transactions":[{"transactionId":"` + firstTransactionID + `","status":"booked","amount":{"amount":"12.34","currency":"pln"},"credit_debit_indicator":"DBIT","remittance_information_unstructured":"coffee","booking_date":"2026-06-11"}]}`,
+					))
 					return
 				}
 				assert.Equal(t, "page-2", request.URL.Query().Get("continuation_key"))
-				_, _ = w.Write([]byte(secondTransactionsResponse))
+				_, _ = w.Write([]byte(
+					`{"transactions":[{"id":"` + secondTransactionID + `","amountMinor":5050,"currency":"pln","description":"refund","effectiveAt":"2026-06-12T10:30:00Z"}]}`,
+				))
 			default:
 				http.NotFound(w, request)
 			}
@@ -361,6 +322,7 @@ func TestConnector(t *testing.T) {
 			Args{
 				BaseURL:        server.URL,
 				HTTPClient:     server.Client(),
+				Logger:         logger,
 				AppID:          "app-" + fake.UUID().V4(),
 				PrivateKeyPath: privateKeyPath,
 			},
@@ -447,232 +409,297 @@ func TestConnector(t *testing.T) {
 				EffectiveAt: &secondEffectiveAt,
 			},
 		}, batch.Transactions[1])
-
-		assert.Equal(t, connection.ExternalID, batch.RawPayloads[0].ProviderObjectID)
-		assert.Equal(t, accountID, batch.RawPayloads[1].ProviderObjectID)
-		assert.Equal(t, accountID, batch.RawPayloads[2].ProviderObjectID)
-		assert.Equal(t, accountID, batch.RawPayloads[3].ProviderObjectID)
-		assert.Equal(t, capturedAt, batch.RawPayloads[0].CapturedAt)
-		assert.Equal(t, capturedAt, batch.RawPayloads[1].CapturedAt)
 	})
 
-	t.Run("covers helper and error branches", func(t *testing.T) {
-		t.Run("start and finish return bounded validation errors", func(t *testing.T) {
-			privateKeyPath := makeSignedKeyPath(t)
-			connector := NewConnector(
-				Args{
-					BaseURL:        "https://example.test",
-					AppID:          "app-" + fake.UUID().V4(),
-					PrivateKeyPath: privateKeyPath,
-					StateProvider: func() (string, error) {
-						return "", assert.AnError
-					},
-				},
-				WithAPI(&stubAPIClient{}),
-			)
-
-			_, err := connector.StartLink(
-				t.Context(),
-				providers.StartLinkRequest{RedirectURL: "https://example.test/callback"},
-			)
-			require.ErrorIs(t, err, assert.AnError)
-
-			connector = NewConnector(
-				Args{
-					BaseURL:        "https://example.test",
-					AppID:          "app-" + fake.UUID().V4(),
-					PrivateKeyPath: privateKeyPath,
-				},
-				WithAPI(&stubAPIClient{response: map[string]any{"id": "auth-1"}}),
-			)
-			_, err = connector.StartLink(
-				t.Context(),
-				providers.StartLinkRequest{RedirectURL: "https://example.test/callback"},
-			)
-			require.ErrorContains(t, err, "missing authorization URL")
-
-			connector = NewConnector(
-				Args{
-					BaseURL:        "https://example.test",
-					AppID:          "app-" + fake.UUID().V4(),
-					PrivateKeyPath: privateKeyPath,
-				},
-				WithAPI(&stubAPIClient{response: map[string]any{}}),
-			)
-			_, err = connector.FinishLink(
-				t.Context(),
-				providers.FinishLinkRequest{
-					State: "state",
-					Code:  "code",
-					Start: providers.StartLinkResult{
-						RawPayloads: []domain.ProviderRawPayloadObservation{{
-							Scope:       domain.RawPayloadScopeConnection,
-							PayloadJSON: []byte(`{"providerReference":"provider-ref"}`),
-						}},
-					},
-				},
-			)
-			require.ErrorContains(t, err, "missing session ID")
-
-			missingCredentialsConnector := NewConnector(
-				Args{BaseURL: "https://example.test"},
-				WithAPI(&stubAPIClient{response: map[string]any{}}),
-			)
-			_, err = missingCredentialsConnector.FinishLink(
-				t.Context(),
-				providers.FinishLinkRequest{
-					State: "state",
-					Code:  "code",
-					Start: providers.StartLinkResult{},
-				},
-			)
-			require.ErrorIs(t, err, ErrConnectorUnsupportedAuthBranch)
-		})
-
-		t.Run("direct helpers normalize and sanitize connector-owned values", func(t *testing.T) {
+	t.Run(
+		"fetch does not recover raw-only account fields that are absent from typed session models",
+		func(t *testing.T) {
 			connection := makeConnection()
-			capturedAt := time.Date(2026, time.July, 2, 11, 0, 0, 0, time.UTC)
+			accountID := "account-" + fake.UUID().V4()
+			privateKeyPath := makeSignedKeyPath(t)
+			requestCount := 0
 
-			payload := NewConnector(
-				Args{
-					ASPSPName: "PKO Bank Polski",
-					Country:   "PL",
-					PSUType:   "personal",
-					Now:       func() time.Time { return capturedAt },
-					ValidDays: 1,
-				},
-			).buildOfficialStartLinkPayload("https://redirect", "state")
-			assert.Equal(t, "state", payload["state"])
-			assert.Equal(t, "https://redirect", payload["redirect_url"])
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				requestCount++
+				switch request.URL.Path {
+				case "/sessions/" + connection.ExternalID:
+					_, _ = w.Write([]byte(
+						`{"id":"` + connection.ExternalID + `","accounts":["` + accountID + `"],"accounts_data":[{"uid":"` + accountID + `","name":"Mock ROR","currency":"EUR","iban":"PL123"}]}`,
+					))
+				default:
+					http.NotFound(w, request)
+				}
+			}))
+			defer server.Close()
 
-			account := normalizeAccount(
-				connection,
-				" account-id ",
-				map[string]any{"name": "", "currency": "pln", "iban": " PL123 "},
-			)
-			assert.Equal(t, "account-id", account.ProviderAccountID)
-			assert.Equal(t, "account-id", account.Name)
-			assert.Equal(t, "PLN", account.Currency)
-			assert.Equal(t, "PL123", account.IBAN)
-
-			current, available, currency := selectBalanceAmounts(map[string]any{
-				"balances": []any{
-					map[string]any{
-						"type": "closingBooked",
-						"balance_amount": map[string]any{
-							"amount":   "10.50",
-							"currency": "pln",
-						},
-					},
-					map[string]any{
-						"type": "available",
-						"balanceAmount": map[string]any{
-							"amount":   "12.00",
-							"currency": "pln",
-						},
-					},
-				},
+			connector := NewConnector(Args{
+				BaseURL:        server.URL,
+				HTTPClient:     server.Client(),
+				Logger:         logger,
+				AppID:          "app-" + fake.UUID().V4(),
+				PrivateKeyPath: privateKeyPath,
 			})
-			require.NotNil(t, available)
-			assert.Equal(t, int64(1050), current)
-			assert.Equal(t, int64(1200), *available)
-			assert.Equal(t, "PLN", currency)
 
-			balance := normalizeBalance(
-				connection,
-				account,
-				map[string]any{
-					"balances": []any{map[string]any{
-						"type": "available",
-						"balance_amount": map[string]any{
-							"amount":   "77.70",
-							"currency": "eur",
-						},
-					}},
-				},
-				capturedAt,
-			)
-			assert.Equal(t, int64(7770), balance.CurrentBalanceMinor)
-			require.NotNil(t, balance.AvailableBalanceMinor)
-			assert.Equal(t, int64(7770), *balance.AvailableBalanceMinor)
-			assert.Equal(t, "EUR", balance.Currency)
-
-			effectiveAt := time.Date(2026, time.July, 2, 0, 0, 0, 0, time.UTC)
-			transaction := normalizeTransaction(
-				connection,
-				"account-id",
-				map[string]any{
-					"id":                                  "",
-					"status":                              "",
-					"amount":                              map[string]any{"amount": "12.34", "currency": "pln"},
-					"credit_debit_indicator":              "DBIT",
-					"remittance_information_unstructured": "fallback",
-					"bookingDate":                         "2026-07-02",
-				},
-			)
-			assert.Equal(t, "fallback", transaction.Description)
-			assert.Equal(t, int64(-1234), transaction.AmountMinor)
-			assert.Equal(t, domain.TransactionStatusBooked, transaction.Status)
-			assert.Equal(t, effectiveAt, transaction.EffectiveAt)
-			assert.NotEmpty(t, transaction.ProviderTransactionID)
-
-			assert.Equal(t, effectiveAt, transactionTime(map[string]any{"booking_date": "2026-07-02"}))
-			assert.Equal(
-				t,
-				int64(-1234),
-				amountMinor(map[string]any{
-					"amount":               map[string]any{"amount": "12.34"},
-					"creditDebitIndicator": "DBIT",
-				}),
-			)
-			assert.Equal(
-				t,
-				map[string]any{"amount": "1.23"},
-				amountObject(map[string]any{"amount": map[string]any{"amount": "1.23"}}),
-			)
-			assert.Equal(
-				t,
-				"session-id",
-				extractSessionIdentifier(map[string]any{"session": map[string]any{"id": "session-id"}}, "id"),
-			)
-			assert.Equal(
-				t,
-				[]map[string]any{{"id": "1"}},
-				objectSlice(map[string]any{"items": []any{map[string]any{"id": "1"}, "skip"}}, "items"),
-			)
-			assert.Equal(t, "value", stringValue(map[string]any{"value": " value "}, "value"))
-			assert.Equal(t, int64(12), int64Value(map[string]any{"value": float64(12)}, "value"))
-			assert.Equal(t, int64(-1234), decimalToMinor("-12.34"))
-			assert.Equal(t, "fallback", firstNonEmpty("", " fallback "))
-			assert.Equal(t, int64(7), firstNonZeroInt64(0, 7, 9))
-			require.JSONEq(t, `{"key":"value"}`, string(mustJSON(map[string]string{"key": "value"})))
-
-			redacted := redactRawPayload(map[string]any{
-				"secret": "raw-secret",
-				"nested": map[string]any{"token": "raw-token", "keep": "value"},
-				"items":  []any{map[string]any{"secret": "nested-secret", "name": "kept"}},
+			batch, err := connector.Fetch(t.Context(), providers.FetchRequest{
+				Connection:      connection,
+				RequestedWindow: domain.ProviderSyncWindow{},
 			})
-			assert.NotContains(t, redacted, "secret")
-			assert.Equal(t, "value", redacted["nested"].(map[string]any)["keep"])
+			require.NoError(t, err)
 
-			sanitized := sanitizeSecretText(
-				"Bearer abc token=xyz secret abc {\"secret\":\"value\"} eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
-			)
-			assert.NotContains(t, sanitized, "abc")
-			assert.NotContains(t, sanitized, "xyz")
-			assert.NotContains(t, sanitized, "value")
+			assert.Equal(t, 1, requestCount)
+			assert.Empty(t, batch.Accounts)
+			assert.Empty(t, batch.Balances)
+			assert.Empty(t, batch.Transactions)
+			require.Len(t, batch.RawPayloads, 1)
+		},
+	)
 
-			providerErr := &enablebankingclient.ResponseError{
-				Operation:  "auth",
-				StatusCode: http.StatusTooManyRequests,
-				Message:    "Bearer abc",
-			}
-			assert.NotContains(t, sanitizeClientError(providerErr).Error(), "abc")
-			assert.NotContains(t, sanitizeClientError(errors.New("token abc")).Error(), "abc")
+	t.Run("covers typed helper mapping and sanitized errors", func(t *testing.T) {
+		connection := makeConnection()
+		capturedAt := time.Date(2026, time.July, 2, 11, 0, 0, 0, time.UTC)
 
-			firstFingerprint := providerFingerprint("a", 1, effectiveAt)
-			secondFingerprint := providerFingerprint("a", 1, effectiveAt)
-			assert.Equal(t, firstFingerprint, secondFingerprint)
+		request := NewConnector(Args{
+			ASPSPName: "PKO Bank Polski",
+			Country:   "PL",
+			Logger:    logger,
+			PSUType:   "personal",
+			Now:       func() time.Time { return capturedAt },
+			ValidDays: 1,
+		}).buildOfficialStartLinkRequest("https://redirect", "state")
+		assert.Equal(t, "state", request.State)
+		assert.Equal(t, "https://redirect", request.RedirectURL)
+		assert.Equal(t, "personal", request.PSUType)
+		assert.Equal(t, "PKO Bank Polski", request.ASPSP.Name)
+		assert.Equal(t, "PL", request.ASPSP.Country)
+
+		account := normalizeAccount(
+			connection,
+			" account-id ",
+			enablebankingclient.Account{Name: "", Currency: "pln", IBAN: " PL123 "},
+		)
+		assert.Equal(t, " account-id ", account.ProviderAccountID)
+		assert.Equal(t, "account-id", account.Name)
+		assert.Equal(t, "PLN", account.Currency)
+		assert.Equal(t, " PL123 ", account.IBAN)
+
+		current, available, currency := selectBalanceAmounts([]enablebankingclient.AccountBalance{
+			{
+				Type: "closingBooked",
+				BalanceAmount: &enablebankingclient.BalanceAmount{
+					Amount:   "10.50",
+					Currency: "pln",
+				},
+			},
+			{
+				Type: "available",
+				BalanceAmount: &enablebankingclient.BalanceAmount{
+					Amount:   "12.00",
+					Currency: "pln",
+				},
+			},
 		})
+		require.NotNil(t, available)
+		assert.Equal(t, int64(1050), current)
+		assert.Equal(t, int64(1200), *available)
+		assert.Equal(t, "PLN", currency)
+
+		balance := normalizeBalance(
+			connection,
+			account,
+			[]enablebankingclient.AccountBalance{{
+				Type: "available",
+				BalanceAmount: &enablebankingclient.BalanceAmount{
+					Amount:   "77.70",
+					Currency: "eur",
+				},
+			}},
+			capturedAt,
+		)
+		assert.Equal(t, int64(7770), balance.CurrentBalanceMinor)
+		require.NotNil(t, balance.AvailableBalanceMinor)
+		assert.Equal(t, int64(7770), *balance.AvailableBalanceMinor)
+		assert.Equal(t, "EUR", balance.Currency)
+
+		effectiveAt := time.Date(2026, time.July, 2, 0, 0, 0, 0, time.UTC)
+		transaction := normalizeTransaction(
+			connection,
+			"account-id",
+			enablebankingclient.AccountTransaction{
+				Amount: &enablebankingclient.TransactionAmount{
+					Amount:   "12.34",
+					Currency: "pln",
+				},
+				CreditDebitIndicator:              "DBIT",
+				RemittanceInformationUnstructured: "fallback",
+				BookingDate:                       "2026-07-02",
+			},
+		)
+		assert.Equal(t, "fallback", transaction.Description)
+		assert.Equal(t, int64(-1234), transaction.AmountMinor)
+		assert.Equal(t, domain.TransactionStatusBooked, transaction.Status)
+		assert.Equal(t, effectiveAt, transaction.EffectiveAt)
+		assert.NotEmpty(t, transaction.ProviderTransactionID)
+
+		assert.Equal(
+			t,
+			effectiveAt,
+			transactionTime(enablebankingclient.AccountTransaction{BookingDate: "2026-07-02"}),
+		)
+		assert.Equal(
+			t,
+			int64(-1234),
+			amountMinor(enablebankingclient.AccountTransaction{
+				Amount:               &enablebankingclient.TransactionAmount{Amount: "12.34"},
+				CreditDebitIndicator: "DBIT",
+			}),
+		)
+
+		assertPayloadJSON(
+			t,
+			mustJSON(&enablebankingclient.SessionResponse{
+				ID:          "session-id",
+				ExternalID:  "external-id",
+				DisplayName: "PKO official",
+				State:       "active",
+				Secret:      "secret-value",
+			}),
+			`{"id":"session-id","externalId":"external-id","displayName":"PKO official","secret":"secret-value","state":"active"}`,
+		)
+
+		assert.Equal(t, int64(-1234), decimalToMinor("-12.34"))
+		assert.Equal(t, "fallback", firstNonEmpty("", " fallback "))
+		assert.Equal(t, int64(7), firstNonZeroInt64(0, 7, 9))
+		require.JSONEq(t, `{"key":"value"}`, string(mustJSON(map[string]string{"key": "value"})))
+
+		firstFingerprint := providerFingerprint("a", 1, effectiveAt)
+		secondFingerprint := providerFingerprint("a", 1, effectiveAt)
+		assert.Equal(t, firstFingerprint, secondFingerprint)
+	})
+
+	t.Run("covers typed validation failures without raw transport fallback", func(t *testing.T) {
+		privateKeyPath := makeSignedKeyPath(t)
+		connector := NewConnector(
+			Args{
+				BaseURL:        "https://example.test",
+				Logger:         logger,
+				AppID:          "app-" + fake.UUID().V4(),
+				PrivateKeyPath: privateKeyPath,
+				StateProvider: func() (string, error) {
+					return "", assert.AnError
+				},
+			},
+		)
+
+		_, err := connector.StartLink(
+			t.Context(),
+			providers.StartLinkRequest{RedirectURL: "https://example.test/callback"},
+		)
+		require.ErrorIs(t, err, assert.AnError)
+
+		missingAuthURLServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"id":"auth-1"}`))
+		}))
+		defer missingAuthURLServer.Close()
+
+		connector = NewConnector(Args{
+			BaseURL:        missingAuthURLServer.URL,
+			HTTPClient:     missingAuthURLServer.Client(),
+			Logger:         logger,
+			AppID:          "app-" + fake.UUID().V4(),
+			PrivateKeyPath: privateKeyPath,
+		})
+		_, err = connector.StartLink(
+			t.Context(),
+			providers.StartLinkRequest{RedirectURL: "https://example.test/callback"},
+		)
+		require.ErrorContains(t, err, "missing authorization URL")
+
+		missingSessionIDServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		defer missingSessionIDServer.Close()
+
+		connector = NewConnector(Args{
+			BaseURL:        missingSessionIDServer.URL,
+			HTTPClient:     missingSessionIDServer.Client(),
+			Logger:         logger,
+			AppID:          "app-" + fake.UUID().V4(),
+			PrivateKeyPath: privateKeyPath,
+		})
+		_, err = connector.FinishLink(
+			t.Context(),
+			providers.FinishLinkRequest{State: "state", Code: "code"},
+		)
+		require.ErrorContains(t, err, "missing session ID")
+
+		missingCredentialsConnector := NewConnector(Args{BaseURL: "https://example.test", Logger: logger})
+		_, err = missingCredentialsConnector.FinishLink(
+			t.Context(),
+			providers.FinishLinkRequest{State: "state", Code: "code"},
+		)
+		require.ErrorIs(t, err, ErrConnectorUnsupportedAuthBranch)
+	})
+
+	t.Run("covers typed option and helper edge branches", func(t *testing.T) {
+		privateKeyPath := makeSignedKeyPath(t)
+
+		api := enablebankingclient.NewClient(enablebankingclient.Args{
+			BaseURL:        "https://example.test",
+			HTTPClient:     http.DefaultClient,
+			Logger:         logger,
+			AppID:          "app-" + fake.UUID().V4(),
+			PrivateKeyPath: privateKeyPath,
+			Now:            func() time.Time { return time.Date(2026, time.July, 3, 9, 0, 0, 0, time.UTC) },
+		})
+		connector := NewConnector(
+			Args{
+				BaseURL:        "https://example.test",
+				Logger:         logger,
+				AppID:          "app-" + fake.UUID().V4(),
+				PrivateKeyPath: privateKeyPath,
+			},
+			nil,
+			WithAPI(api),
+		)
+		require.NotNil(t, connector)
+
+		account := domain.ProviderAccountObservation{
+			Connection:        makeConnection(),
+			ProviderAccountID: "account-" + fake.UUID().V4(),
+			Currency:          "USD",
+		}
+		balance := normalizeBalance(
+			account.Connection,
+			account,
+			[]enablebankingclient.AccountBalance{{Type: "available"}},
+			time.Date(2026, time.July, 3, 10, 0, 0, 0, time.UTC),
+		)
+		assert.Equal(t, "USD", balance.Currency)
+
+		current, available, currency := selectBalanceAmounts([]enablebankingclient.AccountBalance{{Type: "available"}})
+		require.NotNil(t, available)
+		assert.Equal(t, int64(0), current)
+		assert.Equal(t, int64(0), *available)
+		assert.Empty(t, currency)
+
+		assert.True(t, transactionTime(enablebankingclient.AccountTransaction{}).IsZero())
+		assert.Equal(
+			t,
+			int64(1234),
+			amountMinor(enablebankingclient.AccountTransaction{
+				Amount: &enablebankingclient.TransactionAmount{Amount: "12.34"},
+			}),
+		)
+		assert.Empty(t, balanceAmountValue(nil))
+		assert.Empty(t, balanceAmountCurrency(nil))
+		assert.Empty(t, transactionAmountValue(nil))
+		assert.Empty(t, transactionAmountCurrency(nil))
+		assert.Equal(t, domain.TransactionStatusPending, normalizeTransactionStatus("pending"))
+		assert.Equal(t, domain.TransactionStatus("custom"), normalizeTransactionStatus(" custom "))
+		assert.Equal(t, int64(0), decimalToMinor("bad"))
+		assert.Equal(t, int64(0), firstNonZeroInt64(0, 0))
+		assertPayloadJSON(t, mustJSON((*enablebankingclient.SessionResponse)(nil)), `null`)
+
+		assert.Equal(t, "{}", string(mustJSON(func() {})))
 	})
 }

@@ -39,6 +39,7 @@ func New(cfg *Config) (*Finance, error) {
 
 	bankConnectionService, err := newBankConnectionService(bankConnectionServiceArgs{
 		Store:                   store,
+		Logger:                  cfg.Logger,
 		ConnectionSecretCipher:  cfg.ConnectionSecretCipher,
 		ConnectorRegistry:       connectorRegistry,
 		ProviderProfileRegistry: profileRegistry,

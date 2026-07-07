@@ -10,8 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
@@ -22,11 +20,6 @@ import (
 
 const (
 	defaultValidDays = 90
-	fieldState       = "state"
-	fieldCode        = "code"
-	fieldName        = "name"
-	fieldSecret      = "secret"
-	fieldToken       = "token"
 	balanceAvailable = "available"
 	decimalSplitPart = 3
 	decimalBase      = 10
@@ -36,19 +29,32 @@ var (
 	ErrConnectorTokenLinkUnsupported   = errors.New("enable banking connector token link unsupported")
 	ErrConnectorUnsupportedAuthBranch  = errors.New("enable banking connector unsupported auth branch")
 	ErrConnectorUnsupportedFetchBranch = errors.New("enable banking connector unsupported fetch branch")
-
-	privateKeyPattern = regexp.MustCompile(
-		`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----`,
-	)
-	bearerPattern    = regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]+`)
-	jwtPattern       = regexp.MustCompile(`eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+`)
-	jsonTokenPattern = regexp.MustCompile(`(?i)("(?:token|secret)"\s*:\s*")([^"]*)(")`)
-	tokenPattern     = regexp.MustCompile(`(?i)\b(token|secret)\b([=:]\s*|\s+)([^\s,;]+)`)
 )
 
-type apiClient interface {
-	DoRawObject(ctx context.Context, params enablebankingclient.DoRawJSONParams) (map[string]any, error)
+type connectorClient interface {
+	CreateAuth(
+		ctx context.Context,
+		params enablebankingclient.CreateAuthParams,
+	) (*enablebankingclient.CreateAuthResponse, error)
+	CreateSession(
+		ctx context.Context,
+		params enablebankingclient.CreateSessionParams,
+	) (*enablebankingclient.SessionResponse, error)
+	GetSession(
+		ctx context.Context,
+		params enablebankingclient.GetSessionParams,
+	) (*enablebankingclient.SessionResponse, error)
+	GetAccountBalances(
+		ctx context.Context,
+		params enablebankingclient.GetAccountBalancesParams,
+	) (*enablebankingclient.GetAccountBalancesResponse, error)
+	GetAccountTransactions(
+		ctx context.Context,
+		params enablebankingclient.GetAccountTransactionsParams,
+	) (*enablebankingclient.GetAccountTransactionsResponse, error)
 }
+
+var _ connectorClient = (*enablebankingclient.Client)(nil)
 
 type Args struct {
 	BaseURL        string
@@ -67,7 +73,8 @@ type Args struct {
 type Option func(*Connector)
 
 type Connector struct {
-	api            apiClient
+	api            connectorClient
+	logger         *slog.Logger
 	stateProvider  func() (string, error)
 	appID          string
 	privateKeyPath string
@@ -86,7 +93,7 @@ func WithNow(now func() time.Time) Option {
 	}
 }
 
-func WithAPI(api apiClient) Option {
+func WithAPI(api connectorClient) Option {
 	return func(connector *Connector) {
 		if api != nil {
 			connector.api = api
@@ -122,6 +129,7 @@ func NewConnector(args Args, opts ...Option) *Connector {
 			PrivateKeyPath: args.PrivateKeyPath,
 			Now:            now,
 		}),
+		logger:         args.Logger.WithGroup("enableBankingConnector"),
 		stateProvider:  stateProvider,
 		appID:          strings.TrimSpace(args.AppID),
 		privateKeyPath: strings.TrimSpace(args.PrivateKeyPath),
@@ -163,30 +171,24 @@ func (c *Connector) StartLink(
 	if err != nil {
 		return providers.StartLinkResult{}, fmt.Errorf("enable banking start link: %w", err)
 	}
-	payload := c.buildOfficialStartLinkPayload(strings.TrimSpace(request.RedirectURL), strings.TrimSpace(state))
-	raw, err := c.doJSON(ctx, http.MethodPost, "/auth", nil, payload)
+	response, err := c.api.CreateAuth(ctx, enablebankingclient.CreateAuthParams{
+		Request: c.buildOfficialStartLinkRequest(request.RedirectURL, state),
+	})
 	if err != nil {
-		return providers.StartLinkResult{}, err
+		return providers.StartLinkResult{}, fmt.Errorf("enable banking create auth: %w", err)
 	}
-	authorizationURL := firstNonEmpty(
-		stringValue(raw, "authorizationUrl", "authorization_url", "url"),
-		stringValue(raw, "authorizationURL"),
-	)
+	authorizationURL := response.AuthorizationURL
 	if authorizationURL == "" {
 		return providers.StartLinkResult{}, errors.New("enable banking auth response missing authorization URL")
 	}
-	providerObjectID := firstNonEmpty(
-		stringValue(raw, "providerReference", "provider_reference"),
-		extractSessionIdentifier(raw, "authorization_id", "auth_id", "id", "session_id"),
-		"auth",
-	)
+	providerObjectID := firstNonEmpty(response.ProviderReference, response.ID, "auth")
 	return providers.StartLinkResult{
-		State:            strings.TrimSpace(state),
+		State:            state,
 		AuthorizationURL: authorizationURL,
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
 			Scope:            domain.RawPayloadScopeConnection,
 			ProviderObjectID: providerObjectID,
-			PayloadJSON:      mustJSON(redactRawPayload(raw)),
+			PayloadJSON:      mustJSON(response),
 			CapturedAt:       c.now().UTC(),
 		}},
 	}, nil
@@ -199,41 +201,47 @@ func (c *Connector) FinishLink(
 	if !c.hasOfficialCredentials() {
 		return providers.LinkResult{}, ErrConnectorUnsupportedAuthBranch
 	}
-	payload := map[string]any{fieldCode: strings.TrimSpace(request.Code)}
-	raw, err := c.doJSON(ctx, http.MethodPost, "/sessions", nil, payload)
+	response, err := c.api.CreateSession(ctx, enablebankingclient.CreateSessionParams{
+		Request: &enablebankingclient.CreateSessionRequest{
+			Code: request.Code,
+		},
+	})
 	if err != nil {
-		return providers.LinkResult{}, err
+		return providers.LinkResult{}, fmt.Errorf("enable banking create session: %w", err)
 	}
-	externalID := firstNonEmpty(
-		stringValue(raw, "externalId", "external_id"),
-		extractSessionIdentifier(raw, "id", "session_id"),
-	)
+	externalID := firstNonEmpty(response.ExternalID, response.SessionID, response.ID)
 	if externalID == "" {
 		return providers.LinkResult{}, errors.New("enable banking session response missing session ID")
 	}
-	providerReference := firstNonEmpty(
-		stringValue(raw, "providerReference", "provider_reference"),
-		externalID,
-	)
+	providerReference := firstNonEmpty(response.ProviderReference, externalID)
 	providerObjectID := firstNonEmpty(externalID, providerReference, "session")
 	return providers.LinkResult{
 		DisplayName: firstNonEmpty(
-			stringValue(raw, "displayName", "display_name"),
+			response.DisplayName,
 			c.aspspName,
 			"Enable Banking",
 		),
 		ProviderReference: providerReference,
 		ExternalID:        externalID,
-		Secret:            stringValue(raw, fieldSecret),
+		Secret:            response.Secret,
 		State: domain.BankConnectionState(firstNonEmpty(
-			stringValue(raw, "state"),
+			response.State,
 			string(domain.BankConnectionStateActive),
 		)),
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
 			Scope:            domain.RawPayloadScopeConnection,
 			ProviderObjectID: providerObjectID,
-			PayloadJSON:      mustJSON(redactRawPayload(raw)),
-			CapturedAt:       c.now().UTC(),
+			PayloadJSON: mustJSON(&enablebankingclient.SessionResponse{
+				ID:                response.ID,
+				SessionID:         response.SessionID,
+				ExternalID:        response.ExternalID,
+				ProviderReference: response.ProviderReference,
+				DisplayName:       response.DisplayName,
+				State:             response.State,
+				Access:            response.Access,
+				Accounts:          response.Accounts,
+			}),
+			CapturedAt: c.now().UTC(),
 		}},
 	}, nil
 }
@@ -256,31 +264,36 @@ func (c *Connector) fetchOfficial(
 	ctx context.Context,
 	request providers.FetchRequest,
 ) (domain.ProviderSyncBatch, error) {
-	if strings.TrimSpace(request.Connection.ExternalID) == "" ||
+	if request.Connection.ExternalID == "" ||
 		request.Secret.ID != "" ||
 		request.Secret.Reference != "" {
 		return domain.ProviderSyncBatch{}, ErrConnectorUnsupportedFetchBranch
 	}
-	sessionRaw, err := c.doJSON(
-		ctx,
-		http.MethodGet,
-		"/sessions/"+url.PathEscape(strings.TrimSpace(request.Connection.ExternalID)),
-		nil,
-		nil,
-	)
+	session, err := c.api.GetSession(ctx, enablebankingclient.GetSessionParams{
+		SessionID: request.Connection.ExternalID,
+	})
 	if err != nil {
-		return domain.ProviderSyncBatch{}, err
+		return domain.ProviderSyncBatch{}, fmt.Errorf("enable banking get session: %w", err)
 	}
-	return c.mapBatch(ctx, request, sessionRaw)
+	c.logger.InfoContext(
+		ctx,
+		"fetching enable banking sync batch",
+		slog.String("connectionId", request.Connection.ConnectionID),
+		slog.String("externalId", request.Connection.ExternalID),
+		slog.Time("requestedStart", request.RequestedWindow.Start),
+		slog.Time("requestedEnd", request.RequestedWindow.End),
+	)
+	return c.mapBatch(ctx, request, session)
 }
 
 func (c *Connector) mapBatch(
 	ctx context.Context,
 	request providers.FetchRequest,
-	connectionRaw map[string]any,
+	session *enablebankingclient.SessionResponse,
 ) (domain.ProviderSyncBatch, error) {
 	capturedAt := c.now().UTC()
-	accountItems := objectSlice(connectionRaw, "accounts")
+	accountItems := session.Accounts
+	c.logSessionAccounts(ctx, request, accountItems)
 	batch := domain.ProviderSyncBatch{
 		Connection:      request.Connection,
 		RequestedWindow: request.RequestedWindow,
@@ -291,93 +304,129 @@ func (c *Connector) mapBatch(
 			Connection:       request.Connection,
 			Scope:            domain.RawPayloadScopeConnection,
 			ProviderObjectID: firstNonEmpty(request.Connection.ExternalID, "session"),
-			PayloadJSON:      mustJSON(redactRawPayload(connectionRaw)),
+			PayloadJSON:      mustJSON(session),
 			CapturedAt:       capturedAt,
 		}},
 	}
-	for _, accountRaw := range accountItems {
-		accountID := firstNonEmpty(stringValue(accountRaw, "uid", "id"), stringValue(accountRaw, "account_id"))
+	for _, typedAccount := range accountItems {
+		accountID := firstNonEmpty(typedAccount.UID, typedAccount.ID)
 		if accountID == "" {
 			continue
 		}
-		account := normalizeAccount(request.Connection, accountID, accountRaw)
+		c.logger.InfoContext(
+			ctx,
+			"fetching enable banking account data",
+			slog.String("connectionId", request.Connection.ConnectionID),
+			slog.String("accountId", accountID),
+		)
+		account := normalizeAccount(request.Connection, accountID, typedAccount)
 		batch.Accounts = append(batch.Accounts, account)
 
-		balancesRaw, err := c.doJSON(
-			ctx,
-			http.MethodGet,
-			"/accounts/"+url.PathEscape(accountID)+"/balances",
-			nil,
-			nil,
-		)
+		balancesResponse, err := c.api.GetAccountBalances(ctx, enablebankingclient.GetAccountBalancesParams{
+			AccountID: accountID,
+		})
 		if err != nil {
-			return domain.ProviderSyncBatch{}, err
+			return domain.ProviderSyncBatch{}, fmt.Errorf("enable banking get account balances: %w", err)
 		}
-		balance := normalizeBalance(request.Connection, account, balancesRaw, capturedAt)
+		balance := normalizeBalance(request.Connection, account, balancesResponse.Balances, capturedAt)
 		batch.Balances = append(batch.Balances, balance)
 		batch.RawPayloads = append(batch.RawPayloads, domain.ProviderRawPayloadObservation{
 			Connection:       request.Connection,
 			Scope:            domain.RawPayloadScopeAccount,
 			ProviderObjectID: accountID,
-			PayloadJSON:      mustJSON(redactRawPayload(balancesRaw)),
+			PayloadJSON:      mustJSON(balancesResponse),
 			CapturedAt:       capturedAt,
 		})
 
-		transactionPages, transactionsRaw, err := c.fetchTransactionPages(ctx, request, accountID)
+		transactionPages, transactions, err := c.fetchTransactionPages(ctx, request, accountID)
 		if err != nil {
 			return domain.ProviderSyncBatch{}, err
 		}
+		c.logger.InfoContext(
+			ctx,
+			"fetched enable banking account transactions",
+			slog.String("connectionId", request.Connection.ConnectionID),
+			slog.String("accountId", accountID),
+			slog.Int("pageCount", len(transactionPages)),
+			slog.Int("transactionCount", len(transactions)),
+		)
 		for _, page := range transactionPages {
 			batch.RawPayloads = append(batch.RawPayloads, domain.ProviderRawPayloadObservation{
 				Connection:       request.Connection,
 				Scope:            domain.RawPayloadScopeTransaction,
 				ProviderObjectID: accountID,
-				PayloadJSON:      mustJSON(redactRawPayload(page)),
+				PayloadJSON:      mustJSON(page),
 				CapturedAt:       capturedAt,
 			})
 		}
-		for _, transactionRaw := range transactionsRaw {
+		for _, transaction := range transactions {
 			batch.Transactions = append(
 				batch.Transactions,
-				normalizeTransaction(request.Connection, accountID, transactionRaw),
+				normalizeTransaction(request.Connection, accountID, transaction),
 			)
 		}
 	}
+	c.logger.InfoContext(
+		ctx,
+		"fetched enable banking sync batch",
+		slog.String("connectionId", request.Connection.ConnectionID),
+		slog.Int("accountCount", len(batch.Accounts)),
+		slog.Int("balanceCount", len(batch.Balances)),
+		slog.Int("transactionCount", len(batch.Transactions)),
+		slog.Int("rawPayloadCount", len(batch.RawPayloads)),
+	)
 	return batch, nil
+}
+
+func (c *Connector) logSessionAccounts(
+	ctx context.Context,
+	request providers.FetchRequest,
+	accountItems []enablebankingclient.Account,
+) {
+	accountIDs := make([]string, 0, len(accountItems))
+	for _, typedAccount := range accountItems {
+		accountID := firstNonEmpty(typedAccount.UID, typedAccount.ID)
+		if accountID == "" {
+			c.logger.WarnContext(
+				ctx,
+				"skipping enable banking account without identifier",
+				slog.String("connectionId", request.Connection.ConnectionID),
+				slog.String("providerReference", request.Connection.ProviderReference),
+			)
+			continue
+		}
+		accountIDs = append(accountIDs, accountID)
+	}
+	c.logger.InfoContext(
+		ctx,
+		"loaded enable banking session accounts",
+		slog.String("connectionId", request.Connection.ConnectionID),
+		slog.Any("accountIds", accountIDs),
+		slog.Int("accountCount", len(accountIDs)),
+	)
 }
 
 func (c *Connector) fetchTransactionPages(
 	ctx context.Context,
 	request providers.FetchRequest,
 	accountID string,
-) ([]map[string]any, []map[string]any, error) {
-	pages := make([]map[string]any, 0, 1)
-	transactions := make([]map[string]any, 0)
+) ([]*enablebankingclient.GetAccountTransactionsResponse, []enablebankingclient.AccountTransaction, error) {
+	pages := make([]*enablebankingclient.GetAccountTransactionsResponse, 0, 1)
+	transactions := make([]enablebankingclient.AccountTransaction, 0)
 	continuationKey := ""
 	for {
-		query := url.Values{}
-		if !request.RequestedWindow.Start.IsZero() {
-			query.Set("date_from", request.RequestedWindow.Start.UTC().Format(time.DateOnly))
-		}
-		if !request.RequestedWindow.End.IsZero() {
-			query.Set("date_to", request.RequestedWindow.End.UTC().Format(time.DateOnly))
-		}
-		if continuationKey != "" {
-			query.Set("continuation_key", continuationKey)
-		}
-		page, err := c.doJSON(
-			ctx,
-			http.MethodGet,
-			"/accounts/"+url.PathEscape(accountID)+"/transactions",
-			query,
-			nil,
-		)
+		page, err := c.api.GetAccountTransactions(ctx, enablebankingclient.GetAccountTransactionsParams{
+			AccountID:       accountID,
+			DateFrom:        request.RequestedWindow.Start,
+			DateTo:          request.RequestedWindow.End,
+			ContinuationKey: continuationKey,
+		})
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("enable banking get account transactions: %w", err)
 		}
 		pages = append(pages, page)
-		transactions = append(transactions, objectSlice(page, "transactions")...)
-		continuationKey = stringValue(page, "continuation_key", "continuationKey")
+		transactions = append(transactions, page.Transactions...)
+		continuationKey = page.ContinuationKey
 		if continuationKey == "" {
 			break
 		}
@@ -385,64 +434,50 @@ func (c *Connector) fetchTransactionPages(
 	return pages, transactions, nil
 }
 
-func (c *Connector) doJSON(
-	ctx context.Context,
-	method string,
-	path string,
-	query url.Values,
-	payload any,
-) (map[string]any, error) {
-	raw, err := c.api.DoRawObject(ctx, enablebankingclient.DoRawJSONParams{
-		Method: method,
-		Path:   path,
-		Query:  query,
-		Body:   payload,
-	})
-	if err != nil {
-		return nil, sanitizeClientError(err)
-	}
-	return raw, nil
-}
-
 func (c *Connector) hasOfficialCredentials() bool {
 	return c.appID != "" && c.privateKeyPath != ""
 }
 
-func (c *Connector) buildOfficialStartLinkPayload(redirectURL string, state string) map[string]any {
+func (c *Connector) buildOfficialStartLinkRequest(
+	redirectURL string,
+	state string,
+) *enablebankingclient.CreateAuthRequest {
 	validUntil := c.now().UTC().Add(time.Duration(c.validDays) * 24 * time.Hour)
-	return map[string]any{
-		"access": map[string]any{"valid_until": validUntil.Format(time.RFC3339)},
-		"aspsp": map[string]any{
-			fieldName: c.aspspName,
-			"country": c.country,
+	return &enablebankingclient.CreateAuthRequest{
+		Access: enablebankingclient.CreateAuthAccess{
+			ValidUntil: validUntil.Format(time.RFC3339),
 		},
-		fieldState:     state,
-		"redirect_url": redirectURL,
-		"psu_type":     c.psuType,
+		ASPSP: enablebankingclient.CreateAuthASPSP{
+			Name:    c.aspspName,
+			Country: c.country,
+		},
+		State:       state,
+		RedirectURL: redirectURL,
+		PSUType:     c.psuType,
 	}
 }
 
 func normalizeAccount(
 	connection domain.ProviderConnectionRef,
 	accountID string,
-	raw map[string]any,
+	account enablebankingclient.Account,
 ) domain.ProviderAccountObservation {
 	return domain.ProviderAccountObservation{
 		Connection:        connection,
-		ProviderAccountID: strings.TrimSpace(accountID),
-		Name:              firstNonEmpty(stringValue(raw, "name"), accountID),
-		Currency:          strings.ToUpper(stringValue(raw, "currency")),
-		IBAN:              stringValue(raw, "iban"),
+		ProviderAccountID: accountID,
+		Name:              firstNonEmpty(account.Name, accountID),
+		Currency:          strings.ToUpper(account.Currency),
+		IBAN:              account.IBAN,
 	}
 }
 
 func normalizeBalance(
 	connection domain.ProviderConnectionRef,
 	account domain.ProviderAccountObservation,
-	raw map[string]any,
+	balances []enablebankingclient.AccountBalance,
 	capturedAt time.Time,
 ) domain.ProviderBalanceObservation {
-	current, available, currency := selectBalanceAmounts(raw)
+	current, available, currency := selectBalanceAmounts(balances)
 	if currency == "" {
 		currency = account.Currency
 	}
@@ -462,26 +497,21 @@ func normalizeBalance(
 func normalizeTransaction(
 	connection domain.ProviderConnectionRef,
 	accountID string,
-	raw map[string]any,
+	transaction enablebankingclient.AccountTransaction,
 ) domain.ProviderTransactionObservation {
-	effectiveAt := transactionTime(raw)
-	description := firstNonEmpty(
-		stringValue(raw, "description"),
-		stringValue(raw, "remittance_information_unstructured", "remittanceInformationUnstructured"),
-	)
+	effectiveAt := transactionTime(transaction)
+	description := firstNonEmpty(transaction.Description, transaction.RemittanceInformationUnstructured)
 	currency := strings.ToUpper(firstNonEmpty(
-		stringValue(raw, "currency"),
-		stringValue(amountObject(raw), "currency"),
+		transaction.Currency,
+		transactionAmountCurrency(transaction.Amount),
 	))
-	amountMinor := amountMinor(raw)
+	amountMinor := amountMinor(transaction)
 	transactionID := firstNonEmpty(
-		stringValue(raw, "transactionId", "transaction_id", "id"),
-		providerFingerprint(accountID, mustJSON(raw)),
+		transaction.TransactionID,
+		transaction.ID,
+		providerFingerprint(accountID, mustJSON(transaction)),
 	)
-	status := domain.TransactionStatus(firstNonEmpty(
-		strings.ToLower(stringValue(raw, "status")),
-		string(domain.TransactionStatusBooked),
-	))
+	status := normalizeTransactionStatus(transaction.Status)
 	providerOriginal := &domain.ProviderTransactionOriginal{
 		AmountMinor: amountMinor,
 		Currency:    currency,
@@ -492,7 +522,7 @@ func normalizeTransaction(
 	}
 	return domain.ProviderTransactionObservation{
 		Connection:            connection,
-		ProviderAccountID:     strings.TrimSpace(accountID),
+		ProviderAccountID:     accountID,
 		ProviderTransactionID: transactionID,
 		Status:                status,
 		AmountMinor:           amountMinor,
@@ -504,61 +534,16 @@ func normalizeTransaction(
 	}
 }
 
-func sanitizeClientError(err error) error {
-	if err == nil {
-		return nil
-	}
-	var responseErr *enablebankingclient.ResponseError
-	if errors.As(err, &responseErr) {
-		return fmt.Errorf(
-			"enable banking %s failed with status %d: %s",
-			strings.TrimSpace(responseErr.Operation),
-			responseErr.StatusCode,
-			sanitizeSecretText(responseErr.Message),
-		)
-	}
-	return fmt.Errorf("%s", sanitizeSecretText(err.Error()))
-}
-
-func redactRawPayload(raw map[string]any) map[string]any {
-	redacted := make(map[string]any, len(raw))
-	for key, value := range raw {
-		lowerKey := strings.ToLower(strings.TrimSpace(key))
-		if lowerKey == fieldSecret || lowerKey == fieldToken {
-			continue
-		}
-		switch typedValue := value.(type) {
-		case map[string]any:
-			redacted[key] = redactRawPayload(typedValue)
-		case []any:
-			items := make([]any, 0, len(typedValue))
-			for _, item := range typedValue {
-				if objectItem, ok := item.(map[string]any); ok {
-					items = append(items, redactRawPayload(objectItem))
-					continue
-				}
-				items = append(items, item)
-			}
-			redacted[key] = items
-		default:
-			redacted[key] = value
-		}
-	}
-	return redacted
-}
-
-func selectBalanceAmounts(raw map[string]any) (int64, *int64, string) {
-	items := objectSlice(raw, "balances")
+func selectBalanceAmounts(items []enablebankingclient.AccountBalance) (int64, *int64, string) {
 	var current *int64
 	var available *int64
 	currency := ""
 	for _, item := range items {
-		amount := amountObject(item)
 		amountMinor := firstNonZeroInt64(
-			int64Value(item, "currentBalanceMinor"),
-			decimalToMinor(stringValue(amount, "amount")),
+			item.CurrentBalanceMinor,
+			decimalToMinor(balanceAmountValue(item.BalanceAmount)),
 		)
-		balanceType := strings.ToLower(strings.TrimSpace(stringValue(item, "type")))
+		balanceType := strings.ToLower(strings.TrimSpace(item.Type))
 		switch balanceType {
 		case "interimavailable", balanceAvailable, "availablebalance", "expectedavailable":
 			value := amountMinor
@@ -568,17 +553,16 @@ func selectBalanceAmounts(raw map[string]any) (int64, *int64, string) {
 			current = &value
 		}
 		if currency == "" {
-			currency = strings.ToUpper(stringValue(amount, "currency"))
+			currency = strings.ToUpper(balanceAmountCurrency(item.BalanceAmount))
 		}
 	}
-	if current == nil {
-		if len(items) > 0 {
-			fallback := firstNonZeroInt64(
-				int64Value(items[0], "currentBalanceMinor", "availableBalanceMinor"),
-				decimalToMinor(stringValue(amountObject(items[0]), "amount")),
-			)
-			current = &fallback
-		}
+	if current == nil && len(items) > 0 {
+		fallback := firstNonZeroInt64(
+			items[0].CurrentBalanceMinor,
+			items[0].AvailableBalanceMinor,
+			decimalToMinor(balanceAmountValue(items[0].BalanceAmount)),
+		)
+		current = &fallback
 	}
 	if available == nil && current != nil {
 		fallback := *current
@@ -590,11 +574,11 @@ func selectBalanceAmounts(raw map[string]any) (int64, *int64, string) {
 	return *current, available, currency
 }
 
-func transactionTime(raw map[string]any) time.Time {
+func transactionTime(transaction enablebankingclient.AccountTransaction) time.Time {
 	for _, value := range []string{
-		stringValue(raw, "effectiveAt"),
-		stringValue(raw, "booking_date", "bookingDate"),
-		stringValue(raw, "value_date", "valueDate"),
+		transaction.EffectiveAt,
+		transaction.BookingDate,
+		transaction.ValueDate,
 	} {
 		if value == "" {
 			continue
@@ -609,83 +593,56 @@ func transactionTime(raw map[string]any) time.Time {
 	return time.Time{}
 }
 
-func amountMinor(raw map[string]any) int64 {
-	if value := int64Value(raw, "amountMinor"); value != 0 {
-		return value
+func amountMinor(transaction enablebankingclient.AccountTransaction) int64 {
+	if transaction.AmountMinor != 0 {
+		return transaction.AmountMinor
 	}
-	amount := decimalToMinor(stringValue(amountObject(raw), "amount"))
-	if amount > 0 && strings.EqualFold(stringValue(raw, "credit_debit_indicator", "creditDebitIndicator"), "DBIT") {
+	amount := decimalToMinor(transactionAmountValue(transaction.Amount))
+	if amount > 0 && strings.EqualFold(transaction.CreditDebitIndicator, "DBIT") {
 		return -amount
 	}
 	return amount
 }
 
-func amountObject(raw map[string]any) map[string]any {
-	if value, ok := raw["amount"].(map[string]any); ok && value != nil {
-		return value
+func balanceAmountValue(amount *enablebankingclient.BalanceAmount) string {
+	if amount == nil {
+		return ""
 	}
-	if value, ok := raw["balance_amount"].(map[string]any); ok && value != nil {
-		return value
-	}
-	if value, ok := raw["balanceAmount"].(map[string]any); ok && value != nil {
-		return value
-	}
-	return map[string]any{}
+	return amount.Amount
 }
 
-func extractSessionIdentifier(raw map[string]any, keys ...string) string {
-	identifier := stringValue(raw, keys...)
-	if identifier != "" {
-		return identifier
+func balanceAmountCurrency(amount *enablebankingclient.BalanceAmount) string {
+	if amount == nil {
+		return ""
 	}
-	parent, _ := raw["session"].(map[string]any)
-	return stringValue(parent, keys...)
+	return amount.Currency
 }
 
-func objectSlice(raw map[string]any, key string) []map[string]any {
-	items, _ := raw[key].([]any)
-	result := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		objectItem, ok := item.(map[string]any)
-		if ok {
-			result = append(result, objectItem)
-		}
+func transactionAmountValue(amount *enablebankingclient.TransactionAmount) string {
+	if amount == nil {
+		return ""
 	}
-	return result
+	return amount.Amount
 }
 
-func stringValue(raw map[string]any, keys ...string) string {
-	for _, key := range keys {
-		value, ok := raw[key]
-		if !ok {
-			continue
-		}
-		stringValue, ok := value.(string)
-		if !ok {
-			continue
-		}
-		trimmed := strings.TrimSpace(stringValue)
-		if trimmed != "" {
-			return trimmed
-		}
+func transactionAmountCurrency(amount *enablebankingclient.TransactionAmount) string {
+	if amount == nil {
+		return ""
 	}
-	return ""
+	return amount.Currency
 }
 
-func int64Value(raw map[string]any, keys ...string) int64 {
-	for _, key := range keys {
-		switch value := raw[key].(type) {
-		case int:
-			return int64(value)
-		case int32:
-			return int64(value)
-		case int64:
-			return value
-		case float64:
-			return int64(value)
-		}
+func normalizeTransactionStatus(raw string) domain.TransactionStatus {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "BOOK", "BOOKED":
+		return domain.TransactionStatusBooked
+	case "PDNG", "PENDING":
+		return domain.TransactionStatusPending
 	}
-	return 0
+	if strings.TrimSpace(raw) == "" {
+		return domain.TransactionStatusBooked
+	}
+	return domain.TransactionStatus(strings.ToLower(strings.TrimSpace(raw)))
 }
 
 func decimalToMinor(raw string) int64 {
@@ -747,15 +704,6 @@ func mustJSON(value any) []byte {
 		return []byte("{}")
 	}
 	return encoded
-}
-
-func sanitizeSecretText(value string) string {
-	sanitized := privateKeyPattern.ReplaceAllString(strings.TrimSpace(value), "[REDACTED_PRIVATE_KEY]")
-	sanitized = bearerPattern.ReplaceAllString(sanitized, "Bearer [REDACTED]")
-	sanitized = jwtPattern.ReplaceAllString(sanitized, "[REDACTED_JWT]")
-	sanitized = jsonTokenPattern.ReplaceAllString(sanitized, `$1[REDACTED]$3`)
-	sanitized = tokenPattern.ReplaceAllString(sanitized, "$1$2[REDACTED]")
-	return sanitized
 }
 
 func providerFingerprint(parts ...any) string {

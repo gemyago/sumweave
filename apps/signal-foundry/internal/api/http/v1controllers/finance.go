@@ -696,7 +696,7 @@ func (c *FinanceController) LinkFinanceConnectionToken(
 			},
 		)
 		if err != nil {
-			return nil, sanitizeBankConnectionError(err, "bank connection link failed")
+			return nil, mapBankConnectionError(err, "bank connection link failed")
 		}
 
 		mapped := mapConnection(financepkg.BankConnectionView{Connection: item})
@@ -729,7 +729,7 @@ func (c *FinanceController) FinishFinanceConnectionRedirectLink(
 			},
 		)
 		if err != nil {
-			return nil, sanitizeBankConnectionError(err, "bank connection link failed")
+			return nil, mapBankConnectionError(err, "bank connection link failed")
 		}
 
 		mapped := mapConnection(financepkg.BankConnectionView{Connection: item})
@@ -895,7 +895,7 @@ func (c *FinanceController) StartFinanceConnectionRedirectLink(
 			},
 		)
 		if err != nil {
-			return nil, sanitizeBankConnectionError(err, "bank connection redirect start failed")
+			return nil, mapBankConnectionError(err, "bank connection redirect start failed")
 		}
 
 		return &models.FinanceConnectionLinkRedirectStartResponse{
@@ -1319,7 +1319,7 @@ func (c *FinanceController) TriggerFinanceConnectionSync(
 			},
 		)
 		if err != nil {
-			return nil, sanitizeBankConnectionError(err, "bank connection sync failed")
+			return nil, mapBankConnectionError(err, "bank connection sync failed")
 		}
 
 		return &models.FinanceFxSyncResponse{JobID: jobRef.ID, JobType: jobRef.JobType}, nil
@@ -1420,12 +1420,12 @@ func parseDashboardDateValues(startDateRaw string, endDateRaw string) (time.Time
 func mapCSVImportError(err error) error {
 	switch {
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return app.NewErrUnauthorized(err.Error())
+		return fmt.Errorf("%w: %w", app.NewErrUnauthorized(err.Error()), err)
 	case errors.Is(err, financepkg.ErrInvalidTenantDisplayCurrency):
-		return app.NewErrInvalidInput("displayCurrency", err.Error())
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("displayCurrency", err.Error()), err)
 	case errors.Is(err, financepkg.ErrCSVImportAlreadyConfirmed),
 		errors.Is(err, financepkg.ErrCSVImportAlreadyCompleted):
-		return app.NewErrConflict("csv import", err.Error())
+		return fmt.Errorf("%w: %w", app.NewErrConflict("csv import", err.Error()), err)
 	default:
 		return err
 	}
@@ -1893,7 +1893,7 @@ func isLocalCallbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func sanitizeBankConnectionError(err error, fallback string) error {
+func mapBankConnectionError(err error, fallback string) error {
 	if err == nil {
 		return nil
 	}
@@ -1911,21 +1911,29 @@ func sanitizeBankConnectionError(err error, fallback string) error {
 		errors.As(err, &unauthorizedErr):
 		return err
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return app.NewErrUnauthorized("tenant access denied")
+		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
 	case errors.Is(err, financepkg.ErrUnsupportedBankProvider):
-		return app.NewErrInvalidInput("provider", "unsupported bank provider")
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("provider", "unsupported bank provider"), err)
 	case errors.Is(err, financepkg.ErrBankProviderNotConfigured):
-		return app.NewErrInvalidInput("provider", "bank provider not configured")
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("provider", "bank provider not configured"), err)
 	case errors.Is(err, financepkg.ErrUnsupportedBankLinkingMethod):
-		return app.NewErrInvalidInput("provider", "unsupported bank linking method")
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("provider", "unsupported bank linking method"), err)
 	case errors.Is(err, financepkg.ErrPendingBankConnectionLinkStartNotFound):
-		return app.NewErrInvalidInput("state", "pending bank link start not found or expired")
+		return fmt.Errorf(
+			"%w: %w",
+			app.NewErrInvalidInput("state", "pending bank link start not found or expired"),
+			err,
+		)
 	case errors.Is(err, financepkg.ErrBankConnectionNotFound):
-		return app.NewErrNotFound("bank connection", "requested resource")
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("bank connection", "requested resource"), err)
 	case errors.As(err, &providerResponseErr) && providerResponseErr.IsClientError():
-		return app.NewErrInvalidInput("provider", humanizeProviderResponseError(providerResponseErr))
+		return fmt.Errorf(
+			"%w: %w",
+			app.NewErrInvalidInput("provider", humanizeProviderResponseError(providerResponseErr)),
+			err,
+		)
 	default:
-		return errors.New(fallback)
+		return fmt.Errorf("%s: %w", fallback, err)
 	}
 }
 
@@ -1934,15 +1942,27 @@ func mapSyntheticLinkStateError(err error) error {
 		return nil
 	}
 	if errors.Is(err, financepkg.ErrPendingSyntheticLinkStateNotFound) {
-		return app.NewErrInvalidInput("state", "pending synthetic link state not found or expired")
+		return fmt.Errorf(
+			"%w: %w",
+			app.NewErrInvalidInput("state", "pending synthetic link state not found or expired"),
+			err,
+		)
 	}
 	if errors.Is(err, financepkg.ErrSyntheticConfiguredAccountNameRequired) {
-		return app.NewErrInvalidInput("configuredAccounts", "configured account name is required")
+		return fmt.Errorf(
+			"%w: %w",
+			app.NewErrInvalidInput("configuredAccounts", "configured account name is required"),
+			err,
+		)
 	}
 	if errors.Is(err, financepkg.ErrSyntheticConfiguredAccountCurrencyRequired) {
-		return app.NewErrInvalidInput("configuredAccounts", "configured account currency is required")
+		return fmt.Errorf(
+			"%w: %w",
+			app.NewErrInvalidInput("configuredAccounts", "configured account currency is required"),
+			err,
+		)
 	}
-	return sanitizeBankConnectionError(err, "synthetic link state failed")
+	return mapBankConnectionError(err, "synthetic link state failed")
 }
 
 func humanizeProviderResponseError(err *financepkg.ProviderResponseError) string {

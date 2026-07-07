@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
@@ -15,10 +16,12 @@ type BankConnectionService struct {
 	access             *accessGuard
 	pendingStartLookup bankConnectionPendingStartLookup
 	linkCoordinator    bankConnectionLinkCoordinator
+	logger             *slog.Logger
 }
 
 type bankConnectionServiceArgs struct {
 	Store                   *persistence.Store
+	Logger                  *slog.Logger
 	ConnectionSecretCipher  connectionSecretCipher
 	ConnectorRegistry       bankConnectionConnectorRegistry
 	ProviderProfileRegistry bankConnectionProviderProfileRegistry
@@ -80,6 +83,7 @@ func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionSe
 		access:             newAccessGuard(args.Store),
 		pendingStartLookup: linkPersistence,
 		linkCoordinator:    coordinator,
+		logger:             args.Logger.With("component", "bankConnectionService"),
 	}, nil
 }
 
@@ -112,6 +116,16 @@ func (s *BankConnectionService) StartBankConnectionLink(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return ProviderLinkStart{}, err
 	}
+
+	s.logger.InfoContext(
+		ctx,
+		"starting bank connection link",
+		slog.String("redirectURL", params.RedirectURL),
+		slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID),
+		slog.String("provider", params.Provider),
+	)
+
 	result, err := s.linkCoordinator.StartRedirectLink(ctx, internalproviders.RedirectLinkStartRequest{
 		TenantID:           params.TenantID,
 		ActorUserID:        params.ActorUserID,

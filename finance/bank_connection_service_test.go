@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,13 +34,19 @@ func TestBankConnectionService(t *testing.T) {
 		tenantMembershipStore accessGuardStore
 		pendingStartLookup    bankConnectionPendingStartLookup
 		linkCoordinator       bankConnectionLinkCoordinator
+		logger                *slog.Logger
 	}
 
 	makeTestBankConnectionService := func(args testBankConnectionServiceArgs) *BankConnectionService {
+		logger := args.logger
+		if logger == nil {
+			logger = slog.New(slog.DiscardHandler)
+		}
 		return &BankConnectionService{
 			access:             newAccessGuard(args.tenantMembershipStore),
 			pendingStartLookup: args.pendingStartLookup,
 			linkCoordinator:    args.linkCoordinator,
+			logger:             logger.With("component", "bankConnectionService"),
 		}
 	}
 
@@ -323,12 +330,14 @@ func TestBankConnectionService(t *testing.T) {
 
 		service, err := newBankConnectionService(bankConnectionServiceArgs{
 			Store:                  store,
+			Logger:                 slog.New(slog.DiscardHandler),
 			ConnectionSecretCipher: cipher,
 			ConnectorRegistry: internalproviders.NewStaticConnectorRegistry(
 				internalmonobank.NewConnector(internalmonobank.Args{BaseURL: monobankServer.URL}),
 				internalenablebanking.NewConnector(
 					internalenablebanking.Args{
 						BaseURL:        enableBankingServer.URL,
+						Logger:         slog.New(slog.DiscardHandler),
 						AppID:          "app-" + fake.UUID().V4(),
 						PrivateKeyPath: privateKeyPath,
 						StateProvider:  func() (string, error) { return "pko-state", nil },
@@ -416,6 +425,7 @@ func TestBankConnectionService(t *testing.T) {
 
 		_, err = newBankConnectionService(bankConnectionServiceArgs{
 			Store:                  store,
+			Logger:                 slog.New(slog.DiscardHandler),
 			ConnectionSecretCipher: cipher,
 			ProviderProfileRegistry: internalproviders.NewStaticProviderProfileRegistry(
 				internalproviders.PKOProfile(),

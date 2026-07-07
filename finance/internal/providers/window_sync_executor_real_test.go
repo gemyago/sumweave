@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -144,6 +145,7 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			enablebanking.Args{
 				BaseURL:        enableBankingServer.URL,
 				HTTPClient:     enableBankingServer.Client(),
+				Logger:         slog.New(slog.DiscardHandler),
 				AppID:          "app-" + fake.UUID().V4(),
 				PrivateKeyPath: privateKeyPath,
 			},
