@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -244,23 +245,33 @@ func TestAppDispatchUnits(t *testing.T) {
 	})
 
 	t.Run("covers consumer run branches with stubs", func(t *testing.T) {
+		logger := slog.New(slog.DiscardHandler)
 		consumer := &Consumer{
 			subscriber: subscriberStub{err: errors.New("subscribe boom")},
 			registry:   NewHandlerRegistry(),
+			logger:     logger,
 		}
 		err := consumer.Run(t.Context())
 		require.EqualError(t, err, "subscribe dispatch topic: subscribe boom")
 
 		closedMessages := make(chan *wmmessage.Message)
 		close(closedMessages)
-		consumer = &Consumer{subscriber: subscriberStub{messages: closedMessages}, registry: NewHandlerRegistry()}
+		consumer = &Consumer{
+			subscriber: subscriberStub{messages: closedMessages},
+			registry:   NewHandlerRegistry(),
+			logger:     logger,
+		}
 		require.NoError(t, consumer.Run(t.Context()))
 
 		canceledCtx, cancel := context.WithCancel(t.Context())
 		cancel()
 		closedMessages = make(chan *wmmessage.Message)
 		close(closedMessages)
-		consumer = &Consumer{subscriber: subscriberStub{messages: closedMessages}, registry: NewHandlerRegistry()}
+		consumer = &Consumer{
+			subscriber: subscriberStub{messages: closedMessages},
+			registry:   NewHandlerRegistry(),
+			logger:     logger,
+		}
 		require.ErrorIs(t, consumer.Run(canceledCtx), context.Canceled)
 
 		handlerErr := errors.New("handler boom")
@@ -277,7 +288,11 @@ func TestAppDispatchUnits(t *testing.T) {
 		messageCh := make(chan *wmmessage.Message, 1)
 		messageCh <- msg
 		close(messageCh)
-		consumer = &Consumer{subscriber: subscriberStub{messages: messageCh}, registry: registry}
+		consumer = &Consumer{
+			subscriber: subscriberStub{messages: messageCh},
+			registry:   registry,
+			logger:     logger,
+		}
 		err = consumer.Run(t.Context())
 		require.EqualError(t, err, handlerErr.Error())
 	})
@@ -289,7 +304,7 @@ func TestAppDispatchUnits(t *testing.T) {
 		}
 		require.NoError(t, AutoMigrate(t.Context(), cfg))
 
-		publisher, err := NewPublisher(cfg)
+		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		defer func() { require.NoError(t, publisher.Close()) }()
 
@@ -317,7 +332,7 @@ func TestAppDispatchUnits(t *testing.T) {
 			DatabaseDSN: filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
 			TablePrefix: "signal_foundry_data_",
 		}
-		publisherNoSchema, err := NewPublisher(cfgNoSchema)
+		publisherNoSchema, err := NewPublisher(cfgNoSchema, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		defer func() { require.NoError(t, publisherNoSchema.Close()) }()
 		dbNoSchema, err := openDatabase(cfgNoSchema)

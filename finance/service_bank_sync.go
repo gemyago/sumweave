@@ -228,7 +228,14 @@ func (s *BankSyncService) TriggerBankConnectionSync(
 			WindowEnd:    params.WindowEnd,
 		},
 	}
-	return s.bankSyncJobEnqueuer.EnqueueBankConnectionSync(ctx, request)
+	job, err := s.bankSyncJobEnqueuer.EnqueueBankConnectionSync(ctx, request)
+	s.logger.InfoContext(ctx, "bank connection sync job enqueued",
+		slog.String("jobId", job.ID),
+		slog.String("jobType", job.JobType),
+		slog.String("connectionId", connection.ID),
+		slog.String("reason", params.Reason),
+	)
+	return job, err
 }
 
 func (s *BankSyncService) DeleteBankConnection(
@@ -736,22 +743,15 @@ func (s *BankSyncService) upsertProviderAccount(
 			break
 		}
 	}
-	financeAccountID := ""
-	if existing != nil {
-		financeAccountID = existing.FinanceAccountID
-	}
-	if financeAccountID == "" {
-		financeAccount, accountErr := s.findOrCreateFinanceAccountForProviderAccount(ctx, connection, item, now)
-		if accountErr != nil {
-			return domain.ConnectionProviderAccount{}, accountErr
-		}
-		financeAccountID = financeAccount.ID
+	financeAccount, accountErr := s.findOrCreateFinanceAccountForProviderAccount(ctx, connection, item, existing, now)
+	if accountErr != nil {
+		return domain.ConnectionProviderAccount{}, accountErr
 	}
 	providerAccount := domain.ConnectionProviderAccount{
 		ID:                   firstNonEmpty(accountID(existing), s.newID()),
 		ConnectionID:         connection.ID,
 		ProviderAccountID:    item.ProviderAccountID,
-		FinanceAccountID:     financeAccountID,
+		FinanceAccountID:     financeAccount.ID,
 		Name:                 item.Name,
 		Currency:             item.Currency,
 		IBAN:                 item.IBAN,
@@ -770,6 +770,7 @@ func (s *BankSyncService) findOrCreateFinanceAccountForProviderAccount(
 	ctx context.Context,
 	connection domain.BankConnection,
 	item ProviderNormalizedAccount,
+	existingProviderAccount *domain.ConnectionProviderAccount,
 	now time.Time,
 ) (domain.Account, error) {
 	accounts, err := s.store.ListAccounts(ctx, connection.TenantID, true)
@@ -777,10 +778,10 @@ func (s *BankSyncService) findOrCreateFinanceAccountForProviderAccount(
 		return domain.Account{}, fmt.Errorf("list accounts: %w", err)
 	}
 	for _, account := range accounts {
-		if account.LinkedAccount != nil && account.LinkedAccount.Provider == connection.Provider &&
-			account.LinkedAccount.ProviderAccountID == item.ProviderAccountID {
-			return account, nil
+		if !isFinanceAccountForProviderAccount(account, connection, item, existingProviderAccount) {
+			continue
 		}
+		return s.refreshFinanceAccountForProviderAccount(ctx, account, item, existingProviderAccount, now)
 	}
 	account := domain.Account{
 		ID:       s.newID(),
@@ -796,6 +797,69 @@ func (s *BankSyncService) findOrCreateFinanceAccountForProviderAccount(
 		UpdatedAt: now,
 	}
 	return s.store.SaveAccount(ctx, account)
+}
+
+func (s *BankSyncService) refreshFinanceAccountForProviderAccount(
+	ctx context.Context,
+	account domain.Account,
+	item ProviderNormalizedAccount,
+	existingProviderAccount *domain.ConnectionProviderAccount,
+	now time.Time,
+) (domain.Account, error) {
+	updated := account
+	if shouldRefreshProviderLinkedAccountName(account.Name, item, existingProviderAccount) {
+		updated.Name = firstNonEmpty(
+			strings.TrimSpace(item.Name),
+			strings.TrimSpace(item.IBAN),
+			item.ProviderAccountID,
+		)
+	}
+	if shouldRefreshProviderLinkedAccountCurrency(account.Currency, existingProviderAccount) {
+		updated.Currency = strings.ToUpper(strings.TrimSpace(item.Currency))
+	}
+	if updated.Name == account.Name && updated.Currency == account.Currency {
+		return account, nil
+	}
+	updated.UpdatedAt = now
+	return s.store.SaveAccount(ctx, updated)
+}
+
+func isFinanceAccountForProviderAccount(
+	account domain.Account,
+	connection domain.BankConnection,
+	item ProviderNormalizedAccount,
+	existingProviderAccount *domain.ConnectionProviderAccount,
+) bool {
+	if existingProviderAccount != nil && existingProviderAccount.FinanceAccountID != "" &&
+		account.ID == existingProviderAccount.FinanceAccountID {
+		return true
+	}
+	return account.LinkedAccount != nil && account.LinkedAccount.Provider == connection.Provider &&
+		account.LinkedAccount.ProviderAccountID == item.ProviderAccountID
+}
+
+func shouldRefreshProviderLinkedAccountName(
+	current string,
+	item ProviderNormalizedAccount,
+	existingProviderAccount *domain.ConnectionProviderAccount,
+) bool {
+	trimmed := strings.TrimSpace(current)
+	if trimmed == "" || trimmed == strings.TrimSpace(item.ProviderAccountID) {
+		return true
+	}
+	return existingProviderAccount != nil && trimmed == strings.TrimSpace(existingProviderAccount.Name)
+}
+
+func shouldRefreshProviderLinkedAccountCurrency(
+	current string,
+	existingProviderAccount *domain.ConnectionProviderAccount,
+) bool {
+	trimmed := strings.ToUpper(strings.TrimSpace(current))
+	if trimmed == "" {
+		return true
+	}
+	return existingProviderAccount != nil &&
+		trimmed == strings.ToUpper(strings.TrimSpace(existingProviderAccount.Currency))
 }
 
 func (s *BankSyncService) applyProviderTransaction(

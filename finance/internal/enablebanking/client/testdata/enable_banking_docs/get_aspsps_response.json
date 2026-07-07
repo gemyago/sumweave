@@ -1,0 +1,9 @@
+{
+  "aspsps": [
+    {
+      "id": "string",
+      "name": "Mock ASPSP",
+      "country": "PL"
+    }
+  ]
+}

@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,10 +14,11 @@ import (
 
 func TestClient_CreateSession(t *testing.T) {
 	fake := faker.New()
+	requireNoRawField(t, SessionResponse{})
 
-	t.Run("success with all parameters", func(t *testing.T) {
+	t.Run("sends only documented authorize session request and decodes response", func(t *testing.T) {
 		code := "code-" + fake.UUID().V4()
-		state := "state-" + fake.UUID().V4()
+		fixture := readDocsFixture(t, "post_sessions_response.json")
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]any
@@ -25,13 +27,14 @@ func TestClient_CreateSession(t *testing.T) {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
+			if !assert.Len(t, body, 1) {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			assert.Equal(t, code, body["code"])
-			assert.Equal(t, state, body["state"])
-			_, _ = w.Write(
-				[]byte(
-					`{"id":"session-1","externalId":"session-1","secret":"secret-1","accounts":[{"uid":"acc-1"}]}`,
-				),
-			)
+			assert.NotContains(t, body, "state")
+			assert.NotContains(t, body, "providerReference")
+			_, _ = fmt.Fprint(w, fixture)
 		}))
 		defer server.Close()
 
@@ -39,22 +42,25 @@ func TestClient_CreateSession(t *testing.T) {
 
 		response, err := client.CreateSession(
 			t.Context(),
-			CreateSessionParams{Request: &CreateSessionRequest{
-				Code:              code,
-				State:             state,
-				ProviderReference: "ref-1",
-			}},
+			CreateSessionParams{Request: &CreateSessionRequest{Code: code}},
 		)
 
 		require.NoError(t, err)
-		assert.Equal(t, "session-1", response.SessionID)
-		assert.Equal(t, "secret-1", response.Secret)
+		assert.Equal(t, "session-docs-1", response.SessionID)
+		assert.Equal(t, "Nordea", response.DisplayName)
+		assert.Equal(t, "business", response.PSUType)
+		require.NotNil(t, response.Access)
+		assert.Equal(t, "2019-08-24T14:15:22Z", response.Access.ValidUntil)
 		require.Len(t, response.Accounts, 1)
+		assert.Equal(t, "07cc67f4-45d6-494b-adac-09b5cbc7e2b5", response.Accounts[0].UID)
+		assert.Equal(t, "FI0455231152453547", response.Accounts[0].IBAN)
+		assert.Equal(t, "EUR", response.Accounts[0].Currency)
+		assert.Equal(t, []string{"07cc67f4-45d6-494b-adac-09b5cbc7e2b5"}, response.AccountIDs)
 	})
 
-	t.Run("success with required parameters only", func(t *testing.T) {
+	t.Run("ignores undocumented create session response aliases", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"id":"session-2"}`))
+			_, _ = w.Write([]byte(`{"id":"session-2","accounts":[{"uid":"acc-2"}]}`))
 		}))
 		defer server.Close()
 
@@ -66,7 +72,8 @@ func TestClient_CreateSession(t *testing.T) {
 		)
 
 		require.NoError(t, err)
-		assert.Equal(t, "session-2", response.SessionID)
+		assert.Empty(t, response.SessionID)
+		assert.Empty(t, response.ID)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

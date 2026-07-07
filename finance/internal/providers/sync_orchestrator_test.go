@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -38,6 +39,16 @@ func TestSyncOrchestrator(t *testing.T) {
 			targetWindowPolicy: NewMockTargetWindowPolicy(t),
 			windowChunkPolicy:  NewMockWindowChunkPolicy(t),
 			windowExecutor:     NewMockWindowExecutor(t),
+		}
+	}
+
+	makeOrchestratorParams := func(deps mockDeps) SyncOrchestratorParams {
+		return SyncOrchestratorParams{
+			SyncStateJournal:   deps.syncStateJournal,
+			TargetWindowPolicy: deps.targetWindowPolicy,
+			WindowChunkPolicy:  deps.windowChunkPolicy,
+			WindowExecutor:     deps.windowExecutor,
+			Logger:             slog.New(slog.DiscardHandler),
 		}
 	}
 
@@ -185,12 +196,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Times(len(fixture.chunks))
 
 			orchestrator, err := NewSyncOrchestrator(
-				SyncOrchestratorParams{
-					SyncStateJournal:   deps.syncStateJournal,
-					TargetWindowPolicy: deps.targetWindowPolicy,
-					WindowChunkPolicy:  deps.windowChunkPolicy,
-					WindowExecutor:     deps.windowExecutor,
-				},
+				makeOrchestratorParams(deps),
 				WithNow(func() time.Time { return fixture.now }),
 			)
 			require.NoError(t, err)
@@ -252,6 +258,7 @@ func TestSyncOrchestrator(t *testing.T) {
 						TargetWindowPolicy: deps.targetWindowPolicy,
 						WindowChunkPolicy:  deps.windowChunkPolicy,
 						WindowExecutor:     deps.windowExecutor,
+						Logger:             slog.New(slog.DiscardHandler),
 					},
 					expectedErr: ErrSyncStateJournalRequired,
 				},
@@ -261,6 +268,7 @@ func TestSyncOrchestrator(t *testing.T) {
 						SyncStateJournal:  deps.syncStateJournal,
 						WindowChunkPolicy: deps.windowChunkPolicy,
 						WindowExecutor:    deps.windowExecutor,
+						Logger:            slog.New(slog.DiscardHandler),
 					},
 					expectedErr: ErrTargetWindowPolicyRequired,
 				},
@@ -270,6 +278,7 @@ func TestSyncOrchestrator(t *testing.T) {
 						SyncStateJournal:   deps.syncStateJournal,
 						TargetWindowPolicy: deps.targetWindowPolicy,
 						WindowExecutor:     deps.windowExecutor,
+						Logger:             slog.New(slog.DiscardHandler),
 					},
 					expectedErr: ErrWindowChunkPolicyRequired,
 				},
@@ -279,8 +288,19 @@ func TestSyncOrchestrator(t *testing.T) {
 						SyncStateJournal:   deps.syncStateJournal,
 						TargetWindowPolicy: deps.targetWindowPolicy,
 						WindowChunkPolicy:  deps.windowChunkPolicy,
+						Logger:             slog.New(slog.DiscardHandler),
 					},
 					expectedErr: ErrWindowExecutorRequired,
+				},
+				{
+					name: "missing logger",
+					params: SyncOrchestratorParams{
+						SyncStateJournal:   deps.syncStateJournal,
+						TargetWindowPolicy: deps.targetWindowPolicy,
+						WindowChunkPolicy:  deps.windowChunkPolicy,
+						WindowExecutor:     deps.windowExecutor,
+					},
+					expectedErr: ErrLoggerRequired,
 				},
 			}
 
@@ -303,14 +323,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(nil, expectedErr)
 
-			orchestrator, err := NewSyncOrchestrator(
-				SyncOrchestratorParams{
-					SyncStateJournal:   deps.syncStateJournal,
-					TargetWindowPolicy: deps.targetWindowPolicy,
-					WindowChunkPolicy:  deps.windowChunkPolicy,
-					WindowExecutor:     deps.windowExecutor,
-				},
-			)
+			orchestrator, err := NewSyncOrchestrator(makeOrchestratorParams(deps))
 			require.NoError(t, err)
 
 			_, err = orchestrator.Orchestrate(t.Context(), request)
@@ -332,14 +345,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(domain.ProviderSyncWindow{}, expectedErr)
 
-			orchestrator, err := NewSyncOrchestrator(
-				SyncOrchestratorParams{
-					SyncStateJournal:   deps.syncStateJournal,
-					TargetWindowPolicy: deps.targetWindowPolicy,
-					WindowChunkPolicy:  deps.windowChunkPolicy,
-					WindowExecutor:     deps.windowExecutor,
-				},
-			)
+			orchestrator, err := NewSyncOrchestrator(makeOrchestratorParams(deps))
 			require.NoError(t, err)
 
 			_, err = orchestrator.Orchestrate(t.Context(), request)
@@ -364,14 +370,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(nil, expectedErr)
 
-			orchestrator, err := NewSyncOrchestrator(
-				SyncOrchestratorParams{
-					SyncStateJournal:   deps.syncStateJournal,
-					TargetWindowPolicy: deps.targetWindowPolicy,
-					WindowChunkPolicy:  deps.windowChunkPolicy,
-					WindowExecutor:     deps.windowExecutor,
-				},
-			)
+			orchestrator, err := NewSyncOrchestrator(makeOrchestratorParams(deps))
 			require.NoError(t, err)
 
 			_, err = orchestrator.Orchestrate(t.Context(), fixture.request)
@@ -429,12 +428,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Times(len(fixture.chunks))
 
 			orchestrator, err := NewSyncOrchestrator(
-				SyncOrchestratorParams{
-					SyncStateJournal:   deps.syncStateJournal,
-					TargetWindowPolicy: deps.targetWindowPolicy,
-					WindowChunkPolicy:  deps.windowChunkPolicy,
-					WindowExecutor:     deps.windowExecutor,
-				},
+				makeOrchestratorParams(deps),
 				WithNow(func() time.Time { return fixture.now }),
 			)
 			require.NoError(t, err)
@@ -484,14 +478,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				}).
 				Once()
 
-			orchestrator, err := NewSyncOrchestrator(
-				SyncOrchestratorParams{
-					SyncStateJournal:   deps.syncStateJournal,
-					TargetWindowPolicy: deps.targetWindowPolicy,
-					WindowChunkPolicy:  deps.windowChunkPolicy,
-					WindowExecutor:     deps.windowExecutor,
-				},
-			)
+			orchestrator, err := NewSyncOrchestrator(makeOrchestratorParams(deps))
 			require.NoError(t, err)
 
 			_, err = orchestrator.Orchestrate(t.Context(), fixture.request)
@@ -529,14 +516,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(appendErr)
 
-			orchestrator, err := NewSyncOrchestrator(
-				SyncOrchestratorParams{
-					SyncStateJournal:   deps.syncStateJournal,
-					TargetWindowPolicy: deps.targetWindowPolicy,
-					WindowChunkPolicy:  deps.windowChunkPolicy,
-					WindowExecutor:     deps.windowExecutor,
-				},
-			)
+			orchestrator, err := NewSyncOrchestrator(makeOrchestratorParams(deps))
 			require.NoError(t, err)
 
 			_, err = orchestrator.Orchestrate(t.Context(), fixture.request)
@@ -573,14 +553,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(nil, errors.New("stop-after-plan-"+fake.UUID().V4()))
 
-			orchestrator, err := NewSyncOrchestrator(
-				SyncOrchestratorParams{
-					SyncStateJournal:   deps.syncStateJournal,
-					TargetWindowPolicy: deps.targetWindowPolicy,
-					WindowChunkPolicy:  deps.windowChunkPolicy,
-					WindowExecutor:     deps.windowExecutor,
-				},
-			)
+			orchestrator, err := NewSyncOrchestrator(makeOrchestratorParams(deps))
 			require.NoError(t, err)
 
 			_, _ = orchestrator.Orchestrate(t.Context(), fixture.request)

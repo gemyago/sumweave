@@ -15,6 +15,7 @@ var (
 	ErrTargetWindowPolicyRequired = errors.New("target window policy is required")
 	ErrWindowChunkPolicyRequired  = errors.New("window chunk policy is required")
 	ErrWindowExecutorRequired     = errors.New("window executor is required")
+	ErrLoggerRequired             = errors.New("logger is required")
 )
 
 type SyncStateJournal interface {
@@ -57,6 +58,7 @@ type SyncOrchestratorParams struct {
 	TargetWindowPolicy TargetWindowPolicy
 	WindowChunkPolicy  WindowChunkPolicy
 	WindowExecutor     WindowExecutor
+	Logger             *slog.Logger
 }
 
 type SyncOrchestratorOption func(*SyncOrchestrator)
@@ -68,12 +70,6 @@ type SyncOrchestrator struct {
 	windowExecutor     WindowExecutor
 	logger             *slog.Logger
 	now                func() time.Time
-}
-
-func WithLogger(logger *slog.Logger) SyncOrchestratorOption {
-	return func(orchestrator *SyncOrchestrator) {
-		orchestrator.logger = logger
-	}
 }
 
 func WithNow(now func() time.Time) SyncOrchestratorOption {
@@ -98,22 +94,22 @@ func NewSyncOrchestrator(
 	if params.WindowExecutor == nil {
 		return nil, ErrWindowExecutorRequired
 	}
+	if params.Logger == nil {
+		return nil, ErrLoggerRequired
+	}
 
 	orchestrator := &SyncOrchestrator{
 		syncStateJournal:   params.SyncStateJournal,
 		targetWindowPolicy: params.TargetWindowPolicy,
 		windowChunkPolicy:  params.WindowChunkPolicy,
 		windowExecutor:     params.WindowExecutor,
-		logger:             slog.New(slog.DiscardHandler),
+		logger:             params.Logger,
 		now:                time.Now,
 	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(orchestrator)
 		}
-	}
-	if orchestrator.logger == nil {
-		orchestrator.logger = slog.New(slog.DiscardHandler)
 	}
 	return orchestrator, nil
 }

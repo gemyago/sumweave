@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -178,7 +179,7 @@ func TestJobsControllerIntegration(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, jobsStore.AutoMigrate())
 	require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: sharedDSN}))
-	publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: sharedDSN})
+	publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: sharedDSN}, slog.Default())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 

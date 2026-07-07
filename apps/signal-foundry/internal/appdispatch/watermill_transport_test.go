@@ -3,6 +3,7 @@ package appdispatch
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -65,7 +66,7 @@ func TestWatermillTransport(t *testing.T) {
 		cfg := makeConfig(t)
 		require.NoError(t, AutoMigrate(t.Context(), cfg))
 
-		publisher, err := NewPublisher(cfg)
+		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
@@ -86,7 +87,7 @@ func TestWatermillTransport(t *testing.T) {
 			},
 		}))
 
-		consumer, err := NewConsumer(cfg, registry)
+		consumer, err := NewConsumer(cfg, registry, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, consumer.Close()) })
 
@@ -130,7 +131,7 @@ func TestWatermillTransport(t *testing.T) {
 		_, err := db.ExecContext(t.Context(), `CREATE TABLE app_owned_records (id TEXT PRIMARY KEY)`)
 		require.NoError(t, err)
 
-		publisher, err := NewPublisher(cfg)
+		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
@@ -181,7 +182,7 @@ func TestWatermillTransport(t *testing.T) {
 		requireNoTable(t, db, cfg.MessagesTable())
 		requireNoTable(t, db, cfg.OffsetsTable())
 
-		publisher, err := NewPublisher(cfg)
+		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 		require.Error(t, publisher.Publish(t.Context(), Envelope{
@@ -214,11 +215,17 @@ func TestWatermillTransport(t *testing.T) {
 		require.Error(t, err)
 
 		cfg := Config{}
-		_, err = NewPublisher(cfg)
+		_, err = NewPublisher(cfg, nil)
+		require.EqualError(t, err, "logger is required")
+
+		_, err = NewPublisher(cfg, slog.New(slog.DiscardHandler))
 		require.EqualError(t, err, "database dsn is required")
 
-		_, err = NewConsumer(makeConfig(t), nil)
+		_, err = NewConsumer(makeConfig(t), nil, slog.New(slog.DiscardHandler))
 		require.EqualError(t, err, "handler registry is required")
+
+		_, err = NewConsumer(makeConfig(t), NewHandlerRegistry(), nil)
+		require.EqualError(t, err, "logger is required")
 
 		registry := NewHandlerRegistry()
 		err = RegisterTypedHandler(registry, TypedHandlerSpec[examplePayload]{})
@@ -250,7 +257,7 @@ func TestWatermillTransport(t *testing.T) {
 
 	t.Run("surfaces publish and consume failures without schema side effects", func(t *testing.T) {
 		cfg := makeConfig(t)
-		publisher, err := NewPublisher(cfg)
+		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
@@ -270,7 +277,7 @@ func TestWatermillTransport(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		consumer, err := NewConsumer(cfg, NewHandlerRegistry())
+		consumer, err := NewConsumer(cfg, NewHandlerRegistry(), slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, consumer.Close()) })
 
@@ -287,11 +294,11 @@ func TestWatermillTransport(t *testing.T) {
 			ConsumerName: "consumer-" + fake.UUID().V4(),
 		}
 
-		publisher, err := NewPublisher(cfg)
+		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		require.NoError(t, publisher.Close())
 
-		consumer, err := NewConsumer(cfg, NewHandlerRegistry())
+		consumer, err := NewConsumer(cfg, NewHandlerRegistry(), slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		require.NoError(t, consumer.Close())
 

@@ -102,6 +102,8 @@ type WindowSyncSnapshotReader interface {
 }
 
 type WindowSyncApplyStore interface {
+	GetAccount(ctx context.Context, accountID string) (*domain.Account, error)
+	SaveAccount(ctx context.Context, account domain.Account) (domain.Account, error)
 	SaveConnectionProviderAccount(
 		ctx context.Context,
 		account domain.ConnectionProviderAccount,

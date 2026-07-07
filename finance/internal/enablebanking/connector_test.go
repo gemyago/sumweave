@@ -127,7 +127,7 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, "PL", aspsp["country"])
 
 			_, _ = w.Write([]byte(
-				`{"authorizationUrl":"` + authorizationURL + `","providerReference":"` + providerReference + `"}`,
+				`{"url":"` + authorizationURL + `","authorization_id":"` + providerReference + `","psu_id_hash":"psu-hash"}`,
 			))
 		}))
 		defer server.Close()
@@ -159,7 +159,7 @@ func TestConnector(t *testing.T) {
 		assertPayloadJSON(
 			t,
 			result.RawPayloads[0].PayloadJSON,
-			`{"authorizationUrl":"`+authorizationURL+`","providerReference":"`+providerReference+`"}`,
+			`{"url":"`+authorizationURL+`","authorization_id":"`+providerReference+`","psu_id_hash":"psu-hash"}`,
 		)
 	})
 
@@ -179,7 +179,7 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, map[string]any{"code": code}, payload)
 
 			_, _ = w.Write([]byte(
-				`{"id":"` + sessionID + `","displayName":"PKO official","secret":"` + secretValue + `","state":"active"}`,
+				`{"session_id":"` + sessionID + `","aspsp":{"name":"PKO official","country":"PL"},"status":"active","secret":"` + secretValue + `"}`,
 			))
 		}))
 		defer server.Close()
@@ -206,14 +206,14 @@ func TestConnector(t *testing.T) {
 		assert.Equal(t, "PKO official", result.DisplayName)
 		assert.Equal(t, sessionID, result.ProviderReference)
 		assert.Equal(t, sessionID, result.ExternalID)
-		assert.Equal(t, secretValue, result.Secret)
+		assert.Empty(t, result.Secret)
 		assert.Equal(t, domain.BankConnectionStateActive, result.State)
 		require.Len(t, result.RawPayloads, 1)
 		assert.NotContains(t, string(result.RawPayloads[0].PayloadJSON), secretValue)
 		assertPayloadJSON(
 			t,
 			result.RawPayloads[0].PayloadJSON,
-			`{"id":"`+sessionID+`","sessionId":"`+sessionID+`","externalId":"`+sessionID+`","providerReference":"`+sessionID+`","displayName":"PKO official","state":"active"}`,
+			`{"session_id":"`+sessionID+`"}`,
 		)
 	})
 
@@ -282,7 +282,9 @@ func TestConnector(t *testing.T) {
 		}
 		accountID := "account-" + fake.UUID().V4()
 		firstTransactionID := "txn-1-" + fake.UUID().V4()
+		firstTransactionDetailsID := "transaction-details-1-" + fake.UUID().V4()
 		secondTransactionID := "txn-2-" + fake.UUID().V4()
+		secondTransactionDetailsID := "transaction-details-2-" + fake.UUID().V4()
 		privateKeyPath := makeSignedKeyPath(t)
 
 		requestCount := 0
@@ -293,24 +295,24 @@ func TestConnector(t *testing.T) {
 			switch request.URL.Path {
 			case "/sessions/" + connection.ExternalID:
 				_, _ = w.Write([]byte(
-					`{"id":"` + connection.ExternalID + `","accounts":[{"uid":"` + accountID + `","name":"Savings","currency":"pln","iban":" PL33333333333333333333333333 "}]}`,
+					`{"session_id":"` + connection.ExternalID + `","accounts":["` + accountID + `"],"accounts_data":[{"uid":"` + accountID + `","name":"Savings","currency":"pln","account_id":{"iban":" PL33333333333333333333333333 "}}]}`,
 				))
 			case "/accounts/" + accountID + "/balances":
 				_, _ = w.Write([]byte(
-					`{"balances":[{"type":"closingBooked","balance_amount":{"amount":"777.70","currency":"pln"}},{"type":"interimAvailable","balance_amount":{"amount":"900.10","currency":"pln"}}]}`,
+					`{"balances":[{"balance_type":"closingBooked","balance_amount":{"amount":"777.70","currency":"pln"}},{"balance_type":"interimAvailable","balance_amount":{"amount":"900.10","currency":"pln"}}]}`,
 				))
 			case "/accounts/" + accountID + "/transactions":
 				assert.Equal(t, requestedWindow.Start.UTC().Format(time.DateOnly), request.URL.Query().Get("date_from"))
 				assert.Equal(t, requestedWindow.End.UTC().Format(time.DateOnly), request.URL.Query().Get("date_to"))
 				if request.URL.Query().Get("continuation_key") == "" {
 					_, _ = w.Write([]byte(
-						`{"continuation_key":"page-2","transactions":[{"transactionId":"` + firstTransactionID + `","status":"booked","amount":{"amount":"12.34","currency":"pln"},"credit_debit_indicator":"DBIT","remittance_information_unstructured":"coffee","booking_date":"2026-06-11"}]}`,
+						`{"continuation_key":"page-2","transactions":[{"entry_reference":"` + firstTransactionID + `","transaction_id":"` + firstTransactionDetailsID + `","status":"BOOKED","transaction_amount":{"amount":"12.34","currency":"pln"},"credit_debit_indicator":"DBIT","remittance_information":["coffee"],"booking_date":"2026-06-11"}]}`,
 					))
 					return
 				}
 				assert.Equal(t, "page-2", request.URL.Query().Get("continuation_key"))
 				_, _ = w.Write([]byte(
-					`{"transactions":[{"id":"` + secondTransactionID + `","amountMinor":5050,"currency":"pln","description":"refund","effectiveAt":"2026-06-12T10:30:00Z"}]}`,
+					`{"transactions":[{"entry_reference":"` + secondTransactionID + `","transaction_id":"` + secondTransactionDetailsID + `","status":"BOOKED","transaction_amount":{"amount":"50.50","currency":"pln"},"credit_debit_indicator":"CRDT","remittance_information":["refund"],"booking_date":"2026-06-12T10:30:00Z"}]}`,
 				))
 			default:
 				http.NotFound(w, request)
@@ -411,6 +413,63 @@ func TestConnector(t *testing.T) {
 		}, batch.Transactions[1])
 	})
 
+	t.Run("fetch fills account name from details when session only returns account IDs", func(t *testing.T) {
+		connection := makeConnection()
+		connection.ExternalID = "session-" + fake.UUID().V4()
+		accountID := "account-" + fake.UUID().V4()
+		accountName := "Mock ASPSP " + fake.Lorem().Word()
+		privateKeyPath := makeSignedKeyPath(t)
+		requestCount := 0
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			requestCount++
+			switch request.URL.Path {
+			case "/sessions/" + connection.ExternalID:
+				_, _ = w.Write([]byte(
+					`{"session_id":"` + connection.ExternalID + `","accounts":["` + accountID + `"]}`,
+				))
+			case "/accounts/" + accountID + "/details":
+				_, _ = w.Write([]byte(
+					`{"name":"` + accountName + `","currency":"eur","account_id":{"iban":"FI1234567890123456"}}`,
+				))
+			case "/accounts/" + accountID + "/balances":
+				_, _ = w.Write([]byte(`{"balances":[]}`))
+			case "/accounts/" + accountID + "/transactions":
+				_, _ = w.Write([]byte(`{"transactions":[]}`))
+			default:
+				http.NotFound(w, request)
+			}
+		}))
+		defer server.Close()
+
+		connector := NewConnector(
+			Args{
+				BaseURL:        server.URL,
+				HTTPClient:     server.Client(),
+				Logger:         logger,
+				AppID:          "app-" + fake.UUID().V4(),
+				PrivateKeyPath: privateKeyPath,
+			},
+		)
+
+		batch, err := connector.Fetch(t.Context(), providers.FetchRequest{
+			Connection:      connection,
+			RequestedWindow: domain.ProviderSyncWindow{},
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, 4, requestCount)
+		require.Len(t, batch.Accounts, 1)
+		assert.Equal(t, domain.ProviderAccountObservation{
+			Connection:        connection,
+			ProviderAccountID: accountID,
+			Name:              accountName,
+			Currency:          "EUR",
+			IBAN:              "FI1234567890123456",
+		}, batch.Accounts[0])
+		require.Len(t, batch.RawPayloads, 4)
+	})
+
 	t.Run(
 		"fetch does not recover raw-only account fields that are absent from typed session models",
 		func(t *testing.T) {
@@ -424,7 +483,7 @@ func TestConnector(t *testing.T) {
 				switch request.URL.Path {
 				case "/sessions/" + connection.ExternalID:
 					_, _ = w.Write([]byte(
-						`{"id":"` + connection.ExternalID + `","accounts":["` + accountID + `"],"accounts_data":[{"uid":"` + accountID + `","name":"Mock ROR","currency":"EUR","iban":"PL123"}]}`,
+						`{"session_id":"` + connection.ExternalID + `","accounts":["` + accountID + `"],"accounts_data":[{"name":"Mock ROR","currency":"EUR","iban":"PL123"}]}`,
 					))
 				default:
 					http.NotFound(w, request)
@@ -563,7 +622,7 @@ func TestConnector(t *testing.T) {
 				State:       "active",
 				Secret:      "secret-value",
 			}),
-			`{"id":"session-id","externalId":"external-id","displayName":"PKO official","secret":"secret-value","state":"active"}`,
+			`{}`,
 		)
 
 		assert.Equal(t, int64(-1234), decimalToMinor("-12.34"))

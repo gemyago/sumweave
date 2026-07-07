@@ -1,0 +1,22 @@
+{
+  "access": {
+    "valid_until": "2020-12-01T12:00:00.000000+00:00"
+  },
+  "accounts": [
+    "497f6eca-6276-4993-bfeb-53cbbbba6f08"
+  ],
+  "accounts_data": [
+    {
+      "identification_hash": "WwpbCiJhY2NvdW50IiwKImFjY291bnRfaWQiLAoiaWJhbiIKXQpd.E8GzhnnsFC7K+4e3YMYYKpyM83Zx6toXrjgcvPP/Lqc=",
+      "uid": "497f6eca-6276-4993-bfeb-53cbbbba6f08"
+    }
+  ],
+  "aspsp": {
+    "country": "FI",
+    "name": "Nordea"
+  },
+  "authorized": "2020-12-01T12:00:00.000000+00:00",
+  "created": "2020-12-01T12:00:00.000000+00:00",
+  "psu_type": "business",
+  "status": "AUTHORIZED"
+}

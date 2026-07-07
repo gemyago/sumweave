@@ -542,6 +542,138 @@ func TestProviderSyncInternals(t *testing.T) {
 		assert.False(t, claimed)
 	})
 
+	t.Run("refreshes existing linked finance account names from provider metadata", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		service := NewService(store, WithConnectionSecretCipher(makeCipher(t)))
+		now := time.Date(2026, time.July, 7, 18, 45, 0, 0, time.UTC)
+		service.now = func() time.Time { return now }
+
+		tenantID := "tenant-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		financeAccountID := "finance-account-" + fake.UUID().V4()
+		readableName := "provider-name-" + fake.Lorem().Word()
+
+		_, err := store.SaveBankConnection(t.Context(), domain.BankConnection{
+			ID:                connectionID,
+			TenantID:          tenantID,
+			Provider:          string(domain.ProviderIDPKO),
+			ProviderReference: "provider-reference-" + fake.UUID().V4(),
+			ExternalID:        "external-" + fake.UUID().V4(),
+			State:             domain.BankConnectionStateActive,
+			CreatedAt:         now.Add(-time.Hour),
+			UpdatedAt:         now.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+		_, err = store.SaveAccount(t.Context(), domain.Account{
+			ID:       financeAccountID,
+			TenantID: tenantID,
+			Name:     providerAccountID,
+			Kind:     domain.AccountKindLinked,
+			LinkedAccount: &domain.LinkedAccount{
+				Provider:          string(domain.ProviderIDPKO),
+				ProviderAccountID: providerAccountID,
+			},
+			CreatedAt: now.Add(-time.Hour),
+			UpdatedAt: now.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+		_, err = store.SaveConnectionProviderAccount(t.Context(), domain.ConnectionProviderAccount{
+			ID:                "provider-account-row-" + fake.UUID().V4(),
+			ConnectionID:      connectionID,
+			ProviderAccountID: providerAccountID,
+			FinanceAccountID:  financeAccountID,
+			Name:              providerAccountID,
+			CreatedAt:         now.Add(-time.Hour),
+			UpdatedAt:         now.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+
+		_, err = service.ApplyProviderSyncResult(t.Context(), ApplyProviderSyncResultParams{
+			ConnectionID: connectionID,
+			Result: ProviderSyncResult{Accounts: []ProviderNormalizedAccount{{
+				ProviderAccountID: providerAccountID,
+				Name:              readableName,
+				Currency:          "EUR",
+			}}},
+		})
+		require.NoError(t, err)
+
+		loaded, err := store.GetAccount(t.Context(), financeAccountID)
+		require.NoError(t, err)
+		require.NotNil(t, loaded)
+		assert.Equal(t, readableName, loaded.Name)
+		assert.Equal(t, "EUR", loaded.Currency)
+	})
+
+	t.Run("preserves custom linked finance account names during provider metadata refresh", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		service := NewService(store, WithConnectionSecretCipher(makeCipher(t)))
+		now := time.Date(2026, time.July, 7, 18, 50, 0, 0, time.UTC)
+		service.now = func() time.Time { return now }
+
+		tenantID := "tenant-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		financeAccountID := "finance-account-" + fake.UUID().V4()
+		customName := "custom-name-" + fake.Lorem().Word()
+
+		_, err := store.SaveBankConnection(t.Context(), domain.BankConnection{
+			ID:                connectionID,
+			TenantID:          tenantID,
+			Provider:          string(domain.ProviderIDPKO),
+			ProviderReference: "provider-reference-" + fake.UUID().V4(),
+			ExternalID:        "external-" + fake.UUID().V4(),
+			State:             domain.BankConnectionStateActive,
+			CreatedAt:         now.Add(-time.Hour),
+			UpdatedAt:         now.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+		_, err = store.SaveAccount(t.Context(), domain.Account{
+			ID:       financeAccountID,
+			TenantID: tenantID,
+			Name:     customName,
+			Currency: "USD",
+			Kind:     domain.AccountKindLinked,
+			LinkedAccount: &domain.LinkedAccount{
+				Provider:          string(domain.ProviderIDPKO),
+				ProviderAccountID: providerAccountID,
+			},
+			CreatedAt: now.Add(-time.Hour),
+			UpdatedAt: now.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+		_, err = store.SaveConnectionProviderAccount(t.Context(), domain.ConnectionProviderAccount{
+			ID:                "provider-account-row-" + fake.UUID().V4(),
+			ConnectionID:      connectionID,
+			ProviderAccountID: providerAccountID,
+			FinanceAccountID:  financeAccountID,
+			Name:              "old-provider-name-" + fake.Lorem().Word(),
+			Currency:          "USD",
+			CreatedAt:         now.Add(-time.Hour),
+			UpdatedAt:         now.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+
+		_, err = service.ApplyProviderSyncResult(t.Context(), ApplyProviderSyncResultParams{
+			ConnectionID: connectionID,
+			Result: ProviderSyncResult{Accounts: []ProviderNormalizedAccount{{
+				ProviderAccountID: providerAccountID,
+				Name:              "new-provider-name-" + fake.Lorem().Word(),
+				Currency:          "EUR",
+			}}},
+		})
+		require.NoError(t, err)
+
+		loaded, err := store.GetAccount(t.Context(), financeAccountID)
+		require.NoError(t, err)
+		require.NotNil(t, loaded)
+		assert.Equal(t, customName, loaded.Name)
+		assert.Equal(t, "EUR", loaded.Currency)
+	})
+
 	t.Run("surfaces provider and membership configuration errors", func(t *testing.T) {
 		fake := faker.New()
 		service, tenant, ownerUserID := makeService(t, nil)
@@ -1476,6 +1608,7 @@ func TestProviderSyncInternals(t *testing.T) {
 				Name:              "main",
 				Currency:          "USD",
 			},
+			&providerAccount,
 			time.Now().UTC(),
 		)
 		require.NoError(t, err)

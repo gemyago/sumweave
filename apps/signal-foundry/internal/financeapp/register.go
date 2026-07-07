@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
+	apphttpclient "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/infrastructure/httpclient"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	financepkg "github.com/gemyago/signal-foundry/finance"
 	"github.com/gemyago/signal-foundry/finance/credentials"
@@ -47,6 +48,7 @@ type financeServiceDeps struct {
 	Jobs                 *jobspkg.Service
 	JobsStore            *jobspkg.Store
 	Registry             *jobspkg.Registry
+	HTTPClientFactory    *apphttpclient.ClientFactory
 	RootLogger           *slog.Logger
 	JWT                  string        `name:"auth.jwtKey" optional:"true"`
 	MonoURL              string        `name:"config.finance.providers.monobank.baseURL" optional:"true"`
@@ -74,12 +76,16 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 	if err != nil {
 		return nil, err
 	}
+	httpClient, err := newFinanceHTTPClient(deps.HTTPClientFactory)
+	if err != nil {
+		return nil, err
+	}
 	financeModule, err := financepkg.New(&financepkg.Config{
 		Database:               deps.Database,
 		Logger:                 resolveFinanceLogger(deps.RootLogger),
 		Now:                    time.Now,
 		NewID:                  uuid.NewString,
-		HTTPClient:             http.DefaultClient,
+		HTTPClient:             httpClient,
 		ConnectionSecretCipher: cipher,
 		CSVImportJobEnqueuer:   csvImportJobEnqueuer{jobs: deps.Jobs},
 		BankSyncJobEnqueuer:    bankConnectionSyncJobEnqueuer{jobs: deps.Jobs},
@@ -103,6 +109,13 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 		return nil, registerErr
 	}
 	return financeModule, nil
+}
+
+func newFinanceHTTPClient(factory *apphttpclient.ClientFactory) (*http.Client, error) {
+	if factory == nil {
+		return nil, errors.New("finance HTTP client factory is required")
+	}
+	return factory.CreateClient(), nil
 }
 
 func newTenantServiceFromDI(module *financepkg.Finance) *financepkg.TenantService {

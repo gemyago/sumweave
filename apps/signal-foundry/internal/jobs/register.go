@@ -97,11 +97,19 @@ func newWorkerFromDI(deps workerDeps) (*Worker, error) {
 	})
 }
 
-func newPublisherFromDI(deps storeDeps) (*appdispatch.Publisher, error) {
+type publisherDeps struct {
+	dig.In
+
+	DatabaseDSN         string `name:"config.dataLayer.database.dsn"`
+	DatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	Logger              *slog.Logger
+}
+
+func newPublisherFromDI(deps publisherDeps) (*appdispatch.Publisher, error) {
 	return appdispatch.NewPublisher(appdispatch.Config{
 		DatabaseDSN: deps.DatabaseDSN,
 		TablePrefix: deps.DatabaseTablePrefix,
-	})
+	}, deps.Logger)
 }
 
 func newRegistryFromDI(deps registryDeps) (*Registry, error) {

@@ -49,12 +49,16 @@ type Args struct {
 	Now            func() time.Time
 }
 
-// DoRawJSONParams describes a raw JSON request.
-type DoRawJSONParams struct {
+type sendJSONParams[TBody any] struct {
 	Method string
 	Path   string
 	Query  url.Values
-	Body   any
+	Body   *TBody
+}
+
+type sendJSONResult[TTarget any] struct {
+	Value *TTarget
+	Body  []byte
 }
 
 // ResponseError reports a non-2xx upstream response.
@@ -83,7 +87,7 @@ func NewClient(args Args) *Client {
 	}
 	logger := args.Logger
 	if logger == nil {
-		logger = slog.Default()
+		logger = slog.New(slog.DiscardHandler)
 	}
 	now := args.Now
 	if now == nil {
@@ -109,33 +113,30 @@ func WithBearerToken(ctx context.Context, token string) context.Context {
 	return context.WithValue(ctx, bearerTokenContextKey{}, strings.TrimSpace(token))
 }
 
-// DoRawObject executes a request and decodes a JSON object.
-func (c *Client) DoRawObject(ctx context.Context, params DoRawJSONParams) (map[string]any, error) {
-	body, err := c.do(ctx, params)
+func sendJSON[TBody any, TTarget any](
+	ctx context.Context,
+	client *Client,
+	params sendJSONParams[TBody],
+) (*sendJSONResult[TTarget], error) {
+	body, err := doJSONRequest(ctx, client, params)
 	if err != nil {
 		return nil, err
 	}
-	var raw map[string]any
-	if decodeErr := json.Unmarshal(body, &raw); decodeErr != nil {
-		return nil, fmt.Errorf("enable banking response decode: %w", decodeErr)
+	var target TTarget
+	if err = json.Unmarshal(body, &target); err != nil {
+		return nil, fmt.Errorf("enable banking response decode: %w", err)
 	}
-	return raw, nil
+	return &sendJSONResult[TTarget]{
+		Value: &target,
+		Body:  append([]byte(nil), body...),
+	}, nil
 }
 
-// DoRawArray executes a request and decodes a JSON array.
-func (c *Client) DoRawArray(ctx context.Context, params DoRawJSONParams) ([]map[string]any, error) {
-	body, err := c.do(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	var raw []map[string]any
-	if decodeErr := json.Unmarshal(body, &raw); decodeErr != nil {
-		return nil, fmt.Errorf("enable banking response decode: %w", decodeErr)
-	}
-	return raw, nil
-}
-
-func (c *Client) do(ctx context.Context, params DoRawJSONParams) ([]byte, error) {
+func doJSONRequest[TBody any](
+	ctx context.Context,
+	client *Client,
+	params sendJSONParams[TBody],
+) ([]byte, error) {
 	var body io.Reader
 	if params.Body != nil {
 		encoded, err := json.Marshal(params.Body)
@@ -145,7 +146,7 @@ func (c *Client) do(ctx context.Context, params DoRawJSONParams) ([]byte, error)
 		body = bytes.NewReader(encoded)
 	}
 
-	endpoint, err := url.Parse(c.baseURL + params.Path)
+	endpoint, err := url.Parse(client.baseURL + params.Path)
 	if err != nil {
 		return nil, fmt.Errorf("enable banking request build: %w", err)
 	}
@@ -161,11 +162,11 @@ func (c *Client) do(ctx context.Context, params DoRawJSONParams) ([]byte, error)
 	if params.Body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	if err = c.applyAuthorization(ctx, request); err != nil {
+	if err = client.applyAuthorization(ctx, request); err != nil {
 		return nil, err
 	}
 
-	response, err := c.httpClient.Do(request)
+	response, err := client.httpClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("enable banking request: %w", err)
 	}
@@ -273,135 +274,6 @@ func stringValue(raw map[string]any, keys ...string) string {
 	return ""
 }
 
-func intValue(raw map[string]any, keys ...string) int {
-	for _, key := range keys {
-		switch value := raw[key].(type) {
-		case int:
-			return value
-		case int32:
-			return int(value)
-		case int64:
-			return int(value)
-		case float64:
-			return int(value)
-		}
-	}
-	return 0
-}
-
-func int64Value(raw map[string]any, keys ...string) int64 {
-	for _, key := range keys {
-		switch value := raw[key].(type) {
-		case int:
-			return int64(value)
-		case int32:
-			return int64(value)
-		case int64:
-			return value
-		case float64:
-			return int64(value)
-		}
-	}
-	return 0
-}
-
-func objectValue(raw map[string]any, key string) map[string]any {
-	value, _ := raw[key].(map[string]any)
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
-}
-
-func objectSlice(raw map[string]any, key string) []map[string]any {
-	items, _ := raw[key].([]any)
-	result := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		objectItem, ok := item.(map[string]any)
-		if ok {
-			result = append(result, objectItem)
-		}
-	}
-	return result
-}
-
-func extractAccount(raw map[string]any) Account {
-	return Account{
-		UID:      firstNonEmpty(stringValue(raw, "uid"), stringValue(raw, "id")),
-		ID:       firstNonEmpty(stringValue(raw, "id"), stringValue(raw, "uid")),
-		Name:     stringValue(raw, "name"),
-		IBAN:     stringValue(raw, "iban"),
-		Currency: strings.ToUpper(stringValue(raw, "currency")),
-		Raw:      raw,
-	}
-}
-
-func extractAccounts(raw map[string]any) []Account {
-	items := objectSlice(raw, "accounts")
-	accounts := make([]Account, 0, len(items))
-	for _, item := range items {
-		accounts = append(accounts, extractAccount(item))
-	}
-	return accounts
-}
-
-func extractSessionResponse(raw map[string]any) *SessionResponse {
-	return &SessionResponse{
-		ID:        stringValue(raw, "id"),
-		SessionID: firstNonEmpty(stringValue(raw, "session_id"), stringValue(raw, "id")),
-		ExternalID: firstNonEmpty(
-			stringValue(raw, "externalId"),
-			stringValue(raw, "external_id"),
-			stringValue(raw, "id"),
-		),
-		ProviderReference: firstNonEmpty(
-			stringValue(raw, "providerReference", "provider_reference"),
-			extractSessionIdentifier(raw, "id", "session_id"),
-		),
-		DisplayName: stringValue(raw, "displayName", "display_name"),
-		Secret:      stringValue(raw, "secret"),
-		State:       stringValue(raw, "state"),
-		Access:      extractSessionAccess(raw),
-		Accounts:    extractAccounts(raw),
-		Raw:         raw,
-	}
-}
-
-func extractSessionAccess(raw map[string]any) *SessionAccess {
-	access := objectValue(raw, "access")
-	if len(access) == 0 {
-		return nil
-	}
-	validForDays := intValue(access, "valid_for_days")
-	validUntil := stringValue(access, "valid_until")
-	if validForDays == 0 && validUntil == "" {
-		return nil
-	}
-	return &SessionAccess{
-		ValidForDays: validForDays,
-		ValidUntil:   validUntil,
-		Raw:          access,
-	}
-}
-
-func extractSessionIdentifier(raw map[string]any, keys ...string) string {
-	identifier := stringValue(raw, keys...)
-	if identifier != "" {
-		return identifier
-	}
-	return stringValue(objectValue(raw, "session"), keys...)
-}
-
-func amountObject(raw map[string]any) map[string]any {
-	if amount := objectValue(raw, "amount"); len(amount) > 0 {
-		return amount
-	}
-	if amount := objectValue(raw, "balance_amount"); len(amount) > 0 {
-		return amount
-	}
-	return map[string]any{}
-}
-
 func decimalToMinor(raw string) int64 {
 	trimmed := strings.TrimSpace(strings.ReplaceAll(raw, ",", "."))
 	if trimmed == "" {
@@ -427,6 +299,175 @@ func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		trimmed := strings.TrimSpace(value)
 		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func normalizeAccount(account Account) Account {
+	account.Currency = strings.ToUpper(account.Currency)
+	if account.AccountID != nil {
+		account.IBAN = strings.TrimSpace(account.AccountID.IBAN)
+	}
+	if account.ID == "" {
+		account.ID = account.UID
+	}
+	return account
+}
+
+func normalizeAccounts(accounts []Account) []Account {
+	if len(accounts) == 0 {
+		return nil
+	}
+	result := make([]Account, 0, len(accounts))
+	for _, account := range accounts {
+		result = append(result, normalizeAccount(account))
+	}
+	return result
+}
+
+func accountIDsFromAccounts(accounts []Account) []string {
+	if len(accounts) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		accountID := firstNonEmpty(account.UID, account.ID)
+		if accountID == "" {
+			continue
+		}
+		result = append(result, accountID)
+	}
+	return result
+}
+
+func normalizeSessionResponse(response *SessionResponse) *SessionResponse {
+	if response == nil {
+		return nil
+	}
+	response.ID = response.SessionID
+	response.ExternalID = response.SessionID
+	response.ProviderReference = response.SessionID
+	response.DisplayName = ""
+	if response.ASPSP != nil {
+		response.DisplayName = response.ASPSP.Name
+	}
+	response.State = response.Status
+	response.AccountsData = normalizeAccounts(response.AccountsData)
+	response.Accounts = normalizeAccounts(response.Accounts)
+	if len(response.Accounts) == 0 {
+		switch {
+		case len(response.AccountsData) > 0:
+			response.Accounts = append([]Account(nil), response.AccountsData...)
+		case len(response.AccountIDs) > 0:
+			response.Accounts = make([]Account, 0, len(response.AccountIDs))
+			for _, accountID := range response.AccountIDs {
+				trimmed := strings.TrimSpace(accountID)
+				if trimmed == "" {
+					continue
+				}
+				response.Accounts = append(response.Accounts, Account{UID: trimmed, ID: trimmed})
+			}
+		}
+	}
+	return response
+}
+
+func normalizeCreateAuthResponse(response *CreateAuthResponse) *CreateAuthResponse {
+	if response == nil {
+		return nil
+	}
+	response.AuthorizationURL = response.URL
+	response.ID = response.AuthorizationID
+	response.ProviderReference = response.AuthorizationID
+	return response
+}
+
+func normalizeAccountDetailsResponse(response *GetAccountDetailsResponse) *GetAccountDetailsResponse {
+	if response == nil {
+		return nil
+	}
+	response.Currency = strings.ToUpper(response.Currency)
+	if response.AccountID != nil {
+		response.IBAN = strings.TrimSpace(response.AccountID.IBAN)
+	}
+	response.OwnerName = response.Name
+	if response.AccountServicer != nil {
+		response.BIC = response.AccountServicer.BICFI
+	}
+	return response
+}
+
+func normalizeBalances(response *GetAccountBalancesResponse) *GetAccountBalancesResponse {
+	if response == nil {
+		return nil
+	}
+	for index := range response.Balances {
+		response.Balances[index].Type = response.Balances[index].BalanceType
+		if response.Balances[index].BalanceAmount != nil {
+			response.Balances[index].BalanceAmount.Currency = strings.ToUpper(
+				response.Balances[index].BalanceAmount.Currency,
+			)
+		}
+	}
+	return response
+}
+
+func normalizeTransactions(response *GetAccountTransactionsResponse) *GetAccountTransactionsResponse {
+	if response == nil {
+		return nil
+	}
+	for index := range response.Transactions {
+		transaction := &response.Transactions[index]
+		transaction.Amount = transaction.TransactionAmount
+		transaction.Currency = strings.ToUpper(firstNonEmpty(
+			transaction.Currency,
+			transactionAmountCurrencyValue(transaction.TransactionAmount),
+		))
+		transaction.Description = firstNonEmpty(transaction.Note, firstSliceValue(transaction.RemittanceInformation))
+		transaction.RemittanceInformationUnstructured = firstNonEmpty(
+			firstSliceValue(transaction.RemittanceInformation),
+			transaction.Note,
+		)
+		transaction.EffectiveAt = firstNonEmpty(
+			transaction.TransactionDate,
+			transaction.BookingDate,
+			transaction.ValueDate,
+		)
+		transaction.AmountMinor = signedTransactionAmountMinor(*transaction)
+		if transaction.ID == "" {
+			transaction.ID = transaction.EntryReference
+		}
+	}
+	return response
+}
+
+func signedTransactionAmountMinor(transaction AccountTransaction) int64 {
+	amount := decimalToMinor(transactionAmountValue(transaction.TransactionAmount))
+	if amount > 0 && strings.EqualFold(transaction.CreditDebitIndicator, "DBIT") {
+		return -amount
+	}
+	return amount
+}
+
+func transactionAmountValue(amount *TransactionAmount) string {
+	if amount == nil {
+		return ""
+	}
+	return amount.Amount
+}
+
+func transactionAmountCurrencyValue(amount *TransactionAmount) string {
+	if amount == nil {
+		return ""
+	}
+	return amount.Currency
+}
+
+func firstSliceValue(values []string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			return trimmed
 		}
 	}

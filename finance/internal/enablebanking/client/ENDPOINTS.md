@@ -12,9 +12,6 @@ Client method: CreateSession(ctx, CreateSessionParams)
 GET /sessions/{sessionId}
 Client method: GetSession(ctx, GetSessionParams)
 
-GET /accounts
-Client method: ListAccounts(ctx, ListAccountsParams)
-
 GET /accounts/{accountId}/details
 Client method: GetAccountDetails(ctx, GetAccountDetailsParams)
 

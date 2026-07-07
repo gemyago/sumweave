@@ -1,0 +1,34 @@
+{
+  "session_id": "session-docs-1",
+  "accounts": [
+    {
+      "account_id": {
+        "iban": "FI0455231152453547"
+      },
+      "all_account_ids": [
+        {
+          "identification": "123456",
+          "scheme_name": "BBAN"
+        }
+      ],
+      "account_servicer": {
+        "bic_fi": "NDEAFIHH",
+        "name": "Nordea"
+      },
+      "name": "Main account",
+      "details": "Primary account",
+      "product": "Everyday banking",
+      "currency": "eur",
+      "uid": "07cc67f4-45d6-494b-adac-09b5cbc7e2b5",
+      "identification_hash": "hash-1"
+    }
+  ],
+  "aspsp": {
+    "name": "Nordea",
+    "country": "FI"
+  },
+  "psu_type": "business",
+  "access": {
+    "valid_until": "2019-08-24T14:15:22Z"
+  }
+}

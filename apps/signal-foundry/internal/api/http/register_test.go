@@ -172,7 +172,10 @@ func TestSetupV1Routes(t *testing.T) {
 		jobsStore, err := jobspkg.NewStore(jobsDSN, jobspkg.StoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, jobsStore.AutoMigrate())
-		jobsPublisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: jobsDSN})
+		jobsPublisher, err := appdispatch.NewPublisher(
+			appdispatch.Config{DatabaseDSN: jobsDSN},
+			telemetry.RootTestLogger(),
+		)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, jobsPublisher.Close()) })
 		jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
@@ -340,7 +343,10 @@ func TestSetupV1Routes(t *testing.T) {
 		jobsStore, err := jobspkg.NewStore(jobsDSN, jobspkg.StoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, jobsStore.AutoMigrate())
-		jobsPublisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: jobsDSN})
+		jobsPublisher, err := appdispatch.NewPublisher(
+			appdispatch.Config{DatabaseDSN: jobsDSN},
+			telemetry.RootTestLogger(),
+		)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, jobsPublisher.Close()) })
 		jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{

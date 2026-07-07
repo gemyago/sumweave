@@ -63,7 +63,11 @@ func TestRegisterHelpers(t *testing.T) {
 			DatabaseDSN: dsn,
 			TablePrefix: "pref_",
 		}))
-		publisher, err := newPublisherFromDI(storeDeps{DatabaseDSN: dsn, DatabaseTablePrefix: "pref_"})
+		publisher, err := newPublisherFromDI(publisherDeps{
+			DatabaseDSN:         dsn,
+			DatabaseTablePrefix: "pref_",
+			Logger:              slog.Default(),
+		})
 		require.NoError(t, err)
 		defer func() { require.NoError(t, publisher.Close()) }()
 		worker, err := newWorkerFromDI(workerDeps{

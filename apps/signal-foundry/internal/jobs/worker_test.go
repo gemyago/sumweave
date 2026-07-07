@@ -399,7 +399,10 @@ func TestWorker(t *testing.T) {
 		}}
 		dispatchDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
 		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: dispatchDSN}))
-		publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: dispatchDSN})
+		publisher, err := appdispatch.NewPublisher(
+			appdispatch.Config{DatabaseDSN: dispatchDSN},
+			slog.Default(),
+		)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, publisher.Close()) }()
 		activeWorker, err := NewWorker(WorkerDeps{
@@ -443,7 +446,7 @@ func TestWorker(t *testing.T) {
 		publisher, err := appdispatch.NewPublisher(appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		})
+		}, slog.Default())
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
@@ -597,7 +600,7 @@ func TestWorker(t *testing.T) {
 		publisher, err := appdispatch.NewPublisher(appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		})
+		}, slog.Default())
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
@@ -662,7 +665,10 @@ func TestWorker(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "wrk_"})
+		publisher, err := appdispatch.NewPublisher(
+			appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "wrk_"},
+			slog.Default(),
+		)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, publisher.Close()) }()
 
@@ -810,7 +816,7 @@ func TestWorker(t *testing.T) {
 		publisher, err := appdispatch.NewPublisher(appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		})
+		}, slog.Default())
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
@@ -934,7 +940,7 @@ func TestWorker(t *testing.T) {
 		publisher, err := appdispatch.NewPublisher(appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		})
+		}, slog.Default())
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 

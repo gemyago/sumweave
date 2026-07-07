@@ -20,6 +20,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
+	apphttpclient "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/infrastructure/httpclient"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	financepkg "github.com/gemyago/signal-foundry/finance"
@@ -34,6 +35,12 @@ import (
 type publisherStub struct{}
 
 func (publisherStub) PublishInTx(context.Context, *sql.Tx, appdispatch.Envelope) error { return nil }
+
+type financeAppRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f financeAppRoundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestNewFinanceStoreFromDI(t *testing.T) {
 	database, err := newDatabase(databaseDeps{
@@ -101,8 +108,30 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		return privateKeyPath
 	}
 
+	makeHTTPClientFactory := func(
+		t *testing.T,
+		mutateRequest func(*http.Request),
+	) *apphttpclient.ClientFactory {
+		t.Helper()
+
+		return apphttpclient.NewClientFactory(apphttpclient.ClientFactoryDeps{
+			RootLogger: slog.New(slog.DiscardHandler),
+			OtelHTTPTransportFactory: func(next http.RoundTripper) http.RoundTripper {
+				return financeAppRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+					cloned := request.Clone(request.Context())
+					cloned.Header = request.Header.Clone()
+					if mutateRequest != nil {
+						mutateRequest(cloned)
+					}
+					return next.RoundTrip(cloned)
+				})
+			},
+		})
+	}
+
 	t.Run("registers monobank and pko product choices and keeps sync job-backed", func(t *testing.T) {
 		monoToken := "mono-token-test"
+		expectedClientHeader := "finance-app-client"
 		monoClientInfoBody := `{"name":"mono","accounts":[{"id":"mono-acc-1","type":"black","currencyCode":980,"iban":"UA123","balance":101}]}`
 		monoTransactionsBody := `[{"id":"mono-txn-1","time":1717203600,"description":"mono txn","currencyCode":980,"amount":-250}]`
 		monoServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -124,14 +153,19 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		defer monoServer.Close()
 
 		enablePrivateKeyPath := makePrivateKeyPath(t)
-		enableAuthBody := `{"authorizationUrl":"https://bank.example/auth","id":"provider-ref-1"}`
-		enableSessionBody := `{"id":"session-1","displayName":"PKO","state":"active"}`
-		enableAccountsBody := `{"id":"session-1","accounts":[{"uid":"pko-acc-1","name":"PKO","currency":"PLN","iban":"PL123"}]}`
-		enableBalancesBody := `{"balances":[{"balance_amount":{"amount":"12.00","currency":"PLN"},"type":"closingBooked"},{"balance_amount":{"amount":"11.00","currency":"PLN"},"type":"interimAvailable"}]}`
-		enableTransactionsBody := `{"transactions":[{"id":"pko-txn-1","status":"booked","amount":{"amount":"5.00","currency":"PLN"},"credit_debit_indicator":"DBIT","remittance_information_unstructured":"pko txn","booking_date":"2026-06-02"}]}`
+		enableAuthBody := `{"url":"https://bank.example/auth","authorization_id":"provider-ref-1","psu_id_hash":"psu-hash-1"}`
+		enableSessionBody := `{"session_id":"session-1","accounts":[{"uid":"pko-acc-1","name":"PKO","currency":"PLN","account_id":{"iban":"PL123"}}],"aspsp":{"name":"PKO"},"access":{"valid_until":"2026-07-01T00:00:00Z"}}`
+		enableAccountsBody := `{"accounts":["pko-acc-1"],"accounts_data":[{"uid":"pko-acc-1","name":"PKO","currency":"PLN","account_id":{"iban":"PL123"}}],"aspsp":{"name":"PKO"},"status":"AUTHORIZED"}`
+		enableBalancesBody := `{"balances":[{"balance_amount":{"amount":"12.00","currency":"PLN"},"balance_type":"closingBooked"},{"balance_amount":{"amount":"11.00","currency":"PLN"},"balance_type":"interimAvailable"}]}`
+		enableTransactionsBody := `{"transactions":[{"entry_reference":"pko-txn-1","transaction_id":"pko-details-1","status":"BOOK","transaction_amount":{"amount":"5.00","currency":"PLN"},"credit_debit_indicator":"DBIT","remittance_information":["pko txn"],"booking_date":"2026-06-02"}]}`
 		enableServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if got := request.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
 				t.Errorf("enable banking authorization header = %q", got)
+			}
+			if got := request.Header.Get("X-App-Client"); got != expectedClientHeader {
+				writer.WriteHeader(http.StatusBadGateway)
+				_, _ = writer.Write([]byte(`{"message":"missing app-created client header"}`))
+				return
 			}
 			switch {
 			case request.Method == http.MethodPost && request.URL.Path == "/auth":
@@ -164,12 +198,15 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		)
 
 		financeModule, err := newFinanceModuleFromDI(financeServiceDeps{
-			Database:             database,
-			Store:                financeStore,
-			Jobs:                 jobsService,
-			JobsStore:            jobsStore,
-			Registry:             registry,
-			RootLogger:           nil,
+			Database:   database,
+			Store:      financeStore,
+			Jobs:       jobsService,
+			JobsStore:  jobsStore,
+			Registry:   registry,
+			RootLogger: nil,
+			HTTPClientFactory: makeHTTPClientFactory(t, func(request *http.Request) {
+				request.Header.Set("X-App-Client", expectedClientHeader)
+			}),
 			JWT:                  "jwt-key-for-finance-tests",
 			MonoURL:              monoServer.URL,
 			EnableURL:            enableServer.URL,
@@ -281,6 +318,18 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NoError(t, err)
 		privateKey, ok := parsedKey.(*rsa.PrivateKey)
 		require.True(t, ok)
+		authBody := `{"url":"https://bank.example.test/authorize","authorization_id":"auth-123"}`
+		sessionBody := `{"session_id":"session-123","accounts":[` +
+			`{"uid":"acc-1","name":"ROR","currency":"PLN","account_id":{"iban":"PL123"}}]}`
+		sessionDetailsBody := `{"accounts":["acc-1"],"accounts_data":[` +
+			`{"uid":"acc-1","name":"ROR","currency":"PLN","account_id":{"iban":"PL123"}}],` +
+			`"status":"AUTHORIZED"}`
+		balancesBody := `{"balances":[` +
+			`{"balance_type":"closingBooked","balance_amount":{"amount":"100.00","currency":"PLN"}}]}`
+		transactionsBody := `{"transactions":[` +
+			`{"entry_reference":"txn-1","transaction_id":"txn-details-1","status":"BOOK",` +
+			`"booking_date":"2026-06-02","transaction_amount":{"amount":"10.00","currency":"PLN"},` +
+			`"credit_debit_indicator":"DBIT","remittance_information":["Signed flow txn"]}]}`
 
 		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			authorization := strings.TrimSpace(request.Header.Get("Authorization"))
@@ -304,23 +353,15 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 
 			switch {
 			case request.Method == http.MethodPost && request.URL.Path == "/auth":
-				_, _ = writer.Write([]byte(`{"url":"https://bank.example.test/authorize","id":"auth-123"}`))
+				_, _ = writer.Write([]byte(authBody))
 			case request.Method == http.MethodPost && request.URL.Path == "/sessions":
-				_, _ = writer.Write([]byte(
-					`{"id":"session-123","accounts":[{"uid":"acc-1","name":"ROR","currency":"PLN","iban":"PL123"}]}`,
-				))
+				_, _ = writer.Write([]byte(sessionBody))
 			case request.Method == http.MethodGet && request.URL.Path == "/sessions/session-123":
-				_, _ = writer.Write([]byte(
-					`{"id":"session-123","state":"active","accounts":[{"uid":"acc-1","name":"ROR","currency":"PLN","iban":"PL123"}]}`,
-				))
+				_, _ = writer.Write([]byte(sessionDetailsBody))
 			case request.Method == http.MethodGet && request.URL.Path == "/accounts/acc-1/balances":
-				_, _ = writer.Write([]byte(
-					`{"balances":[{"type":"closingBooked","balance_amount":{"amount":"100.00","currency":"PLN"}}]}`,
-				))
+				_, _ = writer.Write([]byte(balancesBody))
 			case request.Method == http.MethodGet && request.URL.Path == "/accounts/acc-1/transactions":
-				_, _ = writer.Write([]byte(
-					`{"transactions":[{"id":"txn-1","status":"booked","booking_date":"2026-06-02","amount":{"amount":"10.00","currency":"PLN"},"credit_debit_indicator":"DBIT","remittance_information_unstructured":"Signed flow txn"}]}`,
-				))
+				_, _ = writer.Write([]byte(transactionsBody))
 			default:
 				http.NotFound(writer, request)
 			}
@@ -346,6 +387,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			JobsStore:            jobsStore,
 			Registry:             registry,
 			RootLogger:           nil,
+			HTTPClientFactory:    makeHTTPClientFactory(t, nil),
 			JWT:                  "jwt-key-for-finance-tests",
 			EnableURL:            server.URL,
 			EnableAppID:          "app-123",
@@ -450,6 +492,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 				func() *jobspkg.Service { return jobsService },
 				func() *jobspkg.Store { return jobsStore },
 				func() *jobspkg.Registry { return registry },
+				func() *apphttpclient.ClientFactory { return makeHTTPClientFactory(t, nil) },
 				di.ProvideValue(monoServer.URL, dig.Name("config.finance.providers.monobank.baseURL")),
 				di.ProvideValue(time.Duration(0), dig.Name("config.finance.providers.monobank.sleepBetweenRequests")),
 				di.ProvideValue(
@@ -535,14 +578,15 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		financeStore := persistence.NewStore(database)
 
 		_, err = newFinanceModuleFromDI(financeServiceDeps{
-			Database:        database,
-			Store:           financeStore,
-			JWT:             "jwt-key-for-finance-tests",
-			EnableURL:       "https://api.enablebanking.com",
-			EnableASPSPName: "Mock ASPSP",
-			EnableCountry:   "PL",
-			EnablePSUType:   "personal",
-			EnableValidDays: 90,
+			Database:          database,
+			Store:             financeStore,
+			HTTPClientFactory: makeHTTPClientFactory(t, nil),
+			JWT:               "jwt-key-for-finance-tests",
+			EnableURL:         "https://api.enablebanking.com",
+			EnableASPSPName:   "Mock ASPSP",
+			EnableCountry:     "PL",
+			EnablePSUType:     "personal",
+			EnableValidDays:   90,
 		})
 		require.ErrorContains(t, err, "validate enable banking config: app ID is required")
 	})

@@ -41,6 +41,140 @@ func (_m *MockWindowSyncApplyStore) EXPECT() *MockWindowSyncApplyStore_Expecter 
 	return &MockWindowSyncApplyStore_Expecter{mock: &_m.Mock}
 }
 
+// GetAccount provides a mock function for the type MockWindowSyncApplyStore
+func (_mock *MockWindowSyncApplyStore) GetAccount(ctx context.Context, accountID string) (*domain.Account, error) {
+	ret := _mock.Called(ctx, accountID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAccount")
+	}
+
+	var r0 *domain.Account
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*domain.Account, error)); ok {
+		return returnFunc(ctx, accountID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *domain.Account); ok {
+		r0 = returnFunc(ctx, accountID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*domain.Account)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, accountID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWindowSyncApplyStore_GetAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAccount'
+type MockWindowSyncApplyStore_GetAccount_Call struct {
+	*mock.Call
+}
+
+// GetAccount is a helper method to define mock.On call
+//   - ctx context.Context
+//   - accountID string
+func (_e *MockWindowSyncApplyStore_Expecter) GetAccount(ctx interface{}, accountID interface{}) *MockWindowSyncApplyStore_GetAccount_Call {
+	return &MockWindowSyncApplyStore_GetAccount_Call{Call: _e.mock.On("GetAccount", ctx, accountID)}
+}
+
+func (_c *MockWindowSyncApplyStore_GetAccount_Call) Run(run func(ctx context.Context, accountID string)) *MockWindowSyncApplyStore_GetAccount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_GetAccount_Call) Return(account *domain.Account, err error) *MockWindowSyncApplyStore_GetAccount_Call {
+	_c.Call.Return(account, err)
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_GetAccount_Call) RunAndReturn(run func(ctx context.Context, accountID string) (*domain.Account, error)) *MockWindowSyncApplyStore_GetAccount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveAccount provides a mock function for the type MockWindowSyncApplyStore
+func (_mock *MockWindowSyncApplyStore) SaveAccount(ctx context.Context, account domain.Account) (domain.Account, error) {
+	ret := _mock.Called(ctx, account)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveAccount")
+	}
+
+	var r0 domain.Account
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.Account) (domain.Account, error)); ok {
+		return returnFunc(ctx, account)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.Account) domain.Account); ok {
+		r0 = returnFunc(ctx, account)
+	} else {
+		r0 = ret.Get(0).(domain.Account)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.Account) error); ok {
+		r1 = returnFunc(ctx, account)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWindowSyncApplyStore_SaveAccount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveAccount'
+type MockWindowSyncApplyStore_SaveAccount_Call struct {
+	*mock.Call
+}
+
+// SaveAccount is a helper method to define mock.On call
+//   - ctx context.Context
+//   - account domain.Account
+func (_e *MockWindowSyncApplyStore_Expecter) SaveAccount(ctx interface{}, account interface{}) *MockWindowSyncApplyStore_SaveAccount_Call {
+	return &MockWindowSyncApplyStore_SaveAccount_Call{Call: _e.mock.On("SaveAccount", ctx, account)}
+}
+
+func (_c *MockWindowSyncApplyStore_SaveAccount_Call) Run(run func(ctx context.Context, account domain.Account)) *MockWindowSyncApplyStore_SaveAccount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 domain.Account
+		if args[1] != nil {
+			arg1 = args[1].(domain.Account)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_SaveAccount_Call) Return(account1 domain.Account, err error) *MockWindowSyncApplyStore_SaveAccount_Call {
+	_c.Call.Return(account1, err)
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_SaveAccount_Call) RunAndReturn(run func(ctx context.Context, account domain.Account) (domain.Account, error)) *MockWindowSyncApplyStore_SaveAccount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveBalanceSnapshot provides a mock function for the type MockWindowSyncApplyStore
 func (_mock *MockWindowSyncApplyStore) SaveBalanceSnapshot(ctx context.Context, snapshot domain.BalanceSnapshot) (domain.BalanceSnapshot, error) {
 	ret := _mock.Called(ctx, snapshot)

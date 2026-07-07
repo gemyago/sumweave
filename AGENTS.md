@@ -118,7 +118,7 @@ The rules are:
 - Each rule must aim to be a simple and clear one line (50-80 characters)
 - `docs/ARCHITECTURE.md` is the source of truth for product direction.
 - Keep platform-internal skills under `.platform-agents/skills`.
-- Keep generic repo-local skills under `.agents/skills`.
+- Keep harness agnostic repo-local skills under `.agents/skills`.
 - Platform runtime loads only `.platform-agents/skills`.
 - Treat template-derived code as reference unless adopted.
 - Prefer core Go, Go app, and UI as real product scope.
@@ -149,6 +149,19 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 ## Manual E2E Testing
 
 When user asks to e2e test something, usually this means following the steps in the relevant [manual e2e testing guide](./docs/manual-e2e/README.md).
+
+Also if user is asking you to run browser in headed mode, usually this means adding `--headed` flag if you're using playwright cli.
+
+When user is asking you to add a new skill, do this:
+- Create the skill in the `.agents/skills` directory. Name it properly
+- Define standard frontmatter for the skill (at least name and description)
+- Keep description short and to the point, avoid fluff. Make it minimalistic and include enough for LLM model to understand what the skill is about.
+- Define skill instruction as per user request.
+- Link the skill to the harnesses using `.agents/skills/link-vendor-harnesses.sh` script
+
+## Harness Agent Skills
+
+Harness agnostic repo-local skills live under `.agents/skills`. After creating a new skill, make sure to link it using `.agents/skills/link-vendor-harnesses.sh`
 
 ## Platform Agent Skills
 

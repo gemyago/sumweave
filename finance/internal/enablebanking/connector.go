@@ -44,6 +44,10 @@ type connectorClient interface {
 		ctx context.Context,
 		params enablebankingclient.GetSessionParams,
 	) (*enablebankingclient.SessionResponse, error)
+	GetAccountDetails(
+		ctx context.Context,
+		params enablebankingclient.GetAccountDetailsParams,
+	) (*enablebankingclient.GetAccountDetailsResponse, error)
 	GetAccountBalances(
 		ctx context.Context,
 		params enablebankingclient.GetAccountBalancesParams,
@@ -277,11 +281,12 @@ func (c *Connector) fetchOfficial(
 	}
 	c.logger.InfoContext(
 		ctx,
-		"fetching enable banking sync batch",
+		"fetched enable banking session",
 		slog.String("connectionId", request.Connection.ConnectionID),
 		slog.String("externalId", request.Connection.ExternalID),
 		slog.Time("requestedStart", request.RequestedWindow.Start),
 		slog.Time("requestedEnd", request.RequestedWindow.End),
+		slog.Int("accountCount", len(session.Accounts)),
 	)
 	return c.mapBatch(ctx, request, session)
 }
@@ -293,21 +298,7 @@ func (c *Connector) mapBatch(
 ) (domain.ProviderSyncBatch, error) {
 	capturedAt := c.now().UTC()
 	accountItems := session.Accounts
-	c.logSessionAccounts(ctx, request, accountItems)
-	batch := domain.ProviderSyncBatch{
-		Connection:      request.Connection,
-		RequestedWindow: request.RequestedWindow,
-		Accounts:        make([]domain.ProviderAccountObservation, 0, len(accountItems)),
-		Balances:        make([]domain.ProviderBalanceObservation, 0, len(accountItems)),
-		Transactions:    []domain.ProviderTransactionObservation{},
-		RawPayloads: []domain.ProviderRawPayloadObservation{{
-			Connection:       request.Connection,
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: firstNonEmpty(request.Connection.ExternalID, "session"),
-			PayloadJSON:      mustJSON(session),
-			CapturedAt:       capturedAt,
-		}},
-	}
+	batch := newSyncBatch(request, session, capturedAt, len(accountItems))
 	for _, typedAccount := range accountItems {
 		accountID := firstNonEmpty(typedAccount.UID, typedAccount.ID)
 		if accountID == "" {
@@ -319,6 +310,20 @@ func (c *Connector) mapBatch(
 			slog.String("connectionId", request.Connection.ConnectionID),
 			slog.String("accountId", accountID),
 		)
+		enrichedAccount, detailsRawPayload, hasDetailsRawPayload, err := c.enrichAccountMetadata(
+			ctx,
+			request.Connection,
+			accountID,
+			typedAccount,
+			capturedAt,
+		)
+		if err != nil {
+			return domain.ProviderSyncBatch{}, err
+		}
+		typedAccount = enrichedAccount
+		if hasDetailsRawPayload {
+			batch.RawPayloads = append(batch.RawPayloads, detailsRawPayload)
+		}
 		account := normalizeAccount(request.Connection, accountID, typedAccount)
 		batch.Accounts = append(batch.Accounts, account)
 
@@ -378,32 +383,79 @@ func (c *Connector) mapBatch(
 	return batch, nil
 }
 
-func (c *Connector) logSessionAccounts(
-	ctx context.Context,
+func newSyncBatch(
 	request providers.FetchRequest,
-	accountItems []enablebankingclient.Account,
-) {
-	accountIDs := make([]string, 0, len(accountItems))
-	for _, typedAccount := range accountItems {
-		accountID := firstNonEmpty(typedAccount.UID, typedAccount.ID)
-		if accountID == "" {
-			c.logger.WarnContext(
-				ctx,
-				"skipping enable banking account without identifier",
-				slog.String("connectionId", request.Connection.ConnectionID),
-				slog.String("providerReference", request.Connection.ProviderReference),
-			)
-			continue
-		}
-		accountIDs = append(accountIDs, accountID)
+	session *enablebankingclient.SessionResponse,
+	capturedAt time.Time,
+	accountCount int,
+) domain.ProviderSyncBatch {
+	return domain.ProviderSyncBatch{
+		Connection:      request.Connection,
+		RequestedWindow: request.RequestedWindow,
+		Accounts:        make([]domain.ProviderAccountObservation, 0, accountCount),
+		Balances:        make([]domain.ProviderBalanceObservation, 0, accountCount),
+		Transactions:    []domain.ProviderTransactionObservation{},
+		RawPayloads: []domain.ProviderRawPayloadObservation{{
+			Connection:       request.Connection,
+			Scope:            domain.RawPayloadScopeConnection,
+			ProviderObjectID: firstNonEmpty(request.Connection.ExternalID, "session"),
+			PayloadJSON:      mustJSON(session),
+			CapturedAt:       capturedAt,
+		}},
 	}
-	c.logger.InfoContext(
-		ctx,
-		"loaded enable banking session accounts",
-		slog.String("connectionId", request.Connection.ConnectionID),
-		slog.Any("accountIds", accountIDs),
-		slog.Int("accountCount", len(accountIDs)),
-	)
+}
+
+func (c *Connector) enrichAccountMetadata(
+	ctx context.Context,
+	connection domain.ProviderConnectionRef,
+	accountID string,
+	account enablebankingclient.Account,
+	capturedAt time.Time,
+) (enablebankingclient.Account, domain.ProviderRawPayloadObservation, bool, error) {
+	if !accountDetailsNeeded(account) {
+		return account, domain.ProviderRawPayloadObservation{}, false, nil
+	}
+	details, err := c.api.GetAccountDetails(ctx, enablebankingclient.GetAccountDetailsParams{
+		AccountID: accountID,
+	})
+	if err != nil {
+		return account, domain.ProviderRawPayloadObservation{}, false,
+			fmt.Errorf("enable banking get account details: %w", err)
+	}
+	account = mergeAccountDetails(account, details)
+	return account, domain.ProviderRawPayloadObservation{
+		Connection:       connection,
+		Scope:            domain.RawPayloadScopeAccount,
+		ProviderObjectID: accountID,
+		PayloadJSON:      mustJSON(details),
+		CapturedAt:       capturedAt,
+	}, true, nil
+}
+
+func accountDetailsNeeded(account enablebankingclient.Account) bool {
+	return strings.TrimSpace(account.Name) == "" || strings.TrimSpace(account.Currency) == ""
+}
+
+func mergeAccountDetails(
+	account enablebankingclient.Account,
+	details *enablebankingclient.GetAccountDetailsResponse,
+) enablebankingclient.Account {
+	if details == nil {
+		return account
+	}
+	if strings.TrimSpace(account.Name) == "" {
+		account.Name = details.Name
+	}
+	if strings.TrimSpace(account.Currency) == "" {
+		account.Currency = details.Currency
+	}
+	if strings.TrimSpace(account.IBAN) == "" {
+		account.IBAN = details.IBAN
+	}
+	if account.AccountID == nil {
+		account.AccountID = details.AccountID
+	}
+	return account
 }
 
 func (c *Connector) fetchTransactionPages(
@@ -507,8 +559,8 @@ func normalizeTransaction(
 	))
 	amountMinor := amountMinor(transaction)
 	transactionID := firstNonEmpty(
-		transaction.TransactionID,
 		transaction.ID,
+		transaction.TransactionID,
 		providerFingerprint(accountID, mustJSON(transaction)),
 	)
 	status := normalizeTransactionStatus(transaction.Status)

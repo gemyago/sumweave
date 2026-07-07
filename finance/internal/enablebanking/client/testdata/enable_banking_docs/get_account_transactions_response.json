@@ -1,0 +1,23 @@
+{
+  "transactions": [
+    {
+      "entry_reference": "5561990681",
+      "transaction_amount": {
+        "currency": "EUR",
+        "amount": "1.23"
+      },
+      "credit_debit_indicator": "CRDT",
+      "status": "BOOK",
+      "booking_date": "2020-01-03",
+      "value_date": "2020-01-02",
+      "transaction_date": "2020-01-01",
+      "remittance_information": [
+        "RF07850352502356628678117",
+        "Gift for Alex"
+      ],
+      "note": "string",
+      "transaction_id": "transaction-docs-1"
+    }
+  ],
+  "continuation_key": "string"
+}

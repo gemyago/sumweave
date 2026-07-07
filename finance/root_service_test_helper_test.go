@@ -769,12 +769,13 @@ func (s *Service) findOrCreateFinanceAccountForProviderAccount(
 	ctx context.Context,
 	connection domain.BankConnection,
 	item ProviderNormalizedAccount,
+	existingProviderAccount *domain.ConnectionProviderAccount,
 	now time.Time,
 ) (domain.Account, error) {
 	if s.bankSync == nil {
 		return domain.Account{}, errors.New("bank sync store is required")
 	}
-	return s.bankSync.findOrCreateFinanceAccountForProviderAccount(ctx, connection, item, now)
+	return s.bankSync.findOrCreateFinanceAccountForProviderAccount(ctx, connection, item, existingProviderAccount, now)
 }
 
 //nolint:unparam // Test-only compatibility wrapper keeps the legacy bool result for existing assertions.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -305,7 +306,7 @@ func TestJobsController(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, store.AutoMigrate())
 				require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: dsn}))
-				publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: dsn})
+				publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: dsn}, slog.Default())
 				require.NoError(t, err)
 				defer func() { require.NoError(t, publisher.Close()) }()
 				svc, err := jobspkg.NewService(

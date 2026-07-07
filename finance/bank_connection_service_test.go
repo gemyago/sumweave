@@ -310,17 +310,19 @@ func TestBankConnectionService(t *testing.T) {
 					t.Fatalf("expected POST auth, got %s", r.Method)
 				}
 				writeJSON(t, w, map[string]any{
-					"authorizationUrl": "https://enable-banking.example.test/auth/" + fake.UUID().V4(),
-					"id":               "auth-ref-" + fake.UUID().V4(),
+					"url":              "https://enable-banking.example.test/auth/" + fake.UUID().V4(),
+					"authorization_id": "auth-ref-" + fake.UUID().V4(),
 				})
 			case "/sessions":
 				if r.Method != http.MethodPost {
 					t.Fatalf("expected POST sessions, got %s", r.Method)
 				}
 				writeJSON(t, w, map[string]any{
-					"id":          "session-" + fake.UUID().V4(),
-					"displayName": "PKO " + fake.Company().Name(),
-					"state":       string(domain.BankConnectionStateActive),
+					"session_id": "session-" + fake.UUID().V4(),
+					"status":     string(domain.BankConnectionStateActive),
+					"aspsp": map[string]any{
+						"name": fake.Company().Name(),
+					},
 				})
 			default:
 				t.Fatalf("unexpected enable banking path: %s", r.URL.Path)

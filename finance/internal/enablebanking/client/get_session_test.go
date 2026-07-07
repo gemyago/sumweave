@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,16 +14,13 @@ import (
 func TestClient_GetSession(t *testing.T) {
 	fake := faker.New()
 
-	t.Run("success with all parameters", func(t *testing.T) {
+	t.Run("decodes documented get session response fields", func(t *testing.T) {
 		sessionID := "session-" + fake.UUID().V4()
+		fixture := readDocsFixture(t, "get_session_response.json")
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/sessions/"+sessionID, r.URL.Path)
-			_, _ = w.Write(
-				[]byte(
-					`{"id":"` + sessionID + `","displayName":"PKO","accounts":[{"uid":"acc-1","name":"ROR"}]}`,
-				),
-			)
+			_, _ = fmt.Fprint(w, fixture)
 		}))
 		defer server.Close()
 
@@ -32,14 +30,19 @@ func TestClient_GetSession(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, sessionID, response.SessionID)
-		assert.Equal(t, "PKO", response.DisplayName)
+		assert.Equal(t, "Nordea", response.DisplayName)
+		assert.Equal(t, "AUTHORIZED", response.Status)
+		assert.Equal(t, []string{"497f6eca-6276-4993-bfeb-53cbbbba6f08"}, response.AccountIDs)
+		require.Len(t, response.AccountsData, 1)
+		assert.Equal(t, "497f6eca-6276-4993-bfeb-53cbbbba6f08", response.AccountsData[0].UID)
 		require.Len(t, response.Accounts, 1)
+		assert.Equal(t, "497f6eca-6276-4993-bfeb-53cbbbba6f08", response.Accounts[0].UID)
 	})
 
-	t.Run("success with required parameters only", func(t *testing.T) {
+	t.Run("rejects undocumented session account object array", func(t *testing.T) {
 		sessionID := "session-" + fake.UUID().V4()
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"id":"` + sessionID + `"}`))
+			_, _ = w.Write([]byte(`{"accounts":[{"uid":"acc-1"}]}`))
 		}))
 		defer server.Close()
 
@@ -47,8 +50,8 @@ func TestClient_GetSession(t *testing.T) {
 
 		response, err := client.GetSession(t.Context(), GetSessionParams{SessionID: sessionID})
 
-		require.NoError(t, err)
-		assert.Equal(t, sessionID, response.SessionID)
+		require.ErrorContains(t, err, "enable banking response decode")
+		assert.Nil(t, response)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

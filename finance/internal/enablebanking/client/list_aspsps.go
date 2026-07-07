@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // ListASPSPsParams contains ASPSP query parameters.
@@ -18,18 +19,17 @@ func (c *Client) ListASPSPs(ctx context.Context, params ListASPSPsParams) (*List
 	if params.Country != "" {
 		query.Set("country", params.Country)
 	}
-	rawItems, err := c.DoRawArray(ctx, DoRawJSONParams{Method: http.MethodGet, Path: "/aspsps", Query: query})
+	result, err := sendJSON[struct{}, ListASPSPsResponse](ctx, c, sendJSONParams[struct{}]{
+		Method: http.MethodGet,
+		Path:   "/aspsps",
+		Query:  query,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list aspsps failed: %w", err)
 	}
-	response := &ListASPSPsResponse{Raw: rawItems, ASPSPs: make([]ASPSP, 0, len(rawItems))}
-	for _, item := range rawItems {
-		response.ASPSPs = append(response.ASPSPs, ASPSP{
-			ID:      stringValue(item, "id"),
-			Name:    stringValue(item, "name"),
-			Country: stringValue(item, "country"),
-			Raw:     item,
-		})
+	response := result.Value
+	for index := range response.ASPSPs {
+		response.ASPSPs[index].Country = strings.TrimSpace(response.ASPSPs[index].Country)
 	}
 	return response, nil
 }

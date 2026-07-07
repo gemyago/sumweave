@@ -227,6 +227,73 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		assert.Empty(t, matches)
 	})
 
+	t.Run("applies provider metadata refresh to persisted linked finance accounts", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		adapter := NewProviderWindowSyncPersistence(store)
+		syncStore, err := providers.NewProviderWindowSyncStore(
+			adapter,
+			providers.WithWindowSyncStoreNow(func() time.Time {
+				return time.Date(2026, time.July, 7, 18, 30, 0, 0, time.UTC)
+			}),
+		)
+		require.NoError(t, err)
+
+		now := time.Date(2026, time.July, 7, 17, 30, 0, 0, time.UTC)
+		tenantID := "tenant-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		financeAccountID := "finance-account-" + fake.UUID().V4()
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		readableName := "provider-name-" + fake.Lorem().Word()
+
+		_, err = store.SaveAccount(t.Context(), domain.Account{
+			ID:       financeAccountID,
+			TenantID: tenantID,
+			Name:     providerAccountID,
+			Currency: "",
+			Kind:     domain.AccountKindLinked,
+			LinkedAccount: &domain.LinkedAccount{
+				Provider:          string(domain.ProviderIDPKO),
+				ProviderAccountID: providerAccountID,
+			},
+			CreatedAt: now.Add(-time.Hour),
+			UpdatedAt: now.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+		_, err = store.SaveConnectionProviderAccount(t.Context(), domain.ConnectionProviderAccount{
+			ID:                "provider-account-row-" + fake.UUID().V4(),
+			ConnectionID:      connectionID,
+			ProviderAccountID: providerAccountID,
+			FinanceAccountID:  financeAccountID,
+			Name:              providerAccountID,
+			Currency:          "",
+			CreatedAt:         now.Add(-time.Hour),
+			UpdatedAt:         now.Add(-time.Hour),
+		})
+		require.NoError(t, err)
+
+		err = syncStore.ApplySync(t.Context(), providers.ProviderDiffPlan{
+			Connection: domain.ProviderConnectionRef{
+				ConnectionID: connectionID,
+				ProviderID:   domain.ProviderIDPKO,
+				ConnectorID:  domain.ProviderConnectorIDEnableBanking,
+			},
+			SnapshotWindow: domain.ProviderSyncWindow{Start: now.Add(-24 * time.Hour), End: now},
+			AccountObservations: []domain.ProviderAccountObservation{{
+				ProviderAccountID: providerAccountID,
+				Name:              readableName,
+				Currency:          "EUR",
+			}},
+		}, providers.ApplyPlan{})
+		require.NoError(t, err)
+
+		loadedAccount, err := store.GetAccount(t.Context(), financeAccountID)
+		require.NoError(t, err)
+		require.NotNil(t, loadedAccount)
+		assert.Equal(t, readableName, loadedAccount.Name)
+		assert.Equal(t, "EUR", loadedAccount.Currency)
+	})
+
 	t.Run("commits on success and rolls back on callback error", func(t *testing.T) {
 		makeFixture := func(fake faker.Faker, connectionID string) (
 			domain.ConnectionProviderAccount,

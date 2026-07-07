@@ -15,16 +15,19 @@ import (
 
 func TestProviderWindowSyncStore(t *testing.T) {
 	type persistenceFixture struct {
-		accounts     []domain.ConnectionProviderAccount
-		transactions []domain.Transaction
-		matches      []domain.ProviderTransactionMatch
+		accounts        []domain.ConnectionProviderAccount
+		financeAccounts map[string]domain.Account
+		transactions    []domain.Transaction
+		matches         []domain.ProviderTransactionMatch
 
-		listAccountsErr     error
-		listTransactionsErr error
-		listMatchesErr      error
-		saveBalanceErr      error
-		saveTransactionErr  error
-		withTransactionErr  error
+		listAccountsErr       error
+		listTransactionsErr   error
+		listMatchesErr        error
+		saveBalanceErr        error
+		getFinanceAccountErr  error
+		saveFinanceAccountErr error
+		saveTransactionErr    error
+		withTransactionErr    error
 
 		listAccountsConnectionIDs []string
 		listTransactionAccountIDs [][]string
@@ -32,11 +35,12 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		listMatchConnectionIDs    []string
 		listMatchTransactionIDs   [][]string
 
-		savedAccounts     []domain.ConnectionProviderAccount
-		savedSnapshots    []domain.BalanceSnapshot
-		savedRawPayloads  []domain.RawPayload
-		savedTransactions []domain.Transaction
-		savedMatches      []domain.ProviderTransactionMatch
+		savedAccounts        []domain.ConnectionProviderAccount
+		savedFinanceAccounts []domain.Account
+		savedSnapshots       []domain.BalanceSnapshot
+		savedRawPayloads     []domain.RawPayload
+		savedTransactions    []domain.Transaction
+		savedMatches         []domain.ProviderTransactionMatch
 
 		operationOrder []string
 
@@ -105,6 +109,35 @@ func TestProviderWindowSyncStore(t *testing.T) {
 			) (domain.ConnectionProviderAccount, error) {
 				fixture.operationOrder = append(fixture.operationOrder, "saveAccount")
 				fixture.savedAccounts = append(fixture.savedAccounts, account)
+				return account, nil
+			}).Maybe()
+
+		applyStore.EXPECT().
+			GetAccount(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, accountID string) (*domain.Account, error) {
+				fixture.operationOrder = append(fixture.operationOrder, "getFinanceAccount")
+				if fixture.getFinanceAccountErr != nil {
+					return nil, fixture.getFinanceAccountErr
+				}
+				if fixture.financeAccounts == nil {
+					return &domain.Account{ID: accountID}, nil
+				}
+				account, ok := fixture.financeAccounts[accountID]
+				if !ok {
+					return &domain.Account{ID: accountID}, nil
+				}
+				copyAccount := account
+				return &copyAccount, nil
+			}).Maybe()
+
+		applyStore.EXPECT().
+			SaveAccount(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, account domain.Account) (domain.Account, error) {
+				fixture.operationOrder = append(fixture.operationOrder, "saveFinanceAccount")
+				if fixture.saveFinanceAccountErr != nil {
+					return domain.Account{}, fixture.saveFinanceAccountErr
+				}
+				fixture.savedFinanceAccounts = append(fixture.savedFinanceAccounts, account)
 				return account, nil
 			}).Maybe()
 
@@ -366,6 +399,19 @@ func TestProviderWindowSyncStore(t *testing.T) {
 			existingAccount.FinanceAccountID,
 			now.Add(-48*time.Hour),
 		)
+		existingFinanceAccount := domain.Account{
+			ID:       existingAccount.FinanceAccountID,
+			TenantID: existingTransaction.TenantID,
+			Name:     existingAccount.Name,
+			Currency: existingAccount.Currency,
+			Kind:     domain.AccountKindLinked,
+			LinkedAccount: &domain.LinkedAccount{
+				Provider:          string(connection.ProviderID),
+				ProviderAccountID: existingAccount.ProviderAccountID,
+			},
+			CreatedAt: now.Add(-72 * time.Hour),
+			UpdatedAt: now.Add(-36 * time.Hour),
+		}
 		existingMatch := makeMatch(
 			fake,
 			connection.ConnectionID,
@@ -438,7 +484,10 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		}
 
 		fixture := &persistenceFixture{
-			accounts:     []domain.ConnectionProviderAccount{existingAccount},
+			accounts: []domain.ConnectionProviderAccount{existingAccount},
+			financeAccounts: map[string]domain.Account{
+				existingFinanceAccount.ID: existingFinanceAccount,
+			},
 			transactions: []domain.Transaction{existingTransaction},
 			matches:      []domain.ProviderTransactionMatch{existingMatch},
 		}
@@ -478,6 +527,8 @@ func TestProviderWindowSyncStore(t *testing.T) {
 				"listTransactions",
 				"listMatches",
 				"saveAccount",
+				"getFinanceAccount",
+				"saveFinanceAccount",
 				"saveBalance",
 				"saveRawPayload",
 				"saveTransaction",
@@ -502,6 +553,12 @@ func TestProviderWindowSyncStore(t *testing.T) {
 			CreatedAt:            existingAccount.CreatedAt,
 			UpdatedAt:            now,
 		}, fixture.savedAccounts[0])
+		require.Len(t, fixture.savedFinanceAccounts, 1)
+		expectedFinanceAccount := existingFinanceAccount
+		expectedFinanceAccount.Name = accountObservation.Name
+		expectedFinanceAccount.Currency = accountObservation.Currency
+		expectedFinanceAccount.UpdatedAt = now
+		assert.Equal(t, expectedFinanceAccount, fixture.savedFinanceAccounts[0])
 
 		require.Len(t, fixture.savedSnapshots, 1)
 		assert.Equal(t, domain.BalanceSnapshot{
@@ -582,6 +639,58 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		}, fixture.savedMatches[1])
 	})
 
+	t.Run("preserves custom linked finance account name during provider metadata refresh", func(t *testing.T) {
+		fake := faker.New()
+		connection := makeRandomProviderConnectionRef(
+			fake,
+			domain.ProviderIDPKO,
+			domain.ProviderConnectorIDEnableBanking,
+		)
+		now := time.Date(2026, time.July, 7, 12, 0, 0, 0, time.UTC)
+		window := makeRandomProviderSyncWindow(fake)
+		existingAccount := makeProviderAccount(fake, connection.ConnectionID)
+		financeAccount := domain.Account{
+			ID:       existingAccount.FinanceAccountID,
+			TenantID: "tenant-" + fake.UUID().V4(),
+			Name:     "custom-" + fake.Lorem().Word(),
+			Currency: existingAccount.Currency,
+			Kind:     domain.AccountKindLinked,
+			LinkedAccount: &domain.LinkedAccount{
+				Provider:          string(connection.ProviderID),
+				ProviderAccountID: existingAccount.ProviderAccountID,
+			},
+			CreatedAt: now.Add(-48 * time.Hour),
+			UpdatedAt: now.Add(-24 * time.Hour),
+		}
+		fixture := &persistenceFixture{
+			accounts: []domain.ConnectionProviderAccount{existingAccount},
+			financeAccounts: map[string]domain.Account{
+				financeAccount.ID: financeAccount,
+			},
+		}
+		persistence := makePersistence(t, fixture)
+		store, err := NewProviderWindowSyncStore(
+			persistence,
+			WithWindowSyncStoreNow(func() time.Time { return now }),
+		)
+		require.NoError(t, err)
+
+		err = store.ApplySync(t.Context(), ProviderDiffPlan{
+			Connection:     connection,
+			SnapshotWindow: window,
+			AccountObservations: []domain.ProviderAccountObservation{{
+				Connection:        connection,
+				ProviderAccountID: existingAccount.ProviderAccountID,
+				Name:              "provider-" + fake.Lorem().Word(),
+				Currency:          existingAccount.Currency,
+			}},
+		}, ApplyPlan{})
+		require.NoError(t, err)
+
+		require.Len(t, fixture.savedAccounts, 1)
+		assert.Empty(t, fixture.savedFinanceAccounts)
+	})
+
 	t.Run("returns apply errors when mappings or canonical writes fail", func(t *testing.T) {
 		fake := faker.New()
 		connection := makeRandomProviderConnectionRef(
@@ -628,6 +737,58 @@ func TestProviderWindowSyncStore(t *testing.T) {
 			FinanceAccountID:  "finance-account-" + fake.UUID().V4(),
 			CreatedAt:         time.Now().UTC(),
 		}
+		existingFinanceAccount := domain.Account{
+			ID:       existingAccount.FinanceAccountID,
+			TenantID: "tenant-" + fake.UUID().V4(),
+			Name:     existingAccount.Name,
+			Currency: existingAccount.Currency,
+			Kind:     domain.AccountKindLinked,
+			LinkedAccount: &domain.LinkedAccount{
+				Provider:          string(connection.ProviderID),
+				ProviderAccountID: existingAccount.ProviderAccountID,
+			},
+			CreatedAt: time.Now().UTC().Add(-time.Hour),
+			UpdatedAt: time.Now().UTC().Add(-time.Minute),
+		}
+		observedLinkedAccount := observedAccount
+		observedLinkedAccount.Name = "provider-name-" + fake.Lorem().Word()
+		observedLinkedAccount.Currency = "EUR"
+
+		expectedErr := errors.New("get-finance-account-" + fake.UUID().V4())
+		fixture = &persistenceFixture{
+			accounts:             []domain.ConnectionProviderAccount{existingAccount},
+			getFinanceAccountErr: expectedErr,
+		}
+		persistence = makePersistence(t, fixture)
+		store, err = NewProviderWindowSyncStore(persistence)
+		require.NoError(t, err)
+		err = store.ApplySync(t.Context(), ProviderDiffPlan{
+			Connection:          connection,
+			SnapshotWindow:      window,
+			AccountObservations: []domain.ProviderAccountObservation{observedLinkedAccount},
+		}, ApplyPlan{})
+		require.ErrorIs(t, err, expectedErr)
+		require.ErrorContains(t, err, "get linked finance account")
+
+		expectedErr = errors.New("save-finance-account-" + fake.UUID().V4())
+		fixture = &persistenceFixture{
+			accounts: []domain.ConnectionProviderAccount{existingAccount},
+			financeAccounts: map[string]domain.Account{
+				existingFinanceAccount.ID: existingFinanceAccount,
+			},
+			saveFinanceAccountErr: expectedErr,
+		}
+		persistence = makePersistence(t, fixture)
+		store, err = NewProviderWindowSyncStore(persistence)
+		require.NoError(t, err)
+		err = store.ApplySync(t.Context(), ProviderDiffPlan{
+			Connection:          connection,
+			SnapshotWindow:      window,
+			AccountObservations: []domain.ProviderAccountObservation{observedLinkedAccount},
+		}, ApplyPlan{})
+		require.ErrorIs(t, err, expectedErr)
+		require.ErrorContains(t, err, "save linked finance account")
+
 		writeObservation := domain.ProviderTransactionObservation{
 			Connection:            connection,
 			ProviderAccountID:     existingAccount.ProviderAccountID,
@@ -639,7 +800,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 			EffectiveAt:           time.Now().UTC(),
 			Fingerprint:           "fingerprint-" + fake.UUID().V4(),
 		}
-		expectedErr := errors.New("save-transaction-" + fake.UUID().V4())
+		expectedErr = errors.New("save-transaction-" + fake.UUID().V4())
 		fixture = &persistenceFixture{
 			accounts: []domain.ConnectionProviderAccount{existingAccount},
 			transactions: []domain.Transaction{{

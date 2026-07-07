@@ -113,7 +113,9 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			case "/sessions/" + enableBankingConnection.ExternalID:
 				_, _ = fmt.Fprintf(
 					w,
-					`{"accounts":[{"uid":"%s","name":"PKO Main","currency":"pln","iban":"PL11111111111111111111111111"}]}`,
+					`{"session_id":"%s","accounts":["%s"],"accounts_data":[{"uid":"%s","name":"PKO Main","currency":"pln","account_id":{"iban":"PL11111111111111111111111111"}}]}`,
+					enableBankingConnection.ExternalID,
+					enableBankingAccountID,
 					enableBankingAccountID,
 				)
 			case "/accounts/" + enableBankingAccountID + "/balances":
@@ -123,7 +125,7 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			case "/accounts/" + enableBankingAccountID + "/transactions":
 				_, _ = fmt.Fprintf(
 					w,
-					`{"transactions":[{"transactionId":"%s","status":"booked","amountMinor":-5050,"currency":"pln","description":"coffee-%s","effectiveAt":"2026-06-11T08:15:00Z"}]}`,
+					`{"transactions":[{"entry_reference":"%s","status":"BOOKED","transaction_amount":{"amount":"50.50","currency":"pln"},"credit_debit_indicator":"DBIT","remittance_information":["coffee-%s"],"booking_date":"2026-06-11"}]}`,
 					enableBankingTransactionID,
 					fake.Lorem().Word(),
 				)

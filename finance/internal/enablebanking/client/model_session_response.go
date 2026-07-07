@@ -2,21 +2,26 @@ package client
 
 // SessionAccess models access metadata.
 type SessionAccess struct {
-	ValidForDays int            `json:"valid_for_days,omitempty"`
-	ValidUntil   string         `json:"valid_until,omitempty"`
-	Raw          map[string]any `json:"-"`
+	ValidForDays int    `json:"valid_for_days,omitempty"`
+	ValidUntil   string `json:"valid_until,omitempty"`
 }
 
 // SessionResponse models a session response.
 type SessionResponse struct {
-	ID                string         `json:"id,omitempty"`
-	SessionID         string         `json:"sessionId,omitempty"`
-	ExternalID        string         `json:"externalId,omitempty"`
-	ProviderReference string         `json:"providerReference,omitempty"`
-	DisplayName       string         `json:"displayName,omitempty"`
-	Secret            string         `json:"secret,omitempty"`
-	State             string         `json:"state,omitempty"`
+	SessionID         string         `json:"session_id,omitempty"`
 	Access            *SessionAccess `json:"access,omitempty"`
-	Accounts          []Account      `json:"accounts,omitempty"`
-	Raw               map[string]any `json:"-"`
+	Accounts          []Account      `json:"-"`
+	AccountIDs        []string       `json:"accounts,omitempty"`
+	AccountsData      []Account      `json:"accounts_data,omitempty"`
+	ASPSP             *ASPSP         `json:"aspsp,omitempty"`
+	PSUType           string         `json:"psu_type,omitempty"`
+	Status            string         `json:"status,omitempty"`
+	Authorized        string         `json:"authorized,omitempty"`
+	Created           string         `json:"created,omitempty"`
+	ID                string         `json:"-"`
+	ExternalID        string         `json:"-"`
+	ProviderReference string         `json:"-"`
+	DisplayName       string         `json:"-"`
+	Secret            string         `json:"-"`
+	State             string         `json:"-"`
 }

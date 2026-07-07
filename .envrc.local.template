@@ -12,3 +12,6 @@
 
 # Use when the registered callback origin differs from the active backend host.
 # export APP_FINANCE_PROVIDERS_ENABLEBANKING_CALLBACKBASEURL="http://localhost:4501"
+
+# Required for AgentMail email sending.
+# export AGENTMAIL_API_KEY="..."

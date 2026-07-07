@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,12 +13,14 @@ import (
 
 func TestClient_GetAccountDetails(t *testing.T) {
 	fake := faker.New()
+	requireNoRawField(t, GetAccountDetailsResponse{})
 
-	t.Run("success with all parameters", func(t *testing.T) {
+	t.Run("decodes documented account details resource", func(t *testing.T) {
 		accountID := "acc-" + fake.UUID().V4()
+		fixture := readDocsFixture(t, "get_account_details_response.json")
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/accounts/"+accountID+"/details", r.URL.Path)
-			_, _ = w.Write([]byte(`{"account":{"owner_name":"Jane Example","product":"ROR","bic":"BPKOPLPW"}}`))
+			_, _ = fmt.Fprint(w, fixture)
 		}))
 		defer server.Close()
 
@@ -26,12 +29,15 @@ func TestClient_GetAccountDetails(t *testing.T) {
 		response, err := client.GetAccountDetails(t.Context(), GetAccountDetailsParams{AccountID: accountID})
 
 		require.NoError(t, err)
-		assert.Equal(t, "Jane Example", response.OwnerName)
-		assert.Equal(t, "ROR", response.Product)
-		assert.Equal(t, "BPKOPLPW", response.BIC)
+		assert.Equal(t, "Main account", response.Name)
+		assert.Equal(t, "Main account", response.OwnerName)
+		assert.Equal(t, "Everyday banking", response.Product)
+		assert.Equal(t, "NDEAFIHH", response.BIC)
+		assert.Equal(t, "FI0455231152453547", response.IBAN)
+		assert.Equal(t, "EUR", response.Currency)
 	})
 
-	t.Run("success with required parameters only", func(t *testing.T) {
+	t.Run("ignores undocumented ownerName alias", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"ownerName":"Jane Minimal"}`))
 		}))
@@ -42,7 +48,8 @@ func TestClient_GetAccountDetails(t *testing.T) {
 		response, err := client.GetAccountDetails(t.Context(), GetAccountDetailsParams{AccountID: "acc-min"})
 
 		require.NoError(t, err)
-		assert.Equal(t, "Jane Minimal", response.OwnerName)
+		assert.Empty(t, response.Name)
+		assert.Empty(t, response.OwnerName)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

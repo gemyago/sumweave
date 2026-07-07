@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
@@ -164,6 +165,10 @@ func (s *ProviderWindowSyncStore) saveObservedAccounts(
 	now time.Time,
 ) error {
 	for _, observation := range observations {
+		existingAccount, err := resolveProviderAccount(providerAccounts, observation.ProviderAccountID)
+		if err != nil {
+			return err
+		}
 		account, err := s.buildObservedProviderAccount(providerAccounts, connection, observation, now)
 		if err != nil {
 			return err
@@ -172,9 +177,76 @@ func (s *ProviderWindowSyncStore) saveObservedAccounts(
 		if err != nil {
 			return fmt.Errorf("save connection provider account: %w", err)
 		}
+		if err = s.refreshLinkedFinanceAccount(ctx, store, existingAccount, savedAccount, now); err != nil {
+			return err
+		}
 		providerAccounts[savedAccount.ProviderAccountID] = savedAccount
 	}
 	return nil
+}
+
+func (s *ProviderWindowSyncStore) refreshLinkedFinanceAccount(
+	ctx context.Context,
+	store WindowSyncApplyStore,
+	existing domain.ConnectionProviderAccount,
+	observed domain.ConnectionProviderAccount,
+	now time.Time,
+) error {
+	if observed.FinanceAccountID == "" {
+		return nil
+	}
+	account, err := store.GetAccount(ctx, observed.FinanceAccountID)
+	if err != nil {
+		return fmt.Errorf("get linked finance account: %w", err)
+	}
+	if account == nil || account.LinkedAccount == nil ||
+		account.LinkedAccount.ProviderAccountID != observed.ProviderAccountID {
+		return nil
+	}
+
+	updated := *account
+	if shouldRefreshLinkedAccountName(account.Name, existing, observed) {
+		updated.Name = providerAccountDisplayName(observed)
+	}
+	if shouldRefreshLinkedAccountCurrency(account.Currency, existing) {
+		updated.Currency = strings.ToUpper(strings.TrimSpace(observed.Currency))
+	}
+	if updated.Name == account.Name && updated.Currency == account.Currency {
+		return nil
+	}
+	updated.UpdatedAt = now
+	if _, err = store.SaveAccount(ctx, updated); err != nil {
+		return fmt.Errorf("save linked finance account: %w", err)
+	}
+	return nil
+}
+
+func shouldRefreshLinkedAccountName(
+	current string,
+	existing domain.ConnectionProviderAccount,
+	observed domain.ConnectionProviderAccount,
+) bool {
+	trimmed := strings.TrimSpace(current)
+	return trimmed == "" || trimmed == strings.TrimSpace(existing.Name) ||
+		trimmed == strings.TrimSpace(observed.ProviderAccountID)
+}
+
+func shouldRefreshLinkedAccountCurrency(
+	current string,
+	existing domain.ConnectionProviderAccount,
+) bool {
+	trimmed := strings.ToUpper(strings.TrimSpace(current))
+	return trimmed == "" || trimmed == strings.ToUpper(strings.TrimSpace(existing.Currency))
+}
+
+func providerAccountDisplayName(account domain.ConnectionProviderAccount) string {
+	for _, value := range []string{account.Name, account.IBAN, account.ProviderAccountID} {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (s *ProviderWindowSyncStore) saveBalanceSnapshots(

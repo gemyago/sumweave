@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	wmsql "github.com/ThreeDotsLabs/watermill-sql/v4/pkg/sql"
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	_ "github.com/glebarez/go-sqlite" // Register the repo-standard SQLite driver for app dispatch DB access.
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -186,20 +188,25 @@ type Publisher struct {
 	config    Config
 	db        *sql.DB
 	publisher wmmessage.Publisher
+	logger    *slog.Logger
 }
 
-func NewPublisher(config Config) (*Publisher, error) {
+func NewPublisher(config Config, logger *slog.Logger) (*Publisher, error) {
 	config = config.normalize()
+	if logger == nil {
+		return nil, errors.New("logger is required")
+	}
+	logger = logger.WithGroup("appdispatch")
 	db, err := openDatabase(config)
 	if err != nil {
 		return nil, err
 	}
-	publisher, err := newMessagePublisher(config, db)
+	publisher, err := newMessagePublisher(config, db, logger)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Publisher{config: config, db: db, publisher: publisher}, nil
+	return &Publisher{config: config, db: db, publisher: publisher, logger: logger}, nil
 }
 
 func (p *Publisher) Close() error {
@@ -220,6 +227,11 @@ func (p *Publisher) Publish(ctx context.Context, envelope Envelope) error {
 	if err = p.publisher.Publish(DispatchTopicExecution, msg); err != nil {
 		return fmt.Errorf("publish dispatch envelope: %w", err)
 	}
+	p.logger.DebugContext(ctx, "message envelope published",
+		slog.String("messageId", msg.UUID),
+		slog.String("requesterId", envelope.RequesterID),
+	)
+
 	return nil
 }
 
@@ -230,7 +242,7 @@ func (p *Publisher) PublishInTx(ctx context.Context, tx *sql.Tx, envelope Envelo
 	if err := envelope.validate(); err != nil {
 		return err
 	}
-	publisher, err := newMessagePublisher(p.config, tx)
+	publisher, err := newMessagePublisher(p.config, tx, p.logger)
 	if err != nil {
 		return err
 	}
@@ -242,6 +254,10 @@ func (p *Publisher) PublishInTx(ctx context.Context, tx *sql.Tx, envelope Envelo
 	if err = publisher.Publish(DispatchTopicExecution, msg); err != nil {
 		return fmt.Errorf("publish dispatch envelope in tx: %w", err)
 	}
+	p.logger.DebugContext(ctx, "message envelope published in tx",
+		slog.String("messageId", msg.UUID),
+		slog.String("requesterId", envelope.RequesterID),
+	)
 	return nil
 }
 
@@ -249,23 +265,28 @@ type Consumer struct {
 	db         *sql.DB
 	subscriber wmmessage.Subscriber
 	registry   *HandlerRegistry
+	logger     *slog.Logger
 }
 
-func NewConsumer(config Config, registry *HandlerRegistry) (*Consumer, error) {
+func NewConsumer(config Config, registry *HandlerRegistry, logger *slog.Logger) (*Consumer, error) {
 	config = config.normalize()
 	if registry == nil {
 		return nil, errors.New("handler registry is required")
 	}
+	if logger == nil {
+		return nil, errors.New("logger is required")
+	}
+	logger = logger.WithGroup("appdispatch")
 	db, err := openDatabase(config)
 	if err != nil {
 		return nil, err
 	}
-	subscriber, err := newMessageSubscriber(config, db)
+	subscriber, err := newMessageSubscriber(config, db, logger)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Consumer{db: db, subscriber: subscriber, registry: registry}, nil
+	return &Consumer{db: db, subscriber: subscriber, registry: registry, logger: logger}, nil
 }
 
 func (c *Consumer) Run(ctx context.Context) error {
@@ -289,7 +310,19 @@ func (c *Consumer) Run(ctx context.Context) error {
 				msg.Nack()
 				return decodeErr
 			}
-			if handleErr := c.registry.Handle(ctx, envelope); handleErr != nil {
+			msgCtx := telemetry.SetLogAttributesToContext(
+				ctx,
+				telemetry.LogAttributes{
+					CorrelationID: slog.StringValue(msg.UUID),
+				},
+			)
+			c.logger.InfoContext(msgCtx, "processing message",
+				slog.String("messageId", msg.UUID),
+				slog.String("requesterId", envelope.RequesterID),
+				slog.String("MessageCorrelationID", envelope.CorrelationID),
+				slog.Any("metadata", msg.Metadata),
+			)
+			if handleErr := c.registry.Handle(msgCtx, envelope); handleErr != nil {
 				msg.Nack()
 				return handleErr
 			}
@@ -376,19 +409,21 @@ func supportsSQLiteWAL(dsn string) bool {
 }
 
 //nolint:ireturn // Watermill publisher is defined by the library interface.
-func newMessagePublisher(config Config, db any) (wmmessage.Publisher, error) {
+func newMessagePublisher(config Config, db any, logger *slog.Logger) (wmmessage.Publisher, error) {
+	wmLogger := watermill.NewSlogLogger(logger)
 	if config.Driver() == TransportDriverPostgres {
 		return wmsql.NewPublisher(asContextExecutor(db), wmsql.PublisherConfig{
 			SchemaAdapter: postgresSchema(config),
-		}, watermill.NopLogger{})
+		}, wmLogger)
 	}
 	return wmsql.NewPublisher(asContextExecutor(db), wmsql.PublisherConfig{
 		SchemaAdapter: sqliteSchema{config: config},
-	}, watermill.NopLogger{})
+	}, wmLogger)
 }
 
 //nolint:ireturn // Watermill subscriber is defined by the library interface.
-func newMessageSubscriber(config Config, db *sql.DB) (wmmessage.Subscriber, error) {
+func newMessageSubscriber(config Config, db *sql.DB, logger *slog.Logger) (wmmessage.Subscriber, error) {
+	wmLogger := watermill.NewSlogLogger(logger)
 	if config.Driver() == TransportDriverPostgres {
 		return wmsql.NewSubscriber(wmsql.BeginnerFromStdSQL(db), wmsql.SubscriberConfig{
 			ConsumerGroup:    config.ConsumerName,
@@ -396,7 +431,7 @@ func newMessageSubscriber(config Config, db *sql.DB) (wmmessage.Subscriber, erro
 			SchemaAdapter:    postgresSchema(config),
 			OffsetsAdapter:   postgresOffsets(config),
 			InitializeSchema: false,
-		}, watermill.NopLogger{})
+		}, wmLogger)
 	}
 	return wmsql.NewSubscriber(wmsql.BeginnerFromStdSQL(db), wmsql.SubscriberConfig{
 		ConsumerGroup:    config.ConsumerName,
@@ -404,7 +439,7 @@ func newMessageSubscriber(config Config, db *sql.DB) (wmmessage.Subscriber, erro
 		SchemaAdapter:    sqliteSchema{config: config},
 		OffsetsAdapter:   sqliteOffsetsAdapter{config: config},
 		InitializeSchema: false,
-	}, watermill.NopLogger{})
+	}, wmLogger)
 }
 
 func envelopeMessage(ctx context.Context, envelope Envelope) (*wmmessage.Message, error) {

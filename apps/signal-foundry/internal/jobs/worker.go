@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/flows"
 	"github.com/gemyago/signal-foundry/runtime/venueedge"
+	"github.com/google/uuid"
 )
 
 type historicalBackfillRunner interface {
@@ -182,7 +184,7 @@ func (w *Worker) ensureConsumer() error {
 		logger:   w.logger,
 		clock:    w.clock,
 		workerID: w.workerID,
-	}))
+	}), w.logger)
 	if err != nil {
 		return err
 	}
@@ -296,7 +298,7 @@ func (w *Worker) processEnvelope(ctx context.Context, envelope appdispatch.Envel
 	executor := &workerExecutor{
 		store:    w.store,
 		registry: w.registry,
-		logger:   w.logger,
+		logger:   w.logger.WithGroup("workerExecutor"),
 		clock:    w.clock,
 		workerID: w.workerID,
 	}
@@ -304,6 +306,15 @@ func (w *Worker) processEnvelope(ctx context.Context, envelope appdispatch.Envel
 }
 
 func (w *workerExecutor) processEnvelope(ctx context.Context, envelope appdispatch.Envelope) error {
+	ctx = telemetry.SetLogAttributesToContext(ctx, telemetry.LogAttributes{
+		CorrelationID: slog.StringValue(uuid.NewString()),
+	})
+	w.logger.InfoContext(ctx, "processing message",
+		slog.String("messageId", envelope.ObservableJobID),
+		slog.String("requesterId", envelope.RequesterID),
+		slog.String("correlationId", envelope.CorrelationID),
+		slog.String("kind", string(envelope.Kind)),
+	)
 	handler, err := w.registry.HandlerByExecutionKind(envelope.Kind)
 	if err != nil {
 		if envelope.ObservableJobID != "" {
