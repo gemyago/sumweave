@@ -19,12 +19,25 @@ The system SHALL implement finance as a root `finance/` product module that rema
 - **AND** the storage design MUST stay compatible with SQLite local development and PostgreSQL-oriented production use
 
 ### Requirement: Tenant, Account, Category, And Tag Management
-The finance module SHALL support tenant-based personal-finance ownership and tenant-local finance catalogs.
+The finance module SHALL support tenant-based personal-finance ownership, tenant profile updates, and tenant-local finance catalogs.
 
 #### Scenario: Users create and join finance tenants
 - **WHEN** an authenticated user creates a tenant or accepts an invite
-- **THEN** the system MUST create or join a finance tenant with a user-friendly name and one display currency
+- **THEN** the system MUST create or join a finance tenant with a user-friendly name and one display currency selected from the predefined valid tenant currency-code list
+- **AND** the stored display currency MUST use the canonical uppercase code
 - **AND** all tenant members MUST be equal in the first implementation
+
+#### Scenario: Tenant members update finance tenants
+- **WHEN** an authenticated tenant member updates a finance tenant
+- **THEN** the system MUST allow updating the tenant name and display currency
+- **AND** the replacement display currency MUST be selected from the predefined valid tenant currency-code list
+- **AND** the stored display currency MUST use the canonical uppercase code
+- **AND** the tenant `UpdatedAt` timestamp MUST advance while membership, invites, accounts, transactions, categories, tags, and archived state remain governed by their existing workflows
+
+#### Scenario: Unsupported tenant display currencies are rejected
+- **WHEN** a caller creates or updates a finance tenant with an empty, unknown, or unsupported display-currency code
+- **THEN** the system MUST reject the request before persisting the tenant change
+- **AND** arbitrary free-text values MUST NOT become tenant display currencies
 
 #### Scenario: New tenants receive tenant-local default categories and tags
 - **WHEN** a finance tenant is created
@@ -39,6 +52,11 @@ The finance module SHALL support tenant-based personal-finance ownership and ten
 - **THEN** every finance account MUST belong to exactly one tenant
 - **AND** the system MUST support manual, linked-bank, imported, and reconciliation-style account shapes
 - **AND** bank-linking flows MUST be able to attach a linked provider account to an existing manual account instead of always creating a duplicate account
+
+#### Scenario: Tenant display currency updates affect reporting display currency only
+- **WHEN** a tenant member changes the tenant display currency
+- **THEN** later tenant display-currency reporting MUST use the updated display currency through the existing persisted FX-rate behavior
+- **AND** the system MUST NOT mutate existing account, transaction, provider-original, or CSV-import native currency values as part of the tenant update
 
 ### Requirement: Ledger-Driven Transaction Semantics
 The finance module SHALL treat transactions as the explainable ledger source of truth for balances and reporting.

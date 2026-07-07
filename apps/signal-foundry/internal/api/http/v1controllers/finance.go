@@ -23,6 +23,7 @@ import (
 
 type tenantService interface {
 	CreateTenant(context.Context, financepkg.CreateTenantParams) (domain.Tenant, error)
+	UpdateTenant(context.Context, financepkg.UpdateTenantParams) (domain.Tenant, error)
 	ArchiveTenant(context.Context, financepkg.ArchiveTenantParams) (domain.Tenant, error)
 	ListTenantsForUser(context.Context, string) ([]domain.TenantMembershipView, error)
 	ListTenantMembers(
@@ -348,7 +349,7 @@ func (c *FinanceController) CreateFinanceTenant(
 			financepkg.CreateTenantParams{
 				ActorUserID:     userID,
 				Name:            params.Payload.Name,
-				DisplayCurrency: params.Payload.DisplayCurrency,
+				DisplayCurrency: string(params.Payload.DisplayCurrency),
 			},
 		)
 		if err != nil {
@@ -366,6 +367,37 @@ func (c *FinanceController) CreateFinanceTenant(
 		})
 
 		return &mapped, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) UpdateFinanceTenant(
+	builder handlers.NoResponseHandlerBuilder[*models.UpdateFinanceTenantParams],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.UpdateFinanceTenantParams,
+	) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
+		_, err = c.deps.TenantService.UpdateTenant(
+			ctx,
+			financepkg.UpdateTenantParams{
+				ActorUserID:     userID,
+				TenantID:        params.TenantID,
+				Name:            params.Payload.Name,
+				DisplayCurrency: string(params.Payload.DisplayCurrency),
+			},
+		)
+		if err != nil {
+			return mapCSVImportError(err)
+		}
+
+		return nil
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -1389,6 +1421,8 @@ func mapCSVImportError(err error) error {
 	switch {
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
 		return app.NewErrUnauthorized(err.Error())
+	case errors.Is(err, financepkg.ErrInvalidTenantDisplayCurrency):
+		return app.NewErrInvalidInput("displayCurrency", err.Error())
 	case errors.Is(err, financepkg.ErrCSVImportAlreadyConfirmed),
 		errors.Is(err, financepkg.ErrCSVImportAlreadyCompleted):
 		return app.NewErrConflict("csv import", err.Error())

@@ -79,7 +79,7 @@ Use gopher skill as your primary source of golang coding conventions and best pr
 
 The rules are:
 - Update module rules and conventions when user corrects the behavior of AI.
-- Mutating APIs should not return data unless backend generates needed data.
+- Mutating APIs (such as POST, PUT, PATCH, DELETE) **should not** return entity data unless backend generates needed data. In this case just the minimal required response data must be returned.
 - OpenAPI JSON uses camelCase for property names or any other identifiers or keys; regenerate after spec edits.
 - HTTP controller tests use registered routes, not custom builders.
 - Config env overrides use standard APP_ AutomaticEnv mapping only.

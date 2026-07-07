@@ -772,6 +772,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+    patch:
+      summary: Update finance tenant
+      operationId: updateFinanceTenant
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTenantUpdateRequest"
+      responses:
+        '204':
+          description: Updated finance tenant
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/v1/finance/tenants/{tenantId}/archive:
     post:
       summary: Archive finance tenant
@@ -2795,7 +2819,16 @@ components:
       required: [name, displayCurrency]
       properties:
         name: { type: string }
-        displayCurrency: { type: string }
+        displayCurrency: { $ref: "#/components/schemas/FinanceTenantDisplayCurrency" }
+    FinanceTenantUpdateRequest:
+      type: object
+      required: [name, displayCurrency]
+      properties:
+        name: { type: string }
+        displayCurrency: { $ref: "#/components/schemas/FinanceTenantDisplayCurrency" }
+    FinanceTenantDisplayCurrency:
+      type: string
+      enum: [USD, EUR, PLN, UAH]
     FinanceTenantSummary:
       type: object
       required: [id, name, displayCurrency, joinedAt, createdAt, updatedAt]

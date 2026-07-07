@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-07-05
+goal: Tenant can be renamed and display currency changed from API and UI with
+  currency selected from a valid code list.

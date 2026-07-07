@@ -5,7 +5,9 @@
     createSignalFinanceApiForAuth,
     type FinanceTenantInvite,
     type FinanceTenantMember,
+    type FinanceTenantSummary,
   } from '../lib/finance/api'
+  import { supportedFinanceTenantDisplayCurrencies } from '../lib/finance/tenant-display-currencies'
   import { formatFinanceDateTime } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
@@ -19,9 +21,12 @@
   let invites = $state<FinanceTenantInvite[]>([])
   let createName = $state('')
   let createCurrency = $state('USD')
+  let editName = $state('')
+  let editCurrency = $state('USD')
   let inviteRecipient = $state('')
   let inviteCode = $state('')
   let reactiveReady = $state(false)
+  let syncedEditTenantKey = $state('')
   let skipNextReactiveLoad = false
 
   onMount(() => {
@@ -84,6 +89,24 @@
     }
   }
 
+  async function updateTenant(event: SubmitEvent) {
+    event.preventDefault()
+    if (!financeShell.selectedTenantId) return
+    error = null
+
+    try {
+      await financeApi.updateTenant({
+        tenantId: financeShell.selectedTenantId,
+        name: editName,
+        displayCurrency: editCurrency,
+      })
+      await financeShell.refreshTenants()
+      await loadTenantDetails()
+    } catch (updateError) {
+      error = updateError instanceof Error ? updateError.message : 'Failed to update tenant'
+    }
+  }
+
   async function createInvite(event: SubmitEvent) {
     event.preventDefault()
     if (!financeShell.selectedTenantId) return
@@ -115,6 +138,21 @@
     }
   }
 
+  function syncEditFormFromTenant(tenant: FinanceTenantSummary | null) {
+    if (!tenant) {
+      editName = ''
+      editCurrency = supportedFinanceTenantDisplayCurrencies[0]
+      syncedEditTenantKey = ''
+      return
+    }
+
+    editName = tenant.name
+    editCurrency = supportedFinanceTenantDisplayCurrencies.includes(tenant.displayCurrency as (typeof supportedFinanceTenantDisplayCurrencies)[number])
+      ? tenant.displayCurrency
+      : supportedFinanceTenantDisplayCurrencies[0]
+    syncedEditTenantKey = `${tenant.id}:${tenant.updatedAt.toISOString()}`
+  }
+
   $effect(() => {
     if (financeShell.loading || !reactiveReady) return
     void financeShell.selectedTenantId
@@ -123,6 +161,15 @@
       return
     }
     void onTenantChange()
+  })
+
+  $effect(() => {
+    const tenant = financeShell.selectedTenant
+    const tenantKey = tenant ? `${tenant.id}:${tenant.updatedAt.toISOString()}` : ''
+    if (tenantKey === syncedEditTenantKey) {
+      return
+    }
+    syncEditFormFromTenant(tenant)
   })
 </script>
 
@@ -195,6 +242,51 @@
         </div>
       </section>
 
+      {#if financeShell.selectedTenant}
+        <form class="card shadow-sm" onsubmit={updateTenant}>
+          <div class="card-body p-4 d-grid gap-3">
+            <div>
+              <h2 class="h5 mb-1">Edit selected tenant</h2>
+              <p class="text-body-secondary mb-0">
+                Update the selected tenant name and display currency without leaving the finance workspace.
+              </p>
+            </div>
+
+            <div class="row g-3 align-items-end">
+              <div class="col-12 col-xl-5">
+                <label class="form-label" for="finance-selected-tenant-name">Tenant name</label>
+                <input
+                  id="finance-selected-tenant-name"
+                  class="form-control"
+                  bind:value={editName}
+                  aria-label="Tenant name"
+                  required
+                />
+              </div>
+
+              <div class="col-12 col-xl-4">
+                <label class="form-label" for="finance-selected-tenant-currency">Display currency</label>
+                <select
+                  id="finance-selected-tenant-currency"
+                  class="form-select"
+                  bind:value={editCurrency}
+                  aria-label="Display currency"
+                  required
+                >
+                  {#each supportedFinanceTenantDisplayCurrencies as currencyCode (currencyCode)}
+                    <option value={currencyCode}>{currencyCode}</option>
+                  {/each}
+                </select>
+              </div>
+
+              <div class="col-12 col-xl-3 d-grid">
+                <button class="btn btn-primary" type="submit">Save tenant changes</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      {/if}
+
       <div class="row g-4">
         <div class="col-12 col-xl-6">
           <form class="card shadow-sm h-100" onsubmit={createTenant}>
@@ -211,7 +303,11 @@
 
               <div>
                 <label class="form-label" for="finance-tenant-currency">Display currency</label>
-                <input id="finance-tenant-currency" class="form-control" bind:value={createCurrency} aria-label="Display currency" required />
+                <select id="finance-tenant-currency" class="form-select" bind:value={createCurrency} aria-label="Display currency" required>
+                  {#each supportedFinanceTenantDisplayCurrencies as currencyCode (currencyCode)}
+                    <option value={currencyCode}>{currencyCode}</option>
+                  {/each}
+                </select>
               </div>
 
               <div>

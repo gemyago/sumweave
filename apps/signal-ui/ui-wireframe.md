@@ -60,7 +60,7 @@
 | `/jobs/:jobId` | Durable historical ingestion job detail. Protected. Separate route with request, timeline, worker, result, and safe error sections plus back links to Jobs and Data. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
 | `/finance` | Canonical Bootstrap finance dashboard. Protected. Uses the shared Finance shell, keeps balance-first summaries in the first viewport, exposes previous/current/next/custom reporting-period controls, caps account/category/recent-transaction sections, and keeps missing-FX plus sync/import follow-up in a compact needs-attention area. |
-| `/finance/tenants` | Finance tenant selection/create/invite/join/member route. Protected. |
+| `/finance/tenants` | Finance tenant selection/create/update/invite/join/member route. Protected. |
 | `/finance/accounts` | Finance account list and create route. Protected. |
 | `/finance/accounts/:accountId` | Finance account detail route. Protected. Separate detail route with recent transaction context. |
 | `/finance/connections` | Finance connection list/link/sync route. Protected. Schedule and last/next sync visibility stay here, and operators can locally delete a link without removing imported ledger history. |
@@ -320,7 +320,13 @@
 **Tenants (`/finance/tenants`)**
 
 - Header: **Finance tenants** heading + copy that explains select/create/invite/join flow.
-- Layout: Bootstrap card-first sections for selected-tenant picker, create-tenant form, join-by-invite form, members list, and invite create/list states.
+- Layout: Bootstrap card-first sections for selected-tenant picker, selected-tenant edit form, create-tenant form, join-by-invite form, members list, and invite create/list states.
+- The selected-tenant card keeps tenant selection on-page and loads member/invite details for the active tenant.
+- When a tenant is selected, the route shows an edit form prefilled with that tenant's current name and display currency.
+- The selected-tenant edit form updates tenant name and display currency in place without leaving `#/finance/tenants`.
+- Both create and edit flows use the same bounded display-currency `<select>` backed by the product-supported tenant currency-code list instead of free-text entry.
+- Successful tenant edits refresh the visible selected-tenant state in both the route and shared Finance shell chrome.
+- Tenant update failures stay on the tenants route, preserve the current selected tenant context, and show a recoverable inline error.
 
 **Accounts (`/finance/accounts`, `/finance/accounts/:accountId`)**
 

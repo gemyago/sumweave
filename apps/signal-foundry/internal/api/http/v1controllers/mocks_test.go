@@ -2003,6 +2003,72 @@ func (_c *mockfinanceService_TriggerFXSync_Call) RunAndReturn(run func(context1 
 	return _c
 }
 
+// UpdateTenant provides a mock function for the type mockfinanceService
+func (_mock *mockfinanceService) UpdateTenant(context1 context.Context, updateTenantParams finance.UpdateTenantParams) (domain.Tenant, error) {
+	ret := _mock.Called(context1, updateTenantParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateTenant")
+	}
+
+	var r0 domain.Tenant
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.UpdateTenantParams) (domain.Tenant, error)); ok {
+		return returnFunc(context1, updateTenantParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.UpdateTenantParams) domain.Tenant); ok {
+		r0 = returnFunc(context1, updateTenantParams)
+	} else {
+		r0 = ret.Get(0).(domain.Tenant)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.UpdateTenantParams) error); ok {
+		r1 = returnFunc(context1, updateTenantParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockfinanceService_UpdateTenant_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateTenant'
+type mockfinanceService_UpdateTenant_Call struct {
+	*mock.Call
+}
+
+// UpdateTenant is a helper method to define mock.On call
+//   - context1 context.Context
+//   - updateTenantParams finance.UpdateTenantParams
+func (_e *mockfinanceService_Expecter) UpdateTenant(context1 interface{}, updateTenantParams interface{}) *mockfinanceService_UpdateTenant_Call {
+	return &mockfinanceService_UpdateTenant_Call{Call: _e.mock.On("UpdateTenant", context1, updateTenantParams)}
+}
+
+func (_c *mockfinanceService_UpdateTenant_Call) Run(run func(context1 context.Context, updateTenantParams finance.UpdateTenantParams)) *mockfinanceService_UpdateTenant_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.UpdateTenantParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.UpdateTenantParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockfinanceService_UpdateTenant_Call) Return(tenant domain.Tenant, err error) *mockfinanceService_UpdateTenant_Call {
+	_c.Call.Return(tenant, err)
+	return _c
+}
+
+func (_c *mockfinanceService_UpdateTenant_Call) RunAndReturn(run func(context1 context.Context, updateTenantParams finance.UpdateTenantParams) (domain.Tenant, error)) *mockfinanceService_UpdateTenant_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateTransaction provides a mock function for the type mockfinanceService
 func (_mock *mockfinanceService) UpdateTransaction(context1 context.Context, updateTransactionParams finance.UpdateTransactionParams) (domain.Transaction, error) {
 	ret := _mock.Called(context1, updateTransactionParams)

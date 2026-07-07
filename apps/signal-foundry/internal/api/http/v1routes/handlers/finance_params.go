@@ -1105,6 +1105,42 @@ func newParamsParserFinanceTriggerFinanceFxSync(rootHandler *RootHandler) params
 	}
 }
 
+type paramsParserFinanceUpdateFinanceTenant struct {
+	bindTenantID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceTenantUpdateRequest]
+}
+
+func (p *paramsParserFinanceUpdateFinanceTenant) parse(router httpRouter, req *http.Request) (*UpdateFinanceTenantParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &UpdateFinanceTenantParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceUpdateFinanceTenant(rootHandler *RootHandler) paramsParser[*UpdateFinanceTenantParams] {
+	return &paramsParserFinanceUpdateFinanceTenant{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceTenantUpdateRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceTenantUpdateRequest],
+			),
+			validateValue: NewFinanceTenantUpdateRequestValidator(),
+		}),
+	}
+}
+
 type paramsParserFinanceUpdateFinanceTransaction struct {
 	bindTenantID requestParamBinder[string, string]
 	bindTransactionID requestParamBinder[string, string]
@@ -1534,6 +1570,18 @@ type financeControllerBuilder struct {
 		*FinanceFxSyncResponse,
 		handlerActionFunc[*TriggerFinanceFxSyncParams, *FinanceFxSyncResponse],
 		httpHandlerActionFunc[*TriggerFinanceFxSyncParams, *FinanceFxSyncResponse],
+	]
+
+	// PATCH /api/v1/finance/tenants/{tenantId}
+	//
+	// Request type: UpdateFinanceTenantParams,
+	//
+	// Response type: none
+	UpdateFinanceTenant genericHandlerBuilder[
+		*UpdateFinanceTenantParams,
+		void,
+		handlerActionFuncNoResponse[*UpdateFinanceTenantParams, void],
+		httpHandlerActionFuncNoResponse[*UpdateFinanceTenantParams, void],
 	]
 
 	// PATCH /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}
@@ -2190,6 +2238,27 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinanceTriggerFinanceFxSync(app),
+			},
+		),
+
+		// PATCH /api/v1/finance/tenants/{tenantId}
+		UpdateFinanceTenant: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*UpdateFinanceTenantParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*UpdateFinanceTenantParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*UpdateFinanceTenantParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceUpdateFinanceTenant(app),
 			},
 		),
 

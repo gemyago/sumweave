@@ -34,6 +34,12 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 				Name:            "tenant-" + fake.Company().Name(),
 				DisplayCurrency: "usd",
 			},
+			UpdateTenantParams{
+				ActorUserID:     makeUserID(),
+				TenantID:        makeTenantID(),
+				Name:            "tenant-" + fake.Company().Name(),
+				DisplayCurrency: "eur",
+			},
 			ArchiveTenantParams{ActorUserID: makeUserID(), TenantID: makeTenantID()},
 			CreateTenantInviteParams{
 				ActorUserID: makeUserID(),
@@ -145,18 +151,19 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 			GetAccountBalanceParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
 		}
 
-		require.Len(t, params, 28)
+		require.Len(t, params, 29)
 		assert.Len(t, []error{
 			ErrTenantAccessDenied,
 			ErrInviteNotFound,
 			ErrInviteAccepted,
+			ErrInvalidTenantDisplayCurrency,
 			ErrAccountNotFound,
 			ErrCategoryNotFound,
 			ErrTagNotFound,
 			ErrTransactionNotFound,
 			ErrCSVImportAlreadyConfirmed,
 			ErrCSVImportAlreadyCompleted,
-		}, 9)
+		}, 10)
 	})
 
 	t.Run("internal tenant seed and transfer helpers keep behavior", func(t *testing.T) {

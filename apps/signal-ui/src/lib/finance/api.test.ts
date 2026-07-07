@@ -295,6 +295,30 @@ describe('finance api', () => {
     expect(String(calls[1].init?.body)).toContain('"categoryId":null')
   })
 
+  it('updates tenants with the patch endpoint and expects no response body', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return {
+        ok: true,
+        status: 204,
+        statusText: 'No Content',
+        json: async () => {
+          throw new Error('no content')
+        },
+      } as unknown as Response
+    })
+
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+    await expect(
+      api.updateTenant({ tenantId: 'tenant-1', name: 'Household Updated', displayCurrency: 'PLN' }),
+    ).resolves.toBeUndefined()
+
+    expect(new URL(String(calls[0].input)).pathname).toBe('/api/v1/finance/tenants/tenant-1')
+    expect(calls[0].init?.method).toBe('PATCH')
+    expect(String(calls[0].init?.body)).toBe('{"name":"Household Updated","displayCurrency":"PLN"}')
+  })
+
   it('covers the remaining finance endpoints with defaulted optional fields', async () => {
     const responses = [
       { id: 'tenant-1', name: 'Created', displayCurrency: 'USD', joinedAt: '2026-06-20T12:00:00Z', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },

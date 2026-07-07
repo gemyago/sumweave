@@ -253,6 +253,99 @@ func TestService(t *testing.T) {
 		require.ErrorIs(t, err, ErrTenantAccessDenied)
 	})
 
+	t.Run("updates tenants with supported currencies and rejects unsupported ones", func(t *testing.T) {
+		fake := faker.New()
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
+		currentTime := time.Date(2026, time.July, 6, 9, 0, 0, 0, time.UTC)
+		service := NewService(store, WithNow(func() time.Time { return currentTime }))
+
+		ownerUserID := "user-owner-" + fake.UUID().V4()
+		memberUserID := "user-member-" + fake.UUID().V4()
+		outsiderUserID := "user-outsider-" + fake.UUID().V4()
+
+		tenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     ownerUserID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "eur",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "EUR", tenant.DisplayCurrency)
+
+		invite, err := service.CreateTenantInvite(t.Context(), CreateTenantInviteParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+			Recipient:   "recipient-" + fake.Internet().User() + "@example.com",
+		})
+		require.NoError(t, err)
+
+		_, err = service.AcceptTenantInvite(t.Context(), AcceptTenantInviteParams{
+			ActorUserID: memberUserID,
+			Code:        invite.Code,
+		})
+		require.NoError(t, err)
+
+		currentTime = currentTime.Add(2 * time.Hour)
+		updatedName := "tenant-updated-" + fake.Company().Name()
+		updatedTenant, err := service.UpdateTenant(t.Context(), UpdateTenantParams{
+			ActorUserID:     memberUserID,
+			TenantID:        tenant.ID,
+			Name:            updatedName,
+			DisplayCurrency: "pln",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, tenant.ID, updatedTenant.ID)
+		assert.Equal(t, updatedName, updatedTenant.Name)
+		assert.Equal(t, "PLN", updatedTenant.DisplayCurrency)
+		assert.Equal(t, tenant.CreatedAt, updatedTenant.CreatedAt)
+		assert.Equal(t, currentTime, updatedTenant.UpdatedAt)
+		assert.True(t, updatedTenant.UpdatedAt.After(tenant.UpdatedAt))
+
+		storedTenant, err := service.store.GetTenant(t.Context(), tenant.ID)
+		require.NoError(t, err)
+		require.NotNil(t, storedTenant)
+		assert.Equal(t, updatedTenant, *storedTenant)
+
+		memberTenants, err := service.ListTenantsForUser(t.Context(), memberUserID)
+		require.NoError(t, err)
+		require.Len(t, memberTenants, 1)
+		assert.Equal(t, updatedName, memberTenants[0].Tenant.Name)
+		assert.Equal(t, "PLN", memberTenants[0].Tenant.DisplayCurrency)
+
+		_, err = service.UpdateTenant(t.Context(), UpdateTenantParams{
+			ActorUserID:     outsiderUserID,
+			TenantID:        tenant.ID,
+			Name:            "forbidden-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+		})
+		require.ErrorIs(t, err, ErrTenantAccessDenied)
+
+		invalidCreateUserID := "user-invalid-create-" + fake.UUID().V4()
+		_, err = service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     invalidCreateUserID,
+			Name:            "tenant-invalid-" + fake.Company().Name(),
+			DisplayCurrency: "btc",
+		})
+		require.ErrorIs(t, err, ErrInvalidTenantDisplayCurrency)
+
+		invalidCreateTenants, err := service.ListTenantsForUser(t.Context(), invalidCreateUserID)
+		require.NoError(t, err)
+		assert.Empty(t, invalidCreateTenants)
+
+		_, err = service.UpdateTenant(t.Context(), UpdateTenantParams{
+			ActorUserID:     ownerUserID,
+			TenantID:        tenant.ID,
+			Name:            "tenant-invalid-update-" + fake.Company().Name(),
+			DisplayCurrency: "",
+		})
+		require.ErrorIs(t, err, ErrInvalidTenantDisplayCurrency)
+
+		storedTenantAfterInvalidUpdate, err := service.store.GetTenant(t.Context(), tenant.ID)
+		require.NoError(t, err)
+		require.NotNil(t, storedTenantAfterInvalidUpdate)
+		assert.Equal(t, updatedTenant, *storedTenantAfterInvalidUpdate)
+	})
+
 	t.Run("manages ledger driven transaction behavior", func(t *testing.T) {
 		service := makeService(t)
 		fake := faker.New()
@@ -1066,6 +1159,21 @@ func TestService(t *testing.T) {
 				return domain.TenantInvite{}, sentinel
 			},
 		}).AcceptTenantInvite(t.Context(), AcceptTenantInviteParams{ActorUserID: "user-1", Code: "code-1"})
+		require.ErrorIs(t, err, sentinel)
+
+		_, err = NewService(stubStore{
+			isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+			getTenantFn:      func(context.Context, string) (*domain.Tenant, error) { return nil, sentinel },
+		}).UpdateTenant(t.Context(), UpdateTenantParams{ActorUserID: "user-1", TenantID: "tenant-1", Name: "tenant", DisplayCurrency: "USD"})
+		require.ErrorIs(t, err, sentinel)
+
+		_, err = NewService(stubStore{
+			isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+			getTenantFn: func(context.Context, string) (*domain.Tenant, error) {
+				return &domain.Tenant{ID: "tenant-1", Name: "tenant", DisplayCurrency: "USD"}, nil
+			},
+			saveTenantFn: func(context.Context, domain.Tenant) (domain.Tenant, error) { return domain.Tenant{}, sentinel },
+		}).UpdateTenant(t.Context(), UpdateTenantParams{ActorUserID: "user-1", TenantID: "tenant-1", Name: "tenant-updated", DisplayCurrency: "EUR"})
 		require.ErrorIs(t, err, sentinel)
 
 		_, err = NewService(stubStore{

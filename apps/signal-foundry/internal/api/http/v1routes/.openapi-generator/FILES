@@ -94,6 +94,7 @@ internal/finance_tag_create_request_validation.go
 internal/finance_tag_validation.go
 internal/finance_tags_response_validation.go
 internal/finance_tenant_create_request_validation.go
+internal/finance_tenant_display_currency_validation.go
 internal/finance_tenant_invite_create_request_validation.go
 internal/finance_tenant_invite_validation.go
 internal/finance_tenant_invites_response_validation.go
@@ -101,6 +102,7 @@ internal/finance_tenant_list_response_validation.go
 internal/finance_tenant_member_validation.go
 internal/finance_tenant_members_response_validation.go
 internal/finance_tenant_summary_validation.go
+internal/finance_tenant_update_request_validation.go
 internal/finance_transaction_create_request_validation.go
 internal/finance_transaction_provider_original_validation.go
 internal/finance_transaction_update_request_validation.go
@@ -162,6 +164,7 @@ internal/strategy_version_list_response_validation.go
 internal/strategy_version_row_validation.go
 internal/trigger_finance_connection_sync_params_validation.go
 internal/trigger_finance_fx_sync_params_validation.go
+internal/update_finance_tenant_params_validation.go
 internal/update_finance_transaction_params_validation.go
 internal/user_info_validation.go
 internal/validate_strategy_params_validation.go
@@ -247,6 +250,7 @@ models/finance_tag.go
 models/finance_tag_create_request.go
 models/finance_tags_response.go
 models/finance_tenant_create_request.go
+models/finance_tenant_display_currency.go
 models/finance_tenant_invite.go
 models/finance_tenant_invite_create_request.go
 models/finance_tenant_invites_response.go
@@ -254,6 +258,7 @@ models/finance_tenant_list_response.go
 models/finance_tenant_member.go
 models/finance_tenant_members_response.go
 models/finance_tenant_summary.go
+models/finance_tenant_update_request.go
 models/finance_transaction.go
 models/finance_transaction_create_request.go
 models/finance_transaction_provider_original.go
@@ -315,6 +320,7 @@ models/strategy_version_list_response.go
 models/strategy_version_row.go
 models/trigger_finance_connection_sync_params.go
 models/trigger_finance_fx_sync_params.go
+models/update_finance_tenant_params.go
 models/update_finance_transaction_params.go
 models/user_info.go
 models/validate_strategy_params.go

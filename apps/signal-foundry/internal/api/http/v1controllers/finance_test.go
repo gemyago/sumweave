@@ -129,6 +129,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "list tenants", method: http.MethodGet, target: "/api/v1/finance/tenants"},
 			{name: "create tenant", method: http.MethodPost, target: "/api/v1/finance/tenants", body: `{"name":"Household","displayCurrency":"USD"}`},
 			{name: "get tenant", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a"},
+			{name: "update tenant", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a", body: `{"name":"Household Updated","displayCurrency":"PLN"}`},
 			{name: "list members", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/members"},
 			{name: "list invites", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/invites"},
 			{name: "create invite", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/invites", body: `{"recipient":"friend@example.com"}`},
@@ -404,6 +405,98 @@ func TestFinanceController(t *testing.T) {
 		handler.ServeHTTP(postArchiveListResp, newRequest(http.MethodGet, "/api/v1/finance/tenants", "", true))
 		require.Equal(t, http.StatusOK, postArchiveListResp.Code)
 		assert.Empty(t, decode(t, postArchiveListResp)["items"].([]any))
+	})
+
+	t.Run("tenant update route returns no content and rejects invalid access or currency", func(t *testing.T) {
+		userID := fake.UUID().V4()
+		createdAt := time.Date(2026, time.July, 3, 12, 0, 0, 0, time.UTC)
+		tenantID := "tenant-" + fake.UUID().V4()
+		updatedName := "tenant-updated-" + fake.Lorem().Word()
+		updatedTenant := domain.Tenant{
+			ID:              tenantID,
+			Name:            updatedName,
+			DisplayCurrency: "PLN",
+			CreatedAt:       createdAt,
+			UpdatedAt:       createdAt.Add(24 * time.Hour),
+		}
+
+		t.Run("success", func(t *testing.T) {
+			service := newMockfinanceService(t)
+			handler := newHandler(
+				service,
+				newMockbankConnectionService(t),
+				makeAuthMiddleware(userID),
+			)
+
+			service.EXPECT().UpdateTenant(mock.Anything, mock.Anything).RunAndReturn(
+				func(_ context.Context, params financepkg.UpdateTenantParams) (domain.Tenant, error) {
+					require.Equal(t, userID, params.ActorUserID)
+					require.Equal(t, tenantID, params.TenantID)
+					require.Equal(t, updatedName, params.Name)
+					require.Equal(t, "PLN", params.DisplayCurrency)
+					return updatedTenant, nil
+				},
+			).Once()
+
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(
+				resp,
+				newRequest(
+					http.MethodPatch,
+					"/api/v1/finance/tenants/"+tenantID,
+					`{"name":"`+updatedName+`","displayCurrency":"PLN"}`,
+					true,
+				),
+			)
+
+			require.Equal(t, http.StatusNoContent, resp.Code)
+			assert.Empty(t, resp.Body.String())
+		})
+
+		t.Run("non member returns unauthorized", func(t *testing.T) {
+			service := newMockfinanceService(t)
+			service.EXPECT().UpdateTenant(mock.Anything, mock.Anything).Return(
+				domain.Tenant{},
+				financepkg.ErrTenantAccessDenied,
+			).Once()
+
+			resp := httptest.NewRecorder()
+			newHandler(
+				service,
+				newMockbankConnectionService(t),
+				makeAuthMiddleware(userID),
+			).ServeHTTP(
+				resp,
+				newRequest(
+					http.MethodPatch,
+					"/api/v1/finance/tenants/"+tenantID,
+					`{"name":"`+updatedName+`","displayCurrency":"PLN"}`,
+					true,
+				),
+			)
+
+			require.Equal(t, http.StatusUnauthorized, resp.Code)
+		})
+
+		t.Run("invalid display currency returns bad request before controller logic", func(t *testing.T) {
+			service := newMockfinanceService(t)
+			resp := httptest.NewRecorder()
+			newHandler(
+				service,
+				newMockbankConnectionService(t),
+				makeAuthMiddleware(userID),
+			).ServeHTTP(
+				resp,
+				newRequest(
+					http.MethodPatch,
+					"/api/v1/finance/tenants/"+tenantID,
+					`{"name":"`+updatedName+`","displayCurrency":"BTC"}`,
+					true,
+				),
+			)
+
+			require.Equal(t, http.StatusBadRequest, resp.Code)
+		})
 	})
 
 	t.Run("catalog and transaction routes keep camelCase and filters", func(t *testing.T) {

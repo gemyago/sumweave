@@ -328,6 +328,15 @@ type FinanceController interface {
 		*FinanceFxSyncResponse,
 	]) http.Handler
 
+	// PATCH /api/v1/finance/tenants/{tenantId}
+	//
+	// Request type: UpdateFinanceTenantParams,
+	//
+	// Response type: none
+	UpdateFinanceTenant(NoResponseHandlerBuilder[
+		*UpdateFinanceTenantParams,
+	]) http.Handler
+
 	// PATCH /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}
 	//
 	// Request type: UpdateFinanceTransactionParams,
@@ -405,6 +414,8 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/fx/sync
 // 
+// - PATCH /api/v1/finance/tenants/{tenantId}
+// 
 // - PATCH /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}
 // 
 // Routes will use provided controller to handle requests.
@@ -442,6 +453,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/start", controller.StartFinanceConnectionRedirectLink(builder.StartFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync", controller.TriggerFinanceConnectionSync(builder.TriggerFinanceConnectionSync))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/fx/sync", controller.TriggerFinanceFxSync(builder.TriggerFinanceFxSync))
+	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}", controller.UpdateFinanceTenant(builder.UpdateFinanceTenant))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}", controller.UpdateFinanceTransaction(builder.UpdateFinanceTransaction))
 	return rootHandler
 }

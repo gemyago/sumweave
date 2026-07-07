@@ -13,7 +13,7 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-type FinanceTenantCreateRequest struct { 
+type FinanceTenantUpdateRequest struct { 
 	Name string `json:"name"`
 	DisplayCurrency FinanceTenantDisplayCurrency `json:"displayCurrency"`
 }

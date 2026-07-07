@@ -271,6 +271,7 @@ export interface FinanceSyntheticLinkState {
 export interface SignalFinanceApi {
   listTenants(): Promise<FinanceTenantSummary[]>
   createTenant(body: { name: string; displayCurrency: string }): Promise<FinanceTenantSummary>
+  updateTenant(params: { tenantId: string; name: string; displayCurrency: string }): Promise<void>
   getTenant(params: { tenantId: string }): Promise<FinanceTenantSummary>
   listTenantMembers(params: { tenantId: string }): Promise<FinanceTenantMember[]>
   listTenantInvites(params: { tenantId: string }): Promise<FinanceTenantInvite[]>
@@ -404,6 +405,13 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
     },
     async createTenant(body) {
       return mapTenant(await request<RawTenantSummary>({ method: 'POST', path: '/finance/tenants', body }))
+    },
+    async updateTenant({ tenantId, name, displayCurrency }) {
+      await request<void>({
+        method: 'PATCH',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}`,
+        body: { name, displayCurrency },
+      })
     },
     async getTenant({ tenantId }) {
       return mapTenant(await request<RawTenantSummary>({ method: 'GET', path: `/finance/tenants/${encodeURIComponent(tenantId)}` }))

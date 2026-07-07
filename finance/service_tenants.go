@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,7 +70,10 @@ func (s *TenantService) CreateTenant(
 	params CreateTenantParams,
 ) (domain.Tenant, error) {
 	tenantName := strings.TrimSpace(params.Name)
-	currency := strings.ToUpper(strings.TrimSpace(params.DisplayCurrency))
+	currency, err := normalizeTenantDisplayCurrency(params.DisplayCurrency)
+	if err != nil {
+		return domain.Tenant{}, err
+	}
 	userID := strings.TrimSpace(params.ActorUserID)
 	if tenantName == "" || currency == "" || userID == "" {
 		return domain.Tenant{}, errors.New(
@@ -92,14 +96,14 @@ func (s *TenantService) CreateTenant(
 		CreatedAt: now,
 	}
 
-	if _, err := s.store.SaveTenant(ctx, tenant); err != nil {
-		return domain.Tenant{}, fmt.Errorf("create tenant: %w", err)
+	if _, saveTenantErr := s.store.SaveTenant(ctx, tenant); saveTenantErr != nil {
+		return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveTenantErr)
 	}
-	if _, err := s.store.SaveTenantMembership(ctx, membership); err != nil {
-		return domain.Tenant{}, fmt.Errorf("create tenant: %w", err)
+	if _, saveMembershipErr := s.store.SaveTenantMembership(ctx, membership); saveMembershipErr != nil {
+		return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveMembershipErr)
 	}
 	for _, seed := range defaultTenantCategorySeeds() {
-		_, err := s.store.SaveCategory(ctx, domain.Category{
+		_, saveCategoryErr := s.store.SaveCategory(ctx, domain.Category{
 			ID:            s.newID(),
 			TenantID:      tenant.ID,
 			Name:          seed.Name,
@@ -108,23 +112,59 @@ func (s *TenantService) CreateTenant(
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		})
-		if err != nil {
-			return domain.Tenant{}, fmt.Errorf("create tenant: %w", err)
+		if saveCategoryErr != nil {
+			return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveCategoryErr)
 		}
 	}
 	for _, seed := range defaultTenantTags() {
-		_, err := s.store.SaveTag(ctx, domain.Tag{
+		_, saveTagErr := s.store.SaveTag(ctx, domain.Tag{
 			ID:        s.newID(),
 			TenantID:  tenant.ID,
 			Name:      seed,
 			CreatedAt: now,
 			UpdatedAt: now,
 		})
-		if err != nil {
-			return domain.Tenant{}, fmt.Errorf("create tenant: %w", err)
+		if saveTagErr != nil {
+			return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveTagErr)
 		}
 	}
 	return tenant, nil
+}
+
+func (s *TenantService) UpdateTenant(
+	ctx context.Context,
+	params UpdateTenantParams,
+) (domain.Tenant, error) {
+	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
+		return domain.Tenant{}, err
+	}
+
+	tenantName := strings.TrimSpace(params.Name)
+	if tenantName == "" {
+		return domain.Tenant{}, errors.New("tenant name is required")
+	}
+
+	currency, err := normalizeTenantDisplayCurrency(params.DisplayCurrency)
+	if err != nil {
+		return domain.Tenant{}, err
+	}
+
+	tenant, err := s.store.GetTenant(ctx, strings.TrimSpace(params.TenantID))
+	if err != nil {
+		return domain.Tenant{}, fmt.Errorf("update tenant: %w", err)
+	}
+
+	now := s.now().UTC()
+	tenant.Name = tenantName
+	tenant.DisplayCurrency = currency
+	tenant.UpdatedAt = now
+
+	updated, err := s.store.SaveTenant(ctx, *tenant)
+	if err != nil {
+		return domain.Tenant{}, fmt.Errorf("update tenant: %w", err)
+	}
+
+	return updated, nil
 }
 
 func (s *TenantService) ArchiveTenant(
@@ -244,4 +284,16 @@ func (s *TenantService) ListTenantInvites(
 		return nil, fmt.Errorf("list tenant invites: %w", err)
 	}
 	return invites, nil
+}
+
+func normalizeTenantDisplayCurrency(displayCurrency string) (string, error) {
+	code := strings.ToUpper(strings.TrimSpace(displayCurrency))
+	if code == "" {
+		return "", ErrInvalidTenantDisplayCurrency
+	}
+	if !slices.Contains(supportedTenantDisplayCurrencies(), code) {
+		return "", ErrInvalidTenantDisplayCurrency
+	}
+
+	return code, nil
 }

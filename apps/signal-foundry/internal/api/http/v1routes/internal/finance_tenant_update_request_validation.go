@@ -10,7 +10,7 @@ import (
 // Below is to workaround unused imports.
 var _ = time.Time{}
 
-func NewFinanceTenantCreateRequestValidator() FieldValidator[*FinanceTenantCreateRequest] {
+func NewFinanceTenantUpdateRequestValidator() FieldValidator[*FinanceTenantUpdateRequest] {
 	validateName := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
@@ -18,7 +18,7 @@ func NewFinanceTenantCreateRequestValidator() FieldValidator[*FinanceTenantCreat
 		EnsureNonDefault[FinanceTenantDisplayCurrency],
 	)
 	
-	return func(bindingCtx *BindingContext, value *FinanceTenantCreateRequest) {
+	return func(bindingCtx *BindingContext, value *FinanceTenantUpdateRequest) {
 		validateName(bindingCtx.Fork("name"), value.Name)
 		validateDisplayCurrency(bindingCtx.Fork("displayCurrency"), value.DisplayCurrency)
 	}

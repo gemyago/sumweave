@@ -212,6 +212,13 @@ func (s *Service) CreateTenant(
 	return s.tenants.CreateTenant(ctx, params)
 }
 
+func (s *Service) UpdateTenant(
+	ctx context.Context,
+	params UpdateTenantParams,
+) (domain.Tenant, error) {
+	return s.tenants.UpdateTenant(ctx, params)
+}
+
 func (s *Service) ArchiveTenant(
 	ctx context.Context,
 	params ArchiveTenantParams,

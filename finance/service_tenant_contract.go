@@ -7,8 +7,9 @@ import (
 )
 
 var (
-	ErrInviteNotFound = errors.New("tenant invite not found")
-	ErrInviteAccepted = errors.New("tenant invite already accepted")
+	ErrInviteNotFound               = errors.New("tenant invite not found")
+	ErrInviteAccepted               = errors.New("tenant invite already accepted")
+	ErrInvalidTenantDisplayCurrency = errors.New("tenant display currency is invalid or unsupported")
 )
 
 const (
@@ -18,10 +19,21 @@ const (
 	defaultTenantTagBusiness     = "Business"
 	defaultTenantTagSubscription = "Subscription"
 	defaultTenantTagTravel       = "Travel"
+	tenantDisplayCurrencyUSD     = "USD"
+	tenantDisplayCurrencyEUR     = "EUR"
+	tenantDisplayCurrencyPLN     = "PLN"
+	tenantDisplayCurrencyUAH     = "UAH"
 )
 
 type CreateTenantParams struct {
 	ActorUserID     string
+	Name            string
+	DisplayCurrency string
+}
+
+type UpdateTenantParams struct {
+	ActorUserID     string
+	TenantID        string
 	Name            string
 	DisplayCurrency string
 }
@@ -93,5 +105,14 @@ func defaultTenantTags() []string {
 		defaultTenantTagBusiness,
 		defaultTenantTagSubscription,
 		defaultTenantTagTravel,
+	}
+}
+
+func supportedTenantDisplayCurrencies() []string {
+	return []string{
+		tenantDisplayCurrencyUSD,
+		tenantDisplayCurrencyEUR,
+		tenantDisplayCurrencyPLN,
+		tenantDisplayCurrencyUAH,
 	}
 }
