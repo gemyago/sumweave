@@ -26,7 +26,7 @@ func TestStartAllCommand(t *testing.T) {
 		startAllCmd := findRootCommandByName(t, rootCmd, startAllCommandName)
 
 		require.NotNil(t, startAllCmd.Flags().Lookup("noop"))
-		require.NotNil(t, startAllCmd.Flags().Lookup("ui-location"))
+		require.Nil(t, startAllCmd.Flags().Lookup("ui-location"))
 	})
 
 	t.Run("resolver and runner errors are surfaced", func(t *testing.T) {

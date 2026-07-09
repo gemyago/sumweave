@@ -262,39 +262,10 @@ func TestMain(t *testing.T) {
 			)
 			assert.Error(t, rootCmd.Execute())
 		})
-		t.Run("--ui-location flag", func(t *testing.T) {
-			t.Run("should accept --ui-location flag and complete setup without error", func(t *testing.T) {
-				wantUILocation := t.TempDir()
-				dsn := filepath.Join(t.TempDir(), "signal-foundry.sqlite")
-				t.Setenv("APP_DATALAYER_DATABASE_DSN", dsn)
-				migrateAppDatabaseForTests(t, dsn)
-				rootCmd := setupCommands()
-				rootCmd.SetArgs([]string{
-					"start", "-e", "test", "--noop",
-					"--ui-location", wantUILocation,
-					"--logs-file", testLogFile(t),
-				})
-				require.NoError(t, rootCmd.Execute())
-			})
-
-			t.Run("should expose ui-location flag on start command", func(t *testing.T) {
-				rootCmd := setupCommands()
-				startCmd := findStartCmd(t, rootCmd)
-				assert.NotNil(t, startCmd.Flags().Lookup("ui-location"))
-			})
-
-			t.Run("should default to empty string when --ui-location is not provided", func(t *testing.T) {
-				dsn := filepath.Join(t.TempDir(), "signal-foundry.sqlite")
-				t.Setenv("APP_DATALAYER_DATABASE_DSN", dsn)
-				migrateAppDatabaseForTests(t, dsn)
-				rootCmd := setupCommands()
-				startCmd := findStartCmd(t, rootCmd)
-				rootCmd.SetArgs([]string{"start", "-e", "test", "--noop", "--logs-file", testLogFile(t)})
-				require.NoError(t, rootCmd.Execute())
-				uiLoc, err := startCmd.Flags().GetString("ui-location")
-				require.NoError(t, err)
-				assert.Empty(t, uiLoc)
-			})
+		t.Run("should not expose deprecated ui-location flag on start command", func(t *testing.T) {
+			rootCmd := setupCommands()
+			startCmd := findStartCmd(t, rootCmd)
+			assert.Nil(t, startCmd.Flags().Lookup("ui-location"))
 		})
 
 		t.Run("does not run durable jobs inline", func(t *testing.T) {
@@ -405,7 +376,7 @@ func findRootCommandByName(t *testing.T, rootCmd *cobra.Command, name string) *c
 func TestDevFlow(t *testing.T) {
 	chdirModuleRoot(t)
 	t.Run("default startup is API-only and requires no UI build artifacts", func(t *testing.T) {
-		t.Run("start without --ui-location completes setup without error", func(t *testing.T) {
+		t.Run("start without ui override completes setup without error", func(t *testing.T) {
 			dsn := filepath.Join(t.TempDir(), "signal-foundry.sqlite")
 			t.Setenv("APP_DATALAYER_DATABASE_DSN", dsn)
 			migrateAppDatabaseForTests(t, dsn)
@@ -414,18 +385,11 @@ func TestDevFlow(t *testing.T) {
 			require.NoError(t, rootCmd.Execute())
 		})
 
-		t.Run("start command ui-location flag defaults to empty string", func(t *testing.T) {
-			dsn := filepath.Join(t.TempDir(), "signal-foundry.sqlite")
-			t.Setenv("APP_DATALAYER_DATABASE_DSN", dsn)
-			migrateAppDatabaseForTests(t, dsn)
+		t.Run("start command keeps only noop HTTP startup toggle", func(t *testing.T) {
 			rootCmd := setupCommands()
 			startCmd := findStartCmd(t, rootCmd)
-			rootCmd.SetArgs([]string{"start", "-e", "test", "--noop", "--logs-file", testLogFile(t)})
-			require.NoError(t, rootCmd.Execute())
-			uiLoc, err := startCmd.Flags().GetString("ui-location")
-			require.NoError(t, err)
-			// ui-location must default to empty so server starts in API-only mode.
-			assert.Empty(t, uiLoc)
+			assert.NotNil(t, startCmd.Flags().Lookup("noop"))
+			assert.Nil(t, startCmd.Flags().Lookup("ui-location"))
 		})
 	})
 }

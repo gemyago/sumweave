@@ -39,6 +39,7 @@ node_modules
 .nx/cache
 .nx/workspace-data
 .cache/
+apps/signal-foundry/internal/api/http/embeddedui/dist/
 
 # Local ACP probe outputs (generated on demand, not committed)
 docs/implementation/opencode-acp-transcripts/*.jsonl

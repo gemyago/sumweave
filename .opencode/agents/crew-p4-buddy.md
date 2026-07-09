@@ -1,6 +1,6 @@
 ---
 name: crew-p4-buddy
-description: P4 software engineer. Good for complex tasks like planning, research, can do complex coding as well.
+description: P4 software engineer. Good for moderatelycomplex tasks like planning, research, can do complex coding as well.
 mode: subagent
 model: openai/gpt-5.4
 reasoningEffort: high

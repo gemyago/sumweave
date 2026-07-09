@@ -100,10 +100,6 @@ func (e *Engine) StartHTTPServer(ctx context.Context, opts ...EngineStartServerO
 		opt.apply(o)
 	}
 
-	if o.uiLocation != "" {
-		e.cfg.Set("httpServer.uiLocation", o.uiLocation)
-	}
-
 	if err := errors.Join(
 		server.Register(e.container),
 		http.Register(e.container),

@@ -76,6 +76,24 @@ When working on some particular task, prefer the following flow:
 
 If you cannot do anything yourself, delegate to appropriate agent.
 
+## Work planning
+
+Prefer splitting work onto actionable self-contained tasks. Do not delegate large volume of unrelated tasks to a single agent. Prefer following the rule: one atomic task - one agent. Group tasks that are coupled or related to each other.
+
+Example:
+- Split across multiple agents:
+  - single-agent: Extend backend and API layer to support new feature featureABC
+  - single-agent: Extend UI layer with featureABC
+  - single-agent: Manually e2e test the featureABC
+
+For each task, asses impact and decide if more complex verification is needed other than standard task completion protocol that agents must follow. In such case prefer using repo instructions to run e2e tests for affected areas as a task verification gate.
+
+## Work submission
+
+If user asks to submit the work this usually means:
+- Following @commit.md instruction to commit all remaning work
+- Following @create-pull-request.md instruction to create a pull request
+
 ## Typical workflow
 
 1. User asks something

@@ -66,12 +66,6 @@ func newStartAllCmdWithResolver(container *dig.Container, resolver startAllResol
 		params.noop,
 		"Do not start. Just setup params and exit. Useful for testing if setup is all working.",
 	)
-	cmd.Flags().StringVar(
-		&params.uiLocation,
-		"ui-location",
-		params.uiLocation,
-		"Path to pre-built UI static assets directory. When set, serves UI from this directory. Empty means API-only mode.",
-	)
 	return cmd
 }
 
@@ -118,7 +112,6 @@ func resolveStartAllRuntime(
 		scheduler:             resolved.Scheduler,
 		schedulerLoopInterval: resolved.SchedulerLoopInterval,
 		startServerOpts: []startHTTPServerOpt{
-			signalfoundry.WithStartHTTPServerUILocation(params.uiLocation),
 			signalfoundry.WithStartHTTPServerNoop(params.noop),
 		},
 	}, nil

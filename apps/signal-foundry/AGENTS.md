@@ -55,6 +55,8 @@ Before starting or restarting backend processes that rely on persisted tables, r
 
 Standard local backend workflow is `go run ./cmd/signal-foundry db-migrate --env local` and then `go run ./cmd/signal-foundry start-all --env local`.
 
+Release build workflow from `apps/signal-foundry` is `make dist/bin`; it rebuilds the SPA into the backend embed directory, validates `dist/index.html`, and then produces the backend binary with embedded UI assets. Runtime UI serving is embedded-only: if embedded `dist/index.html` is absent, the backend stays API-only.
+
 PM2 startup runs the same all-in-one local backend shape on port 4501.
 
 If the PM2 command shape changed (for example from `start` to `start-all`) or you need to guarantee the current ecosystem config is applied, recreate the backend app with `pm2 delete signal-foundry-api && pm2 start ecosystem.config.js` from the repo root; PM2 can otherwise keep an older command definition.
@@ -69,6 +71,7 @@ Durable jobs workflow:
 ## Lint / test
 
 - **This module:** `make lint`, `make test` from `apps/signal-foundry` (uses repo-root pinned `golangci-lint` from `bin/` unless `CI=true`).
+- **Release build:** `make dist/bin` from `apps/signal-foundry` produces `dist/bin/signal-foundry` with embedded UI assets when generated `embeddedui/dist/index.html` is present.
 - **Whole repo:** from the repository root, `make lint` and `make test` include this module via `$(MAKE) -C apps/signal-foundry …`.
 
 ## Module Rules and Conventions

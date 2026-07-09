@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -141,7 +140,6 @@ func TestSetupV1Routes(t *testing.T) {
 
 	makeSetup := func(
 		t *testing.T,
-		uiLocation string,
 		authUserID string,
 	) (*server.HTTPRouter, *v1controllers.HealthController, http.Handler, *financepkg.Finance, *financepkg.BankConnectionService, *financepersistence.Store) {
 		t.Helper()
@@ -295,7 +293,6 @@ func TestSetupV1Routes(t *testing.T) {
 			Runtime:               rt,
 			RootLogger:            telemetry.RootTestLogger(),
 			BankConnectionService: bankConnectionService,
-			UILocation:            uiLocation,
 		})
 		return router, healthCtrl, rootHandler, financeModule, bankConnectionService, financeStore
 	}
@@ -511,7 +508,7 @@ func TestSetupV1Routes(t *testing.T) {
 
 	t.Run("synthetic link-state routes are registered on the app router", func(t *testing.T) {
 		userID := fake.UUID().V4()
-		_, _, rootHandler, financeModule, _, _ := makeSetup(t, "", userID)
+		_, _, rootHandler, financeModule, _, _ := makeSetup(t, userID)
 		tenant, err := financeModule.TenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{
 			ActorUserID:     userID,
 			Name:            "tenant-" + fake.UUID().V4(),
@@ -557,7 +554,7 @@ func TestSetupV1Routes(t *testing.T) {
 	})
 
 	t.Run("enable banking callback route redirects back to finance connections", func(t *testing.T) {
-		_, _, rootHandler, _, bankConnectionService, financeStore := makeSetup(t, "", "")
+		_, _, rootHandler, _, bankConnectionService, financeStore := makeSetup(t, "")
 
 		t.Run("redirects provider return params back to the browser route", func(t *testing.T) {
 			pendingStart, err := financeStore.SavePendingBankConnectionLinkStart(
@@ -606,86 +603,5 @@ func TestSetupV1Routes(t *testing.T) {
 			rootHandler.ServeHTTP(w, req)
 			require.Equal(t, http.StatusBadRequest, w.Code)
 		})
-	})
-
-	t.Run("UI serving", func(t *testing.T) {
-		t.Run("when ui location is empty, server operates in API-only mode", func(t *testing.T) {
-			_, _, rootHandler, _, _, _ := makeSetup(t, "", "")
-
-			t.Run("GET / returns 404", func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
-				w := httptest.NewRecorder()
-				rootHandler.ServeHTTP(w, req)
-				assert.Equal(t, http.StatusNotFound, w.Code)
-			})
-
-			t.Run("GET /some-asset.js returns 404", func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/some-asset.js", http.NoBody)
-				w := httptest.NewRecorder()
-				rootHandler.ServeHTTP(w, req)
-				assert.Equal(t, http.StatusNotFound, w.Code)
-			})
-		})
-
-		t.Run("when ui location is a valid directory, server serves UI", func(t *testing.T) {
-			uiDir := t.TempDir()
-			wantIndexContent := fake.Lorem().Sentence(5)
-			wantAssetContent := fake.Lorem().Sentence(3)
-			assetName := fake.Lorem().Word() + ".js"
-			require.NoError(
-				t,
-				os.WriteFile(filepath.Join(uiDir, "index.html"), []byte(wantIndexContent), 0o600),
-			)
-			require.NoError(
-				t,
-				os.WriteFile(filepath.Join(uiDir, assetName), []byte(wantAssetContent), 0o600),
-			)
-
-			_, _, rootHandler, _, _, _ := makeSetup(t, uiDir, "")
-
-			t.Run("GET / serves index.html", func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
-				w := httptest.NewRecorder()
-				rootHandler.ServeHTTP(w, req)
-				assert.Equal(t, http.StatusOK, w.Code)
-				assert.Equal(t, wantIndexContent, w.Body.String())
-			})
-
-			t.Run("GET /asset serves static file", func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/"+assetName, http.NoBody)
-				w := httptest.NewRecorder()
-				rootHandler.ServeHTTP(w, req)
-				assert.Equal(t, http.StatusOK, w.Code)
-				assert.Equal(t, wantAssetContent, w.Body.String())
-			})
-
-			t.Run("API routes remain functional", func(t *testing.T) {
-				subpath := fmt.Sprintf("%s/subpath", fake.Lorem().Word())
-				req := httptest.NewRequest(
-					http.MethodPost,
-					fmt.Sprintf("/api/v1/runtime/%s", subpath),
-					http.NoBody,
-				)
-				w := httptest.NewRecorder()
-				rootHandler.ServeHTTP(w, req)
-				assert.Equal(t, http.StatusOK, w.Code)
-				assert.Equal(t, "runtime", w.Body.String())
-			})
-		})
-
-		t.Run(
-			"when ui location is invalid directory, server operates in API-only mode",
-			func(t *testing.T) {
-				nonExistentDir := filepath.Join(t.TempDir(), fake.Lorem().Word())
-				_, _, rootHandler, _, _, _ := makeSetup(t, nonExistentDir, "")
-
-				t.Run("GET / returns 404", func(t *testing.T) {
-					req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
-					w := httptest.NewRecorder()
-					rootHandler.ServeHTTP(w, req)
-					assert.Equal(t, http.StatusNotFound, w.Code)
-				})
-			},
-		)
 	})
 }

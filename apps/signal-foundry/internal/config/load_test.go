@@ -16,13 +16,11 @@ func TestLoad(t *testing.T) {
 		require.Equal(t, "DEBUG", cfg.GetString("defaultLogLevel"))
 		require.Equal(t, "https://api.monobank.ua", cfg.GetString("finance.providers.monobank.baseURL"))
 	})
-	t.Run("dev flow regression: default config has no ui location set", func(t *testing.T) {
+	t.Run("dev flow regression: test config still loads core HTTP defaults", func(t *testing.T) {
 		cfg := New()
 		err := Load(cfg, NewLoadOpts().WithEnv("test"))
 		require.NoError(t, err)
-
-		// httpServer.uiLocation must default to empty so no UI build artifacts are required.
-		require.Empty(t, cfg.GetString("httpServer.uiLocation"))
+		require.Equal(t, 4501, cfg.GetInt("httpServer.port"))
 	})
 	t.Run("should fail if no default config is found", func(t *testing.T) {
 		opts := NewLoadOpts()

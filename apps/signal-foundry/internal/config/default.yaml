@@ -22,8 +22,6 @@ httpServer:
   # Align with LLM HTTP client timeout (internal/runtime.go llmClientTimeout); SSE agent runs need the full window.
   writeTimeout: 300s
   accessLogsLevel: ""
-  # Path to pre-built UI static assets directory. Empty means API-only mode.
-  uiLocation: ""
 
 openTelemetry:
   # Enable or disable OpenTelemetry integration in one place

@@ -75,7 +75,6 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "httpServer.readTimeout").asDuration(),
 		provideConfigValue(cfg, "httpServer.writeTimeout").asDuration(),
 		provideConfigValue(cfg, "httpServer.accessLogsLevel").asString(),
-		provideConfigValue(cfg, "httpServer.uiLocation").asString(),
 
 		// opentelemetry config
 		provideConfigValue(cfg, "openTelemetry.enabled").asBool(),

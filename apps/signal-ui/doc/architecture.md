@@ -9,7 +9,7 @@ Browser SPA for Signal Foundry under `apps/signal-ui`: static **`dist/`** from V
 | Area | Choice |
 | --- | --- |
 | UI | **Svelte 5** + **TypeScript** |
-| Build | **Vite** (`vite build` → `dist/`) |
+| Build | **Vite** (`vite build` → `dist/`, or backend embed outDir for backend-serving builds) |
 | Routing | **`svelte-spa-router` v5** — **hash** URLs (`#/chat`, `#/providers`) so a plain static host works without server rewrites |
 | Unit / component tests | **Vitest** + **`@testing-library/svelte`** + **`svelteTesting()`** (Vite plugin), **jsdom**, optional **jest-dom** matchers |
 | Lint | **ESLint** (TS + Svelte) + **`svelte-check`** / **tsc** via `npm run check` |
@@ -31,8 +31,9 @@ Browser SPA for Signal Foundry under `apps/signal-ui`: static **`dist/`** from V
 ## Repository integration
 
 - **`apps/signal-ui`** is its own npm package: **`package-lock.json`**, **`npm ci`** for installs.
-- **`apps/signal-ui/Makefile`:** `lint` → `npm run lint`, `test` → `npm run test:run`.
+- **`apps/signal-ui/Makefile`:** `lint` → `npm run lint`, `test` → `npm run test:run`, `build-embed-dist` → `vite build --outDir … --emptyOutDir` plus `index.html` validation for backend embedding.
 - **Root `Makefile`** runs **`$(MAKE) -C apps/signal-ui lint`** and **`test`**. JS coverage is not merged into Go’s merged HTML report; UI failures still fail the root **`make test`**.
+- **Backend build:** `apps/signal-foundry/make dist/bin` calls `apps/signal-ui/make build-embed-dist` so the Go binary embeds the current SPA output for same-origin `/` + `/api/v1/*` delivery.
 
 ## API Integration
 

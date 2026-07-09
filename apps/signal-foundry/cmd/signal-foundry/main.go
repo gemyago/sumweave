@@ -69,8 +69,7 @@ func setPerCommandDefaults(_ *cobra.Command) {
 }
 
 type startServerParams struct {
-	noop       bool
-	uiLocation string
+	noop bool
 }
 
 func newStartServerCmd(container *dig.Container) *cobra.Command {
@@ -79,8 +78,7 @@ func newStartServerCmd(container *dig.Container) *cobra.Command {
 		Short: "Start the HTTP server",
 	}
 	params := startServerParams{
-		noop:       false,
-		uiLocation: "",
+		noop: false,
 	}
 	cmd.Flags().BoolVar(
 		&params.noop,
@@ -88,19 +86,12 @@ func newStartServerCmd(container *dig.Container) *cobra.Command {
 		params.noop,
 		"Do not start. Just setup params and exit. Useful for testing if setup is all working.",
 	)
-	cmd.Flags().StringVar(
-		&params.uiLocation,
-		"ui-location",
-		params.uiLocation,
-		"Path to pre-built UI static assets directory. When set, serves UI from this directory. Empty means API-only mode.",
-	)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		engine, err := newEngineFromRoot(cmd.Root(), container)
 		if err != nil {
 			return err
 		}
 		opts := []signalfoundry.EngineStartServerOpt{
-			signalfoundry.WithStartHTTPServerUILocation(params.uiLocation),
 			signalfoundry.WithStartHTTPServerNoop(params.noop),
 		}
 		return engine.StartHTTPServer(cmd.Context(), opts...)

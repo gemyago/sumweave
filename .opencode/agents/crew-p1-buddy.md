@@ -1,6 +1,7 @@
 ---
 name: crew-p1-buddy
-description: P1 entry level software engineer. Does it's work very fast, but needs simple work (committing, checking, collecting information, renaming files e.t.c), limited context, can not run e2e tests, or anything that requires browser interaction or visual analysis.
+description: |
+  P1 entry level software engineer. Does it's work very fast, but needs simple work like: fixing lint errors and minor test fixes, commits and pull requests, checking, collecting information, renaming files e.t.c. Limited context, can not run e2e tests, or anything that requires browser interaction or visual analysis.
 mode: subagent
 model: openai/gpt-5.3-codex-spark
 reasoningEffort: high

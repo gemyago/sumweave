@@ -40,8 +40,7 @@ func WithEngineEnv(env string) EngineOpt { //nolint:ireturn
 }
 
 type engineStartServerCfg struct {
-	noop       bool
-	uiLocation string
+	noop bool
 }
 
 // EngineStartServerOpt allows configuring the start server operation.
@@ -60,13 +59,5 @@ func (f engineStartServerOptFunc) apply(opts *engineStartServerCfg) {
 func WithStartHTTPServerNoop(noop bool) EngineStartServerOpt { //nolint:ireturn
 	return engineStartServerOptFunc(func(opts *engineStartServerCfg) {
 		opts.noop = noop
-	})
-}
-
-// WithStartHTTPServerUILocation sets the UI location for the HTTP server.
-// Useful for serving pre-built UI static assets.
-func WithStartHTTPServerUILocation(uiLocation string) EngineStartServerOpt { //nolint:ireturn
-	return engineStartServerOptFunc(func(opts *engineStartServerCfg) {
-		opts.uiLocation = uiLocation
 	})
 }

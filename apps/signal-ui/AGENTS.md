@@ -45,6 +45,8 @@ In order to use the web UI you have to also make sure to start the backend serve
 
 From **`apps/signal-ui`**: **`npm run dev`**, **`npm run build`**, **`npm run preview`**. Install deps with **`npm ci`** (`npm install` only when changing deps). Client env: **`VITE_*`** only — see **`.env.example`**.
 
+For backend embedding, run **`make build-embed-dist EMBED_OUT_DIR=/absolute/output/path`** from `apps/signal-ui`; the backend `make dist/bin` flow already invokes this target for the standard same-origin build and validates the generated `index.html` before compiling the backend binary.
+
 ## Lint / test / API codegen
 
 From **`apps/signal-ui`**:
@@ -53,6 +55,7 @@ From **`apps/signal-ui`**:
 - **`make test`** — `npm run test:run` (Vitest + coverage). Do not lower thresholds in **`vite.config.ts`**.
 - **`make generate-api`** — regenerate **`src/lib/agentapi/agentapi.generated.ts`** from **`runtime/internal/agentapi/openapi.yaml`**.
 - **`make check-api`** — fails if generated API types are stale (runs as part of **`make lint`**).
+- **`make build-embed-dist EMBED_OUT_DIR=/absolute/output/path`** — production SPA build written to the backend embed directory (uses `vite build --outDir … --emptyOutDir`, then validates `index.html`).
 
 From the repo root: **`npx nx lint signal-ui`**, **`npx nx test signal-ui`**, or **`make affected-lint-test`** after code changes.
 

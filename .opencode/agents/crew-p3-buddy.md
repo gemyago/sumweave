@@ -1,6 +1,6 @@
 ---
 name: crew-p3-buddy
-description: P3 software engineer, good for general purpose coding where things are more or less clear.
+description: P3 software engineer, good for general purpose coding where things are more or less clear. Works very well where scope is clearly established.
 mode: subagent
 model: openai/gpt-5.4
 reasoningEffort: medium

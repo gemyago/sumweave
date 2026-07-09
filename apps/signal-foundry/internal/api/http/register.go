@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 
 	signalfoundryinternal "github.com/gemyago/signal-foundry/apps/signal-foundry/internal"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware"
@@ -39,11 +38,6 @@ type V1RoutesDeps struct {
 	Runtime               *signalfoundryinternal.Runtime
 	RootLogger            *slog.Logger
 	BankConnectionService *financepkg.BankConnectionService
-
-	// UILocation is an optional path to the directory containing pre-built UI static assets.
-	// When set and the directory is readable, the backend serves index.html at GET /
-	// and static assets from that directory. When empty or invalid, the server runs in API-only mode.
-	UILocation string `name:"config.httpServer.uiLocation" optional:"true"`
 }
 
 func SetupV1Routes(deps V1RoutesDeps) { // coverage-ignore // Little value in testing wireup code.
@@ -67,24 +61,7 @@ func SetupV1Routes(deps V1RoutesDeps) { // coverage-ignore // Little value in te
 		newEnableBankingCallbackHandler(deps.BankConnectionService),
 	)
 
-	mountUIRoutes(deps.RootLogger, deps.HTTPRouter, deps.UILocation)
-}
-
-// mountUIRoutes mounts UI static file serving when uiLocation is a valid readable directory.
-// If uiLocation is empty or the directory cannot be opened, the server continues in API-only mode.
-func mountUIRoutes(logger *slog.Logger, router *server.HTTPRouter, uiLocation string) {
-	if uiLocation == "" {
-		return
-	}
-	if _, err := os.Stat(uiLocation); err != nil {
-		logger.Warn("UI location is not accessible, running in API-only mode",
-			slog.String("uiLocation", uiLocation),
-			slog.Any("err", err),
-		)
-		return
-	}
-	fs := http.FileServerFS(os.DirFS(uiLocation))
-	router.Handle("/", fs)
+	mountUIRoutes(deps.RootLogger, deps.HTTPRouter)
 }
 
 func Register(container *dig.Container) error {
