@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +34,11 @@ func TestDatabaseStore(t *testing.T) {
 	makeStore := func(t *testing.T, dsn string, tablePrefix string) *DatabaseStore {
 		t.Helper()
 
-		store, err := NewDatabaseStore(dsn, DatabaseStoreOpts{
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+		store, err := NewDatabaseStore(sqlDB, dsn, DatabaseStoreOpts{
 			TablePrefix: tablePrefix,
 		})
 		require.NoError(t, err)
@@ -172,7 +177,11 @@ func TestDatabaseStore(t *testing.T) {
 		t.Run("creates a sqlite-backed store", func(t *testing.T) {
 			t.Parallel()
 
-			store, err := NewDatabaseStore(":memory:", DatabaseStoreOpts{})
+			sqlDB, err := sqlconn.Open(":memory:")
+			require.NoError(t, err)
+			defer func() { require.NoError(t, sqlDB.Close()) }()
+
+			store, err := NewDatabaseStore(sqlDB, ":memory:", DatabaseStoreOpts{})
 			require.NoError(t, err)
 			require.NotNil(t, store)
 		})
@@ -180,7 +189,19 @@ func TestDatabaseStore(t *testing.T) {
 		t.Run("requires a dsn", func(t *testing.T) {
 			t.Parallel()
 
-			store, err := NewDatabaseStore("", DatabaseStoreOpts{})
+			sqlDB, err := sqlconn.Open(":memory:")
+			require.NoError(t, err)
+			defer func() { require.NoError(t, sqlDB.Close()) }()
+
+			store, err := NewDatabaseStore(sqlDB, "", DatabaseStoreOpts{})
+			require.Error(t, err)
+			require.Nil(t, store)
+		})
+
+		t.Run("requires a sql database", func(t *testing.T) {
+			t.Parallel()
+
+			store, err := NewDatabaseStore(nil, ":memory:", DatabaseStoreOpts{})
 			require.Error(t, err)
 			require.Nil(t, store)
 		})
@@ -189,7 +210,11 @@ func TestDatabaseStore(t *testing.T) {
 	t.Run("AutoMigrate", func(t *testing.T) {
 		t.Parallel()
 
-		store, err := NewDatabaseStore(":memory:", DatabaseStoreOpts{})
+		sqlDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+
+		store, err := NewDatabaseStore(sqlDB, ":memory:", DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		require.NoError(t, store.AutoMigrate())

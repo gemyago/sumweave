@@ -15,6 +15,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/runtime/venueedge"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
@@ -111,7 +112,11 @@ func TestHistoricalRawCandleBackfillRunnerWithHyperliquidAdapter(t *testing.T) {
 		server := httptest.NewServer(handler)
 		t.Cleanup(server.Close)
 
-		store, err := data.NewDatabaseStore(":memory:", data.DatabaseStoreOpts{})
+		sqlDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+		store, err := data.NewDatabaseStore(sqlDB, ":memory:", data.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 

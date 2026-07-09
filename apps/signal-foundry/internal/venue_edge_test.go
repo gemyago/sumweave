@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/venueedge"
@@ -22,7 +23,10 @@ func TestVenueEdgeWiring(t *testing.T) {
 	makeStore := func(t *testing.T) *data.DatabaseStore {
 		t.Helper()
 
-		store, err := data.NewDatabaseStore(":memory:", data.DatabaseStoreOpts{})
+		sqlDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		store, err := data.NewDatabaseStore(sqlDB, ":memory:", data.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 

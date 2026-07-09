@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 )
@@ -12,9 +13,17 @@ func openTestDatabase(t *testing.T) *persistence.Database {
 	t.Helper()
 
 	fake := faker.New()
-	database, err := persistence.OpenDatabase(
-		fmt.Sprintf("file:%s?mode=memory&cache=shared", "finance-"+fake.UUID().V4()),
-	)
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "finance-"+fake.UUID().V4())
+	sqlDB, err := sqlconn.Open(dsn)
+	if err != nil {
+		t.Fatalf("open finance test sql database: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := sqlDB.Close(); closeErr != nil {
+			t.Fatalf("close finance test sql database: %v", closeErr)
+		}
+	})
+	database, err := persistence.NewDatabase(sqlDB, dsn)
 	if err != nil {
 		t.Fatalf("open finance test database: %v", err)
 	}

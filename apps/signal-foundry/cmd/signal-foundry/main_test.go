@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/gemyago/signal-foundry/runtime/audit"
 	"github.com/gemyago/signal-foundry/runtime/backtest"
@@ -22,7 +22,6 @@ import (
 	"github.com/gemyago/signal-foundry/runtime/execution"
 	rtgovernor "github.com/gemyago/signal-foundry/runtime/governor"
 	rtstrategy "github.com/gemyago/signal-foundry/runtime/strategy"
-	_ "github.com/glebarez/go-sqlite"
 	"github.com/jaswdr/faker/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -88,22 +87,28 @@ func appDatabaseTemplatePath(t *testing.T) string {
 }
 
 func initializeAppDatabaseTemplate(dsn string) error {
-	if err := appdispatch.AutoMigrate(context.Background(), appdispatch.Config{
+	sqlDB, err := sqlconn.Open(dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sqlDB.Close() }()
+
+	if err = appdispatch.AutoMigrate(context.Background(), appdispatch.Config{
 		DatabaseDSN: dsn,
 		TablePrefix: "signal_foundry_data_",
-	}); err != nil {
+	}, sqlDB); err != nil {
 		return err
 	}
 
-	if err := runAppDatabaseMigrations(dsn); err != nil {
-		return err
+	if migrateErr := runAppDatabaseMigrations(dsn); migrateErr != nil {
+		return migrateErr
 	}
 
 	return checkpointSQLiteTemplate(dsn)
 }
 
 func checkpointSQLiteTemplate(dsn string) error {
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sqlconn.Open(dsn)
 	if err != nil {
 		return fmt.Errorf("open sqlite template checkpoint handle: %w", err)
 	}
@@ -119,7 +124,20 @@ func checkpointSQLiteTemplate(dsn string) error {
 }
 
 func runAppDatabaseMigrations(dsn string) error {
-	dataStore, err := data.NewDatabaseStore(dsn, data.DatabaseStoreOpts{
+	sqlDB, err := sqlconn.Open(dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sqlDB.Close() }()
+
+	if err = appdispatch.AutoMigrate(context.Background(), appdispatch.Config{
+		DatabaseDSN: dsn,
+		TablePrefix: "signal_foundry_data_",
+	}, sqlDB); err != nil {
+		return err
+	}
+
+	dataStore, err := data.NewDatabaseStore(sqlDB, dsn, data.DatabaseStoreOpts{
 		TablePrefix: "signal_foundry_data_",
 	})
 	if err != nil {
@@ -130,7 +148,7 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	jobsStore, err := jobspkg.NewStore(dsn, jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"})
+	jobsStore, err := jobspkg.NewStore(sqlDB, dsn, jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"})
 	if err != nil {
 		return err
 	}
@@ -139,7 +157,7 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	financeDatabase, err := persistence.OpenDatabase(dsn)
+	financeDatabase, err := persistence.NewDatabase(sqlDB, dsn)
 	if err != nil {
 		return err
 	}
@@ -148,7 +166,7 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	strategyStore, err := rtstrategy.NewArtifactDatabaseStore(dsn, rtstrategy.ArtifactDatabaseStoreOpts{
+	strategyStore, err := rtstrategy.NewArtifactDatabaseStore(sqlDB, dsn, rtstrategy.ArtifactDatabaseStoreOpts{
 		TablePrefix: "signal_foundry_data_strategy_",
 	})
 	if err != nil {
@@ -159,7 +177,7 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	strategyRegistry, err := rtstrategy.NewVersionRegistryService(dsn, rtstrategy.VersionRegistryServiceDeps{
+	strategyRegistry, err := rtstrategy.NewVersionRegistryService(sqlDB, dsn, rtstrategy.VersionRegistryServiceDeps{
 		ArtifactStore: strategyStore,
 		TablePrefix:   "signal_foundry_data_strategy_",
 	})
@@ -171,7 +189,7 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	governorStore, err := rtgovernor.NewArtifactDatabaseStore(dsn, rtgovernor.ArtifactDatabaseStoreOpts{
+	governorStore, err := rtgovernor.NewArtifactDatabaseStore(sqlDB, dsn, rtgovernor.ArtifactDatabaseStoreOpts{
 		TablePrefix: "signal_foundry_data_evaluation_",
 	})
 	if err != nil {
@@ -182,7 +200,7 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	auditStore, err := audit.NewDatabaseStore(dsn, audit.DatabaseStoreOpts{
+	auditStore, err := audit.NewDatabaseStore(sqlDB, dsn, audit.DatabaseStoreOpts{
 		TablePrefix: "signal_foundry_data_evaluation_",
 	})
 	if err != nil {
@@ -193,7 +211,7 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	executionStore, err := execution.NewDatabaseStore(dsn, execution.DatabaseStoreOpts{
+	executionStore, err := execution.NewDatabaseStore(sqlDB, dsn, execution.DatabaseStoreOpts{
 		TablePrefix: "signal_foundry_data_evaluation_",
 	})
 	if err != nil {
@@ -204,7 +222,7 @@ func runAppDatabaseMigrations(dsn string) error {
 		return migrateErr
 	}
 
-	backtestStore, err := backtest.NewDatabaseStore(dsn, backtest.DatabaseStoreOpts{
+	backtestStore, err := backtest.NewDatabaseStore(sqlDB, dsn, backtest.DatabaseStoreOpts{
 		TablePrefix: "signal_foundry_data_evaluation_",
 	})
 	if err != nil {
@@ -342,7 +360,10 @@ func TestMain(t *testing.T) {
 func makeQueuedUnknownJob(t *testing.T, dsn string) (*jobspkg.Store, string) {
 	t.Helper()
 	fake := faker.New()
-	store, err := jobspkg.NewStore(dsn, jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"})
+	sqlDB, err := sqlconn.Open(dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	store, err := jobspkg.NewStore(sqlDB, dsn, jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"})
 	require.NoError(t, err)
 	require.NoError(t, store.AutoMigrate())
 	now := time.Now().UTC()

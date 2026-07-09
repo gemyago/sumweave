@@ -9,6 +9,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/credentials"
 	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -327,6 +328,19 @@ func TestStore(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Len(t, pendingTransactions, 1)
+
+		pagedTransactions, err := store.ListTransactions(
+			t.Context(),
+			tenant.ID,
+			"",
+			"",
+			"",
+			true,
+			ListTransactionsPage{Limit: 1, Offset: 1},
+		)
+		require.NoError(t, err)
+		require.Len(t, pagedTransactions, 1)
+		assert.Equal(t, transactionTwo.ID, pagedTransactions[0].ID)
 
 		transactionOne.HiddenAt = &hiddenAt
 		_, err = store.SaveTransaction(t.Context(), transactionOne)
@@ -905,9 +919,11 @@ func TestStore(t *testing.T) {
 
 	t.Run("returns persistence errors when tables are missing", func(t *testing.T) {
 		fake := faker.New()
-		fakeDatabase, err := OpenDatabase(
-			fmt.Sprintf("file:%s?mode=memory&cache=shared", "missing-tables-"+fake.UUID().V4()),
-		)
+		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "missing-tables-"+fake.UUID().V4())
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		fakeDatabase, err := NewDatabase(sqlDB, dsn)
 		require.NoError(t, err)
 		store := NewStore(fakeDatabase)
 

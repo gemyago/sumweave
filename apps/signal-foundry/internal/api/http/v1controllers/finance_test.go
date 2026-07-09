@@ -22,6 +22,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	financepkg "github.com/gemyago/signal-foundry/finance"
 	"github.com/gemyago/signal-foundry/finance/credentials"
 	"github.com/gemyago/signal-foundry/finance/domain"
@@ -141,7 +142,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "create category", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/categories", body: `{"name":"Groceries","kind":"expense"}`},
 			{name: "list tags", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/tags?includeHidden=true"},
 			{name: "create tag", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/tags", body: `{"name":"Household"}`},
-			{name: "list transactions", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/transactions?accountId=account-a&source=manual&status=booked&includeHidden=true"},
+			{name: "list transactions", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/transactions?accountId=account-a&source=manual&status=booked&includeHidden=true&limit=20"},
 			{name: "create transaction", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/transactions", body: `{"accountId":"account-a","source":"manual","status":"booked","kind":"regular","amountMinor":-2500,"currency":"USD","description":"Coffee","effectiveAt":"2026-06-20T14:00:00Z"}`},
 			{name: "get transaction", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/transactions/transaction-a"},
 			{name: "update transaction", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/transactions/transaction-a", body: `{"description":"Coffee update","amountMinor":-3100,"effectiveAt":"2026-06-21T10:00:00Z"}`},
@@ -625,6 +626,8 @@ func TestFinanceController(t *testing.T) {
 				require.Equal(t, domain.TransactionSourceManual, params.Source)
 				require.Equal(t, domain.TransactionStatusBooked, params.Status)
 				require.True(t, params.IncludeHidden)
+				require.Equal(t, int64(20), params.Limit)
+				require.Equal(t, int64(5), params.Offset)
 				return []domain.Transaction{
 					{
 						ID:          transactionID,
@@ -742,7 +745,7 @@ func TestFinanceController(t *testing.T) {
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/categories", body: `{"name":"Groceries","kind":"expense"}`, field: "id", want: categoryID},
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/tags?includeHidden=true", field: "items", want: 1},
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/tags", body: `{"name":"Household"}`, field: "id", want: tagID},
-			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions?accountId=" + accountID + "&source=manual&status=booked&includeHidden=true", field: "items", want: 1},
+			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions?accountId=" + accountID + "&source=manual&status=booked&includeHidden=true&limit=20&offset=5", field: "items", want: 1},
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, field: "id", want: transactionID},
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/transactions", body: `{"accountId":"` + accountID + `","source":"manual","status":"booked","kind":"regular","amountMinor":-2500,"currency":"USD","description":"Coffee","effectiveAt":"2026-06-20T14:00:00Z","categoryId":"` + categoryID + `","transferGroupId":"group-1"}`, field: "id", want: transactionID},
 			{method: http.MethodPatch, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, body: `{"description":"Coffee update","amountMinor":-3100,"effectiveAt":"2026-06-21T10:00:00Z","categoryId":"` + updatedCategoryID + `"}`, field: "id", want: transactionID},
@@ -1239,7 +1242,11 @@ func TestFinanceController(t *testing.T) {
 			makeFinanceModule := func(t *testing.T) *financepkg.Finance {
 				t.Helper()
 
-				database, err := financepersistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
+				dsn := filepath.Join(t.TempDir(), "finance.sqlite")
+				sqlDB, err := sqlconn.Open(dsn)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+				database, err := financepersistence.NewDatabase(sqlDB, dsn)
 				require.NoError(t, err)
 				require.NoError(t, financepersistence.NewMigrator(database).Migrate(t.Context()))
 				cipherKey := [32]byte{}

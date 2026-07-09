@@ -20,6 +20,7 @@ type reportingServiceStore interface {
 		source domain.TransactionSource,
 		status domain.TransactionStatus,
 		includeHidden bool,
+		page ...persistence.ListTransactionsPage,
 	) ([]domain.Transaction, error)
 	ListAccounts(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Account, error)
 	ListCategories(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Category, error)

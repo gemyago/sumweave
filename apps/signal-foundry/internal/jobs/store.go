@@ -56,11 +56,6 @@ type StoreOpts struct {
 	TablePrefix string
 }
 
-const (
-	sqliteBusyTimeoutMillis = 5000
-	sqliteMemoryDSN         = ":memory:"
-)
-
 type jobModel struct {
 	ID                 string     `gorm:"column:id;size:255;not null;primaryKey"`
 	JobType            string     `gorm:"column:job_type;size:64;not null;index:idx_jobs_type_status_created_id,priority:1;index:idx_jobs_idempotency,unique,where:idempotency_key <> '',priority:3"`
@@ -109,14 +104,17 @@ type scheduleModel struct {
 
 func (scheduleModel) TableName() string { return "job_schedules" }
 
-func NewStore(dsn string, opts StoreOpts) (*Store, error) {
+func NewStore(sqlDB *sql.DB, dsn string, opts StoreOpts) (*Store, error) {
+	if sqlDB == nil {
+		return nil, errors.New("sql database is required")
+	}
 	if strings.TrimSpace(dsn) == "" {
 		return nil, errors.New("database dsn is required")
 	}
-	dialector := postgres.Open(dsn)
 	trimmed := strings.TrimSpace(dsn)
+	dialector := postgres.New(postgres.Config{DSN: dsn, Conn: sqlDB})
 	if isSQLiteDSN(trimmed) {
-		dialector = sqlite.Open(dsn)
+		dialector = sqlite.Dialector{DriverName: sqlite.DriverName, DSN: dsn, Conn: sqlDB}
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{TablePrefix: opts.TablePrefix},
@@ -125,56 +123,11 @@ func NewStore(dsn string, opts StoreOpts) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open jobs database: %w", err)
 	}
-	if err = applySQLiteConnectionDefaults(db, trimmed); err != nil {
-		return nil, err
-	}
 	tableName := "jobs"
 	if opts.TablePrefix != "" {
 		tableName = opts.TablePrefix + tableName
 	}
 	return &Store{db: db, tableName: tableName}, nil
-}
-
-func applySQLiteConnectionDefaults(db *gorm.DB, dsn string) error {
-	if db == nil {
-		return nil
-	}
-	trimmed := strings.TrimSpace(dsn)
-	if !isSQLiteDSN(trimmed) {
-		return nil
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		return fmt.Errorf("resolve sqlite jobs database handle: %w", err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-	sqlDB.SetMaxIdleConns(1)
-	if execErr := db.Exec(fmt.Sprintf("PRAGMA busy_timeout = %d", sqliteBusyTimeoutMillis)).Error; execErr != nil {
-		return fmt.Errorf("set jobs sqlite busy timeout: %w", execErr)
-	}
-	if !supportsSQLiteWAL(trimmed) {
-		return nil
-	}
-
-	var journalMode string
-	if rowErr := db.Raw("PRAGMA journal_mode = WAL").Row().Scan(&journalMode); rowErr != nil {
-		return fmt.Errorf("set jobs sqlite journal mode: %w", rowErr)
-	}
-	if !strings.EqualFold(strings.TrimSpace(journalMode), "wal") {
-		return fmt.Errorf("set jobs sqlite journal mode: unexpected mode %q", journalMode)
-	}
-
-	return nil
-}
-
-func supportsSQLiteWAL(dsn string) bool {
-	trimmed := strings.ToLower(strings.TrimSpace(dsn))
-	return trimmed != sqliteMemoryDSN &&
-		!strings.Contains(trimmed, "mode=memory") &&
-		!strings.Contains(trimmed, "cache=shared&mode=memory") &&
-		!strings.Contains(trimmed, "mode=ro") &&
-		!strings.Contains(trimmed, "immutable=1")
 }
 
 func isSQLiteDSN(dsn string) bool {
@@ -194,7 +147,7 @@ func (s *Store) AutoMigrate() error {
 }
 
 func (s *Store) Create(ctx context.Context, job Job) (Job, error) {
-	return s.createWithDB(ctx, s.db, job)
+	return s.createWithDB(ctx, s.db.WithContext(ctx), job)
 }
 
 func (s *Store) createWithDB(ctx context.Context, db *gorm.DB, job Job) (Job, error) {
@@ -210,7 +163,7 @@ func (s *Store) createWithDB(ctx context.Context, db *gorm.DB, job Job) (Job, er
 }
 
 func (s *Store) CreateIdempotent(ctx context.Context, job Job) (Job, bool, error) {
-	return s.createIdempotentWithDB(ctx, s.db, job)
+	return s.createIdempotentWithDB(ctx, s.db.WithContext(ctx), job)
 }
 
 func (s *Store) createIdempotentWithDB(ctx context.Context, db *gorm.DB, job Job) (Job, bool, error) {

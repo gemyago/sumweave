@@ -8,37 +8,41 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpenDatabase(t *testing.T) {
+func TestNewDatabase(t *testing.T) {
 	t.Run("rejects missing dsn", func(t *testing.T) {
-		_, err := OpenDatabase("   ")
+		_, err := NewDatabase(nil, "   ")
 		require.Error(t, err)
 	})
 
 	t.Run("opens sqlite database", func(t *testing.T) {
-		database, err := OpenDatabase(
-			fmt.Sprintf("file:%s?mode=memory&cache=shared", "database-"+faker.New().UUID().V4()),
-		)
+		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "database-"+faker.New().UUID().V4())
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		database, err := NewDatabase(sqlDB, dsn)
 		require.NoError(t, err)
 		require.NotNil(t, database)
 		require.NotNil(t, database.db)
 	})
 
-	t.Run("surfaces database open failures", func(t *testing.T) {
-		_, err := OpenDatabase(fmt.Sprintf("%s/nope/test.sqlite", t.TempDir()))
+	t.Run("requires sql database", func(t *testing.T) {
+		_, err := NewDatabase(nil, fmt.Sprintf("file:%s?mode=memory&cache=shared", "database-"+faker.New().UUID().V4()))
 		require.Error(t, err)
 	})
 
 	t.Run("configures slog-backed gorm logger when requested", func(t *testing.T) {
 		var logs bytes.Buffer
 		logger := slog.New(slog.NewJSONHandler(&logs, nil))
-		database, err := OpenDatabase(
-			fmt.Sprintf("file:%s?mode=memory&cache=shared", "database-"+faker.New().UUID().V4()),
-			WithLogger(logger),
-		)
+		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "database-"+faker.New().UUID().V4())
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		database, err := NewDatabase(sqlDB, dsn, WithLogger(logger))
 		require.NoError(t, err)
 		require.NotNil(t, database)
 		require.NotNil(t, database.db.Config.Logger)

@@ -30,6 +30,7 @@ type ledgerServiceStore interface {
 		source domain.TransactionSource,
 		status domain.TransactionStatus,
 		includeHidden bool,
+		page ...persistence.ListTransactionsPage,
 	) ([]domain.Transaction, error)
 }
 
@@ -303,6 +304,7 @@ func (s *LedgerService) ListTransactions(
 		params.Source,
 		params.Status,
 		params.IncludeHidden,
+		persistence.ListTransactionsPage{Limit: params.Limit, Offset: params.Offset},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list transactions: %w", err)

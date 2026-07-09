@@ -50,12 +50,13 @@ describe('Finance transactions page', () => {
     ])
   })
 
-  it('renders the ledger table, inspector, and editor navigation links', async () => {
+  it('renders the ledger table and row editor navigation links', async () => {
     render(FinanceTransactions)
-    expect(await screen.findByRole('heading', { name: 'Refund' })).toBeInTheDocument()
+    expect(await screen.findByText('Refund')).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'Transactions ledger' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Create transaction' })).toHaveAttribute('href', '#/finance/transactions/new')
-    expect(screen.getByRole('link', { name: 'Open transaction' })).toHaveAttribute('href', '#/finance/transactions/tx-1')
+    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '#/finance/transactions/tx-1')
+    expect(screen.queryByLabelText('Selected transaction details')).not.toBeInTheDocument()
     expect(screen.getAllByText('pending').length).toBeGreaterThan(0)
     expect(screen.getByText('hidden')).toBeInTheDocument()
     expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
@@ -85,7 +86,7 @@ describe('Finance transactions page', () => {
     expect(screen.getAllByText('reconciliation').length).toBeGreaterThan(0)
   })
 
-  it('renders provider-original details in the inspector when they are available', async () => {
+  it('keeps provider-original details off the browse route', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTransactions.mockResolvedValueOnce([
       {
@@ -116,12 +117,12 @@ describe('Finance transactions page', () => {
 
     render(FinanceTransactions)
 
-    expect(await screen.findByText('Provider original')).toBeInTheDocument()
-    expect(screen.getByText('Original provider memo')).toBeInTheDocument()
-    expect(screen.getByText('3.50 USD')).toBeInTheDocument()
+    expect(await screen.findByText('Card charge')).toBeInTheDocument()
+    expect(screen.queryByText('Provider original')).not.toBeInTheDocument()
+    expect(screen.queryByText('Original provider memo')).not.toBeInTheDocument()
   })
 
-  it('clears the inspector selection when a later filter result is empty', async () => {
+  it('renders only the empty table state when a later filter result is empty', async () => {
     const user = userEvent.setup()
     mocks.listTransactions
       .mockResolvedValueOnce([
@@ -149,11 +150,11 @@ describe('Finance transactions page', () => {
 
     render(FinanceTransactions)
 
-    await screen.findByRole('heading', { name: 'Refund' })
+    await screen.findByText('Refund')
     await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction status filter' }), 'booked')
 
     expect(await screen.findByText('No transactions matched the current filters.')).toBeInTheDocument()
-    expect(screen.getByText('Select a transaction row to inspect it here.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Selected transaction details')).not.toBeInTheDocument()
   })
 
   it('reloads transaction filters when selectors change', async () => {
@@ -168,8 +169,53 @@ describe('Finance transactions page', () => {
         accountId: 'account-1',
         status: 'pending',
         source: 'manual',
+        limit: 20,
+        offset: 0,
       }),
     )
+  })
+
+  it('loads the next fixed-size transaction page', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.listTransactions
+      .mockResolvedValueOnce(Array.from({ length: 20 }, (_, index) => ({
+        id: `tx-${index + 1}`,
+        tenantId: 'tenant-1',
+        accountId: 'account-1',
+        source: 'manual',
+        status: 'booked',
+        kind: 'expense',
+        amountMinor: 1200,
+        currency: 'USD',
+        description: `Transaction ${index + 1}`,
+        effectiveAt: now,
+        categoryId: null,
+        transferGroupId: null,
+        transferMatchedAt: null,
+        hiddenAt: null,
+        providerOriginal: null,
+        createdAt: now,
+        updatedAt: now,
+      })))
+      .mockResolvedValueOnce([
+        { id: 'tx-21', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 1200, currency: 'USD', description: 'Transaction 21', effectiveAt: now, categoryId: null, transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now },
+      ])
+
+    render(FinanceTransactions)
+
+    expect(await screen.findByText('Transaction 1')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+
+    expect(await screen.findByText('Transaction 21')).toBeInTheDocument()
+    expect(mocks.listTransactions).toHaveBeenLastCalledWith({
+      tenantId: 'tenant-1',
+      accountId: '',
+      status: '',
+      source: '',
+      limit: 20,
+      offset: 20,
+    })
   })
 
   it('renders a no-tenant state and keeps the create link available', async () => {
@@ -216,8 +262,8 @@ describe('Finance transactions page', () => {
     expect(await screen.findByText('Select an active tenant to continue on this finance route.')).toBeInTheDocument()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), 'tenant-2')
 
-    await waitFor(() => expect(mocks.listTransactions).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', accountId: '', status: '', source: '' }))
-    expect(await screen.findByRole('heading', { name: 'Hotel' })).toBeInTheDocument()
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', accountId: '', status: '', source: '', limit: 20, offset: 0 }))
+    expect(await screen.findByText('Hotel')).toBeInTheDocument()
   })
 
   it('returns to the no-tenant route state when the standalone tenant selection is cleared', async () => {
@@ -255,7 +301,7 @@ describe('Finance transactions page', () => {
     render(FinanceTransactions)
 
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Tenant' }), 'tenant-2')
-    expect(await screen.findByRole('heading', { name: 'Hotel' })).toBeInTheDocument()
+    expect(await screen.findByText('Hotel')).toBeInTheDocument()
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), '')
 

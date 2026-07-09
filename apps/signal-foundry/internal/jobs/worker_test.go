@@ -2,8 +2,10 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/flows"
@@ -104,36 +107,6 @@ func (s *observationStoreStub) RecoverStaleRunning(ctx context.Context, now time
 	return s.base.RecoverStaleRunning(ctx, now, maxAttempts)
 }
 
-type workerStoreListErrorStub struct{ err error }
-
-func (s workerStoreListErrorStub) Get(context.Context, string) (*Job, error) {
-	return nil, ErrJobNotFound
-}
-
-func (s workerStoreListErrorStub) List(context.Context, ListParams) (ListResult, error) {
-	return ListResult{}, s.err
-}
-
-func (s workerStoreListErrorStub) ClaimQueued(context.Context, string, string, time.Time) (*Job, error) {
-	return nil, s.err
-}
-
-func (s workerStoreListErrorStub) MarkSucceeded(context.Context, string, string, any, time.Time) error {
-	return s.err
-}
-
-func (s workerStoreListErrorStub) MarkFailed(context.Context, string, string, *JobError, time.Time) error {
-	return s.err
-}
-
-func (s workerStoreListErrorStub) UpdateProgress(context.Context, string, json.RawMessage, time.Time) error {
-	return s.err
-}
-
-func (s workerStoreListErrorStub) RecoverStaleRunning(context.Context, time.Time, int) error {
-	return s.err
-}
-
 type workerStorePrepareErrorStub struct {
 	job      *Job
 	getErr   error
@@ -170,10 +143,23 @@ func (workerStorePrepareErrorStub) RecoverStaleRunning(context.Context, time.Tim
 
 func TestWorker(t *testing.T) {
 	fake := faker.New()
+	makeSQLiteMemoryDSN := func(prefix string) string {
+		return fmt.Sprintf("file:%s?mode=memory&cache=shared", prefix+"-"+fake.UUID().V4())
+	}
+	makeSharedSQLite := func(t *testing.T, dsn string) *sql.DB {
+		t.Helper()
+		db, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		return db
+	}
 	makeStore := func(t *testing.T) *Store {
 		t.Helper()
+		dsn := makeSQLiteMemoryDSN("jobs-worker-store")
+		sqlDB := makeSharedSQLite(t, dsn)
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "wrk_"},
 		)
 		require.NoError(t, err)
@@ -210,6 +196,16 @@ func TestWorker(t *testing.T) {
 	}
 	makeWorker := func(t *testing.T, store *Store, runner *stubRunner, now time.Time) *Worker {
 		t.Helper()
+		dispatchDSN := makeSQLiteMemoryDSN("jobs-worker-dispatch")
+		dispatchDB := makeSharedSQLite(t, dispatchDSN)
+		require.NoError(
+			t,
+			appdispatch.AutoMigrate(
+				t.Context(),
+				appdispatch.Config{DatabaseDSN: dispatchDSN, TablePrefix: "wrk_"},
+				dispatchDB,
+			),
+		)
 		worker, err := NewWorker(WorkerDeps{
 			Store:  store,
 			Runner: runner,
@@ -223,8 +219,9 @@ func TestWorker(t *testing.T) {
 				MaxConcurrentHistoricalBackfill: 1,
 				PollInterval:                    time.Hour,
 			},
+			DispatchDB: dispatchDB,
 			DispatchConfig: DispatchConfig{
-				DatabaseDSN: filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+				DatabaseDSN: dispatchDSN,
 				TablePrefix: "wrk_",
 			},
 			WorkerID: "worker-test",
@@ -397,18 +394,27 @@ func TestWorker(t *testing.T) {
 		activeRunner := &stubRunner{result: flows.HistoricalRawCandleBackfillResult{
 			RunID: activeJob.Input.IngestionRunID,
 		}}
-		dispatchDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
-		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: dispatchDSN}))
+		dispatchDSN := makeSQLiteMemoryDSN("jobs-worker-dispatch-once")
+		dispatchDB := makeSharedSQLite(t, dispatchDSN)
+		require.NoError(
+			t,
+			appdispatch.AutoMigrate(
+				t.Context(),
+				appdispatch.Config{DatabaseDSN: dispatchDSN},
+				dispatchDB,
+			),
+		)
 		publisher, err := appdispatch.NewPublisher(
 			appdispatch.Config{DatabaseDSN: dispatchDSN},
+			dispatchDB,
 			slog.Default(),
 		)
 		require.NoError(t, err)
-		defer func() { require.NoError(t, publisher.Close()) }()
 		activeWorker, err := NewWorker(WorkerDeps{
 			Store:          activeStore,
 			Runner:         activeRunner,
 			Config:         WorkerConfig{Enabled: true, PollInterval: 50 * time.Millisecond},
+			DispatchDB:     dispatchDB,
 			DispatchConfig: DispatchConfig{DatabaseDSN: dispatchDSN},
 		})
 		require.NoError(t, err)
@@ -424,7 +430,7 @@ func TestWorker(t *testing.T) {
 		brokenWorker := makeWorker(t, store, runner, time.Now().UTC())
 		require.Error(t, brokenWorker.ProcessJob(t.Context(), "job-any"))
 		brokenWorker.dispatchConfig = DispatchConfig{
-			DatabaseDSN: filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			DatabaseDSN: makeSQLiteMemoryDSN("jobs-worker-nil-dispatch"),
 		}
 		require.Error(t, brokenWorker.Start(t.Context()))
 		require.Error(t, brokenWorker.ProcessJob(t.Context(), "job-any"))
@@ -438,17 +444,17 @@ func TestWorker(t *testing.T) {
 		_, err := store.Create(t.Context(), job)
 		require.NoError(t, err)
 
-		dispatchDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
+		dispatchDSN := makeSQLiteMemoryDSN("jobs-worker-dispatch-disabled")
+		dispatchDB := makeSharedSQLite(t, dispatchDSN)
 		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		}))
+		}, dispatchDB))
 		publisher, err := appdispatch.NewPublisher(appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		}, slog.Default())
+		}, dispatchDB, slog.Default())
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
 		runner := &stubRunner{result: flows.HistoricalRawCandleBackfillResult{RunID: job.Input.IngestionRunID}}
 		worker, err := NewWorker(WorkerDeps{
@@ -456,6 +462,7 @@ func TestWorker(t *testing.T) {
 			Runner:         runner,
 			Clock:          func() time.Time { return now.Add(time.Minute) },
 			Config:         WorkerConfig{Enabled: true, PollInterval: 10 * time.Millisecond},
+			DispatchDB:     dispatchDB,
 			DispatchConfig: DispatchConfig{DatabaseDSN: dispatchDSN, TablePrefix: "wrk_"},
 		})
 		require.NoError(t, err)
@@ -510,8 +517,11 @@ func TestWorker(t *testing.T) {
 		_, err = NewHistoricalBackfillRunner(&data.LineageService{}, nil, nil)
 		require.Error(t, err)
 
+		dataDSN := makeSQLiteMemoryDSN("jobs-worker-data")
+		dataSQLDB := makeSharedSQLite(t, dataDSN)
 		dataStore, err := data.NewDatabaseStore(
-			filepath.Join(t.TempDir(), "data.sqlite"),
+			dataSQLDB,
+			dataDSN,
 			data.DatabaseStoreOpts{TablePrefix: "worker_data_"},
 		)
 		require.NoError(t, err)
@@ -596,17 +606,17 @@ func TestWorker(t *testing.T) {
 		runner := &stubRunner{
 			result: flows.HistoricalRawCandleBackfillResult{RunID: job.Input.IngestionRunID},
 		}
-		dispatchDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
+		dispatchDSN := makeSQLiteMemoryDSN("jobs-worker-dispatch-lineage")
+		dispatchDB := makeSharedSQLite(t, dispatchDSN)
 		publisher, err := appdispatch.NewPublisher(appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		}, slog.Default())
+		}, dispatchDB, slog.Default())
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		}))
+		}, dispatchDB))
 
 		worker, err := NewWorker(WorkerDeps{
 			Store:          store,
@@ -614,6 +624,7 @@ func TestWorker(t *testing.T) {
 			Logger:         slog.Default(),
 			Clock:          func() time.Time { return now.Add(time.Minute) },
 			Config:         WorkerConfig{Enabled: true, PollInterval: 10 * time.Millisecond},
+			DispatchDB:     dispatchDB,
 			DispatchConfig: DispatchConfig{DatabaseDSN: dispatchDSN, TablePrefix: "wrk_"},
 			WorkerID:       "worker-dispatch",
 		})
@@ -634,16 +645,17 @@ func TestWorker(t *testing.T) {
 		assert.Equal(t, job.Input.IngestionRunID, runner.calls[0].RunID)
 	})
 
-	t.Run("processes queued jobs when dispatch and jobs share one sqlite database", func(t *testing.T) {
+	t.Run("processes shared sqlite jobs through dispatch consumer", func(t *testing.T) {
 		now := time.Now().UTC()
-		dsn := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
-		store, err := NewStore(dsn, StoreOpts{TablePrefix: "wrk_"})
+		dsn := makeSQLiteMemoryDSN("jobs-worker-shared")
+		sharedDB := makeSharedSQLite(t, dsn)
+		store, err := NewStore(sharedDB, dsn, StoreOpts{TablePrefix: "wrk_"})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
 			DatabaseDSN: dsn,
 			TablePrefix: "wrk_",
-		}))
+		}, sharedDB))
 
 		job := makeJob(now)
 		job.InputJSON = mustEncodeWorkerPayload(t, job.Input)
@@ -652,21 +664,23 @@ func TestWorker(t *testing.T) {
 
 		runner := &stubRunner{result: flows.HistoricalRawCandleBackfillResult{RunID: job.Input.IngestionRunID}}
 		worker, err := NewWorker(WorkerDeps{
-			Store:  store,
-			Runner: runner,
-			Clock:  func() time.Time { return now.Add(time.Minute) },
-			Config: WorkerConfig{Enabled: true, PollInterval: 250 * time.Millisecond},
+			Store:      store,
+			Runner:     runner,
+			Clock:      func() time.Time { return now.Add(time.Minute) },
+			Config:     WorkerConfig{Enabled: true, PollInterval: 250 * time.Millisecond},
+			DispatchDB: sharedDB,
 			DispatchConfig: DispatchConfig{
 				DatabaseDSN: dsn,
-				JobsDSN:     dsn,
 				TablePrefix: "wrk_",
 			},
 			WorkerID: "worker-shared-db",
 		})
 		require.NoError(t, err)
+		require.Nil(t, worker.consumer)
 
 		publisher, err := appdispatch.NewPublisher(
 			appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "wrk_"},
+			sharedDB,
 			slog.Default(),
 		)
 		require.NoError(t, err)
@@ -678,7 +692,16 @@ func TestWorker(t *testing.T) {
 			Payload:         mustEncodeWorkerPayload(t, job.Input),
 			ObservableJobID: job.ID,
 		}))
-		require.NoError(t, worker.RunOnce(t.Context()))
+		require.NoError(t, worker.Start(t.Context()))
+		defer func() { require.NoError(t, worker.Stop(t.Context())) }()
+		assert.Eventually(t, func() bool {
+			persisted, getErr := store.Get(t.Context(), job.ID)
+			if getErr != nil {
+				return false
+			}
+			return persisted.Status == JobStatusSucceeded
+		}, time.Second, 25*time.Millisecond)
+		require.NotNil(t, worker.consumer)
 
 		persisted, err := store.Get(t.Context(), job.ID)
 		require.NoError(t, err)
@@ -686,25 +709,73 @@ func TestWorker(t *testing.T) {
 		require.Len(t, runner.calls, 1)
 	})
 
-	t.Run("sqlite polling helpers cover shared-db detection and idle exits", func(t *testing.T) {
+	t.Run("queued rows without dispatch message stay queued on shared sqlite", func(t *testing.T) {
 		now := time.Now().UTC()
-		store := makeStore(t)
+		dsn := makeSQLiteMemoryDSN("jobs-worker-shared-no-message")
+		sharedDB := makeSharedSQLite(t, dsn)
+		store, err := NewStore(sharedDB, dsn, StoreOpts{TablePrefix: "wrk_"})
+		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
+			DatabaseDSN: dsn,
+			TablePrefix: "wrk_",
+		}, sharedDB))
+
+		job := makeJob(now)
+		job.InputJSON = mustEncodeWorkerPayload(t, job.Input)
+		_, err = store.Create(t.Context(), job)
+		require.NoError(t, err)
+
+		runner := &stubRunner{result: flows.HistoricalRawCandleBackfillResult{RunID: job.Input.IngestionRunID}}
 		worker, err := NewWorker(WorkerDeps{
-			Store:  store,
-			Runner: &stubRunner{},
-			Clock:  func() time.Time { return now },
-			Config: WorkerConfig{Enabled: true, PollInterval: 10 * time.Millisecond},
+			Store:      store,
+			Runner:     runner,
+			Clock:      func() time.Time { return now },
+			Config:     WorkerConfig{Enabled: true, PollInterval: 10 * time.Millisecond},
+			DispatchDB: sharedDB,
 			DispatchConfig: DispatchConfig{
-				DatabaseDSN: filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
-				JobsDSN:     filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+				DatabaseDSN: dsn,
+				TablePrefix: "wrk_",
 			},
 		})
 		require.NoError(t, err)
-		assert.False(t, worker.usesSQLitePolling())
 
-		sharedDSN := filepath.Join(t.TempDir(), "shared.sqlite")
-		worker.dispatchConfig = DispatchConfig{DatabaseDSN: sharedDSN, JobsDSN: sharedDSN}
-		assert.True(t, worker.usesSQLitePolling())
+		require.NoError(t, worker.RunOnce(t.Context()))
+		persisted, err := store.Get(t.Context(), job.ID)
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusQueued, persisted.Status)
+		assert.Empty(t, runner.calls)
+
+		runCtx, cancelRun := context.WithCancel(t.Context())
+		cancelRun()
+		require.ErrorIs(t, worker.Run(runCtx), context.Canceled)
+		require.ErrorIs(t, worker.RunOnce(runCtx), context.Canceled)
+	})
+
+	t.Run("start and stop work with shared sqlite dispatch consumer", func(t *testing.T) {
+		now := time.Now().UTC()
+		dsn := makeSQLiteMemoryDSN("jobs-worker-shared-start-stop")
+		sharedDB := makeSharedSQLite(t, dsn)
+		store, err := NewStore(sharedDB, dsn, StoreOpts{TablePrefix: "wrk_"})
+		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
+			DatabaseDSN: dsn,
+			TablePrefix: "wrk_",
+		}, sharedDB))
+
+		worker, err := NewWorker(WorkerDeps{
+			Store:      store,
+			Runner:     &stubRunner{},
+			Clock:      func() time.Time { return now },
+			Config:     WorkerConfig{Enabled: true, PollInterval: 10 * time.Millisecond},
+			DispatchDB: sharedDB,
+			DispatchConfig: DispatchConfig{
+				DatabaseDSN: dsn,
+				TablePrefix: "wrk_",
+			},
+		})
+		require.NoError(t, err)
 		require.NoError(t, worker.Start(t.Context()))
 		require.NoError(t, worker.Stop(t.Context()))
 
@@ -712,21 +783,9 @@ func TestWorker(t *testing.T) {
 		cancelRun()
 		require.ErrorIs(t, worker.Run(runCtx), context.Canceled)
 		require.ErrorIs(t, worker.RunOnce(runCtx), context.Canceled)
-
-		idleCtx, cancel := context.WithCancel(t.Context())
-		cancel()
-		require.ErrorIs(t, worker.runSQLitePollingLoop(idleCtx), context.Canceled)
 	})
 
-	t.Run("sqlite polling reports list failures and non-observable execution errors", func(t *testing.T) {
-		listErr := errors.New("list boom")
-		worker := &Worker{
-			store:    workerStoreListErrorStub{err: listErr},
-			registry: NewRegistry(),
-			logger:   slog.Default(),
-		}
-		_, err := worker.processNextQueuedJob(t.Context())
-		require.ErrorIs(t, err, listErr)
+	t.Run("non-observable execution errors surface through dispatch handling", func(t *testing.T) {
 		now := time.Now().UTC()
 
 		registry := NewRegistry()
@@ -739,7 +798,12 @@ func TestWorker(t *testing.T) {
 				},
 			},
 		))
-		worker.registry = registry
+		worker := &Worker{
+			store:    makeStore(t),
+			registry: registry,
+			logger:   slog.Default(),
+			clock:    func() time.Time { return now },
+		}
 		input := HistoricalRawCandleBackfillInput{
 			IngestionRunID: fake.UUID().V4(),
 			Venue:          "hyperliquid-perps",
@@ -750,7 +814,7 @@ func TestWorker(t *testing.T) {
 			End:            now,
 			PageSize:       1,
 		}
-		err = worker.processEnvelope(t.Context(), appdispatch.Envelope{
+		err := worker.processEnvelope(t.Context(), appdispatch.Envelope{
 			Version: appdispatch.EnvelopeVersionV1,
 			Kind:    DispatchKindHistoricalRawCandleBackfill,
 			Payload: mustEncodeWorkerPayload(t, input),
@@ -790,11 +854,20 @@ func TestWorker(t *testing.T) {
 
 	t.Run("reuses an already initialized dispatch consumer", func(t *testing.T) {
 		store := makeStore(t)
-		dispatchDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
-		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: dispatchDSN}))
+		dispatchDSN := makeSQLiteMemoryDSN("jobs-worker-dispatch-error")
+		dispatchDB := makeSharedSQLite(t, dispatchDSN)
+		require.NoError(
+			t,
+			appdispatch.AutoMigrate(
+				t.Context(),
+				appdispatch.Config{DatabaseDSN: dispatchDSN},
+				dispatchDB,
+			),
+		)
 		worker, err := NewWorker(WorkerDeps{
 			Store:          store,
 			Runner:         &stubRunner{},
+			DispatchDB:     dispatchDB,
 			DispatchConfig: DispatchConfig{DatabaseDSN: dispatchDSN},
 		})
 		require.NoError(t, err)
@@ -808,19 +881,25 @@ func TestWorker(t *testing.T) {
 
 	t.Run("duplicate-delivery guards apply only when the workflow opts in", func(t *testing.T) {
 		now := time.Now().UTC()
-		dispatchDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
-		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
-			DatabaseDSN: dispatchDSN,
-			TablePrefix: "wrk_",
-		}))
-		publisher, err := appdispatch.NewPublisher(appdispatch.Config{
-			DatabaseDSN: dispatchDSN,
-			TablePrefix: "wrk_",
-		}, slog.Default())
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+		makeDispatch := func(t *testing.T) (string, *sql.DB, *appdispatch.Publisher) {
+			t.Helper()
+			dispatchDSN := makeSQLiteMemoryDSN("jobs-worker-dispatch-generic")
+			dispatchDB := makeSharedSQLite(t, dispatchDSN)
+			require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
+				DatabaseDSN: dispatchDSN,
+				TablePrefix: "wrk_",
+			}, dispatchDB))
+			publisher, err := appdispatch.NewPublisher(appdispatch.Config{
+				DatabaseDSN: dispatchDSN,
+				TablePrefix: "wrk_",
+			}, dispatchDB, slog.Default())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+			return dispatchDSN, dispatchDB, publisher
+		}
 
 		t.Run("guarded handler skips terminal observable duplicates", func(t *testing.T) {
+			dispatchDSN, dispatchDB, publisher := makeDispatch(t)
 			store := makeStore(t)
 			job := makeJob(now)
 			job.Status = JobStatusSucceeded
@@ -851,8 +930,9 @@ func TestWorker(t *testing.T) {
 				},
 			))
 			worker, workerErr := NewWorker(WorkerDeps{
-				Store:    store,
-				Registry: registry,
+				Store:      store,
+				Registry:   registry,
+				DispatchDB: dispatchDB,
 				Config: WorkerConfig{
 					PollInterval: 50 * time.Millisecond,
 				},
@@ -873,6 +953,7 @@ func TestWorker(t *testing.T) {
 		})
 
 		t.Run("unguarded handler may re-execute terminal observable duplicates", func(t *testing.T) {
+			dispatchDSN, dispatchDB, publisher := makeDispatch(t)
 			store := makeStore(t)
 			job := makeJob(now.Add(time.Minute))
 			job.Status = JobStatusSucceeded
@@ -902,8 +983,9 @@ func TestWorker(t *testing.T) {
 				},
 			))
 			worker, workerErr := NewWorker(WorkerDeps{
-				Store:    store,
-				Registry: registry,
+				Store:      store,
+				Registry:   registry,
+				DispatchDB: dispatchDB,
 				Config: WorkerConfig{
 					PollInterval: 50 * time.Millisecond,
 				},
@@ -932,17 +1014,17 @@ func TestWorker(t *testing.T) {
 		_, err := baseStore.Create(t.Context(), job)
 		require.NoError(t, err)
 
-		dispatchDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
+		dispatchDSN := makeSQLiteMemoryDSN("jobs-worker-dispatch-progress")
+		dispatchDB := makeSharedSQLite(t, dispatchDSN)
 		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		}))
+		}, dispatchDB))
 		publisher, err := appdispatch.NewPublisher(appdispatch.Config{
 			DatabaseDSN: dispatchDSN,
 			TablePrefix: "wrk_",
-		}, slog.Default())
+		}, dispatchDB, slog.Default())
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
 		observationStore := &observationStoreStub{
 			base:             baseStore,
@@ -955,6 +1037,7 @@ func TestWorker(t *testing.T) {
 			Store:          observationStore,
 			Runner:         runner,
 			Config:         WorkerConfig{PollInterval: 10 * time.Millisecond},
+			DispatchDB:     dispatchDB,
 			DispatchConfig: DispatchConfig{DatabaseDSN: dispatchDSN, TablePrefix: "wrk_"},
 		})
 		require.NoError(t, err)
@@ -994,7 +1077,7 @@ func TestWorker(t *testing.T) {
 				Store:          store,
 				Runner:         &stubRunner{},
 				Config:         WorkerConfig{PollInterval: 10 * time.Millisecond},
-				DispatchConfig: DispatchConfig{DatabaseDSN: filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")},
+				DispatchConfig: DispatchConfig{DatabaseDSN: makeSQLiteMemoryDSN("jobs-worker-config")},
 			})
 			require.NoError(t, err)
 			require.Error(t, brokenDispatchWorker.RunOnce(t.Context()))

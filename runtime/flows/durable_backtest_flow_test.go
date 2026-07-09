@@ -13,6 +13,7 @@ import (
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/execution"
 	"github.com/gemyago/signal-foundry/runtime/governor"
+	"github.com/gemyago/signal-foundry/runtime/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/runtime/strategy"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
@@ -150,13 +151,19 @@ func TestDurableBacktestFlow(t *testing.T) {
 			Actions: []domain.CandidateAction{firstAction, secondAction},
 		}}
 
-		auditStore, err := audit.NewDatabaseStore(":memory:", audit.DatabaseStoreOpts{})
+		auditSQLDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, auditSQLDB.Close()) }()
+		auditStore, err := audit.NewDatabaseStore(auditSQLDB, ":memory:", audit.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, auditStore.AutoMigrate())
 		auditService, err := audit.NewService(auditStore)
 		require.NoError(t, err)
 
-		executionStore, err := execution.NewDatabaseStore(":memory:", execution.DatabaseStoreOpts{})
+		executionSQLDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, executionSQLDB.Close()) }()
+		executionStore, err := execution.NewDatabaseStore(executionSQLDB, ":memory:", execution.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, executionStore.AutoMigrate())
 		paperExecutor, err := execution.NewPaperService(executionStore)
@@ -164,7 +171,10 @@ func TestDurableBacktestFlow(t *testing.T) {
 		snapshotProjector, err := execution.NewSnapshotService(executionStore)
 		require.NoError(t, err)
 
-		backtestStore, err := backtest.NewDatabaseStore(":memory:", backtest.DatabaseStoreOpts{})
+		backtestSQLDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, backtestSQLDB.Close()) }()
+		backtestStore, err := backtest.NewDatabaseStore(backtestSQLDB, ":memory:", backtest.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, backtestStore.AutoMigrate())
 		backtestService, err := backtest.NewService(backtestStore)
@@ -420,13 +430,19 @@ func TestDurableBacktestFlow(t *testing.T) {
 			Actions: []domain.CandidateAction{firstAction, secondAction},
 		}}
 
-		auditStore, err := audit.NewDatabaseStore(":memory:", audit.DatabaseStoreOpts{})
+		auditSQLDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, auditSQLDB.Close()) }()
+		auditStore, err := audit.NewDatabaseStore(auditSQLDB, ":memory:", audit.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, auditStore.AutoMigrate())
 		auditService, err := audit.NewService(auditStore)
 		require.NoError(t, err)
 
-		executionStore, err := execution.NewDatabaseStore(":memory:", execution.DatabaseStoreOpts{})
+		executionSQLDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, executionSQLDB.Close()) }()
+		executionStore, err := execution.NewDatabaseStore(executionSQLDB, ":memory:", execution.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, executionStore.AutoMigrate())
 		paperExecutor, err := execution.NewPaperService(executionStore)
@@ -434,7 +450,10 @@ func TestDurableBacktestFlow(t *testing.T) {
 		snapshotProjector, err := execution.NewSnapshotService(executionStore)
 		require.NoError(t, err)
 
-		backtestStore, err := backtest.NewDatabaseStore(":memory:", backtest.DatabaseStoreOpts{})
+		backtestSQLDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, backtestSQLDB.Close()) }()
+		backtestStore, err := backtest.NewDatabaseStore(backtestSQLDB, ":memory:", backtest.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, backtestStore.AutoMigrate())
 		backtestService, err := backtest.NewService(backtestStore)

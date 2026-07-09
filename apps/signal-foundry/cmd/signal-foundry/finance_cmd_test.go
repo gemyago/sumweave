@@ -10,6 +10,7 @@ import (
 	"time"
 
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	financepkg "github.com/gemyago/signal-foundry/finance"
 	"github.com/gemyago/signal-foundry/finance/domain"
 	financefixtures "github.com/gemyago/signal-foundry/finance/fixtures"
@@ -231,7 +232,10 @@ func TestFinanceCommand(t *testing.T) {
 			ScenarioIDs: []string{"realistic-core"},
 		}, summary)
 
-		database, err := persistence.OpenDatabase(runtimeConfig.DatabaseDSN)
+		sqlDB, err := sqlconn.Open(runtimeConfig.DatabaseDSN)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		database, err := persistence.NewDatabase(sqlDB, runtimeConfig.DatabaseDSN)
 		require.NoError(t, err)
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
 		store := persistence.NewStore(database)
@@ -350,7 +354,11 @@ func TestFinanceCommand(t *testing.T) {
 
 	t.Run("fixture schedule writer stores generic due schedule rows", func(t *testing.T) {
 		dsn := filepath.Join(t.TempDir(), "jobs.db")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
 		store, err := jobspkg.NewStore(
+			sqlDB,
 			dsn,
 			jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"},
 		)

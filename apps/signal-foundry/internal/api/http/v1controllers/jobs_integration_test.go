@@ -19,6 +19,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1routes/models"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/flows"
@@ -123,8 +124,11 @@ func TestJobsControllerIntegration(t *testing.T) {
 		]`)
 	}))
 	t.Cleanup(serverFixture.Close)
+	sharedDB, err := sqlconn.Open(sharedDSN)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sharedDB.Close()) })
 
-	dataStore, err := data.NewDatabaseStore(sharedDSN, data.DatabaseStoreOpts{})
+	dataStore, err := data.NewDatabaseStore(sharedDB, sharedDSN, data.DatabaseStoreOpts{})
 	require.NoError(t, err)
 	require.NoError(t, dataStore.AutoMigrate())
 
@@ -175,13 +179,12 @@ func TestJobsControllerIntegration(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	jobsStore, err := jobspkg.NewStore(sharedDSN, jobspkg.StoreOpts{})
+	jobsStore, err := jobspkg.NewStore(sharedDB, sharedDSN, jobspkg.StoreOpts{})
 	require.NoError(t, err)
 	require.NoError(t, jobsStore.AutoMigrate())
-	require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: sharedDSN}))
-	publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: sharedDSN}, slog.Default())
+	require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: sharedDSN}, sharedDB))
+	publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: sharedDSN}, sharedDB, slog.Default())
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
 	jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 		Store:       jobsStore,
@@ -282,7 +285,7 @@ func TestJobsControllerIntegration(t *testing.T) {
 	require.NoError(t, json.Unmarshal(dataResp.Body.Bytes(), &candles))
 	require.Len(t, candles.Items, 2)
 
-	restartedStore, err := jobspkg.NewStore(sharedDSN, jobspkg.StoreOpts{})
+	restartedStore, err := jobspkg.NewStore(sharedDB, sharedDSN, jobspkg.StoreOpts{})
 	require.NoError(t, err)
 	restartedService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 		Store:       restartedStore,

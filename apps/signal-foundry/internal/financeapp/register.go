@@ -3,6 +3,7 @@ package financeapp
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ type databaseDeps struct {
 
 	DatabaseDSN string `name:"config.dataLayer.database.dsn"`
 	RootLogger  *slog.Logger
+	SQLDB       *sql.DB
 }
 
 //nolint:golines // dig tags stay clearer inline on the dependency struct.
@@ -64,7 +66,7 @@ type financeServiceDeps struct {
 
 func newDatabase(deps databaseDeps) (*persistence.Database, error) {
 	// TODO: We should make the DSN finance module specific
-	database, err := persistence.OpenDatabase(deps.DatabaseDSN, persistence.WithLogger(deps.RootLogger))
+	database, err := persistence.NewDatabase(deps.SQLDB, deps.DatabaseDSN, persistence.WithLogger(deps.RootLogger))
 	if err != nil {
 		return nil, fmt.Errorf("open finance database: %w", err)
 	}

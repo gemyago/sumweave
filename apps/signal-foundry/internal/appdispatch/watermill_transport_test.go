@@ -3,6 +3,7 @@ package appdispatch
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,7 +27,7 @@ func TestWatermillTransport(t *testing.T) {
 	makeConfig := func(t *testing.T) Config {
 		t.Helper()
 		return Config{
-			DatabaseDSN:  filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			DatabaseDSN:  fmt.Sprintf("file:%s?mode=memory&cache=shared", "appdispatch-"+fake.UUID().V4()),
 			TablePrefix:  "signal_foundry_data_",
 			ConsumerName: "consumer-" + fake.UUID().V4(),
 		}
@@ -33,7 +35,7 @@ func TestWatermillTransport(t *testing.T) {
 
 	openDB := func(t *testing.T, dsn string) *sql.DB {
 		t.Helper()
-		db, err := sql.Open("sqlite", dsn)
+		db, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		return db
@@ -64,11 +66,11 @@ func TestWatermillTransport(t *testing.T) {
 
 	t.Run("publishes and consumes the durable execution topic through the app abstraction", func(t *testing.T) {
 		cfg := makeConfig(t)
-		require.NoError(t, AutoMigrate(t.Context(), cfg))
+		db := openDB(t, cfg.DatabaseDSN)
+		require.NoError(t, AutoMigrate(t.Context(), cfg, db))
 
-		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
+		publisher, err := NewPublisher(cfg, db, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
 		registry := NewHandlerRegistry()
 		var (
@@ -87,9 +89,8 @@ func TestWatermillTransport(t *testing.T) {
 			},
 		}))
 
-		consumer, err := NewConsumer(cfg, registry, slog.New(slog.DiscardHandler))
+		consumer, err := NewConsumer(cfg, db, registry, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, consumer.Close()) })
 
 		envelope := Envelope{
 			Version: EnvelopeVersionV1,
@@ -125,15 +126,14 @@ func TestWatermillTransport(t *testing.T) {
 		require.Equal(t, TransportDriverSQLite, cfg.Driver())
 		require.Equal(t, "signal_foundry_data_app_dispatch_messages", cfg.MessagesTable())
 		require.Equal(t, "signal_foundry_data_app_dispatch_offsets", cfg.OffsetsTable())
-		require.NoError(t, AutoMigrate(t.Context(), cfg))
 
 		db := openDB(t, cfg.DatabaseDSN)
+		require.NoError(t, AutoMigrate(t.Context(), cfg, db))
 		_, err := db.ExecContext(t.Context(), `CREATE TABLE app_owned_records (id TEXT PRIMARY KEY)`)
 		require.NoError(t, err)
 
-		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
+		publisher, err := NewPublisher(cfg, db, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
 		tx, err := db.BeginTx(t.Context(), nil)
 		require.NoError(t, err)
@@ -182,9 +182,15 @@ func TestWatermillTransport(t *testing.T) {
 		requireNoTable(t, db, cfg.MessagesTable())
 		requireNoTable(t, db, cfg.OffsetsTable())
 
-		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
+		publisher, err := NewPublisher(cfg, db, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+		defer func() { require.NoError(t, publisher.Close()) }()
+		consumer, err := NewConsumer(cfg, db, NewHandlerRegistry(), slog.New(slog.DiscardHandler))
+		require.NoError(t, err)
+		defer func() { require.NoError(t, consumer.Close()) }()
+
+		requireNoTable(t, db, cfg.MessagesTable())
+		requireNoTable(t, db, cfg.OffsetsTable())
 		require.Error(t, publisher.Publish(t.Context(), Envelope{
 			Version: EnvelopeVersionV1,
 			Kind:    ExecutionKind("example.dispatch"),
@@ -193,7 +199,9 @@ func TestWatermillTransport(t *testing.T) {
 		requireNoTable(t, db, cfg.MessagesTable())
 		requireNoTable(t, db, cfg.OffsetsTable())
 
-		require.NoError(t, AutoMigrate(t.Context(), cfg))
+		migrator, err := NewMigrator(cfg, db)
+		require.NoError(t, err)
+		require.NoError(t, migrator.Migrate(t.Context()))
 		requireTable(t, db, cfg.MessagesTable())
 		requireTable(t, db, cfg.OffsetsTable())
 	})
@@ -215,16 +223,17 @@ func TestWatermillTransport(t *testing.T) {
 		require.Error(t, err)
 
 		cfg := Config{}
-		_, err = NewPublisher(cfg, nil)
+		_, err = NewPublisher(cfg, nil, nil)
 		require.EqualError(t, err, "logger is required")
 
-		_, err = NewPublisher(cfg, slog.New(slog.DiscardHandler))
-		require.EqualError(t, err, "database dsn is required")
+		_, err = NewPublisher(cfg, nil, slog.New(slog.DiscardHandler))
+		require.EqualError(t, err, "sql database is required")
 
-		_, err = NewConsumer(makeConfig(t), nil, slog.New(slog.DiscardHandler))
+		db := openDB(t, makeConfig(t).DatabaseDSN)
+		_, err = NewConsumer(makeConfig(t), db, nil, slog.New(slog.DiscardHandler))
 		require.EqualError(t, err, "handler registry is required")
 
-		_, err = NewConsumer(makeConfig(t), NewHandlerRegistry(), nil)
+		_, err = NewConsumer(makeConfig(t), db, NewHandlerRegistry(), nil)
 		require.EqualError(t, err, "logger is required")
 
 		registry := NewHandlerRegistry()
@@ -257,9 +266,9 @@ func TestWatermillTransport(t *testing.T) {
 
 	t.Run("surfaces publish and consume failures without schema side effects", func(t *testing.T) {
 		cfg := makeConfig(t)
-		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
+		db := openDB(t, cfg.DatabaseDSN)
+		publisher, err := NewPublisher(cfg, db, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 
 		err = publisher.Publish(t.Context(), Envelope{})
 		require.EqualError(t, err, "unsupported envelope version: ")
@@ -267,8 +276,7 @@ func TestWatermillTransport(t *testing.T) {
 		err = publisher.PublishInTx(t.Context(), nil, Envelope{Version: EnvelopeVersionV1})
 		require.EqualError(t, err, "publish transaction is required")
 
-		db := openDB(t, cfg.DatabaseDSN)
-		require.NoError(t, AutoMigrate(t.Context(), cfg))
+		require.NoError(t, AutoMigrate(t.Context(), cfg, db))
 		_, err = db.ExecContext(
 			t.Context(),
 			`INSERT INTO signal_foundry_data_app_dispatch_messages (uuid, created_at, payload, metadata) VALUES (?, CURRENT_TIMESTAMP, ?, '{}')`,
@@ -277,9 +285,8 @@ func TestWatermillTransport(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		consumer, err := NewConsumer(cfg, NewHandlerRegistry(), slog.New(slog.DiscardHandler))
+		consumer, err := NewConsumer(cfg, db, NewHandlerRegistry(), slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, consumer.Close()) })
 
 		consumeCtx, cancel := context.WithCancel(t.Context())
 		defer cancel()
@@ -294,15 +301,20 @@ func TestWatermillTransport(t *testing.T) {
 			ConsumerName: "consumer-" + fake.UUID().V4(),
 		}
 
-		publisher, err := NewPublisher(cfg, slog.New(slog.DiscardHandler))
+		db, err := sqlconn.Open(cfg.DatabaseDSN)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, db.Close()) }()
+		publisher, err := NewPublisher(cfg, db, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		require.NoError(t, publisher.Close())
 
-		consumer, err := NewConsumer(cfg, NewHandlerRegistry(), slog.New(slog.DiscardHandler))
+		consumer, err := NewConsumer(cfg, db, NewHandlerRegistry(), slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		require.NoError(t, consumer.Close())
 
-		err = AutoMigrate(t.Context(), cfg)
+		migrator, err := NewMigrator(cfg, db)
+		require.NoError(t, err)
+		err = migrator.Migrate(t.Context())
 		require.ErrorContains(t, err, "begin postgres transport migration")
 	})
 }

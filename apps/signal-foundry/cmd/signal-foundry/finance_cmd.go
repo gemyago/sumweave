@@ -13,6 +13,7 @@ import (
 	"time"
 
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	financepkg "github.com/gemyago/signal-foundry/finance"
 	"github.com/gemyago/signal-foundry/finance/credentials"
 	"github.com/gemyago/signal-foundry/finance/domain"
@@ -143,7 +144,14 @@ func runFinanceFixturesGenerate(
 	runtimeConfig financeFixturesRuntimeConfig,
 	params financeFixturesGenerateParams,
 ) (financefixtures.Summary, error) {
-	database, err := persistence.OpenDatabase(strings.TrimSpace(runtimeConfig.DatabaseDSN))
+	dsn := strings.TrimSpace(runtimeConfig.DatabaseDSN)
+	sqlDB, err := sqlconn.Open(dsn)
+	if err != nil {
+		return financefixtures.Summary{}, err
+	}
+	defer func() { _ = sqlDB.Close() }()
+
+	database, err := persistence.NewDatabase(sqlDB, dsn)
 	if err != nil {
 		return financefixtures.Summary{}, err
 	}
@@ -153,6 +161,7 @@ func runFinanceFixturesGenerate(
 	}
 	store := persistence.NewStore(database)
 	jobsStore, err := jobspkg.NewStore(
+		sqlDB,
 		runtimeConfig.DatabaseDSN,
 		jobspkg.StoreOpts{TablePrefix: strings.TrimSpace(runtimeConfig.JobsTablePrefix)},
 	)

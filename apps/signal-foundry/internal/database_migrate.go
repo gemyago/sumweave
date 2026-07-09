@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 
@@ -29,6 +30,7 @@ type DatabaseMigrationDeps struct {
 
 	DataLayerDatabaseDSN         string `name:"config.dataLayer.database.dsn"`
 	DataLayerDatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	DataLayerSQLDB               *sql.DB
 
 	DataStore *data.DatabaseStore
 }
@@ -43,6 +45,7 @@ type DatabaseMigrator struct {
 
 	dataLayerDatabaseDSN         string
 	dataLayerDatabaseTablePrefix string
+	dataLayerSQLDB               *sql.DB
 
 	dataStore *data.DatabaseStore
 }
@@ -57,6 +60,7 @@ func newDatabaseMigrator(deps DatabaseMigrationDeps) *DatabaseMigrator {
 
 		dataLayerDatabaseDSN:         deps.DataLayerDatabaseDSN,
 		dataLayerDatabaseTablePrefix: deps.DataLayerDatabaseTablePrefix,
+		dataLayerSQLDB:               deps.DataLayerSQLDB,
 
 		dataStore: deps.DataStore,
 	}
@@ -167,17 +171,22 @@ func (m *DatabaseMigrator) migrateDataLayer(_ context.Context) error {
 }
 
 func (m *DatabaseMigrator) migrateAppDispatch(ctx context.Context) error {
-	if err := appdispatch.AutoMigrate(ctx, appdispatch.Config{
+	config := appdispatch.Config{
 		DatabaseDSN: m.dataLayerDatabaseDSN,
 		TablePrefix: m.dataLayerDatabaseTablePrefix,
-	}); err != nil {
-		return fmt.Errorf("auto migrate app dispatch transport: %w", err)
+	}
+	migrator, err := appdispatch.NewMigrator(config, m.dataLayerSQLDB)
+	if err != nil {
+		return fmt.Errorf("create app dispatch migrator: %w", err)
+	}
+	if err = migrator.Migrate(ctx); err != nil {
+		return fmt.Errorf("migrate app dispatch transport: %w", err)
 	}
 	return nil
 }
 
 func (m *DatabaseMigrator) migrateJobs(_ context.Context) error {
-	store, err := jobspkg.NewStore(m.dataLayerDatabaseDSN, jobspkg.StoreOpts{
+	store, err := jobspkg.NewStore(m.dataLayerSQLDB, m.dataLayerDatabaseDSN, jobspkg.StoreOpts{
 		TablePrefix: m.dataLayerDatabaseTablePrefix + "jobs_",
 	})
 	if err != nil {
@@ -190,7 +199,8 @@ func (m *DatabaseMigrator) migrateJobs(_ context.Context) error {
 }
 
 func (m *DatabaseMigrator) migrateFinance(ctx context.Context) error {
-	database, err := persistence.OpenDatabase(
+	database, err := persistence.NewDatabase(
+		m.dataLayerSQLDB,
 		m.dataLayerDatabaseDSN,
 		persistence.WithLogger(m.rootLogger),
 	)
@@ -205,6 +215,7 @@ func (m *DatabaseMigrator) migrateFinance(ctx context.Context) error {
 
 func (m *DatabaseMigrator) migrateStrategyArtifacts(_ context.Context) error {
 	store, err := rtstrategy.NewArtifactDatabaseStore(
+		m.dataLayerSQLDB,
 		m.dataLayerDatabaseDSN,
 		rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: m.dataLayerDatabaseTablePrefix + "strategy_"},
 	)
@@ -219,6 +230,7 @@ func (m *DatabaseMigrator) migrateStrategyArtifacts(_ context.Context) error {
 
 func (m *DatabaseMigrator) migrateStrategyVersionRegistry(_ context.Context) error {
 	artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
+		m.dataLayerSQLDB,
 		m.dataLayerDatabaseDSN,
 		rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: m.dataLayerDatabaseTablePrefix + "strategy_"},
 	)
@@ -226,6 +238,7 @@ func (m *DatabaseMigrator) migrateStrategyVersionRegistry(_ context.Context) err
 		return fmt.Errorf("create strategy artifact store: %w", err)
 	}
 	service, err := rtstrategy.NewVersionRegistryService(
+		m.dataLayerSQLDB,
 		m.dataLayerDatabaseDSN,
 		rtstrategy.VersionRegistryServiceDeps{
 			ArtifactStore: artifactStore,
@@ -243,6 +256,7 @@ func (m *DatabaseMigrator) migrateStrategyVersionRegistry(_ context.Context) err
 
 func (m *DatabaseMigrator) migrateEvaluationGovernorPolicy(_ context.Context) error {
 	store, err := rtgovernor.NewArtifactDatabaseStore(
+		m.dataLayerSQLDB,
 		m.dataLayerDatabaseDSN,
 		rtgovernor.ArtifactDatabaseStoreOpts{TablePrefix: m.dataLayerDatabaseTablePrefix + "evaluation_"},
 	)
@@ -257,6 +271,7 @@ func (m *DatabaseMigrator) migrateEvaluationGovernorPolicy(_ context.Context) er
 
 func (m *DatabaseMigrator) migrateEvaluationAudit(_ context.Context) error {
 	store, err := audit.NewDatabaseStore(
+		m.dataLayerSQLDB,
 		m.dataLayerDatabaseDSN,
 		audit.DatabaseStoreOpts{TablePrefix: m.dataLayerDatabaseTablePrefix + "evaluation_"},
 	)
@@ -271,6 +286,7 @@ func (m *DatabaseMigrator) migrateEvaluationAudit(_ context.Context) error {
 
 func (m *DatabaseMigrator) migrateEvaluationExecution(_ context.Context) error {
 	store, err := execution.NewDatabaseStore(
+		m.dataLayerSQLDB,
 		m.dataLayerDatabaseDSN,
 		execution.DatabaseStoreOpts{TablePrefix: m.dataLayerDatabaseTablePrefix + "evaluation_"},
 	)
@@ -285,6 +301,7 @@ func (m *DatabaseMigrator) migrateEvaluationExecution(_ context.Context) error {
 
 func (m *DatabaseMigrator) migrateEvaluationBacktest(_ context.Context) error {
 	store, err := backtest.NewDatabaseStore(
+		m.dataLayerSQLDB,
 		m.dataLayerDatabaseDSN,
 		backtest.DatabaseStoreOpts{TablePrefix: m.dataLayerDatabaseTablePrefix + "evaluation_"},
 	)

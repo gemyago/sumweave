@@ -338,8 +338,9 @@
 **Transactions (`/finance/transactions`, `/finance/transactions/new`, `/finance/transactions/:transactionId`)**
 
 - Transactions browse route: Bootstrap filter card, tenant/account/status/source/sort filters, route-level action links, and visible summary chips.
-- Browse results: table-first ledger with explicit state badges for pending, hidden, transfer, refund, and reconciliation signals plus direct **Open transaction** links.
-- Wide viewports also show a contextual selected-transaction inspector card while keeping the full edit flow on the dedicated detail route.
+- Browse results: table-first ledger with explicit state badges for pending, hidden, transfer, refund, and reconciliation signals plus direct **Edit** row actions.
+- Browse results load fixed 20-row pages with simple Previous/Next controls; changing tenant or filters returns to the first page.
+- The browse route does not render a selected-transaction inspector; row editing opens the dedicated detail route.
 - Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly form, explicit save/cancel actions, visible transaction state context, and provider-original values when present.
 - Edit route: loads one tenant-scoped transaction directly, keeps finance navigation context intact, and shows provider-original values when present so synced data stays distinguishable from operator edits.
 

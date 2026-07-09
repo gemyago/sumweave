@@ -2,11 +2,12 @@ package jobs
 
 import (
 	"context"
-	"path/filepath"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,9 @@ import (
 
 func TestGenericSubstrate(t *testing.T) {
 	fake := faker.New()
+	makeSQLiteMemoryDSN := func() string {
+		return fmt.Sprintf("file:%s?mode=memory&cache=shared", "jobs-generic-"+fake.UUID().V4())
+	}
 	type financeInput struct {
 		AccountID string `json:"accountId"`
 		Scope     string `json:"scope"`
@@ -28,8 +32,13 @@ func TestGenericSubstrate(t *testing.T) {
 
 	makeStore := func(t *testing.T) *Store {
 		t.Helper()
+		dsn := makeSQLiteMemoryDSN()
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "generic_"},
 		)
 		require.NoError(t, err)

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/di"
 	apphttpclient "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/infrastructure/httpclient"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	financepkg "github.com/gemyago/signal-foundry/finance"
 	"github.com/gemyago/signal-foundry/finance/domain"
@@ -43,8 +45,14 @@ func (f financeAppRoundTripperFunc) RoundTrip(request *http.Request) (*http.Resp
 }
 
 func TestNewFinanceStoreFromDI(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "finance-store-"+t.Name())
+	sharedDB, err := sqlconn.Open(dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sharedDB.Close()) })
+
 	database, err := newDatabase(databaseDeps{
-		DatabaseDSN: filepath.Join(t.TempDir(), "finance.sqlite"),
+		DatabaseDSN: dsn,
+		SQLDB:       sharedDB,
 	})
 	require.NoError(t, err)
 
@@ -56,6 +64,12 @@ func TestNewFinanceStoreFromDI(t *testing.T) {
 
 //nolint:cyclop,gocyclo // Keeps closely related DI integration scenarios together.
 func TestNewFinanceServiceFromDI(t *testing.T) {
+	memoryDSNOrdinal := 0
+	makeSQLiteMemoryDSN := func(prefix string) string {
+		memoryDSNOrdinal++
+		return fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", prefix, memoryDSNOrdinal)
+	}
+
 	t.Run("make run bank connection sync params keeps omitted windows unset", func(t *testing.T) {
 		params := makeRunBankConnectionSyncParams(bankConnectionSyncJobInput{
 			ConnectionID: "connection-1",
@@ -76,10 +90,25 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		assert.Equal(t, windowEnd.UTC(), params.WindowEnd)
 	})
 
+	openSharedDB := func(t *testing.T, dsn string) *sql.DB {
+		t.Helper()
+		db, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		return db
+	}
+
+	makeDatabase := func(t *testing.T, dsn string) *persistence.Database {
+		t.Helper()
+		database, err := persistence.NewDatabase(openSharedDB(t, dsn), dsn)
+		require.NoError(t, err)
+		return database
+	}
+
 	makeJobsService := func(t *testing.T, registry *jobspkg.Registry, dsn string) (*jobspkg.Service, *jobspkg.Store) {
 		t.Helper()
 
-		store, err := jobspkg.NewStore(dsn, jobspkg.StoreOpts{TablePrefix: "jobs_"})
+		store, err := jobspkg.NewStore(openSharedDB(t, dsn), dsn, jobspkg.StoreOpts{TablePrefix: "jobs_"})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 
@@ -184,8 +213,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		}))
 		defer enableServer.Close()
 
-		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
-		require.NoError(t, err)
+		database := makeDatabase(t, makeSQLiteMemoryDSN("finance"))
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
 
 		financeStore := persistence.NewStore(database)
@@ -194,7 +222,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		jobsService, jobsStore := makeJobsService(
 			t,
 			registry,
-			filepath.Join(t.TempDir(), "jobs.sqlite"),
+			makeSQLiteMemoryDSN("jobs"),
 		)
 
 		financeModule, err := newFinanceModuleFromDI(financeServiceDeps{
@@ -368,8 +396,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		}))
 		defer server.Close()
 
-		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
-		require.NoError(t, err)
+		database := makeDatabase(t, makeSQLiteMemoryDSN("finance"))
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
 		financeStore := persistence.NewStore(database)
 
@@ -377,7 +404,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		jobsService, jobsStore := makeJobsService(
 			t,
 			registry,
-			filepath.Join(t.TempDir(), "jobs.sqlite"),
+			makeSQLiteMemoryDSN("jobs"),
 		)
 
 		financeModule, err := newFinanceModuleFromDI(financeServiceDeps{
@@ -464,8 +491,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		defer monoServer.Close()
 		enablePrivateKeyPath := makePrivateKeyPath(t)
 
-		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
-		require.NoError(t, err)
+		database := makeDatabase(t, makeSQLiteMemoryDSN("finance"))
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
 		financeStore := persistence.NewStore(database)
 
@@ -473,7 +499,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		jobsService, jobsStore := makeJobsService(
 			t,
 			registry,
-			filepath.Join(t.TempDir(), "jobs.sqlite"),
+			makeSQLiteMemoryDSN("jobs"),
 		)
 
 		dataDir := t.TempDir()
@@ -572,12 +598,11 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 	})
 
 	t.Run("rejects omitted enable banking credentials", func(t *testing.T) {
-		database, err := persistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.sqlite"))
-		require.NoError(t, err)
+		database := makeDatabase(t, makeSQLiteMemoryDSN("finance"))
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
 		financeStore := persistence.NewStore(database)
 
-		_, err = newFinanceModuleFromDI(financeServiceDeps{
+		_, err := newFinanceModuleFromDI(financeServiceDeps{
 			Database:          database,
 			Store:             financeStore,
 			HTTPClientFactory: makeHTTPClientFactory(t, nil),

@@ -850,10 +850,12 @@ func newParamsParserFinanceListFinanceTenantMembers(rootHandler *RootHandler) pa
 
 type paramsParserFinanceListFinanceTransactions struct {
 	bindTenantID requestParamBinder[string, string]
+	bindLimit requestParamBinder[[]string, int64]
 	bindAccountID requestParamBinder[[]string, string]
 	bindSource requestParamBinder[[]string, string]
 	bindStatus requestParamBinder[[]string, string]
 	bindIncludeHidden requestParamBinder[[]string, bool]
+	bindOffset requestParamBinder[[]string, int64]
 }
 
 func (p *paramsParserFinanceListFinanceTransactions) parse(router httpRouter, req *http.Request) (*ListFinanceTransactionsParams, error) {
@@ -869,6 +871,8 @@ func (p *paramsParserFinanceListFinanceTransactions) parse(router httpRouter, re
 	p.bindSource(queryParamsCtx.Fork("source"), readQueryValue("source", query), &reqParams.Source)
 	p.bindStatus(queryParamsCtx.Fork("status"), readQueryValue("status", query), &reqParams.Status)
 	p.bindIncludeHidden(queryParamsCtx.Fork("includeHidden"), readQueryValue("includeHidden", query), &reqParams.IncludeHidden)
+	p.bindLimit(queryParamsCtx.Fork("limit"), readQueryValue("limit", query), &reqParams.Limit)
+	p.bindOffset(queryParamsCtx.Fork("offset"), readQueryValue("offset", query), &reqParams.Offset)
 	return reqParams, bindingCtx.AggregatedError()
 }
 
@@ -880,6 +884,15 @@ func newParamsParserFinanceListFinanceTransactions(rootHandler *RootHandler) par
 				rootHandler.knownParsers.stringParser,
 			),
 			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindLimit: newRequestParamBinder(binderParams[[]string, int64]{
+			required: true,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.int64Parser,
+			),
+			validateValue: NewSimpleFieldValidator[int64](
+				NewMinMaxValueValidator[int64](1, false, true),
 			),
 		}),
 		bindAccountID: newRequestParamBinder(binderParams[[]string, string]{
@@ -912,6 +925,15 @@ func newParamsParserFinanceListFinanceTransactions(rootHandler *RootHandler) par
 				rootHandler.knownParsers.boolParser,
 			),
 			validateValue: NewSimpleFieldValidator[bool](
+			),
+		}),
+		bindOffset: newRequestParamBinder(binderParams[[]string, int64]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.int64Parser,
+			),
+			validateValue: NewSimpleFieldValidator[int64](
+				NewMinMaxValueValidator[int64](0, false, true),
 			),
 		}),
 	}

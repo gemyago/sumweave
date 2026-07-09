@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"database/sql"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/glebarez/go-sqlite"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,10 +16,18 @@ import (
 
 func TestStore(t *testing.T) {
 	fake := faker.New()
+	makeSQLiteMemoryDSN := func(prefix string) string {
+		return fmt.Sprintf("file:%s?mode=memory&cache=shared", prefix+"-"+fake.UUID().V4())
+	}
 	makeStore := func(t *testing.T, dbName string) *Store {
 		t.Helper()
+		dsn := makeSQLiteMemoryDSN(dbName)
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), dbName+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "test_"},
 		)
 		require.NoError(t, err)
@@ -60,8 +67,12 @@ func TestStore(t *testing.T) {
 
 	t.Run("persists explicit columns and restart-visible rows", func(t *testing.T) {
 		now := time.Now().UTC().Add(-time.Minute)
+		// File-backed on purpose: this verifies reopen persistence and WAL on a new handle.
 		dsn := filepath.Join(t.TempDir(), "store-columns.sqlite")
-		store, err := NewStore(dsn, StoreOpts{TablePrefix: "test_"})
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := NewStore(sqlDB, dsn, StoreOpts{TablePrefix: "test_"})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		job := makeJob(now)
@@ -103,12 +114,15 @@ func TestStore(t *testing.T) {
 			"schedule_id",
 		}
 		assert.ElementsMatch(t, expectedColumns, columnNames)
-		reopened, err := NewStore(dsn, StoreOpts{TablePrefix: "test_"})
+		reopenedSQLDB, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
-		sqlDB, err := reopened.db.DB()
+		defer func() { require.NoError(t, reopenedSQLDB.Close()) }()
+		reopened, err := NewStore(reopenedSQLDB, dsn, StoreOpts{TablePrefix: "test_"})
+		require.NoError(t, err)
+		reopenedSQLHandle, err := reopened.db.DB()
 		require.NoError(t, err)
 		var journalMode string
-		require.NoError(t, sqlDB.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&journalMode))
+		require.NoError(t, reopenedSQLHandle.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&journalMode))
 		assert.Equal(t, "wal", journalMode)
 		persisted, err := reopened.Get(t.Context(), job.ID)
 		require.NoError(t, err)
@@ -247,8 +261,12 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("claim queued waits through a transient sqlite writer lock", func(t *testing.T) {
+		// File-backed on purpose: this exercises file-handle locking and busy-timeout behavior.
 		dsn := filepath.Join(t.TempDir(), "store-claim-locked.sqlite")
-		store, err := NewStore(dsn, StoreOpts{TablePrefix: "test_"})
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := NewStore(sqlDB, dsn, StoreOpts{TablePrefix: "test_"})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 
@@ -257,11 +275,9 @@ func TestStore(t *testing.T) {
 		_, err = store.Create(t.Context(), job)
 		require.NoError(t, err)
 
-		locker, err := sql.Open("sqlite", dsn)
+		locker, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, locker.Close()) }()
-		locker.SetMaxOpenConns(1)
-		locker.SetMaxIdleConns(1)
 
 		tx, err := locker.BeginTx(t.Context(), nil)
 		require.NoError(t, err)

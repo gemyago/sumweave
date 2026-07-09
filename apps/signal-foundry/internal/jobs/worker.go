@@ -2,12 +2,12 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +45,7 @@ type WorkerDeps struct {
 	Clock          func() time.Time
 	Config         WorkerConfig
 	WorkerID       string
+	DispatchDB     *sql.DB
 	DispatchConfig DispatchConfig
 }
 
@@ -55,6 +56,7 @@ type Worker struct {
 	clock          func() time.Time
 	config         WorkerConfig
 	workerID       string
+	dispatchDB     *sql.DB
 	dispatchConfig DispatchConfig
 	consumer       *appdispatch.Consumer
 	stop           context.CancelFunc
@@ -90,6 +92,7 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 		clock:          deps.Clock,
 		config:         normalizeWorkerConfig(deps.Config),
 		workerID:       deps.WorkerID,
+		dispatchDB:     deps.DispatchDB,
 		dispatchConfig: deps.DispatchConfig,
 	}, nil
 }
@@ -100,18 +103,6 @@ func (w *Worker) Start(ctx context.Context) error {
 	}
 	if err := w.store.RecoverStaleRunning(ctx, w.clock(), w.config.MaxAttempts); err != nil {
 		return err
-	}
-	if w.usesSQLitePolling() {
-		runCtx, cancel := context.WithCancel(ctx)
-		w.stop = cancel
-		w.wg.Add(1)
-		go func() {
-			defer w.wg.Done()
-			if err := w.runSQLitePollingLoop(runCtx); err != nil && !errors.Is(err, context.Canceled) {
-				w.logger.ErrorContext(runCtx, "jobs worker sqlite polling stopped", "error", err)
-			}
-		}()
-		return nil
 	}
 	if err := w.ensureConsumer(); err != nil {
 		return err
@@ -132,9 +123,6 @@ func (w *Worker) Run(ctx context.Context) error {
 	if err := w.store.RecoverStaleRunning(ctx, w.clock(), w.config.MaxAttempts); err != nil {
 		return err
 	}
-	if w.usesSQLitePolling() {
-		return w.runSQLitePollingLoop(ctx)
-	}
 	if err := w.ensureConsumer(); err != nil {
 		return err
 	}
@@ -144,9 +132,6 @@ func (w *Worker) Run(ctx context.Context) error {
 func (w *Worker) RunOnce(ctx context.Context) error {
 	if err := w.store.RecoverStaleRunning(ctx, w.clock(), w.config.MaxAttempts); err != nil {
 		return err
-	}
-	if w.usesSQLitePolling() {
-		return w.runSQLitePollingAvailable(ctx)
 	}
 	if err := w.ensureConsumer(); err != nil {
 		return err
@@ -175,79 +160,27 @@ func (w *Worker) ensureConsumer() error {
 	if w.consumer != nil {
 		return nil
 	}
-	consumer, err := appdispatch.NewConsumer(appdispatch.Config{
+	config := appdispatch.Config{
 		DatabaseDSN: w.dispatchConfig.DatabaseDSN,
 		TablePrefix: w.dispatchConfig.TablePrefix,
-	}, newWorkerDispatchRegistry(w.registry, &workerExecutor{
+	}
+	registry := newWorkerDispatchRegistry(w.registry, &workerExecutor{
 		store:    w.store,
 		registry: w.registry,
 		logger:   w.logger,
 		clock:    w.clock,
 		workerID: w.workerID,
-	}), w.logger)
+	})
+	if w.dispatchDB == nil {
+		return errors.New("dispatch sql database is required")
+	}
+	consumer, err := appdispatch.NewConsumer(config, w.dispatchDB, registry, w.logger)
 	if err != nil {
 		return err
 	}
 	w.consumer = consumer
 	return nil
 }
-
-func (w *Worker) usesSQLitePolling() bool {
-	dispatchDSN := strings.TrimSpace(w.dispatchConfig.DatabaseDSN)
-	jobsDSN := strings.TrimSpace(w.dispatchConfig.JobsDSN)
-	return dispatchDSN != "" && dispatchDSN == jobsDSN && isSQLiteDSN(dispatchDSN)
-}
-
-func (w *Worker) runSQLitePollingLoop(ctx context.Context) error {
-	if err := w.runSQLitePollingAvailable(ctx); err != nil {
-		return err
-	}
-	ticker := time.NewTicker(w.config.PollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if err := w.runSQLitePollingAvailable(ctx); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func (w *Worker) runSQLitePollingAvailable(ctx context.Context) error {
-	for {
-		processed, err := w.processNextQueuedJob(ctx)
-		if err != nil {
-			return err
-		}
-		if !processed {
-			return nil
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-	}
-}
-
-func (w *Worker) processNextQueuedJob(ctx context.Context) (bool, error) {
-	result, err := w.store.List(ctx, ListParams{
-		Statuses: []JobStatus{JobStatusQueued},
-		Limit:    1,
-	})
-	if err != nil {
-		return false, err
-	}
-	if len(result.Items) == 0 {
-		return false, nil
-	}
-	if err = w.ProcessJob(ctx, result.Items[0].ID); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func (w *Worker) ProcessJob(ctx context.Context, jobID string) error {
 	job, err := w.store.Get(ctx, jobID)
 	if err != nil {

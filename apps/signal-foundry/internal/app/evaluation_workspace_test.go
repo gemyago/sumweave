@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/runtime/audit"
 	"github.com/gemyago/signal-foundry/runtime/backtest"
@@ -531,8 +532,13 @@ func TestEvaluationWorkspaceService(t *testing.T) {
 	)
 
 	t.Run("constructor validates dependencies and ensures default policy", func(t *testing.T) {
+		governorDSN := t.TempDir() + "/governor.db"
+		governorSQLDB, storeErr := sqlconn.Open(governorDSN)
+		require.NoError(t, storeErr)
+		defer func() { require.NoError(t, governorSQLDB.Close()) }()
 		governorStore, storeErr := rtgovernor.NewArtifactDatabaseStore(
-			t.TempDir()+"/governor.db",
+			governorSQLDB,
+			governorDSN,
 			rtgovernor.ArtifactDatabaseStoreOpts{},
 		)
 		require.NoError(t, storeErr)
@@ -1176,8 +1182,13 @@ func TestEvaluationWorkspaceService(t *testing.T) {
 	})
 
 	t.Run("wrapper readers and helper branches stay deterministic", func(t *testing.T) {
+		executionDSN := t.TempDir() + "/execution.db"
+		executionSQLDB, executionStoreErr := sqlconn.Open(executionDSN)
+		require.NoError(t, executionStoreErr)
+		defer func() { require.NoError(t, executionSQLDB.Close()) }()
 		executionStore, executionStoreErr := execution.NewDatabaseStore(
-			t.TempDir()+"/execution.db",
+			executionSQLDB,
+			executionDSN,
 			execution.DatabaseStoreOpts{},
 		)
 		require.NoError(t, executionStoreErr)

@@ -240,11 +240,11 @@ type DatabaseStoreOpts struct {
 	TablePrefix string
 }
 
-// NewDatabaseStore opens a database-backed store for canonical instruments and market data.
-func NewDatabaseStore(
-	dsn string,
-	opts DatabaseStoreOpts,
-) (*DatabaseStore, error) {
+// NewDatabaseStore builds a store from an existing [sql.DB] handle.
+func NewDatabaseStore(sqlDB *sql.DB, dsn string, opts DatabaseStoreOpts) (*DatabaseStore, error) {
+	if sqlDB == nil {
+		return nil, errors.New("sql database is required")
+	}
 	if dsn == "" {
 		return nil, errors.New("dsn is required")
 	}
@@ -257,12 +257,9 @@ func NewDatabaseStore(
 		return time.Now().UTC()
 	}
 
-	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), cfg)
+	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
-	}
-	if err = gormsignalfoundry.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
-		return nil, err
 	}
 
 	return &DatabaseStore{db: db}, nil

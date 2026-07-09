@@ -17,6 +17,7 @@ import (
 
 	appinternal "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/config"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/strategyassistant"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/startupmode"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
@@ -81,7 +82,10 @@ func TestNewRuntime(t *testing.T) {
 		dataDir := t.TempDir()
 		tablePrefix := strings.ReplaceAll("data_"+fake.Lorem().Word(), "-", "_") + "_"
 		dataLayerDSN := filepath.Join(t.TempDir(), fake.Lorem().Word()+".db")
-		dataStore, err := data.NewDatabaseStore(dataLayerDSN, data.DatabaseStoreOpts{
+		sqlDB, err := sqlconn.Open(dataLayerDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		dataStore, err := data.NewDatabaseStore(sqlDB, dataLayerDSN, data.DatabaseStoreOpts{
 			TablePrefix: tablePrefix,
 		})
 		require.NoError(t, err)
@@ -372,7 +376,10 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime.VenueIngestionFlow)
 		require.NotNil(t, runtime.HyperliquidRecorder)
 
-		store, err := data.NewDatabaseStore(deps.DataLayerDatabaseDSN, dataStoreOpts(deps))
+		sqlDB, err := sqlconn.Open(deps.DataLayerDatabaseDSN)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := data.NewDatabaseStore(sqlDB, deps.DataLayerDatabaseDSN, dataStoreOpts(deps))
 		require.NoError(t, err)
 
 		venue, symbol := makeInstrumentIdentity(t)
@@ -391,7 +398,10 @@ func TestNewRuntime(t *testing.T) {
 		require.NotNil(t, runtime.VenueIngestionFlow)
 		require.NotNil(t, runtime.HyperliquidRecorder)
 
-		store, err := data.NewDatabaseStore(deps.DataLayerDatabaseDSN, dataStoreOpts(deps))
+		sqlDB, err := sqlconn.Open(deps.DataLayerDatabaseDSN)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := data.NewDatabaseStore(sqlDB, deps.DataLayerDatabaseDSN, dataStoreOpts(deps))
 		require.NoError(t, err)
 
 		venue, symbol := makeInstrumentIdentity(t)

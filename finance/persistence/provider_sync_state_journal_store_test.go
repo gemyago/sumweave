@@ -7,6 +7,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/domain"
 	"github.com/gemyago/signal-foundry/finance/internal/providers"
+	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,9 +20,11 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 		t.Helper()
 
 		fake := faker.New()
-		database, err := OpenDatabase(
-			fmt.Sprintf("file:%s?mode=memory&cache=shared", "journal-"+fake.UUID().V4()),
-		)
+		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "journal-"+fake.UUID().V4())
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		database, err := NewDatabase(sqlDB, dsn)
 		require.NoError(t, err)
 		store := NewStore(database)
 		if now != nil {

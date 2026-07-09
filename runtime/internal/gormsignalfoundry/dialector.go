@@ -1,6 +1,7 @@
 package gormsignalfoundry
 
 import (
+	"database/sql"
 	"strings"
 
 	"github.com/glebarez/sqlite"
@@ -31,6 +32,17 @@ func NewGormDialector(dsn string) Dialector {
 		return Dialector{Dialector: sqlite.Open(dsn)}
 	}
 	return Dialector{Dialector: postgres.Open(dsn)}
+}
+
+// NewGormDialectorWithConn returns the appropriate GORM dialector for the given DSN and connection pool.
+func NewGormDialectorWithConn(dsn string, conn *sql.DB) Dialector {
+	if conn == nil {
+		return NewGormDialector(dsn)
+	}
+	if isSQLiteDSN(dsn) {
+		return Dialector{Dialector: sqlite.Dialector{DriverName: sqlite.DriverName, DSN: dsn, Conn: conn}}
+	}
+	return Dialector{Dialector: postgres.New(postgres.Config{DSN: dsn, Conn: conn})}
 }
 
 // Translate forwards error translation when the wrapped dialector supports it.

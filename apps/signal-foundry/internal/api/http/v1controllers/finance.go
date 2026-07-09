@@ -1202,6 +1202,8 @@ func (c *FinanceController) ListFinanceTransactions(
 				Source:        domain.TransactionSource(params.Source),
 				Status:        domain.TransactionStatus(params.Status),
 				IncludeHidden: params.IncludeHidden,
+				Limit:         params.Limit,
+				Offset:        params.Offset,
 			},
 		)
 		if err != nil {

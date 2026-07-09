@@ -144,13 +144,13 @@ curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H
 List provider transactions:
 
 ```bash
-curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/transactions?source=provider" -H "Authorization: Bearer ${ACCESS_TOKEN}"
+curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/transactions?source=provider&limit=100" -H "Authorization: Bearer ${ACCESS_TOKEN}"
 ```
 
 Optional one-shot assertion:
 
 ```bash
-curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-accounts.json && curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/transactions?source=provider" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-transactions.json && python3 - <<'PY'
+curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-accounts.json && curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/transactions?source=provider&limit=100" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-transactions.json && python3 - <<'PY'
 import json
 accounts = json.load(open('/tmp/synthetic-provider-accounts.json'))['items']
 transactions = json.load(open('/tmp/synthetic-provider-transactions.json'))['items']

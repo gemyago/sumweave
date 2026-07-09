@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,12 +55,19 @@ func TestMigrate(t *testing.T) {
 
 	t.Run("keeps schema initialization portable across sqlite modes", func(t *testing.T) {
 		fake := faker.New()
-		database, err := OpenDatabase(":memory:")
+		sqlDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		database, err := NewDatabase(sqlDB, ":memory:")
 		require.NoError(t, err)
 		migrator := NewMigrator(database)
 		require.NoError(t, migrator.Migrate(t.Context()))
 
-		fileDatabase, err := OpenDatabase(fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word()))
+		fileDSN := fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word())
+		fileSQLDB, err := sqlconn.Open(fileDSN)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, fileSQLDB.Close()) }()
+		fileDatabase, err := NewDatabase(fileSQLDB, fileDSN)
 		require.NoError(t, err)
 		fileMigrator := NewMigrator(fileDatabase)
 		require.NoError(t, fileMigrator.Migrate(t.Context()))
@@ -70,7 +78,11 @@ func TestMigrate(t *testing.T) {
 		path := fmt.Sprintf("%s/%s.db", t.TempDir(), fake.Lorem().Word())
 		require.NoError(t, os.WriteFile(path, []byte{}, 0o600))
 
-		database, err := OpenDatabase(fmt.Sprintf("file:%s?mode=ro", path))
+		readOnlyDSN := fmt.Sprintf("file:%s?mode=ro", path)
+		sqlDB, err := sqlconn.Open(readOnlyDSN)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		database, err := NewDatabase(sqlDB, readOnlyDSN)
 		require.NoError(t, err)
 		migrator := NewMigrator(database)
 

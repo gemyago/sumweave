@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	rtstrategy "github.com/gemyago/signal-foundry/runtime/strategy"
@@ -13,12 +14,15 @@ type strategyWorkspaceStoreDeps struct {
 
 	DatabaseDSN         string `name:"config.dataLayer.database.dsn"`
 	DatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	SQLDB               *sql.DB
 }
 
 func newStrategyArtifactStore(deps strategyWorkspaceStoreDeps) (*rtstrategy.ArtifactDatabaseStore, error) {
-	store, err := rtstrategy.NewArtifactDatabaseStore(deps.DatabaseDSN, rtstrategy.ArtifactDatabaseStoreOpts{
-		TablePrefix: deps.DatabaseTablePrefix + "strategy_",
-	})
+	store, err := rtstrategy.NewArtifactDatabaseStore(
+		deps.SQLDB,
+		deps.DatabaseDSN,
+		rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: deps.DatabaseTablePrefix + "strategy_"},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create strategy artifact store: %w", err)
 	}
@@ -30,10 +34,14 @@ func newStrategyVersionRegistryService(
 	deps strategyWorkspaceStoreDeps,
 	artifactStore *rtstrategy.ArtifactDatabaseStore,
 ) (*rtstrategy.VersionRegistryService, error) {
-	service, err := rtstrategy.NewVersionRegistryService(deps.DatabaseDSN, rtstrategy.VersionRegistryServiceDeps{
-		ArtifactStore: artifactStore,
-		TablePrefix:   deps.DatabaseTablePrefix + "strategy_",
-	})
+	service, err := rtstrategy.NewVersionRegistryService(
+		deps.SQLDB,
+		deps.DatabaseDSN,
+		rtstrategy.VersionRegistryServiceDeps{
+			ArtifactStore: artifactStore,
+			TablePrefix:   deps.DatabaseTablePrefix + "strategy_",
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create strategy version registry service: %w", err)
 	}

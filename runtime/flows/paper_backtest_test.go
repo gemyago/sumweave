@@ -15,6 +15,7 @@ import (
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/gemyago/signal-foundry/runtime/execution"
 	"github.com/gemyago/signal-foundry/runtime/governor"
+	"github.com/gemyago/signal-foundry/runtime/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/runtime/strategy"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
@@ -1493,7 +1494,10 @@ func TestPaperBacktestFlow(t *testing.T) {
 			require.NoError(t, err)
 
 			governorService := governor.NewService()
-			auditStore, err := audit.NewDatabaseStore(":memory:", audit.DatabaseStoreOpts{})
+			auditSQLDB, err := sqlconn.Open(":memory:")
+			require.NoError(t, err)
+			defer func() { require.NoError(t, auditSQLDB.Close()) }()
+			auditStore, err := audit.NewDatabaseStore(auditSQLDB, ":memory:", audit.DatabaseStoreOpts{})
 			require.NoError(t, err)
 			require.NoError(t, auditStore.AutoMigrate())
 			auditService, err := audit.NewService(auditStore)

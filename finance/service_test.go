@@ -1620,6 +1620,7 @@ func (s stubStore) ListTransactions(
 	source domain.TransactionSource,
 	status domain.TransactionStatus,
 	includeHidden bool,
+	_ ...persistence.ListTransactionsPage,
 ) ([]domain.Transaction, error) {
 	if s.listTransactionsFn == nil {
 		return nil, nil

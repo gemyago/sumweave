@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	rtstrategy "github.com/gemyago/signal-foundry/runtime/strategy"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
@@ -98,7 +99,11 @@ func TestStrategyWorkspaceService(t *testing.T) {
 		t.Helper()
 
 		dsn := filepath.Join(t.TempDir(), "strategy-workspace.db")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
+			sqlDB,
 			dsn,
 			rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: "app_"},
 		)
@@ -106,6 +111,7 @@ func TestStrategyWorkspaceService(t *testing.T) {
 		require.NoError(t, artifactStore.AutoMigrate())
 
 		registry, err := rtstrategy.NewVersionRegistryService(
+			sqlDB,
 			dsn,
 			rtstrategy.VersionRegistryServiceDeps{
 				ArtifactStore: artifactStore,

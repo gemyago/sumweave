@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -15,6 +16,7 @@ type dataLayerStoreDeps struct {
 
 	DatabaseDSN         string `name:"config.dataLayer.database.dsn"`
 	DatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	SQLDB               *sql.DB
 }
 
 type dataLayerBlobStoreDeps struct {
@@ -26,10 +28,9 @@ type dataLayerBlobStoreDeps struct {
 
 func newDataLayerStore(deps dataLayerStoreDeps) (*data.DatabaseStore, error) {
 	store, err := data.NewDatabaseStore(
+		deps.SQLDB,
 		deps.DatabaseDSN,
-		data.DatabaseStoreOpts{
-			TablePrefix: deps.DatabaseTablePrefix,
-		},
+		data.DatabaseStoreOpts{TablePrefix: deps.DatabaseTablePrefix},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create data-layer database store: %w", err)

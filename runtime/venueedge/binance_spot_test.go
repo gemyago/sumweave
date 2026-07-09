@@ -9,6 +9,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/internal/sqlconn"
 	"github.com/stretchr/testify/require"
 )
 
@@ -241,7 +242,10 @@ func TestBinanceSpotVenue(t *testing.T) {
 			}
 		}))
 
-		store, err := data.NewDatabaseStore(":memory:", data.DatabaseStoreOpts{})
+		sqlDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := data.NewDatabaseStore(sqlDB, ":memory:", data.DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		ingestionService, err := data.NewIngestionService(data.IngestionServiceDeps{

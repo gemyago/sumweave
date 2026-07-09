@@ -8,6 +8,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/credentials"
 	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -650,7 +651,11 @@ func TestProviderSyncStore(t *testing.T) {
 		fake := faker.New()
 		path := fmt.Sprintf("%s/%s.db", t.TempDir(), fake.UUID().V4())
 		require.NoError(t, os.WriteFile(path, []byte{}, 0o600))
-		database, err := OpenDatabase("file:" + path + "?mode=ro")
+		dsn := "file:" + path + "?mode=ro"
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		database, err := NewDatabase(sqlDB, dsn)
 		require.NoError(t, err)
 		store := NewStore(database)
 

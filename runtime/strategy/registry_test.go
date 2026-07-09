@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +36,11 @@ func TestStrategyVersionRegistryService(t *testing.T) {
 	makeArtifactStore := func(t *testing.T, dsn string, tablePrefix string) *ArtifactDatabaseStore {
 		t.Helper()
 
-		store, err := NewArtifactDatabaseStore(dsn, ArtifactDatabaseStoreOpts{TablePrefix: tablePrefix})
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+		store, err := NewArtifactDatabaseStore(sqlDB, dsn, ArtifactDatabaseStoreOpts{TablePrefix: tablePrefix})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 
@@ -50,7 +55,11 @@ func TestStrategyVersionRegistryService(t *testing.T) {
 	) *VersionRegistryService {
 		t.Helper()
 
-		service, err := NewVersionRegistryService(dsn, VersionRegistryServiceDeps{
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+		service, err := NewVersionRegistryService(sqlDB, dsn, VersionRegistryServiceDeps{
 			ArtifactStore: artifactStore,
 			TablePrefix:   tablePrefix,
 		})
@@ -186,7 +195,11 @@ func TestStrategyVersionRegistryService(t *testing.T) {
 			t.Parallel()
 
 			artifactStore := makeArtifactStore(t, ":memory:", "")
-			service, err := NewVersionRegistryService(":memory:", VersionRegistryServiceDeps{
+			sqlDB, err := sqlconn.Open(":memory:")
+			require.NoError(t, err)
+			defer func() { require.NoError(t, sqlDB.Close()) }()
+
+			service, err := NewVersionRegistryService(sqlDB, ":memory:", VersionRegistryServiceDeps{
 				ArtifactStore: artifactStore,
 			})
 			require.NoError(t, err)
@@ -196,12 +209,24 @@ func TestStrategyVersionRegistryService(t *testing.T) {
 		t.Run("requires dsn and artifact store", func(t *testing.T) {
 			t.Parallel()
 
-			service, err := NewVersionRegistryService("", VersionRegistryServiceDeps{})
+			sqlDB, err := sqlconn.Open(":memory:")
+			require.NoError(t, err)
+			defer func() { require.NoError(t, sqlDB.Close()) }()
+
+			service, err := NewVersionRegistryService(sqlDB, "", VersionRegistryServiceDeps{})
 			require.Error(t, err)
 			require.Nil(t, service)
 
-			service, err = NewVersionRegistryService(":memory:", VersionRegistryServiceDeps{})
+			service, err = NewVersionRegistryService(sqlDB, ":memory:", VersionRegistryServiceDeps{})
 			require.EqualError(t, err, "artifact store is required")
+			require.Nil(t, service)
+		})
+
+		t.Run("requires sql database", func(t *testing.T) {
+			t.Parallel()
+
+			service, err := NewVersionRegistryService(nil, ":memory:", VersionRegistryServiceDeps{})
+			require.Error(t, err)
 			require.Nil(t, service)
 		})
 	})
@@ -210,7 +235,11 @@ func TestStrategyVersionRegistryService(t *testing.T) {
 		t.Parallel()
 
 		artifactStore := makeArtifactStore(t, ":memory:", "")
-		service, err := NewVersionRegistryService(":memory:", VersionRegistryServiceDeps{
+		sqlDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+
+		service, err := NewVersionRegistryService(sqlDB, ":memory:", VersionRegistryServiceDeps{
 			ArtifactStore: artifactStore,
 		})
 		require.NoError(t, err)

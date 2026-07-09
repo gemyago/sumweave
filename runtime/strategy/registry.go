@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -132,11 +133,15 @@ func (strategyVersionModel) TableName(namer schema.Namer) string {
 	return namer.TableName("strategy_versions")
 }
 
-// NewVersionRegistryService opens a database-backed version registry service.
+// NewVersionRegistryService builds a version registry service from an existing [sql.DB] handle.
 func NewVersionRegistryService(
+	sqlDB *sql.DB,
 	dsn string,
 	deps VersionRegistryServiceDeps,
 ) (*VersionRegistryService, error) {
+	if sqlDB == nil {
+		return nil, errors.New("sql database is required")
+	}
 	if dsn == "" {
 		return nil, errors.New("dsn is required")
 	}
@@ -152,12 +157,9 @@ func NewVersionRegistryService(
 		return time.Now().UTC()
 	}
 
-	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), cfg)
+	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
-	}
-	if err = gormsignalfoundry.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
-		return nil, err
 	}
 
 	return &VersionRegistryService{

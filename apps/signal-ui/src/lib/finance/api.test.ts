@@ -358,7 +358,7 @@ describe('finance api', () => {
     expect((await api.createCategory({ tenantId: 'tenant-1', name: 'Travel', kind: 'expense' })).name).toBe('Travel')
     expect((await api.listTags({ tenantId: 'tenant-1' }))[0].name).toBe('Budget')
     expect((await api.createTag({ tenantId: 'tenant-1', name: 'Holiday' })).name).toBe('Holiday')
-    expect((await api.listTransactions({ tenantId: 'tenant-1' }))[0].description).toBe('Coffee')
+    expect((await api.listTransactions({ tenantId: 'tenant-1', limit: 20 }))[0].description).toBe('Coffee')
     expect((await api.linkTokenConnection({ tenantId: 'tenant-1', provider: 'mono', token: 'secret' })).displayName).toBe('Mono')
     await expect(api.deleteConnection({ tenantId: 'tenant-1', connectionId: 'connection-1' })).resolves.toBeUndefined()
     expect((await api.triggerConnectionSync({ tenantId: 'tenant-1', connectionId: 'connection-1', reason: 'operator_ui' })).jobType).toBe('finance.bank_connection_sync')

@@ -500,6 +500,7 @@ func (s *Store) ListTransactions(
 	source domain.TransactionSource,
 	status domain.TransactionStatus,
 	includeHidden bool,
+	page ...ListTransactionsPage,
 ) ([]domain.Transaction, error) {
 	var models []transactionModel
 	query := s.db.WithContext(ctx).
@@ -517,6 +518,14 @@ func (s *Store) ListTransactions(
 	if !includeHidden {
 		query = query.Where("hidden_at IS NULL")
 	}
+	if len(page) > 0 {
+		if page[0].Limit > 0 {
+			query = query.Limit(dbPageInt(page[0].Limit))
+		}
+		if page[0].Offset > 0 {
+			query = query.Offset(dbPageInt(page[0].Offset))
+		}
+	}
 	if err := query.Order("effective_at DESC, created_at DESC, id DESC").Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list transactions: %w", err)
 	}
@@ -525,4 +534,17 @@ func (s *Store) ListTransactions(
 		items = append(items, transactionFromModel(model))
 	}
 	return items, nil
+}
+
+type ListTransactionsPage struct {
+	Limit  int64
+	Offset int64
+}
+
+func dbPageInt(value int64) int {
+	maxInt := int64(int(^uint(0) >> 1))
+	if value > maxInt {
+		return int(maxInt)
+	}
+	return int(value)
 }

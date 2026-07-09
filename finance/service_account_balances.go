@@ -24,6 +24,7 @@ type accountBalanceFallbackStore interface {
 		source domain.TransactionSource,
 		status domain.TransactionStatus,
 		includeHidden bool,
+		page ...persistence.ListTransactionsPage,
 	) ([]domain.Transaction, error)
 }
 

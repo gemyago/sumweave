@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/google/uuid"
 )
 
@@ -30,6 +31,7 @@ type csvImportFocusedStore interface {
 		source domain.TransactionSource,
 		status domain.TransactionStatus,
 		includeHidden bool,
+		page ...persistence.ListTransactionsPage,
 	) ([]domain.Transaction, error)
 	ListCategories(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Category, error)
 	ListTags(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Tag, error)

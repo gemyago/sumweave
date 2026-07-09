@@ -63,7 +63,7 @@
 
     const [accounts, tx] = await Promise.all([
       financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
-      financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, accountId: params.accountId }),
+      financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, accountId: params.accountId, limit: 10 }),
     ])
 
     account = accounts.find((item) => item.id === params.accountId) ?? null

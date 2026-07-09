@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"time"
@@ -21,6 +22,7 @@ type storeDeps struct {
 
 	DatabaseDSN         string `name:"config.dataLayer.database.dsn"`
 	DatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	SQLDB               *sql.DB
 }
 
 type serviceDeps struct {
@@ -48,6 +50,7 @@ type workerDeps struct {
 	MaxConcurrent int           `name:"config.jobs.worker.maxConcurrentHistoricalBackfills"`
 	DatabaseDSN   string        `name:"config.dataLayer.database.dsn"`
 	TablePrefix   string        `name:"config.dataLayer.database.tablePrefix"`
+	SQLDB         *sql.DB
 }
 
 type registryDeps struct {
@@ -69,13 +72,7 @@ type startupDeps struct {
 }
 
 func newStoreFromDI(deps storeDeps) (*Store, error) {
-	store, err := NewStore(deps.DatabaseDSN, StoreOpts{
-		TablePrefix: deps.DatabaseTablePrefix + "jobs_",
-	})
-	if err != nil {
-		return nil, err
-	}
-	return store, nil
+	return NewStore(deps.SQLDB, deps.DatabaseDSN, StoreOpts{TablePrefix: deps.DatabaseTablePrefix + "jobs_"})
 }
 
 func newWorkerFromDI(deps workerDeps) (*Worker, error) {
@@ -89,9 +86,9 @@ func newWorkerFromDI(deps workerDeps) (*Worker, error) {
 			MaxAttempts:                     deps.MaxAttempts,
 			MaxConcurrentHistoricalBackfill: deps.MaxConcurrent,
 		},
+		DispatchDB: deps.SQLDB,
 		DispatchConfig: DispatchConfig{
 			DatabaseDSN: deps.DatabaseDSN,
-			JobsDSN:     deps.DatabaseDSN,
 			TablePrefix: deps.TablePrefix,
 		},
 	})
@@ -103,13 +100,15 @@ type publisherDeps struct {
 	DatabaseDSN         string `name:"config.dataLayer.database.dsn"`
 	DatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
 	Logger              *slog.Logger
+	SQLDB               *sql.DB
 }
 
 func newPublisherFromDI(deps publisherDeps) (*appdispatch.Publisher, error) {
-	return appdispatch.NewPublisher(appdispatch.Config{
+	config := appdispatch.Config{
 		DatabaseDSN: deps.DatabaseDSN,
 		TablePrefix: deps.DatabaseTablePrefix,
-	}, deps.Logger)
+	}
+	return appdispatch.NewPublisher(config, deps.SQLDB, deps.Logger)
 }
 
 func newRegistryFromDI(deps registryDeps) (*Registry, error) {

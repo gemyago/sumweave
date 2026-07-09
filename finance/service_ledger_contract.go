@@ -62,6 +62,8 @@ type ListTransactionsParams struct {
 	Source        domain.TransactionSource
 	Status        domain.TransactionStatus
 	IncludeHidden bool
+	Limit         int64
+	Offset        int64
 }
 
 type SummarizeTransactionsParams struct {

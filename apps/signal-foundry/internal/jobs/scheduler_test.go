@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -17,10 +19,21 @@ import (
 
 func TestScheduler(t *testing.T) {
 	fake := faker.New()
+	makeSQLiteMemoryDSN := func() string {
+		return fmt.Sprintf("file:%s?mode=memory&cache=shared", "jobs-scheduler-"+fake.UUID().V4())
+	}
 	t.Run("constructor validates dependencies", func(t *testing.T) {
 		_, err := NewScheduler(SchedulerDeps{})
 		require.Error(t, err)
-		store, err := NewStore(filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"), StoreOpts{TablePrefix: "sched_"})
+		dsn := makeSQLiteMemoryDSN()
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := NewStore(
+			sqlDB,
+			dsn,
+			StoreOpts{TablePrefix: "sched_"},
+		)
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		_, err = NewScheduler(SchedulerDeps{Store: store})
@@ -28,7 +41,15 @@ func TestScheduler(t *testing.T) {
 	})
 
 	t.Run("enqueue due surfaces schedule read errors", func(t *testing.T) {
-		store, err := NewStore(filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"), StoreOpts{TablePrefix: "sched_"})
+		dsn := makeSQLiteMemoryDSN()
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := NewStore(
+			sqlDB,
+			dsn,
+			StoreOpts{TablePrefix: "sched_"},
+		)
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		registry := NewRegistry()
@@ -69,7 +90,15 @@ func TestScheduler(t *testing.T) {
 	})
 
 	t.Run("enqueue due returns non-idempotency enqueue errors", func(t *testing.T) {
-		store, err := NewStore(filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"), StoreOpts{TablePrefix: "sched_"})
+		dsn := makeSQLiteMemoryDSN()
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := NewStore(
+			sqlDB,
+			dsn,
+			StoreOpts{TablePrefix: "sched_"},
+		)
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		registry := NewRegistry()
@@ -100,7 +129,16 @@ func TestScheduler(t *testing.T) {
 	})
 
 	t.Run("enqueue due keeps the due window eligible when schedule advancement cannot commit", func(t *testing.T) {
-		store, err := NewStore(filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"), StoreOpts{TablePrefix: "sched_"})
+		// File-backed on purpose: this test cancels in-flight scheduler work and needs schema to survive any reconnect.
+		dsn := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := NewStore(
+			sqlDB,
+			dsn,
+			StoreOpts{TablePrefix: "sched_"},
+		)
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		registry := NewRegistry()

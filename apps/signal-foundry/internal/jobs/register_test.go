@@ -2,12 +2,15 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/lifecycle"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/startupmode"
@@ -18,10 +21,27 @@ import (
 )
 
 func TestRegisterHelpers(t *testing.T) {
+	memoryDSNOrdinal := 0
+	makeSQLiteMemoryDSN := func(prefix string) string {
+		memoryDSNOrdinal++
+		return fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", prefix, memoryDSNOrdinal)
+	}
+
+	openSharedDB := func(t *testing.T, dsn string) *sql.DB {
+		t.Helper()
+		db, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		return db
+	}
+
 	makeDataServices := func(t *testing.T) (*data.IngestionService, *data.ReadService, *data.LineageService) {
 		t.Helper()
+		dsn := makeSQLiteMemoryDSN("jobs-data")
+		sqlDB := openSharedDB(t, dsn)
 		store, err := data.NewDatabaseStore(
-			filepath.Join(t.TempDir(), "data.sqlite"),
+			sqlDB,
+			dsn,
 			data.DatabaseStoreOpts{TablePrefix: "jobs_test_"},
 		)
 		require.NoError(t, err)
@@ -47,7 +67,8 @@ func TestRegisterHelpers(t *testing.T) {
 
 	t.Run("helper constructors and startup wiring succeed", func(t *testing.T) {
 		ingestionService, readService, lineageService := makeDataServices(t)
-		dsn := filepath.Join(t.TempDir(), "jobs.sqlite")
+		dsn := makeSQLiteMemoryDSN("jobs-register")
+		sharedDB := openSharedDB(t, dsn)
 		registry, err := newRegistryFromDI(registryDeps{
 			Lineage:      lineageService,
 			ReadService:  readService,
@@ -57,16 +78,18 @@ func TestRegisterHelpers(t *testing.T) {
 		store, err := newStoreFromDI(storeDeps{
 			DatabaseDSN:         dsn,
 			DatabaseTablePrefix: "pref_",
+			SQLDB:               sharedDB,
 		})
 		require.NoError(t, err)
 		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
 			DatabaseDSN: dsn,
 			TablePrefix: "pref_",
-		}))
+		}, sharedDB))
 		publisher, err := newPublisherFromDI(publisherDeps{
 			DatabaseDSN:         dsn,
 			DatabaseTablePrefix: "pref_",
 			Logger:              slog.Default(),
+			SQLDB:               sharedDB,
 		})
 		require.NoError(t, err)
 		defer func() { require.NoError(t, publisher.Close()) }()
@@ -80,6 +103,7 @@ func TestRegisterHelpers(t *testing.T) {
 			Enabled:      true,
 			DatabaseDSN:  dsn,
 			TablePrefix:  "pref_",
+			SQLDB:        sharedDB,
 		})
 		require.NoError(t, err)
 		service, err := newServiceFromDI(
@@ -116,7 +140,8 @@ func TestRegisterHelpers(t *testing.T) {
 
 	t.Run("startup wiring can disable auto-start while keeping worker enabled", func(t *testing.T) {
 		ingestionService, readService, lineageService := makeDataServices(t)
-		dsn := filepath.Join(t.TempDir(), "jobs.sqlite")
+		dsn := makeSQLiteMemoryDSN("jobs-autostart")
+		sharedDB := openSharedDB(t, dsn)
 		registry, err := newRegistryFromDI(registryDeps{
 			Lineage:      lineageService,
 			ReadService:  readService,
@@ -126,12 +151,13 @@ func TestRegisterHelpers(t *testing.T) {
 		store, err := newStoreFromDI(storeDeps{
 			DatabaseDSN:         dsn,
 			DatabaseTablePrefix: "pref_",
+			SQLDB:               sharedDB,
 		})
 		require.NoError(t, err)
 		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{
 			DatabaseDSN: dsn,
 			TablePrefix: "pref_",
-		}))
+		}, sharedDB))
 		worker, err := newWorkerFromDI(workerDeps{
 			Store:        store,
 			Registry:     registry,
@@ -142,6 +168,7 @@ func TestRegisterHelpers(t *testing.T) {
 			Enabled:      true,
 			DatabaseDSN:  dsn,
 			TablePrefix:  "pref_",
+			SQLDB:        sharedDB,
 		})
 		require.NoError(t, err)
 		hooks := lifecycle.NewTestShutdownHooks()
@@ -158,8 +185,10 @@ func TestRegisterHelpers(t *testing.T) {
 	t.Run("register wires the service into dig", func(t *testing.T) {
 		container := dig.New()
 		ingestionService, readService, lineageService := makeDataServices(t)
+		dsn := makeSQLiteMemoryDSN("jobs-dig")
+		sharedDB := openSharedDB(t, dsn)
 		require.NoError(t, container.Provide(
-			func() string { return filepath.Join(t.TempDir(), "jobs.sqlite") },
+			func() string { return dsn },
 			dig.Name("config.dataLayer.database.dsn"),
 		))
 		require.NoError(t, container.Provide(
@@ -197,6 +226,7 @@ func TestRegisterHelpers(t *testing.T) {
 			dig.Name("config.jobs.worker.maxConcurrentHistoricalBackfills"),
 		))
 		require.NoError(t, container.Provide(slog.Default))
+		require.NoError(t, container.Provide(func() *sql.DB { return sharedDB }))
 		require.NoError(t, container.Provide(func() ident.Generator { return ident.NewMockGenerator() }))
 		require.NoError(t, container.Provide(func() *data.IngestionService { return ingestionService }))
 		require.NoError(t, container.Provide(func() *data.ReadService { return readService }))
@@ -218,9 +248,11 @@ func TestRegisterHelpers(t *testing.T) {
 	t.Run("helper constructors report dependency failures", func(t *testing.T) {
 		_, err := newStoreFromDI(storeDeps{})
 		require.Error(t, err)
+		dsn := makeSQLiteMemoryDSN("jobs-failure")
 		store, err := newStoreFromDI(storeDeps{
-			DatabaseDSN:         filepath.Join(t.TempDir(), "jobs.sqlite"),
+			DatabaseDSN:         dsn,
 			DatabaseTablePrefix: "pref_",
+			SQLDB:               openSharedDB(t, dsn),
 		})
 		require.NoError(t, err)
 		_, err = newWorkerFromDI(workerDeps{Store: store, Logger: slog.Default()})

@@ -18,6 +18,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/runtime/httpapi"
 	"github.com/jaswdr/faker/v2"
@@ -302,13 +303,15 @@ func TestJobsController(t *testing.T) {
 
 			t.Run("idempotency conflict returns 409 with stable code", func(t *testing.T) {
 				dsn := filepath.Join(t.TempDir(), "jobs-controller.sqlite")
-				store, err := jobspkg.NewStore(dsn, jobspkg.StoreOpts{})
+				sqlDB, err := sqlconn.Open(dsn)
+				require.NoError(t, err)
+				defer func() { require.NoError(t, sqlDB.Close()) }()
+				store, err := jobspkg.NewStore(sqlDB, dsn, jobspkg.StoreOpts{})
 				require.NoError(t, err)
 				require.NoError(t, store.AutoMigrate())
-				require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: dsn}))
-				publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: dsn}, slog.Default())
+				require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: dsn}, sqlDB))
+				publisher, err := appdispatch.NewPublisher(appdispatch.Config{DatabaseDSN: dsn}, sqlDB, slog.Default())
 				require.NoError(t, err)
-				defer func() { require.NoError(t, publisher.Close()) }()
 				svc, err := jobspkg.NewService(
 					jobspkg.ServiceDeps{Store: store, Publisher: publisher, IDGenerator: ident.NewDefaultGenerator()},
 				)

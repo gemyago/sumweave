@@ -185,7 +185,6 @@ type WorkerConfig struct {
 
 type DispatchConfig struct {
 	DatabaseDSN string
-	JobsDSN     string
 	TablePrefix string
 }
 

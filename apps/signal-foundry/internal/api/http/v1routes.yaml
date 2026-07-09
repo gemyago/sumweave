@@ -1124,6 +1124,19 @@ paths:
         - in: query
           name: includeHidden
           schema: { type: boolean }
+        - in: query
+          name: limit
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
       responses:
         '200':
           description: Finance transactions

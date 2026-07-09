@@ -399,7 +399,7 @@
           startDate: overrides.startDate ?? customStartDate,
           endDate: overrides.endDate ?? customEndDate,
         }),
-        financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
+        financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, includeHidden: true, limit: TRANSACTION_SECTION_LIMIT }),
         financeApi.listConnections({ tenantId: financeShell.selectedTenantId }),
       ])
 

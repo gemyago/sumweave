@@ -9,6 +9,7 @@ import (
 	"time"
 
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/lifecycle"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/startupmode"
 	"github.com/jaswdr/faker/v2"
@@ -41,7 +42,7 @@ func TestJobsCommand(t *testing.T) {
 		assert.Contains(t, onceFlag.Usage, "consumer")
 	})
 
-	t.Run("worker command drains queued sqlite jobs without a dispatch message", func(t *testing.T) {
+	t.Run("worker command leaves queued sqlite jobs untouched without a dispatch message", func(t *testing.T) {
 		dsn := filepath.Join(t.TempDir(), "jobs-worker-exec.sqlite")
 		t.Setenv("APP_DATALAYER_DATABASE_DSN", dsn)
 		t.Setenv("APP_JOBS_WORKER_ENABLED", "true")
@@ -56,11 +57,10 @@ func TestJobsCommand(t *testing.T) {
 
 		persisted, err := store.Get(t.Context(), jobID)
 		require.NoError(t, err)
-		assert.Equal(t, jobspkg.JobStatusFailed, persisted.Status)
-		assert.NotEmpty(t, persisted.WorkerID)
+		assert.Equal(t, jobspkg.JobStatusQueued, persisted.Status)
+		assert.Empty(t, persisted.WorkerID)
 		assert.Equal(t, 0, persisted.AttemptCount)
-		require.NotNil(t, persisted.Error)
-		assert.Equal(t, "job_execution_failed", persisted.Error.Code)
+		assert.Nil(t, persisted.Error)
 	})
 
 	t.Run("enqueue-due command enqueues only once per due window", func(t *testing.T) {
@@ -68,7 +68,10 @@ func TestJobsCommand(t *testing.T) {
 		t.Setenv("APP_DATALAYER_DATABASE_DSN", dsn)
 		t.Setenv("APP_JOBS_WORKER_ENABLED", "false")
 		migrateAppDatabaseForTests(t, dsn)
-		store, err := jobspkg.NewStore(dsn, jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"})
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+		store, err := jobspkg.NewStore(sqlDB, dsn, jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"})
 		require.NoError(t, err)
 		runAt := time.Now().UTC().Add(-time.Minute)
 		require.NoError(t, store.UpsertSchedule(t.Context(), jobspkg.Schedule{

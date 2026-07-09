@@ -87,7 +87,7 @@ describe('Finance transactions page inside the embedded shell', () => {
 
     render(FinanceTransactions)
 
-    expect(await screen.findByRole('heading', { name: 'Groceries' })).toBeInTheDocument()
+    expect(await screen.findByText('Groceries')).toBeInTheDocument()
     expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
   })
@@ -120,7 +120,7 @@ describe('Finance transactions page inside the embedded shell', () => {
 
     render(FinanceTransactions)
 
-    await screen.findByRole('heading', { name: 'Groceries' })
+    await screen.findByText('Groceries')
     expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
   })

@@ -17,6 +17,7 @@ func newEvaluationGovernorPolicyStore(
 	deps strategyWorkspaceStoreDeps,
 ) (*rtgovernor.ArtifactDatabaseStore, error) {
 	store, err := rtgovernor.NewArtifactDatabaseStore(
+		deps.SQLDB,
 		deps.DatabaseDSN,
 		rtgovernor.ArtifactDatabaseStoreOpts{TablePrefix: deps.DatabaseTablePrefix + "evaluation_"},
 	)
@@ -29,6 +30,7 @@ func newEvaluationGovernorPolicyStore(
 
 func newEvaluationAuditStore(deps strategyWorkspaceStoreDeps) (*audit.DatabaseStore, error) {
 	store, err := audit.NewDatabaseStore(
+		deps.SQLDB,
 		deps.DatabaseDSN,
 		audit.DatabaseStoreOpts{TablePrefix: deps.DatabaseTablePrefix + "evaluation_"},
 	)
@@ -43,6 +45,7 @@ func newEvaluationExecutionStore(
 	deps strategyWorkspaceStoreDeps,
 ) (*execution.DatabaseStore, error) {
 	store, err := execution.NewDatabaseStore(
+		deps.SQLDB,
 		deps.DatabaseDSN,
 		execution.DatabaseStoreOpts{TablePrefix: deps.DatabaseTablePrefix + "evaluation_"},
 	)
@@ -55,6 +58,7 @@ func newEvaluationExecutionStore(
 
 func newEvaluationBacktestStore(deps strategyWorkspaceStoreDeps) (*backtest.DatabaseStore, error) {
 	store, err := backtest.NewDatabaseStore(
+		deps.SQLDB,
 		deps.DatabaseDSN,
 		backtest.DatabaseStoreOpts{TablePrefix: deps.DatabaseTablePrefix + "evaluation_"},
 	)

@@ -4,15 +4,22 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/runtime/audit"
 	rtstrategy "github.com/gemyago/signal-foundry/runtime/strategy"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPersistenceConstructorsDoNotAutoMigrate(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "app.sqlite")
+	sharedDB, openErr := sqlconn.Open(dsn)
+	require.NoError(t, openErr)
+	t.Cleanup(func() { require.NoError(t, sharedDB.Close()) })
+
 	deps := strategyWorkspaceStoreDeps{
-		DatabaseDSN:         filepath.Join(t.TempDir(), "app.sqlite"),
+		DatabaseDSN:         dsn,
 		DatabaseTablePrefix: "signal_foundry_data_",
+		SQLDB:               sharedDB,
 	}
 
 	t.Run("strategy artifact store", func(t *testing.T) {
@@ -26,6 +33,7 @@ func TestPersistenceConstructorsDoNotAutoMigrate(t *testing.T) {
 
 	t.Run("strategy version registry", func(t *testing.T) {
 		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
+			deps.SQLDB,
 			deps.DatabaseDSN,
 			rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: deps.DatabaseTablePrefix + "strategy_"},
 		)

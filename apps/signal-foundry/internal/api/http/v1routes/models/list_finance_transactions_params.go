@@ -20,4 +20,6 @@ type ListFinanceTransactionsParams struct {
 	Source string `json:"source,omitempty"`
 	Status string `json:"status,omitempty"`
 	IncludeHidden bool `json:"includeHidden,omitempty"`
+	Limit int64 `json:"limit"`
+	Offset int64 `json:"offset,omitempty"`
 }

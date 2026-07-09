@@ -2,6 +2,7 @@ package governor
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,11 +86,15 @@ type ArtifactDatabaseStore struct {
 	db *gorm.DB
 }
 
-// NewArtifactDatabaseStore opens a database-backed governor policy artifact store.
+// NewArtifactDatabaseStore builds a governor policy artifact store from an existing [sql.DB] handle.
 func NewArtifactDatabaseStore(
+	sqlDB *sql.DB,
 	dsn string,
 	opts ArtifactDatabaseStoreOpts,
 ) (*ArtifactDatabaseStore, error) {
+	if sqlDB == nil {
+		return nil, errors.New("sql database is required")
+	}
 	if dsn == "" {
 		return nil, errors.New("dsn is required")
 	}
@@ -102,12 +107,9 @@ func NewArtifactDatabaseStore(
 		return time.Now().UTC()
 	}
 
-	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), cfg)
+	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
-	}
-	if err = gormsignalfoundry.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
-		return nil, err
 	}
 
 	return &ArtifactDatabaseStore{db: db}, nil

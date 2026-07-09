@@ -285,10 +285,12 @@ export interface SignalFinanceApi {
   createTag(params: { tenantId: string; name: string }): Promise<FinanceTag>
   listTransactions(params: {
     tenantId: string
+    limit: number
     accountId?: string
     source?: string
     status?: string
     includeHidden?: boolean
+    offset?: number
   }): Promise<FinanceTransaction[]>
   getTransaction(params: { tenantId: string; transactionId: string }): Promise<FinanceTransaction>
   createTransaction(params: {
@@ -489,11 +491,11 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         }),
       )
     },
-    async listTransactions({ tenantId, accountId, source, status, includeHidden }) {
+    async listTransactions({ tenantId, accountId, source, status, includeHidden, limit, offset }) {
       const json = await request<{ items?: RawTransaction[] }>({
         method: 'GET',
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions`,
-        query: buildSearchParams({ accountId, source, status, includeHidden }),
+        query: buildSearchParams({ accountId, source, status, includeHidden, limit, offset }),
       })
       return (json.items ?? []).map(mapTransaction)
     },
@@ -789,7 +791,7 @@ function serializeJson(value: unknown): unknown {
   return value
 }
 
-function buildSearchParams(values: Record<string, string | boolean | undefined>): URLSearchParams {
+function buildSearchParams(values: Record<string, string | number | boolean | undefined>): URLSearchParams {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(values)) {
     if (value === undefined || value === '') {

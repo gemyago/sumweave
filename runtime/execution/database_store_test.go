@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +40,11 @@ func TestDatabaseStore(t *testing.T) {
 		t.Parallel()
 
 		fake := newFake(t)
-		store, err := NewDatabaseStore(":memory:", DatabaseStoreOpts{})
+		sqlDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
+
+		store, err := NewDatabaseStore(sqlDB, ":memory:", DatabaseStoreOpts{})
 		require.NoError(t, err)
 
 		decisionTime := time.Date(

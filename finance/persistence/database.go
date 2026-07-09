@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -31,11 +32,14 @@ func WithLogger(logger *slog.Logger) OpenDatabaseOption {
 	}
 }
 
-// OpenDatabase opens a finance persistence database using PostgreSQL or SQLite DSN detection.
-func OpenDatabase(dsn string, opts ...OpenDatabaseOption) (*Database, error) {
+// NewDatabase builds a finance database wrapper from an existing [sql.DB] handle.
+func NewDatabase(sqlDB *sql.DB, dsn string, opts ...OpenDatabaseOption) (*Database, error) {
 	trimmedDSN := strings.TrimSpace(dsn)
 	if trimmedDSN == "" {
 		return nil, errors.New("database dsn is required")
+	}
+	if sqlDB == nil {
+		return nil, errors.New("sql database is required")
 	}
 	cfg := openDatabaseConfig{}
 	for _, opt := range opts {
@@ -44,13 +48,13 @@ func OpenDatabase(dsn string, opts ...OpenDatabaseOption) (*Database, error) {
 		}
 	}
 
-	dialector := postgres.Open(trimmedDSN)
-	if trimmedDSN == ":memory:" ||
-		strings.HasPrefix(trimmedDSN, "file:") ||
-		strings.HasSuffix(trimmedDSN, ".db") ||
-		strings.HasSuffix(trimmedDSN, ".sqlite") ||
-		strings.Contains(trimmedDSN, "sqlite") {
-		dialector = sqlite.Open(trimmedDSN)
+	dialector := postgres.New(postgres.Config{DSN: dsn, Conn: sqlDB})
+	if dsn == ":memory:" ||
+		strings.HasPrefix(dsn, "file:") ||
+		strings.HasSuffix(dsn, ".db") ||
+		strings.HasSuffix(dsn, ".sqlite") ||
+		strings.Contains(dsn, "sqlite") {
+		dialector = sqlite.Dialector{DriverName: sqlite.DriverName, DSN: dsn, Conn: sqlDB}
 	}
 
 	gormCfg := &gorm.Config{TranslateError: true}

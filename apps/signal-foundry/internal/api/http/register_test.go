@@ -22,6 +22,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	financepkg "github.com/gemyago/signal-foundry/finance"
@@ -146,13 +147,18 @@ func TestSetupV1Routes(t *testing.T) {
 		t.Helper()
 		passthroughMiddleware := makePassthroughMiddleware(authUserID)
 		strategyDSN := filepath.Join(t.TempDir(), "strategy-workspace.db")
+		strategySQLDB, err := sqlconn.Open(strategyDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, strategySQLDB.Close()) })
 		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
+			strategySQLDB,
 			strategyDSN,
 			rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: "http_test_"},
 		)
 		require.NoError(t, err)
 		require.NoError(t, artifactStore.AutoMigrate())
 		registry, err := rtstrategy.NewVersionRegistryService(
+			strategySQLDB,
 			strategyDSN,
 			rtstrategy.VersionRegistryServiceDeps{
 				ArtifactStore: artifactStore,
@@ -169,22 +175,30 @@ func TestSetupV1Routes(t *testing.T) {
 		)
 		require.NoError(t, err)
 		jobsDSN := filepath.Join(t.TempDir(), "jobs.db")
-		jobsStore, err := jobspkg.NewStore(jobsDSN, jobspkg.StoreOpts{})
+		jobsSQLDB, err := sqlconn.Open(jobsDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, jobsSQLDB.Close()) })
+		jobsStore, err := jobspkg.NewStore(jobsSQLDB, jobsDSN, jobspkg.StoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, jobsStore.AutoMigrate())
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: jobsDSN}, jobsSQLDB))
 		jobsPublisher, err := appdispatch.NewPublisher(
 			appdispatch.Config{DatabaseDSN: jobsDSN},
+			jobsSQLDB,
 			telemetry.RootTestLogger(),
 		)
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, jobsPublisher.Close()) })
 		jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 			Store:       jobsStore,
 			Publisher:   jobsPublisher,
 			IDGenerator: ident.NewDefaultGenerator(),
 		})
 		require.NoError(t, err)
-		financeDatabase, err := financepersistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.db"))
+		financeDSN := filepath.Join(t.TempDir(), "finance.db")
+		financeSQLDB, err := sqlconn.Open(financeDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, financeSQLDB.Close()) })
+		financeDatabase, err := financepersistence.NewDatabase(financeSQLDB, financeDSN)
 		require.NoError(t, err)
 		require.NoError(t, financepersistence.NewMigrator(financeDatabase).Migrate(t.Context()))
 		financeStore := financepersistence.NewStore(financeDatabase)
@@ -317,13 +331,18 @@ func TestSetupV1Routes(t *testing.T) {
 			AuthMiddleware: passthroughMiddleware,
 		})
 		strategyDSN := filepath.Join(t.TempDir(), "strategy-workspace.db")
+		strategySQLDB, err := sqlconn.Open(strategyDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, strategySQLDB.Close()) })
 		artifactStore, err := rtstrategy.NewArtifactDatabaseStore(
+			strategySQLDB,
 			strategyDSN,
 			rtstrategy.ArtifactDatabaseStoreOpts{TablePrefix: "http_test_"},
 		)
 		require.NoError(t, err)
 		require.NoError(t, artifactStore.AutoMigrate())
 		registry, err := rtstrategy.NewVersionRegistryService(
+			strategySQLDB,
 			strategyDSN,
 			rtstrategy.VersionRegistryServiceDeps{
 				ArtifactStore: artifactStore,
@@ -340,22 +359,30 @@ func TestSetupV1Routes(t *testing.T) {
 		)
 		require.NoError(t, err)
 		jobsDSN := filepath.Join(t.TempDir(), "jobs.db")
-		jobsStore, err := jobspkg.NewStore(jobsDSN, jobspkg.StoreOpts{})
+		jobsSQLDB, err := sqlconn.Open(jobsDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, jobsSQLDB.Close()) })
+		jobsStore, err := jobspkg.NewStore(jobsSQLDB, jobsDSN, jobspkg.StoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, jobsStore.AutoMigrate())
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), appdispatch.Config{DatabaseDSN: jobsDSN}, jobsSQLDB))
 		jobsPublisher, err := appdispatch.NewPublisher(
 			appdispatch.Config{DatabaseDSN: jobsDSN},
+			jobsSQLDB,
 			telemetry.RootTestLogger(),
 		)
 		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, jobsPublisher.Close()) })
 		jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 			Store:       jobsStore,
 			Publisher:   jobsPublisher,
 			IDGenerator: ident.NewDefaultGenerator(),
 		})
 		require.NoError(t, err)
-		financeDatabase, err := financepersistence.OpenDatabase(filepath.Join(t.TempDir(), "finance.db"))
+		financeDSN := filepath.Join(t.TempDir(), "finance.db")
+		financeSQLDB, err := sqlconn.Open(financeDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, financeSQLDB.Close()) })
+		financeDatabase, err := financepersistence.NewDatabase(financeSQLDB, financeDSN)
 		require.NoError(t, err)
 		require.NoError(t, financepersistence.NewMigrator(financeDatabase).Migrate(t.Context()))
 		_ = financepersistence.NewStore(financeDatabase)

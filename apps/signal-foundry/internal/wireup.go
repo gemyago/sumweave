@@ -66,6 +66,7 @@ func Setup(
 
 		di.ProvideAll(
 			container,
+			newDataLayerSQLDB,
 			newDatabaseMigrator,
 		),
 

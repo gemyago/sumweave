@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -36,10 +37,18 @@ func (p *publisherStub) PublishInTx(ctx context.Context, tx *sql.Tx, envelope ap
 
 func TestService(t *testing.T) {
 	fake := faker.New()
+	makeSQLiteMemoryDSN := func(prefix string) string {
+		return fmt.Sprintf("file:%s?mode=memory&cache=shared", prefix+"-"+fake.UUID().V4())
+	}
 	makeService := func(t *testing.T, now time.Time, publisher *publisherStub) (*Service, *Store, ident.Generator) {
 		t.Helper()
+		dsn := makeSQLiteMemoryDSN("jobs-service")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "svc_"},
 		)
 		require.NoError(t, err)
@@ -90,8 +99,13 @@ func TestService(t *testing.T) {
 
 	t.Run("get returns persisted jobs", func(t *testing.T) {
 		now := time.Now().UTC()
+		dsn := makeSQLiteMemoryDSN("jobs-get")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "svc_"},
 		)
 		require.NoError(t, err)
@@ -117,8 +131,13 @@ func TestService(t *testing.T) {
 
 	t.Run("reuses same idempotency key only for same canonical input hash", func(t *testing.T) {
 		now := time.Now().UTC()
+		dsn := makeSQLiteMemoryDSN("jobs-idempotency")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "svc_"},
 		)
 		require.NoError(t, err)
@@ -223,8 +242,13 @@ func TestService(t *testing.T) {
 	t.Run("returns constructor errors and forwards list queries", func(t *testing.T) {
 		_, err := NewService(ServiceDeps{})
 		require.Error(t, err)
+		dsn := makeSQLiteMemoryDSN("jobs-constructor")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "svc_"},
 		)
 		require.NoError(t, err)
@@ -239,8 +263,13 @@ func TestService(t *testing.T) {
 
 	t.Run("generic enqueue and cancel retry validation paths are covered", func(t *testing.T) {
 		now := time.Now().UTC()
+		dsn := makeSQLiteMemoryDSN("jobs-generic")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "svc_"},
 		)
 		require.NoError(t, err)
@@ -290,8 +319,13 @@ func TestService(t *testing.T) {
 
 	t.Run("default registry and non-idempotent enqueue paths remain usable", func(t *testing.T) {
 		now := time.Now().UTC()
+		dsn := makeSQLiteMemoryDSN("jobs-default-registry")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
 		store, err := NewStore(
-			filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
+			sqlDB,
+			dsn,
 			StoreOpts{TablePrefix: "svc_"},
 		)
 		require.NoError(t, err)
@@ -327,7 +361,7 @@ func TestService(t *testing.T) {
 			Store:    store,
 			Registry: svc.registry,
 			DispatchConfig: DispatchConfig{
-				DatabaseDSN: filepath.Join(t.TempDir(), "dispatch.sqlite"),
+				DatabaseDSN: makeSQLiteMemoryDSN("jobs-dispatch"),
 				TablePrefix: "svc_",
 			},
 		})

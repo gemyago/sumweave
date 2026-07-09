@@ -6,22 +6,33 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"testing"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDatabaseMigrator(t *testing.T) {
+	memoryDSNOrdinal := 0
+	makeSQLiteMemoryDSN := func() string {
+		memoryDSNOrdinal++
+		return fmt.Sprintf("file:signal-foundry-migrate-%d?mode=memory&cache=shared", memoryDSNOrdinal)
+	}
+
 	makeDeps := func(t *testing.T, storageType string) DatabaseMigrationDeps {
 		t.Helper()
 
-		dsn := filepath.Join(t.TempDir(), "signal-foundry.sqlite")
-		dataStore, err := data.NewDatabaseStore(dsn, data.DatabaseStoreOpts{
+		dsn := makeSQLiteMemoryDSN()
+		sharedDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sharedDB.Close()) })
+		dataStore, err := data.NewDatabaseStore(sharedDB, dsn, data.DatabaseStoreOpts{
 			TablePrefix: "signal_foundry_data_",
 		})
 		require.NoError(t, err)
@@ -33,13 +44,14 @@ func TestDatabaseMigrator(t *testing.T) {
 			AgentRuntimeDatabaseTablePrefix: "runtime_",
 			DataLayerDatabaseDSN:            dsn,
 			DataLayerDatabaseTablePrefix:    "signal_foundry_data_",
+			DataLayerSQLDB:                  sharedDB,
 			DataStore:                       dataStore,
 		}
 	}
 
 	openDB := func(t *testing.T, dsn string) *sql.DB {
 		t.Helper()
-		db, err := sql.Open("sqlite", dsn)
+		db, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		return db
@@ -87,6 +99,7 @@ func TestDatabaseMigrator(t *testing.T) {
 	makeReadOnlySQLiteDSN := func(t *testing.T) string {
 		t.Helper()
 
+		// File-backed on purpose: read-only SQLite opens need a real database file.
 		dbPath := filepath.Join(t.TempDir(), "readonly.sqlite")
 		db := openDB(t, dbPath)
 		_, err := db.ExecContext(t.Context(), `PRAGMA user_version = 1`)
@@ -102,7 +115,11 @@ func TestDatabaseMigrator(t *testing.T) {
 	makeReadOnlyDataStore := func(t *testing.T) *data.DatabaseStore {
 		t.Helper()
 
-		store, err := data.NewDatabaseStore(makeReadOnlySQLiteDSN(t), data.DatabaseStoreOpts{
+		dsn := makeReadOnlySQLiteDSN(t)
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		store, err := data.NewDatabaseStore(sqlDB, dsn, data.DatabaseStoreOpts{
 			TablePrefix: "signal_foundry_data_",
 		})
 		require.NoError(t, err)
@@ -197,6 +214,12 @@ func TestDatabaseMigrator(t *testing.T) {
 			if overrides != nil {
 				overrides(&deps)
 			}
+			if deps.DataLayerDatabaseDSN != "" && deps.DataLayerSQLDB == nil {
+				sharedDB, err := sqlconn.Open(deps.DataLayerDatabaseDSN)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, sharedDB.Close()) })
+				deps.DataLayerSQLDB = sharedDB
+			}
 			return newDatabaseMigrator(deps)
 		}
 
@@ -227,6 +250,13 @@ func TestDatabaseMigrator(t *testing.T) {
 			run  func(*DatabaseMigrator) error
 			want string
 		}{
+			{
+				name: "app dispatch migrator create failure",
+				run: func(m *DatabaseMigrator) error {
+					return m.migrateAppDispatch(t.Context())
+				},
+				want: "create app dispatch migrator",
+			},
 			{
 				name: "jobs store create failure",
 				run: func(m *DatabaseMigrator) error {
@@ -297,6 +327,13 @@ func TestDatabaseMigrator(t *testing.T) {
 			run  func(*DatabaseMigrator) error
 			want string
 		}{
+			{
+				name: "app dispatch migrate failure",
+				run: func(m *DatabaseMigrator) error {
+					return m.migrateAppDispatch(t.Context())
+				},
+				want: "migrate app dispatch transport",
+			},
 			{
 				name: "jobs store auto-migrate failure",
 				run: func(m *DatabaseMigrator) error {

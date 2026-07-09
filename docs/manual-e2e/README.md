@@ -10,6 +10,10 @@ Manual guides:
 - [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) — start synthetic redirect linking over HTTP, save pending configured accounts, finish the link, trigger sync, then verify linked accounts and provider transactions.
 - [synthetic-provider-ui-e2e.md](./synthetic-provider-ui-e2e.md) — sign in to the UI, start synthetic setup from Finance connections, save duplicate configured accounts, reload pending state, finish the link, and confirm the new connection card appears.
 
+Optional local verification helpers:
+
+- [postgres-local-verification.md](./postgres-local-verification.md) — optional local-only Postgres compose/runbook for backend verification without changing the default SQLite local workflow.
+
 ## Setup
 
 Commands assume the repo shell environment is loaded first. In a human shell, run `direnv allow` once and then run the commands below from the repo root unless noted otherwise.

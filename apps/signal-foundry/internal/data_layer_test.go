@@ -3,10 +3,13 @@
 package internal
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/lifecycle"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
@@ -14,13 +17,21 @@ import (
 
 func TestDataLayerConstructors(t *testing.T) {
 	fake := faker.New()
+	makeSQLiteMemoryDSN := func() string {
+		return fmt.Sprintf("file:%s?mode=memory&cache=shared", "data-layer-"+fake.UUID().V4())
+	}
 
 	makeStore := func(t *testing.T) *data.DatabaseStore {
 		t.Helper()
+		dsn := makeSQLiteMemoryDSN()
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 
 		store, err := newDataLayerStore(dataLayerStoreDeps{
-			DatabaseDSN:         filepath.Join(t.TempDir(), fake.Lorem().Word()+".db"),
+			DatabaseDSN:         dsn,
 			DatabaseTablePrefix: strings.ReplaceAll("data_"+fake.Lorem().Word(), "-", "_") + "_",
+			SQLDB:               sqlDB,
 		})
 		require.NoError(t, err)
 
@@ -38,15 +49,42 @@ func TestDataLayerConstructors(t *testing.T) {
 	}
 
 	t.Run("newDataLayerStore", func(t *testing.T) {
+		t.Run("opens sql db and registers it for shutdown", func(t *testing.T) {
+			hooks := lifecycle.NewTestShutdownHooks()
+			db, err := newDataLayerSQLDB(dataLayerSQLDBDeps{
+				DatabaseDSN:   makeSQLiteMemoryDSN(),
+				ShutdownHooks: hooks,
+			})
+			require.NoError(t, err)
+			require.NoError(t, db.PingContext(t.Context()))
+			require.NoError(t, hooks.PerformShutdown(t.Context()))
+			require.ErrorContains(t, db.PingContext(t.Context()), "closed")
+		})
+
+		t.Run("wraps sql open errors", func(t *testing.T) {
+			db, err := newDataLayerSQLDB(dataLayerSQLDBDeps{
+				DatabaseDSN:   "   ",
+				ShutdownHooks: lifecycle.NewTestShutdownHooks(),
+			})
+			require.Error(t, err)
+			require.Nil(t, db)
+			require.ErrorContains(t, err, "open data-layer sql database")
+		})
+
 		t.Run("creates store with configured dsn and prefix", func(t *testing.T) {
 			store := makeStore(t)
 			require.NotNil(t, store)
 		})
 
 		t.Run("returns wrapped error when dsn is missing", func(t *testing.T) {
+			sqlDB, err := sqlconn.Open(makeSQLiteMemoryDSN())
+			require.NoError(t, err)
+			defer func() { require.NoError(t, sqlDB.Close()) }()
+
 			store, err := newDataLayerStore(dataLayerStoreDeps{
 				DatabaseDSN:         "",
 				DatabaseTablePrefix: strings.ReplaceAll("data_"+fake.Lorem().Word(), "-", "_") + "_",
+				SQLDB:               sqlDB,
 			})
 			require.Error(t, err)
 			require.Nil(t, store)

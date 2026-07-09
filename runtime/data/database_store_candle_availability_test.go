@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +23,11 @@ func TestDatabaseStoreCandleAvailability(t *testing.T) {
 	makeStore := func(t *testing.T) *DatabaseStore {
 		t.Helper()
 
-		store, err := NewDatabaseStore(":memory:", DatabaseStoreOpts{})
+		sqlDB, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+		store, err := NewDatabaseStore(sqlDB, ":memory:", DatabaseStoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 

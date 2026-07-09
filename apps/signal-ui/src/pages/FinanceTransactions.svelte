@@ -11,6 +11,7 @@
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
+  const transactionPageSize = 20
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
   const financeShell = useFinanceShellState()
 
@@ -22,7 +23,7 @@
   let statusFilter = $state('')
   let sourceFilter = $state('')
   let sortOrder = $state('desc')
-  let selectedTransactionId = $state('')
+  let transactionOffset = $state(0)
   let loadingList = $state(false)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
@@ -35,12 +36,12 @@
     ),
   )
   const accountNameById = $derived.by(() => new Map(accounts.map((account) => [account.id, account.name])))
-  const selectedTransaction = $derived.by(
-    () => visibleTransactions.find((item) => item.id === selectedTransactionId) ?? visibleTransactions[0] ?? null,
-  )
   const visiblePendingCount = $derived(visibleTransactions.filter((item) => item.status === 'pending').length)
   const visibleHiddenCount = $derived(visibleTransactions.filter((item) => item.hiddenAt !== null).length)
   const activeFilterCount = $derived([accountFilter, statusFilter, sourceFilter].filter(Boolean).length)
+  const pageNumber = $derived(Math.floor(transactionOffset / transactionPageSize) + 1)
+  const hasPreviousPage = $derived(transactionOffset > 0)
+  const hasNextPage = $derived(transactions.length === transactionPageSize)
 
   onMount(() => {
     void loadPage()
@@ -72,7 +73,6 @@
     if (!financeShell.selectedTenantId) {
       accounts = []
       transactions = []
-      selectedTransactionId = ''
       return
     }
 
@@ -87,6 +87,8 @@
           accountId: accountFilter,
           status: statusFilter,
           source: sourceFilter,
+          limit: transactionPageSize,
+          offset: transactionOffset,
         }),
       ])
 
@@ -113,10 +115,6 @@
     return accountNameById.get(accountId) ?? 'Unknown account'
   }
 
-  function selectTransaction(id: string): void {
-    selectedTransactionId = id
-  }
-
   function badgeClass(flag: string): string {
     if (flag === 'pending') return 'text-bg-warning'
     if (flag === 'hidden') return 'text-bg-secondary'
@@ -125,19 +123,26 @@
     return 'text-bg-light border text-body'
   }
 
-  $effect(() => {
-    const ids = visibleTransactions.map((item) => item.id)
-    if (ids.length === 0) {
-      if (selectedTransactionId) {
-        selectedTransactionId = ''
-      }
-      return
-    }
+  function reloadFirstPage() {
+    transactionOffset = 0
+    void loadTenantData()
+  }
 
-    if (!ids.includes(selectedTransactionId)) {
-      selectedTransactionId = ids[0]
-    }
-  })
+  function loadPreviousPage() {
+    transactionOffset = Math.max(0, transactionOffset - transactionPageSize)
+    void loadTenantData()
+  }
+
+  function loadNextPage() {
+    if (!hasNextPage) return
+    transactionOffset += transactionPageSize
+    void loadTenantData()
+  }
+
+  function selectTenant(tenantId: string) {
+    transactionOffset = 0
+    financeShell.selectTenant(tenantId)
+  }
 
   $effect(() => {
     if (financeShell.loading || !reactiveReady) return
@@ -159,7 +164,7 @@
             <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Transactions workspace</p>
             <h1 id="finance-transactions-heading" class="h3 mb-2">Finance transactions</h1>
             <p class="text-body-secondary mb-0">
-              Browse a ledger table, keep filter context visible, and open dedicated create or edit routes when needed.
+              Browse the ledger table and use row actions to open dedicated create or edit routes when needed.
             </p>
           </div>
 
@@ -194,7 +199,7 @@
                 id="finance-transactions-tenant"
                 class="form-select"
                 value={financeShell.selectedTenantId}
-                onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                onchange={(event) => selectTenant((event.currentTarget as HTMLSelectElement).value)}
                 aria-label="Tenant"
               >
                 <option value="">Select tenant</option>
@@ -232,7 +237,7 @@
                   id="finance-transactions-tenant-filter"
                   class="form-select"
                   value={financeShell.selectedTenantId}
-                  onchange={(event) => financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                  onchange={(event) => selectTenant((event.currentTarget as HTMLSelectElement).value)}
                   aria-label="Tenant"
                 >
                   <option value="">Select tenant</option>
@@ -245,7 +250,7 @@
 
             <div class="col-12 col-md-6 col-xl-3">
               <label class="form-label" for="finance-transactions-account-filter">Account</label>
-              <select id="finance-transactions-account-filter" class="form-select" bind:value={accountFilter} onchange={() => void loadTenantData()} aria-label="Account filter">
+              <select id="finance-transactions-account-filter" class="form-select" bind:value={accountFilter} onchange={reloadFirstPage} aria-label="Account filter">
                 <option value="">Any account</option>
                 {#each accounts as account (account.id)}
                   <option value={account.id}>{account.name}</option>
@@ -255,7 +260,7 @@
 
             <div class="col-12 col-md-6 col-xl-2">
               <label class="form-label" for="finance-transactions-status-filter">Status</label>
-              <select id="finance-transactions-status-filter" class="form-select" bind:value={statusFilter} onchange={() => void loadTenantData()} aria-label="Transaction status filter">
+              <select id="finance-transactions-status-filter" class="form-select" bind:value={statusFilter} onchange={reloadFirstPage} aria-label="Transaction status filter">
                 <option value="">Any status</option>
                 <option value="pending">pending</option>
                 <option value="booked">booked</option>
@@ -264,7 +269,7 @@
 
             <div class="col-12 col-md-6 col-xl-2">
               <label class="form-label" for="finance-transactions-source-filter">Source</label>
-              <select id="finance-transactions-source-filter" class="form-select" bind:value={sourceFilter} onchange={() => void loadTenantData()} aria-label="Transaction source filter">
+              <select id="finance-transactions-source-filter" class="form-select" bind:value={sourceFilter} onchange={reloadFirstPage} aria-label="Transaction source filter">
                 <option value="">Any source</option>
                 <option value="manual">manual</option>
                 <option value="provider">provider</option>
@@ -284,128 +289,71 @@
         </div>
       </section>
 
-      <div class="row g-4 align-items-start">
-        <div class="col-12 col-xl-7">
-          <section class="card shadow-sm h-100">
-            <div class="card-body p-4 d-grid gap-3">
-              <div>
-                <h2 class="h5 mb-1">Ledger</h2>
-                <p class="text-body-secondary mb-0">Select a row to keep transaction context visible beside the browse results.</p>
+      <section class="card shadow-sm">
+        <div class="card-body p-4 d-grid gap-3">
+          <div>
+            <h2 class="h5 mb-1">Ledger</h2>
+            <p class="text-body-secondary mb-0">Use the table to scan transactions and edit a row on the dedicated transaction screen. Showing up to {transactionPageSize} items per page.</p>
+          </div>
+
+          {#if visibleTransactions.length === 0}
+            <div class="alert alert-light border mb-0" role="status">No transactions matched the current filters.</div>
+          {:else}
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0" aria-label="Transactions ledger">
+                <thead>
+                  <tr>
+                    <th scope="col">Description</th>
+                    <th scope="col">Effective</th>
+                    <th scope="col">Account</th>
+                    <th scope="col">Category</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Amount</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Edit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each visibleTransactions as item (item.id)}
+                    <tr>
+                      <td>
+                        <span class="d-block fw-semibold text-body">{item.description || item.kind}</span>
+                        <span class="small text-body-secondary">{item.kind} · {item.status}</span>
+                      </td>
+                      <td>{formatFinanceDateTime(item.effectiveAt)}</td>
+                      <td>{accountName(item.accountId)}</td>
+                      <td>{item.categoryId || '—'}</td>
+                      <td>{item.source}</td>
+                      <td>{formatFinanceMoney(item.amountMinor, item.currency)}</td>
+                      <td>
+                        <div class="d-flex flex-wrap gap-1">
+                          {#each transactionFlags(item) as flag (flag)}
+                            <span class={`badge ${badgeClass(flag)}`}>{flag}</span>
+                          {/each}
+                          {#if transactionFlags(item).length === 0}
+                            <span class="badge text-bg-light border text-body">clear</span>
+                          {/if}
+                        </div>
+                      </td>
+                      <td>
+                        <a class="btn btn-outline-primary btn-sm" href={`/finance/transactions/${item.id}`} use:link>Edit</a>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+
+            <nav class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center" aria-label="Transaction pages">
+              <span class="text-body-secondary small">Page {pageNumber}</span>
+              <div class="btn-group" role="group" aria-label="Transaction pagination controls">
+                <button class="btn btn-outline-secondary btn-sm" type="button" onclick={loadPreviousPage} disabled={loadingList || !hasPreviousPage}>Previous</button>
+                <button class="btn btn-outline-secondary btn-sm" type="button" onclick={loadNextPage} disabled={loadingList || !hasNextPage}>Next</button>
               </div>
-
-              {#if visibleTransactions.length === 0}
-                <div class="alert alert-light border mb-0" role="status">No transactions matched the current filters.</div>
-              {:else}
-                <div class="table-responsive">
-                  <table class="table table-hover align-middle mb-0" aria-label="Transactions ledger">
-                    <thead>
-                      <tr>
-                        <th scope="col">Description</th>
-                        <th scope="col">Effective</th>
-                        <th scope="col">Account</th>
-                        <th scope="col">Category</th>
-                        <th scope="col">Source</th>
-                        <th scope="col">Amount</th>
-                        <th scope="col">State</th>
-                        <th scope="col">Open</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {#each visibleTransactions as item (item.id)}
-                        <tr class:table-active={selectedTransaction?.id === item.id}>
-                          <td>
-                            <button
-                              type="button"
-                              class="btn btn-link p-0 text-start text-decoration-none"
-                              aria-pressed={selectedTransaction?.id === item.id}
-                              onclick={() => selectTransaction(item.id)}
-                            >
-                              <span class="d-block fw-semibold text-body">{item.description || item.kind}</span>
-                              <span class="small text-body-secondary">{item.kind} · {item.status}</span>
-                            </button>
-                          </td>
-                          <td>{formatFinanceDateTime(item.effectiveAt)}</td>
-                          <td>{accountName(item.accountId)}</td>
-                          <td>{item.categoryId || '—'}</td>
-                          <td>{item.source}</td>
-                          <td>{formatFinanceMoney(item.amountMinor, item.currency)}</td>
-                          <td>
-                            <div class="d-flex flex-wrap gap-1">
-                              {#each transactionFlags(item) as flag (flag)}
-                                <span class={`badge ${badgeClass(flag)}`}>{flag}</span>
-                              {/each}
-                              {#if transactionFlags(item).length === 0}
-                                <span class="badge text-bg-light border text-body">clear</span>
-                              {/if}
-                            </div>
-                          </td>
-                          <td>
-                            <a href={`/finance/transactions/${item.id}`} use:link>Open record</a>
-                          </td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                </div>
-              {/if}
-            </div>
-          </section>
+            </nav>
+          {/if}
         </div>
-
-        <div class="col-12 col-xl-5">
-          <aside class="card shadow-sm h-100" aria-label="Selected transaction details">
-            <div class="card-body p-4 d-grid gap-3">
-              {#if selectedTransaction}
-                <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
-                  <div>
-                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Selected transaction</p>
-                    <h2 class="h5 mb-1">{selectedTransaction.description || selectedTransaction.kind}</h2>
-                  </div>
-
-                  <a class="btn btn-outline-secondary btn-sm align-self-start align-self-md-center" href={`/finance/transactions/${selectedTransaction.id}`} use:link>
-                    Open transaction
-                  </a>
-                </div>
-
-                <p class="display-6 mb-0">{formatFinanceMoney(selectedTransaction.amountMinor, selectedTransaction.currency)}</p>
-
-                <div class="d-flex flex-wrap gap-2">
-                  <span class="badge text-bg-secondary">{selectedTransaction.status}</span>
-                  <span class="badge text-bg-light border text-body">{selectedTransaction.source}</span>
-                  <span class="badge text-bg-light border text-body">{selectedTransaction.kind}</span>
-                </div>
-
-                <div class="row g-3">
-                  <div class="col-12 col-sm-6"><strong>Effective</strong><div>{formatFinanceDateTime(selectedTransaction.effectiveAt)}</div></div>
-                  <div class="col-12 col-sm-6"><strong>Account</strong><div>{accountName(selectedTransaction.accountId)}</div></div>
-                  <div class="col-12 col-sm-6"><strong>Category</strong><div>{selectedTransaction.categoryId || '—'}</div></div>
-                  <div class="col-12 col-sm-6"><strong>Transfer group</strong><div>{selectedTransaction.transferGroupId || '—'}</div></div>
-                  <div class="col-12 col-sm-6"><strong>Hidden</strong><div>{selectedTransaction.hiddenAt ? 'Yes' : 'No'}</div></div>
-                  <div class="col-12 col-sm-6"><strong>Updated</strong><div>{formatFinanceDateTime(selectedTransaction.updatedAt)}</div></div>
-                </div>
-
-                {#if selectedTransaction.providerOriginal}
-                  <section class="border rounded-3 p-3 bg-body-tertiary">
-                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Provider original</p>
-                    <div class="row g-3">
-                      <div class="col-12"><strong>Description</strong><div>{selectedTransaction.providerOriginal.description || '—'}</div></div>
-                      <div class="col-12 col-sm-6"><strong>Amount</strong><div>{formatFinanceMoney(selectedTransaction.providerOriginal.amountMinor, selectedTransaction.providerOriginal.currency)}</div></div>
-                      <div class="col-12 col-sm-6"><strong>Effective</strong><div>{formatFinanceDateTime(selectedTransaction.providerOriginal.effectiveAt)}</div></div>
-                    </div>
-                  </section>
-                {/if}
-
-                <div class="d-flex flex-wrap gap-2">
-                  <a class="btn btn-outline-secondary btn-sm" href={`/finance/accounts/${selectedTransaction.accountId}`} use:link>Open account</a>
-                  <a class="btn btn-primary btn-sm" href={`/finance/transactions/${selectedTransaction.id}`} use:link>Edit transaction</a>
-                </div>
-              {:else}
-                <div class="alert alert-light border mb-0" role="status">Select a transaction row to inspect it here.</div>
-              {/if}
-            </div>
-          </aside>
-        </div>
-      </div>
+      </section>
     {/if}
   </div>
 </section>
