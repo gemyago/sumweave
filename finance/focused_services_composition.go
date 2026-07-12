@@ -37,7 +37,7 @@ type focusedServicesConfig struct {
 
 func defaultFocusedServicesConfig() focusedServicesConfig {
 	return focusedServicesConfig{
-		now:               func() time.Time { return time.Now().UTC() },
+		now:               time.Now,
 		newID:             uuid.NewString,
 		defaultFXProvider: FXProviderFrankfurter,
 	}

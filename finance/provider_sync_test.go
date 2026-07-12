@@ -404,8 +404,10 @@ func TestFinanceProviderSync(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.False(t, paused.Enabled)
+			assert.Nil(t, paused.NextRunAt)
 			require.Len(t, scheduleWriter.schedules, 2)
 			assert.False(t, scheduleWriter.schedules[1].Enabled)
+			assert.Nil(t, scheduleWriter.schedules[1].NextRunAt)
 
 			resumed, err := service.ResumeBankConnectionSchedule(
 				t.Context(),
@@ -420,6 +422,29 @@ func TestFinanceProviderSync(t *testing.T) {
 			assert.True(t, resumed.Enabled)
 			require.Len(t, scheduleWriter.schedules, 3)
 			assert.True(t, scheduleWriter.schedules[2].Enabled)
+
+			scheduledAt := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60))
+			nextScheduledAt := scheduledAt.Add(2 * time.Hour)
+			scheduledJobID := "job-scheduled-" + fake.UUID().V4()
+			_, err = service.RecordBankConnectionSyncScheduled(
+				t.Context(),
+				RecordBankConnectionSyncScheduledParams{
+					ConnectionID: connection.ID, JobID: scheduledJobID,
+					ScheduledAt: time.Time{}, NextRunAt: nextScheduledAt,
+				},
+			)
+			require.ErrorContains(t, err, "scheduled at must be a non-zero timestamp")
+			recorded, err := service.RecordBankConnectionSyncScheduled(
+				t.Context(),
+				RecordBankConnectionSyncScheduledParams{
+					ConnectionID: connection.ID, JobID: scheduledJobID,
+					ScheduledAt: scheduledAt, NextRunAt: nextScheduledAt,
+				},
+			)
+			require.NoError(t, err)
+			assert.Equal(t, &scheduledAt, recorded.LastScheduledAt)
+			assert.Equal(t, &nextScheduledAt, recorded.NextRunAt)
+			assert.Equal(t, scheduledJobID, recorded.LastJobID)
 
 			jobRef, err := service.TriggerBankConnectionSync(
 				t.Context(),
@@ -441,6 +466,7 @@ func TestFinanceProviderSync(t *testing.T) {
 					ConnectionID: connection.ID,
 					JobID:        jobRef.ID,
 					Reason:       BankConnectionSyncReasonScheduled,
+					ScheduledAt:  &scheduledAt, ScheduledNextRunAt: &nextScheduledAt,
 				},
 			)
 			require.NoError(t, err)
@@ -622,10 +648,46 @@ func TestFinanceProviderSync(t *testing.T) {
 		storedConnection, err := store.GetBankConnection(t.Context(), connection.ID)
 		require.NoError(t, err)
 		require.NotNil(t, storedConnection.LastSyncStartedAt)
-		assert.Equal(t, now, storedConnection.LastSyncStartedAt.UTC())
+		assert.Equal(t, now, *storedConnection.LastSyncStartedAt)
 		assert.Equal(t, "provider sync failed", storedConnection.LastSyncError)
 		assert.Equal(t, "job-failed", storedConnection.LastSyncJobID)
 		assert.Nil(t, storedConnection.LastSuccessfulSyncAt)
+
+		scheduledAt := time.Date(2026, time.June, 20, 14, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60))
+		nextRunAt := scheduledAt.Add(time.Hour)
+		_, err = service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
+			ActorUserID: ownerUserID, TenantID: tenant.ID, ConnectionID: connection.ID,
+			Interval: time.Hour, NextRunAt: scheduledAt,
+		})
+		require.NoError(t, err)
+		failedJobID := "job-failed-scheduled-" + fake.UUID().V4()
+		_, err = service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+			ConnectionID: connection.ID, JobID: failedJobID, Reason: BankConnectionSyncReasonScheduled,
+			ScheduledAt: &scheduledAt, ScheduledNextRunAt: &nextRunAt,
+		})
+		require.Error(t, err)
+		views, err = service.ListBankConnections(t.Context(), ListBankConnectionsParams{
+			ActorUserID: ownerUserID, TenantID: tenant.ID,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, views[0].Schedule)
+		require.NotNil(t, views[0].Schedule.LastScheduledAt)
+		require.NotNil(t, views[0].Schedule.NextRunAt)
+		assert.True(t, scheduledAt.Equal(*views[0].Schedule.LastScheduledAt))
+		assert.True(t, nextRunAt.Equal(*views[0].Schedule.NextRunAt))
+		assert.Equal(
+			t,
+			scheduledAt.Format(time.RFC3339Nano),
+			views[0].Schedule.LastScheduledAt.Format(time.RFC3339Nano),
+		)
+		assert.Equal(
+			t,
+			nextRunAt.Format(time.RFC3339Nano),
+			views[0].Schedule.NextRunAt.Format(time.RFC3339Nano),
+		)
+		assert.Equal(t, &now, views[0].Schedule.LastStartedAt)
+		assert.Equal(t, &now, views[0].Schedule.LastCompletedAt)
+		assert.Equal(t, failedJobID, views[0].Schedule.LastJobID)
 	})
 
 	t.Run("uses checkpoint-based default sync windows when no window was requested", func(t *testing.T) {

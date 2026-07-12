@@ -47,8 +47,8 @@ type RawPayloadMetadataListQueryParams struct {
 	Symbol         domain.Symbol
 	AssetClass     domain.AssetClass
 	Timeframe      domain.Timeframe
-	StartAt        time.Time
-	EndAt          time.Time
+	StartAt        *time.Time
+	EndAt          *time.Time
 	IngestionRunID string
 	EntityHint     string
 	Endpoint       string
@@ -281,8 +281,7 @@ func rawPayloadMetadataFromDomain(payload RawVenuePayload) RawPayloadMetadata {
 }
 
 func encodeRawPayloadListCursor(receivedAt time.Time, id string) string {
-	canonicalReceivedAt := receivedAt.UTC().Format(time.RFC3339Nano)
-	return base64.RawURLEncoding.EncodeToString([]byte(canonicalReceivedAt + "\n" + id))
+	return base64.RawURLEncoding.EncodeToString([]byte(receivedAt.Format(time.RFC3339Nano) + "\n" + id))
 }
 
 func decodeRawPayloadListCursor(cursor string) (rawPayloadListCursor, string, error) {
@@ -311,7 +310,7 @@ func decodeRawPayloadListCursor(cursor string) (rawPayloadListCursor, string, er
 		return rawPayloadListCursor{}, "", validationError("raw payload query cursor is invalid")
 	}
 
-	return rawPayloadListCursor{ReceivedAt: receivedAt.UTC(), ID: id}, canonicalCursor, nil
+	return rawPayloadListCursor{ReceivedAt: receivedAt, ID: id}, canonicalCursor, nil
 }
 
 func canonicalizeRawPayloadMetadataLimit(limit int) int {
@@ -371,9 +370,17 @@ func canonicalizeOptionalTimeRange(
 	return canonicalTimeRange, true, nil
 }
 
-func rawPayloadTimeRangePointer(startAt, endAt time.Time) *domain.TimeRange {
-	if startAt.IsZero() && endAt.IsZero() {
+func rawPayloadTimeRangePointer(startAt, endAt *time.Time) *domain.TimeRange {
+	if startAt == nil && endAt == nil {
 		return nil
 	}
-	return &domain.TimeRange{Start: startAt, End: endAt}
+
+	result := &domain.TimeRange{}
+	if startAt != nil {
+		result.Start = *startAt
+	}
+	if endAt != nil {
+		result.End = *endAt
+	}
+	return result
 }

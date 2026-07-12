@@ -109,8 +109,7 @@ func TestVenueEdgeTypes(t *testing.T) {
 			PageToken:  "  " + randomWord("page") + "  ",
 		})
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, candleRequest.TimeRange.Start.Location())
-		require.Equal(t, time.UTC, candleRequest.TimeRange.End.Location())
+		require.Equal(t, candleRange, candleRequest.TimeRange)
 		require.Equal(t, "1m", candleRequest.Timeframe.String())
 
 		tradeRange := makeTimeRange()
@@ -121,8 +120,7 @@ func TestVenueEdgeTypes(t *testing.T) {
 			PageToken:  "  " + randomWord("page") + "  ",
 		})
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, tradeRequest.TimeRange.Start.Location())
-		require.Equal(t, time.UTC, tradeRequest.TimeRange.End.Location())
+		require.Equal(t, tradeRange, tradeRequest.TimeRange)
 	})
 
 	t.Run("request constructors reject invalid canonical inputs", func(t *testing.T) {

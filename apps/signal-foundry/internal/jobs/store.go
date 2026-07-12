@@ -83,6 +83,8 @@ type jobModel struct {
 	LastAttemptAt      *time.Time `gorm:"column:last_attempt_time"`
 	CorrelationID      string     `gorm:"column:correlation_id;size:255;not null;default:''"`
 	ScheduleID         string     `gorm:"column:schedule_id;size:255;not null;default:''"`
+	ScheduledAt        *time.Time `gorm:"column:scheduled_at"`
+	ScheduledNextRunAt *time.Time `gorm:"column:scheduled_next_run_at"`
 }
 
 func (jobModel) TableName() string { return "jobs" }
@@ -96,7 +98,7 @@ type scheduleModel struct {
 	AgentRunID      string     `gorm:"column:agent_run_id;size:255;not null;default:''"`
 	InputJSON       string     `gorm:"column:input_json;type:text;not null"`
 	IntervalSeconds int64      `gorm:"column:interval_seconds;not null"`
-	NextRunAt       time.Time  `gorm:"column:next_run_at;not null;index"`
+	NextRunAt       *time.Time `gorm:"column:next_run_at;index:idx_job_schedules_next_run_at"`
 	LastEnqueuedAt  *time.Time `gorm:"column:last_enqueued_at"`
 	CorrelationID   string     `gorm:"column:correlation_id;size:255;not null;default:''"`
 	Enabled         bool       `gorm:"column:enabled;not null"`
@@ -303,19 +305,23 @@ func (s *Store) List(ctx context.Context, params ListParams) (ListResult, error)
 		statement = statement.Where("requester_source IN ?", params.Sources)
 	}
 	if params.Cursor != "" {
-		cursorTime, cursorID, err := decodeCursor(params.Cursor)
+		cursorCreatedAt, cursorID, err := decodeCursor(params.Cursor)
 		if err != nil {
 			return ListResult{}, fmt.Errorf("decode cursor: %w", err)
 		}
 		statement = statement.Where(
 			"(created_at < ?) OR (created_at = ? AND id < ?)",
-			cursorTime,
-			cursorTime,
+			cursorCreatedAt,
+			cursorCreatedAt,
 			cursorID,
 		)
 	}
 	var models []jobModel
-	if err := statement.Order("created_at DESC").Order("id DESC").Limit(params.Limit).Find(&models).Error; err != nil {
+	if err := statement.
+		Order("created_at DESC").
+		Order("id DESC").
+		Limit(params.Limit).
+		Find(&models).Error; err != nil {
 		return ListResult{}, fmt.Errorf("list jobs: %w", err)
 	}
 	items := make([]Job, 0, len(models))
@@ -328,7 +334,7 @@ func (s *Store) List(ctx context.Context, params ListParams) (ListResult, error)
 	}
 	result := ListResult{Items: items}
 	if len(models) == params.Limit {
-		result.NextCursor = encodeCursor(models[len(models)-1].CreatedAt.UTC(), models[len(models)-1].ID)
+		result.NextCursor = encodeCursor(models[len(models)-1].CreatedAt, models[len(models)-1].ID)
 	}
 	return result, nil
 }
@@ -339,7 +345,9 @@ func (s *Store) ClaimQueued(
 	workerID string,
 	claimedAt time.Time,
 ) (*Job, error) {
-	claimedAt = claimedAt.UTC()
+	if err := validateRequiredTimestamp("claimedAt", claimedAt); err != nil {
+		return nil, err
+	}
 	result := s.db.WithContext(ctx).Table(s.tableName).Model(&jobModel{}).
 		Where("id = ? AND status = ?", strings.TrimSpace(jobID), JobStatusQueued).
 		Updates(map[string]any{
@@ -367,11 +375,13 @@ func (s *Store) MarkSucceeded(
 	result any,
 	completedAt time.Time,
 ) error {
+	if err := validateRequiredTimestamp("completedAt", completedAt); err != nil {
+		return err
+	}
 	resultJSON, err := resultJSONFromValue(result)
 	if err != nil {
 		return err
 	}
-	completedAt = completedAt.UTC()
 	updates := map[string]any{
 		columnStatus:       string(JobStatusSucceeded),
 		columnWorkerID:     strings.TrimSpace(workerID),
@@ -410,7 +420,9 @@ func resultJSONFromValue(result any) (json.RawMessage, error) {
 }
 
 func (s *Store) MarkCanceled(ctx context.Context, jobID string, completedAt time.Time) error {
-	completedAt = completedAt.UTC()
+	if err := validateRequiredTimestamp("completedAt", completedAt); err != nil {
+		return err
+	}
 	updateErr := s.db.WithContext(ctx).Table(s.tableName).
 		Model(&jobModel{}).
 		Where("id = ?", strings.TrimSpace(jobID)).
@@ -431,7 +443,9 @@ func (s *Store) UpdateProgress(
 	progressJSON json.RawMessage,
 	updatedAt time.Time,
 ) error {
-	updatedAt = updatedAt.UTC()
+	if err := validateRequiredTimestamp("updatedAt", updatedAt); err != nil {
+		return err
+	}
 	updateErr := s.db.WithContext(ctx).Table(s.tableName).
 		Model(&jobModel{}).
 		Where("id = ?", strings.TrimSpace(jobID)).
@@ -449,7 +463,9 @@ func (s *Store) MarkFailed(
 	jobErr *JobError,
 	completedAt time.Time,
 ) error {
-	completedAt = completedAt.UTC()
+	if err := validateRequiredTimestamp("completedAt", completedAt); err != nil {
+		return err
+	}
 	updates := map[string]any{
 		columnStatus:       string(JobStatusFailed),
 		columnWorkerID:     strings.TrimSpace(workerID),
@@ -475,7 +491,9 @@ func (s *Store) MarkFailed(
 }
 
 func (s *Store) RecoverStaleRunning(ctx context.Context, now time.Time, maxAttempts int) error {
-	now = now.UTC()
+	if err := validateRequiredTimestamp("now", now); err != nil {
+		return err
+	}
 	var models []jobModel
 	if err := s.db.WithContext(ctx).
 		Table(s.tableName).
@@ -523,6 +541,12 @@ func (s *Store) UpsertSchedule(ctx context.Context, schedule Schedule) error {
 }
 
 func (s *Store) upsertScheduleWithDB(ctx context.Context, db *gorm.DB, schedule Schedule) error {
+	if !schedule.Enabled {
+		schedule.NextRunAt = nil
+	}
+	if err := validateScheduleTimestamps(schedule); err != nil {
+		return err
+	}
 	model := scheduleModel{
 		ID:              strings.TrimSpace(schedule.ID),
 		JobType:         string(schedule.JobType),
@@ -532,10 +556,10 @@ func (s *Store) upsertScheduleWithDB(ctx context.Context, db *gorm.DB, schedule 
 		AgentRunID:      strings.TrimSpace(schedule.Requester.AgentRunID),
 		InputJSON:       string(schedule.InputJSON),
 		IntervalSeconds: int64(schedule.Interval / time.Second),
-		NextRunAt:       schedule.NextRunAt.UTC(),
+		NextRunAt:       schedule.NextRunAt,
 		LastEnqueuedAt:  schedule.LastEnqueuedAt,
 		CorrelationID:   strings.TrimSpace(schedule.CorrelationID),
-		Enabled:         schedule.Enabled || !schedule.NextRunAt.IsZero(),
+		Enabled:         schedule.Enabled,
 	}
 	if err := db.WithContext(ctx).Table(s.scheduleTableName()).Save(&model).Error; err != nil {
 		return fmt.Errorf("upsert schedule: %w", err)
@@ -545,31 +569,29 @@ func (s *Store) upsertScheduleWithDB(ctx context.Context, db *gorm.DB, schedule 
 
 func (s *Store) ListDueSchedules(ctx context.Context, now time.Time) ([]Schedule, error) {
 	var models []scheduleModel
+	duePredicate := "next_run_at IS NULL OR next_run_at <= ?"
+	if s.db.Dialector.Name() == "sqlite" {
+		duePredicate = "next_run_at IS NULL OR julianday(next_run_at) <= julianday(?)"
+	}
 	if err := s.db.WithContext(ctx).
 		Table(s.scheduleTableName()).
-		Where("enabled = ? AND next_run_at <= ?", true, now.UTC()).
+		Where("enabled = ?", true).
+		Where(duePredicate, now).
 		Order("next_run_at ASC").
+		Order("id ASC").
 		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list due schedules: %w", err)
 	}
 	items := make([]Schedule, 0, len(models))
 	for _, model := range models {
-		items = append(items, Schedule{
-			ID:      model.ID,
-			JobType: JobType(model.JobType),
-			Requester: Requester{
-				UserID:         model.RequesterUserID,
-				Source:         RequesterSource(model.RequesterSource),
-				AgentSessionID: model.AgentSessionID,
-				AgentRunID:     model.AgentRunID,
-			},
-			InputJSON:      json.RawMessage(model.InputJSON),
-			Interval:       time.Duration(model.IntervalSeconds) * time.Second,
-			NextRunAt:      model.NextRunAt.UTC(),
-			LastEnqueuedAt: model.LastEnqueuedAt,
-			CorrelationID:  model.CorrelationID,
-			Enabled:        model.Enabled,
-		})
+		schedule, err := scheduleFromModel(model)
+		if err != nil {
+			return nil, err
+		}
+		if schedule.NextRunAt.After(now) {
+			continue
+		}
+		items = append(items, schedule)
 	}
 	return items, nil
 }
@@ -608,9 +630,9 @@ func newJobModel(job Job) (jobModel, error) {
 		InputJSON:          string(inputJSON),
 		ResultJSON:         string(resultJSON),
 		ProgressJSON:       string(job.ProgressJSON),
-		CreatedAt:          job.CreatedAt.UTC(),
-		UpdatedAt:          job.UpdatedAt.UTC(),
-		QueuedAt:           job.QueuedAt.UTC(),
+		CreatedAt:          job.CreatedAt,
+		UpdatedAt:          job.UpdatedAt,
+		QueuedAt:           job.QueuedAt,
 		StartedAt:          job.StartedAt,
 		CompletedAt:        job.CompletedAt,
 		WorkerID:           strings.TrimSpace(job.WorkerID),
@@ -619,6 +641,8 @@ func newJobModel(job Job) (jobModel, error) {
 		LastAttemptAt:      job.LastAttemptAt,
 		CorrelationID:      strings.TrimSpace(job.CorrelationID),
 		ScheduleID:         strings.TrimSpace(job.ScheduleID),
+		ScheduledAt:        job.ScheduledAt,
+		ScheduledNextRunAt: job.ScheduledNextRunAt,
 	}
 	if job.Error != nil {
 		model.ErrorCode = truncateBounded(job.Error.Code, 128)
@@ -662,25 +686,27 @@ func jobFromModel(model jobModel) (Job, error) {
 			AgentSessionID: model.AgentSessionID,
 			AgentRunID:     model.AgentRunID,
 		},
-		IdempotencyKey: model.IdempotencyKey,
-		InputHash:      model.CanonicalInputHash,
-		Input:          historicalInput,
-		InputJSON:      json.RawMessage(model.InputJSON),
-		Result:         historicalResult,
-		ResultJSON:     json.RawMessage(model.ResultJSON),
-		ProgressJSON:   json.RawMessage(model.ProgressJSON),
-		Error:          jobErr,
-		CreatedAt:      model.CreatedAt.UTC(),
-		UpdatedAt:      model.UpdatedAt.UTC(),
-		QueuedAt:       model.QueuedAt.UTC(),
-		StartedAt:      model.StartedAt,
-		CompletedAt:    model.CompletedAt,
-		WorkerID:       model.WorkerID,
-		AttemptCount:   model.AttemptCount,
-		MaxAttempts:    model.MaxAttempts,
-		LastAttemptAt:  model.LastAttemptAt,
-		CorrelationID:  model.CorrelationID,
-		ScheduleID:     model.ScheduleID,
+		IdempotencyKey:     model.IdempotencyKey,
+		InputHash:          model.CanonicalInputHash,
+		Input:              historicalInput,
+		InputJSON:          json.RawMessage(model.InputJSON),
+		Result:             historicalResult,
+		ResultJSON:         json.RawMessage(model.ResultJSON),
+		ProgressJSON:       json.RawMessage(model.ProgressJSON),
+		Error:              jobErr,
+		CreatedAt:          model.CreatedAt,
+		UpdatedAt:          model.UpdatedAt,
+		QueuedAt:           model.QueuedAt,
+		StartedAt:          model.StartedAt,
+		CompletedAt:        model.CompletedAt,
+		WorkerID:           model.WorkerID,
+		AttemptCount:       model.AttemptCount,
+		MaxAttempts:        model.MaxAttempts,
+		LastAttemptAt:      model.LastAttemptAt,
+		CorrelationID:      model.CorrelationID,
+		ScheduleID:         model.ScheduleID,
+		ScheduledAt:        model.ScheduledAt,
+		ScheduledNextRunAt: model.ScheduledNextRunAt,
 	}, nil
 }
 
@@ -699,7 +725,7 @@ func hashBytes(payload []byte) string {
 }
 
 func encodeCursor(createdAt time.Time, id string) string {
-	payload := fmt.Sprintf("%s|%s", createdAt.UTC().Format(time.RFC3339Nano), id)
+	payload := createdAt.Format(time.RFC3339Nano) + "|" + id
 	return base64.RawURLEncoding.EncodeToString([]byte(payload))
 }
 
@@ -709,12 +735,58 @@ func decodeCursor(cursor string) (time.Time, string, error) {
 		return time.Time{}, "", err
 	}
 	parts := strings.SplitN(string(raw), "|", 2)
-	if len(parts) != 2 {
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
 		return time.Time{}, "", errors.New("invalid cursor")
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
-		return time.Time{}, "", err
+		return time.Time{}, "", errors.New("invalid cursor timestamp")
 	}
-	return parsed.UTC(), parts[1], nil
+	return parsed, parts[1], nil
+}
+
+func scheduleFromModel(model scheduleModel) (Schedule, error) {
+	schedule := Schedule{
+		ID:      model.ID,
+		JobType: JobType(model.JobType),
+		Requester: Requester{
+			UserID:         model.RequesterUserID,
+			Source:         RequesterSource(model.RequesterSource),
+			AgentSessionID: model.AgentSessionID,
+			AgentRunID:     model.AgentRunID,
+		},
+		InputJSON:      json.RawMessage(model.InputJSON),
+		Interval:       time.Duration(model.IntervalSeconds) * time.Second,
+		NextRunAt:      model.NextRunAt,
+		LastEnqueuedAt: model.LastEnqueuedAt,
+		CorrelationID:  model.CorrelationID,
+		Enabled:        model.Enabled,
+	}
+	if err := validateScheduleTimestamps(schedule); err != nil {
+		return Schedule{}, fmt.Errorf("map schedule row: %w", err)
+	}
+	return schedule, nil
+}
+
+func validateScheduleTimestamps(schedule Schedule) error {
+	if schedule.Enabled && schedule.NextRunAt == nil {
+		return errors.New("enabled schedule nextRunAt is required")
+	}
+	if !schedule.Enabled && schedule.NextRunAt != nil {
+		return errors.New("disabled schedule nextRunAt must be empty")
+	}
+	if schedule.NextRunAt != nil && schedule.NextRunAt.IsZero() {
+		return errors.New("nextRunAt must be a non-zero timestamp")
+	}
+	if schedule.LastEnqueuedAt != nil && schedule.LastEnqueuedAt.IsZero() {
+		return errors.New("lastEnqueuedAt must be a non-zero timestamp")
+	}
+	return nil
+}
+
+func validateRequiredTimestamp(field string, value time.Time) error {
+	if value.IsZero() {
+		return fmt.Errorf("%s must be a non-zero timestamp", field)
+	}
+	return nil
 }

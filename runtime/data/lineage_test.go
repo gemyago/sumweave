@@ -52,9 +52,9 @@ func TestLineageRecords(t *testing.T) {
 				ID:           "  " + randomWord("run") + "  ",
 				Source:       "  " + randomWord("source") + "  ",
 				Venue:        domain.Venue("  " + randomWord("venue") + "  "),
-				Status:       IngestionRunStatus("  STARTED  "),
+				Status:       IngestionRunStatus("  SUCCEEDED  "),
 				StartedAt:    startedAt,
-				CompletedAt:  completedAt,
+				CompletedAt:  &completedAt,
 				RecordCount:  fake.IntBetween(0, 1000),
 				ErrorSummary: "  " + randomWord("error") + "  ",
 			})
@@ -63,10 +63,40 @@ func TestLineageRecords(t *testing.T) {
 			require.Equal(t, strings.TrimSpace(run.ID), run.ID)
 			require.Equal(t, strings.TrimSpace(run.Source), run.Source)
 			require.Equal(t, domain.Venue(strings.TrimSpace(run.Venue.String())), run.Venue)
-			require.Equal(t, IngestionRunStatusStarted, run.Status)
-			require.Equal(t, startedAt.UTC(), run.StartedAt)
-			require.Equal(t, completedAt.UTC(), run.CompletedAt)
+			require.Equal(t, IngestionRunStatusSucceeded, run.Status)
+			require.Equal(t, startedAt, run.StartedAt)
+			require.NotNil(t, run.CompletedAt)
+			require.Equal(t, completedAt, *run.CompletedAt)
 			require.Equal(t, strings.TrimSpace(run.ErrorSummary), run.ErrorSummary)
+		})
+
+		t.Run("requires completion only for terminal status", func(t *testing.T) {
+			t.Parallel()
+
+			startedAt := randomTime()
+			base := IngestionRunParams{
+				ID:        randomWord("run"),
+				Source:    randomWord("source"),
+				Venue:     domain.Venue(randomWord("venue")),
+				StartedAt: startedAt,
+			}
+
+			started := base
+			started.Status = IngestionRunStatusStarted
+			completedAt := startedAt.Add(time.Minute)
+			started.CompletedAt = &completedAt
+			_, err := NewIngestionRun(started)
+			require.ErrorIs(t, err, ErrValidation)
+
+			succeeded := base
+			succeeded.Status = IngestionRunStatusSucceeded
+			_, err = NewIngestionRun(succeeded)
+			require.ErrorIs(t, err, ErrValidation)
+
+			zero := time.Time{}
+			succeeded.CompletedAt = &zero
+			_, err = NewIngestionRun(succeeded)
+			require.ErrorIs(t, err, ErrValidation)
 		})
 
 		t.Run("rejects missing required identity", func(t *testing.T) {
@@ -121,9 +151,9 @@ func TestLineageRecords(t *testing.T) {
 			require.Equal(t, "/info", payload.Endpoint)
 			require.Equal(t, strings.TrimSpace(payload.RequestType), payload.RequestType)
 			require.Equal(t, strings.TrimSpace(payload.RequestPayloadHash), payload.RequestPayloadHash)
-			require.Equal(t, requestAt.UTC(), payload.RequestAt)
-			require.Equal(t, responseAt.UTC(), payload.ResponseAt)
-			require.Equal(t, receivedAt.UTC(), payload.ReceivedAt)
+			require.Equal(t, requestAt, payload.RequestAt)
+			require.Equal(t, responseAt, payload.ResponseAt)
+			require.Equal(t, receivedAt, payload.ReceivedAt)
 			require.Equal(t, strings.TrimSpace(payload.EntityHint), payload.EntityHint)
 			require.Len(t, payload.RequestMetadata, 1)
 			for key, value := range payload.RequestMetadata {
@@ -172,7 +202,7 @@ func TestLineageRecords(t *testing.T) {
 				},
 				Status:               NormalizationRunStatus("  SUCCEEDED  "),
 				StartedAt:            startedAt,
-				CompletedAt:          completedAt,
+				CompletedAt:          &completedAt,
 				RecordKind:           LineageRecordKind("  TRADE  "),
 				SourceRecordCount:    fake.IntBetween(0, 1000),
 				CanonicalRecordCount: fake.IntBetween(0, 1000),
@@ -182,10 +212,40 @@ func TestLineageRecords(t *testing.T) {
 
 			require.Equal(t, NormalizationRunStatusSucceeded, run.Status)
 			require.Equal(t, LineageRecordKindTrade, run.RecordKind)
-			require.Equal(t, startedAt.UTC(), run.StartedAt)
-			require.Equal(t, completedAt.UTC(), run.CompletedAt)
+			require.Equal(t, startedAt, run.StartedAt)
+			require.NotNil(t, run.CompletedAt)
+			require.Equal(t, completedAt, *run.CompletedAt)
 			require.Len(t, run.RawPayloadIDs, 2)
 			require.Equal(t, strings.TrimSpace(run.ErrorSummary), run.ErrorSummary)
+		})
+
+		t.Run("requires completion only for terminal status", func(t *testing.T) {
+			t.Parallel()
+
+			startedAt := randomTime()
+			base := NormalizationRunParams{
+				ID:            randomWord("normalization"),
+				RawPayloadIDs: []string{randomWord("payload")},
+				StartedAt:     startedAt,
+				RecordKind:    LineageRecordKindCandle,
+			}
+
+			started := base
+			started.Status = NormalizationRunStatusStarted
+			completedAt := startedAt.Add(time.Minute)
+			started.CompletedAt = &completedAt
+			_, err := NewNormalizationRun(started)
+			require.ErrorIs(t, err, ErrValidation)
+
+			failed := base
+			failed.Status = NormalizationRunStatusFailed
+			_, err = NewNormalizationRun(failed)
+			require.ErrorIs(t, err, ErrValidation)
+
+			zero := time.Time{}
+			failed.CompletedAt = &zero
+			_, err = NewNormalizationRun(failed)
+			require.ErrorIs(t, err, ErrValidation)
 		})
 
 		t.Run("rejects missing raw payload links", func(t *testing.T) {
@@ -228,8 +288,8 @@ func TestLineageRecords(t *testing.T) {
 			require.NotNil(t, batch.Instrument)
 			require.Equal(t, strings.TrimSpace(batch.Instrument.Symbol.String()), batch.Instrument.Symbol.String())
 			require.Equal(t, strings.TrimSpace(batch.Summary), batch.Summary)
-			require.Equal(t, batch.TimeRange.Start.UTC(), batch.TimeRange.Start)
-			require.Equal(t, batch.TimeRange.End.UTC(), batch.TimeRange.End)
+			require.NotEqual(t, time.UTC, batch.TimeRange.Start.Location())
+			require.Equal(t, batch.TimeRange.Start.Location(), batch.TimeRange.End.Location())
 		})
 
 		t.Run("rejects missing parent identity", func(t *testing.T) {

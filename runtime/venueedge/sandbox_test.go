@@ -145,7 +145,7 @@ func TestSandboxVenue(t *testing.T) {
 		require.NotEqual(t, firstCandles.Candles, secondCandles.Candles)
 	})
 
-	t.Run("respects half-open range boundaries and canonical timestamps", func(t *testing.T) {
+	t.Run("respects half-open range boundaries and preserves timestamps", func(t *testing.T) {
 		t.Parallel()
 
 		request := makeTradeRequest()
@@ -156,7 +156,7 @@ func TestSandboxVenue(t *testing.T) {
 		for _, trade := range result.Trades {
 			require.False(t, trade.EventTime.Before(request.TimeRange.Start))
 			require.True(t, trade.EventTime.Before(request.TimeRange.End))
-			require.Equal(t, time.UTC, trade.EventTime.Location())
+			require.Equal(t, request.TimeRange.Start.Location(), trade.EventTime.Location())
 			require.GreaterOrEqual(t, trade.Price, 0.0)
 			require.GreaterOrEqual(t, trade.Size, 0.0)
 			require.NotEmpty(t, trade.Provenance.Source)
@@ -170,8 +170,8 @@ func TestSandboxVenue(t *testing.T) {
 		for _, candle := range candleResult.Candles {
 			require.False(t, candle.TimeRange.Start.Before(candleRequest.TimeRange.Start))
 			require.True(t, candle.TimeRange.Start.Before(candleRequest.TimeRange.End))
-			require.Equal(t, time.UTC, candle.TimeRange.Start.Location())
-			require.Equal(t, time.UTC, candle.TimeRange.End.Location())
+			require.Equal(t, candleRequest.TimeRange.Start.Location(), candle.TimeRange.Start.Location())
+			require.Equal(t, candleRequest.TimeRange.End.Location(), candle.TimeRange.End.Location())
 			require.GreaterOrEqual(t, candle.Low, 0.0)
 			require.GreaterOrEqual(t, candle.Volume, 0.0)
 			require.NotEmpty(t, candle.Provenance.RecordID)

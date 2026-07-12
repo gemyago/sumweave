@@ -381,9 +381,11 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			UpdatedAt:         time.Now().UTC(),
 		})
 		require.NoError(t, err)
+		nextRunAt := time.Now().UTC().Add(time.Hour)
 		_, err = store.SaveBankConnectionSchedule(t.Context(), domain.BankConnectionSchedule{
 			ConnectionID: connection.ID,
 			Interval:     time.Hour,
+			NextRunAt:    &nextRunAt,
 			Enabled:      true,
 			CreatedAt:    time.Now().UTC(),
 			UpdatedAt:    time.Now().UTC(),
@@ -628,9 +630,11 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			UpdatedAt:         time.Now().UTC(),
 		})
 		require.NoError(t, err)
+		nextRunAt := time.Now().UTC().Add(time.Hour)
 		_, err = store.SaveBankConnectionSchedule(t.Context(), domain.BankConnectionSchedule{
 			ConnectionID: connection.ID,
 			Interval:     time.Hour,
+			NextRunAt:    &nextRunAt,
 			Enabled:      true,
 			CreatedAt:    time.Now().UTC(),
 			UpdatedAt:    time.Now().UTC(),

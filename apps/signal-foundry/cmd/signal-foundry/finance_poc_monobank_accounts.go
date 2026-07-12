@@ -144,7 +144,7 @@ func runMonobankAccounts(
 	return monobankAccountsOutput{
 		Provider:       monobankCommandName,
 		Operation:      monobankAccountsOp,
-		FetchedAt:      deps.Now().UTC().Format(time.RFC3339),
+		FetchedAt:      deps.Now().Format(time.RFC3339),
 		Name:           extractMonobankString(raw, "name"),
 		Accounts:       accounts,
 		Jars:           jars,

@@ -60,6 +60,8 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		require.Equal(t, 1, res.Total)
 		require.Len(t, res.Sessions, 1)
 		require.Equal(t, meta, res.Sessions[0])
+		var stored sessionMetadataModel
+		require.NoError(t, store.db.First(&stored, "session_id = ?", sid).Error)
 	})
 
 	t.Run("Save updates existing metadata entry (upsert)", func(t *testing.T) {
@@ -141,6 +143,46 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		require.Equal(t, 2, res.Total)
 		require.Equal(t, newerID, res.Sessions[0].SessionID)
 		require.Equal(t, olderID, res.Sessions[1].SessionID)
+	})
+
+	t.Run("List paginates canonical updates deterministically", func(t *testing.T) {
+		t.Parallel()
+		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		app := fake.Lorem().Word()
+		user := fake.UUID().V4()
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		earlierID := fake.UUID().V4()
+		laterID := fake.UUID().V4()
+		for _, metadata := range []SessionMetadata{
+			{SessionID: earlierID, AppName: app, UserID: user, Title: fake.Lorem().Sentence(3), CreatedAt: earlier, UpdatedAt: earlier},
+			{SessionID: laterID, AppName: app, UserID: user, Title: fake.Lorem().Sentence(3), CreatedAt: later, UpdatedAt: later},
+		} {
+			require.NoError(t, store.Save(t.Context(), metadata))
+		}
+
+		firstPage, err := store.List(t.Context(), ListSessionMetadataParams{
+			AppName: app,
+			UserID:  user,
+			Limit:   1,
+		})
+		require.NoError(t, err)
+		require.Equal(t, 2, firstPage.Total)
+		require.Len(t, firstPage.Sessions, 1)
+		require.Equal(t, laterID, firstPage.Sessions[0].SessionID)
+		require.Equal(t, later.Format(time.RFC3339Nano), firstPage.Sessions[0].UpdatedAt.Format(time.RFC3339Nano))
+
+		secondPage, err := store.List(t.Context(), ListSessionMetadataParams{
+			AppName: app,
+			UserID:  user,
+			Limit:   1,
+			Offset:  1,
+		})
+		require.NoError(t, err)
+		require.Len(t, secondPage.Sessions, 1)
+		require.Equal(t, earlierID, secondPage.Sessions[0].SessionID)
 	})
 
 	t.Run("List returns empty slice when no sessions", func(t *testing.T) {

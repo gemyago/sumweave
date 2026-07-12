@@ -1,5 +1,6 @@
 import type { AuthStore } from '../auth/auth-store.svelte'
 import { createAuthFetch } from '../auth/auth-fetch'
+import { ResponseTimestampError, parseRequiredResponseTimestamp } from '../timestamp'
 
 export interface StrategyDefinitionInstrument {
   venue: string
@@ -279,6 +280,13 @@ export class StrategyWorkspaceApiError extends Error {
     this.status = params.status
     this.method = params.method
     this.path = params.path
+  }
+}
+
+export class StrategyWorkspaceResponseError extends ResponseTimestampError {
+  constructor(params: { field: string; issue: string }) {
+    super({ api: 'Strategy workspace', ...params })
+    this.name = 'StrategyWorkspaceResponseError'
   }
 }
 
@@ -679,8 +687,8 @@ function mapStrategyValidationPreview(value: RawStrategyValidationPreview): Stra
 function mapStrategyVersionRow(value: RawStrategyVersionRow): StrategyVersionRow {
   return {
     ...value,
-    createdAt: new Date(value.createdAt),
-    updatedAt: new Date(value.updatedAt),
+    createdAt: parseStrategyRequiredTimestamp(value.createdAt, 'strategy.version.createdAt'),
+    updatedAt: parseStrategyRequiredTimestamp(value.updatedAt, 'strategy.version.updatedAt'),
   }
 }
 
@@ -709,7 +717,7 @@ function mapEvaluationDatasetReference(
   value?: RawEvaluationDatasetReference,
 ): EvaluationDatasetReference | undefined {
   return value
-    ? { ...value, createdAt: new Date(value.createdAt) }
+    ? { ...value, createdAt: parseStrategyRequiredTimestamp(value.createdAt, 'evaluation.datasetReference.createdAt') }
     : undefined
 }
 
@@ -720,21 +728,21 @@ function mapEvaluationPolicyReference(value: RawEvaluationPolicyReference): Eval
 function mapEvaluationRow(value: RawEvaluationRow): EvaluationRow {
   return {
     ...value,
-    testedRangeStart: new Date(value.testedRangeStart),
-    testedRangeEnd: new Date(value.testedRangeEnd),
-    createdAt: new Date(value.createdAt),
-    updatedAt: new Date(value.updatedAt),
+    testedRangeStart: parseStrategyRequiredTimestamp(value.testedRangeStart, 'evaluation.testedRangeStart'),
+    testedRangeEnd: parseStrategyRequiredTimestamp(value.testedRangeEnd, 'evaluation.testedRangeEnd'),
+    createdAt: parseStrategyRequiredTimestamp(value.createdAt, 'evaluation.createdAt'),
+    updatedAt: parseStrategyRequiredTimestamp(value.updatedAt, 'evaluation.updatedAt'),
     aiReadyMetadata: mapEvaluationAiReadyMetadata(value.aiReadyMetadata),
     metrics: mapEvaluationMetricSummary(value.metrics),
   }
 }
 
 function mapEvaluationTraceRow(value: RawEvaluationTraceRow): EvaluationTraceRow {
-  return { ...value, decisionTime: new Date(value.decisionTime) }
+  return { ...value, decisionTime: parseStrategyRequiredTimestamp(value.decisionTime, 'evaluation.trace.decisionTime') }
 }
 
 function mapEvaluationOrderIntentRow(value: RawEvaluationOrderIntentRow): EvaluationOrderIntentRow {
-  return { ...value, createdTime: new Date(value.createdTime) }
+  return { ...value, createdTime: parseStrategyRequiredTimestamp(value.createdTime, 'evaluation.orderIntent.createdTime') }
 }
 
 function mapEvaluationGovernorDecisionRow(
@@ -749,20 +757,29 @@ function mapEvaluationExecutionRow(value: RawEvaluationExecutionRow): Evaluation
     orderId: value.orderId,
     fillId: value.fillId,
     status: value.status,
-    ...(value.eventTime ? { eventTime: new Date(value.eventTime) } : {}),
+    ...(value.eventTime === undefined ? {} : { eventTime: parseStrategyRequiredTimestamp(value.eventTime, 'evaluation.execution.eventTime') }),
   }
 }
 
 function mapEvaluationPositionSnapshotRow(
   value: RawEvaluationPositionSnapshotRow,
 ): EvaluationPositionSnapshotRow {
-  return { ...value, eventTime: new Date(value.eventTime) }
+  return { ...value, eventTime: parseStrategyRequiredTimestamp(value.eventTime, 'evaluation.positionSnapshot.eventTime') }
 }
 
 function mapEvaluationPortfolioSnapshotRow(
   value: RawEvaluationPortfolioSnapshotRow,
 ): EvaluationPortfolioSnapshotRow {
-  return { ...value, eventTime: new Date(value.eventTime) }
+  return { ...value, eventTime: parseStrategyRequiredTimestamp(value.eventTime, 'evaluation.portfolioSnapshot.eventTime') }
+}
+
+function parseStrategyRequiredTimestamp(value: unknown, field: string): Date {
+  try {
+    return parseRequiredResponseTimestamp(value, { api: 'Strategy workspace', field })
+  } catch (error) {
+    if (error instanceof ResponseTimestampError) throw new StrategyWorkspaceResponseError({ field, issue: error.message.split(`${field} `)[1] ?? 'is invalid' })
+    throw error
+  }
 }
 
 function mapEvaluationDetail(value: RawEvaluationDetail): EvaluationDetail {

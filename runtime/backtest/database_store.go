@@ -109,9 +109,7 @@ func NewDatabaseStore(sqlDB *sql.DB, dsn string, opts DatabaseStoreOpts) (*Datab
 		TablePrefix:    opts.TablePrefix,
 		TranslateError: true,
 	})
-	cfg.NowFunc = func() time.Time {
-		return time.Now().UTC()
-	}
+	cfg.NowFunc = time.Now
 
 	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
@@ -281,8 +279,11 @@ func (s *DatabaseStore) QueryBacktestRuns(
 		statement = statement.Where("status = ?", query.Status.String())
 	}
 	if query.TimeRange != nil {
-		statement = statement.Where("created_at >= ?", query.TimeRange.Start.UTC()).
-			Where("created_at < ?", query.TimeRange.End.UTC())
+		statement = statement.Where(
+			gormsignalfoundry.InstantRangePredicate(s.db, "created_at"),
+			query.TimeRange.Start,
+			query.TimeRange.End,
+		)
 	}
 
 	var models []backtestRunModel
@@ -335,8 +336,11 @@ func (s *DatabaseStore) QueryEvaluationReports(
 		statement = statement.Where("decision = ?", query.Decision.String())
 	}
 	if query.TimeRange != nil {
-		statement = statement.Where("created_at >= ?", query.TimeRange.Start.UTC()).
-			Where("created_at < ?", query.TimeRange.End.UTC())
+		statement = statement.Where(
+			gormsignalfoundry.InstantRangePredicate(s.db, "created_at"),
+			query.TimeRange.Start,
+			query.TimeRange.End,
+		)
 	}
 
 	var models []evaluationReportModel
@@ -408,8 +412,8 @@ func datasetReferenceToModel(reference domain.DatasetReference) (datasetReferenc
 		EntityTypesJSON:  entityTypesJSON,
 		InstrumentsJSON:  instrumentsJSON,
 		TimeframesJSON:   timeframesJSON,
-		TimeRangeStart:   reference.TimeRange.Start.UTC(),
-		TimeRangeEnd:     reference.TimeRange.End.UTC(),
+		TimeRangeStart:   reference.TimeRange.Start,
+		TimeRangeEnd:     reference.TimeRange.End,
 		SourceHashesJSON: sourceHashesJSON,
 		ReplayChecksum:   reference.ReplayChecksum,
 		MetadataJSON:     metadataJSON,
@@ -451,10 +455,10 @@ func datasetReferenceFromModel(model datasetReferenceModel) (domain.DatasetRefer
 		EntityTypes:      entityTypes,
 		Instruments:      instruments,
 		Timeframes:       timeframes,
-		TimeRange:        domain.TimeRange{Start: model.TimeRangeStart.UTC(), End: model.TimeRangeEnd.UTC()},
+		TimeRange:        domain.TimeRange{Start: model.TimeRangeStart, End: model.TimeRangeEnd},
 		SourceDataHashes: sourceDataHashes,
 		ReplayChecksum:   model.ReplayChecksum,
-		CreatedAt:        model.CreatedAt.UTC(),
+		CreatedAt:        model.CreatedAt,
 		Metadata:         metadata,
 	})
 }
@@ -483,8 +487,8 @@ func backtestRunToModel(run domain.BacktestRun) (backtestRunModel, error) {
 		GovernorPolicyVersion:     run.GovernorPolicyVersion,
 		GovernorPolicyHash:        run.GovernorPolicyHash,
 		Mode:                      run.Mode.String(),
-		TestedRangeStart:          run.TestedRange.Start.UTC(),
-		TestedRangeEnd:            run.TestedRange.End.UTC(),
+		TestedRangeStart:          run.TestedRange.Start,
+		TestedRangeEnd:            run.TestedRange.End,
 		FeeModelID:                run.FeeModelID,
 		FeeAssumptionsJSON:        feeAssumptionsJSON,
 		SlippageModelID:           run.SlippageModelID,
@@ -535,8 +539,8 @@ func backtestRunFromModel(model backtestRunModel) (domain.BacktestRun, error) {
 		GovernorPolicyHash:    model.GovernorPolicyHash,
 		Mode:                  domain.DecisionMode(model.Mode),
 		TestedRange: domain.TimeRange{
-			Start: model.TestedRangeStart.UTC(),
-			End:   model.TestedRangeEnd.UTC(),
+			Start: model.TestedRangeStart,
+			End:   model.TestedRangeEnd,
 		},
 		FeeModelID:                model.FeeModelID,
 		FeeAssumptions:            feeAssumptions,
@@ -547,8 +551,8 @@ func backtestRunFromModel(model backtestRunModel) (domain.BacktestRun, error) {
 		Metrics:                   metrics,
 		FailureReason:             model.FailureReason,
 		FailureDetails:            model.FailureDetails,
-		CreatedAt:                 model.CreatedAt.UTC(),
-		UpdatedAt:                 model.UpdatedAt.UTC(),
+		CreatedAt:                 model.CreatedAt,
+		UpdatedAt:                 model.UpdatedAt,
 	})
 }
 
@@ -604,7 +608,7 @@ func evaluationReportFromModel(model evaluationReportModel) (domain.EvaluationRe
 		Metrics:              metrics,
 		FailureReasons:       failureReasons,
 		Notes:                model.Notes,
-		CreatedAt:            model.CreatedAt.UTC(),
+		CreatedAt:            model.CreatedAt,
 	})
 }
 

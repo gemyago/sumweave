@@ -31,7 +31,7 @@ type agentProfileModel struct {
 	Instructions      string              `gorm:"column:instructions;type:text;not null"`
 	ToolRefs          []string            `gorm:"column:tool_refs;serializer:json"`
 	ExecutionSettings dbExecutionSettings `gorm:"column:execution_settings;serializer:json"`
-	CreatedAt         time.Time           `gorm:"column:created_at;autoCreateTime"`
+	CreatedAt         time.Time           `gorm:"column:created_at;autoCreateTime;index:idx_agent_profiles_created_at"`
 	UpdatedAt         time.Time           `gorm:"column:updated_at;autoUpdateTime"`
 }
 
@@ -79,7 +79,7 @@ func (s *DatabaseAgentProfilesService) AutoMigrate() error {
 
 func (s *DatabaseAgentProfilesService) List(_ context.Context) ([]AgentProfile, error) {
 	var models []agentProfileModel
-	if err := s.db.Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := s.db.Order("created_at ASC").Order("name ASC").Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list agent profiles: %w", err)
 	}
 

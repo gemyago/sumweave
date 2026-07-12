@@ -104,9 +104,7 @@ func NewDatabaseStore(sqlDB *sql.DB, dsn string, opts DatabaseStoreOpts) (*Datab
 		TablePrefix:    opts.TablePrefix,
 		TranslateError: true,
 	})
-	cfg.NowFunc = func() time.Time {
-		return time.Now().UTC()
-	}
+	cfg.NowFunc = time.Now
 
 	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
@@ -444,7 +442,7 @@ func decisionTraceToModel(trace domain.DecisionTrace) (decisionTraceModel, error
 	return decisionTraceModel{
 		TraceID:              string(trace.TraceID),
 		Mode:                 trace.Mode.String(),
-		DecisionTime:         trace.DecisionTime.Time().UTC(),
+		DecisionTime:         trace.DecisionTime.Time(),
 		StrategyID:           trace.StrategyID,
 		StrategyVersion:      trace.StrategyVersion,
 		StrategyArtifactHash: trace.StrategyArtifactHash,
@@ -454,8 +452,8 @@ func decisionTraceToModel(trace domain.DecisionTrace) (decisionTraceModel, error
 		Timeframe:            trace.Timeframe.String(),
 		DatasetReference:     trace.DatasetReference,
 		RunReference:         trace.RunReference,
-		InputStartAt:         trace.InputRange.Start.UTC(),
-		InputEndAt:           trace.InputRange.End.UTC(),
+		InputStartAt:         trace.InputRange.Start,
+		InputEndAt:           trace.InputRange.End,
 		AnalyticsReference:   trace.AnalyticsReference,
 		DataQuality:          trace.DataQuality.String(),
 		EvaluatorName:        trace.EvaluatorName,
@@ -479,7 +477,7 @@ func decisionTraceModelToDomain(model decisionTraceModel) (domain.DecisionTrace,
 	return domain.NewDecisionTrace(domain.DecisionTraceParams{
 		TraceID:              model.TraceID,
 		Mode:                 domain.DecisionMode(model.Mode),
-		DecisionTime:         model.DecisionTime.UTC(),
+		DecisionTime:         model.DecisionTime,
 		StrategyID:           model.StrategyID,
 		StrategyVersion:      model.StrategyVersion,
 		StrategyArtifactHash: model.StrategyArtifactHash,
@@ -492,7 +490,7 @@ func decisionTraceModelToDomain(model decisionTraceModel) (domain.DecisionTrace,
 		Timeframe:          domain.Timeframe(model.Timeframe),
 		DatasetReference:   model.DatasetReference,
 		RunReference:       model.RunReference,
-		InputRange:         domain.TimeRange{Start: model.InputStartAt.UTC(), End: model.InputEndAt.UTC()},
+		InputRange:         domain.TimeRange{Start: model.InputStartAt, End: model.InputEndAt},
 		AnalyticsReference: model.AnalyticsReference,
 		DataQuality:        domain.DataQuality(model.DataQuality),
 		EvaluatorName:      model.EvaluatorName,
@@ -528,7 +526,7 @@ func orderIntentToModel(intent domain.OrderIntent) (orderIntentModel, error) {
 		ReduceOnly:               intent.ReduceOnly,
 		SourceReasonCode:         intent.SourceReasonCode,
 		CandidateActionReference: intent.CandidateActionReference,
-		CreatedTime:              intent.CreatedTime.Time().UTC(),
+		CreatedTime:              intent.CreatedTime.Time(),
 		Status:                   intent.Status.String(),
 		MetadataJSON:             metadataJSON,
 	}, nil
@@ -562,7 +560,7 @@ func orderIntentModelToDomain(model orderIntentModel) (domain.OrderIntent, error
 		ReduceOnly:               model.ReduceOnly,
 		SourceReasonCode:         model.SourceReasonCode,
 		CandidateActionReference: model.CandidateActionReference,
-		CreatedTime:              model.CreatedTime.UTC(),
+		CreatedTime:              model.CreatedTime,
 		Status:                   domain.OrderIntentStatus(model.Status),
 		Metadata:                 metadata,
 	})
@@ -618,9 +616,9 @@ func applyAuditListQuery(
 	}
 	if timeRange != nil {
 		db = db.Where(
-			timeColumn+" >= ? AND "+timeColumn+" < ?",
-			timeRange.Start.UTC(),
-			timeRange.End.UTC(),
+			gormsignalfoundry.InstantRangePredicate(db, timeColumn),
+			timeRange.Start,
+			timeRange.End,
 		)
 	}
 

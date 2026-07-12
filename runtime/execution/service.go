@@ -353,7 +353,7 @@ func stableNumber(value float64) string {
 }
 
 func stableTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339Nano)
+	return strconv.FormatInt(value.UnixNano(), 10)
 }
 
 func validationError(message string) error {

@@ -47,17 +47,18 @@ Key rules:
 
 ## Run
 
-From the repo root:
+Invoke repo-scoped PM2 commands from the repo root:
 
 `pm2 start signal-foundry-api` (PM2 process name is `signal-foundry-api`).
 
-Before starting or restarting backend processes that rely on persisted tables, run `go run ./cmd/signal-foundry db-migrate --env local` from `apps/signal-foundry`.
+Before starting or restarting backend processes that rely on persisted tables, change to `apps/signal-foundry` and run `go run ./cmd/signal-foundry db-migrate --env local`.
 
-Standard local backend workflow is `go run ./cmd/signal-foundry db-migrate --env local` and then `go run ./cmd/signal-foundry start-all --env local`.
+Standard local backend workflow uses `apps/signal-foundry` as the working directory: run `go run ./cmd/signal-foundry db-migrate --env local` and then `go run ./cmd/signal-foundry start-all --env local`. Local filesystem paths are app-root-relative; arbitrary working directories are unsupported.
 
 Release build workflow from `apps/signal-foundry` is `make dist/bin`; it rebuilds the SPA into the backend embed directory, validates `dist/index.html`, and then produces the backend binary with embedded UI assets. Runtime UI serving is embedded-only: if embedded `dist/index.html` is absent, the backend stays API-only.
 
 PM2 startup runs the same all-in-one local backend shape on port 4501.
+PM2 remains repo-scoped, but `ecosystem.config.js` sets the backend process working directory to `apps/signal-foundry`.
 
 If the PM2 command shape changed (for example from `start` to `start-all`) or you need to guarantee the current ecosystem config is applied, recreate the backend app with `pm2 delete signal-foundry-api && pm2 start ecosystem.config.js` from the repo root; PM2 can otherwise keep an older command definition.
 
@@ -65,7 +66,7 @@ Durable jobs workflow:
 - `signal-foundry db-migrate` is the standard schema setup path for local/dev and PM2-backed environments.
 - `signal-foundry start-all` is the standard local backend mode; it runs the HTTP server, durable consumer, and scheduler loop together after schemas are prepared.
 - `signal-foundry start` starts only the API/server path; it must not execute durable jobs inline.
-- `signal-foundry jobs worker [--once]` is the dedicated split-mode consumer path for production-like or supervised environments.
+- `signal-foundry jobs worker [--once]` is the dedicated split-mode consumer path for production-like or supervised environments. `--once` consumes until two poll intervals pass idle, so it can drain a reused DB backlog; use a reseeded or isolated local DB for a bounded E2E step.
 - `signal-foundry jobs enqueue-due` performs one scheduler tick and enqueues due scheduled jobs without running them; keep it for split or externally scheduled environments.
 
 ## Lint / test
@@ -89,6 +90,7 @@ The rules are:
 - Config load tests cover app logic, not Viper env binding.
 - Put required test defaults in test.yaml, not per-test env.
 - Keep files referenced by test.yaml as committed test fixtures, never use real secrets or ssh keys, generate fake random values instead.
+- Run local backend CLI commands with `apps/signal-foundry` as CWD.
 
 ## Purpose (directional)
 

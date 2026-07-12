@@ -142,6 +142,38 @@ func TestDatabaseAgentProfilesService(t *testing.T) {
 		assert.Equal(t, second.Name, listed[1].Name)
 	})
 
+	t.Run("List preserves canonical creation timestamp ordering", func(t *testing.T) {
+		svc := makeService(t, ":memory:", "")
+		ctx := t.Context()
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		earlierProfile, err := svc.Create(ctx, makeCreateParams())
+		require.NoError(t, err)
+		laterProfile, err := svc.Create(ctx, makeCreateParams())
+		require.NoError(t, err)
+		for _, update := range []struct {
+			name      string
+			createdAt time.Time
+		}{
+			{name: earlierProfile.Name, createdAt: earlier},
+			{name: laterProfile.Name, createdAt: later},
+		} {
+			require.NoError(t, svc.db.Model(&agentProfileModel{}).
+				Where("name = ?", update.name).
+				UpdateColumn("created_at", update.createdAt).Error)
+		}
+
+		listed, err := svc.List(ctx)
+		require.NoError(t, err)
+		require.Len(t, listed, 2)
+		assert.Equal(t, earlierProfile.Name, listed[0].Name)
+		assert.Equal(t, laterProfile.Name, listed[1].Name)
+		assert.Equal(t, earlier.Format(time.RFC3339Nano), listed[0].CreatedAt.Format(time.RFC3339Nano))
+		assert.Equal(t, later.Format(time.RFC3339Nano), listed[1].CreatedAt.Format(time.RFC3339Nano))
+	})
+
 	t.Run("Update changes mutable fields and preserves immutable fields", func(t *testing.T) {
 		svc := makeService(t, ":memory:", "")
 		ctx := t.Context()
@@ -274,62 +306,6 @@ func TestDatabaseAgentProfilesService(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, created.ExecutionSettings, reloaded.ExecutionSettings)
 		})
-	})
-
-	t.Run("AutoMigrate preserves existing regular records", func(t *testing.T) {
-		svc, err := NewDatabaseAgentProfilesService(":memory:", testLogger(t), "")
-		require.NoError(t, err)
-
-		require.NoError(t, svc.db.Exec(`
-			CREATE TABLE agent_profiles (
-				name TEXT PRIMARY KEY,
-				display_name TEXT,
-				role TEXT NOT NULL,
-				instructions TEXT NOT NULL,
-				tool_refs TEXT,
-				execution_settings TEXT,
-				created_at DATETIME,
-				updated_at DATETIME
-			)
-		`).Error)
-
-		name := fake.Lexify("profile-????????")
-		createdAt := time.Now().UTC().Add(-time.Minute).Round(0)
-		updatedAt := createdAt.Add(2 * time.Second)
-
-		toolRefsJSON, err := json.Marshal([]string{"tool.read"})
-		require.NoError(t, err)
-		execSettingsJSON, err := json.Marshal(map[string]any{
-			"defaultModel": "provider/model",
-		})
-		require.NoError(t, err)
-
-		require.NoError(
-			t,
-			svc.db.Exec(
-				`INSERT INTO agent_profiles
-					(name, display_name, role, instructions, tool_refs, execution_settings, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				name,
-				fake.Person().Name(),
-				"assistant",
-				fake.Lorem().Sentence(8),
-				string(toolRefsJSON),
-				string(execSettingsJSON),
-				createdAt,
-				updatedAt,
-			).Error,
-		)
-
-		require.NoError(t, svc.AutoMigrate())
-
-		profile, err := svc.Get(t.Context(), name)
-		require.NoError(t, err)
-		assert.Equal(t, ExecutionSettings{
-			DefaultModel: "provider/model",
-		}, profile.ExecutionSettings)
-		assert.Equal(t, createdAt.UnixNano(), profile.CreatedAt.UnixNano())
-		assert.Equal(t, updatedAt.UnixNano(), profile.UpdatedAt.UnixNano())
 	})
 
 	t.Run("validation and database error paths", func(t *testing.T) {

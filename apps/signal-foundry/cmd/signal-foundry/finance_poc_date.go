@@ -13,7 +13,7 @@ func parseFinancePOCDate(flagName string, value string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse %s: %w", flagName, err)
 	}
-	return parsed.UTC(), nil
+	return parsed, nil
 }
 
 func parseFinancePOCInclusiveEndDate(flagName string, value string) (time.Time, error) {

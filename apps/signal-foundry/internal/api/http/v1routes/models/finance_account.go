@@ -23,7 +23,7 @@ type FinanceAccount struct {
 	PendingBalanceMinor int64 `json:"pendingBalanceMinor"`
 	Provider string `json:"provider,omitempty"`
 	ProviderAccountID string `json:"providerAccountId,omitempty"`
-	HiddenAt time.Time `json:"hiddenAt,omitempty"`
+	HiddenAt *time.Time `json:"hiddenAt,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

@@ -6,7 +6,7 @@
 # opencode_model: fully-qualified OpenCode model (provider/model) written by openspec-manager/sync-opencode-agents.sh
 # Each role must have a matching instruction file:
 #   .agents/prompts/openspec-manager/agent-<role>.md
-# After editing, run: .agents/prompts/openspec-manager/sync-opencode-agents.sh
+# After editing, run: .agents/prompts/openspec-manager/setup.sh
 sub-agents:
   planning:
     sub_agent_name: openspec-planning

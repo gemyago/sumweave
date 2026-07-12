@@ -80,7 +80,8 @@ go get -u ./... && go mod tidy
 # Start backend in a separate terminal
 # Install deps as per above instructions for go modules
 cd apps/signal-foundry
-go run ./cmd/signal-foundry start
+go run ./cmd/signal-foundry db-migrate --env local
+go run ./cmd/signal-foundry start --env local
 
 # Start frontend in a separate terminal
 cd apps/signal-ui
@@ -93,6 +94,10 @@ nx run-many -t dev
 # Or manage both long-running processes via PM2 from the repo root
 npm run pm2:start
 ```
+
+Backend CLI paths are relative to `apps/signal-foundry`. Nx and PM2 set that
+working directory for the backend process; PM2 commands themselves remain
+repo-root commands because `PM2_HOME` is repo-scoped.
 
 Frontend host/port: http://localhost:5173
 Backend host/port: http://localhost:4501

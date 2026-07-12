@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/server"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/v1routes/models"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/gemyago/signal-foundry/runtime/domain"
 	"github.com/jaswdr/faker/v2"
@@ -595,8 +597,6 @@ func TestDataController(t *testing.T) {
 			var body models.DataCandleListResponse
 			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
 			require.Len(t, body.Items, 2)
-			require.NotNil(t, body.Items[0].Start)
-			require.NotNil(t, body.Items[1].Start)
 			assert.Equal(t, identityOne, body.Items[0].IDentity)
 			assert.Equal(t, validInstrument.Venue.String(), body.Items[0].Venue)
 			assert.Equal(t, validInstrument.Symbol.String(), body.Items[0].Symbol)
@@ -605,7 +605,7 @@ func TestDataController(t *testing.T) {
 			assert.Equal(t, "hyperliquid", body.Items[0].ProvenanceSource)
 			assert.NotEmpty(t, body.Items[0].ProvenanceIDentity)
 			assert.Equal(t, identityTwo, body.Items[1].IDentity)
-			assert.True(t, body.Items[0].Start.Before(*body.Items[1].Start))
+			assert.True(t, body.Items[0].Start.Before(body.Items[1].Start))
 			assert.Equal(t, 1, readSvc.calls)
 			assert.Equal(t, validInstrument.Venue, readSvc.lastInstrument.Venue)
 			assert.Equal(t, validInstrument.Symbol, readSvc.lastInstrument.Symbol)
@@ -736,10 +736,8 @@ func TestDataController(t *testing.T) {
 			var body models.DataCandleListResponse
 			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
 			assert.Len(t, body.Items, 2)
-			require.NotNil(t, body.Items[0].Start)
-			require.NotNil(t, body.Items[1].Start)
-			assert.Equal(t, validStart, *body.Items[0].Start)
-			assert.Equal(t, validStart.Add(3*time.Minute), *body.Items[1].Start)
+			assert.Equal(t, validStart, body.Items[0].Start)
+			assert.Equal(t, validStart.Add(3*time.Minute), body.Items[1].Start)
 		})
 
 		t.Run("blank venue returns bad request before replay", func(t *testing.T) {
@@ -887,6 +885,76 @@ func TestDataController(t *testing.T) {
 			require.Len(t, body.Items, 1)
 			assert.Nil(t, body.Items[0].Start)
 			assert.Nil(t, body.Items[0].End)
+			assert.Nil(t, lineageSvc.lastListQuery.TimeRange)
+		})
+
+		t.Run("list preserves supplied fixed-offset bounds", func(t *testing.T) {
+			lineageSvc := makeLineageBrowserService()
+			lineageSvc.listRawPayloadMetadataFunc = func(
+				_ context.Context,
+				_ data.RawPayloadMetadataListQuery,
+			) (data.RawPayloadMetadataListResult, error) {
+				return data.RawPayloadMetadataListResult{}, nil
+			}
+			start := time.Date(2026, time.July, 10, 8, 30, 0, 123, time.FixedZone("request-east", 5*60*60+30*60))
+			end := time.Date(2026, time.July, 10, 9, 30, 0, 456, time.FixedZone("request-west", -4*60*60))
+			ctrl := newController(makeReplayReadService(), lineageSvc, makeAuthMiddleware())
+			resp := httptest.NewRecorder()
+			newDataHTTPHandler(ctrl).ServeHTTP(resp, newRequest(
+				http.MethodGet,
+				makeRawPayloadListURL(map[string]string{
+					"start": start.Format(time.RFC3339Nano),
+					"end":   end.Format(time.RFC3339Nano),
+				}),
+				true,
+			))
+
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			require.NotNil(t, lineageSvc.lastListQuery.TimeRange)
+			assert.Equal(
+				t,
+				start.Format(time.RFC3339Nano),
+				lineageSvc.lastListQuery.TimeRange.Start.Format(time.RFC3339Nano),
+			)
+			assert.Equal(
+				t,
+				end.Format(time.RFC3339Nano),
+				lineageSvc.lastListQuery.TimeRange.End.Format(time.RFC3339Nano),
+			)
+		})
+
+		t.Run("list rejects supplied invalid optional bounds before runtime reads", func(t *testing.T) {
+			for _, testCase := range []struct {
+				name  string
+				query string
+			}{
+				{name: "empty", query: ""},
+				{name: "null text", query: "null"},
+				{name: "malformed", query: "not-a-timestamp"},
+				{name: "year one", query: "0001-01-01T00:00:00Z"},
+			} {
+				t.Run(testCase.name, func(t *testing.T) {
+					lineageSvc := makeLineageBrowserService()
+					lineageSvc.listRawPayloadMetadataFunc = func(
+						_ context.Context,
+						_ data.RawPayloadMetadataListQuery,
+					) (data.RawPayloadMetadataListResult, error) {
+						return data.RawPayloadMetadataListResult{}, nil
+					}
+					query := url.Values{"venue": []string{validInstrument.Venue.String()}}
+					query["start"] = []string{testCase.query}
+					ctrl := newController(makeReplayReadService(), lineageSvc, makeAuthMiddleware())
+					resp := httptest.NewRecorder()
+					newDataHTTPHandler(ctrl).ServeHTTP(resp, newRequest(
+						http.MethodGet,
+						"/api/v1/data/raw-payloads?"+query.Encode(),
+						true,
+					))
+
+					assert.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+					assert.Equal(t, 0, lineageSvc.listCalls)
+				})
+			}
 		})
 
 		t.Run("list rejects unsupported venue", func(t *testing.T) {
@@ -1076,4 +1144,110 @@ func TestDataController(t *testing.T) {
 		mapped := mapDataReadError(data.ErrValidation, "ignored")
 		require.Error(t, mapped)
 	})
+}
+
+func TestDataControllerRegisteredRawPayloadRouteRegression(t *testing.T) {
+	fake := faker.New()
+	start := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.FixedZone("e2e-new-york", -4*60*60))
+	end := start.Add(12 * time.Hour)
+	completedAt := end
+	dsn := filepath.Join(t.TempDir(), "data-controller.sqlite")
+	sqlDB, err := sqlconn.Open(dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+
+	store, err := data.NewDatabaseStore(sqlDB, dsn, data.DatabaseStoreOpts{})
+	require.NoError(t, err)
+	require.NoError(t, store.AutoMigrate())
+	blobStore, err := data.NewLocalRawPayloadBlobStore(filepath.Join(t.TempDir(), "raw-payloads"))
+	require.NoError(t, err)
+	lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: store, BlobStore: blobStore})
+	require.NoError(t, err)
+	readService, err := data.NewReadService(data.ReadServiceDeps{
+		InstrumentStore: store,
+		CandleStore:     store,
+		TradeStore:      store,
+	})
+	require.NoError(t, err)
+
+	run, err := data.NewIngestionRun(data.IngestionRunParams{
+		ID:          fake.UUID().V4(),
+		Source:      "hyperliquid-perps-rest",
+		Venue:       domain.Venue("hyperliquid-perps"),
+		Status:      data.IngestionRunStatusSucceeded,
+		StartedAt:   start,
+		CompletedAt: &completedAt,
+	})
+	require.NoError(t, err)
+	_, err = store.UpsertIngestionRun(t.Context(), run)
+	require.NoError(t, err)
+
+	payload, err := data.NewRawVenuePayload(data.RawVenuePayloadParams{
+		ID:                 fake.UUID().V4(),
+		IngestionRunID:     run.ID,
+		Source:             run.Source,
+		Venue:              run.Venue,
+		Endpoint:           "/info",
+		RequestType:        "candleSnapshot",
+		RequestPayloadHash: fake.UUID().V4(),
+		RequestAt:          start.Add(-2 * time.Second),
+		ResponseAt:         start.Add(-time.Second),
+		HTTPStatus:         http.StatusOK,
+		ResponseBodyHash:   fake.UUID().V4(),
+		PayloadBodyRef:     fake.UUID().V4(),
+		EntityHint:         "candle",
+		Timeframe:          domain.Timeframe1h,
+		TimeRange:          &domain.TimeRange{Start: start, End: end},
+		ReceivedAt:         start,
+	})
+	require.NoError(t, err)
+	_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+	require.NoError(t, err)
+
+	instrument, err := store.UpsertInstrument(t.Context(), domain.Instrument{
+		Venue:      run.Venue,
+		Symbol:     domain.Symbol("BTC"),
+		AssetClass: domain.AssetClassFuture,
+		Active:     true,
+	})
+	require.NoError(t, err)
+	candle := domain.Candle{
+		Instrument: instrument,
+		Timeframe:  domain.Timeframe1h,
+		TimeRange:  domain.TimeRange{Start: start, End: start.Add(time.Hour)},
+		Open:       1,
+		High:       2,
+		Low:        1,
+		Close:      2,
+		Volume:     3,
+		Quality:    domain.DataQualityValidated,
+		Provenance: domain.SourceProvenance{Source: "hyperliquid", RecordID: fake.UUID().V4()},
+	}
+	_, err = store.UpsertCandle(t.Context(), candle)
+	require.NoError(t, err)
+	require.NoError(t, store.LinkRawPayloadToCandle(t.Context(), payload.ID, candle))
+
+	authMiddleware := func(next http.Handler) http.Handler { return next }
+	controller := NewDataController(DataControllerDeps{
+		ReadService:    readService,
+		LineageService: lineageService,
+		AuthMiddleware: authMiddleware,
+	})
+	query := url.Values{
+		"venue":      []string{run.Venue.String()},
+		"symbol":     []string{instrument.Symbol.String()},
+		"assetClass": []string{instrument.AssetClass.String()},
+		"timeframe":  []string{domain.Timeframe1h.String()},
+		"start":      []string{start.Format(time.RFC3339)},
+		"end":        []string{end.Format(time.RFC3339)},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/data/raw-payloads?"+query.Encode(), http.NoBody)
+	response := httptest.NewRecorder()
+	newDataHTTPHandler(controller).ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var body models.RawPayloadMetadataListResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Len(t, body.Items, 1)
+	require.Equal(t, payload.ID, body.Items[0].ID)
 }

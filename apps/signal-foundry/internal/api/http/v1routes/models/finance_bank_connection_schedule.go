@@ -16,10 +16,10 @@ var _ = fmt.Sprint
 type FinanceBankConnectionSchedule struct { 
 	ConnectionID string `json:"connectionId"`
 	IntervalSeconds int64 `json:"intervalSeconds"`
-	NextRunAt time.Time `json:"nextRunAt,omitempty"`
-	LastScheduledAt time.Time `json:"lastScheduledAt,omitempty"`
-	LastStartedAt time.Time `json:"lastStartedAt,omitempty"`
-	LastCompletedAt time.Time `json:"lastCompletedAt,omitempty"`
+	NextRunAt *time.Time `json:"nextRunAt,omitempty"`
+	LastScheduledAt *time.Time `json:"lastScheduledAt,omitempty"`
+	LastStartedAt *time.Time `json:"lastStartedAt,omitempty"`
+	LastCompletedAt *time.Time `json:"lastCompletedAt,omitempty"`
 	LastJobID string `json:"lastJobId,omitempty"`
 	Enabled bool `json:"enabled"`
 	CreatedAt time.Time `json:"createdAt"`

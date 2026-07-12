@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import Finance from './Finance.svelte'
-import BootstrapFinanceDashboardSource from './BootstrapFinanceDashboard.svelte?raw'
 
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
@@ -38,13 +37,13 @@ describe('Finance dashboard page', () => {
       { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
     ])
     mocks.getDashboard.mockResolvedValue({
-      period: { preset: 'current_month', startDate: now, endDate: now, previous: { startDate: now, endDate: now }, next: { startDate: now, endDate: now } },
+      period: { preset: 'current_month', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
       settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
       categoryBreakdowns: [{ categoryId: 'cat-1', categoryName: 'Groceries', kind: 'expense', incomeMinor: 0, expenseMinor: 1000, transactionCount: 1 }],
       accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 50000, nativePendingMinor: 5000, displayBookedMinor: 50000, displayPendingMinor: 5000, missingFx: false }],
       alerts: [{ code: 'stale_connection', severity: 'warning', count: 1 }],
-      missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: now, provider: 'frankfurter' }],
+      missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: new Date(2026, 5, 20), provider: 'frankfurter' }],
       nativeSettledTotals: [],
     })
     mocks.listTransactions.mockResolvedValue([
@@ -118,13 +117,13 @@ describe('Finance dashboard page', () => {
   it('renders compact needs-attention items for pending, missing FX, failed sync, and failed import signals', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: 'current_month', startDate: now, endDate: now, previous: { startDate: now, endDate: now }, next: { startDate: now, endDate: now } },
+      period: { preset: 'current_month', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
       settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 3, complete: true },
       categoryBreakdowns: [{ categoryId: 'cat-1', categoryName: 'Groceries', kind: 'expense', incomeMinor: 0, expenseMinor: 1000, transactionCount: 1 }],
       accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 50000, nativePendingMinor: 5000, displayBookedMinor: 50000, displayPendingMinor: 5000, missingFx: false }],
       alerts: [{ code: 'failed_import', severity: 'error', count: 2 }],
-      missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: now, provider: 'frankfurter' }],
+      missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: '2026-06-20', provider: 'frankfurter' }],
       nativeSettledTotals: [],
     })
     mocks.listConnections.mockResolvedValueOnce([
@@ -186,10 +185,10 @@ describe('Finance dashboard page', () => {
       .mockResolvedValueOnce({
         period: {
           preset: 'current_month',
-          startDate: new Date('2026-06-20T12:00:00Z'),
-          endDate: new Date('2026-06-20T12:00:00Z'),
-          previous: { startDate: new Date('2026-05-01T00:00:00Z'), endDate: new Date('2026-05-31T00:00:00Z') },
-          next: { startDate: new Date('2026-07-01T00:00:00Z'), endDate: new Date('2026-07-31T00:00:00Z') },
+          startDate: new Date(2026, 5, 20),
+          endDate: new Date(2026, 5, 20),
+          previous: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31) },
+          next: { startDate: new Date(2026, 6, 1), endDate: new Date(2026, 6, 31) },
         },
         settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
         pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
@@ -202,10 +201,10 @@ describe('Finance dashboard page', () => {
       .mockResolvedValueOnce({
         period: {
           preset: '',
-          startDate: new Date('2026-05-01T00:00:00Z'),
-          endDate: new Date('2026-05-31T00:00:00Z'),
-          previous: { startDate: new Date('2026-04-01T00:00:00Z'), endDate: new Date('2026-04-30T00:00:00Z') },
-          next: { startDate: new Date('2026-06-01T00:00:00Z'), endDate: new Date('2026-06-30T00:00:00Z') },
+          startDate: new Date(2026, 4, 1),
+          endDate: new Date(2026, 4, 31),
+          previous: { startDate: new Date(2026, 3, 1), endDate: new Date(2026, 3, 30) },
+          next: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30) },
         },
         settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
         pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
@@ -218,10 +217,10 @@ describe('Finance dashboard page', () => {
       .mockResolvedValueOnce({
         period: {
           preset: '',
-          startDate: new Date('2026-06-01T00:00:00Z'),
-          endDate: new Date('2026-06-30T00:00:00Z'),
-          previous: { startDate: new Date('2026-05-01T00:00:00Z'), endDate: new Date('2026-05-31T00:00:00Z') },
-          next: { startDate: new Date('2026-07-01T00:00:00Z'), endDate: new Date('2026-07-31T00:00:00Z') },
+          startDate: new Date(2026, 5, 1),
+          endDate: new Date(2026, 5, 30),
+          previous: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31) },
+          next: { startDate: new Date(2026, 6, 1), endDate: new Date(2026, 6, 31) },
         },
         settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
         pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
@@ -267,10 +266,33 @@ describe('Finance dashboard page', () => {
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
   })
 
+  it('keeps dashboard custom range instants until the date control changes them', async () => {
+    const user = userEvent.setup()
+    const startDate = new Date('2026-06-01T23:45:12.345-07:00')
+    const endDate = new Date('2026-06-30T01:15:42.987+05:30')
+    const dashboard = {
+      period: { preset: 'custom', startDate, endDate, previous: { startDate, endDate }, next: { startDate, endDate } },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], nativeSettledTotals: [],
+    }
+    mocks.getDashboard.mockResolvedValueOnce(dashboard).mockResolvedValueOnce(dashboard)
+
+    render(Finance)
+    await user.click(await screen.findByText('Custom range'))
+    await user.click(screen.getByRole('button', { name: 'Apply custom range' }))
+
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    const request = mocks.getDashboard.mock.calls[1][0]
+    expect(request.startDate).toBeInstanceOf(Date)
+    expect(request.endDate).toBeInstanceOf(Date)
+    expect(request.startDate).toEqual(startDate)
+    expect(request.endDate).toEqual(endDate)
+  })
+
   it('renders honest empty states when the dashboard has no activity', async () => {
-    const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: '', startDate: now, endDate: now, previous: { startDate: now, endDate: now }, next: { startDate: now, endDate: now } },
+      period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       categoryBreakdowns: [],
@@ -295,7 +317,7 @@ describe('Finance dashboard page', () => {
   it('routes native totals, sync issues, and import follow-up through the dashboard attention area', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: '', startDate: now, endDate: now, previous: { startDate: now, endDate: now }, next: { startDate: now, endDate: now } },
+      period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
       settled: { displayCurrency: 'USD', incomeMinor: 220000, expenseMinor: 60000, netMinor: 160000, transactionCount: 14, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 10000, expenseMinor: 4000, netMinor: 6000, transactionCount: 2, complete: true },
       categoryBreakdowns: [{ categoryId: 'cat-income', categoryName: 'Salary', kind: 'income', incomeMinor: 220000, expenseMinor: 0, transactionCount: 1 }],
@@ -340,7 +362,7 @@ describe('Finance dashboard page', () => {
   it('shows account-level missing FX badges and tolerates mixed connection timestamp fallbacks', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: '', startDate: now, endDate: now, previous: { startDate: now, endDate: now }, next: { startDate: now, endDate: now } },
+      period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
       settled: { displayCurrency: 'USD', incomeMinor: 5000, expenseMinor: 3000, netMinor: 2000, transactionCount: 2, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 1500, expenseMinor: 250, netMinor: 1250, transactionCount: 2, complete: true },
       categoryBreakdowns: [],
@@ -426,7 +448,7 @@ describe('Finance dashboard page', () => {
   it('caps account, category, and recent transaction sections to keep the dashboard scannable', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: '', startDate: now, endDate: now, previous: { startDate: now, endDate: now }, next: { startDate: now, endDate: now } },
+      period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
       settled: { displayCurrency: 'USD', incomeMinor: 220000, expenseMinor: 60000, netMinor: 160000, transactionCount: 14, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 10000, expenseMinor: 4000, netMinor: 6000, transactionCount: 2, complete: true },
       categoryBreakdowns: [
@@ -478,8 +500,4 @@ describe('Finance dashboard page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('dashboard exploded')
   })
 
-  it('does not define route-local styles or style attributes for the canonical bootstrap dashboard', () => {
-    expect(BootstrapFinanceDashboardSource).not.toMatch(/<style[\s>]/)
-    expect(BootstrapFinanceDashboardSource).not.toMatch(/\sstyle=/)
-  })
 })

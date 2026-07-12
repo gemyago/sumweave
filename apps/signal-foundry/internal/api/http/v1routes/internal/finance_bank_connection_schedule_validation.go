@@ -17,13 +17,13 @@ func NewFinanceBankConnectionScheduleValidator() FieldValidator[*FinanceBankConn
 	validateIntervalSeconds := NewSimpleFieldValidator[int64](
 		EnsureNonDefault[int64],
 	)
-	validateNextRunAt := NewSimpleFieldValidator[time.Time](
+	validateNextRunAt := NewSimpleFieldValidator[*time.Time](
 	)
-	validateLastScheduledAt := NewSimpleFieldValidator[time.Time](
+	validateLastScheduledAt := NewSimpleFieldValidator[*time.Time](
 	)
-	validateLastStartedAt := NewSimpleFieldValidator[time.Time](
+	validateLastStartedAt := NewSimpleFieldValidator[*time.Time](
 	)
-	validateLastCompletedAt := NewSimpleFieldValidator[time.Time](
+	validateLastCompletedAt := NewSimpleFieldValidator[*time.Time](
 	)
 	validateLastJobID := NewSimpleFieldValidator[string](
 	)

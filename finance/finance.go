@@ -222,7 +222,7 @@ func providerSyncResultFromBatch(batch domain.ProviderSyncBatch) ProviderSyncRes
 			AmountMinor:           item.AmountMinor,
 			Currency:              item.Currency,
 			Description:           item.Description,
-			EffectiveAt:           item.EffectiveAt.UTC(),
+			EffectiveAt:           item.EffectiveAt,
 			Fingerprint:           item.Fingerprint,
 			ProviderOriginal:      item.ProviderOriginal,
 		})

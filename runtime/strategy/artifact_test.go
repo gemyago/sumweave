@@ -416,6 +416,7 @@ func TestStrategyArtifactDatabaseStore(t *testing.T) {
 			t,
 			hasUniqueIndexWithColumns(t, store, tablePrefix+"strategy_artifacts", []string{"hash"}),
 		)
+		require.True(t, store.db.Migrator().HasIndex(&strategyArtifactModel{}, "idx_strategy_artifacts_created_at"))
 	})
 
 	t.Run("Create Get and List persist immutable artifacts", func(t *testing.T) {
@@ -429,7 +430,7 @@ func TestStrategyArtifactDatabaseStore(t *testing.T) {
 		firstCreated, err := store.Create(ctx, firstRaw)
 		require.NoError(t, err)
 		require.NotZero(t, firstCreated.CreatedAt)
-		require.Equal(t, time.UTC, firstCreated.CreatedAt.Location())
+		require.NotZero(t, firstCreated.CreatedAt)
 		require.Equal(t, int64(1), readCount(t, store, "strategy_artifacts"))
 
 		fetched, err := store.Get(ctx, firstCreated.Hash)
@@ -478,6 +479,33 @@ func TestStrategyArtifactDatabaseStore(t *testing.T) {
 		require.Equal(t, firstCreated.CanonicalJSON, listed[0].CanonicalJSON)
 		require.Equal(t, firstCreated.Hash, listed[0].Hash)
 		require.Equal(t, firstCreated.CreatedAt, listed[0].CreatedAt)
+	})
+
+	t.Run("List preserves canonical creation timestamp ordering", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFake(t)
+		store := makeStore(t, ":memory:", "")
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		earlierArtifact, err := store.Create(t.Context(), makeRawPayload(t, fake, 1))
+		require.NoError(t, err)
+		laterArtifact, err := store.Create(t.Context(), makeRawPayload(t, fake, 2))
+		require.NoError(t, err)
+		require.NoError(t, store.db.Model(&strategyArtifactModel{}).
+			Where("hash = ?", earlierArtifact.Hash).
+			UpdateColumn("created_at", earlier).Error)
+		require.NoError(t, store.db.Model(&strategyArtifactModel{}).
+			Where("hash = ?", laterArtifact.Hash).
+			UpdateColumn("created_at", later).Error)
+
+		listed, err := store.List(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierArtifact.Hash, laterArtifact.Hash}, []string{listed[0].Hash, listed[1].Hash})
+		require.Equal(t, earlier.Format(time.RFC3339Nano), listed[0].CreatedAt.Format(time.RFC3339Nano))
+		require.Equal(t, later.Format(time.RFC3339Nano), listed[1].CreatedAt.Format(time.RFC3339Nano))
 	})
 
 	t.Run("schema enforces unique hashes", func(t *testing.T) {

@@ -231,7 +231,7 @@ func runAppDatabaseMigrations(dsn string) error {
 	return backtestStore.AutoMigrate()
 }
 
-// chdirModuleRoot sets cwd to apps/signal-foundry so embedded config paths (e.g. dataDir: data) match pre-cmd layout.
+// chdirModuleRoot keeps command tests in the supported app working directory.
 func chdirModuleRoot(t *testing.T) {
 	t.Helper()
 	wd, err := os.Getwd()

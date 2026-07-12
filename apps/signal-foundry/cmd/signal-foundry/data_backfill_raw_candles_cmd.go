@@ -199,7 +199,7 @@ func parseHistoricalRawCandleBackfillTimestamp(flagName string, value string) (t
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse %s: %w", flagName, err)
 	}
-	return parsed.UTC(), nil
+	return parsed, nil
 }
 
 func renderHistoricalRawCandleBackfillResult(
@@ -244,7 +244,7 @@ func renderHistoricalRawCandleBackfillResult(
 }
 
 func formatHistoricalRawCandleBackfillTime(value time.Time) string {
-	return value.UTC().Format(time.RFC3339)
+	return value.Format(time.RFC3339)
 }
 
 func formatHistoricalRawCandleBackfillTimePtr(value *time.Time) string {

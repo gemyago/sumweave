@@ -22,8 +22,8 @@ type FinanceBankConnection struct {
 	ExternalID string `json:"externalId"`
 	State string `json:"state"`
 	LastSyncJobID string `json:"lastSyncJobId,omitempty"`
-	LastSyncStartedAt time.Time `json:"lastSyncStartedAt,omitempty"`
-	LastSuccessfulSyncAt time.Time `json:"lastSuccessfulSyncAt,omitempty"`
+	LastSyncStartedAt *time.Time `json:"lastSyncStartedAt,omitempty"`
+	LastSuccessfulSyncAt *time.Time `json:"lastSuccessfulSyncAt,omitempty"`
 	LastSyncError string `json:"lastSyncError,omitempty"`
 	Schedule *FinanceBankConnectionSchedule `json:"schedule,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`

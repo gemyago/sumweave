@@ -22,6 +22,158 @@ func TestProviderSyncStore(t *testing.T) {
 		return store
 	}
 
+	t.Run("orders provider synchronization records by canonical timestamps", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+		tenantID := "tenant-" + fake.UUID().V4()
+
+		makeConnection := func(id string, createdAt time.Time) domain.BankConnection {
+			return domain.BankConnection{
+				ID: id, TenantID: tenantID, Provider: "provider-" + fake.Lorem().Word(),
+				DisplayName: fake.Company().Name(), ProviderReference: "ref-" + fake.UUID().V4(),
+				SecretID: "secret-" + fake.UUID().V4(), State: domain.BankConnectionStateActive,
+				CreatedAt: createdAt, UpdatedAt: createdAt,
+			}
+		}
+		earlierConnection := makeConnection("connection-earlier-"+fake.UUID().V4(), earlier)
+		laterConnection := makeConnection("connection-later-"+fake.UUID().V4(), later)
+		for _, connection := range []domain.BankConnection{laterConnection, earlierConnection} {
+			_, err := store.SaveBankConnection(t.Context(), connection)
+			require.NoError(t, err)
+		}
+		connections, err := store.ListBankConnections(t.Context(), tenantID)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]string{earlierConnection.ID, laterConnection.ID},
+			[]string{connections[0].ID, connections[1].ID},
+		)
+
+		connectionID := earlierConnection.ID
+		makeProviderAccount := func(id string, createdAt time.Time) domain.ConnectionProviderAccount {
+			return domain.ConnectionProviderAccount{
+				ID: id, ConnectionID: connectionID, ProviderAccountID: "provider-account-" + fake.UUID().V4(),
+				Name: fake.Person().Name(), Currency: "USD", CreatedAt: createdAt, UpdatedAt: createdAt,
+			}
+		}
+		earlierAccount := makeProviderAccount("account-earlier-"+fake.UUID().V4(), earlier)
+		laterAccount := makeProviderAccount("account-later-"+fake.UUID().V4(), later)
+		for _, account := range []domain.ConnectionProviderAccount{laterAccount, earlierAccount} {
+			_, err = store.SaveConnectionProviderAccount(t.Context(), account)
+			require.NoError(t, err)
+		}
+		accounts, err := store.ListConnectionProviderAccounts(t.Context(), connectionID)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierAccount.ID, laterAccount.ID}, []string{accounts[0].ID, accounts[1].ID})
+
+		for _, snapshot := range []domain.BalanceSnapshot{
+			{ID: "snapshot-earlier-" + fake.UUID().V4(), ConnectionID: connectionID, ProviderAccountID: earlierAccount.ProviderAccountID, Currency: "USD", CapturedAt: earlier},
+			{ID: "snapshot-later-" + fake.UUID().V4(), ConnectionID: connectionID, ProviderAccountID: earlierAccount.ProviderAccountID, Currency: "USD", CapturedAt: later},
+		} {
+			_, err = store.SaveBalanceSnapshot(t.Context(), snapshot)
+			require.NoError(t, err)
+		}
+		snapshots, err := store.ListBalanceSnapshots(t.Context(), connectionID)
+		require.NoError(t, err)
+		require.Equal(t, later.Format(time.RFC3339Nano), snapshots[0].CapturedAt.Format(time.RFC3339Nano))
+
+		for _, payload := range []domain.RawPayload{
+			{ID: "payload-later-" + fake.UUID().V4(), ConnectionID: connectionID, Scope: domain.RawPayloadScopeTransaction, PayloadJSON: []byte(`{}`), CapturedAt: later},
+			{ID: "payload-earlier-" + fake.UUID().V4(), ConnectionID: connectionID, Scope: domain.RawPayloadScopeTransaction, PayloadJSON: []byte(`{}`), CapturedAt: earlier},
+		} {
+			_, err = store.SaveRawPayload(t.Context(), payload)
+			require.NoError(t, err)
+		}
+		payloads, err := store.ListRawPayloads(t.Context(), connectionID)
+		require.NoError(t, err)
+		require.Equal(t, earlier.Format(time.RFC3339Nano), payloads[0].CapturedAt.Format(time.RFC3339Nano))
+
+		fingerprint := "fingerprint-" + fake.UUID().V4()
+		earlierMatch := domain.ProviderTransactionMatch{
+			ID: "match-earlier-" + fake.UUID().V4(), ConnectionID: connectionID,
+			ProviderAccountID: earlierAccount.ProviderAccountID, Fingerprint: fingerprint,
+			TransactionID: "transaction-earlier-" + fake.UUID().V4(), Status: domain.TransactionStatusPending,
+			CreatedAt: earlier, UpdatedAt: earlier,
+		}
+		laterMatch := earlierMatch
+		laterMatch.ID = "match-later-" + fake.UUID().V4()
+		laterMatch.TransactionID = "transaction-later-" + fake.UUID().V4()
+		laterMatch.CreatedAt = later
+		laterMatch.UpdatedAt = later
+		for _, match := range []domain.ProviderTransactionMatch{earlierMatch, laterMatch} {
+			_, err = store.SaveProviderTransactionMatch(t.Context(), match)
+			require.NoError(t, err)
+		}
+		resolved, err := store.GetProviderTransactionMatchByFingerprint(
+			t.Context(), connectionID, earlierAccount.ProviderAccountID, fingerprint,
+		)
+		require.NoError(t, err)
+		require.Equal(t, laterMatch.ID, resolved.ID)
+		require.Equal(t, later.Format(time.RFC3339Nano), resolved.UpdatedAt.Format(time.RFC3339Nano))
+	})
+
+	t.Run("chooses pending link start creation and expiry by canonical timestamps", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		now := later.Add(15 * time.Minute)
+		require.True(t, earlier.Before(later))
+		state := "state-" + fake.UUID().V4()
+		provider := "provider-" + fake.UUID().V4()
+		makeStart := func(
+			id string,
+			tenantID string,
+			createdAt time.Time,
+			expiresAt time.Time,
+		) domain.PendingBankConnectionLinkStart {
+			return domain.PendingBankConnectionLinkStart{
+				ID:               id,
+				TenantID:         tenantID,
+				ActorUserID:      "actor-" + fake.UUID().V4(),
+				Provider:         provider,
+				ConnectorID:      domain.ProviderConnectorIDEnableBanking,
+				State:            state,
+				CallbackURL:      "http://localhost/" + fake.UUID().V4(),
+				AuthorizationURL: "https://example.test/" + fake.UUID().V4(),
+				ExpiresAt:        expiresAt,
+				CreatedAt:        createdAt,
+				UpdatedAt:        createdAt,
+			}
+		}
+		earlierStart := makeStart(
+			"earlier-"+fake.UUID().V4(),
+			"tenant-earlier-"+fake.UUID().V4(),
+			earlier,
+			now.Add(time.Hour),
+		)
+		laterStart := makeStart(
+			"later-"+fake.UUID().V4(),
+			"tenant-later-"+fake.UUID().V4(),
+			later,
+			now.Add(time.Hour),
+		)
+		for _, start := range []domain.PendingBankConnectionLinkStart{earlierStart, laterStart} {
+			_, err := store.SavePendingBankConnectionLinkStart(t.Context(), start)
+			require.NoError(t, err)
+		}
+		resolved, err := store.GetPendingBankConnectionLinkStartByState(t.Context(), provider, state)
+		require.NoError(t, err)
+		require.Equal(t, laterStart.ID, resolved.ID)
+
+		expired := makeStart("expired-"+fake.UUID().V4(), "tenant-expired-"+fake.UUID().V4(), earlier, later)
+		_, err = store.SavePendingBankConnectionLinkStart(t.Context(), expired)
+		require.NoError(t, err)
+		consumed, err := store.ConsumePendingBankConnectionLinkStart(
+			t.Context(), expired.TenantID, expired.ActorUserID, expired.Provider, expired.State, now,
+		)
+		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
+		assert.Nil(t, consumed)
+	})
+
 	t.Run(
 		"persists bank connections schedules accounts snapshots raw payloads and sync matches",
 		func(t *testing.T) {

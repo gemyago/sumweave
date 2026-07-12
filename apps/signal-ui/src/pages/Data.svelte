@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { link } from 'svelte-spa-router'
   import DataCandlestickChart from '../components/DataCandlestickChart.svelte'
-  import UtcDateRangePicker from '../components/UtcDateRangePicker.svelte'
+  import DateRangePicker from '../components/DateRangePicker.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { toChartCandleRows } from '../lib/data/charting'
   import {
@@ -20,7 +20,8 @@
     createSignalJobsApiForAuth,
     type JobDetail,
   } from '../lib/jobs/api'
-  import { validateUtcRange } from '../lib/utc-date-range'
+  import { parseTimestamp, validateRange } from '../lib/date-range'
+  import { formatLocalDateTime } from '../lib/timestamp'
 
   const dataBaseUrl = import.meta.env.VITE_DATA_API_BASE_URL ?? '/api/v1/data'
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
@@ -45,8 +46,8 @@
   let symbol = $state('')
   let assetClass = $state('')
   let timeframe = $state('')
-  let utcStart = $state('')
-  let utcEnd = $state('')
+  let utcStart = $state<Date | undefined>()
+  let utcEnd = $state<Date | undefined>()
   let ingestionRunId = $state('')
 
   let validationErrors = $state<string[]>([])
@@ -157,8 +158,8 @@
         symbol.trim() === '' &&
         assetClass.trim() === '' &&
         timeframe.trim() === '' &&
-        utcStart.trim() === '' &&
-        utcEnd.trim() === ''
+        utcStart === undefined &&
+        utcEnd === undefined
 
       if (response.defaultSelection && shouldAutoLoadDefaultSelection) {
         const defaultKey = availabilityKeyFromSelection(response.defaultSelection)
@@ -448,8 +449,8 @@
     const trimmedSymbol = symbol.trim()
     const trimmedAssetClass = assetClass.trim()
     const trimmedTimeframe = timeframe.trim()
-    const start = parseUtcTimestamp(utcStart)
-    const end = parseUtcTimestamp(utcEnd)
+    const start = utcStart ?? null
+    const end = utcEnd ?? null
 
     if (!trimmedVenue) errors.push('Venue is required.')
     if (!trimmedSymbol) errors.push('Symbol is required.')
@@ -461,18 +462,18 @@
         ? timeframeDurationsMs[trimmedTimeframe as DataTimeframe]
         : null
 
-    const rangeErrors = validateUtcRange({
-      startIso: utcStart,
-      endIso: utcEnd,
-      requiredStartMessage: 'UTC start is required.',
-      requiredEndMessage: 'UTC end is required.',
-      invalidStartMessage: 'UTC start must be a valid ISO-8601 timestamp.',
-      invalidEndMessage: 'UTC end must be a valid ISO-8601 timestamp.',
-      notEarlierMessage: 'UTC start must be earlier than UTC end.',
-      minIso: selectedAvailabilityTimeframe?.start.toISOString(),
-      maxIso: selectedAvailabilityTimeframe?.end.toISOString(),
+    const rangeErrors = validateRange({
+      start: utcStart,
+      end: utcEnd,
+       requiredStartMessage: 'Start is required.',
+       requiredEndMessage: 'End is required.',
+       invalidStartMessage: 'Start must be a valid timestamp.',
+       invalidEndMessage: 'End must be a valid timestamp.',
+       notEarlierMessage: 'Start must be earlier than end.',
+      min: selectedAvailabilityTimeframe?.start,
+      max: selectedAvailabilityTimeframe?.end,
       outOfBoundsMessage: selectedAvailabilityTimeframe
-        ? 'UTC range must stay within the selected availability window.'
+         ? 'Range must stay within the selected availability window.'
         : undefined,
       timeframeDurationMs,
       maxIntervals,
@@ -490,8 +491,8 @@
     symbol = scope.symbol
     assetClass = scope.assetClass
     timeframe = scope.timeframe
-    utcStart = scope.start.toISOString()
-    utcEnd = scope.end.toISOString()
+    utcStart = new Date(scope.start)
+    utcEnd = new Date(scope.end)
   }
 
   function availabilityKey(item: Pick<CandleAvailabilityItem, 'venue' | 'symbol' | 'assetClass'>): string {
@@ -563,8 +564,8 @@
     const symbolValue = searchParams.get('symbol')?.trim() ?? ''
     const assetClassValue = searchParams.get('assetClass')?.trim() ?? ''
     const timeframeValue = searchParams.get('timeframe')?.trim() ?? ''
-    const start = parseUtcTimestamp(searchParams.get('start') ?? '')
-    const end = parseUtcTimestamp(searchParams.get('end') ?? '')
+     const start = parseTimestamp(searchParams.get('start') ?? '')
+     const end = parseTimestamp(searchParams.get('end') ?? '')
 
     if (!venueValue || !symbolValue || !assetClassValue || !timeframeValue || !start || !end) {
       return null
@@ -584,24 +585,8 @@
     }
   }
 
-  function parseUtcTimestamp(value: string): Date | null {
-    const trimmed = value.trim()
-    if (!trimmed) {
-      return null
-    }
-    if (!/(Z|[+-]\d{2}:\d{2})$/.test(trimmed)) {
-      return null
-    }
-    const date = new Date(trimmed)
-    return Number.isNaN(date.getTime()) ? null : date
-  }
-
-  function formatDateTime(value: Date | null): string {
-    return value ? value.toISOString() : '—'
-  }
-
   function formatAvailabilityRange(item: { start: Date; end: Date }): string {
-    return `${formatDateTime(item.start)} → ${formatDateTime(item.end)}`
+    return `${formatLocalDateTime(item.start)} → ${formatLocalDateTime(item.end)}`
   }
 
   function formatSelectedCandleLabel(candle: DataCandle | null): string {
@@ -609,7 +594,7 @@
       return 'No normalized candle selected yet.'
     }
 
-    return `${formatDateTime(candle.start)} · ${candle.timeframe} · O ${candle.open} · C ${candle.close}`
+    return `${formatLocalDateTime(candle.start)} · ${candle.timeframe} · O ${candle.open} · C ${candle.close}`
   }
 
   function mapAssetClassForBackfill(assetClassValue: string, venueValue: string): string {
@@ -712,20 +697,20 @@
       </select>
     </label>
     <div class="filter-form__range">
-      <p class="filter-form__range-label">UTC range</p>
-      <UtcDateRangePicker
+       <p class="filter-form__range-label">Date range</p>
+       <DateRangePicker
         bind:startValue={utcStart}
         bind:endValue={utcEnd}
         showValidation={showRangeValidation}
         disabled={candlesLoading}
         showPresets={selectedAvailabilityTimeframe !== null}
-        presetAnchorIso={selectedAvailabilityTimeframe?.end.toISOString() ?? null}
-        minIso={selectedAvailabilityTimeframe?.start.toISOString() ?? null}
-        maxIso={selectedAvailabilityTimeframe?.end.toISOString() ?? null}
+        presetAnchor={selectedAvailabilityTimeframe?.end ?? null}
+        min={selectedAvailabilityTimeframe?.start ?? null}
+        max={selectedAvailabilityTimeframe?.end ?? null}
         timeframeDurationMs={selectedTimeframeDurationMs}
         maxIntervals={selectedTimeframeDurationMs === null ? null : maxIntervals}
         outOfBoundsMessage={selectedAvailabilityTimeframe
-          ? 'UTC range must stay within the selected availability window.'
+           ? 'Range must stay within the selected availability window.'
           : undefined}
         maxIntervalsMessage={selectedTimeframeMaxIntervalsMessage}
       />
@@ -888,7 +873,7 @@
             <tbody>
               {#each candles as candle (candle.identity)}
                 <tr class:selected={selectedCandleIdentity === candle.identity}>
-                  <td>{formatDateTime(candle.start)}</td>
+                   <td>{formatLocalDateTime(candle.start)}</td>
                   <td>{candle.open}</td>
                   <td>{candle.close}</td>
                   <td>{candle.quality}</td>
@@ -983,7 +968,7 @@
                   <td>{item.id}</td>
                   <td>{item.endpoint}</td>
                   <td>{item.requestType}</td>
-                  <td>{formatDateTime(item.receivedAt)}</td>
+                   <td>{formatLocalDateTime(item.receivedAt)}</td>
                   <td>
                     <button class="secondary table-button" type="button" onclick={() => openRawPayloadDetail(item.id)}>
                       View detail
@@ -1055,7 +1040,7 @@
           <div><dt>Body ref</dt><dd>{rawPayloadDetail.metadata.payloadBodyRef}</dd></div>
           <div><dt>Instrument hint</dt><dd>{rawPayloadDetail.metadata.symbol ?? '—'}</dd></div>
           <div><dt>Timeframe</dt><dd>{rawPayloadDetail.metadata.timeframe ?? '—'}</dd></div>
-          <div><dt>Range</dt><dd>{formatDateTime(rawPayloadDetail.metadata.start)} → {formatDateTime(rawPayloadDetail.metadata.end)}</dd></div>
+           <div><dt>Range</dt><dd>{formatLocalDateTime(rawPayloadDetail.metadata.start)} → {formatLocalDateTime(rawPayloadDetail.metadata.end)}</dd></div>
           <div><dt>Body bytes</dt><dd>{rawPayloadDetail.responseBodySizeBytes}</dd></div>
           <div><dt>Truncated</dt><dd>{rawPayloadDetail.responseBodyPreviewTruncated ? 'Yes' : 'No'}</dd></div>
         </dl>

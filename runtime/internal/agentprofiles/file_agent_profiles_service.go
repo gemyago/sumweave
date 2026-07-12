@@ -411,7 +411,7 @@ func (s *FileAgentProfilesService) writeProfileFile(path string, profile AgentPr
 }
 
 func profileTimestampsFromFileInfo(info os.FileInfo) (time.Time, time.Time) {
-	updatedAt := info.ModTime().UTC()
+	updatedAt := info.ModTime()
 	createdAt := creationTimeFromFileInfo(info)
 	if createdAt.IsZero() {
 		createdAt = updatedAt
@@ -486,7 +486,7 @@ func timeFromTimespecField(value reflect.Value) time.Time {
 	if !secOK || !nsecOK || sec <= 0 || nsec < 0 || nsec >= 1e9 {
 		return time.Time{}
 	}
-	return time.Unix(sec, nsec).UTC()
+	return time.Unix(sec, nsec)
 }
 
 func timeFromWindowsCreationField(value reflect.Value) time.Time {
@@ -515,7 +515,7 @@ func timeFromWindowsCreationField(value reflect.Value) time.Time {
 	if nanos <= 0 {
 		return time.Time{}
 	}
-	return time.Unix(0, nanos).UTC()
+	return time.Unix(0, nanos)
 }
 
 func reflectAsInt64(value reflect.Value) (int64, bool) {

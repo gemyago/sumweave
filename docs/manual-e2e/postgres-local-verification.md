@@ -74,9 +74,10 @@ docker compose -f docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJ
 
 ## Run migrations with the DDL role
 
-From `apps/signal-foundry`:
+Change to the backend app root once:
 
 ```bash
+cd apps/signal-foundry
 APP_DATADIR="$PG_VERIFY_APP_DATA_DIR" \
 APP_DATALAYER_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN" \
 go run ./cmd/signal-foundry db-migrate --env local
@@ -85,7 +86,7 @@ go run ./cmd/signal-foundry db-migrate --env local
 Then run an explicit grant pass as a guard:
 
 ```bash
-docker compose -f docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" exec postgres \
+docker compose -f ../../docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" exec postgres \
   psql -U signal_foundry_owner -d signal_foundry_local \
   -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO signal_foundry_runtime; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO signal_foundry_runtime;"
 ```
@@ -132,7 +133,7 @@ Useful spot checks:
 
 ```bash
 curl -i http://127.0.0.1:4501/health
-docker compose -f docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" exec postgres \
+docker compose -f ../../docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" exec postgres \
   psql -U signal_foundry_owner -d signal_foundry_local \
   -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name;"
 ```
@@ -146,5 +147,5 @@ Notes:
 ## Stop and clean up
 
 ```bash
-docker compose -f docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" down -v
+docker compose -f ../../docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" down -v
 ```

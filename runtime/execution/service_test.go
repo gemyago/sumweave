@@ -179,7 +179,7 @@ func TestService(t *testing.T) {
 			require.Equal(t, decision, firstCommand.ApprovedDecision)
 			require.Equal(t, domain.ExecutionCommandStatusCreated, firstCommand.Status)
 			require.InDelta(t, quantity, firstCommand.Quantity, 0)
-			require.Equal(t, requestTime.UTC(), firstCommand.EventTime.Time())
+			require.Equal(t, requestTime, firstCommand.EventTime.Time())
 			require.NotEmpty(t, firstCommand.CommandID)
 		})
 
@@ -246,7 +246,7 @@ func TestService(t *testing.T) {
 						ApprovedDecision: domain.GovernorDecision{
 							Status:       domain.GovernorDecisionStatusApproved,
 							Reason:       domain.GovernorDecisionReasonEligible,
-							DecisionTime: domain.GovernorDecisionTime(decisionTime.UTC()),
+							DecisionTime: domain.GovernorDecisionTime(decisionTime),
 						},
 						Quantity:  float64(fake.IntBetween(1, 10)),
 						EventTime: requestTime,
@@ -370,7 +370,7 @@ func TestService(t *testing.T) {
 			require.Equal(t, strings.TrimSpace(clientOrderID), firstOrder.ClientOrderID)
 			require.Equal(t, domain.ExecutionOrderStatusOpen, firstOrder.Status)
 			require.InDelta(t, quantity, firstOrder.Quantity, 0)
-			require.Equal(t, eventTime.UTC(), firstOrder.EventTime.Time())
+			require.Equal(t, eventTime, firstOrder.EventTime.Time())
 			require.NotEmpty(t, firstOrder.OrderID)
 		})
 
@@ -521,7 +521,7 @@ func TestService(t *testing.T) {
 			require.Equal(t, order.Command, fill.Order.Command)
 			require.InDelta(t, quantity, fill.Quantity, 0)
 			require.InDelta(t, price, fill.Price, 0)
-			require.Equal(t, eventTime.UTC(), fill.EventTime.Time())
+			require.Equal(t, eventTime, fill.EventTime.Time())
 		})
 
 		t.Run("rejects invalid fill inputs", func(t *testing.T) {

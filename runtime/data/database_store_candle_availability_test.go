@@ -100,12 +100,15 @@ func TestDatabaseStoreCandleAvailability(t *testing.T) {
 
 		startedAt := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 		run, err := NewIngestionRun(IngestionRunParams{
-			ID:          randomWord("run"),
-			Source:      randomWord("source"),
-			Venue:       domain.Venue(venue),
-			Status:      IngestionRunStatusSucceeded,
-			StartedAt:   startedAt,
-			CompletedAt: startedAt.Add(time.Minute),
+			ID:        randomWord("run"),
+			Source:    randomWord("source"),
+			Venue:     domain.Venue(venue),
+			Status:    IngestionRunStatusSucceeded,
+			StartedAt: startedAt,
+			CompletedAt: func() *time.Time {
+				completedAt := startedAt.Add(time.Minute)
+				return &completedAt
+			}(),
 			RecordCount: 1,
 		})
 		require.NoError(t, err)
@@ -179,15 +182,15 @@ func TestDatabaseStoreCandleAvailability(t *testing.T) {
 			item.Timeframes[0].Timeframe,
 			item.Timeframes[1].Timeframe,
 		})
-		require.Equal(t, base, item.Timeframes[0].StartAt)
-		require.Equal(t, base.Add(3*time.Minute), item.Timeframes[0].EndAt)
+		require.True(t, base.Equal(item.Timeframes[0].StartAt))
+		require.True(t, base.Add(3*time.Minute).Equal(item.Timeframes[0].EndAt))
 		require.EqualValues(t, 2, item.Timeframes[0].Count)
-		require.Equal(t, base, item.Timeframes[1].StartAt)
-		require.Equal(t, base.Add(5*time.Minute), item.Timeframes[1].EndAt)
+		require.True(t, base.Equal(item.Timeframes[1].StartAt))
+		require.True(t, base.Add(5*time.Minute).Equal(item.Timeframes[1].EndAt))
 		require.EqualValues(t, 1, item.Timeframes[1].Count)
 		require.Equal(t, domain.Timeframe5m, item.DefaultSlice.Timeframe)
-		require.Equal(t, base, item.DefaultSlice.StartAt)
-		require.Equal(t, base.Add(5*time.Minute), item.DefaultSlice.EndAt)
+		require.True(t, base.Equal(item.DefaultSlice.StartAt))
+		require.True(t, base.Add(5*time.Minute).Equal(item.DefaultSlice.EndAt))
 
 		filtered, err := store.ListCandleAvailability(t.Context(), CandleAvailabilityListQuery{
 			Venue:      domain.Venue("  venue-browseable  "),
@@ -234,12 +237,9 @@ func TestDatabaseStoreCandleAvailability(t *testing.T) {
 		require.Equal(t, newest.Symbol, firstPage.DefaultSelection.Symbol)
 		require.Equal(t, newest.AssetClass, firstPage.DefaultSelection.AssetClass)
 		require.Equal(t, domain.Timeframe1m, firstPage.DefaultSelection.Timeframe)
-		require.Equal(t, newestLatestStart.Add(time.Minute), firstPage.DefaultSelection.EndAt)
-		require.Equal(
-			t,
-			firstPage.DefaultSelection.EndAt.Add(-500*time.Minute),
-			firstPage.DefaultSelection.StartAt,
-		)
+		require.True(t, newestLatestStart.Add(time.Minute).Equal(firstPage.DefaultSelection.EndAt))
+		require.True(t, firstPage.DefaultSelection.EndAt.Add(-500*time.Minute).
+			Equal(firstPage.DefaultSelection.StartAt))
 
 		secondPage, err := store.ListCandleAvailability(t.Context(), CandleAvailabilityListQuery{
 			Limit:  2,
@@ -251,10 +251,38 @@ func TestDatabaseStoreCandleAvailability(t *testing.T) {
 		require.Empty(t, secondPage.NextCursor)
 		require.Equal(t, beta.Symbol, secondPage.Items[0].Symbol)
 		require.Equal(t, domain.Timeframe1m, firstPage.Items[0].DefaultSlice.Timeframe)
+		require.True(t, time.Date(2024, time.January, 3, 0, 9, 0, 0, time.UTC).
+			Equal(firstPage.Items[1].DefaultSlice.StartAt))
+	})
+
+	t.Run("selects canonical availability bounds", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t)
+		ingestionService := makeIngestionService(t, store)
+		instrument := makeInstrument(t, randomWord("venue"), strings.ToUpper(randomWord("symbol")))
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		for _, candle := range []domain.Candle{
+			makeCandle(t, instrument, domain.Timeframe1m, later),
+			makeCandle(t, instrument, domain.Timeframe1m, earlier),
+		} {
+			_, err := ingestionService.IngestCandle(t.Context(), candle)
+			require.NoError(t, err)
+		}
+
+		result, err := store.ListCandleAvailability(t.Context(), CandleAvailabilityListQuery{})
+		require.NoError(t, err)
+		require.Len(t, result.Items, 1)
+		require.Len(t, result.Items[0].Timeframes, 1)
+		summary := result.Items[0].Timeframes[0]
+		require.Equal(t, earlier.Format(time.RFC3339Nano), summary.StartAt.Format(time.RFC3339Nano))
 		require.Equal(
 			t,
-			time.Date(2024, time.January, 3, 0, 9, 0, 0, time.UTC),
-			firstPage.Items[1].DefaultSlice.StartAt,
+			later.Add(time.Minute).Format(time.RFC3339Nano),
+			summary.EndAt.Format(time.RFC3339Nano),
 		)
 	})
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/gemyago/signal-foundry/finance/domain"
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/dig"
@@ -71,23 +72,31 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 	}
 
 	t.Run("make run bank connection sync params keeps omitted windows unset", func(t *testing.T) {
-		params := makeRunBankConnectionSyncParams(bankConnectionSyncJobInput{
+		jobID := "job-" + faker.New().UUID().V4()
+		params := makeRunBankConnectionSyncParams(jobspkg.Job{ID: jobID}, bankConnectionSyncJobInput{
 			ConnectionID: "connection-1",
 			Reason:       "manual",
 		})
-		assert.True(t, params.WindowStart.IsZero())
-		assert.True(t, params.WindowEnd.IsZero())
+		assert.Equal(t, jobID, params.JobID)
+		assert.Nil(t, params.WindowStart)
+		assert.Nil(t, params.WindowEnd)
 
 		windowStart := time.Date(2026, time.June, 1, 9, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60))
 		windowEnd := time.Date(2026, time.June, 15, 18, 0, 0, 0, time.FixedZone("UTC-5", -5*60*60))
-		params = makeRunBankConnectionSyncParams(bankConnectionSyncJobInput{
+		scheduledAt := time.Date(2026, time.June, 1, 9, 0, 0, 0, time.FixedZone("UTC+3", 3*60*60))
+		nextRunAt := scheduledAt.Add(15 * time.Minute)
+		params = makeRunBankConnectionSyncParams(jobspkg.Job{
+			ID: jobID, ScheduledAt: &scheduledAt, ScheduledNextRunAt: &nextRunAt,
+		}, bankConnectionSyncJobInput{
 			ConnectionID: "connection-2",
 			Reason:       "manual",
 			WindowStart:  &windowStart,
 			WindowEnd:    &windowEnd,
 		})
-		assert.Equal(t, windowStart.UTC(), params.WindowStart)
-		assert.Equal(t, windowEnd.UTC(), params.WindowEnd)
+		assert.Equal(t, &windowStart, params.WindowStart)
+		assert.Equal(t, &windowEnd, params.WindowEnd)
+		assert.Equal(t, &scheduledAt, params.ScheduledAt)
+		assert.Equal(t, &nextRunAt, params.ScheduledNextRunAt)
 	})
 
 	openSharedDB := func(t *testing.T, dsn string) *sql.DB {

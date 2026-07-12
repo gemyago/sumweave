@@ -46,7 +46,7 @@ type IngestionRun struct {
 	Venue        domain.Venue
 	Status       IngestionRunStatus
 	StartedAt    time.Time
-	CompletedAt  time.Time
+	CompletedAt  *time.Time
 	RecordCount  int
 	ErrorSummary string
 }
@@ -58,7 +58,7 @@ type IngestionRunParams struct {
 	Venue        domain.Venue
 	Status       IngestionRunStatus
 	StartedAt    time.Time
-	CompletedAt  time.Time
+	CompletedAt  *time.Time
 	RecordCount  int
 	ErrorSummary string
 }
@@ -115,7 +115,7 @@ type NormalizationRun struct {
 	RawPayloadIDs        []string
 	Status               NormalizationRunStatus
 	StartedAt            time.Time
-	CompletedAt          time.Time
+	CompletedAt          *time.Time
 	RecordKind           LineageRecordKind
 	SourceRecordCount    int
 	CanonicalRecordCount int
@@ -128,7 +128,7 @@ type NormalizationRunParams struct {
 	RawPayloadIDs        []string
 	Status               NormalizationRunStatus
 	StartedAt            time.Time
-	CompletedAt          time.Time
+	CompletedAt          *time.Time
 	RecordKind           LineageRecordKind
 	SourceRecordCount    int
 	CanonicalRecordCount int
@@ -237,7 +237,12 @@ func canonicalizeIngestionRun(run IngestionRun) (IngestionRun, error) {
 		return IngestionRun{}, err
 	}
 
-	startedAt, completedAt, err := canonicalizeLineageTimes(run.StartedAt, run.CompletedAt, "ingestion run")
+	startedAt, completedAt, err := validateLineageTimes(
+		run.StartedAt,
+		run.CompletedAt,
+		status == IngestionRunStatusStarted,
+		"ingestion run",
+	)
 	if err != nil {
 		return IngestionRun{}, err
 	}
@@ -334,7 +339,7 @@ func canonicalizeRawVenuePayload(payload RawVenuePayload) (RawVenuePayload, erro
 		Instrument:         instrument,
 		Timeframe:          timeframe,
 		TimeRange:          timeRange,
-		ReceivedAt:         payload.ReceivedAt.UTC(),
+		ReceivedAt:         payload.ReceivedAt,
 	}, nil
 }
 
@@ -349,15 +354,13 @@ func canonicalizeRawPayloadExchangeTimes(
 		return time.Time{}, time.Time{}, validationError("raw payload response time is required")
 	}
 
-	canonicalRequestAt := requestAt.UTC()
-	canonicalResponseAt := responseAt.UTC()
-	if canonicalResponseAt.Before(canonicalRequestAt) {
+	if responseAt.Before(requestAt) {
 		return time.Time{}, time.Time{}, validationError(
 			"raw payload response time must not be before request time",
 		)
 	}
 
-	return canonicalRequestAt, canonicalResponseAt, nil
+	return requestAt, responseAt, nil
 }
 
 func canonicalizeRawPayloadBody(
@@ -440,7 +443,12 @@ func canonicalizeNormalizationRun(run NormalizationRun) (NormalizationRun, error
 		return NormalizationRun{}, err
 	}
 
-	startedAt, completedAt, err := canonicalizeLineageTimes(run.StartedAt, run.CompletedAt, "normalization run")
+	startedAt, completedAt, err := validateLineageTimes(
+		run.StartedAt,
+		run.CompletedAt,
+		status == NormalizationRunStatusStarted,
+		"normalization run",
+	)
 	if err != nil {
 		return NormalizationRun{}, err
 	}
@@ -536,23 +544,35 @@ func canonicalizeDataBatch(batch DataBatch) (DataBatch, error) {
 	}, nil
 }
 
-func canonicalizeLineageTimes(startedAt, completedAt time.Time, subject string) (time.Time, time.Time, error) {
+func validateLineageTimes(
+	startedAt time.Time,
+	completedAt *time.Time,
+	started bool,
+	subject string,
+) (time.Time, *time.Time, error) {
 	if startedAt.IsZero() {
-		return time.Time{}, time.Time{}, validationError(subject + " started time is required")
+		return time.Time{}, nil, validationError(subject + " started time is required")
+	}
+	if started && completedAt != nil {
+		return time.Time{}, nil, validationError(subject + " completed time must be empty while started")
+	}
+	if !started && completedAt == nil {
+		return time.Time{}, nil, validationError(subject + " completed time is required")
+	}
+	if completedAt == nil {
+		return startedAt, nil, nil
+	}
+	if completedAt.IsZero() {
+		return time.Time{}, nil, validationError(subject + " completed time is required")
+	}
+	if completedAt.Before(startedAt) {
+		return time.Time{}, nil, validationError(
+			subject + " completed time must not be before started time",
+		)
 	}
 
-	canonicalStartedAt := startedAt.UTC()
-	canonicalCompletedAt := time.Time{}
-	if !completedAt.IsZero() {
-		canonicalCompletedAt = completedAt.UTC()
-		if canonicalCompletedAt.Before(canonicalStartedAt) {
-			return time.Time{}, time.Time{}, validationError(
-				subject + " completed time must not be before started time",
-			)
-		}
-	}
-
-	return canonicalStartedAt, canonicalCompletedAt, nil
+	completedAtValue := *completedAt
+	return startedAt, &completedAtValue, nil
 }
 
 func canonicalizeMetadataMap(metadata map[string]string) map[string]string {

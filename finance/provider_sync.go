@@ -177,11 +177,20 @@ type DeleteBankConnectionParams struct {
 }
 
 type RunBankConnectionSyncParams struct {
+	ConnectionID       string
+	JobID              string
+	Reason             string
+	WindowStart        *time.Time
+	WindowEnd          *time.Time
+	ScheduledAt        *time.Time
+	ScheduledNextRunAt *time.Time
+}
+
+type RecordBankConnectionSyncScheduledParams struct {
 	ConnectionID string
 	JobID        string
-	Reason       string
-	WindowStart  time.Time
-	WindowEnd    time.Time
+	ScheduledAt  time.Time
+	NextRunAt    time.Time
 }
 
 type ApplyProviderSyncResultParams struct {
@@ -419,12 +428,11 @@ func matchID(match *domain.ProviderTransactionMatch) string {
 	return match.ID
 }
 
-func timePtrUTC(value time.Time) *time.Time {
+func timePtrOrNil(value time.Time) *time.Time {
 	if value.IsZero() {
 		return nil
 	}
-	utcValue := value.UTC()
-	return &utcValue
+	return &value
 }
 
 func defaultLogger() *slog.Logger {

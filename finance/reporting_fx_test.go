@@ -316,32 +316,32 @@ func TestReportingAndFX(t *testing.T) {
 			assert.Equal(t, DashboardPeriodPresetCurrentMonth, dashboard.Period.Preset)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC),
 				dashboard.Period.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 30, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
 				dashboard.Period.EndDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.May, 13, 11, 59, 59, 999999999, time.UTC),
 				dashboard.Period.Previous.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.May, 31, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 1, 11, 59, 59, 999999999, time.UTC),
 				dashboard.Period.Previous.EndDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 20, 12, 0, 0, 1, time.UTC),
 				dashboard.Period.Next.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.July, 31, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.July, 9, 12, 0, 0, 1, time.UTC),
 				dashboard.Period.Next.EndDate,
 			)
 
@@ -367,8 +367,8 @@ func TestReportingAndFX(t *testing.T) {
 			assert.Equal(t, int64(-20_00), dashboard.AccountBalances[0].NativePendingMinor)
 			require.NotNil(t, dashboard.AccountBalances[0].DisplayBookedMinor)
 			require.NotNil(t, dashboard.AccountBalances[0].DisplayPendingMinor)
-			assert.Equal(t, int64(672_00), *dashboard.AccountBalances[0].DisplayBookedMinor)
-			assert.Equal(t, int64(-84_00), *dashboard.AccountBalances[0].DisplayPendingMinor)
+			assert.Equal(t, int64(656_00), *dashboard.AccountBalances[0].DisplayBookedMinor)
+			assert.Equal(t, int64(-82_00), *dashboard.AccountBalances[0].DisplayPendingMinor)
 			assert.Equal(t, eurAccount.ID, dashboard.AccountBalances[2].AccountID)
 			assert.True(t, dashboard.AccountBalances[2].MissingFX)
 			assert.Nil(t, dashboard.AccountBalances[2].DisplayBookedMinor)
@@ -391,7 +391,7 @@ func TestReportingAndFX(t *testing.T) {
 					AccountID:     eurAccount.ID,
 					BaseCurrency:  "EUR",
 					QuoteCurrency: "PLN",
-					RateDate:      time.Date(2026, time.June, 9, 0, 0, 0, 0, time.UTC),
+					RateDate:      missingFXTransaction.EffectiveAt,
 					Provider:      FXProviderFrankfurter,
 				},
 				{
@@ -400,7 +400,7 @@ func TestReportingAndFX(t *testing.T) {
 					AccountID:     eurAccount.ID,
 					BaseCurrency:  "EUR",
 					QuoteCurrency: "PLN",
-					RateDate:      time.Date(2026, time.June, 30, 0, 0, 0, 0, time.UTC),
+					RateDate:      dashboard.Period.EndDate,
 					Provider:      FXProviderFrankfurter,
 				},
 				{
@@ -409,7 +409,7 @@ func TestReportingAndFX(t *testing.T) {
 					AccountID:     gbpAccount.ID,
 					BaseCurrency:  "GBP",
 					QuoteCurrency: "PLN",
-					RateDate:      time.Date(2026, time.June, 30, 0, 0, 0, 0, time.UTC),
+					RateDate:      dashboard.Period.EndDate,
 					Provider:      FXProviderFrankfurter,
 				},
 			}, dashboard.MissingFX)
@@ -428,32 +428,32 @@ func TestReportingAndFX(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(
 				t,
-				time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.May, 1, 12, 0, 0, 0, time.UTC),
 				previousMonth.Period.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.May, 31, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 1, 11, 59, 59, 999999999, time.UTC),
 				previousMonth.Period.EndDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.March, 31, 12, 0, 0, 0, time.UTC),
 				previousMonth.Period.Previous.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.April, 30, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.May, 1, 11, 59, 59, 999999999, time.UTC),
 				previousMonth.Period.Previous.EndDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC),
 				previousMonth.Period.Next.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 30, 0, 0, 0, 0, time.UTC),
+				time.Date(2026, time.July, 2, 11, 59, 59, 999999999, time.UTC),
 				previousMonth.Period.Next.EndDate,
 			)
 			assert.Equal(t, int64(390_00), previousMonth.Settled.IncomeMinor)
@@ -468,9 +468,9 @@ func TestReportingAndFX(t *testing.T) {
 			})
 			require.NoError(t, err)
 			assert.Equal(t, int64(400_00), customRange.Settled.IncomeMinor)
-			assert.Equal(t, int64(120_00), customRange.Settled.ExpenseMinor)
-			assert.Equal(t, int64(280_00), customRange.Settled.NetMinor)
-			assert.Equal(t, int64(170_00), customRange.AccountBalances[0].NativeBookedMinor)
+			assert.Equal(t, int64(160_00), customRange.Settled.ExpenseMinor)
+			assert.Equal(t, int64(240_00), customRange.Settled.NetMinor)
+			assert.Equal(t, int64(160_00), customRange.AccountBalances[0].NativeBookedMinor)
 			assert.Equal(t, int64(0), customRange.AccountBalances[0].NativePendingMinor)
 
 			aggregateStore := persistence.NewAccountBalanceStoreFromStore(store)
@@ -629,14 +629,14 @@ func TestReportingAndFX(t *testing.T) {
 					Provider:      FXProviderFrankfurter,
 					BaseCurrency:  "USD",
 					QuoteCurrency: "PLN",
-					RateDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
+					RateDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.Local),
 					Rate:          4.1234,
 				},
 				{
 					Provider:      FXProviderFrankfurter,
 					BaseCurrency:  "USD",
 					QuoteCurrency: "EUR",
-					RateDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
+					RateDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.Local),
 					Rate:          0.8811,
 				},
 			}, rates)

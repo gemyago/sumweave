@@ -66,7 +66,7 @@ func NewLedgerService(store ledgerServiceStore, opts ...LedgerServiceOption) *Le
 	service := &LedgerService{
 		store:  store,
 		access: newAccessGuard(store),
-		now:    func() time.Time { return time.Now().UTC() },
+		now:    time.Now,
 		newID:  uuid.NewString,
 	}
 	for _, opt := range opts {
@@ -146,6 +146,9 @@ func (s *LedgerService) RecordTransaction(
 	ctx context.Context,
 	params RecordTransactionParams,
 ) (domain.Transaction, error) {
+	if err := validateLedgerTimestamp(params.EffectiveAt); err != nil {
+		return domain.Transaction{}, err
+	}
 	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
 	if err != nil {
 		return domain.Transaction{}, err
@@ -167,7 +170,7 @@ func (s *LedgerService) RecordTransaction(
 	if trimmedTransferGroupID := strings.TrimSpace(params.TransferGroupID); trimmedTransferGroupID != "" {
 		transferGroupID = &trimmedTransferGroupID
 	}
-	now := s.now().UTC()
+	now := s.now()
 	txn := domain.Transaction{
 		ID:               s.newID(),
 		TenantID:         account.TenantID,
@@ -178,7 +181,7 @@ func (s *LedgerService) RecordTransaction(
 		AmountMinor:      params.AmountMinor,
 		Currency:         strings.ToUpper(strings.TrimSpace(params.Currency)),
 		Description:      strings.TrimSpace(params.Description),
-		EffectiveAt:      params.EffectiveAt.UTC(),
+		EffectiveAt:      params.EffectiveAt,
 		CategoryID:       categoryID,
 		TransferGroupID:  transferGroupID,
 		CreatedAt:        now,
@@ -196,33 +199,47 @@ func (s *LedgerService) UpdateTransaction(
 	ctx context.Context,
 	params UpdateTransactionParams,
 ) (domain.Transaction, error) {
+	if params.EffectiveAt != nil {
+		if err := validateLedgerTimestamp(*params.EffectiveAt); err != nil {
+			return domain.Transaction{}, err
+		}
+	}
 	txn, err := s.requireTenantTransaction(ctx, params.TenantID, params.ActorUserID, params.TransactionID)
 	if err != nil {
 		return domain.Transaction{}, err
 	}
-	var categoryID *string
-	if trimmedCategoryID := strings.TrimSpace(params.CategoryID); trimmedCategoryID != "" {
+	if params.ClearCategory {
+		txn.CategoryID = nil
+	} else if params.CategoryID != "" {
 		category, categoryErr := s.requireTenantCategory(
 			ctx,
 			params.TenantID,
 			params.ActorUserID,
-			trimmedCategoryID,
+			params.CategoryID,
 		)
 		if categoryErr != nil {
 			return domain.Transaction{}, categoryErr
 		}
-		categoryID = &category.ID
+		txn.CategoryID = &category.ID
 	}
 	txn.Description = strings.TrimSpace(params.Description)
 	txn.AmountMinor = params.AmountMinor
-	txn.EffectiveAt = params.EffectiveAt.UTC()
-	txn.CategoryID = categoryID
-	txn.UpdatedAt = s.now().UTC()
+	if params.EffectiveAt != nil {
+		txn.EffectiveAt = *params.EffectiveAt
+	}
+	txn.UpdatedAt = s.now()
 	saved, err := s.store.SaveTransaction(ctx, txn)
 	if err != nil {
 		return domain.Transaction{}, fmt.Errorf("update transaction: %w", err)
 	}
 	return saved, nil
+}
+
+func validateLedgerTimestamp(value time.Time) error {
+	if value.IsZero() {
+		return errors.New("effectiveAt must be non-zero")
+	}
+	return nil
 }
 
 func (s *LedgerService) GetTransaction(
@@ -241,7 +258,7 @@ func (s *LedgerService) HideTransaction(ctx context.Context, params HideTransact
 	if err != nil {
 		return err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	txn.HiddenAt = &now
 	txn.UpdatedAt = now
 	_, err = s.store.SaveTransaction(ctx, txn)
@@ -276,7 +293,7 @@ func (s *LedgerService) LinkTransfers(ctx context.Context, params LinkTransfersP
 		transferGroupID = s.newID()
 	}
 
-	now := s.now().UTC()
+	now := s.now()
 	firstTransaction.TransferGroupID = &transferGroupID
 	firstTransaction.TransferMatchedAt = &now
 	firstTransaction.UpdatedAt = now
@@ -370,7 +387,9 @@ func summarizeBookedTransactions(items []domain.Transaction) domain.TransactionS
 			continue
 		case domain.TransactionKindRefund:
 			summary.ExpenseMinor -= item.AmountMinor
-		case domain.TransactionKindRegular:
+		case domain.TransactionKindExpense,
+			domain.TransactionKindIncome,
+			domain.TransactionKindRegular:
 			if item.AmountMinor > 0 {
 				summary.IncomeMinor += item.AmountMinor
 			} else if item.AmountMinor < 0 {

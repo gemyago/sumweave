@@ -410,12 +410,6 @@ func TestService(t *testing.T) {
 		require.Equal(t, expected, first)
 		require.Equal(t, expectedRequestedInstrument, first.Identity.Instrument)
 		require.Len(t, first.Points, 3)
-
-		for idx, point := range first.Points {
-			require.Equal(t, time.UTC, point.Time.Time().Location(), "point %d time must be UTC", idx)
-			require.Equal(t, time.UTC, point.ValueRange.Start.Location(), "point %d range start must be UTC", idx)
-			require.Equal(t, time.UTC, point.ValueRange.End.Location(), "point %d range end must be UTC", idx)
-		}
 	})
 
 	t.Run("calculate candles uses requested half-open range without hidden lookback reads", func(t *testing.T) {

@@ -1,8 +1,8 @@
-export function formatFinanceDate(value: Date | null): string {
-  return formatFinanceWithOptions(value, { dateStyle: 'medium', timeZone: 'UTC' })
+export function formatFinanceDate(value: Date | null | undefined): string {
+  return formatFinanceWithOptions(value, { dateStyle: 'medium' })
 }
 
-export function formatFinanceDateTime(value: Date | null): string {
+export function formatFinanceDateTime(value: Date | null | undefined): string {
   return formatFinanceWithOptions(value, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
@@ -14,10 +14,10 @@ export function formatFinanceMoney(minor: number | null | undefined, currency: s
 }
 
 function formatFinanceWithOptions(
-  value: Date | null,
+  value: Date | null | undefined,
   options: Intl.DateTimeFormatOptions,
 ): string {
-  if (!value || Number.isNaN(value.getTime()) || value.getUTCFullYear() <= 1) {
+  if (!value || Number.isNaN(value.getTime())) {
     return '—'
   }
 

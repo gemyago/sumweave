@@ -23,7 +23,8 @@ type sqliteIndexInfoRow struct {
 }
 
 type sqliteTableInfoRow struct {
-	Name string `gorm:"column:name"`
+	Name    string `gorm:"column:name"`
+	NotNull int    `gorm:"column:notnull"`
 }
 
 func TestDatabaseStore(t *testing.T) {
@@ -52,6 +53,11 @@ func TestDatabaseStore(t *testing.T) {
 	}
 
 	randomTime := func() time.Time {
+		offsetHours := fake.IntBetween(-11, 12)
+		if offsetHours == 0 {
+			offsetHours = 1
+		}
+
 		return time.Date(
 			fake.IntBetween(2021, 2032),
 			time.Month(fake.IntBetween(1, 12)),
@@ -60,7 +66,7 @@ func TestDatabaseStore(t *testing.T) {
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 999999999),
-			time.FixedZone(randomWord("zone"), fake.IntBetween(-11, 12)*3600),
+			time.FixedZone("", offsetHours*3600),
 		)
 	}
 
@@ -225,7 +231,6 @@ func TestDatabaseStore(t *testing.T) {
 
 		tablePrefix := strings.ReplaceAll(randomWord("sf"), "-", "_") + "_"
 		store := makeStore(t, ":memory:", tablePrefix)
-
 		var instrumentColumns []sqliteTableInfoRow
 		require.NoError(
 			t,
@@ -315,7 +320,6 @@ func TestDatabaseStore(t *testing.T) {
 				"provenance_identity_key",
 			}),
 		)
-
 		now := time.Now().UTC().Truncate(time.Second)
 		require.NoError(
 			t,
@@ -379,8 +383,8 @@ func TestDatabaseStore(t *testing.T) {
 		first := makeCandle(t, instrument)
 		persistedFirst, err := service.IngestCandle(t.Context(), first)
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, persistedFirst.TimeRange.Start.Location())
-		require.Equal(t, time.UTC, persistedFirst.TimeRange.End.Location())
+		require.True(t, first.TimeRange.Start.Equal(persistedFirst.TimeRange.Start))
+		require.True(t, first.TimeRange.End.Equal(persistedFirst.TimeRange.End))
 
 		second, err := domain.NewCandle(domain.CandleParams{
 			Instrument: first.Instrument,
@@ -484,7 +488,7 @@ func TestDatabaseStore(t *testing.T) {
 		first := makeTrade(t, instrument)
 		persistedFirst, err := service.IngestTrade(t.Context(), first)
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, persistedFirst.EventTime.Location())
+		require.True(t, first.EventTime.Equal(persistedFirst.EventTime))
 
 		second, err := domain.NewTrade(domain.TradeParams{
 			Instrument: first.Instrument,
@@ -515,6 +519,17 @@ func TestDatabaseStore(t *testing.T) {
 		require.InDelta(t, second.Size, trades[0].Size, 1e-9)
 		require.Equal(t, domain.DataQualityValidated, trades[0].Quality)
 		require.Equal(t, first.Provenance, trades[0].Provenance)
+	})
+
+	t.Run("trade identity is stable across equivalent offsets", func(t *testing.T) {
+		t.Parallel()
+
+		eventTime := randomTime()
+		equivalent := eventTime.In(time.FixedZone("", -9*60*60))
+		provenance, err := domain.NewSourceProvenance(randomWord("source"), "")
+		require.NoError(t, err)
+
+		require.Equal(t, tradeIdentityKey(eventTime, provenance), tradeIdentityKey(equivalent, provenance))
 	})
 
 	t.Run("trade ingestion falls back to event-time identity when provenance record ID is blank", func(t *testing.T) {
@@ -748,6 +763,157 @@ func TestDatabaseStore(t *testing.T) {
 		require.NotZero(t, firstReplay[1].Identity)
 		require.NotZero(t, firstReplay[2].Identity)
 		require.NotEqual(t, firstReplay[1].Identity, firstReplay[2].Identity)
+	})
+
+	t.Run("candle and trade reads use canonical timestamp order", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, ":memory:", "")
+		instrument := makeInstrument(t)
+		_, err := store.UpsertInstrument(t.Context(), instrument)
+		require.NoError(t, err)
+
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		makeCandleAt := func(at time.Time, suffix string) domain.Candle {
+			t.Helper()
+			timeRange, rangeErr := domain.NewTimeRange(at, at.Add(time.Minute))
+			require.NoError(t, rangeErr)
+			provenance, provenanceErr := domain.NewSourceProvenance(
+				randomWord("source-"+suffix),
+				randomWord("record-"+suffix),
+			)
+			require.NoError(t, provenanceErr)
+			candle, candleErr := domain.NewCandle(domain.CandleParams{
+				Instrument: instrument,
+				Timeframe:  domain.Timeframe1m,
+				TimeRange:  timeRange,
+				Open:       fake.Float64(2, 1, 1000),
+				High:       fake.Float64(2, 1, 1000),
+				Low:        fake.Float64(2, 0, 1000),
+				Close:      fake.Float64(2, 1, 1000),
+				Volume:     fake.Float64(4, 0, 10000),
+				Quality:    domain.DataQualityValidated,
+				Provenance: provenance,
+			})
+			require.NoError(t, candleErr)
+			return candle
+		}
+		makeTradeAt := func(at time.Time, suffix string) domain.Trade {
+			t.Helper()
+			provenance, provenanceErr := domain.NewSourceProvenance(
+				randomWord("source-"+suffix),
+				randomWord("record-"+suffix),
+			)
+			require.NoError(t, provenanceErr)
+			trade, tradeErr := domain.NewTrade(domain.TradeParams{
+				Instrument: instrument,
+				EventTime:  at,
+				Price:      fake.Float64(4, 1, 100000),
+				Size:       fake.Float64(4, 0, 100000),
+				Quality:    domain.DataQualityRaw,
+				Provenance: provenance,
+			})
+			require.NoError(t, tradeErr)
+			return trade
+		}
+
+		earlierCandle := makeCandleAt(earlier, "earlier-candle")
+		laterCandle := makeCandleAt(later, "later-candle")
+		earlierTrade := makeTradeAt(earlier, "earlier-trade")
+		laterTrade := makeTradeAt(later, "later-trade")
+		for _, candle := range []domain.Candle{laterCandle, earlierCandle} {
+			_, err = store.UpsertCandle(t.Context(), candle)
+			require.NoError(t, err)
+		}
+		for _, trade := range []domain.Trade{laterTrade, earlierTrade} {
+			_, err = store.UpsertTrade(t.Context(), trade)
+			require.NoError(t, err)
+		}
+		batchID := randomWord("batch")
+		require.NoError(t, store.db.Model(&candleModel{}).Where("1 = 1").Update("data_batch_id", batchID).Error)
+		require.NoError(t, store.db.Model(&tradeModel{}).Where("1 = 1").Update("data_batch_id", batchID).Error)
+		readRange, err := domain.NewTimeRange(earlier.Add(-time.Minute), later.Add(time.Minute))
+		require.NoError(t, err)
+
+		candles, err := store.QueryCandles(t.Context(), instrument, domain.Timeframe1m, readRange)
+		require.NoError(t, err)
+		require.Len(t, candles, 2)
+		require.Equal(t, []string{earlierCandle.Provenance.RecordID, laterCandle.Provenance.RecordID}, []string{
+			candles[0].Provenance.RecordID,
+			candles[1].Provenance.RecordID,
+		})
+		require.Equal(t, earlier.Format(time.RFC3339Nano), candles[0].TimeRange.Start.Format(time.RFC3339Nano))
+		require.Equal(t, later.Format(time.RFC3339Nano), candles[1].TimeRange.Start.Format(time.RFC3339Nano))
+		replayedCandles, err := store.ReplayCandles(t.Context(), instrument, domain.Timeframe1m, readRange)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierCandle.Provenance.RecordID, laterCandle.Provenance.RecordID}, []string{
+			replayedCandles[0].Candle.Provenance.RecordID,
+			replayedCandles[1].Candle.Provenance.RecordID,
+		})
+		batchCandles, err := store.ReplayCandlesByDataBatch(t.Context(), batchID)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierCandle.Provenance.RecordID, laterCandle.Provenance.RecordID}, []string{
+			batchCandles[0].Candle.Provenance.RecordID,
+			batchCandles[1].Candle.Provenance.RecordID,
+		})
+
+		trades, err := store.QueryTrades(t.Context(), instrument, readRange)
+		require.NoError(t, err)
+		require.Len(t, trades, 2)
+		require.Equal(t, []string{earlierTrade.Provenance.RecordID, laterTrade.Provenance.RecordID}, []string{
+			trades[0].Provenance.RecordID,
+			trades[1].Provenance.RecordID,
+		})
+		require.Equal(t, earlier.Format(time.RFC3339Nano), trades[0].EventTime.Format(time.RFC3339Nano))
+		require.Equal(t, later.Format(time.RFC3339Nano), trades[1].EventTime.Format(time.RFC3339Nano))
+		replayedTrades, err := store.ReplayTrades(t.Context(), instrument, readRange)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierTrade.Provenance.RecordID, laterTrade.Provenance.RecordID}, []string{
+			replayedTrades[0].Trade.Provenance.RecordID,
+			replayedTrades[1].Trade.Provenance.RecordID,
+		})
+		batchTrades, err := store.ReplayTradesByDataBatch(t.Context(), batchID)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierTrade.Provenance.RecordID, laterTrade.Provenance.RecordID}, []string{
+			batchTrades[0].Trade.Provenance.RecordID,
+			batchTrades[1].Trade.Provenance.RecordID,
+		})
+
+		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789, time.FixedZone("east", 2*60*60))
+		mixedCandle := makeCandleAt(mixedOffsetAt, "mixed-offset-candle")
+		mixedTrade := makeTradeAt(mixedOffsetAt, "mixed-offset-trade")
+		_, err = store.UpsertCandle(t.Context(), mixedCandle)
+		require.NoError(t, err)
+		_, err = store.UpsertTrade(t.Context(), mixedTrade)
+		require.NoError(t, err)
+		instantRange, err := domain.NewTimeRange(
+			time.Date(2025, time.December, 31, 21, 30, 0, 0, time.UTC),
+			time.Date(2025, time.December, 31, 22, 30, 0, 0, time.UTC),
+		)
+		require.NoError(t, err)
+		candles, err = store.QueryCandles(t.Context(), instrument, domain.Timeframe1m, instantRange)
+		require.NoError(t, err)
+		require.Equal(t, []string{mixedCandle.Provenance.RecordID}, []string{candles[0].Provenance.RecordID})
+		replayedCandles, err = store.ReplayCandles(t.Context(), instrument, domain.Timeframe1m, instantRange)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]string{mixedCandle.Provenance.RecordID},
+			[]string{replayedCandles[0].Candle.Provenance.RecordID},
+		)
+		trades, err = store.QueryTrades(t.Context(), instrument, instantRange)
+		require.NoError(t, err)
+		require.Equal(t, []string{mixedTrade.Provenance.RecordID}, []string{trades[0].Provenance.RecordID})
+		replayedTrades, err = store.ReplayTrades(t.Context(), instrument, instantRange)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]string{mixedTrade.Provenance.RecordID},
+			[]string{replayedTrades[0].Trade.Provenance.RecordID},
+		)
 	})
 
 	t.Run("read service replay methods preserve deterministic identities across repeated reads", func(t *testing.T) {

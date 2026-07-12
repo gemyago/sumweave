@@ -395,8 +395,8 @@ func RegisterHistoricalBackfillHandler(registry *Registry, runner historicalBack
 				}
 				for _, interval := range runResult.Report.MissingIntervalPreview {
 					result.MissingIntervalPreview = append(result.MissingIntervalPreview, jobTimeRange{
-						Start: interval.Start.UTC(),
-						End:   interval.End.UTC(),
+						Start: interval.Start,
+						End:   interval.End,
 					})
 				}
 				return result, nil
@@ -463,6 +463,7 @@ func (r *hyperliquidRawEvidenceRecorder) RecordHyperliquidRawEvidence(
 		HTTPStatus:         capture.HTTPStatus,
 		ResponseBody:       capture.ResponseBody,
 		EntityHint:         capture.EntityHint,
+		Instrument:         rawEvidenceInstrumentRef(capture.Instrument),
 		Timeframe:          capture.Timeframe,
 		TimeRange:          capture.TimeRange,
 		ReceivedAt:         capture.ReceivedAt,
@@ -475,4 +476,12 @@ func (r *hyperliquidRawEvidenceRecorder) RecordHyperliquidRawEvidence(
 		return "", err
 	}
 	return persisted.ID, nil
+}
+
+func rawEvidenceInstrumentRef(instrument *domain.Instrument) *data.BatchInstrumentRef {
+	if instrument == nil {
+		return nil
+	}
+
+	return &data.BatchInstrumentRef{Symbol: instrument.Symbol, AssetClass: instrument.AssetClass}
 }

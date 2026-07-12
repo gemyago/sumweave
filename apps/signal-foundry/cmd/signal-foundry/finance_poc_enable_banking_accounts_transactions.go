@@ -276,7 +276,7 @@ func runEnableBankingAccounts(
 	return enableBankingAccountsOutput{
 		Provider:  enableBankingCommandName,
 		Operation: enableBankingAccountsOp,
-		FetchedAt: deps.Now().UTC().Format(time.RFC3339),
+		FetchedAt: deps.Now().Format(time.RFC3339),
 		SessionID: sessionID,
 		Accounts:  accounts,
 		Raw:       raw,
@@ -328,7 +328,7 @@ func runEnableBankingTransactions(
 	return enableBankingTransactionsOutput{
 		Provider:         enableBankingCommandName,
 		Operation:        enableBankingTransactionsOp,
-		FetchedAt:        deps.Now().UTC().Format(time.RFC3339),
+		FetchedAt:        deps.Now().Format(time.RFC3339),
 		SessionID:        sessionID,
 		AccountID:        strings.TrimSpace(params.AccountID),
 		From:             fromDate.Format(financePOCDateLayout),

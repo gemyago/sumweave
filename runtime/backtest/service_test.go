@@ -57,7 +57,7 @@ func TestService(t *testing.T) {
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 999999999),
-			time.FixedZone(randomWord(t, fake, "zone"), fake.IntBetween(-11, 12)*3600),
+			time.FixedZone("", fake.IntBetween(-11, 12)*3600),
 		)
 	}
 
@@ -343,7 +343,7 @@ func TestService(t *testing.T) {
 		reference := makeDatasetReference(t, fake, createdAt)
 		persistedReference, err := svc.CreateDatasetReference(t.Context(), reference)
 		require.NoError(t, err)
-		require.Same(t, time.UTC, persistedReference.CreatedAt.Time().Location())
+		require.True(t, createdAt.Equal(persistedReference.CreatedAt.Time()))
 		require.NotEmpty(t, persistedReference.SourceDataHashes)
 		require.Empty(t, persistedReference.ReplayChecksum)
 
@@ -550,6 +550,100 @@ func TestService(t *testing.T) {
 		require.Equal(t, int64(2), readCount(t, store, "evaluation_reports"))
 	})
 
+	t.Run("filters and orders canonical runs and reports deterministically", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFake(t)
+		_, store := makeService(t)
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+		datasetID := randomWord(t, fake, "dataset")
+
+		earlierRun, err := store.CreateBacktestRun(
+			t.Context(),
+			makeBacktestRun(t, fake, datasetID, domain.BacktestRunStatusPending, earlier, earlier),
+		)
+		require.NoError(t, err)
+		laterRun, err := store.CreateBacktestRun(
+			t.Context(),
+			makeBacktestRun(t, fake, datasetID, domain.BacktestRunStatusPending, later, later),
+		)
+		require.NoError(t, err)
+
+		makeReport := func(run domain.BacktestRun, createdAt time.Time, suffix string) domain.EvaluationReport {
+			t.Helper()
+			report, reportErr := domain.NewEvaluationReport(domain.EvaluationReportParams{
+				EvaluationID:         randomWord(t, fake, "evaluation-"+suffix),
+				StrategyID:           run.StrategyID,
+				StrategyVersion:      run.StrategyVersion,
+				StrategyArtifactHash: run.StrategyArtifactHash,
+				BacktestRunID:        run.RunID.String(),
+				DatasetID:            run.DatasetID.String(),
+				Decision:             domain.EvaluationDecisionNeedsReview,
+				Notes:                randomWord(t, fake, "note-"+suffix),
+				CreatedAt:            createdAt,
+			})
+			require.NoError(t, reportErr)
+			return report
+		}
+		earlierReport, err := store.CreateEvaluationReport(t.Context(), makeReport(earlierRun, earlier, "earlier"))
+		require.NoError(t, err)
+		laterReport, err := store.CreateEvaluationReport(t.Context(), makeReport(laterRun, later, "later"))
+		require.NoError(t, err)
+		runs, err := store.QueryBacktestRuns(t.Context(), RunQuery{})
+		require.NoError(t, err)
+		require.Equal(t, []domain.BacktestRunID{earlierRun.RunID, laterRun.RunID}, []domain.BacktestRunID{
+			runs[0].RunID,
+			runs[1].RunID,
+		})
+		reports, err := store.QueryEvaluationReports(t.Context(), EvaluationReportQuery{})
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]domain.EvaluationReportID{earlierReport.EvaluationID, laterReport.EvaluationID},
+			[]domain.EvaluationReportID{reports[0].EvaluationID, reports[1].EvaluationID},
+		)
+
+		boundaryRange, err := domain.NewTimeRange(earlier.Add(-time.Minute), earlier.Add(time.Minute))
+		require.NoError(t, err)
+		runs, err = store.QueryBacktestRuns(t.Context(), RunQuery{TimeRange: &boundaryRange})
+		require.NoError(t, err)
+		require.Len(t, runs, 1)
+		require.Equal(t, earlierRun.RunID, runs[0].RunID)
+		reports, err = store.QueryEvaluationReports(t.Context(), EvaluationReportQuery{TimeRange: &boundaryRange})
+		require.NoError(t, err)
+		require.Len(t, reports, 1)
+		require.Equal(t, earlierReport.EvaluationID, reports[0].EvaluationID)
+
+		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789, time.FixedZone("east", 2*60*60))
+		mixedRun, err := store.CreateBacktestRun(
+			t.Context(),
+			makeBacktestRun(t, fake, datasetID, domain.BacktestRunStatusPending, mixedOffsetAt, mixedOffsetAt),
+		)
+		require.NoError(t, err)
+		mixedReport, err := store.CreateEvaluationReport(
+			t.Context(),
+			makeReport(mixedRun, mixedOffsetAt, "mixed-offset"),
+		)
+		require.NoError(t, err)
+		instantRange, err := domain.NewTimeRange(
+			time.Date(2025, time.December, 31, 21, 30, 0, 0, time.UTC),
+			time.Date(2025, time.December, 31, 22, 30, 0, 0, time.UTC),
+		)
+		require.NoError(t, err)
+		runs, err = store.QueryBacktestRuns(t.Context(), RunQuery{TimeRange: &instantRange})
+		require.NoError(t, err)
+		require.Equal(t, []domain.BacktestRunID{mixedRun.RunID}, []domain.BacktestRunID{runs[0].RunID})
+		reports, err = store.QueryEvaluationReports(t.Context(), EvaluationReportQuery{TimeRange: &instantRange})
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]domain.EvaluationReportID{mixedReport.EvaluationID},
+			[]domain.EvaluationReportID{reports[0].EvaluationID},
+		)
+	})
+
 	t.Run("migrates explicit sqlite backtest schema", func(t *testing.T) {
 		t.Parallel()
 
@@ -560,6 +654,11 @@ func TestService(t *testing.T) {
 			require.NoError(t, store.db.Raw(fmt.Sprintf("PRAGMA table_info('%s')", tableName)).Scan(&columns).Error)
 			require.NotEmpty(t, columns)
 		}
+		require.True(t, store.db.Migrator().HasIndex(&backtestRunModel{}, "idx_backtest_runs_status_created_id"))
+		require.True(
+			t,
+			store.db.Migrator().HasIndex(&evaluationReportModel{}, "idx_evaluation_reports_decision_created_id"),
+		)
 
 		require.True(t, hasUniqueIndexWithColumns(t, store, "dataset_references", []string{"dataset_id"}))
 		require.True(t, hasUniqueIndexWithColumns(t, store, "backtest_runs", []string{"run_id"}))

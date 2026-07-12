@@ -1,15 +1,15 @@
 import { render, screen } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import UtcDateRangePicker from './UtcDateRangePicker.svelte'
+import DateRangePicker from './DateRangePicker.svelte'
 
-describe('UtcDateRangePicker', () => {
-  it('renders explicit utc values and resolves presets once', async () => {
-    render(UtcDateRangePicker, {
+describe('DateRangePicker', () => {
+  it('renders explicit instant values and resolves presets once', async () => {
+    render(DateRangePicker, {
       props: {
-        startValue: '2026-06-15T00:00:00.000Z',
-        endValue: '2026-06-16T00:00:00.000Z',
-        presetAnchorIso: '2026-06-16T12:00:00.000Z',
+        startValue: new Date('2026-06-15T00:00:00.000Z'),
+        endValue: new Date('2026-06-16T00:00:00.000Z'),
+        presetAnchor: new Date('2026-06-16T12:00:00.000Z'),
       },
     })
     const user = userEvent.setup()
@@ -25,20 +25,20 @@ describe('UtcDateRangePicker', () => {
   })
 
   it('shows inline validation for bounded and reversed ranges when requested', () => {
-    render(UtcDateRangePicker, {
+    render(DateRangePicker, {
       props: {
-        startValue: '2026-06-15T13:00:00.000Z',
-        endValue: '2026-06-15T12:00:00.000Z',
-        minIso: '2026-06-15T11:30:00.000Z',
-        maxIso: '2026-06-15T12:30:00.000Z',
-        outOfBoundsMessage: 'UTC range must stay within the selected availability window.',
+        startValue: new Date('2026-06-15T13:00:00.000Z'),
+        endValue: new Date('2026-06-15T12:00:00.000Z'),
+        min: new Date('2026-06-15T11:30:00.000Z'),
+        max: new Date('2026-06-15T12:30:00.000Z'),
+        outOfBoundsMessage: 'Range must stay within the selected availability window.',
         showValidation: true,
       },
     })
 
-    expect(screen.getByRole('alert')).toHaveTextContent('UTC start must be earlier than UTC end.')
+    expect(screen.getByRole('alert')).toHaveTextContent('Start must be earlier than end.')
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'UTC range must stay within the selected availability window.',
+      'Range must stay within the selected availability window.',
     )
   })
 })

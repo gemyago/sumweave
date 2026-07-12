@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -158,6 +159,13 @@ func (m *DatabaseMigrator) migrateAgentRuntime(_ context.Context) error {
 	}
 	if err = agentProfilesSvc.AutoMigrate(); err != nil {
 		return fmt.Errorf("auto migrate agent profiles database: %w", err)
+	}
+	providersConfigMigrator, ok := providersConfigSvc.(interface{ AutoMigrate() error })
+	if !ok {
+		return errors.New("database providers config service does not support auto migration")
+	}
+	if err = providersConfigMigrator.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate providers config database: %w", err)
 	}
 
 	return nil

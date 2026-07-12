@@ -127,7 +127,7 @@ func TestCSVImports(t *testing.T) {
 			AmountMinor: -1250,
 			Currency:    "USD",
 			Description: "coffee duplicate",
-			EffectiveAt: now.Add(-24 * time.Hour),
+			EffectiveAt: time.Date(2026, time.June, 19, 0, 0, 0, 0, time.UTC),
 			CategoryID:  category.ID,
 		})
 		require.NoError(t, err)
@@ -256,6 +256,105 @@ func TestCSVImports(t *testing.T) {
 		assert.Equal(t, int64(-5000), transactions[0].AmountMinor)
 		assert.Equal(t, "lunch", transactions[0].Description)
 		assert.Equal(t, domain.TransactionStatusBooked, transactions[0].Status)
+	})
+
+	t.Run("transaction csv preserves instants and does not deduplicate by calendar label", func(t *testing.T) {
+		fake := faker.New()
+		actorUserID := "user-" + fake.UUID().V4()
+		enqueuer := &recordingCSVJobEnqueuer{
+			jobID:   "job-" + fake.UUID().V4(),
+			jobType: CSVImportJobTypeTransactions,
+		}
+		service := makeService(t, WithCSVImportJobEnqueuer(enqueuer))
+		tenant := makeTenant(t, service, actorUserID)
+		account, err := service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: actorUserID,
+			TenantID:    tenant.ID,
+			Name:        "checking-" + fake.Lorem().Word(),
+			Currency:    "USD",
+			Kind:        domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+		existingInstant := time.Date(2026, time.June, 20, 8, 15, 0, 0, time.FixedZone("source", -7*60*60))
+		importedInstant := existingInstant.Add(90 * time.Minute)
+		description := "purchase-" + fake.Lorem().Word()
+		_, err = service.RecordTransaction(t.Context(), RecordTransactionParams{
+			ActorUserID: actorUserID,
+			TenantID:    tenant.ID,
+			AccountID:   account.ID,
+			Source:      domain.TransactionSourceManual,
+			Status:      domain.TransactionStatusBooked,
+			Kind:        domain.TransactionKindRegular,
+			AmountMinor: -1250,
+			Currency:    "USD",
+			Description: description,
+			EffectiveAt: existingInstant,
+		})
+		require.NoError(t, err)
+
+		preview, err := service.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+			ActorUserID: actorUserID,
+			TenantID:    tenant.ID,
+			ImportType:  CSVImportTypeTransactions,
+			FileName:    "timestamped-transactions.csv",
+			CSV: "accountName,currency,effectiveAt,amountMinor,description,category,tag,status\n" +
+				fmt.Sprintf(
+					"%s,USD,%s,-1250,%s,,,booked\n",
+					account.Name,
+					importedInstant.Format(time.RFC3339Nano),
+					description,
+				) +
+				fmt.Sprintf(
+					"%s,USD,%s,-1250,%s,,,booked\n",
+					account.Name,
+					existingInstant.In(time.FixedZone("other-source", 2*60*60)).Format(time.RFC3339Nano),
+					description,
+				),
+		})
+		require.NoError(t, err)
+		require.Len(t, preview.DuplicateRows, 1)
+		assert.Equal(t, 3, preview.DuplicateRows[0].RowNumber)
+		assert.Empty(t, preview.RejectedRows)
+
+		confirmed, err := service.ConfirmCSVImport(t.Context(), ConfirmCSVImportParams{
+			ActorUserID: actorUserID,
+			ImportID:    preview.ImportID,
+			Mapping:     preview.Mapping,
+		})
+		require.NoError(t, err)
+		result, err := service.RunCSVImportJob(t.Context(), RunCSVImportJobParams{
+			ImportID: preview.ImportID,
+			JobID:    confirmed.JobID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.ImportedCount)
+
+		transactions, err := service.ListTransactions(t.Context(), ListTransactionsParams{
+			ActorUserID: actorUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		require.Len(t, transactions, 2)
+		assert.True(t, transactions[0].EffectiveAt.Equal(importedInstant))
+	})
+
+	t.Run("transaction csv timestamp parsing is strict", func(t *testing.T) {
+		fake := faker.New()
+		actorUserID := "user-" + fake.UUID().V4()
+		service := makeService(t)
+		tenant := makeTenant(t, service, actorUserID)
+
+		preview, err := service.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+			ActorUserID: actorUserID,
+			TenantID:    tenant.ID,
+			ImportType:  CSVImportTypeTransactions,
+			FileName:    "invalid-timestamp.csv",
+			CSV:         "accountName,currency,effectiveAt,amountMinor,description,category,tag,status\nchecking,USD,2026-06-20T10:30:00,-1250,purchase,,,booked\n",
+		})
+		require.NoError(t, err)
+		assert.Empty(t, preview.DuplicateRows)
+		require.Len(t, preview.RejectedRows, 1)
+		assert.Equal(t, "transaction row is invalid", preview.RejectedRows[0].Reason)
 	})
 
 	t.Run("account import confirms finance.account_import job type", func(t *testing.T) {

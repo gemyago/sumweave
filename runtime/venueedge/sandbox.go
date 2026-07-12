@@ -196,6 +196,7 @@ func (s *SandboxVenue) ReadCandles(
 	records := make([]domain.Candle, 0)
 	for bucketStart := alignCandleStart(canonicalRequest.TimeRange.Start, duration); bucketStart.Before(canonicalRequest.TimeRange.End); bucketStart = bucketStart.Add(duration) {
 		candleEnd := bucketStart.Add(duration)
+		bucketInstant := strconv.FormatInt(bucketStart.UnixNano(), 10)
 		candleProvenance, provenanceErr := domain.NewSourceProvenance(
 			string(s.venue)+"-sandbox",
 			fmt.Sprintf(
@@ -203,7 +204,7 @@ func (s *SandboxVenue) ReadCandles(
 				s.seed,
 				instrument.Symbol,
 				canonicalRequest.Timeframe,
-				bucketStart.Format(time.RFC3339Nano),
+				bucketInstant,
 			),
 		)
 		if provenanceErr != nil {
@@ -214,13 +215,13 @@ func (s *SandboxVenue) ReadCandles(
 			"candle-base",
 			instrument.Symbol.String(),
 			canonicalRequest.Timeframe.String(),
-			bucketStart.Format(time.RFC3339Nano),
+			bucketInstant,
 		)
 		span := s.float64For(
 			"candle-span",
 			instrument.Symbol.String(),
 			canonicalRequest.Timeframe.String(),
-			bucketStart.Format(time.RFC3339Nano),
+			bucketInstant,
 		)
 		low := math.Max(sandboxMinPositiveValue, base)
 		high := low + span + sandboxCandleHighOffset
@@ -230,7 +231,7 @@ func (s *SandboxVenue) ReadCandles(
 			"candle-volume",
 			instrument.Symbol.String(),
 			canonicalRequest.Timeframe.String(),
-			bucketStart.Format(time.RFC3339Nano),
+			bucketInstant,
 		)*sandboxCandleVolumeFactor + 1
 
 		candle, candleErr := domain.NewCandle(domain.CandleParams{
@@ -285,6 +286,7 @@ func (s *SandboxVenue) ReadTrades(
 
 	records := make([]domain.Trade, 0)
 	for minuteStart := canonicalRequest.TimeRange.Start.Truncate(time.Minute); minuteStart.Before(canonicalRequest.TimeRange.End); minuteStart = minuteStart.Add(time.Minute) {
+		minuteInstant := strconv.FormatInt(minuteStart.UnixNano(), 10)
 		for slot := range sandboxTradeSlotsPerMinute {
 			eventTime := minuteStart.Add(
 				time.Duration(slot*sandboxTradeSlotSpacingSecs+sandboxTradeFirstOffsetSecs) * time.Second,
@@ -299,7 +301,7 @@ func (s *SandboxVenue) ReadTrades(
 					"trade:%d:%s:%s:%d",
 					s.seed,
 					instrument.Symbol,
-					minuteStart.Format(time.RFC3339Nano),
+					minuteInstant,
 					slot,
 				),
 			)
@@ -312,7 +314,7 @@ func (s *SandboxVenue) ReadTrades(
 				s.float64For(
 					"trade-price",
 					instrument.Symbol.String(),
-					minuteStart.Format(time.RFC3339Nano),
+					minuteInstant,
 					strconv.Itoa(slot),
 				)*sandboxTradePriceFactor,
 			)
@@ -321,7 +323,7 @@ func (s *SandboxVenue) ReadTrades(
 				s.float64For(
 					"trade-size",
 					instrument.Symbol.String(),
-					minuteStart.Format(time.RFC3339Nano),
+					minuteInstant,
 					strconv.Itoa(slot),
 				)*sandboxTradeSizeFactor,
 			)

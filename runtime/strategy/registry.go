@@ -125,7 +125,7 @@ type strategyVersionModel struct {
 	Notes                 string    `gorm:"column:notes;type:text;not null"`
 	ParentStrategyID      *string   `gorm:"column:parent_strategy_id;size:255"`
 	ParentStrategyVersion *string   `gorm:"column:parent_strategy_version;size:255"`
-	CreatedAt             time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+	CreatedAt             time.Time `gorm:"column:created_at;not null;autoCreateTime;index:idx_strategy_versions_created_at"`
 	UpdatedAt             time.Time `gorm:"column:updated_at;not null;autoCreateTime;autoUpdateTime"`
 }
 
@@ -153,9 +153,7 @@ func NewVersionRegistryService(
 		TablePrefix:    deps.TablePrefix,
 		TranslateError: true,
 	})
-	cfg.NowFunc = func() time.Time {
-		return time.Now().UTC()
-	}
+	cfg.NowFunc = time.Now
 
 	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
@@ -662,8 +660,8 @@ func strategyVersionModelToValue(model strategyVersionModel) (Version, error) {
 		Notes:            model.Notes,
 		ParentStrategyID: optionalStringValue(model.ParentStrategyID),
 		ParentVersion:    optionalStringValue(model.ParentStrategyVersion),
-		CreatedAt:        model.CreatedAt.UTC(),
-		UpdatedAt:        model.UpdatedAt.UTC(),
+		CreatedAt:        model.CreatedAt,
+		UpdatedAt:        model.UpdatedAt,
 	}, nil
 }
 

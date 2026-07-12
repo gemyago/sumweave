@@ -139,7 +139,7 @@ func handleGetCandlesTool(
 		response.Truncation = NewTruncation(maxCandlesToolRows, len(rows), nil, "", &nextRangeStart)
 		response.NextStepHint = fmt.Sprintf(
 			"Retry with start=%s and the same scope to continue reading candles.",
-			nextRangeStart.UTC().Format(time.RFC3339),
+			nextRangeStart.Format(time.RFC3339),
 		)
 	}
 
@@ -459,7 +459,7 @@ func buildCandleEvidenceQuery(input GetCandleEvidenceRequest) (rtdata.CandleLink
 		return rtdata.CandleLinkedRawPayloadsQuery{}, app.NewErrInvalidInput("openTime", "time range start is required")
 	}
 
-	closeTime := input.OpenTime.UTC().Add(duration)
+	closeTime := input.OpenTime.Add(duration)
 	query, err := rtdata.NewCandleLinkedRawPayloadsQuery(rtdata.CandleLinkedRawPayloadsQueryParams{
 		Venue:              venue,
 		Symbol:             symbol,

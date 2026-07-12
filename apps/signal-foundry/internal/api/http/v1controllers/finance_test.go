@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//nolint:cyclop,gocyclo // Registered-route scenarios intentionally share one controller fixture.
 func TestFinanceController(t *testing.T) {
 	fake := faker.New()
 
@@ -152,7 +153,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "start redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/start", body: `{"provider":"pko","callbackUrl":"https://app.example.test/#/finance/connections"}`},
 			{name: "finish redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/finish", body: `{"provider":"pko","state":"state-1","code":"code-1"}`},
 			{name: "trigger connection sync", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a/sync", body: `{"reason":"manual"}`},
-			{name: "dashboard", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/dashboard?preset=current_month&startDate=2026-06-01&endDate=2026-06-30"},
+			{name: "dashboard", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/dashboard?preset=current_month&startDate=2026-06-01T00:00:00Z&endDate=2026-06-30T00:00:00Z"},
 			{name: "fx diagnostics", method: http.MethodGet, target: "/api/v1/finance/fx/diagnostics"},
 			{name: "fx sync", method: http.MethodPost, target: "/api/v1/finance/fx/sync", body: `{"provider":"nbp","baseCurrencies":["EUR"],"quoteCurrency":"USD","startDate":"2026-06-01T00:00:00Z","endDate":"2026-06-21T00:00:00Z"}`},
 			{name: "preview import", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/imports/preview", body: `{"importType":"transactions","fileName":"demo.csv","csv":"account,amount\nChecking,100"}`},
@@ -707,6 +708,8 @@ func TestFinanceController(t *testing.T) {
 			RunAndReturn(func(_ context.Context, params financepkg.UpdateTransactionParams) (domain.Transaction, error) {
 				require.Equal(t, transactionID, params.TransactionID)
 				require.Equal(t, int64(-3100), params.AmountMinor)
+				require.NotNil(t, params.EffectiveAt)
+				require.False(t, params.ClearCategory)
 				require.Equal(t, updatedCategoryID, params.CategoryID)
 				return domain.Transaction{
 					ID:          transactionID,
@@ -718,7 +721,7 @@ func TestFinanceController(t *testing.T) {
 					AmountMinor: params.AmountMinor,
 					Currency:    "USD",
 					Description: params.Description,
-					EffectiveAt: params.EffectiveAt,
+					EffectiveAt: *params.EffectiveAt,
 					CategoryID:  ptrString(params.CategoryID),
 					ProviderOriginal: &domain.ProviderTransactionOriginal{
 						AmountMinor: -2600,
@@ -781,7 +784,9 @@ func TestFinanceController(t *testing.T) {
 		serviceForNullCategory.EXPECT().
 			UpdateTransaction(mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, params financepkg.UpdateTransactionParams) (domain.Transaction, error) {
+				require.True(t, params.ClearCategory)
 				require.Empty(t, params.CategoryID)
+				require.NotNil(t, params.EffectiveAt)
 				return domain.Transaction{
 					ID:          transactionID,
 					TenantID:    tenantID,
@@ -792,7 +797,7 @@ func TestFinanceController(t *testing.T) {
 					AmountMinor: params.AmountMinor,
 					Currency:    "USD",
 					Description: params.Description,
-					EffectiveAt: params.EffectiveAt,
+					EffectiveAt: *params.EffectiveAt,
 					CreatedAt:   now,
 					UpdatedAt:   now,
 				}, nil
@@ -804,12 +809,70 @@ func TestFinanceController(t *testing.T) {
 			newRequest(
 				http.MethodPatch,
 				"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
-				`{"description":"Coffee cleared","amountMinor":-3200,"effectiveAt":"2026-06-21T11:00:00Z","categoryId":null}`,
+				`{"description":"Coffee cleared","amountMinor":-3200,"effectiveAt":"2026-06-21T11:00:00Z","clearCategory":true}`,
 				true,
 			),
 		)
 		require.Equal(t, http.StatusOK, nullCategoryResp.Code)
 		assert.Equal(t, transactionID, decode(t, nullCategoryResp)["id"])
+
+		serviceForOmittedCategory := newMockfinanceService(t)
+		handlerForOmittedCategory := newHandler(
+			serviceForOmittedCategory,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		)
+		serviceForOmittedCategory.EXPECT().
+			UpdateTransaction(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, params financepkg.UpdateTransactionParams) (domain.Transaction, error) {
+				require.False(t, params.ClearCategory)
+				require.Empty(t, params.CategoryID)
+				require.NotNil(t, params.EffectiveAt)
+				return domain.Transaction{
+					ID:          transactionID,
+					TenantID:    tenantID,
+					AccountID:   accountID,
+					Source:      domain.TransactionSourceProvider,
+					Status:      domain.TransactionStatusBooked,
+					Kind:        domain.TransactionKindRegular,
+					AmountMinor: params.AmountMinor,
+					Currency:    "USD",
+					Description: params.Description,
+					EffectiveAt: *params.EffectiveAt,
+					CategoryID:  &categoryID,
+					CreatedAt:   now,
+					UpdatedAt:   now,
+				}, nil
+			})
+
+		omittedCategoryResp := httptest.NewRecorder()
+		handlerForOmittedCategory.ServeHTTP(
+			omittedCategoryResp,
+			newRequest(
+				http.MethodPatch,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
+				`{"description":"Coffee retained","amountMinor":-3300,"effectiveAt":"2026-06-21T12:00:00Z"}`,
+				true,
+			),
+		)
+		require.Equal(t, http.StatusOK, omittedCategoryResp.Code)
+		assert.Equal(t, categoryID, decode(t, omittedCategoryResp)["categoryId"])
+
+		contradictoryCategoryResp := httptest.NewRecorder()
+		newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		).ServeHTTP(
+			contradictoryCategoryResp,
+			newRequest(
+				http.MethodPatch,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
+				`{"description":"contradictory","amountMinor":-3300,"categoryId":"`+categoryID+`","clearCategory":true}`,
+				true,
+			),
+		)
+		require.Equal(t, http.StatusBadRequest, contradictoryCategoryResp.Code)
 
 		invalidBodyResp := httptest.NewRecorder()
 		handler.ServeHTTP(
@@ -828,7 +891,7 @@ func TestFinanceController(t *testing.T) {
 		"connections dashboard fx and import routes delegate into finance service",
 		func(t *testing.T) {
 			userID := fake.UUID().V4()
-			now := time.Date(2026, time.June, 21, 9, 0, 0, 0, time.UTC)
+			now := time.Date(2026, time.June, 21, 9, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60))
 			tenantID := "tenant-" + fake.UUID().V4()
 			connectionID := "connection-" + fake.UUID().V4()
 			importID := "import-" + fake.UUID().V4()
@@ -916,8 +979,8 @@ func TestFinanceController(t *testing.T) {
 						UpdatedAt:         now,
 					}, nil
 				})
-			windowStart := now.Add(-24 * time.Hour)
-			windowEnd := now
+			windowStart := time.Date(2026, time.June, 20, 9, 0, 0, 0, time.UTC)
+			windowEnd := time.Date(2026, time.June, 21, 9, 0, 0, 0, time.UTC)
 			service.EXPECT().
 				TriggerBankConnectionSync(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.TriggerBankConnectionSyncParams) (financepkg.BankConnectionSyncJobRef, error) {
@@ -943,13 +1006,21 @@ func TestFinanceController(t *testing.T) {
 				GetDashboard(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.DashboardParams) (financepkg.Dashboard, error) {
 					require.Equal(t, financepkg.DashboardPeriodPresetCurrentMonth, params.Preset)
-					require.Equal(t, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), params.StartDate)
-					require.Equal(t, time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC), params.EndDate)
+					require.Equal(t, "2026-06-01T00:00:00Z", params.StartDate.Format(time.RFC3339))
+					require.Equal(t, "2026-06-30T00:00:00Z", params.EndDate.Format(time.RFC3339))
 					return financepkg.Dashboard{
 						Period: financepkg.DashboardPeriod{
 							Preset:    params.Preset,
 							StartDate: params.StartDate,
 							EndDate:   params.EndDate,
+							Previous: financepkg.DashboardPeriodWindow{
+								StartDate: params.StartDate,
+								EndDate:   params.EndDate,
+							},
+							Next: financepkg.DashboardPeriodWindow{
+								StartDate: params.StartDate,
+								EndDate:   params.EndDate,
+							},
 						},
 						Settled: financepkg.DashboardMoneySummary{
 							DisplayCurrency:  "USD",
@@ -965,6 +1036,8 @@ func TestFinanceController(t *testing.T) {
 				TriggerFXSync(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.TriggerFXSyncParams) (financepkg.FXSyncJobRef, error) {
 					require.Equal(t, userID, params.RequestedByUserID)
+					require.Equal(t, "2026-06-01T00:00:00Z", params.StartDate.Format(time.RFC3339))
+					require.Equal(t, "2026-06-21T00:00:00Z", params.EndDate.Format(time.RFC3339))
 					return financepkg.FXSyncJobRef{
 						ID:      "job-fx-1",
 						JobType: financepkg.FXSyncJobType,
@@ -1066,7 +1139,7 @@ func TestFinanceController(t *testing.T) {
 				},
 				{
 					method: http.MethodGet,
-					target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?preset=current_month&startDate=2026-06-01&endDate=2026-06-30",
+					target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?preset=current_month&startDate=2026-06-01T00:00:00Z&endDate=2026-06-30T00:00:00Z",
 					field:  "settled",
 					want:   true,
 					status: http.StatusOK,
@@ -1128,6 +1201,9 @@ func TestFinanceController(t *testing.T) {
 					assert.Contains(t, payload, tc.field)
 					continue
 				}
+				if tc.field == "importedCount" {
+					assert.Equal(t, now.Format(time.RFC3339), payload["createdAt"])
+				}
 				if tc.field == "authorizationUrl" {
 					assert.Equal(t, tc.want, payload[tc.field])
 					assert.Equal(t, startState, payload["state"])
@@ -1135,6 +1211,28 @@ func TestFinanceController(t *testing.T) {
 				}
 				assert.Equal(t, tc.want, payload[tc.field])
 			}
+
+			t.Run("CSV confirm rejects missing, null, empty-key, and empty-value mappings", func(t *testing.T) {
+				for _, body := range []string{
+					`{}`,
+					`{"mapping":null}`,
+					`{"mapping":{"":"account"}}`,
+					`{"mapping":{"account":""}}`,
+				} {
+					resp := httptest.NewRecorder()
+					newHandler(
+						newMockfinanceService(t),
+						newMockbankConnectionService(t),
+						makeAuthMiddleware(userID),
+					).ServeHTTP(resp, newRequest(
+						http.MethodPost,
+						"/api/v1/finance/tenants/"+tenantID+"/imports/"+importID+"/confirm",
+						body,
+						true,
+					))
+					require.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+				}
+			})
 
 			t.Run("provider and callback validation stay explicit", func(t *testing.T) {
 				validationService := newMockfinanceService(t)
@@ -1488,6 +1586,609 @@ func TestFinanceController(t *testing.T) {
 		assert.Equal(t, syntheticState, decode(t, syntheticResp)["providerReference"])
 	})
 
+	t.Run("registered dashboard route preserves timestamp and nullable contract values", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		accountID := "account-" + fake.UUID().V4()
+		date := time.Date(
+			2026, time.March, 29, 13, 47, 11, 123,
+			time.FixedZone("UTC+14", 14*60*60),
+		)
+		zero := int64(0)
+		service := newMockfinanceService(t)
+		service.EXPECT().GetDashboard(mock.Anything, mock.Anything).Return(financepkg.Dashboard{
+			Period: financepkg.DashboardPeriod{
+				Preset:    financepkg.DashboardPeriodPresetCurrentMonth,
+				StartDate: date,
+				EndDate:   date,
+				Previous:  financepkg.DashboardPeriodWindow{StartDate: date, EndDate: date},
+				Next:      financepkg.DashboardPeriodWindow{StartDate: date, EndDate: date},
+			},
+			Settled: financepkg.DashboardMoneySummary{DisplayCurrency: "USD", Complete: false},
+			Pending: financepkg.DashboardMoneySummary{DisplayCurrency: "USD", Complete: false},
+			AccountBalances: []financepkg.DashboardAccountBalance{{
+				AccountID: accountID, AccountName: "account-" + fake.Lorem().Word(), Currency: "USD",
+				DisplayPendingMinor: &zero, MissingFX: false,
+			}},
+			MissingFX: []financepkg.DashboardMissingFXDiagnostic{{
+				Source: financepkg.DashboardMissingFXSourceBalance, AccountID: accountID,
+				BaseCurrency: "EUR", QuoteCurrency: "USD", RateDate: date, Provider: "frankfurter",
+			}},
+		}, nil)
+		handler := newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID))
+
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, newRequest(
+			http.MethodGet,
+			"/api/v1/finance/tenants/"+tenantID+"/dashboard?preset=current_month",
+			"",
+			true,
+		))
+
+		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+		payload := decode(t, resp)
+		period := payload["period"].(map[string]any)
+		assert.Equal(t, "2026-03-29T13:47:11.000000123+14:00", period["startDate"])
+		balance := payload["accountBalances"].([]any)[0].(map[string]any)
+		assert.Contains(t, balance, "displayBookedMinor")
+		assert.Nil(t, balance["displayBookedMinor"])
+		assert.Zero(t, balance["displayPendingMinor"])
+		assert.Equal(t, false, balance["missingFx"])
+		missing := payload["missingFx"].([]any)[0].(map[string]any)
+		assert.Contains(t, missing, "transactionId")
+		assert.Nil(t, missing["transactionId"])
+		assert.Equal(t, accountID, missing["accountId"])
+		assert.Equal(t, "2026-03-29T13:47:11.000000123+14:00", missing["rateDate"])
+	})
+
+	t.Run("nullable finance responses omit absent state and preserve present state", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		presentAt := fake.Time().Recent().In(time.FixedZone("response-offset", 5*60*60+30*60)).Truncate(time.Second)
+		service := newMockfinanceService(t)
+		handler := newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID))
+
+		makeTenantView := func(id string, archivedAt *time.Time) domain.TenantMembershipView {
+			return domain.TenantMembershipView{
+				Tenant: domain.Tenant{
+					ID: id, Name: "tenant-" + fake.Lorem().Word(), DisplayCurrency: "USD",
+					ArchivedAt: archivedAt, CreatedAt: presentAt, UpdatedAt: presentAt,
+				},
+				Membership: domain.TenantMembership{TenantID: id, UserID: userID, JoinedAt: presentAt},
+			}
+		}
+		activeTenant := makeTenantView(tenantID, nil)
+		archivedTenant := makeTenantView("tenant-archived-"+fake.UUID().V4(), &presentAt)
+		service.EXPECT().ListTenantsForUser(mock.Anything, userID).
+			Return([]domain.TenantMembershipView{activeTenant, archivedTenant}, nil).Twice()
+
+		acceptedByUserID := "user-accepted-" + fake.UUID().V4()
+		service.EXPECT().ListTenantInvites(mock.Anything, mock.Anything).Return([]domain.TenantInvite{
+			{
+				ID: "invite-pending-" + fake.UUID().V4(), TenantID: tenantID, Code: "code-" + fake.UUID().V4(),
+				Recipient: fake.Internet().Email(), CreatedByUserID: userID, CreatedAt: presentAt,
+			},
+			{
+				ID: "invite-accepted-" + fake.UUID().V4(), TenantID: tenantID, Code: "code-" + fake.UUID().V4(),
+				Recipient: fake.Internet().Email(), CreatedByUserID: userID, AcceptedByUserID: &acceptedByUserID,
+				CreatedAt: presentAt, AcceptedAt: &presentAt,
+			},
+		}, nil)
+
+		service.EXPECT().ListAccounts(mock.Anything, mock.Anything).Return([]domain.Account{
+			{
+				ID: "account-active-" + fake.UUID().V4(), TenantID: tenantID, Name: "account-" + fake.Lorem().Word(),
+				Currency: "USD", Kind: domain.AccountKindManual, CreatedAt: presentAt, UpdatedAt: presentAt,
+			},
+			{
+				ID: "account-hidden-" + fake.UUID().V4(), TenantID: tenantID, Name: "account-" + fake.Lorem().Word(),
+				Currency: "USD", Kind: domain.AccountKindManual, HiddenAt: &presentAt,
+				CreatedAt: presentAt, UpdatedAt: presentAt,
+			},
+		}, nil)
+		service.EXPECT().ListCategories(mock.Anything, mock.Anything).Return([]domain.Category{
+			{
+				ID: "category-active-" + fake.UUID().V4(), TenantID: tenantID, Name: "category-" + fake.Lorem().Word(),
+				Kind: domain.CategoryKindExpense, CreatedAt: presentAt, UpdatedAt: presentAt,
+			},
+			{
+				ID: "category-hidden-" + fake.UUID().V4(), TenantID: tenantID, Name: "category-" + fake.Lorem().Word(),
+				Kind: domain.CategoryKindExpense, HiddenAt: &presentAt, CreatedAt: presentAt, UpdatedAt: presentAt,
+			},
+		}, nil)
+		service.EXPECT().ListTags(mock.Anything, mock.Anything).Return([]domain.Tag{
+			{
+				ID: "tag-active-" + fake.UUID().V4(), TenantID: tenantID, Name: "tag-" + fake.Lorem().Word(),
+				CreatedAt: presentAt, UpdatedAt: presentAt,
+			},
+			{
+				ID: "tag-hidden-" + fake.UUID().V4(), TenantID: tenantID, Name: "tag-" + fake.Lorem().Word(),
+				HiddenAt: &presentAt, CreatedAt: presentAt, UpdatedAt: presentAt,
+			},
+		}, nil)
+
+		categoryID := "category-" + fake.UUID().V4()
+		transferGroupID := "transfer-group-" + fake.UUID().V4()
+		makeTransaction := func(id string) domain.Transaction {
+			return domain.Transaction{
+				ID: id, TenantID: tenantID, AccountID: "account-" + fake.UUID().V4(),
+				Source: domain.TransactionSourceProvider, Status: domain.TransactionStatusBooked,
+				Kind: domain.TransactionKindRegular, AmountMinor: -1234, Currency: "USD",
+				Description: "transaction-" + fake.Lorem().Word(), EffectiveAt: presentAt,
+				CreatedAt: presentAt, UpdatedAt: presentAt,
+			}
+		}
+		activeTransaction := makeTransaction("transaction-active-" + fake.UUID().V4())
+		activeTransaction.ProviderOriginal = &domain.ProviderTransactionOriginal{
+			AmountMinor: -1200, Currency: "USD", Description: "provider-" + fake.Lorem().Word(),
+		}
+		hiddenTransaction := makeTransaction("transaction-hidden-" + fake.UUID().V4())
+		hiddenTransaction.CategoryID = &categoryID
+		hiddenTransaction.TransferGroupID = &transferGroupID
+		hiddenTransaction.TransferMatchedAt = &presentAt
+		hiddenTransaction.HiddenAt = &presentAt
+		hiddenTransaction.ProviderOriginal = &domain.ProviderTransactionOriginal{
+			AmountMinor: -1200,
+			Currency:    "USD",
+			Description: "provider-" + fake.Lorem().Word(),
+			EffectiveAt: &presentAt,
+		}
+		service.EXPECT().ListTransactions(mock.Anything, mock.Anything).
+			Return([]domain.Transaction{activeTransaction, hiddenTransaction}, nil)
+
+		makeConnection := func(id string) domain.BankConnection {
+			return domain.BankConnection{
+				ID: id, TenantID: tenantID, Provider: "provider-" + fake.Lorem().Word(),
+				DisplayName: "connection-" + fake.Lorem().Word(), ProviderReference: "reference-" + fake.UUID().V4(),
+				ExternalID: "external-" + fake.UUID().V4(), State: domain.BankConnectionStateActive,
+				CreatedAt: presentAt, UpdatedAt: presentAt,
+			}
+		}
+		unsyncedConnection := makeConnection("connection-unsynced-" + fake.UUID().V4())
+		syncedConnection := makeConnection("connection-synced-" + fake.UUID().V4())
+		syncedConnection.LastSyncStartedAt = &presentAt
+		syncedConnection.LastSuccessfulSyncAt = &presentAt
+		service.EXPECT().ListBankConnections(mock.Anything, mock.Anything).Return([]financepkg.BankConnectionView{
+			{
+				Connection: unsyncedConnection,
+				Schedule: &domain.BankConnectionSchedule{
+					ConnectionID: unsyncedConnection.ID,
+					Interval:     time.Hour,
+					CreatedAt:    presentAt,
+					UpdatedAt:    presentAt,
+				},
+			},
+			{
+				Connection: syncedConnection,
+				Schedule: &domain.BankConnectionSchedule{
+					ConnectionID: syncedConnection.ID, Interval: time.Hour, NextRunAt: &presentAt,
+					LastScheduledAt: &presentAt, LastStartedAt: &presentAt, LastCompletedAt: &presentAt,
+					Enabled: true, CreatedAt: presentAt, UpdatedAt: presentAt,
+				},
+			},
+		}, nil)
+
+		previewImportID := "import-preview-" + fake.UUID().V4()
+		confirmedImportID := "import-confirmed-" + fake.UUID().V4()
+		completedImportID := "import-completed-" + fake.UUID().V4()
+		service.EXPECT().GetCSVImportAudit(mock.Anything, mock.Anything).
+			RunAndReturn(func(
+				_ context.Context,
+				params financepkg.GetCSVImportAuditParams,
+			) (financepkg.CSVImportAudit, error) {
+				result := financepkg.CSVImportAudit{
+					ImportID:          params.ImportID,
+					TenantID:          tenantID,
+					ImportType:        financepkg.CSVImportTypeTransactions,
+					JobID:             "job-" + fake.UUID().V4(),
+					ConfirmedByUserID: userID,
+					CreatedAt:         presentAt,
+				}
+				switch params.ImportID {
+				case completedImportID:
+					result.Status = financepkg.CSVImportStatusCompleted
+					result.ConfirmedAt = &presentAt
+					result.CompletedAt = &presentAt
+				case confirmedImportID:
+					result.Status = financepkg.CSVImportStatusConfirmed
+					result.ConfirmedAt = &presentAt
+				default:
+					result.Status = financepkg.CSVImportStatusPreviewed
+				}
+				return result, nil
+			}).
+			Times(3)
+
+		requestPayload := func(target string) map[string]any {
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, newRequest(http.MethodGet, target, "", true))
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			require.NotContains(t, resp.Body.String(), "0001-01-01")
+			return decode(t, resp)
+		}
+		itemAt := func(payload map[string]any, index int) map[string]any {
+			items, ok := payload["items"].([]any)
+			require.True(t, ok)
+			item, ok := items[index].(map[string]any)
+			require.True(t, ok)
+			return item
+		}
+		assertAbsent := func(payload map[string]any, fields ...string) {
+			for _, field := range fields {
+				assert.NotContains(t, payload, field)
+			}
+		}
+		assertPresentAt := func(payload map[string]any, fields ...string) {
+			for _, field := range fields {
+				assert.Equal(t, presentAt.Format(time.RFC3339), payload[field])
+			}
+		}
+
+		tenantPayload := requestPayload("/api/v1/finance/tenants")
+		assertAbsent(itemAt(tenantPayload, 0), "archivedAt")
+		assertPresentAt(itemAt(tenantPayload, 1), "archivedAt")
+		assertAbsent(requestPayload("/api/v1/finance/tenants/"+tenantID), "archivedAt")
+
+		invitePayload := requestPayload("/api/v1/finance/tenants/" + tenantID + "/invites")
+		assertAbsent(itemAt(invitePayload, 0), "acceptedAt", "acceptedByUserId")
+		assertPresentAt(itemAt(invitePayload, 1), "acceptedAt")
+		assert.Equal(t, acceptedByUserID, itemAt(invitePayload, 1)["acceptedByUserId"])
+
+		for _, route := range []string{"accounts", "categories", "tags"} {
+			payload := requestPayload("/api/v1/finance/tenants/" + tenantID + "/" + route + "?includeHidden=true")
+			assertAbsent(itemAt(payload, 0), "hiddenAt")
+			assertPresentAt(itemAt(payload, 1), "hiddenAt")
+		}
+
+		transactionPayload := requestPayload(
+			"/api/v1/finance/tenants/" + tenantID + "/transactions?includeHidden=true&limit=20",
+		)
+		activeTransactionPayload := itemAt(transactionPayload, 0)
+		assertAbsent(activeTransactionPayload, "categoryId", "transferGroupId", "transferMatchedAt", "hiddenAt")
+		assertAbsent(activeTransactionPayload["providerOriginal"].(map[string]any), "effectiveAt")
+		hiddenTransactionPayload := itemAt(transactionPayload, 1)
+		assertPresentAt(hiddenTransactionPayload, "transferMatchedAt", "hiddenAt")
+		assert.Equal(t, categoryID, hiddenTransactionPayload["categoryId"])
+		assert.Equal(t, transferGroupID, hiddenTransactionPayload["transferGroupId"])
+		assertPresentAt(hiddenTransactionPayload["providerOriginal"].(map[string]any), "effectiveAt")
+
+		connectionPayload := requestPayload("/api/v1/finance/tenants/" + tenantID + "/connections")
+		unsyncedPayload := itemAt(connectionPayload, 0)
+		assertAbsent(unsyncedPayload, "lastSyncStartedAt", "lastSuccessfulSyncAt")
+		assertAbsent(
+			unsyncedPayload["schedule"].(map[string]any),
+			"nextRunAt", "lastScheduledAt", "lastStartedAt", "lastCompletedAt",
+		)
+		syncedPayload := itemAt(connectionPayload, 1)
+		assertPresentAt(syncedPayload, "lastSyncStartedAt", "lastSuccessfulSyncAt")
+		assertPresentAt(
+			syncedPayload["schedule"].(map[string]any),
+			"nextRunAt", "lastScheduledAt", "lastStartedAt", "lastCompletedAt",
+		)
+
+		previewPayload := requestPayload(
+			"/api/v1/finance/tenants/" + tenantID + "/imports/" + previewImportID,
+		)
+		assertAbsent(previewPayload, "confirmedAt", "completedAt")
+		confirmedPayload := requestPayload(
+			"/api/v1/finance/tenants/" + tenantID + "/imports/" + confirmedImportID,
+		)
+		assertPresentAt(confirmedPayload, "confirmedAt")
+		assertAbsent(confirmedPayload, "completedAt")
+		completedPayload := requestPayload(
+			"/api/v1/finance/tenants/" + tenantID + "/imports/" + completedImportID,
+		)
+		assertPresentAt(completedPayload, "confirmedAt", "completedAt")
+	})
+
+	t.Run("registered finance routes reject zero timestamps and preserve fixed offsets", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		accountID := "account-" + fake.UUID().V4()
+		validAt := time.Date(2026, time.July, 10, 21, 30, 0, 123, time.FixedZone("request-offset", 5*60*60+30*60))
+		zero := time.Time{}
+
+		for _, testCase := range []struct {
+			name    string
+			account domain.Account
+		}{
+			{
+				name: "nullable timestamp",
+				account: domain.Account{
+					ID: accountID, TenantID: tenantID, Name: fake.Company().Name(), Currency: "USD",
+					Kind: domain.AccountKindManual, HiddenAt: &zero, CreatedAt: validAt, UpdatedAt: validAt,
+				},
+			},
+			{
+				name: "required timestamp",
+				account: domain.Account{
+					ID: accountID, TenantID: tenantID, Name: fake.Company().Name(), Currency: "USD",
+					Kind: domain.AccountKindManual, CreatedAt: zero, UpdatedAt: validAt,
+				},
+			},
+		} {
+			t.Run("rejects corrupt "+testCase.name, func(t *testing.T) {
+				corruptService := newMockfinanceService(t)
+				corruptService.EXPECT().ListAccounts(mock.Anything, mock.Anything).
+					Return([]domain.Account{testCase.account}, nil)
+				corruptResponse := httptest.NewRecorder()
+				newHandler(
+					corruptService,
+					newMockbankConnectionService(t),
+					makeAuthMiddleware(userID),
+				).ServeHTTP(
+					corruptResponse,
+					newRequest(
+						http.MethodGet,
+						"/api/v1/finance/tenants/"+tenantID+"/accounts?includeHidden=true",
+						"",
+						true,
+					),
+				)
+				require.Equal(t, http.StatusInternalServerError, corruptResponse.Code, corruptResponse.Body.String())
+				require.NotContains(t, corruptResponse.Body.String(), "0001-01-01")
+			})
+		}
+
+		validService := newMockfinanceService(t)
+		validService.EXPECT().RecordTransaction(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, params financepkg.RecordTransactionParams) (domain.Transaction, error) {
+				require.Equal(t, int64(-1), params.AmountMinor)
+				require.Equal(t, validAt.Format(time.RFC3339Nano), params.EffectiveAt.Format(time.RFC3339Nano))
+				return domain.Transaction{
+					ID: "transaction-" + fake.UUID().V4(), TenantID: tenantID, AccountID: accountID,
+					Source: domain.TransactionSourceManual, Status: domain.TransactionStatusBooked,
+					Kind: domain.TransactionKindRegular, Currency: "USD", Description: fake.Lorem().Sentence(2),
+					EffectiveAt: params.EffectiveAt, CreatedAt: validAt, UpdatedAt: validAt,
+				}, nil
+			})
+		validResponse := httptest.NewRecorder()
+		validBody := `{"accountId":"` + accountID +
+			`","source":"manual","status":"booked","kind":"regular",` +
+			`"amountMinor":-1,"currency":"USD","description":"valid amount",` +
+			`"effectiveAt":"` + validAt.Format(time.RFC3339Nano) + `"}`
+		newHandler(
+			validService,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		).ServeHTTP(
+			validResponse,
+			newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions",
+				validBody,
+				true,
+			),
+		)
+		require.Equal(t, http.StatusOK, validResponse.Code, validResponse.Body.String())
+
+		zeroResponse := httptest.NewRecorder()
+		newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		).ServeHTTP(
+			zeroResponse,
+			newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions",
+				`{"accountId":"`+accountID+`","source":"manual","status":"booked","kind":"regular","amountMinor":0,"currency":"USD","description":"zero timestamp","effectiveAt":"0001-01-01T00:00:00Z"}`,
+				true,
+			),
+		)
+		require.Equal(t, http.StatusBadRequest, zeroResponse.Code, zeroResponse.Body.String())
+	})
+
+	t.Run("registered optional finance request timestamps preserve presence and validity", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		transactionID := "transaction-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		existingAt := time.Date(2026, time.July, 10, 8, 30, 0, 123, time.FixedZone("existing", -4*60*60))
+		requestAt := time.Date(2026, time.July, 11, 18, 45, 0, 456, time.FixedZone("request", 5*60*60+30*60))
+
+		t.Run("transaction omission and null mean no timestamp change", func(t *testing.T) {
+			service := newMockfinanceService(t)
+			call := service.EXPECT().UpdateTransaction(mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, params financepkg.UpdateTransactionParams) (domain.Transaction, error) {
+					return domain.Transaction{
+						ID:          transactionID,
+						TenantID:    tenantID,
+						AccountID:   "account-" + fake.UUID().V4(),
+						Source:      domain.TransactionSourceManual,
+						Status:      domain.TransactionStatusBooked,
+						Kind:        domain.TransactionKindRegular,
+						Currency:    "USD",
+						Description: params.Description,
+						AmountMinor: params.AmountMinor,
+						EffectiveAt: existingAt,
+						CreatedAt:   existingAt,
+						UpdatedAt:   existingAt,
+					}, nil
+				})
+			call.Times(2)
+			for _, body := range []string{
+				`{"description":"omitted time","amountMinor":1}`,
+				`{"description":"null time","amountMinor":1,"effectiveAt":null}`,
+			} {
+				resp := httptest.NewRecorder()
+				newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+					resp,
+					newRequest(
+						http.MethodPatch,
+						"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
+						body,
+						true,
+					),
+				)
+				require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+				assert.Equal(t, existingAt.Format(time.RFC3339Nano), decode(t, resp)["effectiveAt"])
+			}
+		})
+
+		t.Run("transaction supplied fixed offset is preserved", func(t *testing.T) {
+			service := newMockfinanceService(t)
+			service.EXPECT().UpdateTransaction(mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, params financepkg.UpdateTransactionParams) (domain.Transaction, error) {
+					require.NotNil(t, params.EffectiveAt)
+					require.Equal(t, requestAt.Format(time.RFC3339Nano), params.EffectiveAt.Format(time.RFC3339Nano))
+					return domain.Transaction{
+						ID:          transactionID,
+						TenantID:    tenantID,
+						AccountID:   "account-" + fake.UUID().V4(),
+						Source:      domain.TransactionSourceManual,
+						Status:      domain.TransactionStatusBooked,
+						Kind:        domain.TransactionKindRegular,
+						Currency:    "USD",
+						Description: params.Description,
+						AmountMinor: params.AmountMinor,
+						EffectiveAt: *params.EffectiveAt,
+						CreatedAt:   existingAt,
+						UpdatedAt:   existingAt,
+					}, nil
+				})
+			resp := httptest.NewRecorder()
+			body := `{"description":"updated time","amountMinor":1,"effectiveAt":"` +
+				requestAt.Format(time.RFC3339Nano) + `"}`
+			newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+				resp,
+				newRequest(
+					http.MethodPatch,
+					"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
+					body,
+					true,
+				),
+			)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+		})
+
+		for _, testCase := range []struct {
+			name  string
+			value string
+		}{
+			{name: "empty", value: `""`},
+			{name: "malformed", value: `"not-a-timestamp"`},
+			{name: "year one", value: `"0001-01-01T00:00:00Z"`},
+		} {
+			t.Run("transaction rejects "+testCase.name, func(t *testing.T) {
+				resp := httptest.NewRecorder()
+				newHandler(
+					newMockfinanceService(t),
+					newMockbankConnectionService(t),
+					makeAuthMiddleware(userID),
+				).ServeHTTP(resp, newRequest(
+					http.MethodPatch,
+					"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
+					`{"description":"invalid time","amountMinor":1,"effectiveAt":`+testCase.value+`}`,
+					true,
+				))
+				assert.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+			})
+		}
+
+		for _, testCase := range []struct {
+			name       string
+			body       string
+			wantStart  *time.Time
+			wantEnd    *time.Time
+			wantStatus int
+		}{
+			{name: "omitted", body: `{}`, wantStatus: http.StatusOK},
+			{
+				name: "fixed offsets",
+				body: `{"windowStart":"` + existingAt.Format(time.RFC3339Nano) +
+					`","windowEnd":"` + requestAt.Format(time.RFC3339Nano) + `"}`,
+				wantStart: &existingAt, wantEnd: &requestAt, wantStatus: http.StatusOK,
+			},
+			{name: "null", body: `{"windowStart":null}`, wantStatus: http.StatusOK},
+			{name: "empty", body: `{"windowStart":""}`, wantStatus: http.StatusBadRequest},
+			{name: "malformed", body: `{"windowStart":"not-a-timestamp"}`, wantStatus: http.StatusBadRequest},
+			{name: "year one", body: `{"windowStart":"0001-01-01T00:00:00Z"}`, wantStatus: http.StatusBadRequest},
+		} {
+			t.Run("connection windows "+testCase.name, func(t *testing.T) {
+				service := newMockfinanceService(t)
+				call := service.EXPECT().TriggerBankConnectionSync(mock.Anything, mock.Anything).
+					RunAndReturn(func(_ context.Context, params financepkg.TriggerBankConnectionSyncParams) (financepkg.BankConnectionSyncJobRef, error) {
+						if testCase.wantStart == nil {
+							require.Nil(t, params.WindowStart)
+						} else {
+							require.NotNil(t, params.WindowStart)
+							require.Equal(
+								t,
+								testCase.wantStart.Format(time.RFC3339Nano),
+								params.WindowStart.Format(time.RFC3339Nano),
+							)
+						}
+						if testCase.wantEnd == nil {
+							require.Nil(t, params.WindowEnd)
+						} else {
+							require.NotNil(t, params.WindowEnd)
+							require.Equal(
+								t,
+								testCase.wantEnd.Format(time.RFC3339Nano),
+								params.WindowEnd.Format(time.RFC3339Nano),
+							)
+						}
+						return financepkg.BankConnectionSyncJobRef{
+							ID:      "job-" + fake.UUID().V4(),
+							JobType: financepkg.BankConnectionSyncJobType,
+						}, nil
+					})
+				if testCase.wantStatus != http.StatusOK {
+					call.Maybe()
+				}
+				resp := httptest.NewRecorder()
+				newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+					resp,
+					newRequest(
+						http.MethodPost,
+						"/api/v1/finance/tenants/"+tenantID+"/connections/"+connectionID+"/sync",
+						testCase.body,
+						true,
+					),
+				)
+				assert.Equal(t, testCase.wantStatus, resp.Code, resp.Body.String())
+			})
+		}
+	})
+
+	t.Run("registered finance routes reject invalid timestamp ranges before services", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		)
+
+		for _, testCase := range []struct {
+			name   string
+			method string
+			target string
+			body   string
+		}{
+			{
+				name: "custom dashboard missing end", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?preset=custom&startDate=2026-06-01T00:00:00Z",
+			},
+			{
+				name: "custom dashboard reversed", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?preset=custom&startDate=2026-06-02T00:00:00Z&endDate=2026-06-01T00:00:00Z",
+			},
+			{
+				name: "fx sync reversed", method: http.MethodPost, target: "/api/v1/finance/fx/sync",
+				body: `{"baseCurrencies":["USD"],"quoteCurrency":"PLN","startDate":"2026-06-02T00:00:00Z","endDate":"2026-06-01T00:00:00Z"}`,
+			},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, newRequest(testCase.method, testCase.target, testCase.body, true))
+				require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+				require.NotContains(t, response.Body.String(), "response validation")
+			})
+		}
+	})
+
 	t.Run("controller maps finance domain and decode errors safely", func(t *testing.T) {
 		userID := fake.UUID().V4()
 
@@ -1663,7 +2364,9 @@ func TestFinanceController(t *testing.T) {
 			})
 			require.NotNil(t, mappedConnection.Schedule)
 			assert.Equal(t, int64(900), mappedConnection.Schedule.IntervalSeconds)
-			assert.Equal(t, now.UTC(), mappedConnection.CreatedAt)
+			assert.Equal(t, now, mappedConnection.CreatedAt)
+			assert.Equal(t, now, *mappedConnection.LastSyncStartedAt)
+			assert.Equal(t, now, mappedConnection.Schedule.CreatedAt)
 
 			mappedDashboard := mapDashboard(financepkg.Dashboard{
 				Period: financepkg.DashboardPeriod{
@@ -1729,27 +2432,15 @@ func TestFinanceController(t *testing.T) {
 				string(financepkg.DashboardPeriodPresetCurrentMonth),
 				mappedDashboard.Period.Preset,
 			)
+			assert.Equal(t, now, mappedDashboard.Period.StartDate)
+			assert.Equal(t, now, mappedDashboard.MissingFx[0].RateDate)
 			require.Len(t, mappedDashboard.CategoryBreakdowns, 1)
 			require.Len(t, mappedDashboard.AccountBalances, 1)
 			require.Len(t, mappedDashboard.Alerts, 1)
 			require.Len(t, mappedDashboard.MissingFx, 1)
 			require.Len(t, mappedDashboard.NativeSettledTotals, 1)
 
-			req := httptest.NewRequest(
-				http.MethodGet,
-				"/?startDate=2026-06-01&endDate=2026-06-30",
-				nil,
-			)
-			startDate, endDate, err := parseDashboardDates(req)
-			require.NoError(t, err)
-			assert.Equal(t, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), startDate)
-			assert.Equal(t, time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC), endDate)
-
-			req = httptest.NewRequest(http.MethodGet, "/?startDate=bad-date", nil)
-			_, _, err = parseDashboardDates(req)
-			require.Error(t, err)
-
-			mappedAccount := mapAccount(domain.Account{
+			mappedAccount, err := mapAccount(domain.Account{
 				ID:       "account-1",
 				TenantID: "tenant-1",
 				Name:     "Linked",
@@ -1763,6 +2454,7 @@ func TestFinanceController(t *testing.T) {
 				CreatedAt: now,
 				UpdatedAt: now,
 			})
+			require.NoError(t, err)
 			assert.Equal(t, "provider-1", mappedAccount.Provider)
 			assert.Equal(t, "provider-account-1", mappedAccount.ProviderAccountID)
 
@@ -1784,7 +2476,6 @@ func TestFinanceController(t *testing.T) {
 
 			boom := errors.New("boom")
 			assert.Same(t, boom, mapCSVImportError(boom))
-			assert.Nil(t, timePointerOrNil(time.Time{}))
 		},
 	)
 

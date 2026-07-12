@@ -224,7 +224,7 @@ func NewDecisionTraceTime(value time.Time) (DecisionTraceTime, error) {
 		return DecisionTraceTime{}, errors.New("decision trace time is required")
 	}
 
-	return DecisionTraceTime(canonicalUTC(value)), nil
+	return DecisionTraceTime(value), nil
 }
 
 // NewOrderIntentTime validates and canonicalizes an order intent time.
@@ -233,7 +233,7 @@ func NewOrderIntentTime(value time.Time) (OrderIntentTime, error) {
 		return OrderIntentTime{}, errors.New("order intent time is required")
 	}
 
-	return OrderIntentTime(canonicalUTC(value)), nil
+	return OrderIntentTime(value), nil
 }
 
 // NewDecisionTrace validates and canonicalizes a canonical decision trace.

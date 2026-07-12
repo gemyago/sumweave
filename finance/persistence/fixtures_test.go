@@ -11,7 +11,7 @@ type syntheticProviderStateFixture struct {
 	providerReference string
 	accounts          []domain.SyntheticConfiguredAccount
 	windowHistory     []domain.SyntheticWindowHistoryEntry
-	sequenceCounters  []domain.SyntheticAccountDaySequenceCounter
+	sequenceCounters  []domain.SyntheticAccountInstantSequenceCounter
 	createdAt         time.Time
 	updatedAt         time.Time
 }
@@ -19,7 +19,7 @@ type syntheticProviderStateFixture struct {
 type syntheticProviderStateOption func(*syntheticProviderStateFixture)
 
 func defaultSyntheticProviderStateFixture(fake faker.Faker) syntheticProviderStateFixture {
-	baseDay := time.Date(2026, time.June, 24, 0, 0, 0, 0, time.FixedZone("CET", 2*60*60))
+	baseInstant := time.Date(2026, time.June, 24, 8, 15, 0, 0, time.FixedZone("CET", 2*60*60))
 	createdAt := time.Date(2026, time.June, 24, 12, 30, 0, 0, time.FixedZone("EEST", 3*60*60))
 
 	return syntheticProviderStateFixture{
@@ -30,14 +30,14 @@ func defaultSyntheticProviderStateFixture(fake faker.Faker) syntheticProviderSta
 		},
 		windowHistory: []domain.SyntheticWindowHistoryEntry{{
 			Window: domain.SyntheticWindowKey{
-				NormalizedStartUTC:        baseDay,
-				NormalizedEndExclusiveUTC: baseDay.Add(48 * time.Hour),
+				Start: baseInstant,
+				End:   baseInstant.Add(48 * time.Hour),
 			},
 			RepeatCount: 2,
 		}},
-		sequenceCounters: []domain.SyntheticAccountDaySequenceCounter{{
+		sequenceCounters: []domain.SyntheticAccountInstantSequenceCounter{{
 			AccountKey:   "account-a-" + fake.UUID().V4(),
-			DayUTC:       baseDay.Add(24 * time.Hour),
+			Instant:      baseInstant.Add(24 * time.Hour),
 			NextSequence: 4,
 		}},
 		createdAt: createdAt,
@@ -93,8 +93,8 @@ func withSyntheticProviderWindowHistoryFrom(start time.Time) syntheticProviderSt
 	return func(fixture *syntheticProviderStateFixture) {
 		fixture.windowHistory = []domain.SyntheticWindowHistoryEntry{{
 			Window: domain.SyntheticWindowKey{
-				NormalizedStartUTC:        start,
-				NormalizedEndExclusiveUTC: start.Add(24 * time.Hour),
+				Start: start,
+				End:   start.Add(24 * time.Hour),
 			},
 			RepeatCount: 1,
 		}}

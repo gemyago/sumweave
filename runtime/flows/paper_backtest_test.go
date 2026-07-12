@@ -1119,16 +1119,16 @@ func TestPaperBacktestFlow(t *testing.T) {
 				"execution-reconcile",
 			}, callOrder)
 			require.Len(t, deps.replayReader.calls, 1)
-			require.Equal(t, request.TimeRange.Start.UTC(), deps.replayReader.calls[0].timeRange.Start)
-			require.Equal(t, request.TimeRange.End.UTC(), deps.replayReader.calls[0].timeRange.End)
+			require.Equal(t, request.TimeRange.Start, deps.replayReader.calls[0].timeRange.Start)
+			require.Equal(t, request.TimeRange.End, deps.replayReader.calls[0].timeRange.End)
 			require.Len(t, deps.analyticsCalc.calls, 2)
-			require.Equal(t, request.TimeRange.Start.UTC(), deps.analyticsCalc.calls[0].TimeRange.Start)
-			require.Equal(t, request.TimeRange.End.UTC(), deps.analyticsCalc.calls[0].TimeRange.End)
-			require.Equal(t, request.TimeRange.Start.UTC(), deps.analyticsCalc.calls[1].TimeRange.Start)
-			require.Equal(t, request.TimeRange.End.UTC(), deps.analyticsCalc.calls[1].TimeRange.End)
+			require.Equal(t, request.TimeRange.Start, deps.analyticsCalc.calls[0].TimeRange.Start)
+			require.Equal(t, request.TimeRange.End, deps.analyticsCalc.calls[0].TimeRange.End)
+			require.Equal(t, request.TimeRange.Start, deps.analyticsCalc.calls[1].TimeRange.Start)
+			require.Equal(t, request.TimeRange.End, deps.analyticsCalc.calls[1].TimeRange.End)
 			require.Len(t, deps.strategyEvaluator.calls, 1)
-			require.Equal(t, request.TimeRange.Start.UTC(), deps.strategyEvaluator.calls[0].TimeRange.Start)
-			require.Equal(t, request.TimeRange.End.UTC(), deps.strategyEvaluator.calls[0].TimeRange.End)
+			require.Equal(t, request.TimeRange.Start, deps.strategyEvaluator.calls[0].TimeRange.Start)
+			require.Equal(t, request.TimeRange.End, deps.strategyEvaluator.calls[0].TimeRange.End)
 			require.Len(t, deps.governorEvaluator.calls, 1)
 			require.Len(t, deps.governorEvaluator.calls[0].IntentInputs, 2)
 			require.Equal(
@@ -1553,13 +1553,13 @@ func TestPaperBacktestFlow(t *testing.T) {
 			require.Equal(t, domain.CandidateActionKindLong, result.StrategyEvaluation.Actions[0].Kind)
 			require.Equal(
 				t,
-				requestStart.Add(4*time.Minute).UTC(),
+				requestStart.Add(4*time.Minute),
 				result.StrategyEvaluation.Actions[0].DecisionTime.Time(),
 			)
 			require.Equal(t, domain.CandidateActionKindShort, result.StrategyEvaluation.Actions[1].Kind)
 			require.Equal(
 				t,
-				requestStart.Add(6*time.Minute).UTC(),
+				requestStart.Add(6*time.Minute),
 				result.StrategyEvaluation.Actions[1].DecisionTime.Time(),
 			)
 			require.Len(t, result.GovernorEvaluation.Decisions, 2)

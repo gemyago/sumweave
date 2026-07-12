@@ -31,8 +31,15 @@ export type ModelListResponse = components['schemas']['ModelListResponse']
 export type AgentProfileResponse = components['schemas']['AgentProfileResponse']
 export type AgentProfileListResponse = components['schemas']['AgentProfileListResponse']
 
-export type SessionMetadata = components['schemas']['SessionMetadata']
-export type SessionListResponse = components['schemas']['SessionListResponse']
+type RawSessionMetadata = components['schemas']['SessionMetadata']
+type RawSessionListResponse = components['schemas']['SessionListResponse']
+export type SessionMetadata = Omit<RawSessionMetadata, 'createdAt' | 'updatedAt'> & {
+  createdAt: Date
+  updatedAt: Date
+}
+export type SessionListResponse = Omit<RawSessionListResponse, 'sessions'> & {
+  sessions: SessionMetadata[]
+}
 
 /** Runtime discriminator check for SSE JSON payloads (agent stream contract). */
 export function isStreamEvent(value: unknown): value is StreamEvent {

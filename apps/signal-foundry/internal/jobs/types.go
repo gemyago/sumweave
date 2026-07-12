@@ -88,29 +88,31 @@ type jobTimeRange struct {
 }
 
 type Job struct {
-	ID             string
-	JobType        JobType
-	Status         JobStatus
-	Requester      Requester
-	IdempotencyKey string
-	InputHash      string
-	Input          HistoricalRawCandleBackfillInput
-	InputJSON      json.RawMessage
-	Result         *HistoricalRawCandleBackfillResult
-	ResultJSON     json.RawMessage
-	ProgressJSON   json.RawMessage
-	Error          *JobError
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	QueuedAt       time.Time
-	StartedAt      *time.Time
-	CompletedAt    *time.Time
-	WorkerID       string
-	AttemptCount   int
-	MaxAttempts    int
-	LastAttemptAt  *time.Time
-	CorrelationID  string
-	ScheduleID     string
+	ID                 string
+	JobType            JobType
+	Status             JobStatus
+	Requester          Requester
+	IdempotencyKey     string
+	InputHash          string
+	Input              HistoricalRawCandleBackfillInput
+	InputJSON          json.RawMessage
+	Result             *HistoricalRawCandleBackfillResult
+	ResultJSON         json.RawMessage
+	ProgressJSON       json.RawMessage
+	Error              *JobError
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	QueuedAt           time.Time
+	StartedAt          *time.Time
+	CompletedAt        *time.Time
+	WorkerID           string
+	AttemptCount       int
+	MaxAttempts        int
+	LastAttemptAt      *time.Time
+	CorrelationID      string
+	ScheduleID         string
+	ScheduledAt        *time.Time
+	ScheduledNextRunAt *time.Time
 }
 
 type ListParams struct {
@@ -155,13 +157,15 @@ type EnqueueParams struct {
 }
 
 type EnqueueJSONParams struct {
-	JobType        JobType
-	Requester      Requester
-	IdempotencyKey string
-	CorrelationID  string
-	ScheduleID     string
-	InputHash      string
-	InputJSON      json.RawMessage
+	JobType            JobType
+	Requester          Requester
+	IdempotencyKey     string
+	CorrelationID      string
+	ScheduleID         string
+	ScheduledAt        *time.Time
+	ScheduledNextRunAt *time.Time
+	InputHash          string
+	InputJSON          json.RawMessage
 }
 
 type Schedule struct {
@@ -170,7 +174,7 @@ type Schedule struct {
 	Requester      Requester
 	InputJSON      json.RawMessage
 	Interval       time.Duration
-	NextRunAt      time.Time
+	NextRunAt      *time.Time
 	LastEnqueuedAt *time.Time
 	CorrelationID  string
 	Enabled        bool
@@ -284,8 +288,6 @@ func canonicalizeHistoricalInput(input HistoricalRawCandleBackfillInput) Histori
 	input.Symbol = strings.ToUpper(strings.TrimSpace(input.Symbol))
 	input.AssetClass = strings.TrimSpace(input.AssetClass)
 	input.Timeframe = strings.TrimSpace(input.Timeframe)
-	input.Start = input.Start.UTC()
-	input.End = input.End.UTC()
 	input.TimeRange = domain.TimeRange{Start: input.Start, End: input.End}
 	return input
 }
@@ -357,7 +359,7 @@ func validateHistoricalBackfillInput(
 	if _, err := domain.NewTimeRange(input.Start, input.End); err != nil {
 		return HistoricalRawCandleBackfillInput{}, errors.New("time range must be half-open")
 	}
-	if input.End.After(now.UTC()) {
+	if input.End.After(now) {
 		return HistoricalRawCandleBackfillInput{}, errors.New("end must not be in the future")
 	}
 	if input.PageSize < 0 {

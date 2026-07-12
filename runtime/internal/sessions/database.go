@@ -14,36 +14,22 @@ import (
 
 // sessionMetadataModel is the GORM model for session metadata rows.
 type sessionMetadataModel struct {
-	SessionID string    `gorm:"column:session_id;primaryKey;size:255"`
-	AppName   string    `gorm:"column:app_name;size:255;not null"`
-	UserID    string    `gorm:"column:user_id;size:255;not null"`
+	SessionID string    `gorm:"column:session_id;primaryKey;size:255;index:idx_session_metadata_listing,priority:4"`
+	AppName   string    `gorm:"column:app_name;size:255;not null;index:idx_session_metadata_listing,priority:1"`
+	UserID    string    `gorm:"column:user_id;size:255;not null;index:idx_session_metadata_listing,priority:2"`
 	Title     string    `gorm:"column:title;size:2048"`
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime:false"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime:false"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime:false;index:idx_session_metadata_listing,priority:3"`
 }
 
 func (sessionMetadataModel) TableName() string { return "session_metadata" }
 
 func sessionMetadataToModel(m SessionMetadata) sessionMetadataModel {
-	return sessionMetadataModel{
-		SessionID: m.SessionID,
-		AppName:   m.AppName,
-		UserID:    m.UserID,
-		Title:     m.Title,
-		CreatedAt: m.CreatedAt.UTC(),
-		UpdatedAt: m.UpdatedAt.UTC(),
-	}
+	return sessionMetadataModel(m)
 }
 
 func sessionMetadataFromModel(m sessionMetadataModel) SessionMetadata {
-	return SessionMetadata{
-		SessionID: m.SessionID,
-		AppName:   m.AppName,
-		UserID:    m.UserID,
-		Title:     m.Title,
-		CreatedAt: m.CreatedAt.UTC(),
-		UpdatedAt: m.UpdatedAt.UTC(),
-	}
+	return SessionMetadata(m)
 }
 
 // DatabaseSessionMetadataStore persists session metadata in a relational database via GORM.
@@ -117,6 +103,7 @@ func (s *DatabaseSessionMetadataStore) List(
 	var rows []sessionMetadataModel
 	findTx := s.db.WithContext(ctx).Where("app_name = ? AND user_id = ?", params.AppName, params.UserID).
 		Order("updated_at DESC").
+		Order("session_id DESC").
 		Limit(params.Limit).
 		Offset(params.Offset)
 	if err := findTx.Find(&rows).Error; err != nil {

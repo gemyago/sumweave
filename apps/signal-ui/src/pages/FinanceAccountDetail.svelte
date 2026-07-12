@@ -154,6 +154,10 @@
                 <p class="small text-body-secondary mb-0">
                   Created {formatFinanceDateTime(account.createdAt)} · Updated {formatFinanceDateTime(account.updatedAt)}
                 </p>
+                <div class="d-flex flex-wrap gap-2">
+                  <span class="badge text-bg-light border text-body">Booked balance {formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</span>
+                  <span class="badge text-bg-light border text-body">Pending balance {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</span>
+                </div>
               </div>
             </div>
           </section>

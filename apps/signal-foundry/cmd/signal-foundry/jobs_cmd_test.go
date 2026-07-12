@@ -79,7 +79,8 @@ func TestJobsCommand(t *testing.T) {
 			JobType:   jobspkg.JobTypeHistoricalRawCandleBackfill,
 			Requester: jobspkg.Requester{UserID: "system", Source: jobspkg.RequesterSourceOperator},
 			Interval:  time.Hour,
-			NextRunAt: runAt,
+			NextRunAt: &runAt,
+			Enabled:   true,
 			InputJSON: mustMarshalCommandJSON(t, jobspkg.HistoricalRawCandleBackfillInput{
 				IngestionRunID: fake.UUID().V4(),
 				Venue:          "hyperliquid-perps",

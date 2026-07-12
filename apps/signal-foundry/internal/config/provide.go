@@ -109,6 +109,7 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "auth.refreshTokenTTL").asDuration(),
 
 		// workspacefs exec config
+		provideConfigValue(cfg, "workspacefs.platformAgentsPath").asString(),
 		provideConfigValue(cfg, "workspacefs.exec.enabled").asBool(),
 		provideConfigValue(cfg, "workspacefs.exec.maxOutputBytes").asInt64(),
 		provideConfigValue(cfg, "workspacefs.exec.defaultTimeout").asDuration(),

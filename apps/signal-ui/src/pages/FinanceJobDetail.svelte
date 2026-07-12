@@ -4,7 +4,11 @@
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { formatFinanceDateTime } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
-  import { createSignalJobsApiForAuth, type JobDetail as JobDetailModel } from '../lib/jobs/api'
+  import {
+    createSignalJobsApiForAuth,
+    isHistoricalDataBackfillJob,
+    type JobDetail as JobDetailModel,
+  } from '../lib/jobs/api'
 
   let { params = {} } = $props<{ params?: { jobId?: string } }>()
 
@@ -98,6 +102,9 @@
   }
 
   function buildDataScopeHref(item: JobDetailModel): string {
+    if (!isHistoricalDataBackfillJob(item)) {
+      throw new Error('Historical data scope is only available for historical backfill jobs.')
+    }
     const query = new URLSearchParams({
       venue: item.input.venue,
       symbol: item.input.symbol,
@@ -109,12 +116,8 @@
     return `/data?${query.toString()}`
   }
 
-  function hasHistoricalInput(item: JobDetailModel): boolean {
-    return Boolean(item.input.venue || item.input.symbol || item.input.ingestionRunId)
-  }
-
   function hasHistoricalResult(item: JobDetailModel): boolean {
-    return item.result !== undefined && item.jobType.includes('historical')
+    return isHistoricalDataBackfillJob(item) && item.result !== undefined
   }
 
   function statusBadgeClass(status: string): string {
@@ -150,7 +153,7 @@
         <div class="d-flex flex-wrap gap-2">
           <a class="btn btn-outline-secondary btn-sm" href="/finance/connections" use:link>Back to finance connections</a>
           <a class="btn btn-outline-secondary btn-sm" href="/finance/imports" use:link>Back to finance imports</a>
-          {#if detail && hasHistoricalInput(detail)}
+          {#if detail && isHistoricalDataBackfillJob(detail)}
             <a class="btn btn-outline-secondary btn-sm" href={buildDataScopeHref(detail)} use:link>Open data scope</a>
           {/if}
         </div>
@@ -226,7 +229,7 @@
               <div>
                 <h2 class="h5 mb-1">Input</h2>
                 <p class="text-body-secondary mb-0">
-                  {#if hasHistoricalInput(detail)}
+                  {#if isHistoricalDataBackfillJob(detail)}
                     Request scope kept on the finance-local job route.
                   {:else}
                     Input details are not available for this job type in the current API surface.
@@ -234,7 +237,7 @@
                 </p>
               </div>
 
-              {#if hasHistoricalInput(detail)}
+              {#if isHistoricalDataBackfillJob(detail)}
                 <div class="row g-3">
                   <div class="col-12 col-md-6"><strong>ingestionRunId</strong><div>{detail.input.ingestionRunId || '—'}</div></div>
                   <div class="col-12 col-md-6"><strong>Venue</strong><div>{detail.input.venue || '—'}</div></div>

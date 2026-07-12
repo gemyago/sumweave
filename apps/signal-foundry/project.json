@@ -59,7 +59,7 @@
       "cache": false,
       "dependsOn": ["install-deps"],
       "options": {
-        "command": "go run ./cmd/signal-foundry start --json-logs | pino-pretty",
+        "command": "go run ./cmd/signal-foundry start --env local --json-logs | pino-pretty",
         "cwd": "{projectRoot}"
       }
     }

@@ -378,15 +378,15 @@ func TestServices(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			candle, err := svc.IngestCandle(t.Context(), makeCandle())
+			input := makeCandle()
+			candle, err := svc.IngestCandle(t.Context(), input)
 			require.NoError(t, err)
 
 			require.Len(t, deps.instrumentStore.upserted, 1)
 			require.Len(t, deps.candleStore.upserted, 1)
 			require.Empty(t, deps.tradeStore.upserted)
 			require.Equal(t, deps.candleStore.upserted[0], candle)
-			require.Equal(t, time.UTC, candle.TimeRange.Start.Location())
-			require.Equal(t, time.UTC, candle.TimeRange.End.Location())
+			require.Equal(t, input.TimeRange, candle.TimeRange)
 			require.Equal(t, deps.instrumentStore.upserted[0], candle.Instrument)
 			require.Equal(t, strings.TrimSpace(candle.Provenance.Source), candle.Provenance.Source)
 			require.Equal(t, strings.TrimSpace(candle.Provenance.RecordID), candle.Provenance.RecordID)
@@ -414,7 +414,7 @@ func TestServices(t *testing.T) {
 			require.Equal(t, deps.candleStore.batchUpserts[0].candle, candle)
 		})
 
-		t.Run("persists a valid trade with UTC normalization", func(t *testing.T) {
+		t.Run("persists a valid trade while preserving its timestamp", func(t *testing.T) {
 			t.Parallel()
 
 			deps := makeMockDeps()
@@ -425,14 +425,15 @@ func TestServices(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			trade, err := svc.IngestTrade(t.Context(), makeTrade())
+			input := makeTrade()
+			trade, err := svc.IngestTrade(t.Context(), input)
 			require.NoError(t, err)
 
 			require.Len(t, deps.instrumentStore.upserted, 1)
 			require.Len(t, deps.tradeStore.upserted, 1)
 			require.Empty(t, deps.candleStore.upserted)
 			require.Equal(t, deps.tradeStore.upserted[0], trade)
-			require.Equal(t, time.UTC, trade.EventTime.Location())
+			require.Equal(t, input.EventTime, trade.EventTime)
 			require.Equal(t, deps.instrumentStore.upserted[0], trade.Instrument)
 		})
 
@@ -652,6 +653,10 @@ func TestServices(t *testing.T) {
 			})
 			require.NoError(t, err)
 
+			requestRange := domain.TimeRange{
+				Start: start.In(time.FixedZone(randomWord("zone"), 2*3600)),
+				End:   start.Add(5 * time.Minute).In(time.FixedZone(randomWord("zone"), -3*3600)),
+			}
 			got, err := readSvc.QueryCandles(
 				t.Context(),
 				domain.Instrument{
@@ -659,10 +664,7 @@ func TestServices(t *testing.T) {
 					Symbol: domain.Symbol("  " + expectedInstrument.Symbol.String() + "  "),
 				},
 				domain.Timeframe(" 1M "),
-				domain.TimeRange{
-					Start: start.In(time.FixedZone(randomWord("zone"), 2*3600)),
-					End:   start.Add(5 * time.Minute).In(time.FixedZone(randomWord("zone"), -3*3600)),
-				},
+				requestRange,
 			)
 			require.NoError(t, err)
 			require.Equal(t, []domain.Candle{expectedCandle}, got)
@@ -671,7 +673,7 @@ func TestServices(t *testing.T) {
 			require.Equal(t, expectedInstrument.Symbol, deps.candleStore.queried[0].instrument.Symbol)
 			require.Zero(t, deps.candleStore.queried[0].instrument.AssetClass)
 			require.Equal(t, domain.Timeframe1m, deps.candleStore.queried[0].timeframe)
-			require.Equal(t, expectedRange, deps.candleStore.queried[0].timeRange)
+			require.Equal(t, requestRange, deps.candleStore.queried[0].timeRange)
 		})
 
 		t.Run("delegates candle availability reads with canonical filters", func(t *testing.T) {
@@ -747,9 +749,6 @@ func TestServices(t *testing.T) {
 			require.NoError(t, err)
 
 			start := randomTime()
-			expectedRange, err := domain.NewTimeRange(start, start.Add(3*time.Minute))
-			require.NoError(t, err)
-
 			expectedTrade, err := domain.NewTrade(domain.TradeParams{
 				Instrument: expectedInstrument,
 				EventTime:  start.Add(time.Minute),
@@ -768,23 +767,24 @@ func TestServices(t *testing.T) {
 			})
 			require.NoError(t, err)
 
+			requestRange := domain.TimeRange{
+				Start: start.In(time.FixedZone(randomWord("zone"), 4*3600)),
+				End:   start.Add(3 * time.Minute).In(time.FixedZone(randomWord("zone"), -7*3600)),
+			}
 			got, err := readSvc.QueryTrades(
 				t.Context(),
 				domain.Instrument{
 					Venue:  domain.Venue("  " + expectedInstrument.Venue.String() + "  "),
 					Symbol: domain.Symbol("  " + expectedInstrument.Symbol.String() + "  "),
 				},
-				domain.TimeRange{
-					Start: start.In(time.FixedZone(randomWord("zone"), 4*3600)),
-					End:   start.Add(3 * time.Minute).In(time.FixedZone(randomWord("zone"), -7*3600)),
-				},
+				requestRange,
 			)
 			require.NoError(t, err)
 			require.Equal(t, []domain.Trade{expectedTrade}, got)
 			require.Len(t, deps.tradeStore.queried, 1)
 			require.Equal(t, expectedInstrument.Venue, deps.tradeStore.queried[0].instrument.Venue)
 			require.Equal(t, expectedInstrument.Symbol, deps.tradeStore.queried[0].instrument.Symbol)
-			require.Equal(t, expectedRange, deps.tradeStore.queried[0].timeRange)
+			require.Equal(t, requestRange, deps.tradeStore.queried[0].timeRange)
 		})
 
 		t.Run("replays candles with stable identities", func(t *testing.T) {
@@ -828,6 +828,10 @@ func TestServices(t *testing.T) {
 			})
 			require.NoError(t, err)
 
+			requestRange := domain.TimeRange{
+				Start: expectedRange.Start.In(time.FixedZone(randomWord("zone"), -5*3600)),
+				End:   expectedRange.End.In(time.FixedZone(randomWord("zone"), 6*3600)),
+			}
 			got, err := readSvc.ReplayCandles(
 				t.Context(),
 				domain.Instrument{
@@ -835,15 +839,12 @@ func TestServices(t *testing.T) {
 					Symbol: domain.Symbol("  " + expectedInstrument.Symbol.String() + "  "),
 				},
 				domain.Timeframe(" 1M "),
-				domain.TimeRange{
-					Start: expectedRange.Start.In(time.FixedZone(randomWord("zone"), -5*3600)),
-					End:   expectedRange.End.In(time.FixedZone(randomWord("zone"), 6*3600)),
-				},
+				requestRange,
 			)
 			require.NoError(t, err)
 			require.Equal(t, deps.candleStore.replayValue, got)
 			require.Len(t, deps.candleStore.replayed, 1)
-			require.Equal(t, expectedRange, deps.candleStore.replayed[0].timeRange)
+			require.Equal(t, requestRange, deps.candleStore.replayed[0].timeRange)
 		})
 
 		t.Run("replays trades with stable identities", func(t *testing.T) {
@@ -883,21 +884,22 @@ func TestServices(t *testing.T) {
 			})
 			require.NoError(t, err)
 
+			requestRange := domain.TimeRange{
+				Start: expectedRange.Start.In(time.FixedZone(randomWord("zone"), 8*3600)),
+				End:   expectedRange.End.In(time.FixedZone(randomWord("zone"), -2*3600)),
+			}
 			got, err := readSvc.ReplayTrades(
 				t.Context(),
 				domain.Instrument{
 					Venue:  domain.Venue("  " + expectedInstrument.Venue.String() + "  "),
 					Symbol: domain.Symbol("  " + expectedInstrument.Symbol.String() + "  "),
 				},
-				domain.TimeRange{
-					Start: expectedRange.Start.In(time.FixedZone(randomWord("zone"), 8*3600)),
-					End:   expectedRange.End.In(time.FixedZone(randomWord("zone"), -2*3600)),
-				},
+				requestRange,
 			)
 			require.NoError(t, err)
 			require.Equal(t, deps.tradeStore.replayValue, got)
 			require.Len(t, deps.tradeStore.replayed, 1)
-			require.Equal(t, expectedRange, deps.tradeStore.replayed[0].timeRange)
+			require.Equal(t, requestRange, deps.tradeStore.replayed[0].timeRange)
 		})
 
 		t.Run("rejects invalid read inputs without store calls", func(t *testing.T) {

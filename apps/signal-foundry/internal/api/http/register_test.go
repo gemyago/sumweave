@@ -557,6 +557,7 @@ func TestSetupV1Routes(t *testing.T) {
 		_, _, rootHandler, _, bankConnectionService, financeStore := makeSetup(t, "")
 
 		t.Run("redirects provider return params back to the browser route", func(t *testing.T) {
+			createdAt := time.Now()
 			pendingStart, err := financeStore.SavePendingBankConnectionLinkStart(
 				t.Context(),
 				financedomain.PendingBankConnectionLinkStart{
@@ -566,6 +567,9 @@ func TestSetupV1Routes(t *testing.T) {
 					Provider:    "pko",
 					State:       "state-1",
 					CallbackURL: "http://localhost:5173/#/finance/connections",
+					ExpiresAt:   createdAt.Add(time.Hour),
+					CreatedAt:   createdAt,
+					UpdatedAt:   createdAt,
 				},
 			)
 			require.NoError(t, err)

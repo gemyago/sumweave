@@ -81,9 +81,9 @@ func newFinanceFixturesGenerateCmd(
 		Use:   financeGenerateCommandName,
 		Short: "Generate realistic finance fixtures",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			now := time.Now().UTC()
+			now := time.Now()
 			if deps.Now != nil {
-				now = deps.Now().UTC()
+				now = deps.Now()
 			}
 			resolveRuntimeConfig := deps.ResolveRuntimeConfig
 			runtimeConfig := financeFixturesRuntimeConfig{}
@@ -204,17 +204,13 @@ func runFinanceFixturesGenerate(
 	}
 	monobankServer := newFinanceFixturesMonobankServer()
 	defer monobankServer.Close()
-	monobankBaseURL := strings.TrimSpace(runtimeConfig.MonobankBaseURL)
-	if monobankBaseURL == "" {
-		monobankBaseURL = monobankServer.URL
-	}
 	financeModule, err := newFinanceFixturesModule(
 		database,
 		jobsStore,
 		params,
 		cipher,
 		monobankServer.Client(),
-		monobankBaseURL,
+		monobankServer.URL,
 	)
 	if err != nil {
 		return financefixtures.Summary{}, err
@@ -409,7 +405,7 @@ func resolveFinanceFixturesRuntimeConfig(
 
 		DatabaseDSN     string `name:"config.finance.fixtures.database.dsn"`
 		JobsTablePrefix string `name:"config.finance.fixtures.database.jobsTablePrefix"`
-		JWTKey          string `name:"config.auth.jwtSigningKey"                        optional:"true"`
+		JWTKey          string `name:"auth.jwtKey"                                      optional:"true"`
 		MonoURL         string `name:"config.finance.providers.monobank.baseURL"        optional:"true"`
 	}
 	var runtimeConfig financeFixturesRuntimeConfig
@@ -439,12 +435,13 @@ func (w fixturesScheduleWriter) UpsertBankConnectionSyncSchedule(
 			strconv.Quote(financepkg.BankConnectionSyncReasonScheduled),
 		),
 	)
-	var nextRunAt time.Time
+	var nextRunAt *time.Time
 	if schedule.Enabled {
-		nextRunAt = time.Now().UTC()
+		now := time.Now()
+		nextRunAt = &now
 	}
 	if schedule.NextRunAt != nil {
-		nextRunAt = schedule.NextRunAt.UTC()
+		nextRunAt = schedule.NextRunAt
 	}
 	return w.store.UpsertSchedule(ctx, jobspkg.Schedule{
 		ID:      strings.TrimSpace(schedule.ScheduleID),

@@ -588,6 +588,17 @@ func (s *Service) RunBankConnectionSync(
 	return service.RunBankConnectionSync(ctx, params)
 }
 
+func (s *Service) RecordBankConnectionSyncScheduled(
+	ctx context.Context,
+	params RecordBankConnectionSyncScheduledParams,
+) (domain.BankConnectionSchedule, error) {
+	service, err := s.bankSyncService()
+	if err != nil {
+		return domain.BankConnectionSchedule{}, err
+	}
+	return service.RecordBankConnectionSyncScheduled(ctx, params)
+}
+
 func (s *Service) ApplyProviderSyncResult(
 	ctx context.Context,
 	params ApplyProviderSyncResultParams,

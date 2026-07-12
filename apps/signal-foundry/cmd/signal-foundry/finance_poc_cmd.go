@@ -302,7 +302,7 @@ func runFinancePOCProviderStatus(
 	envelope := financePOCEnvelope{
 		Provider:  request.Provider,
 		Operation: firstNonEmpty(request.Operation, financePOCOperationStatus),
-		FetchedAt: deps.Now().UTC().Format(time.RFC3339),
+		FetchedAt: deps.Now().Format(time.RFC3339),
 		Summary:   result.Summary,
 		Raw:       result.Raw,
 	}
@@ -441,8 +441,8 @@ func newEnableBankingJWT(now time.Time, appID string, privateKeyPath string) (st
 	claims := jwt.MapClaims{
 		"iss": enableBankingJWTIssuer,
 		"aud": enableBankingJWTAudience,
-		"iat": jwt.NewNumericDate(now.UTC()),
-		"exp": jwt.NewNumericDate(now.UTC().Add(enableBankingJWTLifetime)),
+		"iat": jwt.NewNumericDate(now),
+		"exp": jwt.NewNumericDate(now.Add(enableBankingJWTLifetime)),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = strings.TrimSpace(appID)

@@ -22,7 +22,7 @@ type Store struct {
 }
 
 func NewStore(database *Database) *Store {
-	return newStore(database.db, func() time.Time { return time.Now().UTC() })
+	return newStore(database.db, time.Now)
 }
 
 func (s *Store) WithTransaction(ctx context.Context, fn func(*Store) error) error {
@@ -54,7 +54,7 @@ func (s *Store) SaveConnectionSecret(
 ) (domain.ConnectionSecret, error) {
 	model := newConnectionSecretModel(secret)
 	if model.CreatedAt.IsZero() {
-		model.CreatedAt = s.now().UTC()
+		model.CreatedAt = s.now()
 	}
 	if model.UpdatedAt.IsZero() {
 		model.UpdatedAt = model.CreatedAt
@@ -103,7 +103,7 @@ func (s *Store) CreateFixtureBootstrapRun(
 ) error {
 	model := newFixtureBootstrapRunModel(run)
 	if model.StartedAt.IsZero() {
-		model.StartedAt = s.now().UTC()
+		model.StartedAt = s.now()
 	}
 	if err := s.db.WithContext(ctx).Table(model.TableName()).Create(&model).Error; err != nil {
 		return fmt.Errorf("create fixture bootstrap run: %w", err)
@@ -118,7 +118,7 @@ func (s *Store) CreateFixtureScenarioRecord(
 ) error {
 	model := newFixtureScenarioRecordModel(runID, record)
 	if model.OccurredAt.IsZero() {
-		model.OccurredAt = s.now().UTC()
+		model.OccurredAt = s.now()
 	}
 	if err := s.db.WithContext(ctx).Table(model.TableName()).Create(&model).Error; err != nil {
 		return fmt.Errorf("create fixture scenario record: %w", err)
@@ -132,7 +132,7 @@ func (s *Store) SaveCSVImport(
 ) (domain.CSVImportRecord, error) {
 	model := newCSVImportModel(record)
 	if model.CreatedAt.IsZero() {
-		model.CreatedAt = s.now().UTC()
+		model.CreatedAt = s.now()
 	}
 	if model.UpdatedAt.IsZero() {
 		model.UpdatedAt = model.CreatedAt

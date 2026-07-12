@@ -108,9 +108,7 @@ func (b *Bootstrapper) Bootstrap(
 ) (Summary, error) {
 	normalized := config
 	if normalized.Now.IsZero() {
-		normalized.Now = time.Now().UTC()
-	} else {
-		normalized.Now = normalized.Now.UTC()
+		normalized.Now = time.Now()
 	}
 	service, err := b.service.StartRun(ctx, RunStart{
 		Seed:      normalized.Seed,

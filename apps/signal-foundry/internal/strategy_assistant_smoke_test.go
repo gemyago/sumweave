@@ -263,8 +263,8 @@ func TestStrategyAssistantSmoke(t *testing.T) {
 		require.Len(t, availability.Items, 1)
 		assert.Equal(t, instrument.Symbol, availability.Items[0].Symbol)
 		assert.Equal(t, domain.Timeframe1h, availability.Items[0].DefaultSlice.Timeframe)
-		assert.Equal(t, rangeStart, availability.Items[0].DefaultSlice.StartAt)
-		assert.Equal(t, rangeEnd, availability.Items[0].DefaultSlice.EndAt)
+		assert.True(t, rangeStart.Equal(availability.Items[0].DefaultSlice.StartAt))
+		assert.True(t, rangeEnd.Equal(availability.Items[0].DefaultSlice.EndAt))
 
 		replayed, err := deps.DataReadService.ReplayCandles(
 			t.Context(),

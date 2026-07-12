@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/domain"
+	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/schema"
@@ -142,9 +143,9 @@ func (s *DatabaseStore) QueryPortfolioSnapshots(
 	}
 	if query.TimeRange != nil {
 		db = db.Where(
-			"event_time >= ? AND event_time < ?",
-			query.TimeRange.Start.UTC(),
-			query.TimeRange.End.UTC(),
+			gormsignalfoundry.InstantRangePredicate(s.db, "event_time"),
+			query.TimeRange.Start,
+			query.TimeRange.End,
 		)
 	}
 
@@ -319,9 +320,9 @@ func applyExecutionListQuery(
 	}
 	if timeRange != nil {
 		db = db.Where(
-			timeColumn+" >= ? AND "+timeColumn+" < ?",
-			timeRange.Start.UTC(),
-			timeRange.End.UTC(),
+			gormsignalfoundry.InstantRangePredicate(db, timeColumn),
+			timeRange.Start,
+			timeRange.End,
 		)
 	}
 

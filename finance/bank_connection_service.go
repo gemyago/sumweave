@@ -239,7 +239,7 @@ func (w *bankConnectionSecretWriter) SaveConnectionSecret(
 		return "", fmt.Errorf("seal connection secret: %w", err)
 	}
 	secretID := w.newID()
-	now := w.now().UTC()
+	now := w.now()
 	_, err = w.store.SaveConnectionSecret(ctx, domain.ConnectionSecret{
 		ID:        secretID,
 		Provider:  provider,

@@ -50,14 +50,6 @@
     }
   }
 
-  function toDateTimeLocalValue(value: Date | null): string {
-    if (!value) {
-      return ''
-    }
-    const offset = value.getTimezoneOffset() * 60_000
-    return new Date(value.getTime() - offset).toISOString().slice(0, 16)
-  }
-
   function fillFormFromTransaction(item: FinanceTransaction) {
     form = {
       accountId: item.accountId,
@@ -160,6 +152,30 @@
     }
   }
 
+  function toDateTimeLocalValue(value: Date): string {
+    if (Number.isNaN(value.getTime())) {
+      throw new TypeError('Cannot render an invalid transaction timestamp')
+    }
+    const pad = (part: number) => String(part).padStart(2, '0')
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`
+  }
+
+  function fromDateTimeLocalValue(value: string): Date {
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
+    if (!match) {
+      throw new TypeError('Enter a valid local date and time')
+    }
+    const [year, month, day, hour, minute] = match.slice(1).map(Number)
+    const parsed = new Date(year, month - 1, day, hour, minute)
+    if (
+      parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day ||
+      parsed.getHours() !== hour || parsed.getMinutes() !== minute
+    ) {
+      throw new TypeError('Enter a local date and time that exists')
+    }
+    return parsed
+  }
+
   async function saveTransaction(event: SubmitEvent) {
     event.preventDefault()
     if (!financeShell.selectedTenantId) {
@@ -181,7 +197,7 @@
           amountMinor: Number(form.amountMinor),
           currency: form.currency,
           description: form.description,
-          effectiveAt: new Date(form.effectiveAt),
+          effectiveAt: fromDateTimeLocalValue(form.effectiveAt),
           categoryId: form.categoryId || undefined,
           transferGroupId: form.transferGroupId || undefined,
         })
@@ -194,7 +210,7 @@
           transactionId: params.transactionId ?? '',
           description: form.description,
           amountMinor: Number(form.amountMinor),
-          effectiveAt: new Date(form.effectiveAt),
+          effectiveAt: fromDateTimeLocalValue(form.effectiveAt),
           categoryId: form.categoryId || null,
         })
         saveMessage = 'Transaction updated.'

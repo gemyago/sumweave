@@ -31,6 +31,7 @@ func TestRawPayloadBrowserQueries(t *testing.T) {
 			time.FixedZone(randomWord("zone"), fake.IntBetween(-11, 12)*3600),
 		)
 	}
+	timePointer := func(value time.Time) *time.Time { return &value }
 
 	t.Run("NewRawPayloadMetadataListQuery", func(t *testing.T) {
 		t.Parallel()
@@ -48,8 +49,8 @@ func TestRawPayloadBrowserQueries(t *testing.T) {
 				Symbol:         domain.Symbol("  " + strings.ToUpper(randomWord("symbol")) + "  "),
 				AssetClass:     domain.AssetClass("  CRYPTO  "),
 				Timeframe:      domain.Timeframe(" 1M "),
-				StartAt:        start,
-				EndAt:          end,
+				StartAt:        timePointer(start),
+				EndAt:          timePointer(end),
 				IngestionRunID: "  " + randomWord("run") + "  ",
 				EntityHint:     "  " + randomWord("entity") + "  ",
 				Endpoint:       "  /info  ",
@@ -64,14 +65,14 @@ func TestRawPayloadBrowserQueries(t *testing.T) {
 			require.Equal(t, domain.AssetClassCrypto, query.Instrument.AssetClass)
 			require.Equal(t, domain.Timeframe1m, query.Timeframe)
 			require.NotNil(t, query.TimeRange)
-			require.Equal(t, start.UTC(), query.TimeRange.Start)
-			require.Equal(t, end.UTC(), query.TimeRange.End)
+			require.Equal(t, start, query.TimeRange.Start)
+			require.Equal(t, end, query.TimeRange.End)
 			require.Equal(t, strings.TrimSpace(query.IngestionRunID), query.IngestionRunID)
 			require.Equal(t, strings.TrimSpace(query.EntityHint), query.EntityHint)
 			require.Equal(t, "/info", query.Endpoint)
 			require.Equal(t, strings.TrimSpace(query.RequestType), query.RequestType)
 			require.Equal(t, defaultRawPayloadMetadataLimit, query.Limit)
-			require.Equal(t, cursorTime, query.cursor.ReceivedAt)
+			require.True(t, cursorTime.Equal(query.cursor.ReceivedAt))
 			require.Equal(t, cursorID, query.cursor.ID)
 		})
 
@@ -108,11 +109,19 @@ func TestRawPayloadBrowserQueries(t *testing.T) {
 			require.ErrorIs(t, err, ErrValidation)
 			require.EqualError(t, err, "data validation failed: raw payload query timeframe is invalid")
 
+			zero := time.Time{}
+			_, err = NewRawPayloadMetadataListQuery(RawPayloadMetadataListQueryParams{
+				Venue:   domain.Venue(randomWord("venue")),
+				StartAt: &zero,
+			})
+			require.ErrorIs(t, err, ErrValidation)
+			require.ErrorContains(t, err, "time range start is required")
+
 			start := randomTime()
 			_, err = NewRawPayloadMetadataListQuery(RawPayloadMetadataListQueryParams{
 				Venue:   domain.Venue(randomWord("venue")),
-				StartAt: start,
-				EndAt:   start,
+				StartAt: timePointer(start),
+				EndAt:   timePointer(start),
 			})
 			require.ErrorIs(t, err, ErrValidation)
 			require.EqualError(
@@ -155,8 +164,8 @@ func TestRawPayloadBrowserQueries(t *testing.T) {
 			require.Equal(t, strings.TrimSpace(query.Symbol.String()), query.Symbol.String())
 			require.Equal(t, domain.AssetClassCrypto, query.AssetClass)
 			require.Equal(t, domain.Timeframe1m, query.Timeframe)
-			require.Equal(t, start.UTC(), query.TimeRange.Start)
-			require.Equal(t, end.UTC(), query.TimeRange.End)
+			require.Equal(t, start, query.TimeRange.Start)
+			require.Equal(t, end, query.TimeRange.End)
 			require.Equal(t, strings.TrimSpace(query.ProvenanceSource), query.ProvenanceSource)
 			require.Equal(t, strings.TrimSpace(query.ProvenanceIdentity), query.ProvenanceIdentity)
 		})

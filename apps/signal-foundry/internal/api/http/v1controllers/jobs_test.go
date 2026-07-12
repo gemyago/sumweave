@@ -263,6 +263,37 @@ func TestJobsController(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.Code)
 	})
 
+	t.Run("registered list and detail routes omit historical input for finance jobs", func(t *testing.T) {
+		userID := fake.UUID().V4()
+		now := time.Date(2026, time.July, 10, 22, 30, 0, 0, time.FixedZone("fixture", 2*60*60))
+		financeJob := jobspkg.Job{
+			ID: "finance-job-" + fake.UUID().V4(), JobType: jobspkg.JobType("finance.bank_connection_sync"),
+			Status:    jobspkg.JobStatusSucceeded,
+			Requester: jobspkg.Requester{UserID: userID, Source: jobspkg.RequesterSourceOperator},
+			InputJSON: json.RawMessage(`{"connectionId":"connection-1","reason":"scheduled"}`),
+			CreatedAt: now, UpdatedAt: now, QueuedAt: now, AttemptCount: 1,
+		}
+		service := newMockjobsService(t)
+		service.EXPECT().List(mock.Anything, mock.Anything).Return(
+			jobspkg.ListResult{Items: []jobspkg.Job{financeJob}},
+			nil,
+		)
+		service.EXPECT().Get(mock.Anything, financeJob.ID).Return(&financeJob, nil)
+		handler := newHandler(service, userID)
+		for _, target := range []string{"/api/v1/jobs", "/api/v1/jobs/" + financeJob.ID} {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, newRequest(http.MethodGet, target, "", true))
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+			if items, ok := payload["items"].([]any); ok {
+				payload = items[0].(map[string]any)
+			}
+			require.Equal(t, string(financeJob.JobType), payload["jobType"])
+			require.NotContains(t, payload, "input")
+		}
+	})
+
 	t.Run(
 		"controller maps validation not found conflict and internal errors safely",
 		func(t *testing.T) {

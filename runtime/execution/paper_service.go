@@ -155,7 +155,7 @@ func (s *LimitFillSimulator) Simulate(
 		if replayCandle.Candle.Instrument != order.Instrument {
 			continue
 		}
-		if !replayCandle.Candle.TimeRange.End.UTC().After(order.EventTime.Time()) {
+		if !replayCandle.Candle.TimeRange.End.After(order.EventTime.Time()) {
 			continue
 		}
 

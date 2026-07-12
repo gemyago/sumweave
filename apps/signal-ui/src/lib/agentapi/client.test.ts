@@ -336,7 +336,7 @@ describe('createSignalAgentApi / streaming and providers (MSW)', () => {
       const limit = faker.number.int({ min: 1, max: 100 })
       const offset = faker.number.int({ min: 0, max: 99 })
       const result = await api.listSessions({ limit, offset })
-      expect(result).toEqual(responseBody)
+      expect(result.sessions[0]?.updatedAt).toBeInstanceOf(Date)
       const url = new URL(capturedUrl)
       expect(url.searchParams.get('limit')).toBe(String(limit))
       expect(url.searchParams.get('offset')).toBe(String(offset))
@@ -366,6 +366,23 @@ describe('createSignalAgentApi / streaming and providers (MSW)', () => {
       const limit = faker.number.int({ min: 1, max: 100 })
       await expect(api.listSessions({ limit })).rejects.toThrow(/GET \/sessions/)
     })
+
+    it('rejects malformed session lifecycle timestamps before they reach the session list', async () => {
+      const port = faker.internet.port()
+      const baseUrl = `http://127.0.0.1:${port}`
+      server.use(
+        http.get(`${baseUrl}/sessions`, () => HttpResponse.json({
+          sessions: [{ sessionId: faker.string.uuid(), title: 'Bad timestamp', createdAt: '', updatedAt: 'not-a-timestamp' }],
+          total: 1,
+        })),
+      )
+
+      await expect(createSignalAgentApi({ baseUrl }).listSessions({ limit: 10 })).rejects.toMatchObject({
+        name: 'AgentResponseError',
+        field: 'agent.session.createdAt',
+      })
+    })
+
   })
 
   describe('error responses', () => {

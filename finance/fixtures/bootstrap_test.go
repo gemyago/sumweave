@@ -62,7 +62,7 @@ func TestBootstrapper(t *testing.T) {
 			require.Len(t, first.records, 1)
 			require.Len(t, second.records, 1)
 			assert.Equal(t, first.records[0].StableID, second.records[0].StableID)
-			assert.Equal(t, time.UTC, first.records[0].OccurredAt.Location())
+			assert.Equal(t, config.Now, first.records[0].OccurredAt)
 			assert.Equal(t, summaryA, summaryB)
 		},
 	)
@@ -89,7 +89,7 @@ func TestBootstrapper(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, config.Scenario, summary.Scenario)
 		require.Len(t, service.starts, 1)
-		assert.Equal(t, time.UTC, service.starts[0].StartedAt.Location())
+		assert.False(t, service.starts[0].StartedAt.IsZero())
 
 		bootstrapper = NewBootstrapper(&failingBootstrapService{err: assert.AnError})
 		_, err = bootstrapper.Bootstrap(t.Context(), config)
@@ -150,8 +150,8 @@ func TestService(t *testing.T) {
 
 		require.Len(t, repo.runs, 1)
 		require.Len(t, repo.records, 1)
-		assert.Equal(t, time.UTC, repo.runs[0].StartedAt.Location())
-		assert.Equal(t, time.UTC, repo.records[0].OccurredAt.Location())
+		assert.Equal(t, time.FixedZone("fixture", -4*60*60), repo.runs[0].StartedAt.Location())
+		assert.Equal(t, time.FixedZone("fixture", -4*60*60), repo.records[0].OccurredAt.Location())
 	})
 
 	t.Run(
@@ -199,8 +199,8 @@ func TestService(t *testing.T) {
 			}))
 			require.Len(t, store.runs, 1)
 			require.Len(t, store.records, 1)
-			assert.Equal(t, time.UTC, store.runs[0].StartedAt.Location())
-			assert.Equal(t, time.UTC, store.records[0].OccurredAt.Location())
+			assert.Equal(t, time.FixedZone("fixture", 2*60*60), store.runs[0].StartedAt.Location())
+			assert.Equal(t, time.FixedZone("fixture", 2*60*60), store.records[0].OccurredAt.Location())
 		},
 	)
 }

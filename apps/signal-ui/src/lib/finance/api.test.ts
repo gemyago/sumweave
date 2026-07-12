@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSignalFinanceApi, createSignalFinanceApiForAuth, FinanceApiError } from './api'
+import { createSignalFinanceApi, createSignalFinanceApiForAuth, FinanceApiError, FinanceResponseError } from './api'
 
 vi.mock('../auth/auth-fetch', () => ({
   createAuthFetch: vi.fn(() => vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ items: [] }) }) as Response)),
@@ -13,7 +13,7 @@ describe('finance api', () => {
   it('maps tenant, dashboard, connection, import, and fx responses', async () => {
     const responses = [
       { ok: true, json: { items: [{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: '2026-06-20T12:00:00Z', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] } },
-      { ok: true, json: { period: { preset: 'current_month', startDate: '2026-06-01T00:00:00Z', endDate: '2026-06-30T00:00:00Z', previous: { startDate: '2026-05-01T00:00:00Z', endDate: '2026-05-31T00:00:00Z' }, next: { startDate: '2026-07-01T00:00:00Z', endDate: '2026-07-31T00:00:00Z' } }, settled: { displayCurrency: 'USD', incomeMinor: 10, expenseMinor: 5, netMinor: 5, transactionCount: 1, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1, netMinor: -1, transactionCount: 1, complete: true }, categoryBreakdowns: [], accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 10, nativePendingMinor: 1, missingFx: false }], alerts: [], missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: '2026-06-20T00:00:00Z', provider: 'frankfurter' }], nativeSettledTotals: [] } },
+      { ok: true, json: { period: { preset: 'current_month', startDate: '2026-06-01T00:00:00-07:00', endDate: '2026-06-30T00:00:00-07:00', previous: { startDate: '2026-05-01T00:00:00-07:00', endDate: '2026-05-31T00:00:00-07:00' }, next: { startDate: '2026-07-01T00:00:00-07:00', endDate: '2026-07-31T00:00:00-07:00' } }, settled: { displayCurrency: 'USD', incomeMinor: 10, expenseMinor: 5, netMinor: 5, transactionCount: 1, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1, netMinor: -1, transactionCount: 1, complete: true }, categoryBreakdowns: [], accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 10, nativePendingMinor: 1, displayBookedMinor: null, displayPendingMinor: 0, missingFx: false }], alerts: [], missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: '2026-06-20T12:00:00+02:00', provider: 'frankfurter' }], nativeSettledTotals: [] } },
       { ok: true, json: { items: [{ id: 'connection-1', tenantId: 'tenant-1', provider: 'monobank', displayName: 'Mono', providerReference: 'ref', externalId: 'ext', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z', schedule: { connectionId: 'connection-1', intervalSeconds: 900, enabled: true, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' } }] } },
       { ok: true, json: { importId: 'import-1', importType: 'transactions', headers: ['account'], mapping: { account: 'accountName' }, duplicateRows: [], rejectedRows: [], wouldCreateAccounts: ['Checking'], wouldCreateCategories: [], wouldCreateTags: [] } },
       { ok: true, json: { jobId: 'job-1', jobType: 'finance.fx_rates_sync', provider: 'frankfurter' } },
@@ -33,14 +33,33 @@ describe('finance api', () => {
     const dashboard = await api.getDashboard({ tenantId: 'tenant-1', preset: 'current_month' })
     const connections = await api.listConnections({ tenantId: 'tenant-1' })
     const preview = await api.previewCSVImport({ tenantId: 'tenant-1', importType: 'transactions', fileName: 'demo.csv', csv: 'account\nChecking' })
-    const job = await api.triggerFXSync({ provider: 'frankfurter', baseCurrencies: ['USD'], quoteCurrency: 'PLN', startDate: new Date('2026-06-01T00:00:00Z'), endDate: new Date('2026-06-30T00:00:00Z') })
+    const job = await api.triggerFXSync({ provider: 'frankfurter', baseCurrencies: ['USD'], quoteCurrency: 'PLN', startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30) })
 
     expect(tenants[0].joinedAt).toBeInstanceOf(Date)
+    expect(dashboard.period.startDate).toEqual(new Date('2026-06-01T00:00:00-07:00'))
     expect(dashboard.accountBalances[0].displayBookedMinor).toBeNull()
-    expect(dashboard.missingFx[0].rateDate).toBeInstanceOf(Date)
+    expect(dashboard.accountBalances[0].displayPendingMinor).toBe(0)
+    expect(dashboard.accountBalances[0].missingFx).toBe(false)
+    expect(dashboard.missingFx[0].rateDate).toEqual(new Date('2026-06-20T12:00:00+02:00'))
     expect(connections[0].schedule?.intervalSeconds).toBe(900)
     expect(preview.wouldCreateAccounts).toEqual(['Checking'])
     expect(job.jobId).toBe('job-1')
+  })
+
+  it('rejects malformed or missing required dashboard timestamps and nested fields', async () => {
+    const dashboard = {
+      period: { preset: 'current_month', startDate: '2026-03-29T00:00:00+14:00', endDate: '2026-03-31', previous: { startDate: '2026-02-01', endDate: '2026-02-28' }, next: { startDate: '2026-04-01', endDate: '2026-04-30' } },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: false },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: false },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], nativeSettledTotals: [],
+    }
+    const malformedDateFetch = vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => dashboard }) as Response)
+    await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch: malformedDateFetch }).getDashboard({ tenantId: 'tenant-1' })).rejects.toBeInstanceOf(FinanceResponseError)
+
+    const incompleteSettled: Partial<typeof dashboard.settled> = { ...dashboard.settled }
+    delete incompleteSettled.complete
+    const missingNestedFieldFetch = vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ ...dashboard, period: { ...dashboard.period, startDate: '2026-03-29' }, settled: incompleteSettled }) }) as Response)
+    await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch: missingNestedFieldFetch }).getDashboard({ tenantId: 'tenant-1' })).rejects.toBeInstanceOf(FinanceResponseError)
   })
 
   it('raises a typed error for failed responses', async () => {
@@ -74,8 +93,33 @@ describe('finance api', () => {
     const audit = await api.getCSVImportAudit({ tenantId: 'tenant-1', importId: 'import-1' })
 
     expect(String(calls[0].init?.body)).toContain('2026-06-20T12:00:00.000Z')
-    expect(connections[0].schedule).toBeNull()
-    expect(audit.confirmedAt).toBeNull()
+    expect(connections[0].schedule).toBeUndefined()
+    expect(audit.confirmedAt).toBeUndefined()
+  })
+
+  it('omits undefined connection sync windows and preserves supplied instants', async () => {
+    const calls: RequestInit[] = []
+    const fetch = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      calls.push(args[1] ?? {})
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ jobId: 'job-1', jobType: 'finance.bank_connection_sync' }),
+      } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+    const windowStart = new Date('2026-11-01T06:30:00Z')
+
+    await api.triggerConnectionSync({ tenantId: 'tenant-1', connectionId: 'connection-1', reason: 'operator_ui' })
+    await api.triggerConnectionSync({ tenantId: 'tenant-1', connectionId: 'connection-1', reason: 'operator_ui', windowStart })
+
+    expect(JSON.parse(String(calls[0].body))).toEqual({ reason: 'operator_ui' })
+    expect(JSON.parse(String(calls[1].body))).toEqual({
+      reason: 'operator_ui',
+      windowStart: '2026-11-01T06:30:00.000Z',
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it('starts and finishes PKO redirect linking with camelCase payloads', async () => {
@@ -290,9 +334,122 @@ describe('finance api', () => {
 
     expect(transaction.providerOriginal?.description).toBe('Provider coffee')
     expect(transaction.providerOriginal?.effectiveAt).toBeInstanceOf(Date)
-    expect(updated.providerOriginal).toBeNull()
+    expect(updated.providerOriginal).toBeUndefined()
     expect(calls[1].init?.method).toBe('PATCH')
-    expect(String(calls[1].init?.body)).toContain('"categoryId":null')
+		expect(String(calls[1].init?.body)).toContain('"clearCategory":true')
+  })
+
+	it('encodes unchanged, clear, and set category operations across transaction patches', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const transaction = {
+      id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense',
+      amountMinor: 100, currency: 'USD', description: 'Coffee', effectiveAt: '2026-06-20T12:00:00Z',
+      createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
+    }
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return { ok: true, status: 200, statusText: 'OK', json: async () => transaction } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+    const params = {
+      tenantId: 'tenant-1', transactionId: 'tx-1', description: 'Coffee', amountMinor: 100,
+      effectiveAt: new Date('2026-06-20T12:00:00Z'),
+    }
+
+    await api.updateTransaction(params)
+    await api.updateTransaction({ ...params, categoryId: null })
+    await api.updateTransaction({ ...params, categoryId: 'category-1' })
+
+    expect(JSON.parse(String(calls[0].init?.body))).not.toHaveProperty('categoryId')
+		expect(JSON.parse(String(calls[1].init?.body))).toMatchObject({ clearCategory: true })
+    expect(JSON.parse(String(calls[2].init?.body))).toMatchObject({ categoryId: 'category-1' })
+  })
+
+  it('omits an optional transaction effective-at value and preserves a supplied instant', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const transaction = {
+      id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense',
+      amountMinor: 100, currency: 'USD', description: 'Coffee', effectiveAt: '2026-06-20T12:00:00Z',
+      createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
+    }
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return { ok: true, status: 200, statusText: 'OK', json: async () => transaction } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await api.updateTransaction({ tenantId: 'tenant-1', transactionId: 'tx-1', description: 'Coffee', amountMinor: 100 })
+    await api.updateTransaction({
+      tenantId: 'tenant-1', transactionId: 'tx-1', description: 'Coffee', amountMinor: 100,
+      effectiveAt: new Date('2026-11-01T06:30:00Z'),
+    })
+
+    expect(JSON.parse(String(calls[0].init?.body))).not.toHaveProperty('effectiveAt')
+    expect(JSON.parse(String(calls[1].init?.body))).toMatchObject({ effectiveAt: '2026-11-01T06:30:00.000Z' })
+  })
+
+  it('preserves zero balances and distinguishes omitted from nullable response timestamps', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({
+        items: [
+          {
+            id: 'account-null', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual',
+            bookedBalanceMinor: 0, pendingBalanceMinor: -125, hiddenAt: null,
+            createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
+          },
+          {
+            id: 'account-absent', tenantId: 'tenant-1', name: 'Savings', currency: 'EUR', kind: 'manual',
+            bookedBalanceMinor: 25, pendingBalanceMinor: 0,
+            createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
+          },
+        ],
+      }),
+    }) as Response)
+
+    const accounts = await createSignalFinanceApi({ baseUrl: '/api/v1', fetch }).listAccounts({ tenantId: 'tenant-1' })
+
+    expect(accounts[0]).toMatchObject({ bookedBalanceMinor: 0, pendingBalanceMinor: -125, hiddenAt: null })
+    expect(accounts[1]).toMatchObject({ bookedBalanceMinor: 25, pendingBalanceMinor: 0 })
+    expect(accounts[1].hiddenAt).toBeUndefined()
+  })
+
+  it('preserves a disabled schedule instead of defaulting false to an enabled state', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({
+        items: [{
+          id: 'connection-1', tenantId: 'tenant-1', provider: 'monobank', displayName: 'Mono',
+          providerReference: 'ref', externalId: 'ext', state: 'active',
+          createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
+          schedule: {
+            connectionId: 'connection-1', intervalSeconds: 900, enabled: false,
+            createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
+          },
+        }],
+      }),
+    }) as Response)
+
+    const [connection] = await createSignalFinanceApi({ baseUrl: '/api/v1', fetch }).listConnections({ tenantId: 'tenant-1' })
+
+    expect(connection.schedule?.enabled).toBe(false)
+  })
+
+  it('rejects missing required response collections instead of inventing an empty product state', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({}),
+    }) as Response)
+
+    await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch }).listTenants()).rejects.toThrow(
+      'Finance API response contract violation',
+    )
   })
 
   it('updates tenants with the patch endpoint and expects no response body', async () => {
@@ -319,7 +476,7 @@ describe('finance api', () => {
     expect(String(calls[0].init?.body)).toBe('{"name":"Household Updated","displayCurrency":"PLN"}')
   })
 
-  it('covers the remaining finance endpoints with defaulted optional fields', async () => {
+  it('covers the remaining finance endpoints while preserving omitted optional fields', async () => {
     const responses = [
       { id: 'tenant-1', name: 'Created', displayCurrency: 'USD', joinedAt: '2026-06-20T12:00:00Z', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
       { id: 'tenant-1', name: 'Created', displayCurrency: 'USD', joinedAt: '2026-06-20T12:00:00Z', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
@@ -327,8 +484,8 @@ describe('finance api', () => {
       { items: [{ id: 'invite-1', tenantId: 'tenant-1', code: 'code-1', recipient: 'friend@example.com', createdByUserId: 'user-1', createdAt: '2026-06-20T12:00:00Z' }] },
       { id: 'invite-2', tenantId: 'tenant-1', code: 'code-2', recipient: 'team@example.com', createdByUserId: 'user-1', createdAt: '2026-06-20T12:00:00Z' },
       { tenantId: 'tenant-1', userId: 'user-2', joinedAt: '2026-06-20T12:00:00Z' },
-      { items: [{ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] },
-      { id: 'account-2', tenantId: 'tenant-1', name: 'Savings', currency: 'USD', kind: 'manual', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
+      { items: [{ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', bookedBalanceMinor: 0, pendingBalanceMinor: 0, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] },
+      { id: 'account-2', tenantId: 'tenant-1', name: 'Savings', currency: 'USD', kind: 'manual', bookedBalanceMinor: 0, pendingBalanceMinor: 0, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
       { items: [{ id: 'cat-1', tenantId: 'tenant-1', name: 'Groceries', kind: 'expense', seededDefault: true, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] },
       { id: 'cat-2', tenantId: 'tenant-1', name: 'Travel', kind: 'expense', seededDefault: false, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
       { items: [{ id: 'tag-1', tenantId: 'tenant-1', name: 'Budget', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] },
@@ -337,7 +494,7 @@ describe('finance api', () => {
       { id: 'connection-1', tenantId: 'tenant-1', provider: 'mono', displayName: 'Mono', providerReference: 'ref', externalId: 'ext', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
       undefined,
       { jobId: 'job-1', jobType: 'finance.bank_connection_sync' },
-      { defaultProvider: 'frankfurter', storedRatesCount: 3 },
+      { defaultProvider: 'frankfurter', storedRatesCount: 3, providers: [] },
       { importId: 'import-2', jobId: 'job-2', jobType: 'finance.csv_import' },
     ]
     const fetch = vi.fn(async () => {
@@ -349,10 +506,10 @@ describe('finance api', () => {
     expect((await api.createTenant({ name: 'Created', displayCurrency: 'USD' })).name).toBe('Created')
     expect((await api.getTenant({ tenantId: 'tenant-1' })).id).toBe('tenant-1')
     expect((await api.listTenantMembers({ tenantId: 'tenant-1' }))[0].userId).toBe('user-1')
-    expect((await api.listTenantInvites({ tenantId: 'tenant-1' }))[0].acceptedAt).toBeNull()
+    expect((await api.listTenantInvites({ tenantId: 'tenant-1' }))[0].acceptedAt).toBeUndefined()
     expect((await api.createTenantInvite({ tenantId: 'tenant-1', recipient: 'team@example.com' })).recipient).toBe('team@example.com')
     expect((await api.acceptTenantInvite({ code: 'code-2' })).userId).toBe('user-2')
-    expect((await api.listAccounts({ tenantId: 'tenant-1' }))[0].hiddenAt).toBeNull()
+    expect((await api.listAccounts({ tenantId: 'tenant-1' }))[0].hiddenAt).toBeUndefined()
     expect((await api.createAccount({ tenantId: 'tenant-1', name: 'Savings', currency: 'USD', kind: 'manual' })).name).toBe('Savings')
     expect((await api.listCategories({ tenantId: 'tenant-1' }))[0].seededDefault).toBe(true)
     expect((await api.createCategory({ tenantId: 'tenant-1', name: 'Travel', kind: 'expense' })).name).toBe('Travel')
@@ -371,16 +528,9 @@ describe('finance api', () => {
     await expect(api.listTenants()).resolves.toEqual([])
   })
 
-  it('defaults missing csv preview collections and mappings', async () => {
+  it('rejects missing required csv preview collections and mappings', async () => {
     const fetch = vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ importId: 'import-3', importType: 'transactions' }) }) as Response)
     const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
-    const preview = await api.previewCSVImport({ tenantId: 'tenant-1', importType: 'transactions', fileName: 'demo.csv', csv: 'account\nChecking' })
-    expect(preview.headers).toEqual([])
-    expect(preview.mapping).toEqual({})
-    expect(preview.duplicateRows).toEqual([])
-    expect(preview.rejectedRows).toEqual([])
-    expect(preview.wouldCreateAccounts).toEqual([])
-    expect(preview.wouldCreateCategories).toEqual([])
-    expect(preview.wouldCreateTags).toEqual([])
+    await expect(api.previewCSVImport({ tenantId: 'tenant-1', importType: 'transactions', fileName: 'demo.csv', csv: 'account\nChecking' })).rejects.toBeInstanceOf(FinanceResponseError)
   })
 })

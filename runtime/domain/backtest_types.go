@@ -227,7 +227,7 @@ func NewDatasetReferenceTime(value time.Time) (DatasetReferenceTime, error) {
 		return DatasetReferenceTime{}, errors.New("dataset reference created at is required")
 	}
 
-	return DatasetReferenceTime(canonicalUTC(value)), nil
+	return DatasetReferenceTime(value), nil
 }
 
 // NewBacktestRunTime validates and canonicalizes a backtest run timestamp.
@@ -236,7 +236,7 @@ func NewBacktestRunTime(value time.Time, field string) (BacktestRunTime, error) 
 		return BacktestRunTime{}, errors.New(field + " is required")
 	}
 
-	return BacktestRunTime(canonicalUTC(value)), nil
+	return BacktestRunTime(value), nil
 }
 
 // NewEvaluationReportTime validates and canonicalizes an evaluation report time.
@@ -245,7 +245,7 @@ func NewEvaluationReportTime(value time.Time) (EvaluationReportTime, error) {
 		return EvaluationReportTime{}, errors.New("evaluation report created at is required")
 	}
 
-	return EvaluationReportTime(canonicalUTC(value)), nil
+	return EvaluationReportTime(value), nil
 }
 
 // NewVersionedMetrics validates and canonicalizes compact versioned metrics.
@@ -541,14 +541,14 @@ func (s BacktestRunStatus) String() string { return string(s) }
 // String returns the canonical string value for an evaluation decision.
 func (d EvaluationDecision) String() string { return string(d) }
 
-// Time returns the UTC time value for a dataset reference timestamp.
-func (t DatasetReferenceTime) Time() time.Time { return canonicalUTC(time.Time(t)) }
+// Time returns the time value for a dataset reference timestamp.
+func (t DatasetReferenceTime) Time() time.Time { return time.Time(t) }
 
-// Time returns the UTC time value for a backtest run timestamp.
-func (t BacktestRunTime) Time() time.Time { return canonicalUTC(time.Time(t)) }
+// Time returns the time value for a backtest run timestamp.
+func (t BacktestRunTime) Time() time.Time { return time.Time(t) }
 
-// Time returns the UTC time value for an evaluation report timestamp.
-func (t EvaluationReportTime) Time() time.Time { return canonicalUTC(time.Time(t)) }
+// Time returns the time value for an evaluation report timestamp.
+func (t EvaluationReportTime) Time() time.Time { return time.Time(t) }
 
 // MarshalJSON renders compact deterministic metrics JSON.
 func (m VersionedMetrics) MarshalJSON() ([]byte, error) {

@@ -1,5 +1,6 @@
 import type { AuthStore } from '../auth/auth-store.svelte'
 import { createAuthFetch } from '../auth/auth-fetch'
+import { ResponseTimestampError, parseRequiredResponseTimestamp, serializeRequestTimestamp } from '../timestamp'
 
 export type DataTimeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
 
@@ -38,8 +39,8 @@ export interface RawPayloadMetadata {
   symbol: string | null
   assetClass: string | null
   timeframe: string | null
-  start: Date | null
-  end: Date | null
+  start?: Date | null
+  end?: Date | null
   receivedAt: Date
 }
 
@@ -159,6 +160,13 @@ export class DataApiError extends Error {
     this.name = 'DataApiError'
     this.status = params.status
     this.path = params.path
+  }
+}
+
+export class DataResponseError extends ResponseTimestampError {
+  constructor(params: { field: string; issue: string }) {
+    super({ api: 'Data', ...params })
+    this.name = 'DataResponseError'
   }
 }
 
@@ -331,15 +339,18 @@ function buildSearchParams<T extends object>(params: T): URLSearchParams {
 
   for (const [key, value] of Object.entries(params) as Array<[
     string,
-    string | number | Date | undefined
+    string | number | Date | null | undefined
   ]>) {
     if (value === undefined) {
       continue
     }
+    if (value === null) {
+      throw new TypeError(`Cannot serialize null query parameter: ${key}`)
+    }
     if (typeof value === 'string' && value.trim() === '') {
       continue
     }
-    searchParams.set(key, value instanceof Date ? value.toISOString() : String(value))
+    searchParams.set(key, value instanceof Date ? serializeRequestTimestamp(value) : String(value))
   }
 
   return searchParams
@@ -348,8 +359,8 @@ function buildSearchParams<T extends object>(params: T): URLSearchParams {
 function mapDataCandle(item: RawDataCandle): DataCandle {
   return {
     ...item,
-    start: new Date(item.start),
-    end: new Date(item.end),
+    start: parseDataRequiredTimestamp(item.start, 'data.candle.start'),
+    end: parseDataRequiredTimestamp(item.end, 'data.candle.end'),
   }
 }
 
@@ -366,8 +377,8 @@ function mapCandleAvailabilityTimeframeSummary(
 ): CandleAvailabilityTimeframeSummary {
   return {
     ...item,
-    start: new Date(item.start),
-    end: new Date(item.end),
+    start: parseDataRequiredTimestamp(item.start, 'data.candleAvailability.timeframe.start'),
+    end: parseDataRequiredTimestamp(item.end, 'data.candleAvailability.timeframe.end'),
   }
 }
 
@@ -376,8 +387,8 @@ function mapCandleAvailabilityDefaultSlice(
 ): CandleAvailabilityDefaultSlice {
   return {
     ...item,
-    start: new Date(item.start),
-    end: new Date(item.end),
+    start: parseDataRequiredTimestamp(item.start, 'data.candleAvailability.defaultSlice.start'),
+    end: parseDataRequiredTimestamp(item.end, 'data.candleAvailability.defaultSlice.end'),
   }
 }
 
@@ -386,8 +397,8 @@ function mapCandleAvailabilityDefaultSelection(
 ): CandleAvailabilityDefaultSelection {
   return {
     ...item,
-    start: new Date(item.start),
-    end: new Date(item.end),
+    start: parseDataRequiredTimestamp(item.start, 'data.candleAvailability.defaultSelection.start'),
+    end: parseDataRequiredTimestamp(item.end, 'data.candleAvailability.defaultSelection.end'),
   }
 }
 
@@ -397,10 +408,24 @@ function mapRawPayloadMetadata(item: RawRawPayloadMetadata): RawPayloadMetadata 
     symbol: item.symbol ?? null,
     assetClass: item.assetClass ?? null,
     timeframe: item.timeframe ?? null,
-    requestAt: new Date(item.requestAt),
-    responseAt: new Date(item.responseAt),
-    start: item.start ? new Date(item.start) : null,
-    end: item.end ? new Date(item.end) : null,
-    receivedAt: new Date(item.receivedAt),
+    requestAt: parseDataRequiredTimestamp(item.requestAt, 'data.rawPayload.requestAt'),
+    responseAt: parseDataRequiredTimestamp(item.responseAt, 'data.rawPayload.responseAt'),
+    start: parseDataOptionalTimestamp(item.start, 'data.rawPayload.start'),
+    end: parseDataOptionalTimestamp(item.end, 'data.rawPayload.end'),
+    receivedAt: parseDataRequiredTimestamp(item.receivedAt, 'data.rawPayload.receivedAt'),
   }
+}
+
+function parseDataRequiredTimestamp(value: unknown, field: string): Date {
+  try {
+    return parseRequiredResponseTimestamp(value, { api: 'Data', field })
+  } catch (error) {
+    if (error instanceof ResponseTimestampError) throw new DataResponseError({ field, issue: error.message.split(`${field} `)[1] ?? 'is invalid' })
+    throw error
+  }
+}
+
+function parseDataOptionalTimestamp(value: unknown, field: string): Date | null | undefined {
+  if (value === undefined || value === null) return value
+  return parseDataRequiredTimestamp(value, field)
 }

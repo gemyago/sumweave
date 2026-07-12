@@ -51,6 +51,7 @@ func TestExecutionSnapshotTypes(t *testing.T) {
 		t.Parallel()
 
 		averageEntryPrice := fake.Float64(2, 10, 1000)
+		eventTime := randomLocationTime()
 		snapshot, err := NewPositionSnapshot(PositionSnapshotParams{
 			SnapshotID:           randomWord("position-snapshot"),
 			SourceFillID:         randomWord("fill"),
@@ -63,11 +64,11 @@ func TestExecutionSnapshotTypes(t *testing.T) {
 			AverageEntryPrice:    &averageEntryPrice,
 			RealizedPnL:          fake.Float64(4, -100, 100),
 			ExposureNotional:     fake.Float64(4, 10, 10000),
-			EventTime:            randomLocationTime(),
+			EventTime:            eventTime,
 			Metadata:             map[string]string{"projection": "fill-ledger-v0"},
 		})
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, snapshot.EventTime.Time().Location())
+		require.Equal(t, eventTime, snapshot.EventTime.Time())
 		require.NotNil(t, snapshot.AverageEntryPrice)
 
 		_, err = NewPositionSnapshot(PositionSnapshotParams{
@@ -121,6 +122,7 @@ func TestExecutionSnapshotTypes(t *testing.T) {
 		t.Parallel()
 
 		unrealizedPnL := fake.Float64(4, -100, 100)
+		eventTime := randomLocationTime()
 		snapshot, err := NewPortfolioSnapshot(PortfolioSnapshotParams{
 			SnapshotID:    randomWord("portfolio-snapshot"),
 			SourceFillID:  randomWord("fill"),
@@ -129,12 +131,12 @@ func TestExecutionSnapshotTypes(t *testing.T) {
 			NetExposure:   fake.Float64(4, -5000, 5000),
 			RealizedPnL:   fake.Float64(4, -100, 100),
 			UnrealizedPnL: &unrealizedPnL,
-			EventTime:     randomLocationTime(),
+			EventTime:     eventTime,
 			Metadata:      map[string]string{"projection": "fill-ledger-v0"},
 		})
 		require.NoError(t, err)
 		require.NotNil(t, snapshot.UnrealizedPnL)
-		require.Equal(t, time.UTC, snapshot.EventTime.Time().Location())
+		require.Equal(t, eventTime, snapshot.EventTime.Time())
 
 		nan := math.NaN()
 		_, err = NewPortfolioSnapshot(PortfolioSnapshotParams{

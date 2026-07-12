@@ -404,6 +404,15 @@ func (s *failingProviderSyncStore) GetPendingBankConnectionLinkStartByState(
 }
 
 func TestProviderSyncInternals(t *testing.T) {
+	t.Run("optional sync windows reject invalid present timestamps", func(t *testing.T) {
+		valid := time.Date(2026, time.July, 10, 8, 30, 0, 123, time.FixedZone("request", 5*60*60+30*60))
+		require.NoError(t, validateBankConnectionSyncWindows(nil, nil))
+		require.NoError(t, validateBankConnectionSyncWindows(&valid, &valid))
+
+		zero := time.Time{}
+		require.ErrorContains(t, validateBankConnectionSyncWindows(&zero, nil), "windowStart must be non-zero")
+	})
+
 	makeStore := func(t *testing.T) *persistence.Store {
 		t.Helper()
 		database := openTestDatabase(t)
@@ -518,11 +527,11 @@ func TestProviderSyncInternals(t *testing.T) {
 		assert.Equal(t, "account-1", accountID(&domain.ConnectionProviderAccount{ID: "account-1"}))
 		assert.Empty(t, matchID(nil))
 		assert.Equal(t, "match-1", matchID(&domain.ProviderTransactionMatch{ID: "match-1"}))
-		assert.Nil(t, timePtrUTC(time.Time{}))
+		assert.Nil(t, timePtrOrNil(time.Time{}))
 		now := time.Date(2026, time.June, 23, 10, 0, 0, 0, time.FixedZone("CET", 2*60*60))
-		resolved := timePtrUTC(now)
+		resolved := timePtrOrNil(now)
 		require.NotNil(t, resolved)
-		assert.Equal(t, now.UTC(), *resolved)
+		assert.Equal(t, now, *resolved)
 		alreadyApplied, err := (&Service{}).syncRunAlreadyApplied(t.Context(), nil, "connection-1", "")
 		require.NoError(t, err)
 		assert.False(t, alreadyApplied)
@@ -756,8 +765,8 @@ func TestProviderSyncInternals(t *testing.T) {
 			ConnectionID: connection.ID,
 			JobID:        "job-" + fake.UUID().V4(),
 			Reason:       BankConnectionSyncReasonManual,
-			WindowStart:  windowStart,
-			WindowEnd:    windowEnd,
+			WindowStart:  &windowStart,
+			WindowEnd:    &windowEnd,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 1, result.ImportedAccounts)
@@ -950,8 +959,8 @@ func TestProviderSyncInternals(t *testing.T) {
 	t.Run("covers helpers and successful schedule update path", func(t *testing.T) {
 		assert.Equal(t, "a", firstNonEmpty("", "a", "b"))
 		assert.Empty(t, firstNonEmpty("", "   "))
-		assert.Nil(t, timePtrUTC(time.Time{}))
-		require.NotNil(t, timePtrUTC(time.Now()))
+		assert.Nil(t, timePtrOrNil(time.Time{}))
+		require.NotNil(t, timePtrOrNil(time.Now()))
 		assert.NotEmpty(t, providerFingerprint("a", 1, "b"))
 
 		fake := faker.New()

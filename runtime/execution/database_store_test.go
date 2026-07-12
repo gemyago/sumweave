@@ -36,16 +36,17 @@ func TestDatabaseStore(t *testing.T) {
 		return prefix + "-" + strings.ToLower(fake.Lorem().Word()) + "-" + strconv.Itoa(fake.IntBetween(1000, 9999))
 	}
 
-	t.Run("AutoMigrate upgrades legacy execution_commands rows without failing", func(t *testing.T) {
+	t.Run("AutoMigrate requires complete approved decision state", func(t *testing.T) {
 		t.Parallel()
 
 		fake := newFake(t)
 		sqlDB, err := sqlconn.Open(":memory:")
 		require.NoError(t, err)
-		defer func() { require.NoError(t, sqlDB.Close()) }()
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 
 		store, err := NewDatabaseStore(sqlDB, ":memory:", DatabaseStoreOpts{})
 		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
 
 		decisionTime := time.Date(
 			fake.IntBetween(2022, 2031),
@@ -55,107 +56,14 @@ func TestDatabaseStore(t *testing.T) {
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 999999999),
-			time.UTC,
+			time.FixedZone(randomWord(t, fake, "zone"), fake.IntBetween(-11, 12)*3600),
 		)
-		eventTime := decisionTime.Add(time.Duration(fake.IntBetween(1, 30)) * time.Minute)
+		inputStart := decisionTime.Add(-2 * time.Minute)
+		inputEnd := decisionTime.Add(-time.Minute)
+		eventTime := decisionTime.Add(time.Minute)
 		quantity := float64(fake.IntBetween(1, 100)) + 0.25
 		notional := quantity * float64(fake.IntBetween(10, 100))
 		limitPrice := notional / quantity
-
-		commandID := randomWord(t, fake, "command")
-		traceID := randomWord(t, fake, "trace")
-		intentID := randomWord(t, fake, "intent")
-		decisionRef := randomWord(t, fake, "decision-ref")
-		strategyID := randomWord(t, fake, "strategy")
-		strategyVersion := randomWord(t, fake, "version")
-		strategyArtifactHash := randomWord(t, fake, "artifact")
-		venue := randomWord(t, fake, "venue")
-		symbol := strings.ToUpper(randomWord(t, fake, "symbol"))
-
-		require.NoError(t, store.db.Exec(`
-			CREATE TABLE execution_commands (
-				command_id TEXT NOT NULL PRIMARY KEY,
-				trace_id TEXT,
-				intent_id TEXT,
-				governor_decision_reference TEXT NOT NULL,
-				mode TEXT NOT NULL,
-				strategy_id TEXT NOT NULL,
-				strategy_version TEXT NOT NULL,
-				strategy_artifact_hash TEXT NOT NULL,
-				venue TEXT NOT NULL,
-				symbol TEXT NOT NULL,
-				asset_class TEXT NOT NULL,
-				action_kind TEXT NOT NULL,
-				order_type TEXT NOT NULL,
-				limit_price REAL,
-				reduce_only NUMERIC NOT NULL,
-				approved_quantity REAL NOT NULL,
-				approved_notional REAL NOT NULL,
-				decision_status TEXT NOT NULL,
-				decision_reason TEXT NOT NULL,
-				decision_time DATETIME NOT NULL,
-				status TEXT NOT NULL,
-				event_time DATETIME NOT NULL,
-				created_at DATETIME NOT NULL,
-				updated_at DATETIME NOT NULL
-			)
-		`).Error)
-
-		require.NoError(t, store.db.Exec(`
-			INSERT INTO execution_commands (
-				command_id,
-				trace_id,
-				intent_id,
-				governor_decision_reference,
-				mode,
-				strategy_id,
-				strategy_version,
-				strategy_artifact_hash,
-				venue,
-				symbol,
-				asset_class,
-				action_kind,
-				order_type,
-				limit_price,
-				reduce_only,
-				approved_quantity,
-				approved_notional,
-				decision_status,
-				decision_reason,
-				decision_time,
-				status,
-				event_time,
-				created_at,
-				updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`,
-			commandID,
-			traceID,
-			intentID,
-			decisionRef,
-			domain.DecisionModeBacktest.String(),
-			strategyID,
-			strategyVersion,
-			strategyArtifactHash,
-			venue,
-			symbol,
-			domain.AssetClassCrypto.String(),
-			domain.CandidateActionKindLong.String(),
-			domain.OrderTypeLimit.String(),
-			limitPrice,
-			true,
-			quantity,
-			notional,
-			domain.GovernorDecisionStatusApproved.String(),
-			domain.GovernorDecisionReasonEligible.String(),
-			decisionTime,
-			domain.ExecutionCommandStatusCreated.String(),
-			eventTime,
-			eventTime,
-			eventTime,
-		).Error)
-
-		require.NoError(t, store.AutoMigrate())
 
 		var columns []sqliteExecutionCommandColumnRow
 		require.NoError(
@@ -168,22 +76,59 @@ func TestDatabaseStore(t *testing.T) {
 			columnByName[column.Name] = column
 		}
 
-		require.Zero(t, columnByName["approved_instrument_active"].NotNull)
-		require.Zero(t, columnByName["approved_timeframe"].NotNull)
-		require.Zero(t, columnByName["approved_quality"].NotNull)
+		for _, columnName := range []string{
+			"approved_instrument_active",
+			"approved_timeframe",
+			"approved_input_start",
+			"approved_input_end",
+			"approved_quality",
+		} {
+			require.Equal(t, 1, columnByName[columnName].NotNull, columnName)
+		}
 
-		model, err := store.findExecutionCommandModel(t.Context(), commandID)
-		require.NoError(t, err)
+		model := executionCommandModel{
+			CommandID:                 randomWord(t, fake, "command"),
+			TraceID:                   randomWord(t, fake, "trace"),
+			IntentID:                  randomWord(t, fake, "intent"),
+			GovernorDecisionReference: randomWord(t, fake, "decision-ref"),
+			Mode:                      domain.DecisionModeBacktest.String(),
+			StrategyID:                randomWord(t, fake, "strategy"),
+			StrategyVersion:           randomWord(t, fake, "version"),
+			StrategyArtifactHash:      randomWord(t, fake, "artifact"),
+			Venue:                     randomWord(t, fake, "venue"),
+			Symbol:                    strings.ToUpper(randomWord(t, fake, "symbol")),
+			AssetClass:                domain.AssetClassCrypto.String(),
+			ActionKind:                domain.CandidateActionKindLong.String(),
+			OrderType:                 domain.OrderTypeLimit.String(),
+			LimitPrice:                &limitPrice,
+			ApprovedQuantity:          quantity,
+			ApprovedNotional:          notional,
+			ApprovedTimeframe:         domain.Timeframe1m.String(),
+			ApprovedInputStart:        inputStart,
+			ApprovedInputEnd:          inputEnd,
+			ApprovedQuality:           domain.DataQualityValidated.String(),
+			DecisionStatus:            domain.GovernorDecisionStatusApproved.String(),
+			DecisionReason:            domain.GovernorDecisionReasonEligible.String(),
+			DecisionTime:              decisionTime,
+			Status:                    domain.ExecutionCommandStatusCreated.String(),
+			EventTime:                 eventTime,
+		}
 
 		command, err := executionCommandModelToDomain(model)
 		require.NoError(t, err)
-		require.Equal(t, commandID, string(command.CommandID))
+		require.Equal(t, model.CommandID, string(command.CommandID))
 		require.InDelta(t, quantity, command.Quantity, 0)
 		require.InDelta(t, notional, command.Notional, 0)
-		require.True(t, command.ApprovedDecision.CandidateAction.Strategy.Instrument.Active)
+		require.False(t, command.ApprovedDecision.CandidateAction.Strategy.Instrument.Active)
 		require.Equal(t, domain.Timeframe1m, command.ApprovedDecision.CandidateAction.Strategy.Timeframe)
 		require.Equal(t, domain.DataQualityValidated, command.ApprovedDecision.CandidateAction.Quality)
-		require.Equal(t, decisionTime, command.ApprovedDecision.CandidateAction.InputRange.Start)
-		require.Equal(t, decisionTime.Add(time.Minute), command.ApprovedDecision.CandidateAction.InputRange.End)
+		require.Equal(t, inputStart, command.ApprovedDecision.CandidateAction.InputRange.Start)
+		require.Equal(t, inputEnd, command.ApprovedDecision.CandidateAction.InputRange.End)
+		require.Equal(t, decisionTime, command.ApprovedDecision.DecisionTime.Time())
+		require.Equal(t, eventTime, command.EventTime.Time())
+
+		model.ApprovedInputStart = time.Time{}
+		_, err = executionCommandModelToDomain(model)
+		require.Error(t, err)
 	})
 }

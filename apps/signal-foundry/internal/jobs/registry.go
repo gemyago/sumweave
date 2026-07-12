@@ -19,6 +19,7 @@ type typedHandler interface {
 	supportsCancel() bool
 	supportsRetry() bool
 	guardDuplicateDelivery() bool
+	onScheduled(context.Context, Job) error
 	execute(context.Context, Job, func(json.RawMessage) error) (json.RawMessage, error)
 }
 
@@ -86,6 +87,8 @@ type TypedHandlerSpec[Input any, Result any, Progress any] struct {
 	SupportsRetry          bool
 	GuardDuplicateDelivery bool
 	Run                    func(context.Context, Input, func(Progress) error) (Result, error)
+	RunJob                 func(context.Context, Job, Input, func(Progress) error) (Result, error)
+	OnScheduled            func(context.Context, Job) error
 }
 
 func RegisterTypedHandler[Input any, Result any, Progress any](
@@ -95,7 +98,7 @@ func RegisterTypedHandler[Input any, Result any, Progress any](
 	if registry == nil {
 		return errors.New("job registry is required")
 	}
-	if spec.Run == nil {
+	if spec.Run == nil && spec.RunJob == nil {
 		return errors.New("job handler run func is required")
 	}
 	return registry.Register(&registeredTypedHandler[Input, Result, Progress]{spec: spec})
@@ -138,6 +141,13 @@ func (h *registeredTypedHandler[Input, Result, Progress]) guardDuplicateDelivery
 	return h.spec.GuardDuplicateDelivery
 }
 
+func (h *registeredTypedHandler[Input, Result, Progress]) onScheduled(ctx context.Context, job Job) error {
+	if h.spec.OnScheduled == nil {
+		return nil
+	}
+	return h.spec.OnScheduled(ctx, job)
+}
+
 func (h *registeredTypedHandler[Input, Result, Progress]) execute(
 	ctx context.Context,
 	job Job,
@@ -147,13 +157,19 @@ func (h *registeredTypedHandler[Input, Result, Progress]) execute(
 	if err != nil {
 		return nil, err
 	}
-	result, err := h.spec.Run(ctx, input, func(progress Progress) error {
+	setProgress := func(progress Progress) error {
 		payload, marshalErr := json.Marshal(progress)
 		if marshalErr != nil {
 			return fmt.Errorf("marshal job progress: %w", marshalErr)
 		}
 		return setProgressJSON(payload)
-	})
+	}
+	var result Result
+	if h.spec.RunJob != nil {
+		result, err = h.spec.RunJob(ctx, job, input, setProgress)
+	} else {
+		result, err = h.spec.Run(ctx, input, setProgress)
+	}
 	if err != nil {
 		return nil, err
 	}

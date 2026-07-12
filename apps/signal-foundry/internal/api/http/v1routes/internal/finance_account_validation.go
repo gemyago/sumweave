@@ -36,7 +36,7 @@ func NewFinanceAccountValidator() FieldValidator[*FinanceAccount] {
 	)
 	validateProviderAccountID := NewSimpleFieldValidator[string](
 	)
-	validateHiddenAt := NewSimpleFieldValidator[time.Time](
+	validateHiddenAt := NewSimpleFieldValidator[*time.Time](
 	)
 	validateCreatedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],

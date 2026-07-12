@@ -17,7 +17,7 @@ type FinanceTenantSummary struct {
 	ID string `json:"id"`
 	Name string `json:"name"`
 	DisplayCurrency string `json:"displayCurrency"`
-	ArchivedAt time.Time `json:"archivedAt,omitempty"`
+	ArchivedAt *time.Time `json:"archivedAt,omitempty"`
 	JoinedAt time.Time `json:"joinedAt"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`

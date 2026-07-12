@@ -70,7 +70,7 @@ func WithFXServiceScheduleWriter(writer FXSyncScheduleWriter) FXServiceOption {
 func NewFXService(store fxServiceStore, opts ...FXServiceOption) *FXService {
 	service := &FXService{
 		store:             store,
-		now:               func() time.Time { return time.Now().UTC() },
+		now:               time.Now,
 		fxProviders:       defaultFXProviders(),
 		defaultFXProvider: FXProviderFrankfurter,
 	}
@@ -84,6 +84,9 @@ func (s *FXService) SyncFXRates(
 	ctx context.Context,
 	params SyncFXRatesParams,
 ) (SyncFXRatesResult, error) {
+	if err := ValidateRequiredTimestampRange(params.StartDate, params.EndDate); err != nil {
+		return SyncFXRatesResult{}, err
+	}
 	providerName, err := s.resolveFXProviderName(params.Provider)
 	if err != nil {
 		return SyncFXRatesResult{}, err
@@ -94,11 +97,14 @@ func (s *FXService) SyncFXRates(
 		rates, fetchErr := provider.FetchHistoricalRates(ctx, FXProviderQuery{
 			BaseCurrency:    baseCurrency,
 			QuoteCurrencies: []string{strings.ToUpper(strings.TrimSpace(params.QuoteCurrency))},
-			StartDate:       startOfDay(params.StartDate),
-			EndDate:         startOfDay(params.EndDate),
+			StartDate:       params.StartDate,
+			EndDate:         params.EndDate,
 		})
 		if fetchErr != nil {
 			return SyncFXRatesResult{}, fmt.Errorf("sync fx rates: %w", fetchErr)
+		}
+		if validationErr := validateProviderFXRates(rates); validationErr != nil {
+			return SyncFXRatesResult{}, fmt.Errorf("sync fx rates: %w", validationErr)
 		}
 		items = append(items, rates...)
 	}
@@ -112,6 +118,9 @@ func (s *FXService) TriggerFXSync(
 	ctx context.Context,
 	params TriggerFXSyncParams,
 ) (FXSyncJobRef, error) {
+	if err := ValidateRequiredTimestampRange(params.StartDate, params.EndDate); err != nil {
+		return FXSyncJobRef{}, err
+	}
 	if s.fxJobEnqueuer == nil {
 		return FXSyncJobRef{}, errors.New("fx job enqueuer is required")
 	}
@@ -129,14 +138,23 @@ func (s *FXService) TriggerFXSync(
 			Provider:       providerName,
 			BaseCurrencies: canonicalizeCurrencies(params.BaseCurrencies),
 			QuoteCurrency:  strings.ToUpper(strings.TrimSpace(params.QuoteCurrency)),
-			StartDate:      startOfDay(params.StartDate),
-			EndDate:        startOfDay(params.EndDate),
+			StartDate:      params.StartDate,
+			EndDate:        params.EndDate,
 		},
 	})
 	if err != nil {
 		return FXSyncJobRef{}, fmt.Errorf("trigger fx sync: %w", err)
 	}
 	return jobRef, nil
+}
+
+func validateProviderFXRates(rates []domain.FXRate) error {
+	for _, rate := range rates {
+		if rate.RateDate.IsZero() {
+			return fmt.Errorf("%w: provider rate timestamp is required", ErrInvalidTimestampRange)
+		}
+	}
+	return nil
 }
 
 func (s *FXService) EnsureFXSyncSchedule(
@@ -150,7 +168,7 @@ func (s *FXService) EnsureFXSyncSchedule(
 	if err != nil {
 		return FXSyncSchedule{}, err
 	}
-	now := startOfDay(s.now())
+	now := s.now()
 	schedule := FXSyncSchedule{
 		ScheduleID: strings.TrimSpace(params.ScheduleID),
 		JobType:    FXSyncJobType,

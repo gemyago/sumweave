@@ -45,7 +45,7 @@ describe('Finance job detail page', () => {
     mocks.shellState.needsTenantSelection = false
     mocks.getJob.mockResolvedValue({
       id: 'job-1',
-      jobType: 'historical.backfill',
+      jobType: 'data.historical_raw_candle_backfill',
       status: 'failed',
       requester: { userId: 'user-1', source: 'operator', agentSessionId: '', agentRunId: '' },
       input: {
@@ -82,7 +82,7 @@ describe('Finance job detail page', () => {
     render(FinanceJobDetail, { params: { jobId: 'job-1' } })
 
     expect(await screen.findByRole('heading', { name: 'Summary' })).toBeInTheDocument()
-    expect(screen.getByText('historical.backfill')).toBeInTheDocument()
+    expect(screen.getByText('data.historical_raw_candle_backfill')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open data scope' })).toHaveAttribute('href', expect.stringContaining('#/data?'))
     expect(screen.getByRole('heading', { name: 'Missing interval preview' })).toBeInTheDocument()
     expect(screen.getByText('Sync failed')).toBeInTheDocument()
@@ -95,41 +95,35 @@ describe('Finance job detail page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Job id is required.')
   })
 
-  it('shows the non-historical result fallback copy', async () => {
-    const now = new Date('2026-06-20T12:00:00Z')
+  it('renders the successful scheduled Finance sync response without historical sections', async () => {
+    const startedAt = new Date('2026-07-10T22:49:21.992094+02:00')
+    const completedAt = new Date('2026-07-10T22:49:22.004058+02:00')
     mocks.getJob.mockReset()
     mocks.getJob.mockResolvedValue({
-      id: 'job-2',
-      jobType: 'finance.csv_import',
+      id: '019f4dca-c2ad-729d-a5ce-2f9bfa61703a',
+      jobType: 'finance.bank_connection_sync',
       status: 'succeeded',
-      requester: { userId: 'user-1', source: 'operator', agentSessionId: '', agentRunId: '' },
-      input: {
-        ingestionRunId: '',
-        venue: '',
-        symbol: '',
-        assetClass: '',
-        timeframe: '',
-        start: now,
-        end: now,
-        pageSize: 0,
-      },
-      result: undefined,
-      error: undefined,
-      createdAt: now,
-      updatedAt: now,
-      startedAt: now,
-      completedAt: now,
+      requester: { userId: '', source: 'system', agentSessionId: '', agentRunId: '' },
+      createdAt: new Date('2026-07-10T22:48:10.777316+02:00'),
+      updatedAt: completedAt,
+      startedAt,
+      completedAt,
       attemptCount: 1,
       workerId: '',
-      lastAttemptAt: now,
+      lastAttemptAt: completedAt,
     })
 
-    render(FinanceJobDetail, { params: { jobId: 'job-2' } })
+    render(FinanceJobDetail, { params: { jobId: '019f4dca-c2ad-729d-a5ce-2f9bfa61703a' } })
 
     expect(await screen.findByText('Input details are not available for this job type in the current API surface.')).toBeInTheDocument()
     expect(screen.getByText('Result details are not yet specialized for this job type.')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Open data scope' })).not.toBeInTheDocument()
+    expect(screen.getByText('finance.bank_connection_sync')).toBeInTheDocument()
+    expect(screen.getByText('system')).toBeInTheDocument()
+    expect(screen.getByText('1')).toBeInTheDocument()
     expect(screen.getByText('succeeded')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Timeline and worker' })).toBeInTheDocument()
+    expect(screen.getByText('Created').parentElement).toHaveClass('col-12', 'col-md-6')
   })
 
   it('surfaces finance job detail load failures', async () => {

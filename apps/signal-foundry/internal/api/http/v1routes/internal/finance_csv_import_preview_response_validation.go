@@ -25,7 +25,6 @@ func NewFinanceCsvImportPreviewResponseValidator() FieldValidator[*FinanceCsvImp
 			),
 	)
 	validateMapping := NewSimpleFieldValidator[map[string]string](
-		EnsureNonDefault[map[string]string],
 	)
 	validateDuplicateRows := NewArrayValidator[map[string]interface{}](
 		NewSimpleFieldValidator[[]map[string]interface{}](

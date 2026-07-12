@@ -123,7 +123,7 @@ func TestStrategyTools(t *testing.T) {
 	}
 
 	t.Run("list versions returns compact filtered metadata with deterministic mapping", func(t *testing.T) {
-		createdAt := time.Date(2026, time.June, 16, 10, 0, 0, 0, time.UTC)
+		createdAt := time.Date(2026, time.June, 16, 10, 0, 0, 0, time.FixedZone("UTC+02", 2*60*60))
 		strategySvc := &fakeStrategyWorkspaceService{}
 		strategySvc.listFunc = func(_ context.Context) ([]app.StrategyVersionRecord, error) {
 			return []app.StrategyVersionRecord{

@@ -93,11 +93,12 @@ func (s evaluationReplayReaderStub) ReplayCandles(
 }
 
 type evaluationBacktestStoreStub struct {
-	runs      map[string]domain.BacktestRun
-	reports   []domain.EvaluationReport
-	datasets  map[string]domain.DatasetReference
-	err       error
-	reportErr error
+	runs            map[string]domain.BacktestRun
+	reports         []domain.EvaluationReport
+	datasets        map[string]domain.DatasetReference
+	createdDatasets []domain.DatasetReference
+	err             error
+	reportErr       error
 }
 
 func (s *evaluationBacktestStoreStub) CreateDatasetReference(
@@ -110,6 +111,7 @@ func (s *evaluationBacktestStoreStub) CreateDatasetReference(
 	if s.datasets == nil {
 		s.datasets = map[string]domain.DatasetReference{}
 	}
+	s.createdDatasets = append(s.createdDatasets, reference)
 	s.datasets[reference.DatasetID.String()] = reference
 	return reference, nil
 }
@@ -507,6 +509,45 @@ func TestEvaluationWorkspaceService(t *testing.T) {
 			require.Equal(t, defaultGovernorPolicyArtifactIDName, detail.PolicyReference.PolicyID)
 		},
 	)
+
+	t.Run("failed evaluation dataset reference identifies equivalent range instants", func(t *testing.T) {
+		service, _, store := makeService(t, 0, version)
+		runID := fake.UUID().V4()
+		start := time.Date(2026, time.June, 15, 11, 0, 0, 123, time.UTC)
+		end := start.Add(time.Hour)
+		startWithOffset := start.In(time.FixedZone("test-offset", 2*60*60))
+		endWithOffset := end.In(time.FixedZone("test-offset", 2*60*60))
+
+		_, firstErr := service.persistDataUnavailableFailure(
+			t.Context(),
+			runID,
+			version,
+			&artifact,
+			&policy,
+			"",
+			domain.TimeRange{Start: start, End: end},
+			nil,
+		)
+		require.NoError(t, firstErr)
+		_, secondErr := service.persistDataUnavailableFailure(
+			t.Context(),
+			runID,
+			version,
+			&artifact,
+			&policy,
+			"",
+			domain.TimeRange{Start: startWithOffset, End: endWithOffset},
+			nil,
+		)
+		require.NoError(t, secondErr)
+		require.Len(t, store.createdDatasets, 2)
+		require.Equal(
+			t,
+			store.createdDatasets[0].ReplayChecksum,
+			store.createdDatasets[1].ReplayChecksum,
+		)
+		require.Equal(t, endWithOffset, store.createdDatasets[1].CreatedAt.Time())
+	})
 
 	t.Run(
 		"create persists explicit policy reference on replay data unavailable failures",

@@ -257,6 +257,44 @@ func TestWorker(t *testing.T) {
 		assert.Equal(t, domain.Venue("hyperliquid-perps"), runner.calls[0].Venue)
 	})
 
+	t.Run("passes durable scheduled job identity and occurrence to typed handlers", func(t *testing.T) {
+		now := time.Now()
+		store := makeStore(t)
+		scheduledAt := now.Add(-time.Minute).In(time.FixedZone("worker-offset", 3*60*60))
+		nextRunAt := scheduledAt.Add(15 * time.Minute)
+		job := Job{
+			ID: "finance-job-" + fake.UUID().V4(), JobType: JobType("finance.bank_connection_sync"),
+			Status:    JobStatusQueued,
+			Requester: Requester{UserID: "user-" + fake.UUID().V4(), Source: RequesterSourceOperator},
+			InputJSON: mustRegistryJSON(t, map[string]string{"connectionId": "connection-" + fake.UUID().V4()}),
+			CreatedAt: now, UpdatedAt: now, QueuedAt: now,
+			ScheduledAt: &scheduledAt, ScheduledNextRunAt: &nextRunAt,
+		}
+		_, err := store.Create(t.Context(), job)
+		require.NoError(t, err)
+		registry := NewRegistry()
+		var observed Job
+		require.NoError(t, RegisterTypedHandler(registry, TypedHandlerSpec[map[string]string, struct{}, struct{}]{
+			JobType: job.JobType,
+			RunJob: func(_ context.Context, executed Job, _ map[string]string, _ func(struct{}) error) (struct{}, error) {
+				observed = executed
+				return struct{}{}, nil
+			},
+		}))
+		worker, err := NewWorker(WorkerDeps{
+			Store: store, Registry: registry,
+			Clock:    func() time.Time { return now.Add(time.Minute) },
+			WorkerID: "worker-" + fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		require.NoError(t, worker.ProcessJob(t.Context(), job.ID))
+		assert.Equal(t, job.ID, observed.ID)
+		require.NotNil(t, observed.ScheduledAt)
+		require.NotNil(t, observed.ScheduledNextRunAt)
+		assert.Equal(t, scheduledAt.Format(time.RFC3339Nano), observed.ScheduledAt.Format(time.RFC3339Nano))
+		assert.Equal(t, nextRunAt.Format(time.RFC3339Nano), observed.ScheduledNextRunAt.Format(time.RFC3339Nano))
+	})
+
 	t.Run("persists safe bounded failures and repeats terminal processing without explicit guards", func(t *testing.T) {
 		now := time.Now().UTC()
 		store := makeStore(t)
@@ -562,6 +600,12 @@ func TestWorker(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, backfillRunner)
 		recorder := &hyperliquidRawEvidenceRecorder{lineageService: lineageService}
+		capturedInstrument := domain.Instrument{
+			Venue:      venueedge.HyperliquidPerpsVenueName,
+			Symbol:     domain.Symbol("BTC"),
+			AssetClass: domain.AssetClassFuture,
+			Active:     true,
+		}
 		payloadID, err := recorder.RecordHyperliquidRawEvidence(t.Context(), venueedge.HyperliquidRawEvidenceCapture{
 			ID:                 "payload-a",
 			IngestionRunID:     "run-a",
@@ -573,10 +617,16 @@ func TestWorker(t *testing.T) {
 			ResponseAt:         time.Now().UTC(),
 			HTTPStatus:         200,
 			ResponseBody:       []byte("{}"),
+			Instrument:         &capturedInstrument,
 			ReceivedAt:         time.Now().UTC(),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "payload-a", payloadID)
+		detail, err := lineageService.GetRawPayloadDetail(t.Context(), payloadID)
+		require.NoError(t, err)
+		require.NotNil(t, detail.Metadata.Instrument)
+		assert.Equal(t, capturedInstrument.Symbol, detail.Metadata.Instrument.Symbol)
+		assert.Equal(t, capturedInstrument.AssetClass, detail.Metadata.Instrument.AssetClass)
 		_, err = recorder.RecordHyperliquidRawEvidence(t.Context(), venueedge.HyperliquidRawEvidenceCapture{
 			ID:                 "payload-b",
 			IngestionRunID:     "missing-run",

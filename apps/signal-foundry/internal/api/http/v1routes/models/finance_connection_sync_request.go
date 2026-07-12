@@ -15,6 +15,6 @@ var _ = fmt.Sprint
 
 type FinanceConnectionSyncRequest struct { 
 	Reason string `json:"reason,omitempty"`
-	WindowStart time.Time `json:"windowStart,omitempty"`
-	WindowEnd time.Time `json:"windowEnd,omitempty"`
+	WindowStart *time.Time `json:"windowStart,omitempty"`
+	WindowEnd *time.Time `json:"windowEnd,omitempty"`
 }

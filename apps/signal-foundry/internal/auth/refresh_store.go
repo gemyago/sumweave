@@ -67,7 +67,7 @@ func (s *RefreshTokenStore) Create(ctx context.Context, userID string, ttl time.
 	opaqueToken := base64.RawURLEncoding.EncodeToString(raw)
 	hash := hashToken(opaqueToken)
 
-	now := time.Now().UTC()
+	now := time.Now().Round(0)
 	record := RefreshToken{
 		UserID:    userID,
 		TokenHash: hash,

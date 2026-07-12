@@ -22,6 +22,6 @@ type FinanceCsvImportAuditResponse struct {
 	ConfirmedByUserID string `json:"confirmedByUserId"`
 	ImportedCount int64 `json:"importedCount"`
 	CreatedAt time.Time `json:"createdAt"`
-	ConfirmedAt time.Time `json:"confirmedAt,omitempty"`
-	CompletedAt time.Time `json:"completedAt,omitempty"`
+	ConfirmedAt *time.Time `json:"confirmedAt,omitempty"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
 }

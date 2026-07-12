@@ -217,15 +217,15 @@ func TestHyperliquidPerpsVenue(t *testing.T) {
 		require.Len(t, candles.Candles, 2)
 		require.Empty(t, candles.Metadata.RawPayloadIDs)
 		require.Equal(t, domain.DataQualityRaw, candles.Candles[0].Quality)
-		require.Equal(t, time.UnixMilli(1710000000000).UTC(), candles.Candles[0].TimeRange.Start)
-		require.Equal(t, time.UnixMilli(1710000060000).UTC(), candles.Candles[0].TimeRange.End)
+		require.True(t, time.UnixMilli(1710000000000).Equal(candles.Candles[0].TimeRange.Start))
+		require.True(t, time.UnixMilli(1710000060000).Equal(candles.Candles[0].TimeRange.End))
 
 		trades, err := adapter.ReadTrades(t.Context(), makeTradeRequest(2))
 		require.NoError(t, err)
 		require.Len(t, trades.Trades, 2)
 		require.Empty(t, trades.Metadata.RawPayloadIDs)
 		require.Equal(t, domain.DataQualityRaw, trades.Trades[0].Quality)
-		require.Equal(t, time.UnixMilli(1710000005000).UTC(), trades.Trades[0].EventTime)
+		require.True(t, time.UnixMilli(1710000005000).Equal(trades.Trades[0].EventTime))
 		require.Equal(t, "hyperliquid-perps-rest", trades.Trades[0].Provenance.Source)
 
 		require.Len(t, requestBodies, 3)
@@ -280,14 +280,14 @@ func TestHyperliquidPerpsVenue(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []string{"raw-candle"}, candleResult.Metadata.RawPayloadIDs)
 		require.Len(t, candleResult.Candles, 1)
-		require.Equal(t, time.UnixMilli(1710000000000).UTC(), candleResult.Candles[0].TimeRange.Start)
+		require.True(t, time.UnixMilli(1710000000000).Equal(candleResult.Candles[0].TimeRange.Start))
 
 		tradeRequest := makeTradeRequest(2)
 		tradeResult, err := adapter.ReadTrades(t.Context(), tradeRequest)
 		require.NoError(t, err)
 		require.Equal(t, []string{"raw-trade"}, tradeResult.Metadata.RawPayloadIDs)
 		require.Len(t, tradeResult.Trades, 1)
-		require.Equal(t, time.UnixMilli(1710000005000).UTC(), tradeResult.Trades[0].EventTime)
+		require.True(t, time.UnixMilli(1710000005000).Equal(tradeResult.Trades[0].EventTime))
 
 		require.Len(t, recorder.captures, 3)
 
@@ -309,9 +309,9 @@ func TestHyperliquidPerpsVenue(t *testing.T) {
 		require.JSONEq(t, metaResponse, string(recorder.captures[0].ResponseBody))
 		require.Equal(t, "instrument", recorder.captures[0].EntityHint)
 		require.Nil(t, recorder.captures[0].Instrument)
-		require.True(t, recorder.captures[0].RequestAt.Equal(recorder.captures[0].RequestAt.UTC()))
-		require.True(t, recorder.captures[0].ResponseAt.Equal(recorder.captures[0].ResponseAt.UTC()))
-		require.True(t, recorder.captures[0].ReceivedAt.Equal(recorder.captures[0].ReceivedAt.UTC()))
+		require.NotZero(t, recorder.captures[0].RequestAt)
+		require.False(t, recorder.captures[0].ResponseAt.Before(recorder.captures[0].RequestAt))
+		require.False(t, recorder.captures[0].ReceivedAt.Before(recorder.captures[0].ResponseAt))
 		require.False(t, recorder.captures[0].ResponseAt.Before(recorder.captures[0].RequestAt))
 		require.False(t, recorder.captures[0].ReceivedAt.Before(recorder.captures[0].ResponseAt))
 

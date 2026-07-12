@@ -25,7 +25,7 @@ func NewFinanceCategoryValidator() FieldValidator[*FinanceCategory] {
 	)
 	validateSeededDefault := NewSimpleFieldValidator[bool](
 	)
-	validateHiddenAt := NewSimpleFieldValidator[time.Time](
+	validateHiddenAt := NewSimpleFieldValidator[*time.Time](
 	)
 	validateCreatedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],

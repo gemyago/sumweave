@@ -20,7 +20,7 @@ func NewFinanceTagValidator() FieldValidator[*FinanceTag] {
 	validateName := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateHiddenAt := NewSimpleFieldValidator[time.Time](
+	validateHiddenAt := NewSimpleFieldValidator[*time.Time](
 	)
 	validateCreatedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],

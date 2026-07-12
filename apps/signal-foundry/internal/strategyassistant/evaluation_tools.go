@@ -251,8 +251,8 @@ func mapEvaluationRunSummary(detail app.EvaluationDetail) *EvaluationRunSummary 
 		Status:         detail.Status,
 		FailureReason:  detail.FailureReason,
 		FailureDetails: detail.FailureDetails,
-		CreatedAt:      detail.CreatedAt.UTC(),
-		UpdatedAt:      detail.UpdatedAt.UTC(),
+		CreatedAt:      detail.CreatedAt,
+		UpdatedAt:      detail.UpdatedAt,
 	}
 }
 
@@ -266,15 +266,15 @@ func mapEvaluationListRow(item app.EvaluationListItem) EvaluationListRow {
 		SourceLabel:          item.SourceLabel,
 		Instrument:           mapStrategyInstrument(item.Instrument),
 		Timeframe:            item.Timeframe,
-		TestedRangeStart:     item.TestedRangeStart.UTC(),
-		TestedRangeEnd:       item.TestedRangeEnd.UTC(),
+		TestedRangeStart:     item.TestedRangeStart,
+		TestedRangeEnd:       item.TestedRangeEnd,
 		Status:               item.Status,
 		Decision:             cloneStringPointer(item.Decision),
 		Metrics:              mapEvaluationMetrics(item.Metrics),
 		FailureReason:        item.FailureReason,
 		FailureDetails:       item.FailureDetails,
-		CreatedAt:            item.CreatedAt.UTC(),
-		UpdatedAt:            item.UpdatedAt.UTC(),
+		CreatedAt:            item.CreatedAt,
+		UpdatedAt:            item.UpdatedAt,
 	}
 }
 
@@ -288,8 +288,8 @@ func mapEvaluationDetail(detail app.EvaluationDetail) EvaluationDetail {
 		SourceLabel:          detail.SourceLabel,
 		Instrument:           mapStrategyInstrument(detail.Instrument),
 		Timeframe:            detail.Timeframe,
-		TestedRangeStart:     detail.TestedRangeStart.UTC(),
-		TestedRangeEnd:       detail.TestedRangeEnd.UTC(),
+		TestedRangeStart:     detail.TestedRangeStart,
+		TestedRangeEnd:       detail.TestedRangeEnd,
 		Status:               detail.Status,
 		Decision:             cloneStringPointer(detail.Decision),
 		FailureReason:        detail.FailureReason,
@@ -297,8 +297,8 @@ func mapEvaluationDetail(detail app.EvaluationDetail) EvaluationDetail {
 		Metrics:              mapEvaluationMetrics(detail.Metrics),
 		DatasetReference:     mapEvaluationDatasetReference(detail.DatasetReference),
 		PolicyReference:      mapEvaluationPolicyReference(detail.PolicyReference),
-		CreatedAt:            detail.CreatedAt.UTC(),
-		UpdatedAt:            detail.UpdatedAt.UTC(),
+		CreatedAt:            detail.CreatedAt,
+		UpdatedAt:            detail.UpdatedAt,
 		AIRenderMetadata:     mapEvaluationAIRenderMetadata(detail.AIRenderMetadata),
 	}
 }
@@ -437,7 +437,7 @@ func mapEvaluationDatasetReference(reference *app.EvaluationDatasetReference) *E
 	return &EvaluationDatasetReference{
 		DatasetID:      reference.DatasetID,
 		ReplayChecksum: reference.ReplayChecksum,
-		CreatedAt:      reference.CreatedAt.UTC(),
+		CreatedAt:      reference.CreatedAt,
 	}
 }
 
@@ -484,7 +484,7 @@ func buildTraceEvidenceSection(
 	for i := range selected {
 		mapped[i] = EvaluationTraceEvidenceRow{
 			TraceID:      selected[i].TraceID,
-			DecisionTime: selected[i].DecisionTime.UTC(),
+			DecisionTime: selected[i].DecisionTime,
 			Result:       selected[i].Result,
 			ReasonCodes:  append([]string(nil), selected[i].ReasonCodes...),
 			DataQuality:  selected[i].DataQuality,
@@ -509,7 +509,7 @@ func buildOrderIntentEvidenceSection(
 			ActionKind:        selected[i].ActionKind,
 			RequestedQuantity: selected[i].RequestedQuantity,
 			RequestedNotional: selected[i].RequestedNotional,
-			CreatedTime:       selected[i].CreatedTime.UTC(),
+			CreatedTime:       selected[i].CreatedTime,
 		}
 	}
 	return EvaluationOrderIntentEvidenceSection{Rows: mapped, Truncation: truncation}
@@ -580,7 +580,7 @@ func buildPositionSnapshotEvidenceSection(
 			FillID:      selected[i].FillID,
 			Quantity:    selected[i].Quantity,
 			RealizedPnL: selected[i].RealizedPnL,
-			EventTime:   selected[i].EventTime.UTC(),
+			EventTime:   selected[i].EventTime,
 		}
 	}
 	return EvaluationPositionSnapshotEvidenceSection{Rows: mapped, Truncation: truncation}
@@ -600,7 +600,7 @@ func buildPortfolioSnapshotEvidenceSection(
 			GrossExposure: selected[i].GrossExposure,
 			NetExposure:   selected[i].NetExposure,
 			RealizedPnL:   selected[i].RealizedPnL,
-			EventTime:     selected[i].EventTime.UTC(),
+			EventTime:     selected[i].EventTime,
 		}
 	}
 	return EvaluationPortfolioSnapshotEvidenceSection{Rows: mapped, Truncation: truncation}
@@ -644,7 +644,7 @@ func cloneTimePointer(value *time.Time) *time.Time {
 	if value == nil {
 		return nil
 	}
-	cloned := value.UTC()
+	cloned := *value
 	return &cloned
 }
 

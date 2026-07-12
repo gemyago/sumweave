@@ -3,8 +3,10 @@ package gormsignalfoundry
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestNewGormDialectorWithConn(t *testing.T) {
@@ -20,5 +22,15 @@ func TestNewGormDialectorWithConn(t *testing.T) {
 			conn,
 		)
 		require.NotNil(t, dialector.Dialector)
+
+		db, err := gorm.Open(dialector, &gorm.Config{DisableAutomaticPing: true, DryRun: true})
+		require.NoError(t, err)
+		now := time.Now()
+		query := db.Table("events").
+			Where(InstantRangePredicate(db, "event_time"), now, now.Add(time.Hour)).
+			Where(InstantOnOrAfterPredicate(db, "start_at"), now).
+			Where(InstantOnOrBeforePredicate(db, "end_at"), now.Add(time.Hour)).
+			Find(&[]struct{}{})
+		require.NoError(t, query.Error)
 	})
 }

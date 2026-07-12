@@ -32,8 +32,9 @@ type UpdateTransactionParams struct {
 	TransactionID string
 	Description   string
 	AmountMinor   int64
-	EffectiveAt   time.Time
+	EffectiveAt   *time.Time
 	CategoryID    string
+	ClearCategory bool
 }
 
 type HideTransactionParams struct {

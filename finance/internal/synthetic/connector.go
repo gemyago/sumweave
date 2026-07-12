@@ -25,16 +25,15 @@ var (
 )
 
 const (
-	syntheticFirstWindowMaxTransactionsPerDay    = 2
-	syntheticRepeatedWindowMaxTransactionsPerDay = 3
-	syntheticBalanceBaseMinor                    = 100_000
-	syntheticHoursPerDay                         = 24
-	syntheticMinutesPerHour                      = 60
-	syntheticAmountBaseMinor                     = 100
-	syntheticAmountRangeMinor                    = 900
-	syntheticPositiveNegativeRange               = 2
-	syntheticFirstSequence                       = 1
-	syntheticNextSequenceAfterFirst              = 2
+	syntheticFirstWindowMaxTransactionsPerInterval    = 2
+	syntheticRepeatedWindowMaxTransactionsPerInterval = 3
+	syntheticBalanceBaseMinor                         = 100_000
+	syntheticWindowStep                               = 24 * time.Hour
+	syntheticAmountBaseMinor                          = 100
+	syntheticAmountRangeMinor                         = 900
+	syntheticPositiveNegativeRange                    = 2
+	syntheticFirstSequence                            = 1
+	syntheticNextSequenceAfterFirst                   = 2
 )
 
 type ProviderStateStore interface {
@@ -86,7 +85,7 @@ func NewConnector(stateStore ProviderStateStore, opts ...ConnectorOption) *Conne
 	connector := &Connector{
 		stateStore: stateStore,
 		logger:     slog.New(slog.DiscardHandler),
-		now:        func() time.Time { return time.Now().UTC() },
+		now:        time.Now,
 		stateID:    uuid.NewString,
 		randomIntn: func(_ int) int { return 0 },
 	}
@@ -99,7 +98,7 @@ func NewConnector(stateStore ProviderStateStore, opts ...ConnectorOption) *Conne
 		connector.logger = slog.New(slog.DiscardHandler)
 	}
 	if connector.now == nil {
-		connector.now = func() time.Time { return time.Now().UTC() }
+		connector.now = time.Now
 	}
 	if connector.stateID == nil {
 		connector.stateID = uuid.NewString
@@ -187,11 +186,11 @@ func (c *Connector) Fetch(
 	windowKey := newWindowKey(request.RequestedWindow)
 	repeatIndex := windowHistoryIndex(state.Envelope.WindowHistory, windowKey)
 	mode := "firstWindow"
-	generationDays := windowDays(windowKey)
+	generationInstants := windowInstants(windowKey)
 	if repeatIndex >= 0 {
 		mode = "repeatedWindow"
-		if len(generationDays) > 0 {
-			generationDays = generationDays[len(generationDays)-1:]
+		if len(generationInstants) > 0 {
+			generationInstants = generationInstants[len(generationInstants)-1:]
 		}
 	}
 
@@ -199,7 +198,7 @@ func (c *Connector) Fetch(
 		ProviderReference: state.ProviderReference,
 		Envelope:          cloneEnvelope(state.Envelope),
 		CreatedAt:         state.CreatedAt,
-		UpdatedAt:         c.now().UTC(),
+		UpdatedAt:         c.now(),
 	}
 	if updatedState.CreatedAt.IsZero() {
 		updatedState.CreatedAt = updatedState.UpdatedAt
@@ -208,7 +207,7 @@ func (c *Connector) Fetch(
 	batch, err := c.generateBatch(
 		request.Connection,
 		windowKey,
-		generationDays,
+		generationInstants,
 		mode,
 		&updatedState.Envelope,
 	)
@@ -244,16 +243,13 @@ func (c *Connector) Fetch(
 func (c *Connector) generateBatch(
 	connection domain.ProviderConnectionRef,
 	windowKey domain.SyntheticWindowKey,
-	generationDays []time.Time,
+	generationInstants []time.Time,
 	mode string,
 	envelope *domain.SyntheticProviderStateEnvelope,
 ) (domain.ProviderSyncBatch, error) {
 	batch := domain.ProviderSyncBatch{
-		Connection: connection,
-		RequestedWindow: domain.ProviderSyncWindow{
-			Start: windowKey.NormalizedStartUTC,
-			End:   windowKey.NormalizedEndExclusiveUTC,
-		},
+		Connection:      connection,
+		RequestedWindow: domain.ProviderSyncWindow(windowKey),
 	}
 	sequenceCounters := envelope.SequenceCounters
 	accountTotals := map[string]int64{}
@@ -280,25 +276,25 @@ func (c *Connector) generateBatch(
 			Scope:            domain.RawPayloadScopeAccount,
 			ProviderObjectID: providerAccountID,
 			PayloadJSON:      accountPayload,
-			CapturedAt:       c.now().UTC(),
+			CapturedAt:       c.now(),
 		})
 
-		for _, day := range generationDays {
-			transactionsForDay := syntheticFirstSequence +
-				c.randomBounded(syntheticFirstWindowMaxTransactionsPerDay)
+		for _, instant := range generationInstants {
+			transactionsForInterval := syntheticFirstSequence +
+				c.randomBounded(syntheticFirstWindowMaxTransactionsPerInterval)
 			if mode == "repeatedWindow" {
-				transactionsForDay = syntheticFirstSequence +
-					c.randomBounded(syntheticRepeatedWindowMaxTransactionsPerDay)
+				transactionsForInterval = syntheticFirstSequence +
+					c.randomBounded(syntheticRepeatedWindowMaxTransactionsPerInterval)
 			}
-			for range transactionsForDay {
-				sequence := nextSequence(&sequenceCounters, configuredAccount.Key, day)
+			for range transactionsForInterval {
+				sequence := nextSequence(&sequenceCounters, configuredAccount.Key, instant)
 				transaction, payload, makeTransactionErr := c.makeTransaction(
 					connection,
 					windowKey,
 					mode,
 					configuredAccount,
 					providerAccountID,
-					day,
+					instant,
 					sequence,
 				)
 				if makeTransactionErr != nil {
@@ -316,7 +312,7 @@ func (c *Connector) generateBatch(
 			ProviderAccountID:   providerAccountID,
 			Currency:            configuredAccount.Currency,
 			CurrentBalanceMinor: currentBalanceMinor,
-			CapturedAt:          c.now().UTC(),
+			CapturedAt:          c.now(),
 		})
 	}
 	envelope.SequenceCounters = sequenceCounters
@@ -329,28 +325,32 @@ func (c *Connector) makeTransaction(
 	mode string,
 	configuredAccount domain.SyntheticConfiguredAccount,
 	providerAccountID string,
-	day time.Time,
+	intervalStart time.Time,
 	sequence int,
 ) (domain.ProviderTransactionObservation, domain.ProviderRawPayloadObservation, error) {
-	hour := c.randomBounded(syntheticHoursPerDay)
-	minute := c.randomBounded(syntheticMinutesPerHour)
+	intervalEnd := intervalStart.Add(syntheticWindowStep)
+	if windowKey.End.Before(intervalEnd) {
+		intervalEnd = windowKey.End
+	}
+	availableSeconds := int(intervalEnd.Sub(intervalStart) / time.Second)
+	offset := time.Duration(c.randomBounded(availableSeconds)) * time.Second
 	amountMinor := int64(syntheticAmountBaseMinor + c.randomBounded(syntheticAmountRangeMinor))
 	transactionKind := "credit"
 	if c.randomBounded(syntheticPositiveNegativeRange) == 0 {
 		amountMinor *= -1
 		transactionKind = "debit"
 	}
-	effectiveAt := day.Add(time.Duration(hour) * time.Hour).Add(time.Duration(minute) * time.Minute)
+	effectiveAt := intervalStart.Add(offset)
 	description := fmt.Sprintf(
 		"Synthetic %s %s #%d",
 		transactionKind,
-		day.Format(time.DateOnly),
+		effectiveAt.Format(time.RFC3339),
 		sequence,
 	)
 	providerTransactionID := fmt.Sprintf(
-		"synthetic-txn-%s-%s-%06d",
+		"synthetic-txn-%s-%d-%06d",
 		sanitizeIDPart(providerAccountID),
-		day.Format("20060102"),
+		effectiveAt.UnixNano(),
 		sequence,
 	)
 	providerOriginal := &domain.ProviderTransactionOriginal{
@@ -384,7 +384,7 @@ func (c *Connector) makeTransaction(
 		"providerTransactionId": providerTransactionID,
 		"providerAccountId":     providerAccountID,
 		"accountKey":            configuredAccount.Key,
-		"dayUTC":                day.Format(time.RFC3339),
+		"intervalStart":         intervalStart.Format(time.RFC3339Nano),
 		"sequence":              sequence,
 		"amountMinor":           amountMinor,
 		"currency":              configuredAccount.Currency,
@@ -398,7 +398,7 @@ func (c *Connector) makeTransaction(
 		Scope:            domain.RawPayloadScopeTransaction,
 		ProviderObjectID: providerTransactionID,
 		PayloadJSON:      payload,
-		CapturedAt:       c.now().UTC(),
+		CapturedAt:       c.now(),
 	}, nil
 }
 
@@ -413,35 +413,25 @@ func (c *Connector) randomBounded(bound int) int {
 	return value % bound
 }
 
-func (c *Connector) sortSequenceCounters(counters []domain.SyntheticAccountDaySequenceCounter) {
+func (c *Connector) sortSequenceCounters(counters []domain.SyntheticAccountInstantSequenceCounter) {
 	sort.Slice(counters, func(i int, j int) bool {
 		if counters[i].AccountKey == counters[j].AccountKey {
-			return counters[i].DayUTC.Before(counters[j].DayUTC)
+			return counters[i].Instant.Before(counters[j].Instant)
 		}
 		return counters[i].AccountKey < counters[j].AccountKey
 	})
 }
 
 func newWindowKey(window domain.ProviderSyncWindow) domain.SyntheticWindowKey {
-	startUTC := window.Start.UTC()
-	endUTC := window.End.UTC()
-	normalizedStartUTC := startOfUTCDay(startUTC)
-	normalizedEndExclusiveUTC := endUTC
-	if !endUTC.Equal(startOfUTCDay(endUTC)) {
-		normalizedEndExclusiveUTC = startOfUTCDay(endUTC).Add(syntheticHoursPerDay * time.Hour)
-	}
-	return domain.SyntheticWindowKey{
-		NormalizedStartUTC:        normalizedStartUTC,
-		NormalizedEndExclusiveUTC: normalizedEndExclusiveUTC,
-	}
+	return domain.SyntheticWindowKey(window)
 }
 
-func windowDays(windowKey domain.SyntheticWindowKey) []time.Time {
-	days := make([]time.Time, 0)
-	for day := windowKey.NormalizedStartUTC; day.Before(windowKey.NormalizedEndExclusiveUTC); day = day.Add(syntheticHoursPerDay * time.Hour) {
-		days = append(days, day)
+func windowInstants(windowKey domain.SyntheticWindowKey) []time.Time {
+	instants := make([]time.Time, 0)
+	for instant := windowKey.Start; instant.Before(windowKey.End); instant = instant.Add(syntheticWindowStep) {
+		instants = append(instants, instant)
 	}
-	return days
+	return instants
 }
 
 func windowHistoryIndex(
@@ -449,7 +439,7 @@ func windowHistoryIndex(
 	windowKey domain.SyntheticWindowKey,
 ) int {
 	for index, item := range history {
-		if item.Window == windowKey {
+		if item.Window.Start.Equal(windowKey.Start) && item.Window.End.Equal(windowKey.End) {
 			return index
 		}
 	}
@@ -457,12 +447,12 @@ func windowHistoryIndex(
 }
 
 func nextSequence(
-	counters *[]domain.SyntheticAccountDaySequenceCounter,
+	counters *[]domain.SyntheticAccountInstantSequenceCounter,
 	accountKey string,
-	day time.Time,
+	instant time.Time,
 ) int {
 	for index := range *counters {
-		if (*counters)[index].AccountKey == accountKey && (*counters)[index].DayUTC.Equal(day) {
+		if (*counters)[index].AccountKey == accountKey && (*counters)[index].Instant.Equal(instant) {
 			sequence := (*counters)[index].NextSequence
 			if sequence <= 0 {
 				sequence = 1
@@ -471,9 +461,9 @@ func nextSequence(
 			return sequence
 		}
 	}
-	*counters = append(*counters, domain.SyntheticAccountDaySequenceCounter{
+	*counters = append(*counters, domain.SyntheticAccountInstantSequenceCounter{
 		AccountKey:   accountKey,
-		DayUTC:       day,
+		Instant:      instant,
 		NextSequence: syntheticNextSequenceAfterFirst,
 	})
 	return syntheticFirstSequence
@@ -496,8 +486,8 @@ func sanitizeIDPart(value string) string {
 
 func windowPayload(windowKey domain.SyntheticWindowKey) map[string]string {
 	return map[string]string{
-		"normalizedStartUTC":        windowKey.NormalizedStartUTC.Format(time.RFC3339),
-		"normalizedEndExclusiveUTC": windowKey.NormalizedEndExclusiveUTC.Format(time.RFC3339),
+		"start": windowKey.Start.Format(time.RFC3339Nano),
+		"end":   windowKey.End.Format(time.RFC3339Nano),
 	}
 }
 
@@ -514,18 +504,13 @@ func cloneEnvelope(envelope domain.SyntheticProviderStateEnvelope) domain.Synthe
 		Version:            envelope.Version,
 		ConfiguredAccounts: append([]domain.SyntheticConfiguredAccount{}, envelope.ConfiguredAccounts...),
 		WindowHistory:      append([]domain.SyntheticWindowHistoryEntry{}, envelope.WindowHistory...),
-		SequenceCounters:   append([]domain.SyntheticAccountDaySequenceCounter{}, envelope.SequenceCounters...),
+		SequenceCounters:   append([]domain.SyntheticAccountInstantSequenceCounter{}, envelope.SequenceCounters...),
 	}
 }
 
 func fingerprint(parts ...any) string {
 	hash := sha256.Sum256(fmt.Append(nil, parts...))
 	return hex.EncodeToString(hash[:16])
-}
-
-func startOfUTCDay(value time.Time) time.Time {
-	utcValue := value.UTC()
-	return time.Date(utcValue.Year(), utcValue.Month(), utcValue.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func hasConfiguredAccounts(accounts []domain.SyntheticConfiguredAccount) bool {

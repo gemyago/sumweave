@@ -35,6 +35,58 @@ func (failingReadCloser) Read(p []byte) (int, error) {
 func (failingReadCloser) Close() error { return nil }
 
 func TestReportingAndFXInternals(t *testing.T) {
+	t.Run("rejects missing and reversed timestamp ranges at finance boundaries", func(t *testing.T) {
+		validDate := time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC)
+		laterDate := time.Date(2026, time.June, 21, 0, 0, 0, 0, time.UTC)
+		provider := NewStaticFXProvider("static", []domain.FXRate{{
+			Provider:      "static",
+			BaseCurrency:  "USD",
+			QuoteCurrency: "PLN",
+			RateDate:      validDate,
+			Rate:          4.1,
+		}})
+
+		_, err := provider.FetchHistoricalRates(t.Context(), FXProviderQuery{
+			BaseCurrency: "USD", QuoteCurrencies: []string{"PLN"}, EndDate: validDate,
+		})
+		require.Error(t, err)
+
+		_, err = provider.FetchHistoricalRates(t.Context(), FXProviderQuery{
+			BaseCurrency: "USD", QuoteCurrencies: []string{"PLN"}, StartDate: laterDate, EndDate: validDate,
+		})
+		require.Error(t, err)
+
+		service := NewService(
+			stubStore{isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil }},
+			WithFXProviders(provider),
+			WithDefaultFXProvider(provider.Name()),
+		)
+		_, err = service.SyncFXRates(t.Context(), SyncFXRatesParams{
+			BaseCurrencies: []string{"USD"}, QuoteCurrency: "PLN", EndDate: validDate,
+		})
+		require.ErrorIs(t, err, ErrInvalidTimestampRange)
+
+		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{})
+		require.ErrorIs(t, err, ErrInvalidTimestampRange)
+		require.ErrorIs(t, ValidateRequiredTimestampRange(validDate, time.Time{}), ErrInvalidTimestampRange)
+		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{
+			StartDate: validDate,
+			EndDate:   validDate,
+		})
+		require.Error(t, err)
+
+		require.ErrorIs(t, validateProviderFXRates([]domain.FXRate{{}}), ErrInvalidTimestampRange)
+
+		_, err = service.GetDashboard(t.Context(), DashboardParams{
+			ActorUserID: "user",
+			TenantID:    "tenant",
+			Preset:      DashboardPeriodPresetCustom,
+			StartDate:   laterDate,
+			EndDate:     validDate,
+		})
+		require.Error(t, err)
+	})
+
 	t.Run("covers fx provider helpers and service error paths", func(t *testing.T) {
 		fake := faker.New()
 		sentinel := errors.New("sentinel")
@@ -72,9 +124,13 @@ func TestReportingAndFXInternals(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, emptyRates)
 
-		_, err = NewNBPFXProvider(nil, "").FetchHistoricalRates(t.Context(), FXProviderQuery{})
+		providerQuery := FXProviderQuery{
+			StartDate: time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
+			EndDate:   time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
+		}
+		_, err = NewNBPFXProvider(nil, "").FetchHistoricalRates(t.Context(), providerQuery)
 		require.ErrorIs(t, err, ErrFXProviderNotImplemented)
-		_, err = NewECBFXProvider(nil, "").FetchHistoricalRates(t.Context(), FXProviderQuery{})
+		_, err = NewECBFXProvider(nil, "").FetchHistoricalRates(t.Context(), providerQuery)
 		require.ErrorIs(t, err, ErrFXProviderNotImplemented)
 
 		service := NewService(stubStore{})
@@ -113,7 +169,9 @@ func TestReportingAndFXInternals(t *testing.T) {
 			WithDefaultFXProvider(staticProvider.Name()),
 		)
 		_, err = service.SyncFXRates(t.Context(), SyncFXRatesParams{
-			Provider: fmt.Sprintf("missing-%s", fake.Lorem().Word()),
+			Provider:  fmt.Sprintf("missing-%s", fake.Lorem().Word()),
+			StartDate: time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
+			EndDate:   time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
 		})
 		require.Error(t, err)
 
@@ -121,11 +179,6 @@ func TestReportingAndFXInternals(t *testing.T) {
 			t,
 			[]string{"USD", "PLN"},
 			canonicalizeCurrencies([]string{"usd", "PLN", "usd"}),
-		)
-		assert.Equal(
-			t,
-			time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-			startOfDay(time.Date(2026, time.June, 20, 12, 0, 0, 0, time.FixedZone("x", 3600))),
 		)
 	})
 
@@ -259,7 +312,7 @@ func TestReportingAndFXInternals(t *testing.T) {
 		)
 		assert.Equal(
 			t,
-			time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2026, time.March, 20, 12, 0, 0, 0, time.UTC),
 			resolveDashboardPeriod(
 				now,
 				DashboardParams{Preset: DashboardPeriodPresetLast3Months},
@@ -267,7 +320,7 @@ func TestReportingAndFXInternals(t *testing.T) {
 		)
 		assert.Equal(
 			t,
-			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2025, time.December, 20, 12, 0, 0, 0, time.UTC),
 			resolveDashboardPeriod(
 				now,
 				DashboardParams{Preset: DashboardPeriodPresetLast6Months},
@@ -275,7 +328,7 @@ func TestReportingAndFXInternals(t *testing.T) {
 		)
 		assert.Equal(
 			t,
-			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
 			resolveDashboardPeriod(
 				now,
 				DashboardParams{Preset: DashboardPeriodPresetThisYear},
@@ -283,7 +336,7 @@ func TestReportingAndFXInternals(t *testing.T) {
 		)
 		assert.Equal(
 			t,
-			time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC),
 			resolveDashboardPeriod(
 				now,
 				DashboardParams{Preset: DashboardPeriodPresetPreviousYear},
@@ -293,74 +346,40 @@ func TestReportingAndFXInternals(t *testing.T) {
 			now,
 			DashboardParams{Preset: DashboardPeriodPresetCurrentMonth},
 		)
-		assert.Equal(
-			t,
-			time.Date(2026, time.May, 31, 0, 0, 0, 0, time.UTC),
-			currentMonth.Previous.EndDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2026, time.July, 31, 0, 0, 0, 0, time.UTC),
-			currentMonth.Next.EndDate,
-		)
+		assert.Equal(t, time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC), currentMonth.StartDate)
+		assert.Equal(t, now, currentMonth.EndDate)
+		assert.Equal(t, currentMonth.StartDate.Add(-time.Nanosecond), currentMonth.Previous.EndDate)
+		assert.Equal(t, currentMonth.EndDate.Add(time.Nanosecond), currentMonth.Next.StartDate)
 		lastThreeMonths := resolveDashboardPeriod(
 			now,
 			DashboardParams{Preset: DashboardPeriodPresetLast3Months},
 		)
+		assert.Equal(t, lastThreeMonths.StartDate.Add(-time.Nanosecond), lastThreeMonths.Previous.EndDate)
+		assert.Equal(t, lastThreeMonths.EndDate.Add(time.Nanosecond), lastThreeMonths.Next.StartDate)
 		assert.Equal(
 			t,
-			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
-			lastThreeMonths.Previous.StartDate,
+			lastThreeMonths.EndDate.Sub(lastThreeMonths.StartDate),
+			lastThreeMonths.Previous.EndDate.Sub(lastThreeMonths.Previous.StartDate),
 		)
 		assert.Equal(
 			t,
-			time.Date(2026, time.March, 31, 0, 0, 0, 0, time.UTC),
-			lastThreeMonths.Previous.EndDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
-			lastThreeMonths.Next.StartDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2026, time.September, 30, 0, 0, 0, 0, time.UTC),
-			lastThreeMonths.Next.EndDate,
+			lastThreeMonths.EndDate.Sub(lastThreeMonths.StartDate),
+			lastThreeMonths.Next.EndDate.Sub(lastThreeMonths.Next.StartDate),
 		)
 		thisYear := resolveDashboardPeriod(
 			now,
 			DashboardParams{Preset: DashboardPeriodPresetThisYear},
 		)
-		assert.Equal(
-			t,
-			time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC),
-			thisYear.Previous.StartDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2025, time.December, 31, 0, 0, 0, 0, time.UTC),
-			thisYear.Previous.EndDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2027, time.January, 1, 0, 0, 0, 0, time.UTC),
-			thisYear.Next.StartDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2027, time.December, 31, 0, 0, 0, 0, time.UTC),
-			thisYear.Next.EndDate,
-		)
+		assert.Equal(t, time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC), thisYear.StartDate)
+		assert.Equal(t, now, thisYear.EndDate)
 		previousStart, previousEnd, nextStart, nextEnd := shiftPeriodWindow(
 			time.Date(2026, time.June, 10, 0, 0, 0, 0, time.UTC),
 			time.Date(2026, time.June, 12, 0, 0, 0, 0, time.UTC),
-			0,
-			0,
 		)
-		assert.Equal(t, time.Date(2026, time.June, 7, 0, 0, 0, 0, time.UTC), previousStart)
-		assert.Equal(t, time.Date(2026, time.June, 15, 0, 0, 0, 0, time.UTC), nextEnd)
-		assert.Equal(t, time.Date(2026, time.June, 9, 0, 0, 0, 0, time.UTC), previousEnd)
-		assert.Equal(t, time.Date(2026, time.June, 13, 0, 0, 0, 0, time.UTC), nextStart)
+		assert.Equal(t, time.Date(2026, time.June, 7, 23, 59, 59, 999999999, time.UTC), previousStart)
+		assert.Equal(t, time.Date(2026, time.June, 14, 0, 0, 0, 1, time.UTC), nextEnd)
+		assert.Equal(t, time.Date(2026, time.June, 9, 23, 59, 59, 999999999, time.UTC), previousEnd)
+		assert.Equal(t, time.Date(2026, time.June, 12, 0, 0, 0, 1, time.UTC), nextStart)
 
 		income, expense, ok := reportingContribution(
 			domain.Transaction{Kind: domain.TransactionKindOpeningBalance},

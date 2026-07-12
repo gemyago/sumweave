@@ -17,7 +17,7 @@ type FinanceCsvImportPreviewResponse struct {
 	ImportID string `json:"importId"`
 	ImportType string `json:"importType"`
 	Headers []string `json:"headers"`
-	Mapping map[string]string `json:"mapping"`
+	Mapping map[string]string `json:"mapping,omitempty"`
 	DuplicateRows []map[string]interface{} `json:"duplicateRows"`
 	RejectedRows []map[string]interface{} `json:"rejectedRows"`
 	WouldCreateAccounts []string `json:"wouldCreateAccounts"`

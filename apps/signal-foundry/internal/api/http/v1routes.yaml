@@ -221,12 +221,10 @@ paths:
           name: start
           schema:
             type: string
-            format: date-time
         - in: query
           name: end
           schema:
             type: string
-            format: date-time
         - in: query
           name: ingestionRunId
           schema:
@@ -483,7 +481,7 @@ paths:
                 $ref: "#/components/schemas/Error"
   /api/v1/jobs:
     get:
-      summary: List durable historical ingestion jobs
+      summary: List durable registered jobs
       operationId: listJobs
       tags:
         - jobs
@@ -533,7 +531,7 @@ paths:
                 $ref: "#/components/schemas/Error"
   /api/v1/jobs/{jobId}:
     get:
-      summary: Get one durable historical ingestion job
+      summary: Get one durable registered job
       operationId: getJob
       tags:
         - jobs
@@ -545,7 +543,7 @@ paths:
             type: string
       responses:
         '200':
-          description: Durable historical ingestion job detail
+          description: Durable registered job detail
           content:
             application/json:
               schema:
@@ -1700,11 +1698,9 @@ components:
         start:
           type: string
           format: date-time
-          nullable: true
         end:
           type: string
           format: date-time
-          nullable: true
         open:
           type: number
           format: double
@@ -2766,7 +2762,6 @@ components:
         - jobType
         - status
         - requester
-        - input
         - createdAt
         - updatedAt
         - attemptCount
@@ -2781,6 +2776,7 @@ components:
           $ref: "#/components/schemas/JobRequester"
         input:
           $ref: "#/components/schemas/HistoricalDataBackfillJobInput"
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -2849,7 +2845,7 @@ components:
         id: { type: string }
         name: { type: string }
         displayCurrency: { type: string }
-        archivedAt: { type: string, format: date-time }
+        archivedAt: { type: string, format: date-time, nullable: true }
         joinedAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -2888,9 +2884,9 @@ components:
         code: { type: string }
         recipient: { type: string }
         createdByUserId: { type: string }
-        acceptedByUserId: { type: string }
+        acceptedByUserId: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
-        acceptedAt: { type: string, format: date-time }
+        acceptedAt: { type: string, format: date-time, nullable: true }
     FinanceTenantInvitesResponse:
       type: object
       required: [items]
@@ -2923,7 +2919,7 @@ components:
         pendingBalanceMinor: { type: integer, format: int64 }
         provider: { type: string }
         providerAccountId: { type: string }
-        hiddenAt: { type: string, format: date-time }
+        hiddenAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     FinanceAccountsResponse:
@@ -2948,7 +2944,7 @@ components:
         name: { type: string }
         kind: { type: string }
         seededDefault: { type: boolean }
-        hiddenAt: { type: string, format: date-time }
+        hiddenAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     FinanceCategoriesResponse:
@@ -2970,7 +2966,7 @@ components:
         id: { type: string }
         tenantId: { type: string }
         name: { type: string }
-        hiddenAt: { type: string, format: date-time }
+        hiddenAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     FinanceTagsResponse:
@@ -3008,10 +3004,10 @@ components:
         currency: { type: string }
         description: { type: string }
         effectiveAt: { type: string, format: date-time }
-        categoryId: { type: string }
-        transferGroupId: { type: string }
-        transferMatchedAt: { type: string, format: date-time }
-        hiddenAt: { type: string, format: date-time }
+        categoryId: { type: string, nullable: true }
+        transferGroupId: { type: string, nullable: true }
+        transferMatchedAt: { type: string, format: date-time, nullable: true }
+        hiddenAt: { type: string, format: date-time, nullable: true }
         providerOriginal: { $ref: "#/components/schemas/FinanceTransactionProviderOriginal" }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -3024,14 +3020,13 @@ components:
           items: { $ref: "#/components/schemas/FinanceTransaction" }
     FinanceTransactionUpdateRequest:
       type: object
-      required: [description, amountMinor, effectiveAt]
+      required: [description, amountMinor]
       properties:
         description: { type: string }
         amountMinor: { type: integer, format: int64 }
-        effectiveAt: { type: string, format: date-time }
-        categoryId:
-          type: string
-          nullable: true
+        effectiveAt: { type: string, format: date-time, nullable: true }
+        categoryId: { type: string }
+        clearCategory: { type: boolean }
     FinanceTransactionProviderOriginal:
       type: object
       required: [amountMinor, currency, description]
@@ -3039,7 +3034,7 @@ components:
         amountMinor: { type: integer, format: int64 }
         currency: { type: string }
         description: { type: string }
-        effectiveAt: { type: string, format: date-time }
+        effectiveAt: { type: string, format: date-time, nullable: true }
     FinanceConnectionLinkTokenRequest:
       type: object
       required: [provider, token]
@@ -3107,8 +3102,8 @@ components:
       type: object
       properties:
         reason: { type: string }
-        windowStart: { type: string, format: date-time }
-        windowEnd: { type: string, format: date-time }
+        windowStart: { type: string, format: date-time, nullable: true }
+        windowEnd: { type: string, format: date-time, nullable: true }
     FinanceBankConnection:
       type: object
       required: [id, tenantId, provider, displayName, providerReference, externalId, state, createdAt, updatedAt]
@@ -3121,8 +3116,8 @@ components:
         externalId: { type: string }
         state: { type: string }
         lastSyncJobId: { type: string }
-        lastSyncStartedAt: { type: string, format: date-time }
-        lastSuccessfulSyncAt: { type: string, format: date-time }
+        lastSyncStartedAt: { type: string, format: date-time, nullable: true }
+        lastSuccessfulSyncAt: { type: string, format: date-time, nullable: true }
         lastSyncError: { type: string }
         schedule: { $ref: "#/components/schemas/FinanceBankConnectionSchedule" }
         createdAt: { type: string, format: date-time }
@@ -3133,10 +3128,10 @@ components:
       properties:
         connectionId: { type: string }
         intervalSeconds: { type: integer, format: int64 }
-        nextRunAt: { type: string, format: date-time }
-        lastScheduledAt: { type: string, format: date-time }
-        lastStartedAt: { type: string, format: date-time }
-        lastCompletedAt: { type: string, format: date-time }
+        nextRunAt: { type: string, format: date-time, nullable: true }
+        lastScheduledAt: { type: string, format: date-time, nullable: true }
+        lastStartedAt: { type: string, format: date-time, nullable: true }
+        lastCompletedAt: { type: string, format: date-time, nullable: true }
         lastJobId: { type: string }
         enabled: { type: boolean }
         createdAt: { type: string, format: date-time }
@@ -3151,7 +3146,108 @@ components:
     FinanceDashboardResponse:
       type: object
       description: Aggregated finance dashboard response.
-      additionalProperties: true
+      additionalProperties: false
+      required: [period, settled, pending, categoryBreakdowns, accountBalances, alerts, missingFx, nativeSettledTotals]
+      properties:
+        period: { $ref: "#/components/schemas/FinanceDashboardPeriod" }
+        settled: { $ref: "#/components/schemas/FinanceDashboardMoneySummary" }
+        pending: { $ref: "#/components/schemas/FinanceDashboardMoneySummary" }
+        categoryBreakdowns:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardCategoryBreakdown" }
+        accountBalances:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardAccountBalance" }
+        alerts:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardAlert" }
+        missingFx:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardMissingFx" }
+        nativeSettledTotals:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardCurrencyTotal" }
+    FinanceDashboardPeriod:
+      type: object
+      additionalProperties: false
+      required: [preset, startDate, endDate, previous, next]
+      properties:
+        preset: { type: string }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+        previous: { $ref: "#/components/schemas/FinanceDashboardPeriodWindow" }
+        next: { $ref: "#/components/schemas/FinanceDashboardPeriodWindow" }
+    FinanceDashboardPeriodWindow:
+      type: object
+      additionalProperties: false
+      required: [startDate, endDate]
+      properties:
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+    FinanceDashboardMoneySummary:
+      type: object
+      additionalProperties: false
+      required: [displayCurrency, incomeMinor, expenseMinor, netMinor, transactionCount, complete]
+      properties:
+        displayCurrency: { type: string }
+        incomeMinor: { type: integer, format: int64 }
+        expenseMinor: { type: integer, format: int64 }
+        netMinor: { type: integer, format: int64 }
+        transactionCount: { type: integer, format: int64 }
+        complete: { type: boolean }
+    FinanceDashboardCategoryBreakdown:
+      type: object
+      additionalProperties: false
+      required: [categoryId, categoryName, kind, incomeMinor, expenseMinor, transactionCount]
+      properties:
+        categoryId: { type: string }
+        categoryName: { type: string }
+        kind: { type: string }
+        incomeMinor: { type: integer, format: int64 }
+        expenseMinor: { type: integer, format: int64 }
+        transactionCount: { type: integer, format: int64 }
+    FinanceDashboardAccountBalance:
+      type: object
+      additionalProperties: false
+      required: [accountId, accountName, currency, nativeBookedMinor, nativePendingMinor, displayBookedMinor, displayPendingMinor, missingFx]
+      properties:
+        accountId: { type: string }
+        accountName: { type: string }
+        currency: { type: string }
+        nativeBookedMinor: { type: integer, format: int64 }
+        nativePendingMinor: { type: integer, format: int64 }
+        displayBookedMinor: { type: integer, format: int64, nullable: true }
+        displayPendingMinor: { type: integer, format: int64, nullable: true }
+        missingFx: { type: boolean }
+    FinanceDashboardAlert:
+      type: object
+      additionalProperties: false
+      required: [code, severity, count]
+      properties:
+        code: { type: string }
+        severity: { type: string }
+        count: { type: integer, format: int64 }
+    FinanceDashboardMissingFx:
+      type: object
+      additionalProperties: false
+      required: [source, transactionId, accountId, baseCurrency, quoteCurrency, rateDate, provider]
+      properties:
+        source: { type: string }
+        transactionId: { type: string, nullable: true }
+        accountId: { type: string, nullable: true }
+        baseCurrency: { type: string }
+        quoteCurrency: { type: string }
+        rateDate: { type: string, format: date-time }
+        provider: { type: string }
+    FinanceDashboardCurrencyTotal:
+      type: object
+      additionalProperties: false
+      required: [currency, incomeMinor, expenseMinor, netMinor]
+      properties:
+        currency: { type: string }
+        incomeMinor: { type: integer, format: int64 }
+        expenseMinor: { type: integer, format: int64 }
+        netMinor: { type: integer, format: int64 }
     FinanceFxDiagnosticsResponse:
       type: object
       required: [defaultProvider, providers, storedRatesCount]
@@ -3194,7 +3290,7 @@ components:
         csv: { type: string }
     FinanceCsvImportPreviewResponse:
       type: object
-      required: [importId, importType, headers, mapping, duplicateRows, rejectedRows, wouldCreateAccounts, wouldCreateCategories, wouldCreateTags]
+      required: [importId, importType, headers, duplicateRows, rejectedRows, wouldCreateAccounts, wouldCreateCategories, wouldCreateTags]
       properties:
         importId: { type: string }
         importType: { type: string }
@@ -3221,7 +3317,6 @@ components:
           items: { type: string }
     FinanceCsvImportConfirmRequest:
       type: object
-      required: [mapping]
       properties:
         mapping:
           type: object
@@ -3245,8 +3340,8 @@ components:
         confirmedByUserId: { type: string }
         importedCount: { type: integer, format: int64 }
         createdAt: { type: string, format: date-time }
-        confirmedAt: { type: string, format: date-time }
-        completedAt: { type: string, format: date-time }
+        confirmedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
     Error:
       type: object
       required:

@@ -623,7 +623,7 @@ func TestProfileTimestampsFromFileInfo(t *testing.T) {
 			},
 		}
 		createdAt, updatedAt := profileTimestampsFromFileInfo(info)
-		assert.Equal(t, birth, createdAt)
+		assert.True(t, birth.Equal(createdAt))
 		assert.Equal(t, modTime, updatedAt)
 	})
 
@@ -686,7 +686,7 @@ func TestCreationTimeFromFileInfo(t *testing.T) {
 				Birthtimespec: testTimespec{Sec: birth.Unix(), Nsec: int64(birth.Nanosecond())},
 			},
 		})
-		assert.Equal(t, birth, got)
+		assert.True(t, birth.Equal(got))
 	})
 
 	t.Run("reads alternate unix birthtim field", func(t *testing.T) {
@@ -697,7 +697,7 @@ func TestCreationTimeFromFileInfo(t *testing.T) {
 				Birthtim: testTimespec{Sec: birth.Unix(), Nsec: int64(birth.Nanosecond())},
 			},
 		})
-		assert.Equal(t, birth, got)
+		assert.True(t, birth.Equal(got))
 	})
 
 	t.Run("reads windows creation time field", func(t *testing.T) {
@@ -708,7 +708,7 @@ func TestCreationTimeFromFileInfo(t *testing.T) {
 				CreationTime: testCreationTimeValue{nanos: birth.UnixNano()},
 			},
 		})
-		assert.Equal(t, birth, got)
+		assert.True(t, birth.Equal(got))
 	})
 }
 
@@ -738,7 +738,7 @@ func TestTimeFromTimespecField(t *testing.T) {
 			Sec:  base.Unix(),
 			Nsec: int64(base.Nanosecond()),
 		}))
-		assert.Equal(t, base, got)
+		assert.True(t, base.Equal(got))
 	})
 }
 
@@ -764,7 +764,7 @@ func TestTimeFromWindowsCreationField(t *testing.T) {
 
 	t.Run("parses nanoseconds method", func(t *testing.T) {
 		got := timeFromWindowsCreationField(reflect.ValueOf(testCreationTimeValue{nanos: base.UnixNano()}))
-		assert.Equal(t, base, got)
+		assert.True(t, base.Equal(got))
 	})
 }
 

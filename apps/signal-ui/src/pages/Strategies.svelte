@@ -13,6 +13,7 @@
     type StrategyVersionDetail,
     type StrategyVersionRow,
   } from '../lib/strategy-workspace/api'
+  import { formatLocalDateTime } from '../lib/timestamp'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
 
@@ -242,10 +243,6 @@
     }
   }
 
-  function formatDate(value: Date): string {
-    return value.toISOString().replace('T', ' ').slice(0, 16) + 'Z'
-  }
-
   function formatInstrument(row: { instrument: { venue: string; symbol: string; assetClass: string } }): string {
     return `${row.instrument.venue} / ${row.instrument.symbol} / ${row.instrument.assetClass}`
   }
@@ -393,7 +390,7 @@
                   </td>
                   <td>{formatInstrument(strategy)}</td>
                   <td>{strategy.timeframe}</td>
-                  <td>{formatDate(strategy.createdAt)}</td>
+                  <td>{formatLocalDateTime(strategy.createdAt)}</td>
                 </tr>
               {/each}
             </tbody>

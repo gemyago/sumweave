@@ -127,7 +127,7 @@ func TestDurableBacktestFlow(t *testing.T) {
 
 		fake := newFake(t)
 		instrument := makeInstrument(t, fake)
-		requestStart := time.Date(2026, 4, 5, 9, 0, 0, 0, time.FixedZone(randomWord(t, fake, "zone"), 0))
+		requestStart := time.Date(2026, 4, 5, 9, 0, 0, 0, time.FixedZone("", 2*60*60))
 		requestRange, err := domain.NewTimeRange(requestStart, requestStart.Add(8*time.Minute))
 		require.NoError(t, err)
 
@@ -240,8 +240,8 @@ func TestDurableBacktestFlow(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, traces, 2)
-		require.Equal(t, requestStart.Add(4*time.Minute).UTC(), traces[0].DecisionTime.Time())
-		require.Equal(t, requestStart.Add(6*time.Minute).UTC(), traces[1].DecisionTime.Time())
+		require.Equal(t, requestStart.Add(4*time.Minute), traces[0].DecisionTime.Time())
+		require.Equal(t, requestStart.Add(6*time.Minute), traces[1].DecisionTime.Time())
 		require.Equal(t, result.DatasetReference.DatasetID.String(), traces[0].DatasetReference)
 		require.Equal(t, result.BacktestRun.RunID.String(), traces[0].RunReference)
 		require.Equal(t, string(intents[0].IntentID), traces[0].Metadata["intent_id"])
@@ -360,7 +360,7 @@ func TestDurableBacktestFlow(t *testing.T) {
 
 		fake := newFake(t)
 		instrument := makeInstrument(t, fake)
-		requestStart := time.Date(2026, 4, 6, 9, 0, 0, 0, time.FixedZone(randomWord(t, fake, "zone"), 0))
+		requestStart := time.Date(2026, 4, 6, 9, 0, 0, 0, time.FixedZone("", 2*60*60))
 		requestRange, err := domain.NewTimeRange(requestStart, requestStart.Add(4*time.Minute))
 		require.NoError(t, err)
 
@@ -406,7 +406,7 @@ func TestDurableBacktestFlow(t *testing.T) {
 
 		fake := newFake(t)
 		instrument := makeInstrument(t, fake)
-		requestStart := time.Date(2026, 4, 7, 9, 0, 0, 0, time.FixedZone(randomWord(t, fake, "zone"), 0))
+		requestStart := time.Date(2026, 4, 7, 9, 0, 0, 0, time.FixedZone("", 2*60*60))
 		requestRange, err := domain.NewTimeRange(requestStart, requestStart.Add(8*time.Minute))
 		require.NoError(t, err)
 

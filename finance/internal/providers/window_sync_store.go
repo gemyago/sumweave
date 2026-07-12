@@ -54,9 +54,7 @@ func NewProviderWindowSyncStore(
 		store.idGenerator = uuid.NewString
 	}
 	if store.now == nil {
-		store.now = func() time.Time {
-			return time.Now().UTC()
-		}
+		store.now = time.Now
 	}
 	return store, nil
 }
@@ -111,7 +109,7 @@ func (s *ProviderWindowSyncStore) ApplySync(
 		return fmt.Errorf("load existing apply snapshot: %w", err)
 	}
 
-	now := s.now().UTC()
+	now := s.now()
 	return s.persistence.WithTransaction(ctx, func(store WindowSyncApplyStore) error {
 		providerAccounts := providerAccountsByProviderID(snapshot.Accounts)
 		err = s.saveObservedAccounts(
@@ -352,7 +350,7 @@ func (s *ProviderWindowSyncStore) buildObservedProviderAccount(
 		Currency:             observation.Currency,
 		IBAN:                 observation.IBAN,
 		MaskedPAN:            observation.MaskedPAN,
-		LastSuccessfulSyncAt: timePointerUTC(now),
+		LastSuccessfulSyncAt: timePointerOrNil(now),
 		CreatedAt:            existing.CreatedAt,
 		UpdatedAt:            now,
 	}, nil
@@ -545,10 +543,9 @@ func existingSnapshotMatch(
 	return &match
 }
 
-func timePointerUTC(value time.Time) *time.Time {
+func timePointerOrNil(value time.Time) *time.Time {
 	if value.IsZero() {
 		return nil
 	}
-	utcValue := value.UTC()
-	return &utcValue
+	return &value
 }

@@ -26,11 +26,11 @@ func NewDataCandleValidator() FieldValidator[*DataCandle] {
 	validateTimeframe := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateStart := NewSimpleFieldValidator[*time.Time](
-		SkipNullValidator(EnsureNonDefault[time.Time]),
+	validateStart := NewSimpleFieldValidator[time.Time](
+		EnsureNonDefault[time.Time],
 	)
-	validateEnd := NewSimpleFieldValidator[*time.Time](
-		SkipNullValidator(EnsureNonDefault[time.Time]),
+	validateEnd := NewSimpleFieldValidator[time.Time](
+		EnsureNonDefault[time.Time],
 	)
 	validateOpen := NewSimpleFieldValidator[float64](
 		EnsureNonDefault[float64],

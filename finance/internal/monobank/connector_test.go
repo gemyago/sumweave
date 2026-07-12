@@ -283,9 +283,9 @@ func TestConnector(t *testing.T) {
 			CapturedAt:          capturedAt,
 		}, batch.Balances[1])
 
-		firstEffectiveAt := firstTime.UTC()
-		secondEffectiveAt := secondTime.UTC()
-		thirdEffectiveAt := thirdTime.UTC()
+		firstEffectiveAt := time.Unix(firstTime.Unix(), 0)
+		secondEffectiveAt := time.Unix(secondTime.Unix(), 0)
+		thirdEffectiveAt := time.Unix(thirdTime.Unix(), 0)
 		assert.Equal(t, domain.ProviderTransactionObservation{
 			Connection:            connection,
 			ProviderAccountID:     firstAccountID,

@@ -25,7 +25,7 @@ func NewJobDetailResponseValidator() FieldValidator[*JobDetailResponse] {
 		NewJobRequesterValidator(),
 	)
 	validateInput := NewObjectFieldValidator(
-		ObjectFieldValidatorParams{Required: true, Nullable: false},
+		ObjectFieldValidatorParams{Required: false, Nullable: false},
 		NewHistoricalDataBackfillJobInputValidator(),
 	)
 	validateCreatedAt := NewSimpleFieldValidator[time.Time](

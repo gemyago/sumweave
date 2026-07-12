@@ -3,6 +3,7 @@ import { faker } from '@faker-js/faker'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import Data from './Data.svelte'
+import { formatLocalDateTime } from '../lib/timestamp'
 import { DataApiError } from '../lib/data/data-api'
 
 const chartSetData = vi.fn()
@@ -178,10 +179,10 @@ async function fillUtcRange(
   _user: ReturnType<typeof userEvent.setup>,
   range: { startDate: string; startTime: string; endDate: string; endTime: string },
 ) {
-  const startDate = screen.getByLabelText('UTC start date') as HTMLInputElement
-  const startTime = screen.getByLabelText('UTC start time') as HTMLInputElement
-  const endDate = screen.getByLabelText('UTC end date') as HTMLInputElement
-  const endTime = screen.getByLabelText('UTC end time') as HTMLInputElement
+  const startDate = screen.getByLabelText('Start date') as HTMLInputElement
+  const startTime = screen.getByLabelText('Start time') as HTMLInputElement
+  const endDate = screen.getByLabelText('End date') as HTMLInputElement
+  const endTime = screen.getByLabelText('End time') as HTMLInputElement
 
   await fireEvent.input(startDate, { target: { value: range.startDate } })
   await fireEvent.change(startDate, { target: { value: range.startDate } })
@@ -363,14 +364,14 @@ describe('Data page', () => {
     const secondCard = await findAvailabilityCard(secondAvailability)
     await user.click(secondCard)
 
-    expect(await screen.findByText(secondCandle.start.toISOString())).toBeInTheDocument()
+    expect(await screen.findByText(formatLocalDateTime(secondCandle.start))).toBeInTheDocument()
     expect(screen.getByLabelText('Symbol')).toHaveValue(secondAvailability.symbol)
 
     firstCandles.resolve({ items: [firstCandle] })
 
     await waitFor(() => {
       expect(screen.getByLabelText('Symbol')).toHaveValue(secondAvailability.symbol)
-      expect(screen.queryByText(firstCandle.start.toISOString())).not.toBeInTheDocument()
+      expect(screen.queryByText(formatLocalDateTime(firstCandle.start))).not.toBeInTheDocument()
       expect(mocks.listCandleRawPayloads).toHaveBeenCalledTimes(1)
       expect(mocks.listCandleRawPayloads).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -519,8 +520,8 @@ describe('Data page', () => {
         symbol: 'BTCUSD',
         assetClass: 'future',
         timeframe: '1m',
-        start: new Date('2026-06-15T12:00:00.000Z'),
-        end: new Date('2026-06-15T13:00:00.000Z'),
+           start: new Date(2026, 5, 15, 12, 0, 0),
+           end: new Date(2026, 5, 15, 13, 0, 0),
         pageSize: 0,
       },
       createdAt: new Date('2026-06-15T11:59:00.000Z'),
@@ -545,8 +546,8 @@ describe('Data page', () => {
           symbol: 'BTCUSD',
           assetClass: 'future',
           timeframe: '1m',
-          start: new Date('2026-06-15T12:00:00.000Z'),
-          end: new Date('2026-06-15T13:00:00.000Z'),
+           start: new Date(2026, 5, 15, 12, 0, 0),
+           end: new Date(2026, 5, 15, 13, 0, 0),
           pageSize: 500,
         },
       })
@@ -575,8 +576,8 @@ describe('Data page', () => {
         symbol: 'BTCUSD',
         assetClass: 'future',
         timeframe: '1m',
-        start: new Date('2026-06-15T12:00:00.000Z'),
-        end: new Date('2026-06-15T13:00:00.000Z'),
+           start: new Date(2026, 5, 15, 12, 0, 0),
+           end: new Date(2026, 5, 15, 13, 0, 0),
         pageSize: 0,
       },
       createdAt: new Date('2026-06-15T11:59:00.000Z'),
@@ -603,8 +604,8 @@ describe('Data page', () => {
           symbol: 'BTCUSD',
           assetClass: 'future',
           timeframe: '1m',
-          start: new Date('2026-06-15T12:00:00.000Z'),
-          end: new Date('2026-06-15T13:00:00.000Z'),
+          start: new Date(2026, 5, 15, 12, 0, 0),
+          end: new Date(2026, 5, 15, 13, 0, 0),
           pageSize: 0,
         },
       })
@@ -788,7 +789,7 @@ describe('Data page', () => {
     await user.click(screen.getByRole('button', { name: 'Load candles' }))
 
     expect(screen.getByText(
-      'UTC range must stay within the selected availability window.',
+       'Range must stay within the selected availability window.',
     )).toBeInTheDocument()
     expect(mocks.listCandles).not.toHaveBeenCalled()
   })
@@ -811,7 +812,7 @@ describe('Data page', () => {
     await user.click(screen.getByRole('button', { name: 'Load candles' }))
 
     expect(await screen.findByText(
-      'UTC start must be earlier than UTC end.',
+       'Start must be earlier than end.',
     )).toBeInTheDocument()
     expect(mocks.listCandles).not.toHaveBeenCalled()
   })
@@ -827,7 +828,7 @@ describe('Data page', () => {
     const user = userEvent.setup()
     render(Data)
 
-    await screen.findByText(firstCandle.start.toISOString())
+    await screen.findByText(formatLocalDateTime(firstCandle.start))
     expect(screen.getByRole('button', { name: 'Selected' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: 'Select' }))
 

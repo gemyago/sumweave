@@ -549,7 +549,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 			Currency:             accountObservation.Currency,
 			IBAN:                 accountObservation.IBAN,
 			MaskedPAN:            accountObservation.MaskedPAN,
-			LastSuccessfulSyncAt: timePointerUTC(now),
+			LastSuccessfulSyncAt: timePointerOrNil(now),
 			CreatedAt:            existingAccount.CreatedAt,
 			UpdatedAt:            now,
 		}, fixture.savedAccounts[0])
@@ -869,7 +869,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		require.ErrorContains(t, err, "tenant id not found")
 		_, err = resolveProviderAccount(providerAccountsByProviderID(accounts), "missing-provider")
 		require.ErrorContains(t, err, "provider account mapping not found")
-		assert.Nil(t, timePointerUTC(time.Time{}))
+		assert.Nil(t, timePointerOrNil(time.Time{}))
 
 		action := ProviderTransactionAction{
 			MatchStrategy: ProviderTransactionMatchStrategyFingerprint,

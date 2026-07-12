@@ -13,9 +13,9 @@ var _ = time.Time{}
 func NewFinanceConnectionSyncRequestValidator() FieldValidator[*FinanceConnectionSyncRequest] {
 	validateReason := NewSimpleFieldValidator[string](
 	)
-	validateWindowStart := NewSimpleFieldValidator[time.Time](
+	validateWindowStart := NewSimpleFieldValidator[*time.Time](
 	)
-	validateWindowEnd := NewSimpleFieldValidator[time.Time](
+	validateWindowEnd := NewSimpleFieldValidator[*time.Time](
 	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceConnectionSyncRequest) {

@@ -66,6 +66,148 @@ func TestStore(t *testing.T) {
 		}
 	})
 
+	t.Run("orders core entity canonical timestamps", func(t *testing.T) {
+		store := makeStore(t)
+		fake := faker.New()
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		userID := "user-" + fake.UUID().V4()
+		earlierTenant := domain.Tenant{
+			ID: "tenant-earlier-" + fake.UUID().V4(), Name: fake.Company().Name(), DisplayCurrency: "USD",
+			CreatedAt: earlier, UpdatedAt: earlier,
+		}
+		laterTenant := domain.Tenant{
+			ID: "tenant-later-" + fake.UUID().V4(), Name: fake.Company().Name(), DisplayCurrency: "USD",
+			CreatedAt: later, UpdatedAt: later,
+		}
+		for _, tenant := range []domain.Tenant{laterTenant, earlierTenant} {
+			_, err := store.SaveTenant(t.Context(), tenant)
+			require.NoError(t, err)
+			_, err = store.SaveTenantMembership(t.Context(), domain.TenantMembership{
+				TenantID: tenant.ID, UserID: userID, JoinedAt: tenant.CreatedAt, CreatedAt: tenant.CreatedAt,
+			})
+			require.NoError(t, err)
+		}
+		views, err := store.ListTenantsForUser(t.Context(), userID)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierTenant.ID, laterTenant.ID}, []string{views[0].Tenant.ID, views[1].Tenant.ID})
+
+		tenantID := earlierTenant.ID
+		earlierInvite := domain.TenantInvite{
+			ID: "invite-earlier-" + fake.UUID().V4(), TenantID: tenantID, Code: "code-earlier-" + fake.UUID().V4(),
+			Recipient: fake.Internet().Email(), CreatedByUserID: userID, CreatedAt: earlier,
+		}
+		laterInvite := domain.TenantInvite{
+			ID: "invite-later-" + fake.UUID().V4(), TenantID: tenantID, Code: "code-later-" + fake.UUID().V4(),
+			Recipient: fake.Internet().Email(), CreatedByUserID: userID, CreatedAt: later,
+		}
+		for _, invite := range []domain.TenantInvite{laterInvite, earlierInvite} {
+			_, err = store.SaveTenantInvite(t.Context(), invite)
+			require.NoError(t, err)
+		}
+		invites, err := store.ListTenantInvites(t.Context(), tenantID)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierInvite.ID, laterInvite.ID}, []string{invites[0].ID, invites[1].ID})
+
+		earlierMember := domain.TenantMembership{
+			TenantID: tenantID, UserID: "member-earlier-" + fake.UUID().V4(), JoinedAt: earlier, CreatedAt: earlier,
+		}
+		laterMember := domain.TenantMembership{
+			TenantID: tenantID, UserID: "member-later-" + fake.UUID().V4(), JoinedAt: later, CreatedAt: later,
+		}
+		for _, membership := range []domain.TenantMembership{laterMember, earlierMember} {
+			_, err = store.SaveTenantMembership(t.Context(), membership)
+			require.NoError(t, err)
+		}
+		members, err := store.ListTenantMembers(t.Context(), tenantID)
+		require.NoError(t, err)
+		require.Equal(t, laterMember.UserID, members[len(members)-1].UserID)
+		earlierMemberIndex := -1
+		laterMemberIndex := -1
+		for index, member := range members {
+			if member.UserID == earlierMember.UserID {
+				earlierMemberIndex = index
+			}
+			if member.UserID == laterMember.UserID {
+				laterMemberIndex = index
+			}
+		}
+		require.GreaterOrEqual(t, earlierMemberIndex, 0)
+		require.Greater(t, laterMemberIndex, earlierMemberIndex)
+
+		earlierAccount := domain.Account{
+			ID: "account-earlier-" + fake.UUID().V4(), TenantID: tenantID, Name: fake.Lorem().Word(), Currency: "USD",
+			Kind: domain.AccountKindManual, CreatedAt: earlier, UpdatedAt: earlier,
+		}
+		laterAccount := domain.Account{
+			ID: "account-later-" + fake.UUID().V4(), TenantID: tenantID, Name: fake.Lorem().Word(), Currency: "USD",
+			Kind: domain.AccountKindManual, CreatedAt: later, UpdatedAt: later,
+		}
+		for _, account := range []domain.Account{laterAccount, earlierAccount} {
+			_, err = store.SaveAccount(t.Context(), account)
+			require.NoError(t, err)
+		}
+		accounts, err := store.ListAccounts(t.Context(), tenantID, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierAccount.ID, laterAccount.ID}, []string{accounts[0].ID, accounts[1].ID})
+
+		earlierCategory := domain.Category{
+			ID: "category-earlier-" + fake.UUID().V4(), TenantID: tenantID, Name: fake.Lorem().Word(),
+			Kind: domain.CategoryKindExpense, CreatedAt: earlier, UpdatedAt: earlier,
+		}
+		laterCategory := domain.Category{
+			ID: "category-later-" + fake.UUID().V4(), TenantID: tenantID, Name: fake.Lorem().Word(),
+			Kind: domain.CategoryKindExpense, CreatedAt: later, UpdatedAt: later,
+		}
+		for _, category := range []domain.Category{laterCategory, earlierCategory} {
+			_, err = store.SaveCategory(t.Context(), category)
+			require.NoError(t, err)
+		}
+		categories, err := store.ListCategories(t.Context(), tenantID, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierCategory.ID, laterCategory.ID}, []string{categories[0].ID, categories[1].ID})
+
+		earlierTag := domain.Tag{
+			ID: "tag-earlier-" + fake.UUID().V4(), TenantID: tenantID, Name: fake.Lorem().Word(),
+			CreatedAt: earlier, UpdatedAt: earlier,
+		}
+		laterTag := domain.Tag{
+			ID: "tag-later-" + fake.UUID().V4(), TenantID: tenantID, Name: fake.Lorem().Word(),
+			CreatedAt: later, UpdatedAt: later,
+		}
+		for _, tag := range []domain.Tag{laterTag, earlierTag} {
+			_, err = store.SaveTag(t.Context(), tag)
+			require.NoError(t, err)
+		}
+		tags, err := store.ListTags(t.Context(), tenantID, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{earlierTag.ID, laterTag.ID}, []string{tags[0].ID, tags[1].ID})
+
+		makeTransaction := func(id string, at time.Time) domain.Transaction {
+			return domain.Transaction{
+				ID: id, TenantID: tenantID, AccountID: earlierAccount.ID, Source: domain.TransactionSourceManual,
+				Status: domain.TransactionStatusBooked, Kind: domain.TransactionKindRegular, AmountMinor: 1,
+				Currency: "USD", Description: fake.Lorem().Sentence(3), EffectiveAt: at, CreatedAt: at, UpdatedAt: at,
+			}
+		}
+		earlierTransaction := makeTransaction("transaction-earlier-"+fake.UUID().V4(), earlier)
+		laterTransaction := makeTransaction("transaction-later-"+fake.UUID().V4(), later)
+		for _, transaction := range []domain.Transaction{earlierTransaction, laterTransaction} {
+			_, err = store.SaveTransaction(t.Context(), transaction)
+			require.NoError(t, err)
+		}
+		transactions, err := store.ListTransactions(t.Context(), tenantID, "", "", "", true)
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]string{laterTransaction.ID, earlierTransaction.ID},
+			[]string{transactions[0].ID, transactions[1].ID},
+		)
+		require.Equal(t, later.Format(time.RFC3339Nano), transactions[0].EffectiveAt.Format(time.RFC3339Nano))
+	})
+
 	t.Run("persists csv import records and reports missing imports", func(t *testing.T) {
 		store := makeStore(t)
 		fake := faker.New()
@@ -461,7 +603,10 @@ func TestStore(t *testing.T) {
 			domain.TransactionStatusBooked,
 			domain.TransactionKindRegular,
 			20_00,
-			now.Add(24*time.Hour),
+			time.Date(
+				now.Year(), now.Month(), now.Day(), 23, 30, 0, 0,
+				time.FixedZone("UTC-10", -10*60*60),
+			),
 			false,
 		)
 
@@ -564,7 +709,7 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, loadedTenant)
 		require.NotNil(t, loadedTenant.ArchivedAt)
-		assert.Equal(t, archivedAt, loadedTenant.ArchivedAt.UTC())
+		assert.True(t, archivedAt.Equal(*loadedTenant.ArchivedAt))
 
 		views, err := store.ListTenantsForUser(t.Context(), membership.UserID)
 		require.NoError(t, err)
@@ -577,7 +722,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run(
-		"stores encrypted secrets without plaintext and normalizes timestamps to utc",
+		"stores encrypted secrets without changing supplied timestamp offsets",
 		func(t *testing.T) {
 			store := makeStore(t)
 			fake := faker.New()
@@ -612,8 +757,8 @@ func TestStore(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			assert.Equal(t, time.UTC, secret.CreatedAt.Location())
-			assert.Equal(t, time.UTC, secret.UpdatedAt.Location())
+			assert.Equal(t, createdAt, secret.CreatedAt)
+			assert.Equal(t, createdAt, secret.UpdatedAt)
 
 			sqlDB, err := store.db.DB()
 			require.NoError(t, err)
@@ -720,7 +865,17 @@ func TestStore(t *testing.T) {
 				runID,
 			).Scan(&startedAt)
 			require.NoError(t, err)
-			assert.Equal(t, time.UTC, startedAt.Location())
+			expectedStartedAt := time.Date(
+				2026,
+				time.June,
+				20,
+				18,
+				0,
+				0,
+				0,
+				time.FixedZone("fixture", 5*60*60),
+			)
+			assert.True(t, expectedStartedAt.Equal(startedAt))
 
 			var recordID string
 			var occurredAt time.Time
@@ -732,7 +887,7 @@ func TestStore(t *testing.T) {
 			).Scan(&recordID, &occurredAt)
 			require.NoError(t, err)
 			assert.NotEmpty(t, recordID)
-			assert.Equal(t, time.UTC, occurredAt.Location())
+			assert.False(t, occurredAt.IsZero())
 		},
 	)
 
@@ -1130,5 +1285,19 @@ func TestStore(t *testing.T) {
 		require.Len(t, windowRates, 1)
 		assert.Equal(t, "frankfurter", windowRates[0].Provider)
 		assert.InDelta(t, 4.12, windowRates[0].Rate, 0.00001)
+
+		_, err = store.ListFXRates(t.Context(), ListFXRatesParams{
+			StartDate: secondDate,
+			EndDate:   firstDate,
+		})
+		require.Error(t, err)
+
+		err = store.SaveFXRates(t.Context(), []domain.FXRate{{
+			Provider:      "frankfurter",
+			BaseCurrency:  "USD",
+			QuoteCurrency: "PLN",
+			Rate:          4.15,
+		}})
+		require.Error(t, err)
 	})
 }

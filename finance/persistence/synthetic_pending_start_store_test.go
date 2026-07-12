@@ -131,6 +131,47 @@ func TestSyntheticPendingStartStore(t *testing.T) {
 		}
 	})
 
+	t.Run("filters expiry by canonical timestamp", func(t *testing.T) {
+		fake := faker.New()
+		store, pendingStore := makeStore(t)
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		now := time.Date(2026, time.January, 1, 0, 15, 0, 0, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+		require.True(t, later.Before(now))
+		tenantID := "tenant-" + fake.UUID().V4()
+		actorUserID := "actor-" + fake.UUID().V4()
+		state := "state-" + fake.UUID().V4()
+
+		makeStart := func(id string, createdAt time.Time, expiresAt time.Time) domain.PendingBankConnectionLinkStart {
+			return domain.PendingBankConnectionLinkStart{
+				ID: id, TenantID: tenantID, ActorUserID: actorUserID,
+				Provider: string(domain.ProviderIDSynthetic), ConnectorID: domain.ProviderConnectorIDSynthetic,
+				State: state, CallbackURL: "http://localhost/" + fake.UUID().V4(),
+				AuthorizationURL: "#/finance/connections/synthetic?state=" + fake.UUID().V4(),
+				ExpiresAt:        expiresAt, CreatedAt: createdAt, UpdatedAt: createdAt,
+			}
+		}
+		expired := makeStart("expired-"+fake.UUID().V4(), earlier, later)
+		_, err := store.SavePendingBankConnectionLinkStart(t.Context(), expired)
+		require.NoError(t, err)
+		missing, err := pendingStore.GetPendingSyntheticStart(t.Context(), tenantID, actorUserID, state, now)
+		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
+		assert.Nil(t, missing)
+
+		mixedNow := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+		mixedExpiry := time.Date(2025, time.December, 31, 23, 0, 0, 0, time.FixedZone("west", -2*60*60))
+		validMixedOffset := makeStart("valid-mixed-"+fake.UUID().V4(), mixedNow.Add(-time.Minute), mixedExpiry)
+		validMixedOffset.State = "mixed-state-" + fake.UUID().V4()
+		_, err = store.SavePendingBankConnectionLinkStart(t.Context(), validMixedOffset)
+		require.NoError(t, err)
+		resolved, err := pendingStore.GetPendingSyntheticStart(
+			t.Context(), tenantID, actorUserID, validMixedOffset.State, mixedNow,
+		)
+		require.NoError(t, err)
+		require.Equal(t, validMixedOffset.ID, resolved.ID)
+	})
+
 	t.Run("handles constructor nil and database failures", func(t *testing.T) {
 		assert.Nil(t, NewSyntheticPendingStartStoreFromStore(nil))
 

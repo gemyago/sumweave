@@ -108,11 +108,11 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 	) domain.ProviderSyncState {
 		expected := state
 		expected.Connection = connection
-		expected.AttemptedAt = normalizeUTCPointer(state.AttemptedAt)
-		expected.SucceededAt = normalizeUTCPointer(state.SucceededAt)
+		expected.AttemptedAt = state.AttemptedAt
+		expected.SucceededAt = state.SucceededAt
 		expected.Window = domain.ProviderSyncWindow{
-			Start: normalizeUTC(state.Window.Start),
-			End:   normalizeUTC(state.Window.End),
+			Start: state.Window.Start,
+			End:   state.Window.End,
 		}
 		return expected
 	}
@@ -200,17 +200,20 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 			)
 			require.Len(t, records, 2)
 
-			assert.Equal(t, firstAppendAt.UTC(), records[0].CreatedAt.UTC())
-			assert.Equal(t, firstAttemptedAt.UTC(), records[0].AttemptedAt.UTC())
-			assert.Equal(t, firstSucceededAt.UTC(), records[0].SucceededAt.UTC())
-			assert.Equal(t, firstWindow.Start.UTC(), records[0].WindowStart.UTC())
-			assert.Equal(t, firstWindow.End.UTC(), records[0].WindowEnd.UTC())
+			assert.True(t, firstAppendAt.Equal(records[0].CreatedAt))
+			require.NotNil(t, records[0].AttemptedAt)
+			assert.True(t, firstAttemptedAt.Equal(*records[0].AttemptedAt))
+			require.NotNil(t, records[0].SucceededAt)
+			assert.True(t, firstSucceededAt.Equal(*records[0].SucceededAt))
+			assert.True(t, firstWindow.Start.Equal(records[0].WindowStart))
+			assert.True(t, firstWindow.End.Equal(records[0].WindowEnd))
 
-			assert.Equal(t, secondAppendAt.UTC(), records[1].CreatedAt.UTC())
-			assert.Equal(t, secondAttemptedAt.UTC(), records[1].AttemptedAt.UTC())
+			assert.True(t, secondAppendAt.Equal(records[1].CreatedAt))
+			require.NotNil(t, records[1].AttemptedAt)
+			assert.True(t, secondAttemptedAt.Equal(*records[1].AttemptedAt))
 			assert.Nil(t, records[1].SucceededAt)
-			assert.Equal(t, secondWindow.Start.UTC(), records[1].WindowStart.UTC())
-			assert.Equal(t, secondWindow.End.UTC(), records[1].WindowEnd.UTC())
+			assert.True(t, secondWindow.Start.Equal(records[1].WindowStart))
+			assert.True(t, secondWindow.End.Equal(records[1].WindowEnd))
 			assert.Equal(t, int64(secondState.AggregateStats.ObservedAccounts), records[1].ObservedAccounts)
 			assert.Equal(
 				t,
@@ -317,6 +320,36 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 		assert.Equal(t, makeExpectedState(secondState, connectionTwo), *loadedTwo)
 	})
 
+	t.Run("loads the newest canonical journal record", func(t *testing.T) {
+		fake := faker.New()
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+		appendTimes := []time.Time{earlier, later}
+		appendIndex := 0
+		store := makeStore(t, func() time.Time {
+			current := appendTimes[appendIndex]
+			appendIndex++
+			return current
+		})
+		journalStore := NewProviderSyncStateJournalStore(store)
+		connection := makeConnection(t, fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking)
+		window := makeSyncWindow(earlier.Add(-time.Hour), time.Hour)
+		earlierState := makeState(connection, &earlier, nil, window, "", "job-earlier-"+fake.UUID().V4(),
+			fake.Lorem().Sentence(3), makeStats(fake))
+		laterState := makeState(connection, &later, &later, window, "run-later-"+fake.UUID().V4(),
+			"job-later-"+fake.UUID().V4(), "", makeStats(fake))
+		require.NoError(t, journalStore.AppendSyncState(t.Context(), earlierState))
+		require.NoError(t, journalStore.AppendSyncState(t.Context(), laterState))
+
+		loaded, err := journalStore.LoadLastState(t.Context(), connection)
+		require.NoError(t, err)
+		require.NotNil(t, loaded)
+		require.Equal(t, laterState.JobID, loaded.JobID)
+		require.NotNil(t, loaded.SucceededAt)
+		require.Equal(t, later.Format(time.RFC3339Nano), loaded.SucceededAt.Format(time.RFC3339Nano))
+	})
+
 	t.Run("round-trips all sync state fields without loss", func(t *testing.T) {
 		fake := faker.New()
 		eest := time.FixedZone("case2-"+fake.UUID().V4(), 3*60*60)
@@ -353,7 +386,18 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 		loadedState, err := journalStore.LoadLastState(t.Context(), connection)
 		require.NoError(t, err)
 		require.NotNil(t, loadedState)
-		assert.Equal(t, makeExpectedState(state, connection), *loadedState)
+		expected := makeExpectedState(state, connection)
+		assert.Equal(t, expected.Connection, loadedState.Connection)
+		assert.Equal(t, expected.RunID, loadedState.RunID)
+		assert.Equal(t, expected.JobID, loadedState.JobID)
+		assert.Equal(t, expected.ErrorSummary, loadedState.ErrorSummary)
+		assert.Equal(t, expected.AggregateStats, loadedState.AggregateStats)
+		require.NotNil(t, loadedState.AttemptedAt)
+		require.NotNil(t, loadedState.SucceededAt)
+		assert.True(t, expected.AttemptedAt.Equal(*loadedState.AttemptedAt))
+		assert.True(t, expected.SucceededAt.Equal(*loadedState.SucceededAt))
+		assert.True(t, expected.Window.Start.Equal(loadedState.Window.Start))
+		assert.True(t, expected.Window.End.Equal(loadedState.Window.End))
 	})
 
 	t.Run("wraps append and load database errors with journal-specific context", func(t *testing.T) {

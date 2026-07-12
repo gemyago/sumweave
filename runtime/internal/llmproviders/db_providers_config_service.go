@@ -20,14 +20,16 @@ type providerModelConfig struct {
 
 // providerConfigModel is the GORM model for a provider config record.
 type providerConfigModel struct {
-	Name        string                `gorm:"column:name;primaryKey;size:255"`
-	Type        string                `gorm:"column:type;size:50;not null"`
-	DisplayName string                `gorm:"column:display_name;size:255"`
-	BaseURL     string                `gorm:"column:base_url;size:2048;not null"`
-	APIKey      string                `gorm:"column:api_key;size:2048;not null"  json:"-"`
-	Models      []providerModelConfig `gorm:"column:models;serializer:json"`
-	CreatedAt   time.Time             `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt   time.Time             `gorm:"column:updated_at;autoUpdateTime"`
+	Name        string `gorm:"column:name;primaryKey;size:255"`
+	Type        string `gorm:"column:type;size:50;not null"`
+	DisplayName string `gorm:"column:display_name;size:255"`
+	BaseURL     string `gorm:"column:base_url;size:2048;not null"`
+
+	APIKey string `gorm:"column:api_key;not null" json:"-"`
+
+	Models    []providerModelConfig `gorm:"column:models;serializer:json"`
+	CreatedAt time.Time             `gorm:"column:created_at;autoCreateTime;index:idx_provider_configs_created"`
+	UpdatedAt time.Time             `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (providerConfigModel) TableName() string { return "provider_configs" }
@@ -74,7 +76,7 @@ func (s *DatabaseProvidersConfigService) AutoMigrate() error {
 
 func (s *DatabaseProvidersConfigService) List(_ context.Context) ([]ProviderConfig, error) {
 	var models []providerConfigModel
-	if err := s.db.Order("created_at ASC").Find(&models).Error; err != nil {
+	if err := s.db.Order("created_at ASC").Order("name ASC").Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list provider configs: %w", err)
 	}
 	result := make([]ProviderConfig, 0, len(models))

@@ -111,13 +111,13 @@ func TestBinanceSpotVenue(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, candles.Candles, 2)
 		require.Equal(t, domain.DataQualityRaw, candles.Candles[0].Quality)
-		require.Equal(t, time.UnixMilli(1710000000000).UTC(), candles.Candles[0].TimeRange.Start)
+		require.True(t, time.UnixMilli(1710000000000).Equal(candles.Candles[0].TimeRange.Start))
 
 		trades, err := adapter.ReadTrades(t.Context(), makeTradeRequest(candleRequest))
 		require.NoError(t, err)
 		require.Len(t, trades.Trades, 2)
 		require.Equal(t, domain.DataQualityRaw, trades.Trades[0].Quality)
-		require.Equal(t, time.UnixMilli(1710000005000).UTC(), trades.Trades[0].EventTime)
+		require.True(t, time.UnixMilli(1710000005000).Equal(trades.Trades[0].EventTime))
 
 		require.Contains(t, requests[0], "/api/v3/exchangeInfo")
 		require.Contains(t, requests[1], "interval=1m")

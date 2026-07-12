@@ -125,7 +125,14 @@ This should stay disciplined:
 - explicit schemas
 - explicit column names
 - explicit migrations
-- UTC-first time handling
+- preserve timestamp values as received/generated; do not coerce them to UTC for storage
+- use persisted timestamp columns directly for identity and equality; use dialect-native instant range predicates for filtering
+- current local SQLite storage keeps one timestamp representation and uses query-time instant conversion for range membership rather than persisted scalar shadow columns
+- accept SQLite's imperfect mixed-offset text sorting and timestamp-cursor order as a local-storage tradeoff; PostgreSQL uses native timestamp comparisons
+- this local SQLite choice does not constrain a future non-local or database-native storage design
+- clients render instants in local timezone
+- Finance currently uses ordinary timestamp instants for reports, FX, and cutoffs; clients render them in local time, and calendar edge cases are deferred until production evidence justifies more complexity
+- keep nullable timestamps nullable; never use zero-time sentinels
 
 GORM persistence models should stay isolated from `domain/`. Even when a persistence model is structurally identical to a domain model, keep it separate so shared domain types are not polluted with GORM tags or persistence-only metadata.
 

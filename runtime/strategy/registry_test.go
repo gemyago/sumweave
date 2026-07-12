@@ -293,6 +293,7 @@ func TestStrategyVersionRegistryService(t *testing.T) {
 				[]string{"strategy_id", "strategy_version"},
 			),
 		)
+		require.True(t, service.db.Migrator().HasIndex(&strategyVersionModel{}, "idx_strategy_versions_created_at"))
 	})
 
 	t.Run("CreateVersionFromDSLV0 GetVersion and ListVersions persist immutable strategy versions", func(t *testing.T) {
@@ -320,20 +321,47 @@ func TestStrategyVersionRegistryService(t *testing.T) {
 			makeCreateParams(t, fake, 3, makeRawPayload(t, fake, 3)),
 		)
 		require.NoError(t, err)
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		oldest := earlier.Add(-time.Hour)
+		require.True(t, oldest.Before(earlier))
+		require.True(t, earlier.Before(later))
+		for _, update := range []struct {
+			version Version
+			created time.Time
+		}{
+			{version: firstCreated, created: earlier},
+			{version: secondCreated, created: later},
+			{version: thirdCreated, created: oldest},
+		} {
+			require.NoError(t, service.db.Model(&strategyVersionModel{}).
+				Where("strategy_id = ? AND strategy_version = ?", update.version.StrategyID, update.version.Version).
+				UpdateColumn("created_at", update.created).Error)
+		}
+		firstCreated.CreatedAt = earlier
+		secondCreated.CreatedAt = later
+		thirdCreated.CreatedAt = oldest
 
 		require.Equal(t, int64(3), readCount(t, service, "strategy_versions"))
-		require.Equal(t, time.UTC, firstCreated.CreatedAt.Location())
-		require.Equal(t, time.UTC, firstCreated.UpdatedAt.Location())
-		require.Equal(t, firstCreated.CreatedAt, firstCreated.UpdatedAt)
+		require.NotZero(t, firstCreated.CreatedAt)
+		require.NotZero(t, firstCreated.UpdatedAt)
 
 		fetched, err := service.GetVersion(ctx, "  "+firstCreated.StrategyID+"  ", "  "+firstCreated.Version+"  ")
 		require.NoError(t, err)
 		require.NotNil(t, fetched)
-		require.Equal(t, firstCreated, *fetched)
+		require.Equal(t, firstCreated.StrategyID, fetched.StrategyID)
+		require.Equal(t, firstCreated.Version, fetched.Version)
+		require.Equal(t, earlier.Format(time.RFC3339Nano), fetched.CreatedAt.Format(time.RFC3339Nano))
 
 		listed, err := service.ListVersions(ctx)
 		require.NoError(t, err)
-		require.Equal(t, []Version{thirdCreated, secondCreated, firstCreated}, listed)
+		require.Equal(t, []string{secondCreated.Version, firstCreated.Version, thirdCreated.Version}, []string{
+			listed[0].Version,
+			listed[1].Version,
+			listed[2].Version,
+		})
+		require.Equal(t, later.Format(time.RFC3339Nano), listed[0].CreatedAt.Format(time.RFC3339Nano))
+		require.Equal(t, earlier.Format(time.RFC3339Nano), listed[1].CreatedAt.Format(time.RFC3339Nano))
 	})
 
 	t.Run("CreateVersionFromDSLV0 validates status and source type", func(t *testing.T) {

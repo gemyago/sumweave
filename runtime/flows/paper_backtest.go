@@ -9,7 +9,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gemyago/signal-foundry/runtime/analytics"
 	"github.com/gemyago/signal-foundry/runtime/audit"
@@ -208,9 +207,9 @@ func (f *PaperBacktestFlow) Run(
 		return PaperBacktestResult{}, fmt.Errorf("evaluate strategy: %w", err)
 	}
 
-	replayClosePrices := make(map[time.Time]float64, len(replayedCandles))
+	replayClosePrices := make(map[int64]float64, len(replayedCandles))
 	for _, replayedCandle := range replayedCandles {
-		replayClosePrices[replayedCandle.Candle.TimeRange.End.UTC()] = replayedCandle.Candle.Close
+		replayClosePrices[replayedCandle.Candle.TimeRange.End.UnixNano()] = replayedCandle.Candle.Close
 	}
 
 	intentContexts, err := f.prepareIntentContexts(
@@ -254,13 +253,13 @@ func (f *PaperBacktestFlow) prepareIntentContexts(
 	ctx context.Context,
 	request canonicalPaperBacktestRequest,
 	actions []domain.CandidateAction,
-	replayClosePrices map[time.Time]float64,
+	replayClosePrices map[int64]float64,
 ) ([]audit.IntentContext, error) {
 	contexts := make([]audit.IntentContext, 0, len(actions))
 
 	for idx, action := range actions {
-		decisionTime := action.DecisionTime.Time().UTC()
-		limitPrice, ok := replayClosePrices[decisionTime]
+		decisionTime := action.DecisionTime.Time()
+		limitPrice, ok := replayClosePrices[decisionTime.UnixNano()]
 		if !ok {
 			return nil, fmt.Errorf(
 				"prepare order intent %d limit price: replay candle close price is required at decision time",
@@ -342,9 +341,9 @@ func (f *PaperBacktestFlow) runExecutionStage(
 	replayedCandles []data.ReplayCandle,
 ) ([]PaperExecutionResult, error) {
 	approvedExecutions := make([]PaperExecutionResult, 0, len(decisions))
-	replayClosePrices := make(map[time.Time]float64, len(replayedCandles))
+	replayClosePrices := make(map[int64]float64, len(replayedCandles))
 	for _, replayedCandle := range replayedCandles {
-		replayClosePrices[replayedCandle.Candle.TimeRange.End.UTC()] = replayedCandle.Candle.Close
+		replayClosePrices[replayedCandle.Candle.TimeRange.End.UnixNano()] = replayedCandle.Candle.Close
 	}
 
 	approvedDecisionOrder := 0
@@ -353,8 +352,8 @@ func (f *PaperBacktestFlow) runExecutionStage(
 			continue
 		}
 
-		decisionTime := decision.DecisionTime.Time().UTC()
-		fillPrice, ok := replayClosePrices[decisionTime]
+		decisionTime := decision.DecisionTime.Time()
+		fillPrice, ok := replayClosePrices[decisionTime.UnixNano()]
 		if !ok {
 			return nil, fmt.Errorf(
 				"paper execution approved decision %d fill price candle: replay candle close price is required at decision time",

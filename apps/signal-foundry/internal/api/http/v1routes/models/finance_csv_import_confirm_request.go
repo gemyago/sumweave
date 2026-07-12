@@ -14,5 +14,5 @@ var _ = json.Unmarshal
 var _ = fmt.Sprint
 
 type FinanceCsvImportConfirmRequest struct { 
-	Mapping map[string]string `json:"mapping"`
+	Mapping map[string]string `json:"mapping,omitempty"`
 }

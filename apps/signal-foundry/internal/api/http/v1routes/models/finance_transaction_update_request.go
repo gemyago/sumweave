@@ -16,6 +16,7 @@ var _ = fmt.Sprint
 type FinanceTransactionUpdateRequest struct { 
 	Description string `json:"description"`
 	AmountMinor int64 `json:"amountMinor"`
-	EffectiveAt time.Time `json:"effectiveAt"`
-	CategoryID *string `json:"categoryId,omitempty"`
+	EffectiveAt *time.Time `json:"effectiveAt,omitempty"`
+	CategoryID string `json:"categoryId,omitempty"`
+	ClearCategory bool `json:"clearCategory,omitempty"`
 }

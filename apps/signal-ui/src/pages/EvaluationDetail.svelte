@@ -7,6 +7,7 @@
     type EvaluationEvidence,
     type EvaluationReport,
   } from '../lib/strategy-workspace/api'
+  import { formatLocalDateTime } from '../lib/timestamp'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
 
@@ -68,9 +69,6 @@
     }
   }
 
-  function formatDate(value: Date | undefined): string {
-    return value ? value.toISOString().replace('T', ' ').slice(0, 16) + 'Z' : '—'
-  }
 </script>
 
 <section class="page" aria-labelledby="evaluation-detail-heading">
@@ -147,7 +145,7 @@
       {#if detail.failureReason || detail.failureDetails}
         <p class="error" role="alert">{detail.failureReason}: {detail.failureDetails}</p>
       {/if}
-      <p class="muted">Range: {formatDate(detail.testedRangeStart)} → {formatDate(detail.testedRangeEnd)}</p>
+      <p class="muted">Range: {formatLocalDateTime(detail.testedRangeStart)} → {formatLocalDateTime(detail.testedRangeEnd)}</p>
       <p class="muted">Request note: {report.aiReadyMetadata.note || '—'}</p>
     </section>
 
@@ -173,7 +171,7 @@
               {#each evidence.traces as item (item.traceId)}
                 <tr>
                   <td><code>{item.traceId}</code></td>
-                  <td>{formatDate(item.decisionTime)}</td>
+                  <td>{formatLocalDateTime(item.decisionTime)}</td>
                   <td>{item.result}</td>
                   <td>{item.reasonCodes.join(', ') || '—'}</td>
                 </tr>

@@ -56,6 +56,9 @@ func (p *StaticFXProvider) FetchHistoricalRates(
 	query FXProviderQuery,
 ) ([]domain.FXRate, error) {
 	_ = ctx
+	if err := ValidateRequiredTimestampRange(query.StartDate, query.EndDate); err != nil {
+		return nil, err
+	}
 	quotes := make(map[string]struct{}, len(query.QuoteCurrencies))
 	for _, quote := range query.QuoteCurrencies {
 		quotes[strings.ToUpper(strings.TrimSpace(quote))] = struct{}{}
@@ -68,10 +71,10 @@ func (p *StaticFXProvider) FetchHistoricalRates(
 		if _, ok := quotes[strings.ToUpper(rate.QuoteCurrency)]; !ok {
 			continue
 		}
-		if !query.StartDate.IsZero() && rate.RateDate.Before(startOfDay(query.StartDate)) {
+		if !query.StartDate.IsZero() && rate.RateDate.Before(query.StartDate) {
 			continue
 		}
-		if !query.EndDate.IsZero() && rate.RateDate.After(startOfDay(query.EndDate)) {
+		if !query.EndDate.IsZero() && rate.RateDate.After(query.EndDate) {
 			continue
 		}
 		items = append(items, rate)
@@ -100,7 +103,9 @@ func (p *StubFXProvider) FetchHistoricalRates(
 	query FXProviderQuery,
 ) ([]domain.FXRate, error) {
 	_ = ctx
-	_ = query
+	if err := ValidateRequiredTimestampRange(query.StartDate, query.EndDate); err != nil {
+		return nil, err
+	}
 	return nil, ErrFXProviderNotImplemented
 }
 
@@ -125,8 +130,11 @@ func (p *FrankfurterFXProvider) FetchHistoricalRates(
 	ctx context.Context,
 	query FXProviderQuery,
 ) ([]domain.FXRate, error) {
-	startDate := startOfDay(query.StartDate)
-	endDate := startOfDay(query.EndDate)
+	if err := ValidateRequiredTimestampRange(query.StartDate, query.EndDate); err != nil {
+		return nil, err
+	}
+	startDate := query.StartDate
+	endDate := query.EndDate
 	path := startDate.Format(time.DateOnly)
 	if !startDate.Equal(endDate) {
 		path = path + ".." + endDate.Format(time.DateOnly)
@@ -174,7 +182,7 @@ func (p *FrankfurterFXProvider) FetchHistoricalRates(
 
 	var single singleDayResponse
 	if decodeErr := json.Unmarshal(body, &single); decodeErr == nil && single.Date != "" {
-		rateDate, parseErr := time.Parse(time.DateOnly, single.Date)
+		rateDate, parseErr := time.ParseInLocation(time.DateOnly, single.Date, time.Local)
 		if parseErr != nil {
 			return nil, fmt.Errorf("parse frankfurter date: %w", parseErr)
 		}
@@ -187,7 +195,7 @@ func (p *FrankfurterFXProvider) FetchHistoricalRates(
 	}
 	items := make([]domain.FXRate, 0)
 	for dateString, rates := range dateRange.Rates {
-		rateDate, parseErr := time.Parse(time.DateOnly, dateString)
+		rateDate, parseErr := time.ParseInLocation(time.DateOnly, dateString, time.Local)
 		if parseErr != nil {
 			return nil, fmt.Errorf("parse frankfurter date: %w", parseErr)
 		}
@@ -210,7 +218,7 @@ func makeProviderRates(
 			Provider:      provider,
 			BaseCurrency:  strings.ToUpper(strings.TrimSpace(baseCurrency)),
 			QuoteCurrency: strings.ToUpper(strings.TrimSpace(quoteCurrency)),
-			RateDate:      startOfDay(rateDate),
+			RateDate:      rateDate,
 			Rate:          rateValue,
 		})
 	}
@@ -326,9 +334,4 @@ func canonicalizeCurrencies(values []string) []string {
 		items = append(items, currency)
 	}
 	return items
-}
-
-func startOfDay(value time.Time) time.Time {
-	utc := value.UTC()
-	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 }

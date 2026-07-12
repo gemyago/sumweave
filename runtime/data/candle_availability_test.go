@@ -56,7 +56,7 @@ func TestCandleAvailabilityQueries(t *testing.T) {
 			require.Equal(t, strings.TrimSpace(query.Symbol.String()), query.Symbol.String())
 			require.Equal(t, domain.AssetClassCrypto, query.AssetClass)
 			require.Equal(t, defaultCandleAvailabilityLimit, query.Limit)
-			require.Equal(t, cursorTime, query.cursor.LatestEnd)
+			require.True(t, cursorTime.Equal(query.cursor.LatestEnd))
 			require.NotEmpty(t, query.Cursor)
 		})
 

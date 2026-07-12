@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strconv"
-	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
 )
@@ -24,12 +23,10 @@ func NewService(repo Repository) *Service {
 }
 
 func (s *Service) StartRun(ctx context.Context, run RunStart) (*RunHandle, error) {
-	normalized := run
-	normalized.StartedAt = normalized.StartedAt.UTC()
-	if err := s.repo.CreateRun(ctx, normalized); err != nil {
+	if err := s.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
-	return newRunHandle(&serviceRunHandle{repo: s.repo, runID: makeRunID(normalized)}), nil
+	return newRunHandle(&serviceRunHandle{repo: s.repo, runID: makeRunID(run)}), nil
 }
 
 type serviceRunHandle struct {
@@ -38,15 +35,11 @@ type serviceRunHandle struct {
 }
 
 func (h *serviceRunHandle) RecordScenario(ctx context.Context, record ScenarioRecord) error {
-	normalized := record
-	normalized.OccurredAt = normalized.OccurredAt.UTC()
-	return h.repo.CreateScenarioRecord(ctx, h.runID, normalized)
+	return h.repo.CreateScenarioRecord(ctx, h.runID, record)
 }
 
 func makeRunID(run RunStart) string {
-	stableInput := run.Scenario +
-		run.StartedAt.UTC().Format(time.RFC3339Nano) +
-		strconv.FormatInt(run.Seed, 10)
+	stableInput := run.Scenario + strconv.FormatInt(run.StartedAt.UnixNano(), 10) + strconv.FormatInt(run.Seed, 10)
 	hash := sha256.Sum256([]byte(stableInput))
 	return hex.EncodeToString(hash[:8])
 }
@@ -73,7 +66,7 @@ func (r *PersistenceRepository) CreateRun(ctx context.Context, run RunStart) err
 		ID:        makeRunID(run),
 		Seed:      run.Seed,
 		Scenario:  run.Scenario,
-		StartedAt: run.StartedAt.UTC(),
+		StartedAt: run.StartedAt,
 	})
 }
 
@@ -85,6 +78,6 @@ func (r *PersistenceRepository) CreateScenarioRecord(
 	return r.store.CreateFixtureScenarioRecord(ctx, runID, domain.FixtureScenarioRecord{
 		Name:       record.Name,
 		StableID:   record.StableID,
-		OccurredAt: record.OccurredAt.UTC(),
+		OccurredAt: record.OccurredAt,
 	})
 }

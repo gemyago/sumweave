@@ -40,24 +40,22 @@ func TestSyntheticProviderStateStore(t *testing.T) {
 			state.Envelope.WindowHistory[0].RepeatCount,
 			loaded.Envelope.WindowHistory[0].RepeatCount,
 		)
-		assert.Equal(
+		assert.True(
 			t,
-			state.Envelope.WindowHistory[0].Window.NormalizedStartUTC.UTC(),
-			loaded.Envelope.WindowHistory[0].Window.NormalizedStartUTC,
+			state.Envelope.WindowHistory[0].Window.Start.Equal(
+				loaded.Envelope.WindowHistory[0].Window.Start,
+			),
 		)
-		assert.Equal(
+		assert.True(
 			t,
-			state.Envelope.WindowHistory[0].Window.NormalizedEndExclusiveUTC.UTC(),
-			loaded.Envelope.WindowHistory[0].Window.NormalizedEndExclusiveUTC,
+			state.Envelope.WindowHistory[0].Window.End.Equal(
+				loaded.Envelope.WindowHistory[0].Window.End,
+			),
 		)
 		require.Len(t, loaded.Envelope.SequenceCounters, 1)
-		assert.Equal(
-			t,
-			state.Envelope.SequenceCounters[0].DayUTC.UTC(),
-			loaded.Envelope.SequenceCounters[0].DayUTC,
-		)
-		assert.Equal(t, state.CreatedAt.UTC(), loaded.CreatedAt)
-		assert.Equal(t, state.UpdatedAt.UTC(), loaded.UpdatedAt)
+		assert.True(t, state.Envelope.SequenceCounters[0].Instant.Equal(loaded.Envelope.SequenceCounters[0].Instant))
+		assert.True(t, state.CreatedAt.Equal(loaded.CreatedAt))
+		assert.True(t, state.UpdatedAt.Equal(loaded.UpdatedAt))
 	})
 
 	t.Run(

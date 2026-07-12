@@ -61,7 +61,7 @@ func NewCatalogService(store catalogServiceStore, opts ...CatalogServiceOption) 
 	service := &CatalogService{
 		store:  store,
 		access: newAccessGuard(store),
-		now:    func() time.Time { return time.Now().UTC() },
+		now:    time.Now,
 		newID:  uuid.NewString,
 	}
 	for _, opt := range opts {
@@ -166,7 +166,7 @@ func (s *CatalogService) CreateAccount(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.Account{}, err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	account := domain.Account{
 		ID:        s.newID(),
 		TenantID:  strings.TrimSpace(params.TenantID),
@@ -192,7 +192,7 @@ func (s *CatalogService) UpdateAccount(
 		return domain.Account{}, err
 	}
 	account.Name = strings.TrimSpace(params.Name)
-	account.UpdatedAt = s.now().UTC()
+	account.UpdatedAt = s.now()
 	saved, err := s.store.SaveAccount(ctx, account)
 	if err != nil {
 		return domain.Account{}, fmt.Errorf("update account: %w", err)
@@ -205,7 +205,7 @@ func (s *CatalogService) HideAccount(ctx context.Context, params HideAccountPara
 	if err != nil {
 		return err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	account.HiddenAt = &now
 	account.UpdatedAt = now
 	_, err = s.store.SaveAccount(ctx, account)
@@ -228,7 +228,7 @@ func (s *CatalogService) AttachLinkedAccount(
 		Provider:          strings.TrimSpace(params.Provider),
 		ProviderAccountID: strings.TrimSpace(params.ProviderAccountID),
 	}
-	account.UpdatedAt = s.now().UTC()
+	account.UpdatedAt = s.now()
 	saved, err := s.store.SaveAccount(ctx, account)
 	if err != nil {
 		return domain.Account{}, fmt.Errorf("attach linked account: %w", err)
@@ -285,7 +285,7 @@ func (s *CatalogService) CreateCategory(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.Category{}, err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	category := domain.Category{
 		ID:        s.newID(),
 		TenantID:  strings.TrimSpace(params.TenantID),
@@ -310,7 +310,7 @@ func (s *CatalogService) UpdateCategory(
 		return domain.Category{}, err
 	}
 	category.Name = strings.TrimSpace(params.Name)
-	category.UpdatedAt = s.now().UTC()
+	category.UpdatedAt = s.now()
 	saved, err := s.store.SaveCategory(ctx, category)
 	if err != nil {
 		return domain.Category{}, fmt.Errorf("update category: %w", err)
@@ -323,7 +323,7 @@ func (s *CatalogService) HideCategory(ctx context.Context, params HideCategoryPa
 	if err != nil {
 		return err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	category.HiddenAt = &now
 	category.UpdatedAt = now
 	_, err = s.store.SaveCategory(ctx, category)
@@ -351,7 +351,7 @@ func (s *CatalogService) CreateTag(ctx context.Context, params CreateTagParams) 
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.Tag{}, err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	tag := domain.Tag{
 		ID:        s.newID(),
 		TenantID:  strings.TrimSpace(params.TenantID),
@@ -372,7 +372,7 @@ func (s *CatalogService) UpdateTag(ctx context.Context, params UpdateTagParams) 
 		return domain.Tag{}, err
 	}
 	tag.Name = strings.TrimSpace(params.Name)
-	tag.UpdatedAt = s.now().UTC()
+	tag.UpdatedAt = s.now()
 	saved, err := s.store.SaveTag(ctx, tag)
 	if err != nil {
 		return domain.Tag{}, fmt.Errorf("update tag: %w", err)
@@ -385,7 +385,7 @@ func (s *CatalogService) HideTag(ctx context.Context, params HideTagParams) erro
 	if err != nil {
 		return err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	tag.HiddenAt = &now
 	tag.UpdatedAt = now
 	_, err = s.store.SaveTag(ctx, tag)

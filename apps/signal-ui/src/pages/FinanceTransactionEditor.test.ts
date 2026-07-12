@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceTransactionEditor from './FinanceTransactionEditor.svelte'
+import { FinanceResponseError } from '../lib/finance/api'
 
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
@@ -179,6 +180,33 @@ describe('Finance transaction editor page', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Transaction updated.')
   })
 
+  it('round-trips a local datetime value through the transaction editor', async () => {
+    const environment = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env
+    const previousTimezone = environment.TZ
+    environment.TZ = 'America/Los_Angeles'
+    try {
+      const user = userEvent.setup()
+      const localTime = new Date(2026, 10, 1, 1, 30)
+      mocks.getTransaction.mockResolvedValueOnce({
+        id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'pending', kind: 'refund',
+        amountMinor: 900, currency: 'USD', description: 'Refund', effectiveAt: localTime, categoryId: 'cat-1',
+        transferGroupId: 'transfer-1', transferMatchedAt: null, hiddenAt: null, providerOriginal: null,
+        createdAt: new Date('2026-06-20T12:00:00Z'), updatedAt: new Date('2026-06-20T12:00:00Z'),
+      })
+
+      render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
+
+      expect(await screen.findByLabelText('Transaction effective at')).toHaveValue('2026-11-01T01:30')
+      await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+      await waitFor(() => expect(mocks.updateTransaction).toHaveBeenCalled())
+      expect(mocks.updateTransaction.mock.calls[0][0]).toMatchObject({ effectiveAt: localTime })
+    } finally {
+      if (previousTimezone === undefined) delete environment.TZ
+      else environment.TZ = previousTimezone
+    }
+  })
+
   it('requires an explicit tenant choice for deep-link edit routes when multiple tenants are joined', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     const user = userEvent.setup()
@@ -220,5 +248,19 @@ describe('Finance transaction editor page', () => {
     await user.click(screen.getByRole('button', { name: 'Save transaction' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('save exploded')
+  })
+
+  it('shows a bounded response error when transaction hydration receives a malformed timestamp', async () => {
+    mocks.getTransaction.mockRejectedValueOnce(new FinanceResponseError({
+      field: 'finance.transaction.effectiveAt',
+      issue: 'must be a valid RFC3339 timestamp',
+    }))
+
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Finance API response contract violation: finance.transaction.effectiveAt',
+    )
+    expect(screen.getByLabelText('Transaction effective at')).toHaveValue('')
   })
 })

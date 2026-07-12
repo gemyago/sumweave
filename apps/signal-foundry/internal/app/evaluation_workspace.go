@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -530,8 +531,8 @@ func (s *EvaluationWorkspaceService) ListEvaluations(
 			SourceLabel:          sourceLabel(versionValue.SourceType),
 			Instrument:           mapEvaluationInstrument(artifactValue.Strategy.Instrument),
 			Timeframe:            artifactValue.Strategy.Timeframe.String(),
-			TestedRangeStart:     run.TestedRange.Start.UTC(),
-			TestedRangeEnd:       run.TestedRange.End.UTC(),
+			TestedRangeStart:     run.TestedRange.Start,
+			TestedRangeEnd:       run.TestedRange.End,
 			Status:               run.Status.String(),
 			FailureReason:        run.FailureReason,
 			FailureDetails:       run.FailureDetails,
@@ -749,10 +750,10 @@ func (s *EvaluationWorkspaceService) persistDataUnavailableFailure(
 			"replay",
 			runID,
 			artifact.Hash,
-			timeRange.Start.UTC().Format(time.RFC3339Nano),
-			timeRange.End.UTC().Format(time.RFC3339Nano),
+			strconv.FormatInt(timeRange.Start.UnixNano(), 10),
+			strconv.FormatInt(timeRange.End.UnixNano(), 10),
 		),
-		CreatedAt: timeRange.End.UTC(),
+		CreatedAt: timeRange.End,
 		Metadata: map[string]string{
 			"failure_reason": evaluationFailureReasonDataMissing,
 		},
@@ -765,7 +766,7 @@ func (s *EvaluationWorkspaceService) persistDataUnavailableFailure(
 		return domain.BacktestRun{}, fmt.Errorf("create failed dataset reference: %w", err)
 	}
 
-	createdAt := timeRange.Start.UTC()
+	createdAt := timeRange.Start
 	run, err := domain.NewBacktestRun(domain.BacktestRunParams{
 		RunID:                     runID,
 		StrategyID:                version.StrategyID,
@@ -802,7 +803,7 @@ func (s *EvaluationWorkspaceService) persistDataUnavailableFailure(
 		RunID:          runID,
 		FailureReason:  evaluationFailureReasonDataMissing,
 		FailureDetails: failureDetails,
-		EndedAt:        domain.BacktestRunTime(timeRange.End.UTC()),
+		EndedAt:        domain.BacktestRunTime(timeRange.End),
 	})
 	if err != nil {
 		return domain.BacktestRun{}, fmt.Errorf("fail backtest run: %w", err)
@@ -877,8 +878,8 @@ func (s *EvaluationWorkspaceService) buildDetail(
 		StrategySourceLabel:  sourceLabel(version.SourceType),
 		Instrument:           mapEvaluationInstrument(artifact.Strategy.Instrument),
 		Timeframe:            artifact.Strategy.Timeframe.String(),
-		TestedRangeStart:     run.TestedRange.Start.UTC(),
-		TestedRangeEnd:       run.TestedRange.End.UTC(),
+		TestedRangeStart:     run.TestedRange.Start,
+		TestedRangeEnd:       run.TestedRange.End,
 		Status:               run.Status.String(),
 		Decision:             decision,
 		FailureReason:        run.FailureReason,

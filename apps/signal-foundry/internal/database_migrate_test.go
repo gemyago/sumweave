@@ -135,6 +135,7 @@ func TestDatabaseMigrator(t *testing.T) {
 
 		db := openDB(t, deps.DataLayerDatabaseDSN)
 		requireAnyTable(t, db, "agent_profiles", "runtime_agent_profiles")
+		requireAnyTable(t, db, "provider_configs", "runtime_provider_configs")
 		requireAnyTable(t, db, "session_metadata", "runtime_session_metadata")
 		for _, tableName := range []string{
 			"signal_foundry_data_instruments",
@@ -163,6 +164,8 @@ func TestDatabaseMigrator(t *testing.T) {
 		db := openDB(t, deps.DataLayerDatabaseDSN)
 		requireNoTable(t, db, "agent_profiles")
 		requireNoTable(t, db, "runtime_agent_profiles")
+		requireNoTable(t, db, "provider_configs")
+		requireNoTable(t, db, "runtime_provider_configs")
 		requireNoTable(t, db, "session_metadata")
 		requireNoTable(t, db, "runtime_session_metadata")
 		requireTable(t, db, "signal_foundry_data_instruments")

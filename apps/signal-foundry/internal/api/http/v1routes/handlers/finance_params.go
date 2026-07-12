@@ -1370,12 +1370,12 @@ type financeControllerBuilder struct {
 	//
 	// Request type: GetFinanceDashboardParams,
 	//
-	// Response type: map[string]interface{}
+	// Response type: FinanceDashboardResponse
 	GetFinanceDashboard genericHandlerBuilder[
 		*GetFinanceDashboardParams,
-		*map[string]interface{},
-		handlerActionFunc[*GetFinanceDashboardParams, *map[string]interface{}],
-		httpHandlerActionFunc[*GetFinanceDashboardParams, *map[string]interface{}],
+		*FinanceDashboardResponse,
+		handlerActionFunc[*GetFinanceDashboardParams, *FinanceDashboardResponse],
+		httpHandlerActionFunc[*GetFinanceDashboardParams, *FinanceDashboardResponse],
 	]
 
 	// GET /api/v1/finance/fx/diagnostics
@@ -1888,15 +1888,15 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			app,
 			newHandlerAdapter[
 				*GetFinanceDashboardParams,
-				*map[string]interface{},
+				*FinanceDashboardResponse,
 			](),
 			newHTTPHandlerAdapter[
 				*GetFinanceDashboardParams,
-				*map[string]interface{},
+				*FinanceDashboardResponse,
 			](),
 			makeActionBuilderParams[
 				*GetFinanceDashboardParams,
-				*map[string]interface{},
+				*FinanceDashboardResponse,
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinanceGetFinanceDashboard(app),

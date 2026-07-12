@@ -555,8 +555,8 @@ func mapStrategyVersionRecord(version rtstrategy.Version) StrategyVersionRecord 
 		Notes:            version.Notes,
 		ParentStrategyID: version.ParentStrategyID,
 		ParentVersion:    version.ParentVersion,
-		CreatedAt:        version.CreatedAt.UTC(),
-		UpdatedAt:        version.UpdatedAt.UTC(),
+		CreatedAt:        version.CreatedAt,
+		UpdatedAt:        version.UpdatedAt,
 		Definition: StrategyDefinitionInput{
 			Kind:       version.Strategy.Kind.String(),
 			Instrument: mapStrategyInstrument(version.Strategy.Instrument),

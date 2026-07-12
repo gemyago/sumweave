@@ -82,7 +82,7 @@ func (l *Linker) LinkConfiguredBankConnection(
 	if err != nil {
 		return domain.BankConnection{}, err
 	}
-	now := l.deps.Now().UTC()
+	now := l.deps.Now()
 	providerReference := "synthetic-configured-" + l.deps.NewID()
 	secretID, err := l.deps.SaveConnectionSecret(
 		ctx,
@@ -120,7 +120,7 @@ func (l *Linker) LinkConfiguredBankConnection(
 			Version:            domain.SyntheticProviderStateVersion1,
 			ConfiguredAccounts: configuredAccounts,
 			WindowHistory:      []domain.SyntheticWindowHistoryEntry{},
-			SequenceCounters:   []domain.SyntheticAccountDaySequenceCounter{},
+			SequenceCounters:   []domain.SyntheticAccountInstantSequenceCounter{},
 		},
 		CreatedAt: now,
 		UpdatedAt: now,

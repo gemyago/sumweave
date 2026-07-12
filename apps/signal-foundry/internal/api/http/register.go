@@ -14,10 +14,7 @@ import (
 	"go.uber.org/dig"
 )
 
-// Use apigen to generate v1routes.
-// The follow-up patch keeps generated validators buildable for required map fields
-// until the upstream generator emits a map-safe EnsureNonDefault helper.
-//go:generate sh -c "go run github.com/gemyago/apigen server ./v1routes.yaml ./v1routes && go run ./apigenpatch"
+//go:generate sh -c "go run github.com/gemyago/apigen server ./v1routes.yaml ./v1routes"
 
 type V1RoutesDeps struct {
 	dig.In

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // Migrator owns the app dispatch schema setup flow.
@@ -37,62 +36,11 @@ func (m *Migrator) Migrate(ctx context.Context) error {
 	return m.migrateSQLite(ctx)
 }
 
-func migrateSQLite(ctx context.Context, db *sql.DB, config Config) error {
-	migrator, err := NewMigrator(config, db)
-	if err != nil {
-		return err
-	}
-	return migrator.migrateSQLite(ctx)
-}
-
 func (m *Migrator) migrateSQLite(ctx context.Context) error {
-	if err := recreateSQLiteOffsetsTableIfNeeded(ctx, m.db, m.config.OffsetsTable()); err != nil {
-		return err
-	}
 	for _, query := range buildSQLiteMigrationQueries(m.config) {
 		if _, execErr := m.db.ExecContext(ctx, query); execErr != nil {
 			return fmt.Errorf("migrate sqlite app dispatch transport: %w", execErr)
 		}
-	}
-	return nil
-}
-
-func recreateSQLiteOffsetsTableIfNeeded(ctx context.Context, db *sql.DB, tableName string) error {
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+quoteIdentifier(tableName)+`)`)
-	if err != nil {
-		return fmt.Errorf("inspect sqlite app dispatch offsets schema: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var (
-		hasColumns     bool
-		hasLockedUntil bool
-	)
-	for rows.Next() {
-		var (
-			cid        int
-			name       string
-			columnType string
-			notNull    int
-			defaultVal sql.NullString
-			pk         int
-		)
-		if err = rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
-			return fmt.Errorf("scan sqlite app dispatch offsets schema: %w", err)
-		}
-		hasColumns = true
-		if strings.EqualFold(name, "locked_until") {
-			hasLockedUntil = true
-		}
-	}
-	if err = rows.Err(); err != nil {
-		return fmt.Errorf("read sqlite app dispatch offsets schema: %w", err)
-	}
-	if !hasColumns || hasLockedUntil {
-		return nil
-	}
-	if _, err = db.ExecContext(ctx, `DROP TABLE `+quoteIdentifier(tableName)); err != nil {
-		return fmt.Errorf("reset sqlite app dispatch offsets schema: %w", err)
 	}
 	return nil
 }

@@ -35,9 +35,9 @@ func NewFinanceCsvImportAuditResponseValidator() FieldValidator[*FinanceCsvImpor
 	validateCreatedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
-	validateConfirmedAt := NewSimpleFieldValidator[time.Time](
+	validateConfirmedAt := NewSimpleFieldValidator[*time.Time](
 	)
-	validateCompletedAt := NewSimpleFieldValidator[time.Time](
+	validateCompletedAt := NewSimpleFieldValidator[*time.Time](
 	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceCsvImportAuditResponse) {

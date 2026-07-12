@@ -15,6 +15,19 @@ import (
 )
 
 func TestService(t *testing.T) {
+	t.Run("ledger timestamp policy rejects zero", func(t *testing.T) {
+		require.Error(t, validateLedgerTimestamp(time.Time{}))
+		require.NoError(t, validateLedgerTimestamp(
+			time.Date(2026, time.July, 11, 12, 0, 0, 0, time.FixedZone("fixed", 2*60*60)),
+		))
+		_, err := new(LedgerService).RecordTransaction(
+			t.Context(),
+			RecordTransactionParams{EffectiveAt: time.Time{}},
+		)
+		require.Error(t, err)
+	})
+
+	timePointer := func(value time.Time) *time.Time { return &value }
 	makeService := func(t *testing.T) *Service {
 		t.Helper()
 
@@ -516,6 +529,7 @@ func TestService(t *testing.T) {
 		require.NotNil(t, transferOut.TransferGroupID)
 		assert.Equal(t, *transferOut.TransferGroupID, *transferIn.TransferGroupID)
 
+		updatedCategoryID := category.ID
 		updatedProviderTransaction, err := service.UpdateTransaction(
 			t.Context(),
 			UpdateTransactionParams{
@@ -524,8 +538,8 @@ func TestService(t *testing.T) {
 				TransactionID: providerTransaction.ID,
 				Description:   fmt.Sprintf("txn-user-edited-%s", fake.Lorem().Word()),
 				AmountMinor:   -31_00,
-				EffectiveAt:   time.Date(2026, time.June, 8, 11, 0, 0, 0, time.UTC),
-				CategoryID:    category.ID,
+				EffectiveAt:   timePointer(time.Date(2026, time.June, 8, 11, 0, 0, 0, time.UTC)),
+				CategoryID:    updatedCategoryID,
 			},
 		)
 		require.NoError(t, err)
@@ -544,16 +558,31 @@ func TestService(t *testing.T) {
 		)
 		assert.Equal(t, int64(-32_00), updatedProviderTransaction.ProviderOriginal.AmountMinor)
 
+		preservedCategoryTransaction, err := service.UpdateTransaction(
+			t.Context(),
+			UpdateTransactionParams{
+				ActorUserID:   ownerUserID,
+				TenantID:      tenant.ID,
+				TransactionID: providerTransaction.ID,
+				Description:   fmt.Sprintf("txn-category-preserved-%s", fake.Lorem().Word()),
+				AmountMinor:   updatedProviderTransaction.AmountMinor,
+			},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, preservedCategoryTransaction.CategoryID)
+		assert.Equal(t, category.ID, *preservedCategoryTransaction.CategoryID)
+		assert.Equal(t, updatedProviderTransaction.EffectiveAt, preservedCategoryTransaction.EffectiveAt)
+
 		clearedCategoryTransaction, err := service.UpdateTransaction(
 			t.Context(),
 			UpdateTransactionParams{
 				ActorUserID:   ownerUserID,
 				TenantID:      tenant.ID,
 				TransactionID: providerTransaction.ID,
-				Description:   updatedProviderTransaction.Description,
-				AmountMinor:   updatedProviderTransaction.AmountMinor,
-				EffectiveAt:   updatedProviderTransaction.EffectiveAt,
-				CategoryID:    "",
+				Description:   preservedCategoryTransaction.Description,
+				AmountMinor:   preservedCategoryTransaction.AmountMinor,
+				EffectiveAt:   timePointer(preservedCategoryTransaction.EffectiveAt),
+				ClearCategory: true,
 			},
 		)
 		require.NoError(t, err)
@@ -1076,7 +1105,7 @@ func TestService(t *testing.T) {
 			TransactionID: fmt.Sprintf("missing-transaction-%s", fake.Lorem().Word()),
 			Description:   fmt.Sprintf("name-%s", fake.Lorem().Word()),
 			AmountMinor:   1,
-			EffectiveAt:   now,
+			EffectiveAt:   timePointer(now),
 		})
 		require.ErrorIs(t, err, ErrTransactionNotFound)
 
@@ -1101,6 +1130,7 @@ func TestService(t *testing.T) {
 		}).CreateTenant(t.Context(), CreateTenantParams{ActorUserID: "user-1", Name: "tenant", DisplayCurrency: "USD"})
 		require.ErrorIs(t, err, sentinel)
 
+		categoryID := "category-1"
 		_, err = NewService(stubStore{
 			saveTenantFn: func(context.Context, domain.Tenant) (domain.Tenant, error) { return domain.Tenant{}, nil },
 			saveTenantMembershipFn: func(context.Context, domain.TenantMembership) (domain.TenantMembership, error) {
@@ -1303,8 +1333,8 @@ func TestService(t *testing.T) {
 			TransactionID: "transaction-1",
 			Description:   "txn",
 			AmountMinor:   -1,
-			EffectiveAt:   effectiveAt,
-			CategoryID:    "category-1",
+			EffectiveAt:   timePointer(effectiveAt),
+			CategoryID:    categoryID,
 		})
 		require.ErrorIs(t, err, sentinel)
 

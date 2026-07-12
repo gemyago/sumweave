@@ -2,7 +2,6 @@ package v1controllers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -195,7 +194,7 @@ func (c *FinanceController) AcceptFinanceTenantInvite(
 		return &models.FinanceTenantMember{
 			TenantID: membership.TenantID,
 			UserID:   membership.UserID,
-			JoinedAt: membership.JoinedAt.UTC(),
+			JoinedAt: membership.JoinedAt,
 		}, nil
 	})
 
@@ -212,6 +211,14 @@ func (c *FinanceController) ConfirmFinanceCsvImport(
 		userID, err := operatorUserIDFromContext(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if params.Payload.Mapping == nil {
+			return nil, app.NewErrInvalidInput("mapping", "is required")
+		}
+		for source, target := range params.Payload.Mapping {
+			if source == "" || target == "" {
+				return nil, app.NewErrInvalidInput("mapping", "keys and values must not be empty")
+			}
 		}
 
 		item, err := c.deps.CSVImportService.ConfirmCSVImport(
@@ -262,7 +269,10 @@ func (c *FinanceController) CreateFinanceAccount(
 			return nil, err
 		}
 
-		mapped := mapAccount(item)
+		mapped, err := mapAccount(item)
+		if err != nil {
+			return nil, err
+		}
 		return &mapped, nil
 	})
 
@@ -470,6 +480,9 @@ func (c *FinanceController) CreateFinanceTransaction(
 		if err != nil {
 			return nil, err
 		}
+		if validationErr := validateFinanceTimestamp("effectiveAt", params.Payload.EffectiveAt); validationErr != nil {
+			return nil, app.NewErrInvalidInput("effectiveAt", validationErr.Error())
+		}
 
 		item, err := c.deps.LedgerService.RecordTransaction(
 			ctx,
@@ -562,9 +575,9 @@ func (c *FinanceController) GetFinanceCsvImportAudit(
 			JobID:             item.JobID,
 			ConfirmedByUserID: item.ConfirmedByUserID,
 			ImportedCount:     int64(item.ImportedCount),
-			CreatedAt:         item.CreatedAt.UTC(),
-			ConfirmedAt:       timeValueOrZero(item.ConfirmedAt),
-			CompletedAt:       timeValueOrZero(item.CompletedAt),
+			CreatedAt:         item.CreatedAt,
+			ConfirmedAt:       item.ConfirmedAt,
+			CompletedAt:       item.CompletedAt,
 		}, nil
 	})
 
@@ -572,37 +585,55 @@ func (c *FinanceController) GetFinanceCsvImportAudit(
 }
 
 func (c *FinanceController) GetFinanceDashboard(
-	builder handlers.HandlerBuilder[*models.GetFinanceDashboardParams, *map[string]interface{}],
+	builder handlers.HandlerBuilder[*models.GetFinanceDashboardParams, *models.FinanceDashboardResponse],
 ) http.Handler {
-	inner := builder.HandleWith(func(
-		ctx context.Context,
+	inner := builder.HandleWithHTTP(func(
+		_ http.ResponseWriter,
+		req *http.Request,
 		params *models.GetFinanceDashboardParams,
-	) (*map[string]interface{}, error) {
-		userID, err := operatorUserIDFromContext(ctx)
+	) (*models.FinanceDashboardResponse, error) {
+		userID, err := operatorUserIDFromContext(req.Context())
 		if err != nil {
 			return nil, err
 		}
 
-		startDate, endDate, err := parseDashboardDateValues(params.StartDate, params.EndDate)
+		var startDate, endDate time.Time
+		parsedStart, startSupplied, err := parseOptionalTimestampQuery(req, "startDate", params.StartDate)
 		if err != nil {
 			return nil, err
+		}
+		if startSupplied {
+			startDate = parsedStart
+		}
+		parsedEnd, endSupplied, err := parseOptionalTimestampQuery(req, "endDate", params.EndDate)
+		if err != nil {
+			return nil, err
+		}
+		if endSupplied {
+			endDate = parsedEnd
+		}
+
+		dashboardParams := financepkg.DashboardParams{
+			ActorUserID: userID,
+			TenantID:    params.TenantID,
+			Preset:      financepkg.DashboardPeriodPreset(params.Preset),
+			StartDate:   startDate,
+			EndDate:     endDate,
+		}
+		if validationErr := financepkg.ValidateDashboardParams(dashboardParams); validationErr != nil {
+			return nil, mapFinanceRangeError(validationErr)
 		}
 
 		item, err := c.deps.ReportingService.GetDashboard(
-			ctx,
-			financepkg.DashboardParams{
-				ActorUserID: userID,
-				TenantID:    params.TenantID,
-				Preset:      financepkg.DashboardPeriodPreset(params.Preset),
-				StartDate:   startDate,
-				EndDate:     endDate,
-			},
+			req.Context(),
+			dashboardParams,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		return dashboardResponseMap(item)
+		response := mapDashboard(item)
+		return &response, nil
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -611,35 +642,37 @@ func (c *FinanceController) GetFinanceDashboard(
 func (c *FinanceController) GetFinanceFxDiagnostics(
 	builder handlers.NoParamsHandlerBuilder[*models.FinanceFxDiagnosticsResponse],
 ) http.Handler {
-	inner := builder.HandleWith(func(ctx context.Context) (*models.FinanceFxDiagnosticsResponse, error) {
-		if _, err := operatorUserIDFromContext(ctx); err != nil {
-			return nil, err
-		}
-
-		item, err := c.deps.FXService.GetFXAdminDiagnostics(
-			ctx,
-			financepkg.FXAdminDiagnosticsParams{},
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		response := models.FinanceFxDiagnosticsResponse{
-			DefaultProvider:  item.DefaultProvider,
-			StoredRatesCount: int64(item.StoredRatesCount),
-			Providers:        make([]*models.FinanceFxProviderDiagnostic, 0, len(item.Providers)),
-		}
-		for _, provider := range item.Providers {
-			mapped := models.FinanceFxProviderDiagnostic{
-				Name:    provider.Name,
-				Default: provider.Default,
-				Ready:   provider.Ready,
+	inner := builder.HandleWith(
+		func(ctx context.Context) (*models.FinanceFxDiagnosticsResponse, error) {
+			if _, err := operatorUserIDFromContext(ctx); err != nil {
+				return nil, err
 			}
-			response.Providers = append(response.Providers, &mapped)
-		}
 
-		return &response, nil
-	})
+			item, err := c.deps.FXService.GetFXAdminDiagnostics(
+				ctx,
+				financepkg.FXAdminDiagnosticsParams{},
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			response := models.FinanceFxDiagnosticsResponse{
+				DefaultProvider:  item.DefaultProvider,
+				StoredRatesCount: int64(item.StoredRatesCount),
+				Providers:        make([]*models.FinanceFxProviderDiagnostic, 0, len(item.Providers)),
+			}
+			for _, provider := range item.Providers {
+				mapped := models.FinanceFxProviderDiagnostic{
+					Name:    provider.Name,
+					Default: provider.Default,
+					Ready:   provider.Ready,
+				}
+				response.Providers = append(response.Providers, &mapped)
+			}
+
+			return &response, nil
+		},
+	)
 
 	return c.deps.AuthMiddleware(inner)
 }
@@ -826,7 +859,7 @@ func (c *FinanceController) ListFinanceAccounts(
 			return nil, err
 		}
 
-		return mapAccountsResponse(items), nil
+		return mapAccountsResponse(items)
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -856,7 +889,10 @@ func (c *FinanceController) GetFinanceAccount(
 			return nil, err
 		}
 
-		mapped := mapAccount(item)
+		mapped, err := mapAccount(item)
+		if err != nil {
+			return nil, err
+		}
 		return &mapped, nil
 	})
 
@@ -1142,7 +1178,7 @@ func (c *FinanceController) ListFinanceTenantMembers(
 			mapped := models.FinanceTenantMember{
 				TenantID: item.TenantID,
 				UserID:   item.UserID,
-				JoinedAt: item.JoinedAt.UTC(),
+				JoinedAt: item.JoinedAt,
 			}
 			response.Items = append(response.Items, &mapped)
 		}
@@ -1156,27 +1192,29 @@ func (c *FinanceController) ListFinanceTenantMembers(
 func (c *FinanceController) ListFinanceTenants(
 	builder handlers.NoParamsHandlerBuilder[*models.FinanceTenantListResponse],
 ) http.Handler {
-	inner := builder.HandleWith(func(ctx context.Context) (*models.FinanceTenantListResponse, error) {
-		userID, err := operatorUserIDFromContext(ctx)
-		if err != nil {
-			return nil, err
-		}
+	inner := builder.HandleWith(
+		func(ctx context.Context) (*models.FinanceTenantListResponse, error) {
+			userID, err := operatorUserIDFromContext(ctx)
+			if err != nil {
+				return nil, err
+			}
 
-		items, err := c.deps.TenantService.ListTenantsForUser(ctx, userID)
-		if err != nil {
-			return nil, err
-		}
+			items, err := c.deps.TenantService.ListTenantsForUser(ctx, userID)
+			if err != nil {
+				return nil, err
+			}
 
-		response := models.FinanceTenantListResponse{
-			Items: make([]*models.FinanceTenantSummary, 0, len(items)),
-		}
-		for _, item := range items {
-			mapped := mapTenantSummary(item)
-			response.Items = append(response.Items, &mapped)
-		}
+			response := models.FinanceTenantListResponse{
+				Items: make([]*models.FinanceTenantSummary, 0, len(items)),
+			}
+			for _, item := range items {
+				mapped := mapTenantSummary(item)
+				response.Items = append(response.Items, &mapped)
+			}
 
-		return &response, nil
-	})
+			return &response, nil
+		},
+	)
 
 	return c.deps.AuthMiddleware(inner)
 }
@@ -1235,10 +1273,14 @@ func (c *FinanceController) UpdateFinanceTransaction(
 		if err != nil {
 			return nil, err
 		}
-
-		categoryID := ""
-		if params.Payload.CategoryID != nil {
-			categoryID = *params.Payload.CategoryID
+		if params.Payload.EffectiveAt != nil {
+			validationErr := validateFinanceTimestamp("effectiveAt", *params.Payload.EffectiveAt)
+			if validationErr != nil {
+				return nil, app.NewErrInvalidInput("effectiveAt", validationErr.Error())
+			}
+		}
+		if params.Payload.ClearCategory && params.Payload.CategoryID != "" {
+			return nil, app.NewErrInvalidInput("categoryId", "must be omitted when clearCategory is true")
 		}
 
 		item, err := c.deps.LedgerService.UpdateTransaction(
@@ -1250,7 +1292,8 @@ func (c *FinanceController) UpdateFinanceTransaction(
 				Description:   params.Payload.Description,
 				AmountMinor:   params.Payload.AmountMinor,
 				EffectiveAt:   params.Payload.EffectiveAt,
-				CategoryID:    categoryID,
+				CategoryID:    params.Payload.CategoryID,
+				ClearCategory: params.Payload.ClearCategory,
 			},
 		)
 		if err != nil {
@@ -1308,6 +1351,17 @@ func (c *FinanceController) TriggerFinanceConnectionSync(
 		if err != nil {
 			return nil, err
 		}
+		for field, value := range map[string]*time.Time{
+			"windowStart": params.Payload.WindowStart,
+			"windowEnd":   params.Payload.WindowEnd,
+		} {
+			if value == nil {
+				continue
+			}
+			if validationErr := validateFinanceTimestamp(field, *value); validationErr != nil {
+				return nil, app.NewErrInvalidInput(field, validationErr.Error())
+			}
+		}
 
 		jobRef, err := c.deps.BankSyncService.TriggerBankConnectionSync(
 			ctx,
@@ -1316,8 +1370,8 @@ func (c *FinanceController) TriggerFinanceConnectionSync(
 				TenantID:     params.TenantID,
 				ConnectionID: params.ConnectionID,
 				Reason:       params.Payload.Reason,
-				WindowStart:  timePointerOrNil(params.Payload.WindowStart),
-				WindowEnd:    timePointerOrNil(params.Payload.WindowEnd),
+				WindowStart:  params.Payload.WindowStart,
+				WindowEnd:    params.Payload.WindowEnd,
 			},
 		)
 		if err != nil {
@@ -1341,7 +1395,12 @@ func (c *FinanceController) TriggerFinanceFxSync(
 		if err != nil {
 			return nil, err
 		}
-
+		if validationErr := financepkg.ValidateRequiredTimestampRange(
+			params.Payload.StartDate,
+			params.Payload.EndDate,
+		); validationErr != nil {
+			return nil, mapFinanceRangeError(validationErr)
+		}
 		jobRef, err := c.deps.FXService.TriggerFXSync(
 			ctx,
 			financepkg.TriggerFXSyncParams{
@@ -1377,46 +1436,19 @@ func operatorUserIDFromContext(ctx context.Context) (string, error) {
 	return identity.UserID(), nil
 }
 
-func dashboardResponseMap(item financepkg.Dashboard) (*map[string]interface{}, error) {
-	response := mapDashboard(item)
-	raw, err := json.Marshal(response)
-	if err != nil {
-		return nil, fmt.Errorf("marshal dashboard response: %w", err)
+func mapFinanceRangeError(err error) error {
+	if errors.Is(err, financepkg.ErrInvalidTimestampRange) ||
+		errors.Is(err, financepkg.ErrInvalidDashboardPeriod) {
+		return app.NewErrInvalidInput("dateRange", err.Error())
 	}
-
-	payload := make(map[string]interface{})
-	if unmarshalErr := json.Unmarshal(raw, &payload); unmarshalErr != nil {
-		return nil, fmt.Errorf("unmarshal dashboard response: %w", unmarshalErr)
-	}
-
-	return &payload, nil
+	return err
 }
 
-func parseDashboardDates(req *http.Request) (time.Time, time.Time, error) {
-	return parseDashboardDateValues(req.URL.Query().Get("startDate"), req.URL.Query().Get("endDate"))
-}
-
-func parseDashboardDateValues(startDateRaw string, endDateRaw string) (time.Time, time.Time, error) {
-	parseDate := func(key string, value string) (time.Time, error) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return time.Time{}, nil
-		}
-		parsed, err := time.Parse(time.DateOnly, value)
-		if err != nil {
-			return time.Time{}, app.NewErrInvalidInput(key, err.Error())
-		}
-		return parsed.UTC(), nil
+func validateFinanceTimestamp(field string, value time.Time) error {
+	if value.IsZero() {
+		return fmt.Errorf("%s must be a non-zero timestamp", field)
 	}
-	startDate, err := parseDate("startDate", startDateRaw)
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	endDate, err := parseDate("endDate", endDateRaw)
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	return startDate, endDate, nil
+	return nil
 }
 
 func mapCSVImportError(err error) error {
@@ -1440,10 +1472,10 @@ func mapTenantSummary(
 		ID:              item.Tenant.ID,
 		Name:            item.Tenant.Name,
 		DisplayCurrency: item.Tenant.DisplayCurrency,
-		ArchivedAt:      timeValueOrZero(item.Tenant.ArchivedAt),
-		JoinedAt:        item.Membership.JoinedAt.UTC(),
-		CreatedAt:       item.Tenant.CreatedAt.UTC(),
-		UpdatedAt:       item.Tenant.UpdatedAt.UTC(),
+		ArchivedAt:      item.Tenant.ArchivedAt,
+		JoinedAt:        item.Membership.JoinedAt,
+		CreatedAt:       item.Tenant.CreatedAt,
+		UpdatedAt:       item.Tenant.UpdatedAt,
 	}
 }
 
@@ -1454,20 +1486,23 @@ func mapTenantInvite(item domain.TenantInvite) models.FinanceTenantInvite {
 		Code:             item.Code,
 		Recipient:        item.Recipient,
 		CreatedByUserID:  item.CreatedByUserID,
-		AcceptedByUserID: stringValueOrZero(item.AcceptedByUserID),
-		CreatedAt:        item.CreatedAt.UTC(),
-		AcceptedAt:       timeValueOrZero(item.AcceptedAt),
+		AcceptedByUserID: item.AcceptedByUserID,
+		CreatedAt:        item.CreatedAt,
+		AcceptedAt:       item.AcceptedAt,
 	}
 }
 
-func mapAccountsResponse(items []domain.Account) *models.FinanceAccountsResponse {
+func mapAccountsResponse(items []domain.Account) (*models.FinanceAccountsResponse, error) {
 	response := models.FinanceAccountsResponse{Items: make([]*models.FinanceAccount, 0, len(items))}
 	for _, item := range items {
-		mapped := mapAccount(item)
+		mapped, err := mapAccount(item)
+		if err != nil {
+			return nil, err
+		}
 		response.Items = append(response.Items, &mapped)
 	}
 
-	return &response
+	return &response, nil
 }
 
 func mapCategoriesResponse(items []domain.Category) *models.FinanceCategoriesResponse {
@@ -1492,7 +1527,19 @@ func mapTagsResponse(items []domain.Tag) *models.FinanceTagsResponse {
 	return &response
 }
 
-func mapAccount(item domain.Account) models.FinanceAccount {
+func mapAccount(item domain.Account) (models.FinanceAccount, error) {
+	if err := validateFinanceTimestamp("account.createdAt", item.CreatedAt); err != nil {
+		return models.FinanceAccount{}, err
+	}
+	if err := validateFinanceTimestamp("account.updatedAt", item.UpdatedAt); err != nil {
+		return models.FinanceAccount{}, err
+	}
+	if item.HiddenAt != nil {
+		if err := validateFinanceTimestamp("account.hiddenAt", *item.HiddenAt); err != nil {
+			return models.FinanceAccount{}, err
+		}
+	}
+
 	response := models.FinanceAccount{
 		ID:                  item.ID,
 		TenantID:            item.TenantID,
@@ -1501,15 +1548,15 @@ func mapAccount(item domain.Account) models.FinanceAccount {
 		Kind:                string(item.Kind),
 		BookedBalanceMinor:  item.BookedBalanceMinor,
 		PendingBalanceMinor: item.PendingBalanceMinor,
-		HiddenAt:            timeValueOrZero(item.HiddenAt),
-		CreatedAt:           item.CreatedAt.UTC(),
-		UpdatedAt:           item.UpdatedAt.UTC(),
+		HiddenAt:            item.HiddenAt,
+		CreatedAt:           item.CreatedAt,
+		UpdatedAt:           item.UpdatedAt,
 	}
 	if item.LinkedAccount != nil {
 		response.Provider = item.LinkedAccount.Provider
 		response.ProviderAccountID = item.LinkedAccount.ProviderAccountID
 	}
-	return response
+	return response, nil
 }
 
 func mapCategory(item domain.Category) models.FinanceCategory {
@@ -1519,9 +1566,9 @@ func mapCategory(item domain.Category) models.FinanceCategory {
 		Name:          item.Name,
 		Kind:          string(item.Kind),
 		SeededDefault: item.SeededDefault,
-		HiddenAt:      timeValueOrZero(item.HiddenAt),
-		CreatedAt:     item.CreatedAt.UTC(),
-		UpdatedAt:     item.UpdatedAt.UTC(),
+		HiddenAt:      item.HiddenAt,
+		CreatedAt:     item.CreatedAt,
+		UpdatedAt:     item.UpdatedAt,
 	}
 }
 
@@ -1530,9 +1577,9 @@ func mapTag(item domain.Tag) models.FinanceTag {
 		ID:        item.ID,
 		TenantID:  item.TenantID,
 		Name:      item.Name,
-		HiddenAt:  timeValueOrZero(item.HiddenAt),
-		CreatedAt: item.CreatedAt.UTC(),
-		UpdatedAt: item.UpdatedAt.UTC(),
+		HiddenAt:  item.HiddenAt,
+		CreatedAt: item.CreatedAt,
+		UpdatedAt: item.UpdatedAt,
 	}
 }
 
@@ -1547,20 +1594,20 @@ func mapTransaction(item domain.Transaction) models.FinanceTransaction {
 		AmountMinor:       item.AmountMinor,
 		Currency:          item.Currency,
 		Description:       item.Description,
-		EffectiveAt:       item.EffectiveAt.UTC(),
-		CategoryID:        stringValueOrZero(item.CategoryID),
-		TransferGroupID:   stringValueOrZero(item.TransferGroupID),
-		TransferMatchedAt: timeValueOrZero(item.TransferMatchedAt),
-		HiddenAt:          timeValueOrZero(item.HiddenAt),
-		CreatedAt:         item.CreatedAt.UTC(),
-		UpdatedAt:         item.UpdatedAt.UTC(),
+		EffectiveAt:       item.EffectiveAt,
+		CategoryID:        item.CategoryID,
+		TransferGroupID:   item.TransferGroupID,
+		TransferMatchedAt: item.TransferMatchedAt,
+		HiddenAt:          item.HiddenAt,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
 	}
 	if item.ProviderOriginal != nil {
 		response.ProviderOriginal = &models.FinanceTransactionProviderOriginal{
 			AmountMinor: item.ProviderOriginal.AmountMinor,
 			Currency:    item.ProviderOriginal.Currency,
 			Description: item.ProviderOriginal.Description,
-			EffectiveAt: timeValueOrZero(item.ProviderOriginal.EffectiveAt),
+			EffectiveAt: item.ProviderOriginal.EffectiveAt,
 		}
 	}
 	return response
@@ -1578,24 +1625,24 @@ func mapConnection(
 		ExternalID:           item.Connection.ExternalID,
 		State:                string(item.Connection.State),
 		LastSyncJobID:        item.Connection.LastSyncJobID,
-		LastSyncStartedAt:    timeValueOrZero(item.Connection.LastSyncStartedAt),
-		LastSuccessfulSyncAt: timeValueOrZero(item.Connection.LastSuccessfulSyncAt),
+		LastSyncStartedAt:    item.Connection.LastSyncStartedAt,
+		LastSuccessfulSyncAt: item.Connection.LastSuccessfulSyncAt,
 		LastSyncError:        item.Connection.LastSyncError,
-		CreatedAt:            item.Connection.CreatedAt.UTC(),
-		UpdatedAt:            item.Connection.UpdatedAt.UTC(),
+		CreatedAt:            item.Connection.CreatedAt,
+		UpdatedAt:            item.Connection.UpdatedAt,
 	}
 	if item.Schedule != nil {
 		response.Schedule = &models.FinanceBankConnectionSchedule{
 			ConnectionID:    item.Schedule.ConnectionID,
 			IntervalSeconds: int64(item.Schedule.Interval.Seconds()),
-			NextRunAt:       timeValueOrZero(item.Schedule.NextRunAt),
-			LastScheduledAt: timeValueOrZero(item.Schedule.LastScheduledAt),
-			LastStartedAt:   timeValueOrZero(item.Schedule.LastStartedAt),
-			LastCompletedAt: timeValueOrZero(item.Schedule.LastCompletedAt),
+			NextRunAt:       item.Schedule.NextRunAt,
+			LastScheduledAt: item.Schedule.LastScheduledAt,
+			LastStartedAt:   item.Schedule.LastStartedAt,
+			LastCompletedAt: item.Schedule.LastCompletedAt,
 			LastJobID:       item.Schedule.LastJobID,
 			Enabled:         item.Schedule.Enabled,
-			CreatedAt:       item.Schedule.CreatedAt.UTC(),
-			UpdatedAt:       item.Schedule.UpdatedAt.UTC(),
+			CreatedAt:       item.Schedule.CreatedAt,
+			UpdatedAt:       item.Schedule.UpdatedAt,
 		}
 	}
 	return response
@@ -1644,33 +1691,33 @@ func mapSyntheticLinkStateAccountsRequest(
 
 func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { //nolint:funlen
 	response := models.FinanceDashboardResponse{
-		Period: models.FinanceDashboardPeriod{
+		Period: &models.FinanceDashboardPeriod{
 			Preset:    string(item.Period.Preset),
-			StartDate: item.Period.StartDate.UTC(),
-			EndDate:   item.Period.EndDate.UTC(),
-			Previous: models.FinanceDashboardPeriodWindow{
-				StartDate: item.Period.Previous.StartDate.UTC(),
-				EndDate:   item.Period.Previous.EndDate.UTC(),
+			StartDate: item.Period.StartDate,
+			EndDate:   item.Period.EndDate,
+			Previous: &models.FinanceDashboardPeriodWindow{
+				StartDate: item.Period.Previous.StartDate,
+				EndDate:   item.Period.Previous.EndDate,
 			},
-			Next: models.FinanceDashboardPeriodWindow{
-				StartDate: item.Period.Next.StartDate.UTC(),
-				EndDate:   item.Period.Next.EndDate.UTC(),
+			Next: &models.FinanceDashboardPeriodWindow{
+				StartDate: item.Period.Next.StartDate,
+				EndDate:   item.Period.Next.EndDate,
 			},
 		},
-		Settled: models.FinanceDashboardMoneySummary{
+		Settled: &models.FinanceDashboardMoneySummary{
 			DisplayCurrency:  item.Settled.DisplayCurrency,
 			IncomeMinor:      item.Settled.IncomeMinor,
 			ExpenseMinor:     item.Settled.ExpenseMinor,
 			NetMinor:         item.Settled.NetMinor,
-			TransactionCount: item.Settled.TransactionCount,
+			TransactionCount: int64(item.Settled.TransactionCount),
 			Complete:         item.Settled.Complete,
 		},
-		Pending: models.FinanceDashboardMoneySummary{
+		Pending: &models.FinanceDashboardMoneySummary{
 			DisplayCurrency:  item.Pending.DisplayCurrency,
 			IncomeMinor:      item.Pending.IncomeMinor,
 			ExpenseMinor:     item.Pending.ExpenseMinor,
 			NetMinor:         item.Pending.NetMinor,
-			TransactionCount: item.Pending.TransactionCount,
+			TransactionCount: int64(item.Pending.TransactionCount),
 			Complete:         item.Pending.Complete,
 		},
 		CategoryBreakdowns: make(
@@ -1698,7 +1745,7 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 			Kind:             string(breakdown.Kind),
 			IncomeMinor:      breakdown.IncomeMinor,
 			ExpenseMinor:     breakdown.ExpenseMinor,
-			TransactionCount: breakdown.TransactionCount,
+			TransactionCount: int64(breakdown.TransactionCount),
 		}
 		response.CategoryBreakdowns = append(response.CategoryBreakdowns, &mapped)
 	}
@@ -1719,18 +1766,18 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 		mapped := models.FinanceDashboardAlert{
 			Code:     alert.Code,
 			Severity: alert.Severity,
-			Count:    alert.Count,
+			Count:    int64(alert.Count),
 		}
 		response.Alerts = append(response.Alerts, &mapped)
 	}
 	for _, missing := range item.MissingFX {
 		mapped := models.FinanceDashboardMissingFx{
 			Source:        string(missing.Source),
-			TransactionID: missing.TransactionID,
-			AccountID:     missing.AccountID,
+			TransactionID: stringPointerOrNil(missing.TransactionID),
+			AccountID:     stringPointerOrNil(missing.AccountID),
 			BaseCurrency:  missing.BaseCurrency,
 			QuoteCurrency: missing.QuoteCurrency,
-			RateDate:      missing.RateDate.UTC(),
+			RateDate:      missing.RateDate,
 			Provider:      missing.Provider,
 		}
 		response.MissingFx = append(response.MissingFx, &mapped)
@@ -1745,6 +1792,13 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 		response.NativeSettledTotals = append(response.NativeSettledTotals, &mapped)
 	}
 	return response
+}
+
+func stringPointerOrNil(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func mapCSVPreview(
@@ -1774,31 +1828,6 @@ func mapCSVPreview(
 		})
 	}
 	return response
-}
-
-func stringValueOrZero(val *string) string {
-	if val == nil {
-		return ""
-	}
-
-	return *val
-}
-
-func timeValueOrZero(val *time.Time) time.Time {
-	if val == nil {
-		return time.Time{}
-	}
-
-	return val.UTC()
-}
-
-func timePointerOrNil(val time.Time) *time.Time {
-	if val.IsZero() {
-		return nil
-	}
-
-	utc := val.UTC()
-	return &utc
 }
 
 func ValidateFinanceRedirectCallbackURL(raw string) error {

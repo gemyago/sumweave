@@ -37,15 +37,16 @@ func (p *ProviderLinkPersistence) ConsumePendingStart(
 	result := p.Store.db.WithContext(ctx).
 		Table(lookup.TableName()).
 		Where(
-			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND connector_id = ? AND state = ? AND "+columnConsumedAt+" IS NULL AND expires_at > ?",
+			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND connector_id = ? AND state = ? AND "+
+				columnConsumedAt+" IS NULL AND "+expiresAfterPredicate(p.Store.db),
 			strings.TrimSpace(request.TenantID),
 			strings.TrimSpace(request.ActorUserID),
 			provider,
 			strings.TrimSpace(string(request.ConnectorID)),
 			strings.TrimSpace(request.State),
-			request.ConsumedAt.UTC(),
+			request.ConsumedAt,
 		).
-		Updates(map[string]any{columnConsumedAt: request.ConsumedAt.UTC(), columnUpdatedAt: request.ConsumedAt.UTC()})
+		Updates(map[string]any{columnConsumedAt: request.ConsumedAt, columnUpdatedAt: request.ConsumedAt})
 	if result.Error != nil {
 		return nil, fmt.Errorf("consume pending start: %w", result.Error)
 	}
@@ -61,7 +62,7 @@ func (p *ProviderLinkPersistence) ConsumePendingStart(
 			provider,
 			strings.TrimSpace(string(request.ConnectorID)),
 			strings.TrimSpace(request.State),
-			request.ConsumedAt.UTC(),
+			request.ConsumedAt,
 		).
 		First(&lookup).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -88,7 +89,7 @@ func (p *ProviderLinkPersistence) RestorePendingStart(
 			strings.TrimSpace(string(request.ConnectorID)),
 			strings.TrimSpace(request.State),
 		).
-		Updates(map[string]any{columnConsumedAt: nil, columnUpdatedAt: request.RestoredAt.UTC()})
+		Updates(map[string]any{columnConsumedAt: nil, columnUpdatedAt: request.RestoredAt})
 	if result.Error != nil {
 		return fmt.Errorf("restore pending start: %w", result.Error)
 	}

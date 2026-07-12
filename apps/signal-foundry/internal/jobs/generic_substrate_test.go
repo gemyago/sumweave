@@ -204,12 +204,14 @@ func TestGenericSubstrate(t *testing.T) {
 			Registry:    registry,
 		})
 		require.NoError(t, err)
+		dueAt := now.Add(-time.Minute)
 		require.NoError(t, store.UpsertSchedule(t.Context(), Schedule{
 			ID:        "fx-daily",
 			JobType:   JobType("finance.fx_rates_sync"),
 			Requester: Requester{UserID: "system", Source: RequesterSourceOperator},
 			Interval:  time.Hour,
-			NextRunAt: now.Add(-time.Minute),
+			NextRunAt: &dueAt,
+			Enabled:   true,
 			InputJSON: mustMarshalJSON(t, financeInput{AccountID: "acct-scheduled"}),
 		}))
 		_, err = svc.Enqueue(t.Context(), EnqueueParams{

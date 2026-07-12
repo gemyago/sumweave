@@ -33,7 +33,25 @@ describe('Admin finance FX page', () => {
     expect(await screen.findByText(/stored rates 14/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Trigger FX sync' }))
     await waitFor(() => expect(mocks.triggerFXSync).toHaveBeenCalled())
+    const request = mocks.triggerFXSync.mock.calls[0][0]
+    expect(request.startDate).toBeInstanceOf(Date)
+    expect(request.endDate).toBeInstanceOf(Date)
     expect(await screen.findByRole('link', { name: 'open admin job detail' })).toHaveAttribute('href', '#/admin/jobs/job-22')
+  })
+
+  it('keeps its initial native date defaults in a negative-offset timezone', async () => {
+    const environment = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env
+    const previousTimezone = environment.TZ
+    environment.TZ = 'America/Los_Angeles'
+    try {
+      render(AdminFinanceFX)
+
+      expect((await screen.findByLabelText('FX start date') as HTMLInputElement).value).toBe('2026-01-01')
+      expect((screen.getByLabelText('FX end date') as HTMLInputElement).value).toBe('2026-01-31')
+    } finally {
+      if (previousTimezone === undefined) delete environment.TZ
+      else environment.TZ = previousTimezone
+    }
   })
 
   it('renders an error state when diagnostics fail', async () => {

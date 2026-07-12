@@ -71,8 +71,9 @@ Go and Node.js are managed by direnv (in .envrc) and nvm respectively. All depen
 PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from the repo root.
 
 **PM2 usage notes**
-- Run `go run ./apps/signal-foundry/cmd/signal-foundry db-migrate --env local` before starting or restarting backend PM2 processes that rely on persisted tables.
-- Standard local backend workflow is `db-migrate` followed by `go run ./apps/signal-foundry/cmd/signal-foundry start-all --env local` (or `pm2 start ecosystem.config.js` to run the same shape under PM2).
+- From `apps/signal-foundry`, run `go run ./cmd/signal-foundry db-migrate --env local` before starting or restarting backend PM2 processes that rely on persisted tables.
+- Standard local backend workflow from `apps/signal-foundry` is `db-migrate` followed by `go run ./cmd/signal-foundry start-all --env local`.
+- PM2 is invoked from the repository root, but its backend process uses `apps/signal-foundry` as its working directory.
 - Run `pm2 start ecosystem.config.js` to create the PM2 apps from the current ecosystem file.
 - If the ecosystem command/args changed or you need a guaranteed fresh backend shape, recreate the app with `pm2 delete signal-foundry-api && pm2 start ecosystem.config.js`; PM2 can otherwise keep an older command definition.
 - Run `pm2 status` to see the status of all processes
@@ -116,6 +117,7 @@ The rules are:
 - Store temp files in a project scoped tmp directory (e.g ${PWD}/tmp/...)
 - Update project rules and conventions when user corrects the behavior of AI.
 - Each rule must aim to be a simple and clear one line (50-80 characters)
+- Backend tasks must be serialized; only unrelated frontend tasks run in parallel
 - `docs/ARCHITECTURE.md` is the source of truth for product direction.
 - Keep platform-internal skills under `.platform-agents/skills`.
 - Keep harness agnostic repo-local skills under `.agents/skills`.
@@ -126,7 +128,10 @@ The rules are:
 - Natural-language approval completes OpenSpec review by default.
 - Seed/reseed requests default to the first `.local-users` entry.
 - Reseed means replace local seeded data, then reopen the live DB.
+- Launch local backend CLI commands from `apps/signal-foundry`.
 - Avoid markdown tables, prefer lists or other formatting. Tables are hard to read by humans. Use tables only when user explicitly requests it.
+- Do not explicitly normalize dates or timestamps to UTC.
+- Consider SQLite as local-dev only storage. Small issues and inconsistencies are tolerable.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

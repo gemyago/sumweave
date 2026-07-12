@@ -56,7 +56,7 @@ func NewTenantService(store tenantServiceStore, opts ...TenantServiceOption) *Te
 	service := &TenantService{
 		store:  store,
 		access: newAccessGuard(store),
-		now:    func() time.Time { return time.Now().UTC() },
+		now:    time.Now,
 		newID:  uuid.NewString,
 	}
 	for _, opt := range opts {
@@ -81,7 +81,7 @@ func (s *TenantService) CreateTenant(
 		)
 	}
 
-	now := s.now().UTC()
+	now := s.now()
 	tenant := domain.Tenant{
 		ID:              s.newID(),
 		Name:            tenantName,
@@ -154,7 +154,7 @@ func (s *TenantService) UpdateTenant(
 		return domain.Tenant{}, fmt.Errorf("update tenant: %w", err)
 	}
 
-	now := s.now().UTC()
+	now := s.now()
 	tenant.Name = tenantName
 	tenant.DisplayCurrency = currency
 	tenant.UpdatedAt = now
@@ -178,7 +178,7 @@ func (s *TenantService) ArchiveTenant(
 	if err != nil {
 		return domain.Tenant{}, fmt.Errorf("archive tenant: %w", err)
 	}
-	now := s.now().UTC()
+	now := s.now()
 	tenant.ArchivedAt = &now
 	tenant.UpdatedAt = now
 	archived, err := s.store.SaveTenant(ctx, *tenant)
@@ -206,7 +206,7 @@ func (s *TenantService) CreateTenantInvite(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.TenantInvite{}, err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	invite := domain.TenantInvite{
 		ID:              s.newID(),
 		TenantID:        strings.TrimSpace(params.TenantID),
@@ -236,7 +236,7 @@ func (s *TenantService) AcceptTenantInvite(
 	if invite.AcceptedAt != nil {
 		return domain.TenantMembership{}, ErrInviteAccepted
 	}
-	now := s.now().UTC()
+	now := s.now()
 	membership := domain.TenantMembership{
 		TenantID:  invite.TenantID,
 		UserID:    strings.TrimSpace(params.ActorUserID),

@@ -340,7 +340,7 @@ func validateHyperliquidTradeRangeSupport(
 		return nil
 	}
 
-	earliestAvailable := time.UnixMilli(rows[0].Time).UTC()
+	earliestAvailable := time.UnixMilli(rows[0].Time)
 	if request.TimeRange.Start.Before(earliestAvailable) {
 		return validationError(
 			"hyperliquid perps trade time range is unsupported in v0 because recentTrades only exposes the latest venue window",
@@ -395,7 +395,7 @@ func (v *HyperliquidPerpsVenue) postInfoJSON(
 		return ReadResultMetadata{}, fmt.Errorf("marshal request body: %w", err)
 	}
 
-	requestAt := time.Now().UTC()
+	requestAt := time.Now()
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -417,8 +417,8 @@ func (v *HyperliquidPerpsVenue) postInfoJSON(
 	if err != nil {
 		return ReadResultMetadata{}, fmt.Errorf("read response body: %w", err)
 	}
-	responseAt := time.Now().UTC()
-	receivedAt := time.Now().UTC()
+	responseAt := time.Now()
+	receivedAt := time.Now()
 
 	metadata, err := v.recordRawEvidence(ctx, HyperliquidRawEvidenceCapture{
 		ID:                 uuid.NewString(),
@@ -515,7 +515,7 @@ func parseHyperliquidStartTimePageToken(pageToken, tokenKind string) (time.Time,
 		)
 	}
 
-	return time.UnixMilli(milliseconds).UTC(), nil
+	return time.UnixMilli(milliseconds), nil
 }
 
 func hyperliquidHTTPError(statusCode int, body []byte) error {
@@ -549,8 +549,8 @@ func mapHyperliquidCandle(
 		return domain.Candle{}, errors.New("decode response body: candle interval does not match request")
 	}
 
-	start := time.UnixMilli(row.OpenTime).UTC()
-	end := time.UnixMilli(row.CloseTime).UTC().Add(time.Millisecond)
+	start := time.UnixMilli(row.OpenTime)
+	end := time.UnixMilli(row.CloseTime).Add(time.Millisecond)
 	provenance, err := domain.NewSourceProvenance(
 		string(HyperliquidPerpsVenueName)+"-rest",
 		fmt.Sprintf("candle:%s:%s:%d", row.Symbol, row.Interval, row.OpenTime),
@@ -591,7 +591,7 @@ func mapHyperliquidTrade(instrument domain.Instrument, row hyperliquidTrade) (do
 
 	return domain.NewTrade(domain.TradeParams{
 		Instrument: instrument,
-		EventTime:  time.UnixMilli(row.Time).UTC(),
+		EventTime:  time.UnixMilli(row.Time),
 		Price:      float64(row.Price),
 		Size:       float64(row.Size),
 		Quality:    domain.DataQualityRaw,

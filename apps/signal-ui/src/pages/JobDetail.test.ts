@@ -26,7 +26,7 @@ function makeJobDetail(overrides: Record<string, unknown> = {}) {
   const completedAt = faker.date.soon({ refDate: startedAt })
   return {
     id: faker.string.uuid(),
-    jobType: 'historical_raw_candle_backfill',
+    jobType: 'data.historical_raw_candle_backfill',
     status: 'succeeded',
     requester: {
       userId: faker.string.uuid(),
@@ -123,6 +123,24 @@ describe('Job detail page', () => {
     render(JobDetail, { params: { jobId: 'job-123' } })
 
     expect(await screen.findByRole('alert')).toHaveTextContent('detail blew up')
+  })
+
+  it('renders an unknown job type as bounded generic metadata', async () => {
+    const job = {
+      ...makeJobDetail(),
+      jobType: 'future.reconciliation',
+      input: undefined,
+      result: undefined,
+    }
+    mocks.getJob.mockResolvedValue(job)
+
+    render(JobDetail, { params: { jobId: job.id } })
+
+    expect(await screen.findByText(job.id)).toBeInTheDocument()
+    expect(screen.getByText('future.reconciliation')).toBeInTheDocument()
+    expect(screen.getByText('Input details are not available for this job type in the current API surface.')).toBeInTheDocument()
+    expect(screen.getByText('Result details are not yet specialized for this job type.')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open data scope' })).not.toBeInTheDocument()
   })
 
   it('auto-refreshes queued jobs and stops once a terminal status is returned', async () => {

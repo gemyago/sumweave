@@ -52,8 +52,7 @@ func (s *AccountBalanceStore) ListAccountBalances(
 		Where("tenant_id = ?", params.TenantID).
 		Where("hidden_at IS NULL")
 	if params.EffectiveAtOnOrBefore != nil {
-		cutoffExclusive := startOfDay(*params.EffectiveAtOnOrBefore).AddDate(0, 0, 1)
-		query = query.Where("effective_at < ?", cutoffExclusive.UTC())
+		query = applyInstantAtOrBefore(query, "effective_at", *params.EffectiveAtOnOrBefore)
 	}
 	if len(params.AccountIDs) > 0 {
 		query = query.Where("account_id IN ?", params.AccountIDs)
@@ -71,9 +70,4 @@ func (s *AccountBalanceStore) ListAccountBalances(
 		})
 	}
 	return items, nil
-}
-
-func startOfDay(value time.Time) time.Time {
-	utc := value.UTC()
-	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 }

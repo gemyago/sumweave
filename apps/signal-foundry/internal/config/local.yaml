@@ -1,3 +1,22 @@
 # Create a local-user.yaml file to override settings for your local environment
 
 defaultLogLevel: DEBUG
+
+# Local paths are relative to the apps/signal-foundry working directory.
+dataDir: data
+
+dataLayer:
+  database:
+    dsn: data/data-layer.db
+
+finance:
+  fixtures:
+    database:
+      dsn: data/data-layer.db
+
+workspacefs:
+  platformAgentsPath: ../../.platform-agents
+
+skills:
+  paths:
+    - ../../.platform-agents/skills

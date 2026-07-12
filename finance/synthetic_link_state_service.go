@@ -96,7 +96,7 @@ func NewSyntheticLinkStateService(
 		access:             newAccessGuard(store),
 		pendingStartLookup: persistence.NewSyntheticPendingStartStoreFromStore(store),
 		stateStore:         persistence.NewSyntheticProviderStateStoreFromStore(store),
-		now:                func() time.Time { return time.Now().UTC() },
+		now:                time.Now,
 		newID:              uuid.NewString,
 	}
 	for _, opt := range opts {
@@ -148,15 +148,15 @@ func (s *SyntheticLinkStateService) SavePendingSyntheticLinkState(
 		return PendingSyntheticLinkState{}, err
 	}
 	providerReference := syntheticProviderReference(*pendingStart)
-	now := s.now().UTC()
+	now := s.now()
 	createdAt := now
 	windowHistory := []domain.SyntheticWindowHistoryEntry{}
-	sequenceCounters := []domain.SyntheticAccountDaySequenceCounter{}
+	sequenceCounters := []domain.SyntheticAccountInstantSequenceCounter{}
 	if existingState != nil {
 		createdAt = existingState.CreatedAt
 		windowHistory = append([]domain.SyntheticWindowHistoryEntry{}, existingState.Envelope.WindowHistory...)
 		sequenceCounters = append(
-			[]domain.SyntheticAccountDaySequenceCounter{},
+			[]domain.SyntheticAccountInstantSequenceCounter{},
 			existingState.Envelope.SequenceCounters...,
 		)
 	}
@@ -188,7 +188,7 @@ func (s *SyntheticLinkStateService) resolvePendingSyntheticState(
 		tenantID,
 		actorUserID,
 		state,
-		s.now().UTC(),
+		s.now(),
 	)
 	if err != nil {
 		if errors.Is(err, persistence.ErrPendingBankConnectionLinkStartNotFound) {

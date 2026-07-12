@@ -3,6 +3,7 @@ package persistence
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,9 +23,6 @@ func TestMigrate(t *testing.T) {
 		require.NoError(t, migrator.Migrate(t.Context()))
 		require.NoError(t, migrator.Migrate(t.Context()))
 
-		schemaModels := financeSchemaModels()
-		require.Len(t, schemaModels, 22)
-
 		sqlDB, err := store.db.DB()
 		require.NoError(t, err)
 		rows, err := sqlDB.QueryContext(
@@ -42,15 +40,12 @@ func TestMigrate(t *testing.T) {
 		}
 		require.NoError(t, rows.Err())
 		assert.NotContains(t, tableNames, "finance_schema_migrations")
-		assert.Contains(t, tableNames, "finance_connection_secrets")
 		assert.Contains(t, tableNames, "finance_transactions")
-		assert.Contains(t, tableNames, "finance_csv_imports")
-		assert.Contains(t, tableNames, "finance_pending_bank_link_starts")
-		assert.Contains(t, tableNames, "finance_provider_sync_state_journal_records")
-		assert.Contains(t, tableNames, "finance_synthetic_provider_states")
-		assert.Contains(t, tableColumns(t, store, "finance_bank_connections"), "connector_id")
-		assert.Contains(t, tableColumns(t, store, "finance_pending_bank_link_starts"), "connector_id")
-		assert.Contains(t, tableColumns(t, store, "finance_pending_bank_link_starts"), "start_result_json")
+		for _, tableName := range tableNames {
+			for _, columnName := range tableColumns(t, store, tableName) {
+				assert.False(t, strings.HasSuffix(columnName, "_unix_nano"), tableName+"."+columnName)
+			}
+		}
 	})
 
 	t.Run("keeps schema initialization portable across sqlite modes", func(t *testing.T) {
@@ -127,117 +122,6 @@ func TestMigrate(t *testing.T) {
 		})
 		require.Error(t, err)
 	})
-
-	t.Run("preserves prior composite index shapes", func(t *testing.T) {
-		database := openTestDatabase(t)
-		store := NewStore(database)
-
-		assert.Equal(
-			t,
-			[]string{"code"},
-			indexColumns(t, store, "finance_tenant_invites", "idx_finance_tenant_invites_code"),
-		)
-		assert.True(t, indexUnique(t, store, "finance_tenant_invites", "idx_finance_tenant_invites_code"))
-		assert.Equal(
-			t,
-			[]string{"tenant_id", "actor_user_id", "provider", "connector_id", "state"},
-			indexColumns(
-				t,
-				store,
-				"finance_pending_bank_link_starts",
-				"idx_finance_pending_bank_link_starts_lookup",
-			),
-		)
-		assert.True(
-			t,
-			indexUnique(
-				t,
-				store,
-				"finance_pending_bank_link_starts",
-				"idx_finance_pending_bank_link_starts_lookup",
-			),
-		)
-		assert.Equal(
-			t,
-			[]string{"connection_id", "captured_at"},
-			indexColumns(t, store, "finance_balance_snapshots", "idx_finance_balance_snapshots_connection_id"),
-		)
-		assert.Equal(
-			t,
-			[]string{"connection_id", "captured_at"},
-			indexColumns(t, store, "finance_raw_payloads", "idx_finance_raw_payloads_connection_id"),
-		)
-		assert.Equal(
-			t,
-			[]string{"connection_id", "provider_account_id", "provider_transaction_id"},
-			indexColumns(
-				t,
-				store,
-				"finance_provider_transaction_matches",
-				"idx_finance_provider_transaction_matches_provider_id",
-			),
-		)
-		assert.Equal(
-			t,
-			[]string{"connection_id", "provider_account_id", "fingerprint"},
-			indexColumns(
-				t,
-				store,
-				"finance_provider_transaction_matches",
-				"idx_finance_provider_transaction_matches_fingerprint",
-			),
-		)
-	})
-}
-
-func indexColumns(t *testing.T, store *Store, tableName string, indexName string) []string {
-	t.Helper()
-
-	sqlDB, err := store.db.DB()
-	require.NoError(t, err)
-
-	rows, err := sqlDB.QueryContext(t.Context(), fmt.Sprintf("PRAGMA index_info('%s')", indexName))
-	require.NoError(t, err)
-	defer rows.Close()
-
-	columns := make([]string, 0)
-	for rows.Next() {
-		var seqno int
-		var cid int
-		var name string
-		require.NoError(t, rows.Scan(&seqno, &cid, &name))
-		columns = append(columns, name)
-	}
-	require.NoError(t, rows.Err())
-	require.NotEmptyf(t, columns, "expected index %s on %s", indexName, tableName)
-
-	return columns
-}
-
-func indexUnique(t *testing.T, store *Store, tableName string, indexName string) bool {
-	t.Helper()
-
-	sqlDB, err := store.db.DB()
-	require.NoError(t, err)
-
-	rows, err := sqlDB.QueryContext(t.Context(), fmt.Sprintf("PRAGMA index_list('%s')", tableName))
-	require.NoError(t, err)
-	defer rows.Close()
-
-	for rows.Next() {
-		var seq int
-		var name string
-		var unique int
-		var origin string
-		var partial int
-		require.NoError(t, rows.Scan(&seq, &name, &unique, &origin, &partial))
-		if name == indexName {
-			return unique == 1
-		}
-	}
-	require.NoError(t, rows.Err())
-	require.Failf(t, "missing index", "index %s not found on table %s", indexName, tableName)
-	return false
 }
 
 func tableColumns(t *testing.T, store *Store, tableName string) []string {

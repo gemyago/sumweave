@@ -229,7 +229,7 @@ func (f *DurableBacktestFlow) Run(
 			backtestRun.RunID.String(),
 			failureReasonForError(err, "evaluation-failed"),
 			err,
-			canonicalRequest.timeRange.End.UTC(),
+			canonicalRequest.timeRange.End,
 		)
 	}
 
@@ -397,9 +397,9 @@ func (f *DurableBacktestFlow) evaluateBacktest(
 		)
 	}
 
-	replayClosePrices := make(map[time.Time]float64, len(replayedCandles))
+	replayClosePrices := make(map[int64]float64, len(replayedCandles))
 	for _, replayedCandle := range replayedCandles {
-		replayClosePrices[replayedCandle.Candle.TimeRange.End.UTC()] = replayedCandle.Candle.Close
+		replayClosePrices[replayedCandle.Candle.TimeRange.End.UnixNano()] = replayedCandle.Candle.Close
 	}
 
 	intentContexts, err := prepareLinkedIntentContexts(
@@ -653,7 +653,7 @@ func (f *DurableBacktestFlow) failBacktestRun(
 		RunID:          runID,
 		FailureReason:  failureReason,
 		FailureDetails: cause.Error(),
-		EndedAt:        domain.BacktestRunTime(endedAt.UTC()),
+		EndedAt:        domain.BacktestRunTime(endedAt),
 	})
 	if failErr != nil {
 		return fmt.Errorf("%w (fail backtest run: %s)", cause, failErr.Error())
@@ -684,14 +684,14 @@ func prepareLinkedIntentContexts(
 	auditRecorder durableAuditRecorder,
 	request canonicalPaperBacktestRequest,
 	actions []domain.CandidateAction,
-	replayClosePrices map[time.Time]float64,
+	replayClosePrices map[int64]float64,
 	datasetReference domain.DatasetReference,
 ) ([]audit.IntentContext, error) {
 	contexts := make([]audit.IntentContext, 0, len(actions))
 
 	for idx, action := range actions {
-		decisionTime := action.DecisionTime.Time().UTC()
-		limitPrice, ok := replayClosePrices[decisionTime]
+		decisionTime := action.DecisionTime.Time()
+		limitPrice, ok := replayClosePrices[decisionTime.UnixNano()]
 		if !ok {
 			return nil, fmt.Errorf(
 				"prepare order intent %d limit price: replay candle close price is required at decision time",
@@ -748,9 +748,9 @@ func buildDatasetReference(
 	request canonicalPaperBacktestRequest,
 	replayedCandles []data.ReplayCandle,
 ) (domain.DatasetReference, error) {
-	createdAt := request.timeRange.End.UTC()
+	createdAt := request.timeRange.End
 	if len(replayedCandles) > 0 {
-		createdAt = replayedCandles[len(replayedCandles)-1].Candle.TimeRange.End.UTC()
+		createdAt = replayedCandles[len(replayedCandles)-1].Candle.TimeRange.End
 	}
 	replayChecksum := replayChecksum(request, replayedCandles)
 
@@ -794,8 +794,8 @@ func buildBacktestRun(
 		},
 		ExecutionSimulatorVersion: "closed-candle-limit-v0",
 		Status:                    domain.BacktestRunStatusPending,
-		CreatedAt:                 request.timeRange.Start.UTC(),
-		UpdatedAt:                 request.timeRange.Start.UTC(),
+		CreatedAt:                 request.timeRange.Start,
+		UpdatedAt:                 request.timeRange.Start,
 	})
 	if err != nil {
 		return domain.BacktestRun{}, validationError(err.Error())
@@ -918,13 +918,13 @@ func replayChecksum(
 		request.instrument.Symbol.String(),
 		request.instrument.AssetClass.String(),
 		request.timeframe.String(),
-		request.timeRange.Start.UTC().Format(time.RFC3339Nano),
-		request.timeRange.End.UTC().Format(time.RFC3339Nano),
+		strconv.FormatInt(request.timeRange.Start.UnixNano(), 10),
+		strconv.FormatInt(request.timeRange.End.UnixNano(), 10),
 	}
 	for _, replayedCandle := range replayedCandles {
 		parts = append(parts,
 			strconv.FormatUint(replayedCandle.Identity, 10),
-			replayedCandle.Candle.TimeRange.End.UTC().Format(time.RFC3339Nano),
+			strconv.FormatInt(replayedCandle.Candle.TimeRange.End.UnixNano(), 10),
 			strconv.FormatFloat(replayedCandle.Candle.Open, 'g', -1, 64),
 			strconv.FormatFloat(replayedCandle.Candle.High, 'g', -1, 64),
 			strconv.FormatFloat(replayedCandle.Candle.Low, 'g', -1, 64),
@@ -1115,13 +1115,13 @@ func governorDecisionReference(decision domain.GovernorDecision) string {
 			strategyIdentity.Timeframe.String(),
 			strategyIdentity.Kind.String(),
 			action.Kind.String(),
-			action.DecisionTime.Time().UTC().Format(time.RFC3339Nano),
-			inputRange.Start.UTC().Format(time.RFC3339Nano),
-			inputRange.End.UTC().Format(time.RFC3339Nano),
+			strconv.FormatInt(action.DecisionTime.Time().UnixNano(), 10),
+			strconv.FormatInt(inputRange.Start.UnixNano(), 10),
+			strconv.FormatInt(inputRange.End.UnixNano(), 10),
 			action.Quality.String(),
 			decision.Status.String(),
 			decision.Reason.String(),
-			decision.DecisionTime.Time().UTC().Format(time.RFC3339Nano),
+			strconv.FormatInt(decision.DecisionTime.Time().UnixNano(), 10),
 		}, "|"),
 	)
 }
@@ -1132,7 +1132,7 @@ func linkedReportTime(
 	portfolioSnapshots []domain.PortfolioSnapshot,
 	fills []domain.ExecutionFill,
 ) time.Time {
-	latest := request.timeRange.End.UTC()
+	latest := request.timeRange.End
 	for _, decision := range decisions {
 		if decision.DecisionTime.Time().After(latest) {
 			latest = decision.DecisionTime.Time()
@@ -1149,7 +1149,7 @@ func linkedReportTime(
 		}
 	}
 
-	return latest.UTC()
+	return latest
 }
 
 func copyMetadata(metadata map[string]string) map[string]string {

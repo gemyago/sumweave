@@ -109,6 +109,35 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 			assert.Equal(t, m1.BaseURL, result[0].BaseURL)
 			assert.Equal(t, m1.APIKey, result[0].APIKey)
 		})
+
+		t.Run("preserves canonical creation timestamp ordering", func(t *testing.T) {
+			svc := makeService(t)
+			earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+			later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+			require.True(t, earlier.Before(later))
+
+			earlierModel := insertModel(t, svc)
+			laterModel := insertModel(t, svc)
+			for _, update := range []struct {
+				name      string
+				createdAt time.Time
+			}{
+				{name: earlierModel.Name, createdAt: earlier},
+				{name: laterModel.Name, createdAt: later},
+			} {
+				require.NoError(t, svc.db.Model(&providerConfigModel{}).
+					Where("name = ?", update.name).
+					UpdateColumn("created_at", update.createdAt).Error)
+			}
+
+			result, err := svc.List(t.Context())
+			require.NoError(t, err)
+			require.Len(t, result, 2)
+			assert.Equal(t, earlierModel.Name, result[0].Name)
+			assert.Equal(t, laterModel.Name, result[1].Name)
+			assert.Equal(t, earlier.Format(time.RFC3339Nano), result[0].CreatedAt.Format(time.RFC3339Nano))
+			assert.Equal(t, later.Format(time.RFC3339Nano), result[1].CreatedAt.Format(time.RFC3339Nano))
+		})
 	})
 
 	t.Run("Get", func(t *testing.T) {

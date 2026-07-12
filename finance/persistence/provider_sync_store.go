@@ -110,7 +110,7 @@ func (s *Store) SavePendingBankConnectionLinkStart(
 ) (domain.PendingBankConnectionLinkStart, error) {
 	model := newPendingBankConnectionLinkStartModel(start)
 	if model.CreatedAt.IsZero() {
-		model.CreatedAt = s.now().UTC()
+		model.CreatedAt = s.now()
 	}
 	if model.UpdatedAt.IsZero() {
 		model.UpdatedAt = model.CreatedAt
@@ -137,12 +137,13 @@ func (s *Store) ConsumePendingBankConnectionLinkStart(
 	trimmedActorUserID := strings.TrimSpace(actorUserID)
 	trimmedProvider := strings.TrimSpace(provider)
 	trimmedState := strings.TrimSpace(state)
-	normalizedConsumedAt := consumedAt.UTC()
+	normalizedConsumedAt := consumedAt
 
 	result := s.db.WithContext(ctx).
 		Table(lookup.TableName()).
 		Where(
-			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND state = ? AND consumed_at IS NULL AND expires_at > ?",
+			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND state = ? AND consumed_at IS NULL AND "+
+				expiresAfterPredicate(s.db),
 			trimmedTenantID,
 			trimmedActorUserID,
 			trimmedProvider,
@@ -190,7 +191,7 @@ func (s *Store) RestorePendingBankConnectionLinkStart(
 	trimmedActorUserID := strings.TrimSpace(actorUserID)
 	trimmedProvider := strings.TrimSpace(provider)
 	trimmedState := strings.TrimSpace(state)
-	normalizedRestoredAt := restoredAt.UTC()
+	normalizedRestoredAt := restoredAt
 
 	result := s.db.WithContext(ctx).
 		Table(lookup.TableName()).
@@ -531,6 +532,7 @@ func (s *Store) GetProviderTransactionMatchByFingerprint(
 			strings.TrimSpace(fingerprint),
 		).
 		Order("updated_at DESC").
+		Order("id DESC").
 		First(&model).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrProviderTransactionMatchNotFound
@@ -552,7 +554,7 @@ func (s *Store) SaveProviderTransactionMatch(
 			Columns: []clause.Column{{Name: "id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"provider_transaction_id",
-				"fingerprint",
+				columnFingerprint,
 				"transaction_id",
 				"status",
 				columnUpdatedAt,

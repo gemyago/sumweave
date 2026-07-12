@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import Evaluations from './Evaluations.svelte'
 import EvaluationDetail from './EvaluationDetail.svelte'
 import { formatCompactIdentifier } from '../lib/compact-identifier'
+import { formatLocalDateTime } from '../lib/timestamp'
 import type { EvaluationDetail as EvaluationDetailModel, EvaluationEvidence, EvaluationReport, EvaluationRow, StrategyVersionRow } from '../lib/strategy-workspace/api'
 
 const mocks = vi.hoisted(() => ({
@@ -200,7 +201,7 @@ function deferred<T>() {
 }
 
 function formatDate(value: Date): string {
-  return value.toISOString().replace('T', ' ').slice(0, 16) + 'Z'
+  return formatLocalDateTime(value)
 }
 
 function hasExactTextContent(expected: string) {
@@ -211,10 +212,10 @@ async function fillUtcRange(
   _user: ReturnType<typeof userEvent.setup>,
   range: { startDate: string; startTime: string; endDate: string; endTime: string },
 ) {
-  const startDate = screen.getByLabelText('UTC start date') as HTMLInputElement
-  const startTime = screen.getByLabelText('UTC start time') as HTMLInputElement
-  const endDate = screen.getByLabelText('UTC end date') as HTMLInputElement
-  const endTime = screen.getByLabelText('UTC end time') as HTMLInputElement
+  const startDate = screen.getByLabelText('Start date') as HTMLInputElement
+  const startTime = screen.getByLabelText('Start time') as HTMLInputElement
+  const endDate = screen.getByLabelText('End date') as HTMLInputElement
+  const endTime = screen.getByLabelText('End time') as HTMLInputElement
 
   await fireEvent.input(startDate, { target: { value: range.startDate } })
   await fireEvent.change(startDate, { target: { value: range.startDate } })
@@ -354,7 +355,7 @@ describe('Evaluations pages', () => {
     })
     await user.click(screen.getByRole('button', { name: 'Start evaluation' }))
 
-    expect((await screen.findAllByText('UTC start must be earlier than UTC end.')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Start must be earlier than end.')).length).toBeGreaterThan(0)
     expect(mocks.createEvaluationBacktest).not.toHaveBeenCalled()
   })
 

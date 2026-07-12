@@ -4,6 +4,9 @@ Follow preparation steps in [README.md](./README.md) and get the API token befor
 
 This guide stays on the public HTTP API only. It replaces the old temporary Go helper with the real synthetic start/configure/finish endpoints.
 
+For the scheduled-sync lifecycle and worker assertions, see
+[finance-scheduled-sync-lifecycle-e2e.md](./finance-scheduled-sync-lifecycle-e2e.md).
+
 ## 1. Create a fresh finance tenant
 
 Use a unique tenant name on each run.
@@ -109,7 +112,8 @@ Expected:
 
 ## 9. Wait for sync completion
 
-The sync runs asynchronously. Poll the connection until `lastSuccessfulSyncAt` is no longer the zero timestamp.
+The sync runs asynchronously. Poll the connection until `lastSuccessfulSyncAt`
+is present and not `null`.
 
 ```bash
 for attempt in 1 2 3 4 5 6 7 8 9 10; do curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections" -H "Authorization: Bearer ${ACCESS_TOKEN}" > /tmp/synthetic-provider-connections-after-sync.json && CONNECTION_ID="$CONNECTION_ID" python3 - <<'PY'
@@ -118,7 +122,7 @@ connection_id = os.environ['CONNECTION_ID']
 items = json.load(open('/tmp/synthetic-provider-connections-after-sync.json'))['items']
 item = next((x for x in items if x['id'] == connection_id), None)
 assert item is not None, 'connection missing during poll'
-if item.get('lastSuccessfulSyncAt') and item['lastSuccessfulSyncAt'] != '0001-01-01T00:00:00Z':
+if item.get('lastSuccessfulSyncAt') not in (None, ""):
     print(item['lastSuccessfulSyncAt'])
     sys.exit(0)
 sys.exit(1)
@@ -131,7 +135,8 @@ done
 Expected:
 
 - the poll exits successfully within a few attempts
-- the connection now shows non-zero `lastSyncStartedAt` and `lastSuccessfulSyncAt`
+- the connection now shows non-null, non-empty `lastSyncStartedAt` and
+  `lastSuccessfulSyncAt`
 
 ## 10. Verify linked accounts and provider transactions
 

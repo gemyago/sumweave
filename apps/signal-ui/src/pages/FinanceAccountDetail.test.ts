@@ -12,7 +12,7 @@ describe('Finance account detail page', () => {
     window.localStorage.clear()
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTenants.mockResolvedValue([{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now }])
-    mocks.listAccounts.mockResolvedValue([{ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now }])
+    mocks.listAccounts.mockResolvedValue([{ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', bookedBalanceMinor: 2500, pendingBalanceMinor: 0, provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now }])
     mocks.listTransactions.mockResolvedValue([{ id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 1200, currency: 'USD', description: 'Groceries', effectiveAt: now, categoryId: null, transferGroupId: null, transferMatchedAt: null, hiddenAt: null, createdAt: now, updatedAt: now }])
   })
 
@@ -20,6 +20,13 @@ describe('Finance account detail page', () => {
     render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
     expect(await screen.findByText('Checking')).toBeInTheDocument()
     expect(screen.getByText('Groceries')).toBeInTheDocument()
+  })
+
+  it('renders booked and pending balances in the account summary', async () => {
+    render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
+
+    expect(await screen.findByText('Booked balance 25.00 USD')).toBeInTheDocument()
+    expect(screen.getByText('Pending balance 0.00 USD')).toBeInTheDocument()
   })
 
   it('renders an empty recent-transactions state', async () => {

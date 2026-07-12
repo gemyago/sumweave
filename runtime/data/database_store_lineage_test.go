@@ -37,6 +37,11 @@ func TestDatabaseStoreLineage(t *testing.T) {
 	}
 
 	randomTime := func() time.Time {
+		offsetHours := fake.IntBetween(-11, 12)
+		if offsetHours == 0 {
+			offsetHours = 1
+		}
+
 		return time.Date(
 			fake.IntBetween(2020, 2035),
 			time.Month(fake.IntBetween(1, 12)),
@@ -45,9 +50,10 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 999999999),
-			time.FixedZone(randomWord("zone"), fake.IntBetween(-11, 12)*3600),
+			time.FixedZone("", offsetHours*3600),
 		)
 	}
+	timePointer := func(value time.Time) *time.Time { return &value }
 
 	readCount := func(t *testing.T, store *DatabaseStore, tableName string) int64 {
 		t.Helper()
@@ -256,6 +262,22 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			)
 			require.Equal(t, want, columnNames(columns))
 		}
+		assertNullable := func(tableName string, columnName string) {
+			t.Helper()
+
+			var columns []sqliteTableInfoRow
+			require.NoError(
+				t,
+				store.db.Raw(fmt.Sprintf("PRAGMA table_info('%s')", tableName)).Scan(&columns).Error,
+			)
+			for _, column := range columns {
+				if column.Name == columnName {
+					require.Zero(t, column.NotNull, tableName+"."+columnName)
+					return
+				}
+			}
+			require.Fail(t, "column not found", tableName+"."+columnName)
+		}
 
 		assertColumns(tablePrefix+"ingestion_runs", []string{
 			"id",
@@ -310,6 +332,10 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			"raw_payload_id",
 			"created_at",
 		})
+		assertNullable(tablePrefix+"ingestion_runs", "completed_at")
+		assertNullable(tablePrefix+"normalization_runs", "completed_at")
+		assertNullable(tablePrefix+"raw_venue_payloads", "start_at")
+		assertNullable(tablePrefix+"raw_venue_payloads", "end_at")
 		assertColumns(tablePrefix+"data_batches", []string{
 			"id",
 			"normalization_run_id",
@@ -436,7 +462,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 		})
 	})
 
-	t.Run("UpsertIngestionRun updates one row and normalizes UTC timestamps", func(t *testing.T) {
+	t.Run("UpsertIngestionRun updates one row and preserves timestamp instants", func(t *testing.T) {
 		t.Parallel()
 
 		store := makeStore(t, "")
@@ -444,7 +470,8 @@ func TestDatabaseStoreLineage(t *testing.T) {
 
 		persisted, err := store.UpsertIngestionRun(t.Context(), run)
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, persisted.StartedAt.Location())
+		require.True(t, run.StartedAt.Equal(persisted.StartedAt))
+		require.Nil(t, persisted.CompletedAt)
 
 		updated, err := NewIngestionRun(IngestionRunParams{
 			ID:           run.ID,
@@ -452,7 +479,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			Venue:        run.Venue,
 			Status:       IngestionRunStatusSucceeded,
 			StartedAt:    run.StartedAt,
-			CompletedAt:  run.StartedAt.Add(2 * time.Minute),
+			CompletedAt:  timePointer(run.StartedAt.Add(2 * time.Minute)),
 			RecordCount:  run.RecordCount + 7,
 			ErrorSummary: randomWord("summary"),
 		})
@@ -462,6 +489,74 @@ func TestDatabaseStoreLineage(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, updated, persistedUpdated)
 		require.Equal(t, int64(1), readCount(t, store, "ingestion_runs"))
+	})
+
+	t.Run("lineage model mappers preserve offsets and nullable timestamps", func(t *testing.T) {
+		t.Parallel()
+
+		startedAt := randomTime()
+		completedAt := startedAt.Add(time.Minute)
+		run, err := NewIngestionRun(IngestionRunParams{
+			ID:          randomWord("ingestion-run"),
+			Source:      randomWord("source"),
+			Venue:       domain.Venue(randomWord("venue")),
+			Status:      IngestionRunStatusStarted,
+			StartedAt:   startedAt,
+			RecordCount: fake.IntBetween(0, 1000),
+		})
+		require.NoError(t, err)
+
+		startedModel := ingestionRunToModel(run)
+		require.Equal(t, startedAt, startedModel.StartedAt)
+		require.Nil(t, startedModel.CompletedAt)
+
+		run.Status = IngestionRunStatusSucceeded
+		run.CompletedAt = &completedAt
+		completedModel := ingestionRunToModel(run)
+		require.Equal(t, &completedAt, completedModel.CompletedAt)
+		mappedRun, err := ingestionRunModelToDomain(completedModel)
+		require.NoError(t, err)
+		require.Equal(t, startedAt, mappedRun.StartedAt)
+		require.Equal(t, &completedAt, mappedRun.CompletedAt)
+
+		payload := makeRawVenuePayload(t, run.ID)
+		payload.TimeRange = nil
+		payloadModel, err := rawVenuePayloadToModel(payload)
+		require.NoError(t, err)
+		require.Nil(t, payloadModel.StartAt)
+		require.Nil(t, payloadModel.EndAt)
+		require.Equal(t, payload.ReceivedAt, payloadModel.ReceivedAt)
+
+		mappedPayload, err := rawVenuePayloadModelToDomain(payloadModel)
+		require.NoError(t, err)
+		require.Nil(t, mappedPayload.TimeRange)
+		require.Equal(t, payload.RequestAt, mappedPayload.RequestAt)
+		require.Equal(t, payload.ResponseAt, mappedPayload.ResponseAt)
+		require.Equal(t, payload.ReceivedAt, mappedPayload.ReceivedAt)
+	})
+
+	t.Run("persistence rejects zero lineage timestamps before writing", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		zero := time.Time{}
+		run := makeIngestionRun(t)
+		run.Status = IngestionRunStatusSucceeded
+		run.CompletedAt = &zero
+
+		_, err := store.UpsertIngestionRun(t.Context(), run)
+		require.ErrorIs(t, err, ErrValidation)
+		require.Equal(t, int64(0), readCount(t, store, "ingestion_runs"))
+
+		validRun := makeIngestionRun(t)
+		_, err = store.UpsertIngestionRun(t.Context(), validRun)
+		require.NoError(t, err)
+
+		payload := makeRawVenuePayload(t, validRun.ID)
+		payload.TimeRange = &domain.TimeRange{Start: zero, End: payload.ReceivedAt}
+		_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+		require.ErrorIs(t, err, ErrValidation)
+		require.Equal(t, int64(0), readCount(t, store, "raw_venue_payloads"))
 	})
 
 	t.Run("UpsertRawVenuePayload supports standalone rows and preserves body refs", func(t *testing.T) {
@@ -510,7 +605,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 
 		persisted, err := store.UpsertRawVenuePayload(t.Context(), payload)
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, persisted.ReceivedAt.Location())
+		require.True(t, payload.ReceivedAt.Equal(persisted.ReceivedAt))
 		require.Contains(t, persisted.RequestMetadata, "safe-request-id")
 		require.NotContains(t, persisted.RequestMetadata, "Authorization")
 		require.NotContains(t, persisted.RequestMetadata, "cookie")
@@ -596,14 +691,15 @@ func TestDatabaseStoreLineage(t *testing.T) {
 		persisted, err := store.UpsertNormalizationRun(t.Context(), normalizationRun)
 		require.NoError(t, err)
 		require.ElementsMatch(t, []string{payloadOne.ID, payloadTwo.ID}, persisted.RawPayloadIDs)
-		require.Equal(t, time.UTC, persisted.StartedAt.Location())
+		require.True(t, normalizationRun.StartedAt.Equal(persisted.StartedAt))
+		require.Nil(t, persisted.CompletedAt)
 
 		updated, err := NewNormalizationRun(NormalizationRunParams{
 			ID:                   normalizationRun.ID,
 			RawPayloadIDs:        []string{payloadTwo.ID, payloadOne.ID, payloadOne.ID},
 			Status:               NormalizationRunStatusFailed,
 			StartedAt:            normalizationRun.StartedAt,
-			CompletedAt:          normalizationRun.StartedAt.Add(3 * time.Minute),
+			CompletedAt:          timePointer(normalizationRun.StartedAt.Add(3 * time.Minute)),
 			RecordKind:           normalizationRun.RecordKind,
 			SourceRecordCount:    normalizationRun.SourceRecordCount + 1,
 			CanonicalRecordCount: normalizationRun.CanonicalRecordCount + 2,
@@ -708,8 +804,8 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			require.Equal(t, runOne.ID, audit.RawPayloads[0].IngestionRun.ID)
 			require.Equal(t, runOne.ID, audit.RawPayloads[1].IngestionRun.ID)
 			require.Equal(t, runTwo.ID, audit.RawPayloads[2].IngestionRun.ID)
-			require.Equal(t, time.UTC, audit.RawPayloads[0].Payload.ReceivedAt.Location())
-			require.Equal(t, time.UTC, audit.RawPayloads[2].IngestionRun.StartedAt.Location())
+			require.True(t, payloadSameTimeFirstID.ReceivedAt.Equal(audit.RawPayloads[0].Payload.ReceivedAt))
+			require.True(t, runTwo.StartedAt.Equal(audit.RawPayloads[2].IngestionRun.StartedAt))
 		},
 	)
 
@@ -731,7 +827,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			RawPayloadIDs:        []string{payload.ID},
 			Status:               NormalizationRunStatusSucceeded,
 			StartedAt:            normalizationStartedAt,
-			CompletedAt:          normalizationStartedAt.Add(time.Minute),
+			CompletedAt:          timePointer(normalizationStartedAt.Add(time.Minute)),
 			RecordKind:           LineageRecordKindCandle,
 			SourceRecordCount:    fake.IntBetween(1, 1000),
 			CanonicalRecordCount: fake.IntBetween(1, 1000),
@@ -787,7 +883,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			RawPayloadIDs:        []string{payload.ID},
 			Status:               NormalizationRunStatusSucceeded,
 			StartedAt:            tradeNormalizationStartedAt,
-			CompletedAt:          tradeNormalizationStartedAt.Add(time.Minute),
+			CompletedAt:          timePointer(tradeNormalizationStartedAt.Add(time.Minute)),
 			RecordKind:           LineageRecordKindTrade,
 			SourceRecordCount:    fake.IntBetween(1, 1000),
 			CanonicalRecordCount: fake.IntBetween(1, 1000),
@@ -856,7 +952,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			RawPayloadIDs:        []string{payload.ID},
 			Status:               NormalizationRunStatusSucceeded,
 			StartedAt:            candleNormalizationStartedAt,
-			CompletedAt:          candleNormalizationStartedAt.Add(time.Minute),
+			CompletedAt:          timePointer(candleNormalizationStartedAt.Add(time.Minute)),
 			RecordKind:           LineageRecordKindCandle,
 			SourceRecordCount:    1,
 			CanonicalRecordCount: 1,
@@ -871,7 +967,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			RawPayloadIDs:        []string{payload.ID},
 			Status:               NormalizationRunStatusSucceeded,
 			StartedAt:            tradeNormalizationStartedAt,
-			CompletedAt:          tradeNormalizationStartedAt.Add(time.Minute),
+			CompletedAt:          timePointer(tradeNormalizationStartedAt.Add(time.Minute)),
 			RecordKind:           LineageRecordKindTrade,
 			SourceRecordCount:    1,
 			CanonicalRecordCount: 1,
@@ -1062,8 +1158,8 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			Symbol:         domain.Symbol("BTC-USD"),
 			AssetClass:     domain.AssetClassCrypto,
 			Timeframe:      domain.Timeframe1m,
-			StartAt:        matchingFirst.TimeRange.Start,
-			EndAt:          matchingFirst.TimeRange.End.Add(time.Second),
+			StartAt:        timePointer(matchingFirst.TimeRange.Start),
+			EndAt:          timePointer(matchingFirst.TimeRange.End.Add(time.Second)),
 			IngestionRunID: run.ID,
 			EntityHint:     "candle",
 			Endpoint:       "/info",
@@ -1094,6 +1190,96 @@ func TestDatabaseStoreLineage(t *testing.T) {
 		require.Len(t, secondPage.Items, 1)
 		require.Equal(t, matchingSecond.ID, secondPage.Items[0].ID)
 		require.Empty(t, secondPage.NextCursor)
+
+		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789, time.FixedZone("east", 2*60*60))
+		mixedPayload := makeScopedPayload("payload-mixed-"+randomWord("id"), mixedOffsetAt)
+		mixedPayload.Endpoint = "/mixed-offset"
+		mixedPayload, err = NewRawVenuePayload(RawVenuePayloadParams(mixedPayload))
+		require.NoError(t, err)
+		_, err = store.UpsertRawVenuePayload(t.Context(), mixedPayload)
+		require.NoError(t, err)
+		mixedQuery, err := NewRawPayloadMetadataListQuery(RawPayloadMetadataListQueryParams{
+			Venue:          run.Venue,
+			StartAt:        timePointer(time.Date(2025, time.December, 31, 21, 30, 0, 0, time.UTC)),
+			EndAt:          timePointer(time.Date(2025, time.December, 31, 22, 30, 1, 0, time.UTC)),
+			IngestionRunID: run.ID,
+			Endpoint:       mixedPayload.Endpoint,
+			Limit:          10,
+		})
+		require.NoError(t, err)
+		mixedResult, err := store.ListRawPayloadMetadata(t.Context(), mixedQuery)
+		require.NoError(t, err)
+		require.Equal(t, []string{mixedPayload.ID}, []string{mixedResult.Items[0].ID})
+	})
+
+	t.Run("ListRawPayloadMetadata finds scoped candle evidence when raw metadata omits instrument", func(t *testing.T) {
+		t.Parallel()
+
+		store := makeStore(t, "")
+		start := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.FixedZone("e2e-new-york", -4*60*60))
+		end := start.Add(12 * time.Hour)
+		completedAt := end
+		run, err := NewIngestionRun(IngestionRunParams{
+			ID:          randomWord("ingestion-run"),
+			Source:      "hyperliquid-perps-rest",
+			Venue:       domain.Venue("hyperliquid-perps"),
+			Status:      IngestionRunStatusSucceeded,
+			StartedAt:   start,
+			CompletedAt: &completedAt,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertIngestionRun(t.Context(), run)
+		require.NoError(t, err)
+
+		payload, err := NewRawVenuePayload(RawVenuePayloadParams{
+			ID:                 randomWord("raw-payload"),
+			IngestionRunID:     run.ID,
+			Source:             run.Source,
+			Venue:              run.Venue,
+			Endpoint:           "/info",
+			RequestType:        "candleSnapshot",
+			RequestPayloadHash: randomWord("request-hash"),
+			RequestAt:          start.Add(-2 * time.Second),
+			ResponseAt:         start.Add(-time.Second),
+			HTTPStatus:         200,
+			ResponseBodyHash:   randomWord("response-hash"),
+			PayloadBodyRef:     randomWord("payload-ref"),
+			EntityHint:         "candle",
+			Timeframe:          domain.Timeframe1h,
+			TimeRange:          &domain.TimeRange{Start: start, End: end},
+			ReceivedAt:         start,
+		})
+		require.NoError(t, err)
+		_, err = store.UpsertRawVenuePayload(t.Context(), payload)
+		require.NoError(t, err)
+
+		instrument := domain.Instrument{
+			Venue:      run.Venue,
+			Symbol:     domain.Symbol("BTC"),
+			AssetClass: domain.AssetClassFuture,
+			Active:     true,
+		}
+		instrument, err = store.UpsertInstrument(t.Context(), instrument)
+		require.NoError(t, err)
+		candle := makeCandle(t, instrument, domain.TimeRange{Start: start, End: start.Add(time.Hour)})
+		_, err = store.UpsertCandle(t.Context(), candle)
+		require.NoError(t, err)
+		require.NoError(t, store.LinkRawPayloadToCandle(t.Context(), payload.ID, candle))
+
+		query, err := NewRawPayloadMetadataListQuery(RawPayloadMetadataListQueryParams{
+			Venue:      run.Venue,
+			Symbol:     instrument.Symbol,
+			AssetClass: instrument.AssetClass,
+			Timeframe:  domain.Timeframe1h,
+			StartAt:    timePointer(start),
+			EndAt:      timePointer(end),
+		})
+		require.NoError(t, err)
+
+		result, err := store.ListRawPayloadMetadata(t.Context(), query)
+		require.NoError(t, err)
+		require.Len(t, result.Items, 1)
+		require.Equal(t, payload.ID, result.Items[0].ID)
 	})
 
 	t.Run("GetRawPayloadMetadata returns metadata only and reports not found", func(t *testing.T) {
@@ -1237,7 +1423,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			RawPayloadIDs:        []string{payload.ID},
 			Status:               NormalizationRunStatusSucceeded,
 			StartedAt:            candleNormalizationStartedAt,
-			CompletedAt:          candleNormalizationStartedAt.Add(time.Minute),
+			CompletedAt:          timePointer(candleNormalizationStartedAt.Add(time.Minute)),
 			RecordKind:           LineageRecordKindCandle,
 			SourceRecordCount:    2,
 			CanonicalRecordCount: 2,
@@ -1294,7 +1480,7 @@ func TestDatabaseStoreLineage(t *testing.T) {
 			RawPayloadIDs:        []string{payload.ID},
 			Status:               NormalizationRunStatusSucceeded,
 			StartedAt:            tradeNormalizationStartedAt,
-			CompletedAt:          tradeNormalizationStartedAt.Add(time.Minute),
+			CompletedAt:          timePointer(tradeNormalizationStartedAt.Add(time.Minute)),
 			RecordKind:           LineageRecordKindTrade,
 			SourceRecordCount:    2,
 			CanonicalRecordCount: 2,

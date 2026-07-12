@@ -16,6 +16,7 @@ import type {
   SessionListResponse,
   UpdateProviderRequest,
 } from './types'
+import { ResponseTimestampError, parseRequiredResponseTimestamp } from '../timestamp'
 
 export type { paths }
 
@@ -34,6 +35,13 @@ function throwJsonApiError(operation: string, error: unknown): never {
       ? JSON.stringify(error)
       : String(error)
   throw new Error(`Agent API ${operation} failed: ${suffix}`)
+}
+
+export class AgentResponseError extends ResponseTimestampError {
+  constructor(params: { field: string; issue: string }) {
+    super({ api: 'Agent', ...params })
+    this.name = 'AgentResponseError'
+  }
 }
 
 /** Pre-configured Agent API (one `openapi-fetch` client per factory call). */
@@ -151,7 +159,23 @@ export function createSignalAgentApi(params: {
         },
       })
       if (error) throwJsonApiError('GET /sessions', error)
-      return data!
+      return {
+        ...data!,
+        sessions: data!.sessions.map((session) => ({
+          ...session,
+          createdAt: parseAgentTimestamp(session.createdAt, 'agent.session.createdAt'),
+          updatedAt: parseAgentTimestamp(session.updatedAt, 'agent.session.updatedAt'),
+        })),
+      }
     },
+  }
+}
+
+function parseAgentTimestamp(value: unknown, field: string): Date {
+  try {
+    return parseRequiredResponseTimestamp(value, { api: 'Agent', field })
+  } catch (error) {
+    if (error instanceof ResponseTimestampError) throw new AgentResponseError({ field, issue: error.message.split(`${field} `)[1] ?? 'is invalid' })
+    throw error
   }
 }

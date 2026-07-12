@@ -144,6 +144,15 @@ describe('createSignalDataApi', () => {
     expect(requestUrl.searchParams.get('endpoint')).toBeNull()
   })
 
+  it('omits undefined optional timestamp filters', async () => {
+    const authFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+    const api = createSignalDataApi({ baseUrl: '/api/v1/data', fetch: authFetch })
+
+    await api.listRawPayloads({ venue: 'hyperliquid-perps' })
+    expect(new URL(authFetch.mock.calls[0][0] as string).searchParams.has('start')).toBe(false)
+    expect(authFetch).toHaveBeenCalledOnce()
+  })
+
   it('serializes availability filters and maps nested availability response dates', async () => {
     const availability = makeAvailabilityJson()
     const nextCursor = faker.string.alphanumeric(10)
@@ -273,6 +282,25 @@ describe('createSignalDataApi', () => {
     expect(response.items[0].symbol).toBeNull()
     expect(response.items[0].start).toBeNull()
     expect(response.items[0].end).toBeNull()
+  })
+
+  it('preserves null and omitted raw-payload range timestamps but rejects empty or malformed response timestamps', async () => {
+    const nullablePayload = { ...makeRawPayloadJson(), start: null, end: undefined }
+    const malformedPayload = { ...makeRawPayloadJson(), requestAt: '', responseAt: 'not-a-timestamp' }
+    const authFetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [nullablePayload] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [malformedPayload] }), { status: 200 }))
+    const api = createSignalDataApi({ baseUrl: '/api/v1/data', fetch: authFetch })
+
+    const nullable = await api.listRawPayloads({ venue: nullablePayload.venue })
+
+    expect(nullable.items[0].start).toBeNull()
+    expect(nullable.items[0].end).toBeUndefined()
+    await expect(api.listRawPayloads({ venue: malformedPayload.venue })).rejects.toMatchObject({
+      name: 'DataResponseError',
+      field: 'data.rawPayload.requestAt',
+    })
   })
 
   it('creates an auth-backed data API client with createAuthFetch', async () => {

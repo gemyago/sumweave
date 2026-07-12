@@ -27,6 +27,7 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 		makeCategoryID := func() string { return "category-" + fake.UUID().V4() }
 		makeTagID := func() string { return "tag-" + fake.UUID().V4() }
 		makeTransactionID := func(prefix string) string { return prefix + fake.UUID().V4() }
+		updateCategoryID := makeCategoryID()
 
 		params := []any{
 			CreateTenantParams{
@@ -120,8 +121,8 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 				TransactionID: makeTransactionID("txn-"),
 				Description:   "transaction-" + fake.Lorem().Word(),
 				AmountMinor:   456,
-				EffectiveAt:   effectiveAt,
-				CategoryID:    makeCategoryID(),
+				EffectiveAt:   &effectiveAt,
+				CategoryID:    updateCategoryID,
 			},
 			HideTransactionParams{
 				ActorUserID:   makeUserID(),

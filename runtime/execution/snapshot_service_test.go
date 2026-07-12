@@ -123,8 +123,8 @@ func TestSnapshotService(t *testing.T) {
 			Kind:         actionKind,
 			DecisionTime: eventTime.Add(-time.Minute),
 			InputRange: domain.TimeRange{
-				Start: eventTime.Add(-2 * time.Minute).UTC(),
-				End:   eventTime.Add(-time.Minute).UTC(),
+				Start: eventTime.Add(-2 * time.Minute),
+				End:   eventTime.Add(-time.Minute),
 			},
 			Quality: domain.DataQualityValidated,
 		})
@@ -351,7 +351,7 @@ func TestSnapshotService(t *testing.T) {
 		require.InDelta(t, -1.5, positionSnapshots[5].Quantity, 0)
 		require.InDelta(t, 57.5, positionSnapshots[5].RealizedPnL, 1e-9)
 		require.InDelta(t, 195, positionSnapshots[5].ExposureNotional, 1e-9)
-		require.Equal(t, time.UTC, positionSnapshots[5].EventTime.Time().Location())
+		require.Equal(t, baseTime.Add(5*time.Minute), positionSnapshots[5].EventTime.Time())
 		require.Equal(t, map[string]string{
 			"funding_model":     "deferred",
 			"leverage_model":    "not-modeled",
@@ -572,6 +572,8 @@ func TestSnapshotService(t *testing.T) {
 
 		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"position_snapshots", []string{"snapshot_id"}))
 		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"portfolio_snapshots", []string{"snapshot_id"}))
+		require.True(t, store.db.Migrator().HasIndex(&positionSnapshotModel{}, "idx_position_snapshots_mode_time_id"))
+		require.True(t, store.db.Migrator().HasIndex(&portfolioSnapshotModel{}, "idx_portfolio_snapshots_mode_time_id"))
 
 		svc, err := NewSnapshotService(store)
 		require.NoError(t, err)
@@ -652,6 +654,152 @@ func TestSnapshotService(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, portfolioQueried, 2)
 		require.Equal(t, int64(3), readCount(t, store, tablePrefix+"portfolio_snapshots"))
+	})
+
+	t.Run("filters and orders canonical execution records deterministically", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFake(t)
+		_, store := makeService(t)
+		instrument := makeInstrument(t, fake)
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		baseFill := makeFill(
+			t,
+			instrument,
+			randomWord(t, fake, "strategy"),
+			randomWord(t, fake, "version"),
+			randomWord(t, fake, "artifact"),
+			domain.DecisionModePaper,
+			domain.CandidateActionKindLong,
+			"fill-earlier-"+randomWord(t, fake, "id"),
+			1,
+			100,
+			earlier,
+		)
+		laterFill, err := domain.NewExecutionFill(domain.ExecutionFillParams{
+			FillID:    "fill-later-" + randomWord(t, fake, "id"),
+			Order:     baseFill.Order,
+			Quantity:  1,
+			Price:     101,
+			EventTime: later,
+		})
+		require.NoError(t, err)
+		_, err = store.CreateCommand(t.Context(), baseFill.Order.Command)
+		require.NoError(t, err)
+		_, err = store.CreateOrder(t.Context(), baseFill.Order)
+		require.NoError(t, err)
+		_, err = store.CreateFill(t.Context(), laterFill)
+		require.NoError(t, err)
+		_, err = store.CreateFill(t.Context(), baseFill)
+		require.NoError(t, err)
+		fills, err := store.ListFillsByOrder(t.Context(), string(baseFill.Order.OrderID))
+		require.NoError(t, err)
+		require.Equal(t, []domain.ExecutionFillID{baseFill.FillID, laterFill.FillID}, []domain.ExecutionFillID{
+			fills[0].FillID,
+			fills[1].FillID,
+		})
+		require.Equal(t, earlier.Format(time.RFC3339Nano), fills[0].EventTime.Time().Format(time.RFC3339Nano))
+		require.Equal(t, later.Format(time.RFC3339Nano), fills[1].EventTime.Time().Format(time.RFC3339Nano))
+
+		makePosition := func(at time.Time, suffix string) domain.PositionSnapshot {
+			t.Helper()
+			averageEntryPrice := 100.0
+			snapshot, snapshotErr := domain.NewPositionSnapshot(domain.PositionSnapshotParams{
+				SnapshotID:           "position-" + suffix + "-" + randomWord(t, fake, "id"),
+				SourceFillID:         "fill-" + suffix + "-" + randomWord(t, fake, "id"),
+				Mode:                 domain.DecisionModePaper,
+				StrategyID:           randomWord(t, fake, "strategy"),
+				StrategyVersion:      randomWord(t, fake, "version"),
+				StrategyArtifactHash: randomWord(t, fake, "artifact"),
+				Instrument:           instrument,
+				Quantity:             1,
+				AverageEntryPrice:    &averageEntryPrice,
+				ExposureNotional:     100,
+				EventTime:            at,
+			})
+			require.NoError(t, snapshotErr)
+			return snapshot
+		}
+		makePortfolio := func(at time.Time, suffix string) domain.PortfolioSnapshot {
+			t.Helper()
+			snapshot, snapshotErr := domain.NewPortfolioSnapshot(domain.PortfolioSnapshotParams{
+				SnapshotID:    "portfolio-" + suffix + "-" + randomWord(t, fake, "id"),
+				SourceFillID:  "fill-" + suffix + "-" + randomWord(t, fake, "id"),
+				Mode:          domain.DecisionModePaper,
+				GrossExposure: 100,
+				NetExposure:   100,
+				EventTime:     at,
+			})
+			require.NoError(t, snapshotErr)
+			return snapshot
+		}
+		earlierPosition := makePosition(earlier, "earlier")
+		laterPosition := makePosition(later, "later")
+		earlierPortfolio := makePortfolio(earlier, "earlier")
+		laterPortfolio := makePortfolio(later, "later")
+		for _, snapshot := range []domain.PositionSnapshot{laterPosition, earlierPosition} {
+			_, err = store.CreatePositionSnapshot(t.Context(), snapshot)
+			require.NoError(t, err)
+		}
+		for _, snapshot := range []domain.PortfolioSnapshot{laterPortfolio, earlierPortfolio} {
+			_, err = store.CreatePortfolioSnapshot(t.Context(), snapshot)
+			require.NoError(t, err)
+		}
+		positions, err := store.QueryPositionSnapshots(t.Context(), PositionSnapshotQuery{})
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]domain.PositionSnapshotID{earlierPosition.SnapshotID, laterPosition.SnapshotID},
+			[]domain.PositionSnapshotID{positions[0].SnapshotID, positions[1].SnapshotID},
+		)
+		portfolios, err := store.QueryPortfolioSnapshots(t.Context(), PortfolioSnapshotQuery{})
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]domain.PortfolioSnapshotID{earlierPortfolio.SnapshotID, laterPortfolio.SnapshotID},
+			[]domain.PortfolioSnapshotID{portfolios[0].SnapshotID, portfolios[1].SnapshotID},
+		)
+
+		boundaryRange, err := domain.NewTimeRange(earlier.Add(-time.Minute), earlier.Add(time.Minute))
+		require.NoError(t, err)
+		positions, err = store.QueryPositionSnapshots(t.Context(), PositionSnapshotQuery{TimeRange: &boundaryRange})
+		require.NoError(t, err)
+		require.Len(t, positions, 1)
+		require.Equal(t, earlierPosition.SnapshotID, positions[0].SnapshotID)
+		portfolios, err = store.QueryPortfolioSnapshots(t.Context(), PortfolioSnapshotQuery{TimeRange: &boundaryRange})
+		require.NoError(t, err)
+		require.Len(t, portfolios, 1)
+		require.Equal(t, earlierPortfolio.SnapshotID, portfolios[0].SnapshotID)
+
+		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789, time.FixedZone("east", 2*60*60))
+		mixedPosition := makePosition(mixedOffsetAt, "mixed-offset")
+		mixedPortfolio := makePortfolio(mixedOffsetAt, "mixed-offset")
+		_, err = store.CreatePositionSnapshot(t.Context(), mixedPosition)
+		require.NoError(t, err)
+		_, err = store.CreatePortfolioSnapshot(t.Context(), mixedPortfolio)
+		require.NoError(t, err)
+		instantRange, err := domain.NewTimeRange(
+			time.Date(2025, time.December, 31, 21, 30, 0, 0, time.UTC),
+			time.Date(2025, time.December, 31, 22, 30, 0, 0, time.UTC),
+		)
+		require.NoError(t, err)
+		positions, err = store.QueryPositionSnapshots(t.Context(), PositionSnapshotQuery{TimeRange: &instantRange})
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]domain.PositionSnapshotID{mixedPosition.SnapshotID},
+			[]domain.PositionSnapshotID{positions[0].SnapshotID},
+		)
+		portfolios, err = store.QueryPortfolioSnapshots(t.Context(), PortfolioSnapshotQuery{TimeRange: &instantRange})
+		require.NoError(t, err)
+		require.Equal(
+			t,
+			[]domain.PortfolioSnapshotID{mixedPortfolio.SnapshotID},
+			[]domain.PortfolioSnapshotID{portfolios[0].SnapshotID},
+		)
 	})
 }
 

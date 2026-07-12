@@ -17,7 +17,7 @@ type FinanceTag struct {
 	ID string `json:"id"`
 	TenantID string `json:"tenantId"`
 	Name string `json:"name"`
-	HiddenAt time.Time `json:"hiddenAt,omitempty"`
+	HiddenAt *time.Time `json:"hiddenAt,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

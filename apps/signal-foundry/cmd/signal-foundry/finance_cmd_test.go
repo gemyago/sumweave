@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -168,6 +170,7 @@ func TestFinanceCommand(t *testing.T) {
 	t.Run(
 		"resolve finance fixtures runtime config preserves default config values",
 		func(t *testing.T) {
+			t.Chdir(t.TempDir())
 			rootCmd := newRootCmd()
 			require.NoError(t, rootCmd.PersistentFlags().Set("env", "test"))
 
@@ -179,6 +182,7 @@ func TestFinanceCommand(t *testing.T) {
 				runtimeConfig.DatabaseDSN,
 			)
 			assert.Equal(t, "signal_foundry_data_jobs_", runtimeConfig.JobsTablePrefix)
+			assert.NotEmpty(t, runtimeConfig.JWTSigningKey)
 		},
 	)
 
@@ -262,6 +266,34 @@ func TestFinanceCommand(t *testing.T) {
 		assert.True(t, dashboard.Settled.Complete)
 		assert.True(t, dashboard.Pending.Complete)
 		assert.Empty(t, dashboard.MissingFX)
+	})
+
+	t.Run("run finance fixtures generate never calls configured live monobank", func(t *testing.T) {
+		liveCalls := 0
+		liveServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			liveCalls++
+			writer.WriteHeader(http.StatusForbidden)
+		}))
+		defer liveServer.Close()
+		_, err := runFinanceFixturesGenerate(t.Context(), financeFixturesRuntimeConfig{
+			DatabaseDSN:     filepath.Join(t.TempDir(), "fixture-safe.sqlite"),
+			MonobankBaseURL: liveServer.URL,
+		}, financeFixturesGenerateParams{
+			Seed: 7, Scenario: realisticScenarioName,
+			Now:         time.Date(2026, time.July, 10, 22, 0, 0, 0, time.FixedZone("fixture", 2*60*60)),
+			OwnerUserID: "owner-" + fake.UUID().V4(), MemberUserID: "member-" + fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		assert.Zero(t, liveCalls)
+	})
+
+	t.Run("finance fixture monobank server rejects non-fixture paths", func(t *testing.T) {
+		server := newFinanceFixturesMonobankServer()
+		defer server.Close()
+		response, err := server.Client().Get(server.URL + "/personal/statement")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, response.Body.Close()) }()
+		assert.Equal(t, http.StatusNotFound, response.StatusCode)
 	})
 
 	t.Run("fixture provider exposes deterministic finance provider behavior", func(t *testing.T) {

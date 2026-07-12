@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func TestNewDatabase(t *testing.T) {
@@ -56,5 +59,25 @@ func TestNewDatabase(t *testing.T) {
 
 		require.Contains(t, logs.String(), `"gorm"`)
 		require.Contains(t, logs.String(), `"sql":"SELECT ? FROM accounts WHERE id = ?"`)
+	})
+
+	t.Run("builds postgres timestamp query chains", func(t *testing.T) {
+		sqlDB, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		mock.ExpectClose()
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		db, err := gorm.Open(
+			postgres.New(postgres.Config{Conn: sqlDB}),
+			&gorm.Config{DisableAutomaticPing: true, DryRun: true},
+		)
+		require.NoError(t, err)
+
+		now := time.Now()
+		query := db.Table("events").
+			Where(instantRangePredicate(db, "event_time"), now, now.Add(time.Hour))
+		query = applyInstantAtOrAfter(query, "start_at", now)
+		query = applyInstantAtOrBefore(query, "end_at", now.Add(time.Hour))
+		query = query.Where(expiresAfterPredicate(db), now).Find(&[]struct{}{})
+		require.NoError(t, query.Error)
 	})
 }

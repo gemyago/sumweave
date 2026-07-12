@@ -234,7 +234,7 @@ func TestDomain(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("canonical records normalize UTC timestamps and compare as whole values", func(t *testing.T) {
+	t.Run("canonical records preserve timestamp representations and compare as whole values", func(t *testing.T) {
 		t.Parallel()
 
 		venue, err := NewVenue(randomWord("venue"))
@@ -257,9 +257,8 @@ func TestDomain(t *testing.T) {
 		end := start.Add(time.Duration(fake.IntBetween(1, 180)) * time.Minute)
 		timeRange, err := NewTimeRange(start, end)
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, timeRange.Start.Location())
-		require.Equal(t, time.UTC, timeRange.End.Location())
-
+		require.Equal(t, start, timeRange.Start)
+		require.Equal(t, end, timeRange.End)
 		timeframe := validTimeframes[fake.IntBetween(0, len(validTimeframes)-1)]
 		quality := validQualities[fake.IntBetween(0, len(validQualities)-1)]
 
@@ -280,16 +279,13 @@ func TestDomain(t *testing.T) {
 		expectedCandle := Candle{
 			Instrument: instrument,
 			Timeframe:  timeframe,
-			TimeRange: TimeRange{
-				Start: start.UTC(),
-				End:   end.UTC(),
-			},
-			Open:    candle.Open,
-			High:    candle.High,
-			Low:     candle.Low,
-			Close:   candle.Close,
-			Volume:  candle.Volume,
-			Quality: quality,
+			TimeRange:  TimeRange{Start: start, End: end},
+			Open:       candle.Open,
+			High:       candle.High,
+			Low:        candle.Low,
+			Close:      candle.Close,
+			Volume:     candle.Volume,
+			Quality:    quality,
 			Provenance: SourceProvenance{
 				Source:   provenance.Source,
 				RecordID: strings.TrimSpace(provenance.RecordID),
@@ -310,7 +306,7 @@ func TestDomain(t *testing.T) {
 
 		expectedTrade := Trade{
 			Instrument: instrument,
-			EventTime:  eventTime.UTC(),
+			EventTime:  eventTime,
 			Price:      trade.Price,
 			Size:       trade.Size,
 			Quality:    quality,
@@ -320,10 +316,10 @@ func TestDomain(t *testing.T) {
 			},
 		}
 		require.Equal(t, expectedTrade, trade)
-		require.Equal(t, time.UTC, trade.EventTime.Location())
+		require.Equal(t, eventTime.Location(), trade.EventTime.Location())
 	})
 
-	t.Run("audit records validate required fields and normalize UTC timestamps", func(t *testing.T) {
+	t.Run("audit records validate required fields and preserve timestamp representations", func(t *testing.T) {
 		t.Parallel()
 
 		instrument := randomInstrument(t)
@@ -350,9 +346,9 @@ func TestDomain(t *testing.T) {
 			Metadata:             map[string]string{"scope": "unit-test"},
 		})
 		require.NoError(t, err)
-		require.Equal(t, decisionTime.UTC(), trace.DecisionTime.Time())
-		require.Equal(t, inputStart.UTC(), trace.InputRange.Start)
-		require.Equal(t, inputEnd.UTC(), trace.InputRange.End)
+		require.Equal(t, decisionTime, trace.DecisionTime.Time())
+		require.Equal(t, inputStart, trace.InputRange.Start)
+		require.Equal(t, inputEnd, trace.InputRange.End)
 
 		limitPrice := fake.Float64(2, 1, 1000)
 		intent, err := NewOrderIntent(OrderIntentParams{
@@ -375,7 +371,7 @@ func TestDomain(t *testing.T) {
 			Metadata:                 map[string]string{"flow": "paper-backtest"},
 		})
 		require.NoError(t, err)
-		require.Equal(t, createdAt.UTC(), intent.CreatedTime.Time())
+		require.Equal(t, createdAt, intent.CreatedTime.Time())
 		require.NotNil(t, intent.RequestedLimitPrice)
 
 		_, err = NewOrderIntent(OrderIntentParams{
@@ -444,7 +440,7 @@ func TestDomain(t *testing.T) {
 		}
 	})
 
-	t.Run("analytics identity canonicalizes embedded instrument and UTC timestamps", func(t *testing.T) {
+	t.Run("analytics identity canonicalizes embedded instrument and preserves timestamps", func(t *testing.T) {
 		t.Parallel()
 
 		start := randomLocationTime()
@@ -508,10 +504,8 @@ func TestDomain(t *testing.T) {
 		require.Equal(t, expectedInstrument, identity.Instrument)
 		require.Equal(t, expectedTimeframe, identity.Timeframe)
 		require.Equal(t, kind, identity.Kind)
-		require.Equal(t, time.UTC, identity.TimeRange.Start.Location())
-		require.Equal(t, time.UTC, identity.TimeRange.End.Location())
-		require.Equal(t, start.UTC(), identity.TimeRange.Start)
-		require.Equal(t, end.UTC(), identity.TimeRange.End)
+		require.Equal(t, start, identity.TimeRange.Start)
+		require.Equal(t, end, identity.TimeRange.End)
 		require.Equal(t, params, identity.Parameters)
 	})
 
@@ -574,7 +568,7 @@ func TestDomain(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("analytics points canonicalize UTC value ranges and times", func(t *testing.T) {
+	t.Run("analytics points preserve value range and point timestamp representations", func(t *testing.T) {
 		t.Parallel()
 
 		start := randomLocationTime()
@@ -596,12 +590,9 @@ func TestDomain(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		require.Equal(t, pointTime.UTC(), point.Time.Time())
-		require.Equal(t, time.UTC, point.Time.Time().Location())
-		require.Equal(t, start.UTC(), point.ValueRange.Start)
-		require.Equal(t, end.UTC(), point.ValueRange.End)
-		require.Equal(t, time.UTC, point.ValueRange.Start.Location())
-		require.Equal(t, time.UTC, point.ValueRange.End.Location())
+		require.Equal(t, pointTime, point.Time.Time())
+		require.Equal(t, start, point.ValueRange.Start)
+		require.Equal(t, end, point.ValueRange.End)
 		require.NotZero(t, point.SourceReplayIdentity)
 		require.Equal(t, provenance.Source, point.SourceProvenance.Source)
 		require.Equal(t, strings.TrimSpace(provenance.RecordID), point.SourceProvenance.RecordID)
@@ -818,7 +809,7 @@ func TestDomain(t *testing.T) {
 		require.ErrorContains(t, err, "strategy kind")
 	})
 
-	t.Run("candidate actions canonicalize UTC decision time and input range", func(t *testing.T) {
+	t.Run("candidate actions preserve decision time and input range representations", func(t *testing.T) {
 		t.Parallel()
 
 		decisionTime := randomLocationTime()
@@ -843,12 +834,9 @@ func TestDomain(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		require.Equal(t, decisionTime.UTC(), action.DecisionTime.Time())
-		require.Equal(t, time.UTC, action.DecisionTime.Time().Location())
-		require.Equal(t, inputStart.UTC(), action.InputRange.Start)
-		require.Equal(t, inputEnd.UTC(), action.InputRange.End)
-		require.Equal(t, time.UTC, action.InputRange.Start.Location())
-		require.Equal(t, time.UTC, action.InputRange.End.Location())
+		require.Equal(t, decisionTime, action.DecisionTime.Time())
+		require.Equal(t, inputStart, action.InputRange.Start)
+		require.Equal(t, inputEnd, action.InputRange.End)
 		require.Equal(t, identity, action.Strategy)
 	})
 
@@ -878,7 +866,7 @@ func TestDomain(t *testing.T) {
 		require.ErrorContains(t, err, "input range")
 	})
 
-	t.Run("governor decisions canonicalize UTC time and retain candidate actions", func(t *testing.T) {
+	t.Run("governor decisions preserve time and retain candidate actions", func(t *testing.T) {
 		t.Parallel()
 
 		candidateAction := randomCandidateAction(t)
@@ -898,10 +886,10 @@ func TestDomain(t *testing.T) {
 			CandidateAction: candidateAction,
 			Status:          status,
 			Reason:          reason,
-			DecisionTime:    GovernorDecisionTime(decisionTime.UTC()),
+			DecisionTime:    GovernorDecisionTime(decisionTime),
 		}
 		require.Equal(t, expected, decision)
-		require.Equal(t, time.UTC, decision.DecisionTime.Time().Location())
+		require.Equal(t, decisionTime.Location(), decision.DecisionTime.Time().Location())
 	})
 
 	t.Run("governor decisions reject invalid values", func(t *testing.T) {
@@ -940,7 +928,7 @@ func TestDomain(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("execution records canonicalize identifiers statuses quantities prices and UTC times", func(t *testing.T) {
+	t.Run("execution records canonicalize fields and preserve timestamp representations", func(t *testing.T) {
 		t.Parallel()
 
 		approvedDecision := randomApprovedDecision(t)
@@ -1005,10 +993,10 @@ func TestDomain(t *testing.T) {
 			ApprovedDecision: approvedDecision,
 			Status:           commandStatus,
 			Quantity:         quantity,
-			EventTime:        ExecutionEventTime(commandTime.UTC()),
+			EventTime:        ExecutionEventTime(commandTime),
 		}, command)
 		require.Equal(t, approvedDecision, command.ApprovedDecision)
-		require.Equal(t, time.UTC, command.EventTime.Time().Location())
+		require.Equal(t, commandTime.Location(), command.EventTime.Time().Location())
 
 		require.Equal(t, ExecutionOrder{
 			OrderID:       ExecutionOrderID(strings.TrimSpace(orderIDText)),
@@ -1017,28 +1005,28 @@ func TestDomain(t *testing.T) {
 			ClientOrderID: strings.TrimSpace(clientOrderIDText),
 			Status:        orderStatus,
 			Quantity:      quantity,
-			EventTime:     ExecutionEventTime(orderTime.UTC()),
+			EventTime:     ExecutionEventTime(orderTime),
 		}, order)
-		require.Equal(t, time.UTC, order.EventTime.Time().Location())
+		require.Equal(t, orderTime.Location(), order.EventTime.Time().Location())
 
 		require.Equal(t, ExecutionFill{
 			FillID:    ExecutionFillID(strings.TrimSpace(fillIDText)),
 			Order:     order,
 			Quantity:  fillQuantity,
 			Price:     price,
-			EventTime: ExecutionEventTime(fillTime.UTC()),
+			EventTime: ExecutionEventTime(fillTime),
 		}, fill)
 		require.Equal(t, command, fill.Order.Command)
-		require.Equal(t, time.UTC, fill.EventTime.Time().Location())
+		require.Equal(t, fillTime.Location(), fill.EventTime.Time().Location())
 
 		require.Equal(t, ExecutionReconciliation{
 			Order:          order,
 			Fills:          []ExecutionFill{fill},
 			Status:         ExecutionOrderStatusFilled,
 			FilledQuantity: fillQuantity,
-			EventTime:      ExecutionEventTime(reconciliationTime.UTC()),
+			EventTime:      ExecutionEventTime(reconciliationTime),
 		}, reconciliation)
-		require.Equal(t, time.UTC, reconciliation.EventTime.Time().Location())
+		require.Equal(t, reconciliationTime.Location(), reconciliation.EventTime.Time().Location())
 	})
 
 	t.Run("execution records reject invalid values", func(t *testing.T) {

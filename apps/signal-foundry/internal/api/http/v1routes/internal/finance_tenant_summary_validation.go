@@ -20,7 +20,7 @@ func NewFinanceTenantSummaryValidator() FieldValidator[*FinanceTenantSummary] {
 	validateDisplayCurrency := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateArchivedAt := NewSimpleFieldValidator[time.Time](
+	validateArchivedAt := NewSimpleFieldValidator[*time.Time](
 	)
 	validateJoinedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],

@@ -19,8 +19,8 @@ type ListDataRawPayloadsParams struct {
 	Symbol string `json:"symbol,omitempty"`
 	AssetClass string `json:"assetClass,omitempty"`
 	Timeframe string `json:"timeframe,omitempty"`
-	Start time.Time `json:"start,omitempty"`
-	End time.Time `json:"end,omitempty"`
+	Start string `json:"start,omitempty"`
+	End string `json:"end,omitempty"`
 	IngestionRunID string `json:"ingestionRunId,omitempty"`
 	EntityHint string `json:"entityHint,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`

@@ -290,8 +290,8 @@ type paramsParserDataListDataRawPayloads struct {
 	bindSymbol requestParamBinder[[]string, string]
 	bindAssetClass requestParamBinder[[]string, string]
 	bindTimeframe requestParamBinder[[]string, string]
-	bindStart requestParamBinder[[]string, time.Time]
-	bindEnd requestParamBinder[[]string, time.Time]
+	bindStart requestParamBinder[[]string, string]
+	bindEnd requestParamBinder[[]string, string]
 	bindIngestionRunID requestParamBinder[[]string, string]
 	bindEntityHint requestParamBinder[[]string, string]
 	bindEndpoint requestParamBinder[[]string, string]
@@ -355,20 +355,20 @@ func newParamsParserDataListDataRawPayloads(rootHandler *RootHandler) paramsPars
 			validateValue: NewSimpleFieldValidator[string](
 			),
 		}),
-		bindStart: newRequestParamBinder(binderParams[[]string, time.Time]{
+		bindStart: newRequestParamBinder(binderParams[[]string, string]{
 			required: false,
 			parseValue: parseMultiValueParamAsSoloValue(
-				rootHandler.knownParsers.timeParser,
+				rootHandler.knownParsers.stringParser,
 			),
-			validateValue: NewSimpleFieldValidator[time.Time](
+			validateValue: NewSimpleFieldValidator[string](
 			),
 		}),
-		bindEnd: newRequestParamBinder(binderParams[[]string, time.Time]{
+		bindEnd: newRequestParamBinder(binderParams[[]string, string]{
 			required: false,
 			parseValue: parseMultiValueParamAsSoloValue(
-				rootHandler.knownParsers.timeParser,
+				rootHandler.knownParsers.stringParser,
 			),
-			validateValue: NewSimpleFieldValidator[time.Time](
+			validateValue: NewSimpleFieldValidator[string](
 			),
 		}),
 		bindIngestionRunID: newRequestParamBinder(binderParams[[]string, string]{

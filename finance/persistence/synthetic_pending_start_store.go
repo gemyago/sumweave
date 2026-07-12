@@ -37,13 +37,14 @@ func (s *SyntheticPendingStartStore) GetPendingSyntheticStart(
 	if err := s.db.WithContext(ctx).
 		Table(model.TableName()).
 		Where(
-			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND connector_id = ? AND state = ? AND consumed_at IS NULL AND expires_at > ?",
+			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND connector_id = ? AND "+
+				"state = ? AND consumed_at IS NULL AND "+expiresAfterPredicate(s.db),
 			strings.TrimSpace(tenantID),
 			strings.TrimSpace(actorUserID),
 			string(domain.ProviderIDSynthetic),
 			string(domain.ProviderConnectorIDSynthetic),
 			strings.TrimSpace(state),
-			now.UTC(),
+			now,
 		).
 		Order("created_at DESC, id DESC").
 		First(&model).Error; err != nil {

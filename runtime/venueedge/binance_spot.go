@@ -340,7 +340,7 @@ func parseBinanceCandlePageToken(pageToken string) (time.Time, error) {
 		return time.Time{}, validationError("binance spot candle page token is invalid")
 	}
 
-	return time.UnixMilli(milliseconds).UTC(), nil
+	return time.UnixMilli(milliseconds), nil
 }
 
 func parseBinanceTradePageToken(pageToken string) (int64, error) {
@@ -390,7 +390,7 @@ func mapBinanceKlineRow(
 		return domain.Candle{}, fmt.Errorf("decode response body: invalid kline volume: %w", err)
 	}
 
-	start := time.UnixMilli(openTime).UTC()
+	start := time.UnixMilli(openTime)
 	provenance, err := domain.NewSourceProvenance(
 		string(BinanceSpotVenueName)+"-rest",
 		fmt.Sprintf("kline:%s:%s:%d", instrument.Symbol, timeframe, openTime),
@@ -436,7 +436,7 @@ func mapBinanceAggTrade(instrument domain.Instrument, row binanceAggTrade) (doma
 
 	return domain.NewTrade(domain.TradeParams{
 		Instrument: instrument,
-		EventTime:  time.UnixMilli(row.Timestamp).UTC(),
+		EventTime:  time.UnixMilli(row.Timestamp),
 		Price:      price,
 		Size:       quantity,
 		Quality:    domain.DataQualityRaw,

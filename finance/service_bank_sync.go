@@ -87,7 +87,7 @@ func NewBankSyncService(store bankSyncFocusedStore, opts ...BankSyncServiceOptio
 	service := &BankSyncService{
 		store:         store,
 		access:        newAccessGuard(store),
-		now:           func() time.Time { return time.Now().UTC() },
+		now:           time.Now,
 		newID:         uuid.NewString,
 		bankProviders: map[string]BankConnectionProvider{},
 		logger:        slog.New(slog.DiscardHandler),
@@ -106,7 +106,7 @@ func (s *BankSyncService) UpsertBankConnectionSchedule(
 	if err != nil {
 		return domain.BankConnectionSchedule{}, err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	existing, err := s.store.GetBankConnectionSchedule(ctx, connection.ID)
 	if err != nil && !errors.Is(err, persistence.ErrBankConnectionScheduleNotFound) {
 		return domain.BankConnectionSchedule{}, fmt.Errorf("upsert bank connection schedule: %w", err)
@@ -114,7 +114,7 @@ func (s *BankSyncService) UpsertBankConnectionSchedule(
 	schedule := domain.BankConnectionSchedule{
 		ConnectionID: connection.ID,
 		Interval:     params.Interval,
-		NextRunAt:    timePtrUTC(params.NextRunAt),
+		NextRunAt:    timePtrOrNil(params.NextRunAt),
 		Enabled:      true,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -156,7 +156,8 @@ func (s *BankSyncService) PauseBankConnectionSchedule(
 		return domain.BankConnectionSchedule{}, fmt.Errorf("pause bank connection schedule: %w", err)
 	}
 	schedule.Enabled = false
-	schedule.UpdatedAt = s.now().UTC()
+	schedule.NextRunAt = nil
+	schedule.UpdatedAt = s.now()
 	persisted, err := s.store.SaveBankConnectionSchedule(ctx, *schedule)
 	if err != nil {
 		return domain.BankConnectionSchedule{}, err
@@ -187,8 +188,8 @@ func (s *BankSyncService) ResumeBankConnectionSchedule(
 		return domain.BankConnectionSchedule{}, fmt.Errorf("resume bank connection schedule: %w", err)
 	}
 	schedule.Enabled = true
-	schedule.NextRunAt = timePtrUTC(params.NextRunAt)
-	schedule.UpdatedAt = s.now().UTC()
+	schedule.NextRunAt = timePtrOrNil(params.NextRunAt)
+	schedule.UpdatedAt = s.now()
 	persisted, err := s.store.SaveBankConnectionSchedule(ctx, *schedule)
 	if err != nil {
 		return domain.BankConnectionSchedule{}, err
@@ -210,6 +211,9 @@ func (s *BankSyncService) TriggerBankConnectionSync(
 	ctx context.Context,
 	params TriggerBankConnectionSyncParams,
 ) (BankConnectionSyncJobRef, error) {
+	if err := validateBankConnectionSyncWindows(params.WindowStart, params.WindowEnd); err != nil {
+		return BankConnectionSyncJobRef{}, err
+	}
 	if s.bankSyncJobEnqueuer == nil {
 		return BankConnectionSyncJobRef{}, errors.New("bank sync job enqueuer is required")
 	}
@@ -269,6 +273,9 @@ func (s *BankSyncService) RunBankConnectionSync(
 	ctx context.Context,
 	params RunBankConnectionSyncParams,
 ) (BankConnectionSyncResult, error) {
+	if err := validateBankConnectionSyncWindows(params.WindowStart, params.WindowEnd); err != nil {
+		return BankConnectionSyncResult{}, err
+	}
 	connection, err := s.store.GetBankConnection(ctx, strings.TrimSpace(params.ConnectionID))
 	if err != nil {
 		return BankConnectionSyncResult{}, ErrBankConnectionNotFound
@@ -281,7 +288,7 @@ func (s *BankSyncService) RunBankConnectionSync(
 	if err != nil {
 		return BankConnectionSyncResult{}, err
 	}
-	now := s.now().UTC()
+	now := s.now()
 	windowStart, windowEnd := resolveBankConnectionSyncWindow(*connection, params, now)
 	scheduledRun, hasScheduledRun, err := s.makeScheduledRunMetadata(ctx, *connection, params, now)
 	if err != nil {
@@ -330,27 +337,79 @@ func (s *BankSyncService) RunBankConnectionSync(
 	return applyResult, nil
 }
 
+func (s *BankSyncService) RecordBankConnectionSyncScheduled(
+	ctx context.Context,
+	params RecordBankConnectionSyncScheduledParams,
+) (domain.BankConnectionSchedule, error) {
+	if strings.TrimSpace(params.ConnectionID) == "" {
+		return domain.BankConnectionSchedule{}, errors.New("connection id is required")
+	}
+	if strings.TrimSpace(params.JobID) == "" {
+		return domain.BankConnectionSchedule{}, errors.New("job id is required")
+	}
+	if params.ScheduledAt.IsZero() {
+		return domain.BankConnectionSchedule{}, errors.New("scheduled at must be a non-zero timestamp")
+	}
+	if params.NextRunAt.IsZero() {
+		return domain.BankConnectionSchedule{}, errors.New("next run at must be a non-zero timestamp")
+	}
+	if !params.NextRunAt.After(params.ScheduledAt) {
+		return domain.BankConnectionSchedule{}, errors.New("next run at must be after scheduled at")
+	}
+	schedule, err := s.store.GetBankConnectionSchedule(ctx, strings.TrimSpace(params.ConnectionID))
+	if err != nil {
+		return domain.BankConnectionSchedule{}, fmt.Errorf("get bank connection schedule: %w", err)
+	}
+	schedule.LastScheduledAt = &params.ScheduledAt
+	schedule.NextRunAt = &params.NextRunAt
+	schedule.LastJobID = strings.TrimSpace(params.JobID)
+	schedule.UpdatedAt = s.now()
+	persisted, err := s.store.SaveBankConnectionSchedule(ctx, *schedule)
+	if err != nil {
+		return domain.BankConnectionSchedule{}, fmt.Errorf("save bank connection schedule: %w", err)
+	}
+	return persisted, nil
+}
+
 func resolveBankConnectionSyncWindow(
 	connection domain.BankConnection,
 	params RunBankConnectionSyncParams,
 	now time.Time,
 ) (time.Time, time.Time) {
-	windowEnd := now.UTC()
-	if !params.WindowEnd.IsZero() {
-		windowEnd = params.WindowEnd.UTC()
+	windowEnd := now
+	if params.WindowEnd != nil {
+		windowEnd = *params.WindowEnd
 	}
-	if !params.WindowStart.IsZero() {
-		return params.WindowStart.UTC(), windowEnd
+	if params.WindowStart != nil {
+		return *params.WindowStart, windowEnd
 	}
 	recentStart := windowEnd.AddDate(0, 0, -bankSyncRecentRefreshDays)
 	if connection.LastSuccessfulSyncAt == nil {
 		return windowEnd.AddDate(-bankSyncInitialBackfillYears, 0, 0), windowEnd
 	}
-	checkpoint := connection.LastSuccessfulSyncAt.UTC()
+	checkpoint := *connection.LastSuccessfulSyncAt
 	if checkpoint.Before(recentStart) {
 		return checkpoint, windowEnd
 	}
 	return recentStart, windowEnd
+}
+
+func validateBankConnectionSyncWindows(windowStart, windowEnd *time.Time) error {
+	for _, timestamp := range []struct {
+		field string
+		value *time.Time
+	}{
+		{field: "windowStart", value: windowStart},
+		{field: "windowEnd", value: windowEnd},
+	} {
+		if timestamp.value == nil {
+			continue
+		}
+		if timestamp.value.IsZero() {
+			return fmt.Errorf("bank connection sync %s must be non-zero", timestamp.field)
+		}
+	}
+	return nil
 }
 
 func (s *BankSyncService) ApplyProviderSyncResult(
@@ -572,6 +631,20 @@ func (s *BankSyncService) makeScheduledRunMetadata(
 		return nil, false, nil
 	}
 	metadata := &ProviderScheduledRunMetadata{ScheduledAt: now}
+	if params.ScheduledAt != nil || params.ScheduledNextRunAt != nil {
+		if params.ScheduledAt == nil || params.ScheduledAt.IsZero() {
+			return nil, false, errors.New("scheduled at must be a non-zero timestamp")
+		}
+		if params.ScheduledNextRunAt == nil || params.ScheduledNextRunAt.IsZero() {
+			return nil, false, errors.New("scheduled next run at must be a non-zero timestamp")
+		}
+		if !params.ScheduledNextRunAt.After(*params.ScheduledAt) {
+			return nil, false, errors.New("scheduled next run at must be after scheduled at")
+		}
+		metadata.ScheduledAt = *params.ScheduledAt
+		metadata.NextRunAt = params.ScheduledNextRunAt
+		return metadata, true, nil
+	}
 	schedule, err := s.store.GetBankConnectionSchedule(ctx, connection.ID)
 	if errors.Is(err, persistence.ErrBankConnectionScheduleNotFound) {
 		return metadata, true, nil
@@ -580,7 +653,7 @@ func (s *BankSyncService) makeScheduledRunMetadata(
 		return nil, false, fmt.Errorf("prepare bank connection sync schedule: %w", err)
 	}
 	if schedule.Enabled && schedule.Interval > 0 {
-		nextRunAt := now.Add(schedule.Interval).UTC()
+		nextRunAt := now.Add(schedule.Interval)
 		metadata.NextRunAt = &nextRunAt
 	}
 	return metadata, true, nil
@@ -632,7 +705,7 @@ func (s *BankSyncService) recordBankConnectionSyncFailure(
 	connection.LastSyncJobID = strings.TrimSpace(params.JobID)
 	connection.LastSyncStartedAt = &startedAt
 	connection.LastSyncError = strings.TrimSpace(syncErr.Error())
-	connection.UpdatedAt = s.now().UTC()
+	connection.UpdatedAt = s.now()
 	if _, err := s.store.SaveBankConnection(ctx, *connection); err != nil {
 		return fmt.Errorf("save bank connection: %w", err)
 	}
@@ -644,12 +717,14 @@ func (s *BankSyncService) recordBankConnectionSyncFailure(
 		return fmt.Errorf("save bank connection schedule: %w", err)
 	}
 	schedule.LastStartedAt = &startedAt
+	completedAt := s.now()
+	schedule.LastCompletedAt = &completedAt
 	schedule.LastJobID = strings.TrimSpace(params.JobID)
 	if scheduledRun != nil {
 		schedule.LastScheduledAt = &scheduledRun.ScheduledAt
 		schedule.NextRunAt = scheduledRun.NextRunAt
 	}
-	schedule.UpdatedAt = s.now().UTC()
+	schedule.UpdatedAt = completedAt
 	_, saveErr := s.store.SaveBankConnectionSchedule(ctx, *schedule)
 	if saveErr != nil {
 		return fmt.Errorf("save bank connection schedule: %w", saveErr)
@@ -662,7 +737,7 @@ func (s *BankSyncService) applyProviderSyncResult(
 	params ApplyProviderSyncResultParams,
 	atomic bool,
 ) (BankConnectionSyncResult, error) {
-	now := s.now().UTC()
+	now := s.now()
 	if atomic {
 		claimed, claimErr := s.claimSyncRun(ctx, params.ConnectionID, params.Result.SyncKey, params.JobID, now)
 		if claimErr != nil {
@@ -904,7 +979,7 @@ func (s *BankSyncService) applyProviderTransaction(
 		AmountMinor:      item.AmountMinor,
 		Currency:         strings.ToUpper(strings.TrimSpace(item.Currency)),
 		Description:      item.Description,
-		EffectiveAt:      item.EffectiveAt.UTC(),
+		EffectiveAt:      item.EffectiveAt,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 		ProviderOriginal: item.ProviderOriginal,

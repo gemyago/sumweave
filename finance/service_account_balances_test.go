@@ -82,4 +82,42 @@ func TestAccountBalanceReadStoreAssignmentAndFallback(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, emptyBalances)
 	})
+
+	t.Run("fallback includes the cutoff calendar date across opposite offsets", func(t *testing.T) {
+		fallbackStore := stubStore{
+			listTransactionsFn: func(
+				_ context.Context,
+				_ string,
+				accountID string,
+				_ domain.TransactionSource,
+				_ domain.TransactionStatus,
+				_ bool,
+			) ([]domain.Transaction, error) {
+				return []domain.Transaction{{
+					AccountID:   accountID,
+					Status:      domain.TransactionStatusBooked,
+					AmountMinor: 125,
+					EffectiveAt: time.Date(
+						2026, time.October, 25, 23, 30, 0, 0,
+						time.FixedZone("UTC-10", -10*60*60),
+					),
+				}}, nil
+			},
+		}
+		cutoff := time.Date(
+			2026, time.October, 25, 0, 0, 0, 0,
+			time.FixedZone("UTC+14", 14*60*60),
+		)
+
+		balances, err := (&accountBalanceFromTransactionStore{store: fallbackStore}).ListAccountBalances(
+			t.Context(),
+			persistence.ListAccountBalancesParams{
+				TenantID: "tenant-1", AccountIDs: []string{"account-1"}, EffectiveAtOnOrBefore: &cutoff,
+			},
+		)
+
+		require.NoError(t, err)
+		require.Len(t, balances, 1)
+		assert.Zero(t, balances[0].BookedBalanceMinor)
+	})
 }

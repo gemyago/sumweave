@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -9,10 +9,10 @@
     type FinanceTransaction,
   } from '../lib/finance/api'
   import {
-    formatFinanceDate,
     formatFinanceDateTime,
     formatFinanceMoney,
   } from '../lib/finance/format'
+  import { dateInputValue, withDateInput } from '../lib/date-range'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   type BootstrapTone = 'primary' | 'success' | 'warning' | 'danger' | 'secondary'
@@ -49,8 +49,8 @@
   let recentTransactions = $state<FinanceTransaction[]>([])
   let recentConnections = $state<FinanceBankConnection[]>([])
   let dashboardPreset = $state('current_month')
-  let customStartDate = $state('')
-  let customEndDate = $state('')
+  let customStartDate = $state<Date | undefined>(undefined)
+  let customEndDate = $state<Date | undefined>(undefined)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
 
@@ -272,7 +272,7 @@
   )
 
   const failedSyncConnections = $derived.by(() =>
-    recentConnections.filter((connection) => connection.lastSyncError.trim().length > 0),
+    recentConnections.filter((connection) => (connection.lastSyncError?.trim().length ?? 0) > 0),
   )
 
   const attentionItems = $derived.by<AttentionItem[]>(() => {
@@ -380,7 +380,7 @@
     }
   }
 
-  async function loadDashboard(overrides: { preset?: string; startDate?: string; endDate?: string } = {}) {
+  async function loadDashboard(overrides: { preset?: string; startDate?: Date; endDate?: Date } = {}) {
     if (!financeShell.selectedTenantId) {
       dashboard = null
       recentTransactions = []
@@ -413,8 +413,8 @@
         return rightTime - leftTime
       })
       dashboardPreset = loadedDashboard.period.preset
-      customStartDate = loadedDashboard.period.startDate.toISOString().slice(0, 10)
-      customEndDate = loadedDashboard.period.endDate.toISOString().slice(0, 10)
+      customStartDate = loadedDashboard.period.startDate
+      customEndDate = loadedDashboard.period.endDate
     } catch (loadError) {
       recentTransactions = []
       recentConnections = []
@@ -431,15 +431,15 @@
       skipNextReactiveLoad = false
       return
     }
-    void loadDashboard()
+    void untrack(() => loadDashboard())
   })
 
   async function openPreviousPeriod() {
     if (!dashboard) return
-    dashboardPreset = ''
-    customStartDate = dashboard.period.previous.startDate.toISOString().slice(0, 10)
-    customEndDate = dashboard.period.previous.endDate.toISOString().slice(0, 10)
-    await loadDashboard({ preset: '', startDate: customStartDate, endDate: customEndDate })
+    dashboardPreset = 'custom'
+    customStartDate = dashboard.period.previous.startDate
+    customEndDate = dashboard.period.previous.endDate
+    await loadDashboard({ preset: 'custom', startDate: dashboard.period.previous.startDate, endDate: dashboard.period.previous.endDate })
   }
 
   async function openCurrentMonth() {
@@ -449,16 +449,21 @@
 
   async function openNextPeriod() {
     if (!dashboard) return
-    dashboardPreset = ''
-    customStartDate = dashboard.period.next.startDate.toISOString().slice(0, 10)
-    customEndDate = dashboard.period.next.endDate.toISOString().slice(0, 10)
-    await loadDashboard({ preset: '', startDate: customStartDate, endDate: customEndDate })
+    dashboardPreset = 'custom'
+    customStartDate = dashboard.period.next.startDate
+    customEndDate = dashboard.period.next.endDate
+    await loadDashboard({ preset: 'custom', startDate: dashboard.period.next.startDate, endDate: dashboard.period.next.endDate })
   }
 
   async function applyCustomRange(event: SubmitEvent) {
     event.preventDefault()
-    dashboardPreset = ''
-    await loadDashboard({ preset: '', startDate: customStartDate, endDate: customEndDate })
+    dashboardPreset = 'custom'
+    if (!customStartDate || !customEndDate ||
+      Number.isNaN(customStartDate.getTime()) || Number.isNaN(customEndDate.getTime())) {
+      error = 'Choose valid start and end dates.'
+      return
+    }
+    await loadDashboard({ preset: 'custom', startDate: customStartDate, endDate: customEndDate })
   }
 </script>
 
@@ -495,7 +500,7 @@
             <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Reporting period</p>
             {#if dashboard}
               <h2 class="h5 mb-1">
-                {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(dashboard.period.endDate)}
+                {formatFinanceDateTime(dashboard.period.startDate)} → {formatFinanceDateTime(dashboard.period.endDate)}
               </h2>
               <p class="text-body-secondary mb-2">Preset: {dashboard.period.preset || 'custom'}</p>
             {:else}
@@ -522,11 +527,25 @@
               <form class="row g-3 mt-1" onsubmit={applyCustomRange}>
                 <div class="col-12 col-md-4">
                   <label class="form-label" for="finance-start-date">Custom start date</label>
-                  <input id="finance-start-date" class="form-control" type="date" bind:value={customStartDate} aria-label="Custom start date" />
+                  <input
+                    id="finance-start-date"
+                    class="form-control"
+                    type="date"
+                    value={dateInputValue(customStartDate)}
+                    oninput={(event) => customStartDate = withDateInput(customStartDate, event.currentTarget.value)}
+                    aria-label="Custom start date"
+                  />
                 </div>
                 <div class="col-12 col-md-4">
                   <label class="form-label" for="finance-end-date">Custom end date</label>
-                  <input id="finance-end-date" class="form-control" type="date" bind:value={customEndDate} aria-label="Custom end date" />
+                  <input
+                    id="finance-end-date"
+                    class="form-control"
+                    type="date"
+                    value={dateInputValue(customEndDate)}
+                    oninput={(event) => customEndDate = withDateInput(customEndDate, event.currentTarget.value)}
+                    aria-label="Custom end date"
+                  />
                 </div>
                 <div class="col-12 col-md-4 d-grid align-content-end">
                   <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId}>

@@ -114,7 +114,7 @@ func objectSlice(input map[string]any, key string) []map[string]any {
 
 func timeValue(input map[string]any, key string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339, stringValue(input, key))
-	return parsed.UTC()
+	return parsed
 }
 
 func providerFingerprint(parts ...any) string {

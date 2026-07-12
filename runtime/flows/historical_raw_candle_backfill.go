@@ -169,7 +169,7 @@ func (r *HistoricalRawCandleBackfillRunner) Run(
 		Source:      historicalRawCandleBackfillSource,
 		Venue:       canonicalRequest.Venue,
 		Status:      data.IngestionRunStatusStarted,
-		StartedAt:   r.clock().UTC(),
+		StartedAt:   r.clock(),
 		RecordCount: 0,
 	})
 	if err != nil {
@@ -219,7 +219,7 @@ func (r *HistoricalRawCandleBackfillRunner) Run(
 		data.IngestionRunStatusSucceeded,
 		len(persistedCandles),
 		"",
-		r.clock().UTC(),
+		r.clock(),
 	)
 	if err != nil {
 		return HistoricalRawCandleBackfillResult{}, fmt.Errorf("record succeeded ingestion run: %w", err)
@@ -299,7 +299,7 @@ func (r *HistoricalRawCandleBackfillRunner) failRun(
 		data.IngestionRunStatusFailed,
 		recordCount,
 		conciseErrorSummary(runErr),
-		r.clock().UTC(),
+		r.clock(),
 	)
 	if statusErr != nil {
 		return errors.Join(runErr, fmt.Errorf("record failed ingestion run: %w", statusErr))
@@ -316,13 +316,14 @@ func (r *HistoricalRawCandleBackfillRunner) recordRunStatus(
 	errorSummary string,
 	completedAt time.Time,
 ) (data.IngestionRun, error) {
+	completedAtValue := completedAt
 	run, err := data.NewIngestionRun(data.IngestionRunParams{
 		ID:           startedRun.ID,
 		Source:       startedRun.Source,
 		Venue:        startedRun.Venue,
 		Status:       status,
 		StartedAt:    startedRun.StartedAt,
-		CompletedAt:  completedAt.UTC(),
+		CompletedAt:  &completedAtValue,
 		RecordCount:  recordCount,
 		ErrorSummary: errorSummary,
 	})
@@ -503,8 +504,8 @@ func newHistoricalRawCandleBackfillReport(
 	var firstPersistedStart *time.Time
 	var lastPersistedEnd *time.Time
 	for _, candle := range persistedCandles {
-		start := candle.TimeRange.Start.UTC()
-		end := candle.TimeRange.End.UTC()
+		start := candle.TimeRange.Start
+		end := candle.TimeRange.End
 		if firstPersistedStart == nil || start.Before(*firstPersistedStart) {
 			value := start
 			firstPersistedStart = &value
@@ -543,9 +544,9 @@ func expectedHistoricalRawCandleIntervals(
 ) []domain.TimeRange {
 	intervals := make([]domain.TimeRange, 0)
 	for current := alignHistoricalRawCandleIntervalStart(
-		timeRange.Start.UTC(),
+		timeRange.Start,
 		intervalDuration,
-	); current.Before(timeRange.End.UTC()); current = current.Add(intervalDuration) {
+	); current.Before(timeRange.End); current = current.Add(intervalDuration) {
 		intervals = append(intervals, domain.TimeRange{Start: current, End: current.Add(intervalDuration)})
 	}
 	return intervals
@@ -585,8 +586,8 @@ func historicalRawCandleNaturalKey(candle domain.Candle) string {
 		candle.Instrument.Symbol.String(),
 		candle.Instrument.AssetClass.String(),
 		candle.Timeframe.String(),
-		strconv.FormatInt(candle.TimeRange.Start.UTC().UnixNano(), 10),
-		strconv.FormatInt(candle.TimeRange.End.UTC().UnixNano(), 10),
+		strconv.FormatInt(candle.TimeRange.Start.UnixNano(), 10),
+		strconv.FormatInt(candle.TimeRange.End.UnixNano(), 10),
 	}, "|")
 }
 

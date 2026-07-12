@@ -790,10 +790,10 @@ func TestService(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.Len(t, result.Actions, 1)
-			require.Equal(t, secondTime.UTC(), result.Actions[0].DecisionTime.Time())
+			require.Equal(t, secondTime, result.Actions[0].DecisionTime.Time())
 			require.Equal(t, domain.TimeRange{
-				Start: slowPreviousRange.Start.UTC(),
-				End:   slowCurrentRange.End.UTC(),
+				Start: slowPreviousRange.Start,
+				End:   slowCurrentRange.End,
 			}, result.Actions[0].InputRange)
 			require.Equal(t, domain.DataQualityRaw, result.Actions[0].Quality)
 		})

@@ -1,5 +1,6 @@
 import type { AuthStore } from '../auth/auth-store.svelte'
 import { createAuthFetch } from '../auth/auth-fetch'
+import { ResponseTimestampError, parseRequiredResponseTimestamp } from '../timestamp'
 
 export interface JobRequester {
   userId: string
@@ -43,24 +44,45 @@ export interface JobExecutionError {
   details: string
 }
 
-export interface JobSummary {
+export const historicalDataBackfillJobType = 'data.historical_raw_candle_backfill'
+
+interface JobMetadata {
   id: string
   jobType: string
   status: string
   requester: JobRequester
-  input: HistoricalDataBackfillJobInput
-  result?: HistoricalDataBackfillJobResult
   error?: JobExecutionError
   createdAt: Date
   updatedAt: Date
-  startedAt: Date | null
-  completedAt: Date | null
+  startedAt?: Date | null
+  completedAt?: Date | null
   attemptCount: number
 }
 
-export interface JobDetail extends JobSummary {
+export interface HistoricalDataBackfillJob extends JobMetadata {
+  jobType: typeof historicalDataBackfillJobType
+  input: HistoricalDataBackfillJobInput
+  result?: HistoricalDataBackfillJobResult
+}
+
+export interface OtherJob extends JobMetadata {
+  input?: undefined
+  result?: undefined
+}
+
+export type JobSummary = HistoricalDataBackfillJob | OtherJob
+
+interface JobDetailMetadata {
   workerId: string
-  lastAttemptAt: Date | null
+  lastAttemptAt?: Date | null
+}
+
+export type JobDetail = JobSummary & JobDetailMetadata
+
+export function isHistoricalDataBackfillJob(
+  job: JobSummary | JobDetail,
+): job is HistoricalDataBackfillJob & JobDetailMetadata {
+  return job.jobType === historicalDataBackfillJobType
 }
 
 export interface ListJobsParams {
@@ -109,6 +131,13 @@ export class JobsApiError extends Error {
     this.status = params.status
     this.method = params.method
     this.path = params.path
+  }
+}
+
+export class JobsResponseError extends ResponseTimestampError {
+  constructor(params: { field: string; issue: string }) {
+    super({ api: 'Jobs', ...params })
+    this.name = 'JobsResponseError'
   }
 }
 
@@ -198,35 +227,6 @@ interface RawJobRequester {
   agentRunId: string
 }
 
-interface RawHistoricalDataBackfillJobInput {
-  ingestionRunId: string
-  venue: string
-  symbol: string
-  assetClass: string
-  timeframe: string
-  start: string
-  end: string
-  pageSize: number
-}
-
-interface RawJobTimeRange {
-  start: string
-  end: string
-}
-
-interface RawHistoricalDataBackfillJobResult {
-  ingestionRunId: string
-  persistedCount: number
-  expectedCount: number
-  missingIntervalCount: number
-  duplicateNaturalKeyCount: number
-  firstPersistedStart?: string | null
-  lastPersistedEnd?: string | null
-  rawPayloadCount?: number | null
-  missingIntervalPreview?: RawJobTimeRange[]
-  missingIntervalPreviewCap: number
-}
-
 interface RawJobExecutionError {
   code: string
   summary: string
@@ -238,8 +238,8 @@ interface RawJobSummary {
   jobType: string
   status: string
   requester: RawJobRequester
-  input: RawHistoricalDataBackfillJobInput
-  result?: RawHistoricalDataBackfillJobResult
+  input?: unknown
+  result?: unknown
   error?: RawJobExecutionError
   createdAt: string
   updatedAt: string
@@ -259,19 +259,28 @@ interface RawJobListResponse {
 }
 
 function mapJobSummary(raw: RawJobSummary): JobSummary {
-  return {
+  const summary: JobMetadata = {
     id: raw.id,
     jobType: raw.jobType,
     status: raw.status,
     requester: raw.requester,
-    input: mapJobInput(raw.input),
-    ...(raw.result ? { result: mapJobResult(raw.result) } : {}),
     ...(raw.error ? { error: raw.error } : {}),
-    createdAt: new Date(raw.createdAt),
-    updatedAt: new Date(raw.updatedAt),
-    startedAt: raw.startedAt ? new Date(raw.startedAt) : null,
-    completedAt: raw.completedAt ? new Date(raw.completedAt) : null,
+    createdAt: parseJobsRequiredTimestamp(raw.createdAt, 'jobs.job.createdAt'),
+    updatedAt: parseJobsRequiredTimestamp(raw.updatedAt, 'jobs.job.updatedAt'),
+    startedAt: parseJobsOptionalTimestamp(raw.startedAt, 'jobs.job.startedAt'),
+    completedAt: parseJobsOptionalTimestamp(raw.completedAt, 'jobs.job.completedAt'),
     attemptCount: raw.attemptCount,
+  }
+
+  if (raw.jobType !== historicalDataBackfillJobType) {
+    return summary
+  }
+
+  return {
+    ...summary,
+    jobType: historicalDataBackfillJobType,
+    input: mapJobInput(raw.input),
+    ...(raw.result === undefined ? {} : { result: mapJobResult(raw.result) }),
   }
 }
 
@@ -279,29 +288,92 @@ function mapJobDetail(raw: RawJobDetail): JobDetail {
   return {
     ...mapJobSummary(raw),
     workerId: raw.workerId ?? '',
-    lastAttemptAt: raw.lastAttemptAt ? new Date(raw.lastAttemptAt) : null,
+    lastAttemptAt: parseJobsOptionalTimestamp(raw.lastAttemptAt, 'jobs.job.lastAttemptAt'),
   }
 }
 
-function mapJobInput(raw: RawHistoricalDataBackfillJobInput): HistoricalDataBackfillJobInput {
+function mapJobInput(raw: unknown): HistoricalDataBackfillJobInput {
+  const input = requireRecord(raw, 'jobs.job.input')
   return {
-    ...raw,
-    start: new Date(raw.start),
-    end: new Date(raw.end),
+    ingestionRunId: requireString(input.ingestionRunId, 'jobs.job.input.ingestionRunId'),
+    venue: requireString(input.venue, 'jobs.job.input.venue'),
+    symbol: requireString(input.symbol, 'jobs.job.input.symbol'),
+    assetClass: requireString(input.assetClass, 'jobs.job.input.assetClass'),
+    timeframe: requireString(input.timeframe, 'jobs.job.input.timeframe'),
+    start: parseJobsRequiredTimestamp(input.start, 'jobs.job.input.start'),
+    end: parseJobsRequiredTimestamp(input.end, 'jobs.job.input.end'),
+    pageSize: requireInteger(input.pageSize, 'jobs.job.input.pageSize'),
   }
 }
 
-function mapJobResult(raw: RawHistoricalDataBackfillJobResult): HistoricalDataBackfillJobResult {
+function mapJobResult(raw: unknown): HistoricalDataBackfillJobResult {
+  const result = requireRecord(raw, 'jobs.job.result')
+  const missingIntervalPreview = result.missingIntervalPreview === undefined
+    ? []
+    : requireArray(result.missingIntervalPreview, 'jobs.job.result.missingIntervalPreview').map((item) => {
+      const interval = requireRecord(item, 'jobs.job.result.missingIntervalPreview')
+      return {
+        start: parseJobsRequiredTimestamp(interval.start, 'jobs.job.result.missingIntervalPreview.start'),
+        end: parseJobsRequiredTimestamp(interval.end, 'jobs.job.result.missingIntervalPreview.end'),
+      }
+    })
+
   return {
-    ...raw,
-    firstPersistedStart: raw.firstPersistedStart ? new Date(raw.firstPersistedStart) : null,
-    lastPersistedEnd: raw.lastPersistedEnd ? new Date(raw.lastPersistedEnd) : null,
-    rawPayloadCount: raw.rawPayloadCount ?? null,
-    missingIntervalPreview: (raw.missingIntervalPreview ?? []).map((item) => ({
-      start: new Date(item.start),
-      end: new Date(item.end),
-    })),
+    ingestionRunId: requireString(result.ingestionRunId, 'jobs.job.result.ingestionRunId'),
+    persistedCount: requireInteger(result.persistedCount, 'jobs.job.result.persistedCount'),
+    expectedCount: requireInteger(result.expectedCount, 'jobs.job.result.expectedCount'),
+    missingIntervalCount: requireInteger(result.missingIntervalCount, 'jobs.job.result.missingIntervalCount'),
+    duplicateNaturalKeyCount: requireInteger(result.duplicateNaturalKeyCount, 'jobs.job.result.duplicateNaturalKeyCount'),
+    firstPersistedStart: parseJobsOptionalTimestamp(result.firstPersistedStart, 'jobs.job.result.firstPersistedStart') ?? null,
+    lastPersistedEnd: parseJobsOptionalTimestamp(result.lastPersistedEnd, 'jobs.job.result.lastPersistedEnd') ?? null,
+    rawPayloadCount: result.rawPayloadCount === undefined || result.rawPayloadCount === null
+      ? null
+      : requireInteger(result.rawPayloadCount, 'jobs.job.result.rawPayloadCount'),
+    missingIntervalPreview,
+    missingIntervalPreviewCap: requireInteger(result.missingIntervalPreviewCap, 'jobs.job.result.missingIntervalPreviewCap'),
   }
+}
+
+function requireRecord(value: unknown, field: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new JobsResponseError({ field, issue: 'is required' })
+  }
+  return value as Record<string, unknown>
+}
+
+function requireArray(value: unknown, field: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new JobsResponseError({ field, issue: 'must be an array' })
+  }
+  return value
+}
+
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new JobsResponseError({ field, issue: 'is required' })
+  }
+  return value
+}
+
+function requireInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new JobsResponseError({ field, issue: 'is required' })
+  }
+  return value
+}
+
+function parseJobsRequiredTimestamp(value: unknown, field: string): Date {
+  try {
+    return parseRequiredResponseTimestamp(value, { api: 'Jobs', field })
+  } catch (error) {
+    if (error instanceof ResponseTimestampError) throw new JobsResponseError({ field, issue: error.message.split(`${field} `)[1] ?? 'is invalid' })
+    throw error
+  }
+}
+
+function parseJobsOptionalTimestamp(value: unknown, field: string): Date | null | undefined {
+  if (value === undefined || value === null) return value
+  return parseJobsRequiredTimestamp(value, field)
 }
 
 function buildSearchParams(params: ListJobsParams): URLSearchParams {

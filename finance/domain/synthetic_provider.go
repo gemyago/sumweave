@@ -15,7 +15,7 @@ type SyntheticProviderStateEnvelope struct {
 	Version            int
 	ConfiguredAccounts []SyntheticConfiguredAccount
 	WindowHistory      []SyntheticWindowHistoryEntry
-	SequenceCounters   []SyntheticAccountDaySequenceCounter
+	SequenceCounters   []SyntheticAccountInstantSequenceCounter
 }
 
 type SyntheticConfiguredAccount struct {
@@ -25,8 +25,8 @@ type SyntheticConfiguredAccount struct {
 }
 
 type SyntheticWindowKey struct {
-	NormalizedStartUTC        time.Time
-	NormalizedEndExclusiveUTC time.Time
+	Start time.Time
+	End   time.Time
 }
 
 type SyntheticWindowHistoryEntry struct {
@@ -34,8 +34,8 @@ type SyntheticWindowHistoryEntry struct {
 	RepeatCount int
 }
 
-type SyntheticAccountDaySequenceCounter struct {
+type SyntheticAccountInstantSequenceCounter struct {
 	AccountKey   string
-	DayUTC       time.Time
+	Instant      time.Time
 	NextSequence int
 }

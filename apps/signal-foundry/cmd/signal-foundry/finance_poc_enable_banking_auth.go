@@ -577,7 +577,7 @@ func startEnableBankingAuthorization(
 	pendingAuth := enableBankingPendingAuthFile{
 		Provider:         enableBankingCommandName,
 		Kind:             enableBankingPendingAuthKind,
-		CreatedAt:        now().UTC().Format(time.RFC3339),
+		CreatedAt:        now().Format(time.RFC3339),
 		State:            state,
 		Request:          pendingRequest,
 		AuthorizationURL: extractEnableBankingString(raw, "url", "authorization_url"),
@@ -620,7 +620,7 @@ func exchangeEnableBankingSession(
 
 	sessionFile := enableBankingSessionFile{
 		Provider:           enableBankingCommandName,
-		CreatedAt:          now().UTC().Format(time.RFC3339),
+		CreatedAt:          now().Format(time.RFC3339),
 		Country:            pendingAuth.Request.Country,
 		ASPSPName:          pendingAuth.Request.ASPSPName,
 		PSUType:            pendingAuth.Request.PSUType,
@@ -640,7 +640,7 @@ func buildEnableBankingAuthorizationRequestBody(
 	state string,
 	now time.Time,
 ) map[string]any {
-	validUntil := now.UTC().Add(time.Duration(pendingRequest.ValidDays) * 24 * time.Hour)
+	validUntil := now.Add(time.Duration(pendingRequest.ValidDays) * 24 * time.Hour)
 	return map[string]any{
 		"access": map[string]any{
 			"valid_until": validUntil.Format(time.RFC3339),

@@ -203,7 +203,7 @@ func TestAuditService(t *testing.T) {
 		return false
 	}
 
-	t.Run("records trace and intent with UTC normalization and exact trace linkage", func(t *testing.T) {
+	t.Run("records trace and intent with preserved instants and exact trace linkage", func(t *testing.T) {
 		t.Parallel()
 
 		fake := newFake(t)
@@ -213,13 +213,13 @@ func TestAuditService(t *testing.T) {
 
 		persistedTrace, err := svc.RecordTrace(t.Context(), trace)
 		require.NoError(t, err)
-		require.Equal(t, time.UTC, persistedTrace.DecisionTime.Time().Location())
+		require.True(t, trace.DecisionTime.Time().Equal(persistedTrace.DecisionTime.Time()))
 
 		intent := makeIntent(t, fake, persistedTrace, randomTime(t, fake))
 		persistedIntent, err := svc.CreateOrderIntent(t.Context(), intent)
 		require.NoError(t, err)
 		require.Equal(t, persistedTrace.TraceID, persistedIntent.TraceID)
-		require.Equal(t, time.UTC, persistedIntent.CreatedTime.Time().Location())
+		require.True(t, intent.CreatedTime.Time().Equal(persistedIntent.CreatedTime.Time()))
 	})
 
 	t.Run("rejects unknown trace references for intents", func(t *testing.T) {
@@ -371,6 +371,8 @@ func TestAuditService(t *testing.T) {
 
 		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"decision_traces", []string{"trace_id"}))
 		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"order_intents", []string{"intent_id"}))
+		require.True(t, store.db.Migrator().HasIndex(&decisionTraceModel{}, "idx_decision_traces_mode_time_id"))
+		require.True(t, store.db.Migrator().HasIndex(&orderIntentModel{}, "idx_order_intents_mode_time_id"))
 
 		svc, err := NewService(store)
 		require.NoError(t, err)
@@ -438,6 +440,66 @@ func TestAuditService(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, []domain.OrderIntent{intentA1, intentA2}, intents)
+	})
+
+	t.Run("filters and orders canonical traces and intents deterministically", func(t *testing.T) {
+		t.Parallel()
+
+		fake := newFake(t)
+		svc, _ := makeService(t)
+		instrument := makeInstrument(t, fake)
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		earlierTrace, err := svc.RecordTrace(t.Context(), makeTrace(t, fake, instrument, earlier))
+		require.NoError(t, err)
+		laterTrace, err := svc.RecordTrace(t.Context(), makeTrace(t, fake, instrument, later))
+		require.NoError(t, err)
+		earlierIntent, err := svc.CreateOrderIntent(t.Context(), makeIntent(t, fake, earlierTrace, earlier))
+		require.NoError(t, err)
+		laterIntent, err := svc.CreateOrderIntent(t.Context(), makeIntent(t, fake, laterTrace, later))
+		require.NoError(t, err)
+		traces, err := svc.ListTraces(t.Context(), TraceQuery{})
+		require.NoError(t, err)
+		require.Equal(t, []domain.DecisionTraceID{earlierTrace.TraceID, laterTrace.TraceID}, []domain.DecisionTraceID{
+			traces[0].TraceID,
+			traces[1].TraceID,
+		})
+		intents, err := svc.ListOrderIntents(t.Context(), OrderIntentQuery{})
+		require.NoError(t, err)
+		require.Equal(t, []domain.OrderIntentID{earlierIntent.IntentID, laterIntent.IntentID}, []domain.OrderIntentID{
+			intents[0].IntentID,
+			intents[1].IntentID,
+		})
+
+		boundaryRange, err := domain.NewTimeRange(earlier.Add(-time.Minute), earlier.Add(time.Minute))
+		require.NoError(t, err)
+		traces, err = svc.ListTraces(t.Context(), TraceQuery{TimeRange: &boundaryRange})
+		require.NoError(t, err)
+		require.Len(t, traces, 1)
+		require.Equal(t, earlierTrace.TraceID, traces[0].TraceID)
+		intents, err = svc.ListOrderIntents(t.Context(), OrderIntentQuery{TimeRange: &boundaryRange})
+		require.NoError(t, err)
+		require.Len(t, intents, 1)
+		require.Equal(t, earlierIntent.IntentID, intents[0].IntentID)
+
+		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789, time.FixedZone("east", 2*60*60))
+		mixedTrace, err := svc.RecordTrace(t.Context(), makeTrace(t, fake, instrument, mixedOffsetAt))
+		require.NoError(t, err)
+		mixedIntent, err := svc.CreateOrderIntent(t.Context(), makeIntent(t, fake, mixedTrace, mixedOffsetAt))
+		require.NoError(t, err)
+		instantRange, err := domain.NewTimeRange(
+			time.Date(2025, time.December, 31, 21, 30, 0, 0, time.UTC),
+			time.Date(2025, time.December, 31, 22, 30, 0, 0, time.UTC),
+		)
+		require.NoError(t, err)
+		traces, err = svc.ListTraces(t.Context(), TraceQuery{TimeRange: &instantRange})
+		require.NoError(t, err)
+		require.Equal(t, []domain.DecisionTraceID{mixedTrace.TraceID}, []domain.DecisionTraceID{traces[0].TraceID})
+		intents, err = svc.ListOrderIntents(t.Context(), OrderIntentQuery{TimeRange: &instantRange})
+		require.NoError(t, err)
+		require.Equal(t, []domain.OrderIntentID{mixedIntent.IntentID}, []domain.OrderIntentID{intents[0].IntentID})
 	})
 }
 

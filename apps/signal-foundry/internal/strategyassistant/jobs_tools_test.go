@@ -84,19 +84,19 @@ func TestJobsTools(t *testing.T) {
 				Symbol:         "BTC",
 				AssetClass:     "future",
 				Timeframe:      "1m",
-				Start:          now.UTC(),
-				End:            now.UTC().Add(3 * time.Minute),
+				Start:          now,
+				End:            now.Add(3 * time.Minute),
 				PageSize:       200,
 			},
-			CreatedAt:    now.UTC(),
-			UpdatedAt:    now.UTC().Add(time.Minute),
-			QueuedAt:     now.UTC(),
+			CreatedAt:    now,
+			UpdatedAt:    now.Add(time.Minute),
+			QueuedAt:     now,
 			AttemptCount: 0,
 		}
 		if status == jobspkg.JobStatusRunning ||
 			status == jobspkg.JobStatusSucceeded ||
 			status == jobspkg.JobStatusFailed {
-			startedAt := now.UTC().Add(30 * time.Second)
+			startedAt := now.Add(30 * time.Second)
 			lastAttemptAt := startedAt
 			job.StartedAt = &startedAt
 			job.LastAttemptAt = &lastAttemptAt
@@ -104,7 +104,7 @@ func TestJobsTools(t *testing.T) {
 			job.WorkerID = "jobs-worker-test"
 		}
 		if status == jobspkg.JobStatusSucceeded {
-			completedAt := now.UTC().Add(time.Minute)
+			completedAt := now.Add(time.Minute)
 			firstPersistedStart := job.Input.Start
 			lastPersistedEnd := job.Input.End
 			job.CompletedAt = &completedAt
@@ -120,7 +120,7 @@ func TestJobsTools(t *testing.T) {
 			}
 		}
 		if status == jobspkg.JobStatusFailed {
-			completedAt := now.UTC().Add(time.Minute)
+			completedAt := now.Add(time.Minute)
 			job.CompletedAt = &completedAt
 			job.Error = &jobspkg.JobError{
 				Code:    "job_execution_failed",
@@ -132,7 +132,7 @@ func TestJobsTools(t *testing.T) {
 	}
 
 	t.Run("start historical backfill calls jobs service directly with agent metadata", func(t *testing.T) {
-		now := time.Date(2026, time.June, 17, 0, 0, 0, 0, time.UTC)
+		now := time.Date(2026, time.June, 17, 0, 0, 0, 0, time.FixedZone("UTC+05:30", 5*60*60+30*60))
 		service := &fakeJobsService{}
 		idempotencyKey := "key-" + fake.Lorem().Word()
 		ctx := &jobsToolContextStub{

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ const (
 	columnStartAt            = "start_at"
 	columnEndAt              = "end_at"
 	columnEventTime          = "event_time"
+	columnReceivedAt         = "received_at"
 	columnPrice              = "price"
 	columnSize               = "size"
 	columnQuality            = "quality"
@@ -85,7 +87,7 @@ func (candleModel) TableName(namer schema.Namer) string { return namer.TableName
 type tradeModel struct {
 	ID                 uint      `gorm:"column:id;primaryKey;autoIncrement"`
 	InstrumentID       uint      `gorm:"column:instrument_id;not null;index;uniqueIndex:idx_trades_natural_key"`
-	EventTime          time.Time `gorm:"column:event_time;not null"`
+	EventTime          time.Time `gorm:"column:event_time;not null;index"`
 	Price              float64   `gorm:"column:price;not null"`
 	Size               float64   `gorm:"column:size;not null"`
 	Quality            string    `gorm:"column:quality;size:32;not null"`
@@ -100,16 +102,16 @@ type tradeModel struct {
 func (tradeModel) TableName(namer schema.Namer) string { return namer.TableName("trades") }
 
 type ingestionRunModel struct {
-	ID           string    `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_ingestion_runs_id"`
-	Source       string    `gorm:"column:source;size:255;not null"`
-	Venue        string    `gorm:"column:venue;size:255;not null"`
-	Status       string    `gorm:"column:status;size:32;not null"`
-	StartedAt    time.Time `gorm:"column:started_at;not null"`
-	CompletedAt  time.Time `gorm:"column:completed_at"`
-	RecordCount  int       `gorm:"column:record_count;not null"`
-	ErrorSummary string    `gorm:"column:error_summary"`
-	CreatedAt    time.Time `gorm:"column:created_at;not null;autoCreateTime"`
-	UpdatedAt    time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
+	ID           string     `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_ingestion_runs_id"`
+	Source       string     `gorm:"column:source;size:255;not null"`
+	Venue        string     `gorm:"column:venue;size:255;not null"`
+	Status       string     `gorm:"column:status;size:32;not null"`
+	StartedAt    time.Time  `gorm:"column:started_at;not null"`
+	CompletedAt  *time.Time `gorm:"column:completed_at"`
+	RecordCount  int        `gorm:"column:record_count;not null"`
+	ErrorSummary string     `gorm:"column:error_summary"`
+	CreatedAt    time.Time  `gorm:"column:created_at;not null;autoCreateTime"`
+	UpdatedAt    time.Time  `gorm:"column:updated_at;not null;autoUpdateTime"`
 }
 
 func (ingestionRunModel) TableName(namer schema.Namer) string {
@@ -117,28 +119,28 @@ func (ingestionRunModel) TableName(namer schema.Namer) string {
 }
 
 type rawVenuePayloadModel struct {
-	ID                  string    `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_raw_venue_payloads_id"`
-	IngestionRunID      string    `gorm:"column:ingestion_run_id;size:255;index"`
-	Source              string    `gorm:"column:source;size:255;not null"`
-	Venue               string    `gorm:"column:venue;size:255;not null"`
-	Endpoint            string    `gorm:"column:endpoint;size:255;not null"`
-	RequestType         string    `gorm:"column:request_type;size:255;not null"`
-	RequestPayloadHash  string    `gorm:"column:request_payload_hash;size:255;not null;index"`
-	RequestMetadataJSON string    `gorm:"column:request_metadata_json;type:text"`
-	RequestAt           time.Time `gorm:"column:request_at;not null"`
-	ResponseAt          time.Time `gorm:"column:response_at;not null"`
-	HTTPStatus          int       `gorm:"column:http_status;not null"`
-	ResponseBodyHash    string    `gorm:"column:response_body_hash;size:255;not null"`
-	PayloadBodyRef      string    `gorm:"column:payload_body_ref;size:1024;not null"`
-	EntityHint          string    `gorm:"column:entity_hint;size:255"`
-	InstrumentSymbol    string    `gorm:"column:instrument_symbol;size:255"`
-	InstrumentAssetCls  string    `gorm:"column:instrument_asset_class;size:64"`
-	Timeframe           string    `gorm:"column:timeframe;size:32"`
-	StartAt             time.Time `gorm:"column:start_at"`
-	EndAt               time.Time `gorm:"column:end_at"`
-	ReceivedAt          time.Time `gorm:"column:received_at;not null;index:idx_raw_venue_payloads_received_at_id,priority:1"`
-	CreatedAt           time.Time `gorm:"column:created_at;not null;autoCreateTime"`
-	UpdatedAt           time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
+	ID                  string     `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_raw_venue_payloads_id"`
+	IngestionRunID      string     `gorm:"column:ingestion_run_id;size:255;index"`
+	Source              string     `gorm:"column:source;size:255;not null"`
+	Venue               string     `gorm:"column:venue;size:255;not null"`
+	Endpoint            string     `gorm:"column:endpoint;size:255;not null"`
+	RequestType         string     `gorm:"column:request_type;size:255;not null"`
+	RequestPayloadHash  string     `gorm:"column:request_payload_hash;size:255;not null;index"`
+	RequestMetadataJSON string     `gorm:"column:request_metadata_json;type:text"`
+	RequestAt           time.Time  `gorm:"column:request_at;not null"`
+	ResponseAt          time.Time  `gorm:"column:response_at;not null"`
+	HTTPStatus          int        `gorm:"column:http_status;not null"`
+	ResponseBodyHash    string     `gorm:"column:response_body_hash;size:255;not null"`
+	PayloadBodyRef      string     `gorm:"column:payload_body_ref;size:1024;not null"`
+	EntityHint          string     `gorm:"column:entity_hint;size:255"`
+	InstrumentSymbol    string     `gorm:"column:instrument_symbol;size:255"`
+	InstrumentAssetCls  string     `gorm:"column:instrument_asset_class;size:64"`
+	Timeframe           string     `gorm:"column:timeframe;size:32"`
+	StartAt             *time.Time `gorm:"column:start_at"`
+	EndAt               *time.Time `gorm:"column:end_at"`
+	ReceivedAt          time.Time  `gorm:"column:received_at;not null;index:idx_raw_venue_payloads_received_at_id,priority:1"`
+	CreatedAt           time.Time  `gorm:"column:created_at;not null;autoCreateTime"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at;not null;autoUpdateTime"`
 }
 
 func (rawVenuePayloadModel) TableName(namer schema.Namer) string {
@@ -146,16 +148,16 @@ func (rawVenuePayloadModel) TableName(namer schema.Namer) string {
 }
 
 type normalizationRunModel struct {
-	ID                   string    `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_normalization_runs_id"`
-	Status               string    `gorm:"column:status;size:32;not null"`
-	StartedAt            time.Time `gorm:"column:started_at;not null"`
-	CompletedAt          time.Time `gorm:"column:completed_at"`
-	RecordKind           string    `gorm:"column:record_kind;size:32;not null"`
-	SourceRecordCount    int       `gorm:"column:source_record_count;not null"`
-	CanonicalRecordCount int       `gorm:"column:canonical_record_count;not null"`
-	ErrorSummary         string    `gorm:"column:error_summary"`
-	CreatedAt            time.Time `gorm:"column:created_at;not null;autoCreateTime"`
-	UpdatedAt            time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
+	ID                   string     `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_normalization_runs_id"`
+	Status               string     `gorm:"column:status;size:32;not null"`
+	StartedAt            time.Time  `gorm:"column:started_at;not null"`
+	CompletedAt          *time.Time `gorm:"column:completed_at"`
+	RecordKind           string     `gorm:"column:record_kind;size:32;not null"`
+	SourceRecordCount    int        `gorm:"column:source_record_count;not null"`
+	CanonicalRecordCount int        `gorm:"column:canonical_record_count;not null"`
+	ErrorSummary         string     `gorm:"column:error_summary"`
+	CreatedAt            time.Time  `gorm:"column:created_at;not null;autoCreateTime"`
+	UpdatedAt            time.Time  `gorm:"column:updated_at;not null;autoUpdateTime"`
 }
 
 func (normalizationRunModel) TableName(namer schema.Namer) string {
@@ -253,9 +255,7 @@ func NewDatabaseStore(sqlDB *sql.DB, dsn string, opts DatabaseStoreOpts) (*Datab
 		TablePrefix:    opts.TablePrefix,
 		TranslateError: true,
 	})
-	cfg.NowFunc = func() time.Time {
-		return time.Now().UTC()
-	}
+	cfg.NowFunc = time.Now
 
 	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
@@ -363,6 +363,11 @@ func (s *DatabaseStore) upsertCandle(
 	if err := ctx.Err(); err != nil {
 		return domain.Candle{}, err
 	}
+	canonicalCandle, err := domain.NewCandle(domain.CandleParams(candle))
+	if err != nil {
+		return domain.Candle{}, fmt.Errorf("validate candle persistence input: %w", err)
+	}
+	candle = canonicalCandle
 
 	instrumentRow, err := s.findInstrumentModel(ctx, candle.Instrument.Venue, candle.Instrument.Symbol)
 	if err != nil {
@@ -436,11 +441,12 @@ func (s *DatabaseStore) QueryCandles(
 
 	var rows []candleModel
 	if queryErr := s.db.WithContext(ctx).
-		Where("instrument_id = ? AND timeframe = ? AND start_at >= ? AND start_at < ?",
+		Where("instrument_id = ? AND timeframe = ? AND "+
+			gormsignalfoundry.InstantRangePredicate(s.db, columnStartAt),
 			instrumentRow.ID,
 			timeframe.String(),
-			timeRange.Start.UTC(),
-			timeRange.End.UTC(),
+			timeRange.Start,
+			timeRange.End,
 		).
 		Order("start_at ASC, id ASC").
 		Find(&rows).Error; queryErr != nil {
@@ -476,11 +482,12 @@ func (s *DatabaseStore) ReplayCandles(
 
 	var rows []candleModel
 	if queryErr := s.db.WithContext(ctx).
-		Where("instrument_id = ? AND timeframe = ? AND start_at >= ? AND start_at < ?",
+		Where("instrument_id = ? AND timeframe = ? AND "+
+			gormsignalfoundry.InstantRangePredicate(s.db, columnStartAt),
 			instrumentRow.ID,
 			timeframe.String(),
-			timeRange.Start.UTC(),
-			timeRange.End.UTC(),
+			timeRange.Start,
+			timeRange.End,
 		).
 		Order("start_at ASC, id ASC").
 		Find(&rows).Error; queryErr != nil {
@@ -664,8 +671,8 @@ func candleAvailabilitySummaryRowToItemParts(
 			assetClass: assetClass.String(),
 		}, CandleAvailabilityTimeframeSummary{
 			Timeframe: timeframe,
-			StartAt:   row.StartAt.UTC(),
-			EndAt:     row.EndAt.UTC(),
+			StartAt:   row.StartAt,
+			EndAt:     row.EndAt,
 			Count:     row.Count,
 		}, CandleAvailabilityItem{
 			Venue:      venue,
@@ -728,6 +735,11 @@ func (s *DatabaseStore) upsertTrade(
 	if err := ctx.Err(); err != nil {
 		return domain.Trade{}, err
 	}
+	canonicalTrade, err := domain.NewTrade(domain.TradeParams(trade))
+	if err != nil {
+		return domain.Trade{}, fmt.Errorf("validate trade persistence input: %w", err)
+	}
+	trade = canonicalTrade
 
 	instrumentRow, err := s.findInstrumentModel(ctx, trade.Instrument.Venue, trade.Instrument.Symbol)
 	if err != nil {
@@ -832,10 +844,10 @@ func (s *DatabaseStore) QueryTrades(
 
 	var rows []tradeModel
 	if queryErr := s.db.WithContext(ctx).
-		Where("instrument_id = ? AND event_time >= ? AND event_time < ?",
+		Where("instrument_id = ? AND "+gormsignalfoundry.InstantRangePredicate(s.db, columnEventTime),
 			instrumentRow.ID,
-			timeRange.Start.UTC(),
-			timeRange.End.UTC(),
+			timeRange.Start,
+			timeRange.End,
 		).
 		Order("event_time ASC, id ASC").
 		Find(&rows).Error; queryErr != nil {
@@ -870,10 +882,10 @@ func (s *DatabaseStore) ReplayTrades(
 
 	var rows []tradeModel
 	if queryErr := s.db.WithContext(ctx).
-		Where("instrument_id = ? AND event_time >= ? AND event_time < ?",
+		Where("instrument_id = ? AND "+gormsignalfoundry.InstantRangePredicate(s.db, columnEventTime),
 			instrumentRow.ID,
-			timeRange.Start.UTC(),
-			timeRange.End.UTC(),
+			timeRange.Start,
+			timeRange.End,
 		).
 		Order("event_time ASC, id ASC").
 		Find(&rows).Error; queryErr != nil {
@@ -903,6 +915,11 @@ func (s *DatabaseStore) UpsertIngestionRun(
 		return IngestionRun{}, err
 	}
 
+	canonicalRun, validationErr := canonicalizeIngestionRun(run)
+	if validationErr != nil {
+		return IngestionRun{}, validationErr
+	}
+	run = canonicalRun
 	model := ingestionRunToModel(run)
 	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
@@ -932,6 +949,11 @@ func (s *DatabaseStore) UpsertRawVenuePayload(
 	if err := ctx.Err(); err != nil {
 		return RawVenuePayload{}, err
 	}
+	canonicalPayload, validationErr := canonicalizeRawVenuePayload(payload)
+	if validationErr != nil {
+		return RawVenuePayload{}, validationErr
+	}
+	payload = canonicalPayload
 
 	var persisted rawVenuePayloadModel
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -987,6 +1009,11 @@ func (s *DatabaseStore) UpsertNormalizationRun(
 	if err := ctx.Err(); err != nil {
 		return NormalizationRun{}, err
 	}
+	canonicalRun, validationErr := canonicalizeNormalizationRun(run)
+	if validationErr != nil {
+		return NormalizationRun{}, validationErr
+	}
+	run = canonicalRun
 
 	var persisted normalizationRunModel
 	var rawPayloadIDs []string
@@ -1039,6 +1066,11 @@ func (s *DatabaseStore) UpsertDataBatch(
 	if err := ctx.Err(); err != nil {
 		return DataBatch{}, err
 	}
+	canonicalBatch, validationErr := canonicalizeDataBatch(batch)
+	if validationErr != nil {
+		return DataBatch{}, validationErr
+	}
+	batch = canonicalBatch
 
 	var persisted dataBatchModel
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1371,8 +1403,8 @@ func (s *DatabaseStore) queryCandleLinkedRawPayloadMetadataRows(
 		Where(fmt.Sprintf("%s.symbol = ?", instrumentTable), query.Symbol.String()).
 		Where(fmt.Sprintf("%s.asset_class = ?", instrumentTable), query.AssetClass.String()).
 		Where(fmt.Sprintf("%s.timeframe = ?", candleTable), query.Timeframe.String()).
-		Where(fmt.Sprintf("%s.start_at = ?", candleTable), query.TimeRange.Start.UTC()).
-		Where(fmt.Sprintf("%s.end_at = ?", candleTable), query.TimeRange.End.UTC()).
+		Where(fmt.Sprintf("%s.start_at = ?", candleTable), query.TimeRange.Start).
+		Where(fmt.Sprintf("%s.end_at = ?", candleTable), query.TimeRange.End).
 		Where(fmt.Sprintf("%s.provenance_source = ?", candleTable), query.ProvenanceSource).
 		Where(fmt.Sprintf("%s.provenance_identity_key = ?", candleTable), query.ProvenanceIdentity).
 		Order(fmt.Sprintf("%s.received_at ASC", rawPayloadTable)).
@@ -1416,8 +1448,8 @@ func (s *DatabaseStore) findCandleModel(ctx context.Context, needle candleModel)
 			"instrument_id = ? AND timeframe = ? AND start_at = ? AND end_at = ? AND provenance_source = ? AND provenance_identity_key = ?",
 			needle.InstrumentID,
 			needle.Timeframe,
-			needle.StartAt.UTC(),
-			needle.EndAt.UTC(),
+			needle.StartAt,
+			needle.EndAt,
 			needle.ProvenanceSource,
 			needle.ProvenanceIdentity,
 		).
@@ -1439,8 +1471,8 @@ func findCandleModelByNaturalKey(
 		"instrument_id = ? AND timeframe = ? AND start_at = ? AND end_at = ? AND provenance_source = ? AND provenance_identity_key = ?",
 		target.InstrumentID,
 		target.Timeframe,
-		target.StartAt.UTC(),
-		target.EndAt.UTC(),
+		target.StartAt,
+		target.EndAt,
 		target.ProvenanceSource,
 		target.ProvenanceIdentity,
 	).First(&model).Error; err != nil {
@@ -1518,8 +1550,8 @@ func candleToModel(candle domain.Candle, instrumentID uint, batchID string) cand
 	return candleModel{
 		InstrumentID:       instrumentID,
 		Timeframe:          candle.Timeframe.String(),
-		StartAt:            candle.TimeRange.Start.UTC(),
-		EndAt:              candle.TimeRange.End.UTC(),
+		StartAt:            candle.TimeRange.Start,
+		EndAt:              candle.TimeRange.End,
 		ProvenanceSource:   candle.Provenance.Source,
 		ProvenanceIdentity: candleIdentityKey(candle.Provenance),
 		Open:               candle.Open,
@@ -1581,7 +1613,7 @@ func candleModelToDomain(model candleModel, instrumentModel instrumentModel) (do
 func tradeToModel(trade domain.Trade, instrumentID uint, batchID string) tradeModel {
 	return tradeModel{
 		InstrumentID:       instrumentID,
-		EventTime:          trade.EventTime.UTC(),
+		EventTime:          trade.EventTime,
 		Price:              trade.Price,
 		Size:               trade.Size,
 		Quality:            trade.Quality.String(),
@@ -1598,8 +1630,8 @@ func ingestionRunToModel(run IngestionRun) ingestionRunModel {
 		Source:       run.Source,
 		Venue:        run.Venue.String(),
 		Status:       run.Status.String(),
-		StartedAt:    run.StartedAt.UTC(),
-		CompletedAt:  run.CompletedAt.UTC(),
+		StartedAt:    run.StartedAt,
+		CompletedAt:  run.CompletedAt,
 		RecordCount:  run.RecordCount,
 		ErrorSummary: run.ErrorSummary,
 	}
@@ -1611,8 +1643,8 @@ func ingestionRunModelToDomain(model ingestionRunModel) (IngestionRun, error) {
 		Source:       model.Source,
 		Venue:        domain.Venue(model.Venue),
 		Status:       IngestionRunStatus(model.Status),
-		StartedAt:    model.StartedAt.UTC(),
-		CompletedAt:  model.CompletedAt.UTC(),
+		StartedAt:    model.StartedAt,
+		CompletedAt:  model.CompletedAt,
 		RecordCount:  model.RecordCount,
 		ErrorSummary: model.ErrorSummary,
 	})
@@ -1641,11 +1673,13 @@ func rawVenuePayloadToModel(payload RawVenuePayload) (rawVenuePayloadModel, erro
 		timeframe = payload.Timeframe.String()
 	}
 
-	var startAt time.Time
-	var endAt time.Time
+	var startAt *time.Time
+	var endAt *time.Time
 	if payload.TimeRange != nil {
-		startAt = payload.TimeRange.Start.UTC()
-		endAt = payload.TimeRange.End.UTC()
+		startValue := payload.TimeRange.Start
+		endValue := payload.TimeRange.End
+		startAt = &startValue
+		endAt = &endValue
 	}
 	if payload.PayloadBodyRef == "" {
 		return rawVenuePayloadModel{}, validationError("raw payload body ref is required")
@@ -1663,8 +1697,8 @@ func rawVenuePayloadToModel(payload RawVenuePayload) (rawVenuePayloadModel, erro
 		RequestType:         payload.RequestType,
 		RequestPayloadHash:  payload.RequestPayloadHash,
 		RequestMetadataJSON: requestMetadataJSON,
-		RequestAt:           payload.RequestAt.UTC(),
-		ResponseAt:          payload.ResponseAt.UTC(),
+		RequestAt:           payload.RequestAt,
+		ResponseAt:          payload.ResponseAt,
 		HTTPStatus:          payload.HTTPStatus,
 		ResponseBodyHash:    payload.ResponseBodyHash,
 		PayloadBodyRef:      payload.PayloadBodyRef,
@@ -1674,7 +1708,7 @@ func rawVenuePayloadToModel(payload RawVenuePayload) (rawVenuePayloadModel, erro
 		Timeframe:           timeframe,
 		StartAt:             startAt,
 		EndAt:               endAt,
-		ReceivedAt:          payload.ReceivedAt.UTC(),
+		ReceivedAt:          payload.ReceivedAt,
 	}, nil
 }
 
@@ -1693,8 +1727,11 @@ func rawVenuePayloadModelToDomain(model rawVenuePayloadModel) (RawVenuePayload, 
 	}
 
 	var timeRange *domain.TimeRange
-	if !model.StartAt.IsZero() || !model.EndAt.IsZero() {
-		candidate := domain.TimeRange{Start: model.StartAt.UTC(), End: model.EndAt.UTC()}
+	if model.StartAt != nil || model.EndAt != nil {
+		if model.StartAt == nil || model.EndAt == nil {
+			return RawVenuePayload{}, validationError("raw payload time range must include start and end")
+		}
+		candidate := domain.TimeRange{Start: *model.StartAt, End: *model.EndAt}
 		timeRange = &candidate
 	}
 
@@ -1707,8 +1744,8 @@ func rawVenuePayloadModelToDomain(model rawVenuePayloadModel) (RawVenuePayload, 
 		RequestType:        model.RequestType,
 		RequestPayloadHash: model.RequestPayloadHash,
 		RequestMetadata:    requestMetadata,
-		RequestAt:          model.RequestAt.UTC(),
-		ResponseAt:         model.ResponseAt.UTC(),
+		RequestAt:          model.RequestAt,
+		ResponseAt:         model.ResponseAt,
 		HTTPStatus:         model.HTTPStatus,
 		ResponseBodyHash:   model.ResponseBodyHash,
 		PayloadBodyRef:     model.PayloadBodyRef,
@@ -1716,7 +1753,7 @@ func rawVenuePayloadModelToDomain(model rawVenuePayloadModel) (RawVenuePayload, 
 		Instrument:         instrument,
 		Timeframe:          domain.Timeframe(model.Timeframe),
 		TimeRange:          timeRange,
-		ReceivedAt:         model.ReceivedAt.UTC(),
+		ReceivedAt:         model.ReceivedAt,
 	})
 	if err != nil {
 		return RawVenuePayload{}, fmt.Errorf("map raw venue payload row to domain: %w", err)
@@ -1738,8 +1775,8 @@ func normalizationRunToModel(run NormalizationRun) normalizationRunModel {
 	return normalizationRunModel{
 		ID:                   run.ID,
 		Status:               run.Status.String(),
-		StartedAt:            run.StartedAt.UTC(),
-		CompletedAt:          run.CompletedAt.UTC(),
+		StartedAt:            run.StartedAt,
+		CompletedAt:          run.CompletedAt,
 		RecordKind:           run.RecordKind.String(),
 		SourceRecordCount:    run.SourceRecordCount,
 		CanonicalRecordCount: run.CanonicalRecordCount,
@@ -1755,8 +1792,8 @@ func normalizationRunModelToDomain(
 		ID:                   model.ID,
 		RawPayloadIDs:        rawPayloadIDs,
 		Status:               NormalizationRunStatus(model.Status),
-		StartedAt:            model.StartedAt.UTC(),
-		CompletedAt:          model.CompletedAt.UTC(),
+		StartedAt:            model.StartedAt,
+		CompletedAt:          model.CompletedAt,
 		RecordKind:           LineageRecordKind(model.RecordKind),
 		SourceRecordCount:    model.SourceRecordCount,
 		CanonicalRecordCount: model.CanonicalRecordCount,
@@ -1775,8 +1812,8 @@ func dataBatchToModel(batch DataBatch) dataBatchModel {
 		NormalizationRunID: batch.NormalizationRunID,
 		Venue:              batch.Venue.String(),
 		RecordKind:         batch.RecordKind.String(),
-		StartAt:            batch.TimeRange.Start.UTC(),
-		EndAt:              batch.TimeRange.End.UTC(),
+		StartAt:            batch.TimeRange.Start,
+		EndAt:              batch.TimeRange.End,
 		Quality:            batch.Quality.String(),
 		RecordCount:        batch.RecordCount,
 		Summary:            batch.Summary,
@@ -1790,7 +1827,7 @@ func dataBatchToModel(batch DataBatch) dataBatchModel {
 }
 
 func dataBatchModelToDomain(model dataBatchModel) (DataBatch, error) {
-	timeRange, err := domain.NewTimeRange(model.StartAt.UTC(), model.EndAt.UTC())
+	timeRange, err := domain.NewTimeRange(model.StartAt, model.EndAt)
 	if err != nil {
 		return DataBatch{}, fmt.Errorf("map data batch time range: %w", err)
 	}
@@ -1830,7 +1867,7 @@ func tradeIdentityKey(eventTime time.Time, provenance domain.SourceProvenance) s
 		return provenance.RecordID
 	}
 
-	return eventTime.UTC().Format(time.RFC3339Nano)
+	return strconv.FormatInt(eventTime.UnixNano(), 10)
 }
 
 func tradeModelToDomain(model tradeModel, instrumentModel instrumentModel) (domain.Trade, error) {
@@ -1851,7 +1888,7 @@ func tradeModelToDomain(model tradeModel, instrumentModel instrumentModel) (doma
 
 	trade, err := domain.NewTrade(domain.TradeParams{
 		Instrument: instrument,
-		EventTime:  model.EventTime.UTC(),
+		EventTime:  model.EventTime,
 		Price:      model.Price,
 		Size:       model.Size,
 		Quality:    quality,
@@ -2100,17 +2137,15 @@ func queryRawPayloadMetadataRows(
 ) ([]rawVenuePayloadModel, error) {
 	statement := db.Model(&rawVenuePayloadModel{}).Where("venue = ?", query.Venue.String())
 	if query.Instrument != nil {
-		statement = statement.
-			Where("instrument_symbol = ?", query.Instrument.Symbol.String()).
-			Where("instrument_asset_class = ?", query.Instrument.AssetClass.String())
+		statement = applyRawPayloadInstrumentScope(statement, query)
 	}
 	if query.Timeframe != "" {
 		statement = statement.Where("timeframe = ?", query.Timeframe.String())
 	}
 	if query.TimeRange != nil {
 		statement = statement.
-			Where("start_at >= ?", query.TimeRange.Start.UTC()).
-			Where("end_at <= ?", query.TimeRange.End.UTC())
+			Where(gormsignalfoundry.InstantOnOrAfterPredicate(db, columnStartAt), query.TimeRange.Start).
+			Where(gormsignalfoundry.InstantOnOrBeforePredicate(db, columnEndAt), query.TimeRange.End)
 	}
 	if query.IngestionRunID != "" {
 		statement = statement.Where("ingestion_run_id = ?", query.IngestionRunID)
@@ -2127,8 +2162,8 @@ func queryRawPayloadMetadataRows(
 	if !query.cursor.ReceivedAt.IsZero() {
 		statement = statement.Where(
 			"(received_at > ?) OR (received_at = ? AND id > ?)",
-			query.cursor.ReceivedAt.UTC(),
-			query.cursor.ReceivedAt.UTC(),
+			query.cursor.ReceivedAt,
+			query.cursor.ReceivedAt,
 			query.cursor.ID,
 		)
 	}
@@ -2139,6 +2174,40 @@ func queryRawPayloadMetadataRows(
 	}
 
 	return rows, nil
+}
+
+func applyRawPayloadInstrumentScope(db *gorm.DB, query RawPayloadMetadataListQuery) *gorm.DB {
+	rawPayloadTable := db.NamingStrategy.TableName("raw_venue_payloads")
+	instrumentLinkTable := db.NamingStrategy.TableName("raw_payload_instrument_links")
+	candleLinkTable := db.NamingStrategy.TableName("raw_payload_candle_links")
+	candleTable := db.NamingStrategy.TableName("candles")
+	instrumentTable := db.NamingStrategy.TableName("instruments")
+	symbol := query.Instrument.Symbol.String()
+	assetClass := query.Instrument.AssetClass.String()
+	venue := query.Venue.String()
+
+	return db.Where(
+		"(instrument_symbol = ? AND instrument_asset_class = ?) OR "+
+			"EXISTS (SELECT 1 FROM "+instrumentLinkTable+" AS payload_instrument_links "+
+			"JOIN "+instrumentTable+" AS linked_instruments ON linked_instruments.id = payload_instrument_links.instrument_id "+
+			"WHERE payload_instrument_links.raw_payload_id = "+rawPayloadTable+".id "+
+			"AND linked_instruments.venue = ? AND linked_instruments.symbol = ? "+
+			"AND linked_instruments.asset_class = ?) OR "+
+			"EXISTS (SELECT 1 FROM "+candleLinkTable+" AS payload_candle_links "+
+			"JOIN "+candleTable+" AS linked_candles ON linked_candles.id = payload_candle_links.candle_id "+
+			"JOIN "+instrumentTable+" AS candle_instruments ON candle_instruments.id = linked_candles.instrument_id "+
+			"WHERE payload_candle_links.raw_payload_id = "+rawPayloadTable+".id "+
+			"AND candle_instruments.venue = ? AND candle_instruments.symbol = ? "+
+			"AND candle_instruments.asset_class = ?)",
+		symbol,
+		assetClass,
+		venue,
+		symbol,
+		assetClass,
+		venue,
+		symbol,
+		assetClass,
+	)
 }
 
 func queryCandleAvailabilitySummaryRows(
@@ -2154,8 +2223,12 @@ func queryCandleAvailabilitySummaryRows(
 			"instruments.symbol AS symbol",
 			"instruments.asset_class AS asset_class",
 			"candles.timeframe AS timeframe",
-			"MIN(candles.start_at) AS start_at",
-			"MAX(candles.end_at) AS end_at",
+			"(SELECT earliest.start_at FROM " + candlesTable + " AS earliest " +
+				"WHERE earliest.instrument_id = candles.instrument_id AND earliest.timeframe = candles.timeframe " +
+				"ORDER BY earliest.start_at ASC, earliest.id ASC LIMIT 1) AS start_at",
+			"(SELECT latest.end_at FROM " + candlesTable + " AS latest " +
+				"WHERE latest.instrument_id = candles.instrument_id AND latest.timeframe = candles.timeframe " +
+				"ORDER BY latest.end_at DESC, latest.id DESC LIMIT 1) AS end_at",
 			"COUNT(*) AS candle_count",
 		}, ", ")).
 		Joins("JOIN " + instrumentsTable + " AS instruments ON instruments.id = candles.instrument_id")
@@ -2222,7 +2295,7 @@ func queryCandleAvailabilitySummaryRows(
 func scanAggregatedTimeValue(value any) (time.Time, error) {
 	switch typed := value.(type) {
 	case time.Time:
-		return typed.UTC(), nil
+		return typed, nil
 	case string:
 		return parseAggregatedTimeString(typed)
 	case []byte:
@@ -2231,7 +2304,7 @@ func scanAggregatedTimeValue(value any) (time.Time, error) {
 		if !typed.Valid {
 			return time.Time{}, validationError("candle availability time is invalid")
 		}
-		return typed.Time.UTC(), nil
+		return typed.Time, nil
 	default:
 		return time.Time{}, validationError("candle availability time is invalid")
 	}
@@ -2246,7 +2319,7 @@ func parseAggregatedTimeString(value string) (time.Time, error) {
 	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05-07:00", "2006-01-02 15:04:05Z07:00", "2006-01-02 15:04:05"} {
 		parsed, err := time.Parse(layout, trimmed)
 		if err == nil {
-			return parsed.UTC(), nil
+			return parsed, nil
 		}
 	}
 
@@ -2310,8 +2383,8 @@ func buildDefaultCandleAvailabilitySlice(
 
 	return CandleAvailabilityDefaultSlice{
 		Timeframe: summary.Timeframe,
-		StartAt:   startAt.UTC(),
-		EndAt:     summary.EndAt.UTC(),
+		StartAt:   startAt,
+		EndAt:     summary.EndAt,
 	}, nil
 }
 
@@ -2323,7 +2396,7 @@ func candleAvailabilityItemAfterCursor(
 		return true
 	}
 
-	itemLatestEnd := item.DefaultSlice.EndAt.UTC()
+	itemLatestEnd := item.DefaultSlice.EndAt
 	if itemLatestEnd.Before(cursor.LatestEnd) {
 		return true
 	}

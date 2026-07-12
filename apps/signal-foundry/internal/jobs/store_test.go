@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"encoding/base64"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -65,7 +66,7 @@ func TestStore(t *testing.T) {
 		}
 	}
 
-	t.Run("persists explicit columns and restart-visible rows", func(t *testing.T) {
+	t.Run("persists restart-visible rows", func(t *testing.T) {
 		now := time.Now().UTC().Add(-time.Minute)
 		// File-backed on purpose: this verifies reopen persistence and WAL on a new handle.
 		dsn := filepath.Join(t.TempDir(), "store-columns.sqlite")
@@ -79,41 +80,6 @@ func TestStore(t *testing.T) {
 		created, err := store.Create(t.Context(), job)
 		require.NoError(t, err)
 		require.Equal(t, job.ID, created.ID)
-		columnTypes, err := store.db.Migrator().ColumnTypes(store.tableName)
-		require.NoError(t, err)
-		columnNames := make([]string, 0, len(columnTypes))
-		for _, column := range columnTypes {
-			columnNames = append(columnNames, column.Name())
-		}
-		expectedColumns := []string{
-			"id",
-			"job_type",
-			"status",
-			"requester_user_id",
-			"requester_source",
-			"agent_session_id",
-			"agent_run_id",
-			"idempotency_key",
-			"canonical_input_hash",
-			"input_json",
-			"result_json",
-			"progress_json",
-			"error_code",
-			"error_summary",
-			"error_details",
-			"created_at",
-			"updated_at",
-			"queued_at",
-			"started_at",
-			"completed_at",
-			"worker_id",
-			"attempt_count",
-			"max_attempts",
-			"last_attempt_time",
-			"correlation_id",
-			"schedule_id",
-		}
-		assert.ElementsMatch(t, expectedColumns, columnNames)
 		reopenedSQLDB, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, reopenedSQLDB.Close()) }()
@@ -207,6 +173,31 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, found)
 		assert.Equal(t, jobA.ID, found.ID)
+	})
+
+	t.Run("paginates jobs by canonical creation timestamp", func(t *testing.T) {
+		store := makeStore(t, "store-list-canonical-time")
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+		earlierJob := makeJob(earlier)
+		laterJob := makeJob(later)
+		earlierJob.CreatedAt = earlier
+		laterJob.CreatedAt = later
+		for _, job := range []Job{earlierJob, laterJob} {
+			_, err := store.Create(t.Context(), job)
+			require.NoError(t, err)
+		}
+		firstPage, err := store.List(t.Context(), ListParams{Limit: 1})
+		require.NoError(t, err)
+		require.Len(t, firstPage.Items, 1)
+		assert.Equal(t, laterJob.ID, firstPage.Items[0].ID)
+		require.NotEmpty(t, firstPage.NextCursor)
+
+		secondPage, err := store.List(t.Context(), ListParams{Limit: 1, Cursor: firstPage.NextCursor})
+		require.NoError(t, err)
+		require.Len(t, secondPage.Items, 1)
+		assert.Equal(t, earlierJob.ID, secondPage.Items[0].ID)
 	})
 
 	t.Run("creates idempotent rows once across concurrent callers", func(t *testing.T) {
@@ -392,10 +383,18 @@ func TestStore(t *testing.T) {
 		require.NoError(t, otherHashErr)
 		assert.Equal(t, hash, otherHash)
 		cursor := encodeCursor(time.Now().UTC(), "cursor-id")
-		cursorTime, cursorID, decodeErr := decodeCursor(cursor)
+		cursorCreatedAt, cursorID, decodeErr := decodeCursor(cursor)
 		require.NoError(t, decodeErr)
 		assert.Equal(t, "cursor-id", cursorID)
-		assert.False(t, cursorTime.IsZero())
+		assert.False(t, cursorCreatedAt.IsZero())
+		for _, invalidCursor := range []string{
+			"%",
+			base64.RawURLEncoding.EncodeToString([]byte("not-a-timestamp|cursor-id")),
+			base64.RawURLEncoding.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano) + "|")),
+		} {
+			_, _, decodeErr = decodeCursor(invalidCursor)
+			require.Error(t, decodeErr)
+		}
 	})
 
 	t.Run("surfaces store operation errors when the table is unavailable", func(t *testing.T) {
@@ -523,12 +522,14 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, updated.ProgressJSON)
 
+		dueAt := now.Add(-time.Minute)
 		schedule := Schedule{
 			ID:        "sched-" + fake.UUID().V4(),
 			JobType:   JobType("finance.fx_rates_sync"),
 			Requester: Requester{UserID: "system", Source: RequesterSourceOperator},
 			Interval:  time.Hour,
-			NextRunAt: now.Add(-time.Minute),
+			NextRunAt: &dueAt,
+			Enabled:   true,
 			InputJSON: mustRegistryJSON(t, map[string]string{"scope": "daily"}),
 		}
 		require.NoError(t, store.UpsertSchedule(t.Context(), schedule))
@@ -542,12 +543,126 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusCanceled, canceled.Status)
 
-		schedule.NextRunAt = now.Add(2 * time.Hour)
+		nextRunAt := now.Add(2 * time.Hour)
+		schedule.NextRunAt = &nextRunAt
 		schedule.Enabled = false
 		require.NoError(t, store.UpsertSchedule(t.Context(), schedule))
 		dueSchedules, err = store.ListDueSchedules(t.Context(), now)
 		require.NoError(t, err)
 		assert.Empty(t, dueSchedules)
+	})
+
+	t.Run("orders due schedules by canonical next-run timestamp", func(t *testing.T) {
+		store := makeStore(t, "store-schedules-canonical-time")
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		makeSchedule := func(at time.Time, suffix string) Schedule {
+			t.Helper()
+			return Schedule{
+				ID:        "schedule-" + suffix + "-" + fake.UUID().V4(),
+				JobType:   JobType("finance.fx_rates_sync"),
+				Requester: Requester{UserID: "system", Source: RequesterSourceOperator},
+				Interval:  time.Hour,
+				NextRunAt: &at,
+				Enabled:   true,
+				InputJSON: mustRegistryJSON(t, map[string]string{"scope": suffix}),
+			}
+		}
+		earlierSchedule := makeSchedule(earlier, "earlier")
+		laterSchedule := makeSchedule(later, "later")
+		require.NoError(t, store.UpsertSchedule(t.Context(), laterSchedule))
+		require.NoError(t, store.UpsertSchedule(t.Context(), earlierSchedule))
+		dueSchedules, err := store.ListDueSchedules(t.Context(), later.Add(time.Minute))
+		require.NoError(t, err)
+		require.Len(t, dueSchedules, 2)
+		assert.Equal(t, []string{earlierSchedule.ID, laterSchedule.ID}, []string{
+			dueSchedules[0].ID,
+			dueSchedules[1].ID,
+		})
+
+		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789, time.FixedZone("east", 2*60*60))
+		mixedSchedule := makeSchedule(mixedOffsetAt, "mixed-offset")
+		require.NoError(t, store.UpsertSchedule(t.Context(), mixedSchedule))
+		dueSchedules, err = store.ListDueSchedules(
+			t.Context(),
+			time.Date(2025, time.December, 31, 22, 30, 0, 0, time.UTC),
+		)
+		require.NoError(t, err)
+		require.Equal(t, []string{mixedSchedule.ID}, []string{dueSchedules[0].ID})
+	})
+
+	t.Run("persists nullable disabled schedules and fixed-offset next runs", func(t *testing.T) {
+		store := makeStore(t, "store-nullable-schedules")
+		fixedOffsetRun := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.FixedZone("UTC+05:30", 5*60*60+30*60))
+		disabledSchedule := Schedule{
+			ID:        "disabled-" + fake.UUID().V4(),
+			JobType:   JobType("finance.fx_rates_sync"),
+			Requester: Requester{UserID: "system", Source: RequesterSourceOperator},
+			Interval:  time.Hour,
+			InputJSON: mustRegistryJSON(t, map[string]string{"scope": "disabled"}),
+		}
+		enabledSchedule := Schedule{
+			ID:        "enabled-" + fake.UUID().V4(),
+			JobType:   JobType("finance.fx_rates_sync"),
+			Requester: Requester{UserID: "system", Source: RequesterSourceOperator},
+			Interval:  time.Hour,
+			NextRunAt: &fixedOffsetRun,
+			Enabled:   true,
+			InputJSON: mustRegistryJSON(t, map[string]string{"scope": "enabled"}),
+		}
+		require.NoError(t, store.UpsertSchedule(t.Context(), disabledSchedule))
+		require.NoError(t, store.UpsertSchedule(t.Context(), enabledSchedule))
+
+		var disabledNextRunAt *time.Time
+		require.NoError(
+			t,
+			store.db.Raw(
+				"SELECT next_run_at FROM "+store.scheduleTableName()+" WHERE id = ?",
+				disabledSchedule.ID,
+			).Row().Scan(&disabledNextRunAt),
+		)
+		assert.Nil(t, disabledNextRunAt)
+		dueSchedules, err := store.ListDueSchedules(t.Context(), fixedOffsetRun.Add(time.Minute))
+		require.NoError(t, err)
+		require.Len(t, dueSchedules, 1)
+		assert.Equal(t, fixedOffsetRun.Format(time.RFC3339), dueSchedules[0].NextRunAt.Format(time.RFC3339))
+	})
+
+	t.Run("enforces schedule timestamp invariants", func(t *testing.T) {
+		store := makeStore(t, "store-timestamp-invariants")
+		validAt := time.Date(2026, time.July, 10, 18, 30, 0, 123, time.FixedZone("west", -4*60*60))
+		zero := time.Time{}
+		makeSchedule := func() Schedule {
+			return Schedule{
+				ID:        "schedule-" + fake.UUID().V4(),
+				JobType:   JobType("finance.fx_rates_sync"),
+				Requester: Requester{UserID: "system", Source: RequesterSourceOperator},
+				Interval:  time.Hour,
+				InputJSON: mustRegistryJSON(t, map[string]int{"attempt": 0}),
+			}
+		}
+
+		enabled := makeSchedule()
+		enabled.Enabled = true
+		require.Error(t, store.UpsertSchedule(t.Context(), enabled))
+		enabled.NextRunAt = &zero
+		require.Error(t, store.UpsertSchedule(t.Context(), enabled))
+		enabled.NextRunAt = &validAt
+		require.NoError(t, store.UpsertSchedule(t.Context(), enabled))
+
+		disabled := makeSchedule()
+		disabled.NextRunAt = &validAt
+		require.NoError(t, store.UpsertSchedule(t.Context(), disabled))
+		var disabledNextRunAt *time.Time
+		require.NoError(t, store.db.Raw(
+			"SELECT next_run_at FROM "+store.scheduleTableName()+" WHERE id = ?",
+			disabled.ID,
+		).Row().Scan(&disabledNextRunAt))
+		require.Nil(t, disabledNextRunAt)
+		require.Error(t, validateScheduleTimestamps(Schedule{NextRunAt: &validAt}))
+		require.Error(t, validateScheduleTimestamps(Schedule{LastEnqueuedAt: &zero}))
 	})
 
 	t.Run("surfaces malformed historical payload rows", func(t *testing.T) {

@@ -161,11 +161,73 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		assert.Equal(t, []domain.Transaction{insideLater, insideEarlier}, transactions)
 	})
 
+	t.Run("filters and orders provider transactions by canonical timestamp", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		adapter := NewProviderWindowSyncPersistence(store)
+		accountID := "finance-account-" + fake.UUID().V4()
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, earlier.Before(later))
+
+		earlierTransaction, err := store.SaveTransaction(
+			t.Context(),
+			makeTransaction(fake, accountID, domain.TransactionSourceProvider, earlier),
+		)
+		require.NoError(t, err)
+		laterTransaction, err := store.SaveTransaction(
+			t.Context(),
+			makeTransaction(fake, accountID, domain.TransactionSourceProvider, later),
+		)
+		require.NoError(t, err)
+		transactions, err := adapter.ListProviderTransactionsInWindow(
+			t.Context(),
+			[]string{accountID},
+			domain.ProviderSyncWindow{Start: earlier.Add(-time.Minute), End: later.Add(time.Minute)},
+		)
+		require.NoError(t, err)
+		require.Len(t, transactions, 2)
+		assert.Equal(t, []string{laterTransaction.ID, earlierTransaction.ID}, []string{
+			transactions[0].ID,
+			transactions[1].ID,
+		})
+		assert.Equal(t, later.Format(time.RFC3339Nano), transactions[0].EffectiveAt.Format(time.RFC3339Nano))
+		assert.Equal(t, earlier.Format(time.RFC3339Nano), transactions[1].EffectiveAt.Format(time.RFC3339Nano))
+
+		boundaryTransactions, err := adapter.ListProviderTransactionsInWindow(
+			t.Context(),
+			[]string{accountID},
+			domain.ProviderSyncWindow{Start: earlier.Add(-time.Minute), End: earlier.Add(time.Minute)},
+		)
+		require.NoError(t, err)
+		require.Len(t, boundaryTransactions, 1)
+		assert.Equal(t, earlierTransaction.ID, boundaryTransactions[0].ID)
+
+		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789, time.FixedZone("east", 2*60*60))
+		mixedTransaction, err := store.SaveTransaction(
+			t.Context(),
+			makeTransaction(fake, accountID, domain.TransactionSourceProvider, mixedOffsetAt),
+		)
+		require.NoError(t, err)
+		boundaryTransactions, err = adapter.ListProviderTransactionsInWindow(
+			t.Context(),
+			[]string{accountID},
+			domain.ProviderSyncWindow{
+				Start: time.Date(2025, time.December, 31, 21, 30, 0, 0, time.UTC),
+				End:   time.Date(2025, time.December, 31, 22, 30, 0, 0, time.UTC),
+			},
+		)
+		require.NoError(t, err)
+		require.Equal(t, []string{mixedTransaction.ID}, []string{boundaryTransactions[0].ID})
+	})
+
 	t.Run("lists provider transaction matches scoped by connection and transaction ids", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
 		adapter := NewProviderWindowSyncPersistence(store)
-		now := time.Now().UTC()
+		now := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		require.True(t, now.Before(later))
 		connectionID := "connection-" + fake.UUID().V4()
 		otherConnectionID := "other-connection-" + fake.UUID().V4()
 		providerAccountID := "provider-account-" + fake.UUID().V4()
@@ -180,7 +242,7 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		require.NoError(t, err)
 		secondMatch, err := store.SaveProviderTransactionMatch(
 			t.Context(),
-			makeMatch(fake, connectionID, providerAccountID, transactionIDTwo, now.Add(time.Second)),
+			makeMatch(fake, connectionID, providerAccountID, transactionIDTwo, later),
 		)
 		require.NoError(t, err)
 		_, err = store.SaveProviderTransactionMatch(
@@ -200,7 +262,10 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			[]string{"  " + transactionIDOne + "  ", transactionIDTwo, "   "},
 		)
 		require.NoError(t, err)
-		assert.Equal(t, []domain.ProviderTransactionMatch{firstMatch, secondMatch}, matches)
+		require.Len(t, matches, 2)
+		assert.Equal(t, []string{firstMatch.ID, secondMatch.ID}, []string{matches[0].ID, matches[1].ID})
+		assert.Equal(t, now.Format(time.RFC3339Nano), matches[0].CreatedAt.Format(time.RFC3339Nano))
+		assert.Equal(t, later.Format(time.RFC3339Nano), matches[1].CreatedAt.Format(time.RFC3339Nano))
 	})
 
 	t.Run("returns empty results when snapshot query inputs are empty", func(t *testing.T) {

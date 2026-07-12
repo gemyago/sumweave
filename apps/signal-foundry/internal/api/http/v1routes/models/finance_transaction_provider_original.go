@@ -17,5 +17,5 @@ type FinanceTransactionProviderOriginal struct {
 	AmountMinor int64 `json:"amountMinor"`
 	Currency string `json:"currency"`
 	Description string `json:"description"`
-	EffectiveAt time.Time `json:"effectiveAt,omitempty"`
+	EffectiveAt *time.Time `json:"effectiveAt,omitempty"`
 }

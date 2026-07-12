@@ -12,7 +12,6 @@ var _ = time.Time{}
 
 func NewFinanceCsvImportConfirmRequestValidator() FieldValidator[*FinanceCsvImportConfirmRequest] {
 	validateMapping := NewSimpleFieldValidator[map[string]string](
-		EnsureNonDefault[map[string]string],
 	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceCsvImportConfirmRequest) {

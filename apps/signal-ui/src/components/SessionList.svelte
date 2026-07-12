@@ -15,9 +15,11 @@
 
   const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
 
-  /** Relative label for `updatedAt` (e.g. "2 hours ago"). */
-  function formatUpdatedLabel(iso: string, now = new Date()): string {
-    const target = new Date(iso)
+  /** Relative label for decoded `updatedAt` (e.g. "2 hours ago"). */
+  function formatUpdatedLabel(target: Date, now = new Date()): string {
+    if (Number.isNaN(target.getTime()) || Number.isNaN(now.getTime())) {
+      return 'Updated time unavailable'
+    }
     const diffSec = Math.round((target.getTime() - now.getTime()) / 1000)
     if (Math.abs(diffSec) < 60) {
       return rtf.format(diffSec, 'second')
@@ -45,6 +47,10 @@
     const diffYear = Math.round(diffSec / (86400 * 365))
     return rtf.format(diffYear, 'year')
   }
+
+  function dateTimeAttribute(value: Date): string | undefined {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString()
+  }
 </script>
 
 <div class="session-list">
@@ -67,7 +73,7 @@
               : undefined}
           >
             <span class="session-title">{s.title}</span>
-            <time class="session-time" datetime={s.updatedAt}>{formatUpdatedLabel(s.updatedAt)}</time>
+             <time class="session-time" datetime={dateTimeAttribute(s.updatedAt)}>{formatUpdatedLabel(s.updatedAt)}</time>
           </a>
         </li>
       {/each}

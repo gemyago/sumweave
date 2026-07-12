@@ -95,7 +95,7 @@ func NewConnector(args Args, opts ...Option) *Connector {
 			monobankclient.WithHTTPClient(httpClient),
 			monobankclient.WithLogger(args.Logger),
 		),
-		now: func() time.Time { return time.Now().UTC() },
+		now: time.Now,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -126,7 +126,7 @@ func (c *Connector) LinkToken(ctx context.Context, request providers.LinkTokenRe
 	if err != nil {
 		return providers.LinkResult{}, normalizeClientError(err)
 	}
-	capturedAt := c.now().UTC()
+	capturedAt := c.now()
 	body := response.ClientInfo
 	providerObjectID := firstNonEmpty(body.Name, "monobank")
 	return providers.LinkResult{
@@ -159,7 +159,7 @@ func (c *Connector) Fetch(
 	if err != nil {
 		return domain.ProviderSyncBatch{}, normalizeClientError(err)
 	}
-	capturedAt := c.now().UTC()
+	capturedAt := c.now()
 	clientInfo := clientInfoResponse.ClientInfo
 	batch := domain.ProviderSyncBatch{
 		Connection:      request.Connection,
@@ -267,7 +267,7 @@ func normalizeTransaction(
 	providerAccountID string,
 	item monobankclient.PersonalStatementItem,
 ) domain.ProviderTransactionObservation {
-	effectiveAt := time.Unix(item.Time, 0).UTC()
+	effectiveAt := time.Unix(item.Time, 0)
 	description := strings.TrimSpace(item.Description)
 	currency := currencyCodeToISO(item.CurrencyCode)
 	return domain.ProviderTransactionObservation{
@@ -294,8 +294,8 @@ func makeChunks(accountID string, window domain.ProviderSyncWindow) []statementC
 		return []statementChunk{{accountID: firstNonEmpty(accountID, "0")}}
 	}
 	items := []statementChunk{}
-	chunkFrom := window.Start.UTC()
-	windowEnd := window.End.UTC()
+	chunkFrom := window.Start
+	windowEnd := window.End
 	for {
 		chunkTo := chunkFrom.Add(statementChunkRange)
 		if chunkTo.After(windowEnd) {

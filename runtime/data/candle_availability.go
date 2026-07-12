@@ -144,7 +144,7 @@ func encodeCandleAvailabilityListCursor(
 	assetClass domain.AssetClass,
 ) string {
 	encoded := strings.Join([]string{
-		latestEnd.UTC().Format(time.RFC3339Nano),
+		latestEnd.Format(time.RFC3339Nano),
 		venue.String(),
 		symbol.String(),
 		assetClass.String(),
@@ -204,7 +204,7 @@ func decodeCandleAvailabilityListCursor(
 	}
 
 	return candleAvailabilityListCursor{
-		LatestEnd:  latestEnd.UTC(),
+		LatestEnd:  latestEnd,
 		Venue:      venue,
 		Symbol:     symbol,
 		AssetClass: assetClass,

@@ -90,7 +90,7 @@ func NewCSVImportService(
 		access:  newAccessGuard(store),
 		catalog: catalog,
 		ledger:  ledger,
-		now:     func() time.Time { return time.Now().UTC() },
+		now:     time.Now,
 		newID:   uuid.NewString,
 	}
 	for _, opt := range opts {
@@ -120,7 +120,7 @@ func (s *CSVImportService) PreviewCSVImport(
 	if previewErr != nil {
 		return CSVImportPreview{}, previewErr
 	}
-	now := s.now().UTC()
+	now := s.now()
 	_, saveErr := s.store.SaveCSVImport(ctx, domain.CSVImportRecord{
 		ID:                    preview.ImportID,
 		TenantID:              strings.TrimSpace(params.TenantID),
@@ -180,7 +180,7 @@ func (s *CSVImportService) ConfirmCSVImport(
 	if enqueueErr != nil {
 		return CSVImportConfirmation{}, fmt.Errorf("confirm csv import: %w", enqueueErr)
 	}
-	now := s.now().UTC()
+	now := s.now()
 	record.Status = domain.CSVImportStatusConfirmed
 	record.Mapping = confirmedCSVImportMapping(record.Type, record.Headers, record.Mapping, params.Mapping)
 	record.JobID = jobRef.ID
@@ -257,7 +257,7 @@ func (s *CSVImportService) RunCSVImportJob(
 			}
 		}
 	}
-	now := s.now().UTC()
+	now := s.now()
 	record.Status = domain.CSVImportStatusCompleted
 	record.JobID = strings.TrimSpace(params.JobID)
 	record.ImportedCount = result.ImportedCount
@@ -363,10 +363,10 @@ func (s *CSVImportService) populateCSVImportPreview(
 		categoryName := csvImportMappedValue(preview.Headers, preview.Mapping, row, csvImportFieldCategory)
 		tagName := csvImportMappedValue(preview.Headers, preview.Mapping, row, csvImportFieldTag)
 		status := csvImportMappedValue(preview.Headers, preview.Mapping, row, csvImportFieldStatus)
-		parsedDate, dateErr := time.Parse(time.DateOnly, effectiveAt)
+		parsedTimestamp, timestampErr := parseCSVTransactionTimestamp(effectiveAt)
 		parsedAmount, amountErr := strconv.ParseInt(amount, 10, 64)
 		if accountName == "" || currency == "" || description == "" || status == "" ||
-			dateErr != nil || amountErr != nil {
+			timestampErr != nil || amountErr != nil {
 			preview.RejectedRows = append(
 				preview.RejectedRows,
 				CSVImportRejectedRow{RowNumber: rowNumber, Reason: "transaction row is invalid"},
@@ -393,7 +393,7 @@ func (s *CSVImportService) populateCSVImportPreview(
 			if transaction.Currency == currency &&
 				transaction.AmountMinor == parsedAmount &&
 				transaction.Description == description &&
-				transaction.EffectiveAt.Format(time.DateOnly) == parsedDate.Format(time.DateOnly) {
+				transaction.EffectiveAt.Equal(parsedTimestamp) {
 				preview.DuplicateRows = append(
 					preview.DuplicateRows,
 					CSVImportRejectedRow{RowNumber: rowNumber, Reason: "duplicate transaction"},
@@ -433,8 +433,7 @@ func (s *CSVImportService) importTransactionCSVRow(
 ) (bool, error) {
 	accountName := csvImportMappedValue(record.Headers, mapping, row, csvImportFieldAccountName)
 	currency := strings.ToUpper(csvImportMappedValue(record.Headers, mapping, row, csvImportFieldCurrency))
-	effectiveAt, err := time.Parse(
-		time.DateOnly,
+	effectiveAt, err := parseCSVTransactionTimestamp(
 		csvImportMappedValue(record.Headers, mapping, row, csvImportFieldEffectiveAt),
 	)
 	if err != nil {
@@ -517,7 +516,7 @@ func (s *CSVImportService) importTransactionCSVRow(
 			transaction.Currency == currency &&
 			transaction.AmountMinor == amountMinor &&
 			transaction.Description == description &&
-			transaction.EffectiveAt.Format(time.DateOnly) == effectiveAt.Format(time.DateOnly) {
+			transaction.EffectiveAt.Equal(effectiveAt) {
 			return false, errors.New("duplicate transaction")
 		}
 	}
@@ -535,4 +534,12 @@ func (s *CSVImportService) importTransactionCSVRow(
 		CategoryID:  categoryID,
 	})
 	return err == nil, err
+}
+
+func parseCSVTransactionTimestamp(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err == nil {
+		return parsed, nil
+	}
+	return time.Parse(time.DateOnly, value)
 }

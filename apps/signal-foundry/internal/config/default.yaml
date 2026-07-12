@@ -2,7 +2,7 @@
 
 defaultLogLevel: INFO
 
-# Base directory for agent storage and workspace tools (relative to process working directory).
+# Base directory for agent storage and workspace tools, relative to the app root.
 dataDir: data
 
 pprofListener:
@@ -75,6 +75,7 @@ auth:
   refreshTokenTTL: 720h   # 30 days
 
 workspacefs:
+  platformAgentsPath: ../../.platform-agents
   exec:
     # Exec tools are disabled by default; set to true to enable shell execution tools.
     enabled: false
@@ -147,9 +148,7 @@ skills:
   enabled: true
   # Directories to scan for platform-agent skill subdirectories.
   # Each skill subdirectory must contain a SKILL.md.
-  # Relative paths are resolved from the process working directory.
-  # The bundled platform-agent skills path assumes the documented PM2/Nx cwd:
-  # apps/signal-foundry/.
+  # Relative paths are resolved from the app process working directory.
   paths:
     - ../../.platform-agents/skills
   # Maximum size in bytes of a single SKILL.md file (default 65536 = 64 KiB).

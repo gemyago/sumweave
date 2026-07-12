@@ -2,7 +2,7 @@
 
 This file describes the current backend foundation in this repository. For product direction and naming, use the repository-level [../../../docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) as the source of truth.
 
-HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a single **`signal-foundry`** binary built from `cmd/signal-foundry` (`go run ./cmd/signal-foundry db-migrate --env local`, `go run ./cmd/signal-foundry start-all --env local`, `go run ./cmd/signal-foundry start`, or `go install ./cmd/signal-foundry`). The app wires configuration, logging, OpenTelemetry, health, and mounts the **runtime** agent HTTP API. The long-term shape is a deployable backend that can serve or embed **`apps/signal-ui`** as one unit.
+HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a single **`signal-foundry`** binary built from `cmd/signal-foundry`. Local commands run with `apps/signal-foundry` as CWD (`go run ./cmd/signal-foundry db-migrate --env local`, `go run ./cmd/signal-foundry start-all --env local`, or `go run ./cmd/signal-foundry start --env local`). The app wires configuration, logging, OpenTelemetry, health, and mounts the **runtime** agent HTTP API. The long-term shape is a deployable backend that can serve or embed **`apps/signal-ui`** as one unit.
 
 ## Stack
 
@@ -68,7 +68,7 @@ HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a
 
 ## Technical notes (one-liners)
 
-- **Data directory:** injected as **`config.dataDir`** (default base **`data/`** relative to CWD) for agent storage and workspace tools; align paths when running from another working directory.
+- **Local persistence:** app-root launches use **`data`** for file-backed agent/auth state and **`data/data-layer.db`** for data, Finance, durable transport, and jobs. On disk these are under **`apps/signal-foundry/data`**.
 - **LLM HTTP client timeout** in **`internal/runtime.go`** should stay consistent with **`httpServer.writeTimeout`** for streaming runs.
 - **Health** and **auth** routes use the generated v1 stack (**`RegisterHealthRoutes`**, **`RegisterAuthRoutes`**); **`GET /api/v1/auth/me`** is wrapped with **`AuthMiddleware`** in controller. **Agent** traffic is a separate subtree under **`/api/v1/runtime/`**.
 

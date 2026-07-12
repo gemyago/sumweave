@@ -270,8 +270,8 @@ func mapStrategyVersionRow(record app.StrategyVersionRecord) StrategyVersionRow 
 		Notes:            record.Notes,
 		ParentStrategyID: record.ParentStrategyID,
 		ParentVersion:    record.ParentVersion,
-		CreatedAt:        record.CreatedAt.UTC(),
-		UpdatedAt:        record.UpdatedAt.UTC(),
+		CreatedAt:        record.CreatedAt,
+		UpdatedAt:        record.UpdatedAt,
 	}
 }
 

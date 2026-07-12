@@ -12,8 +12,8 @@ function linkNameMatcher(title: string): RegExp {
 function sessionFixture(overrides: Partial<SessionMetadata> & Pick<SessionMetadata, 'sessionId' | 'title'>): SessionMetadata {
   const created = faker.date.past()
   return {
-    createdAt: created.toISOString(),
-    updatedAt: faker.date.between({ from: created, to: new Date() }).toISOString(),
+    createdAt: created,
+    updatedAt: faker.date.between({ from: created, to: new Date() }),
     ...overrides,
   }
 }
@@ -60,5 +60,18 @@ describe('SessionList', () => {
     await user.click(screen.getByRole('button', { name: 'New chat' }))
 
     expect(onNewChat).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses a bounded placeholder instead of a NaN relative-time label for malformed session timestamps', () => {
+    render(SessionList, {
+      props: {
+        sessions: [sessionFixture({ sessionId: faker.string.uuid(), title: 'Malformed session', updatedAt: new Date('not-a-timestamp') })],
+        activeSessionId: null,
+        onNewChat: vi.fn(),
+      },
+    })
+
+    expect(screen.getByText('Updated time unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument()
   })
 })

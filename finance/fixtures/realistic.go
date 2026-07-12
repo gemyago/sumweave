@@ -64,53 +64,38 @@ func RealisticScenarioMemberUserID(seed int64) string {
 }
 
 func RealisticScenarioWindow(anchor time.Time) (time.Time, time.Time) {
-	anchorUTC := anchor.UTC()
-	endDate := time.Date(anchorUTC.Year(), anchorUTC.Month()+1, 0, 0, 0, 0, 0, time.UTC)
-	startDate := time.Date(endDate.Year(), endDate.Month()-11, 1, 0, 0, 0, 0, time.UTC)
-	return startDate, endDate
+	return anchor.AddDate(0, -11, 0), anchor
 }
 
 //nolint:mnd // Deterministic fixture rates intentionally use simple fixed coefficients.
 func RealisticScenarioStaticFXRates(provider string, anchor time.Time) []domain.FXRate {
-	startDate, endDate := RealisticScenarioWindow(anchor)
+	startDate := anchor.AddDate(0, -11, 0)
+	endDate := anchor
 	rateDates := []time.Time{startDate}
 	for monthStart := startDate; !monthStart.After(endDate); monthStart = monthStart.AddDate(0, 1, 0) {
-		for _, day := range []int{10, 27, 30} {
-			lastDay := time.Date(
-				monthStart.Year(),
-				monthStart.Month()+1,
-				0,
-				0,
-				0,
-				0,
-				0,
-				time.UTC,
-			).Day()
-			if day > lastDay {
-				day = lastDay
+		for _, dayOffset := range []int{0, 9, 26} {
+			date := monthStart.AddDate(0, 0, dayOffset)
+			if date.After(endDate) {
+				continue
 			}
-			rateDates = append(
-				rateDates,
-				time.Date(monthStart.Year(), monthStart.Month(), day, 0, 0, 0, 0, time.UTC),
-			)
+			rateDates = append(rateDates, date)
 		}
 	}
 	rates := make([]domain.FXRate, 0, len(rateDates))
 	seenDates := make(map[string]struct{}, len(rateDates))
-	for _, day := range rateDates {
-		day = day.UTC()
-		dateKey := day.Format(time.DateOnly)
+	for _, date := range rateDates {
+		dateKey := date.Format(time.RFC3339Nano)
 		if _, seen := seenDates[dateKey]; seen {
 			continue
 		}
 		seenDates[dateKey] = struct{}{}
-		monthComponent := float64(int(day.Month())-1) * 0.004
-		dayComponent := float64(day.Day()-1) * 0.0005
+		monthComponent := float64(int(date.Month())-1) * 0.004
+		dayComponent := float64(date.Day()-1) * 0.0005
 		rates = append(rates, domain.FXRate{
 			Provider:      strings.TrimSpace(provider),
 			BaseCurrency:  fixtureCurrencyEUR,
 			QuoteCurrency: fixtureCurrencyUSD,
-			RateDate:      day.UTC(),
+			RateDate:      date,
 			Rate:          1.05 + monthComponent + dayComponent,
 		})
 	}
@@ -234,22 +219,6 @@ func GenerateRealisticScenario(
 					return err
 				}
 
-				recordMonthDay := func(monthStart time.Time, day int) time.Time {
-					lastDay := time.Date(
-						monthStart.Year(),
-						monthStart.Month()+1,
-						0,
-						0,
-						0,
-						0,
-						0,
-						time.UTC,
-					).Day()
-					if day > lastDay {
-						day = lastDay
-					}
-					return time.Date(monthStart.Year(), monthStart.Month(), day, 10, 0, 0, 0, time.UTC)
-				}
 				tagPreview, err := service.PreviewCSVImport(
 					ctx,
 					financepkg.PreviewCSVImportParams{
@@ -259,7 +228,7 @@ func GenerateRealisticScenario(
 						FileName:    "realistic-tag-preview.csv",
 						CSV: "accountName,currency,effectiveAt,amountMinor,description,category,tag,status\n" +
 							importedCard.Name + "," + fixtureCurrencyUSD + "," +
-							recordMonthDay(startDate, 9).Format(time.DateOnly) +
+							startDate.AddDate(0, 0, 8).Format(time.DateOnly) +
 							",-15000,travel import preview,Travel & Vacation,Travel,booked\n",
 					},
 				)
@@ -354,7 +323,7 @@ func GenerateRealisticScenario(
 						320_000,
 						fixtureCurrencyUSD,
 						"monthly paycheck",
-						recordMonthDay(monthStart, 1),
+						monthStart,
 						"Paycheck",
 						nil,
 						"",
@@ -370,7 +339,7 @@ func GenerateRealisticScenario(
 							45_000,
 							fixtureCurrencyUSD,
 							"quarterly bonus",
-							recordMonthDay(monthStart, 2),
+							monthStart.AddDate(0, 0, 1),
 							"Bonus",
 							nil,
 							"",
@@ -421,7 +390,7 @@ func GenerateRealisticScenario(
 					} {
 						var providerOriginal *domain.ProviderTransactionOriginal
 						if item.source == domain.TransactionSourceProvider {
-							originalAt := recordMonthDay(monthStart, item.day)
+							originalAt := monthStart.AddDate(0, 0, item.day-1)
 							providerOriginal = &domain.ProviderTransactionOriginal{
 								AmountMinor: item.amountMinor - 300,
 								Currency:    item.currency,
@@ -437,7 +406,7 @@ func GenerateRealisticScenario(
 							item.amountMinor,
 							item.currency,
 							item.description,
-							recordMonthDay(monthStart, item.day),
+							monthStart.AddDate(0, 0, item.day-1),
 							item.categoryName,
 							providerOriginal,
 							"",
@@ -454,7 +423,7 @@ func GenerateRealisticScenario(
 						-90_000,
 						fixtureCurrencyUSD,
 						"move to savings",
-						recordMonthDay(monthStart, 10),
+						monthStart.AddDate(0, 0, 9),
 						"",
 						nil,
 						"",
@@ -470,7 +439,7 @@ func GenerateRealisticScenario(
 						83_000,
 						fixtureCurrencyEUR,
 						"move from checking",
-						recordMonthDay(monthStart, 10),
+						monthStart.AddDate(0, 0, 9),
 						"",
 						nil,
 						"",
@@ -494,7 +463,7 @@ func GenerateRealisticScenario(
 						-12_500,
 						fixtureCurrencyUSD,
 						"unmatched transfer export",
-						recordMonthDay(monthStart, 28),
+						monthStart.AddDate(0, 0, 27),
 						"",
 						nil,
 						fmt.Sprintf("unmatched-%d", monthIndex),
@@ -509,7 +478,7 @@ func GenerateRealisticScenario(
 						-2_100,
 						fixtureCurrencyUSD,
 						"duplicate import row",
-						recordMonthDay(monthStart, 15),
+						monthStart.AddDate(0, 0, 14),
 						"Shopping",
 						nil,
 						"",

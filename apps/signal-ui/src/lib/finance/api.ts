@@ -1,5 +1,6 @@
 import type { AuthStore } from '../auth/auth-store.svelte'
 import { createAuthFetch } from '../auth/auth-fetch'
+import { ResponseTimestampError, parseRequiredResponseTimestamp, serializeRequestTimestamp } from '../timestamp'
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -7,6 +8,7 @@ export interface FinanceTenantSummary {
   id: string
   name: string
   displayCurrency: string
+  archivedAt?: Date | null
   joinedAt: Date
   createdAt: Date
   updatedAt: Date
@@ -24,9 +26,9 @@ export interface FinanceTenantInvite {
   code: string
   recipient: string
   createdByUserId: string
-  acceptedByUserId: string | null
+  acceptedByUserId?: string | null
   createdAt: Date
-  acceptedAt: Date | null
+  acceptedAt?: Date | null
 }
 
 export interface FinanceAccount {
@@ -35,9 +37,11 @@ export interface FinanceAccount {
   name: string
   currency: string
   kind: string
-  provider: string
-  providerAccountId: string
-  hiddenAt: Date | null
+  bookedBalanceMinor: number
+  pendingBalanceMinor: number
+  provider?: string
+  providerAccountId?: string
+  hiddenAt?: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -48,7 +52,7 @@ export interface FinanceCategory {
   name: string
   kind: string
   seededDefault: boolean
-  hiddenAt: Date | null
+  hiddenAt?: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -57,7 +61,7 @@ export interface FinanceTag {
   id: string
   tenantId: string
   name: string
-  hiddenAt: Date | null
+  hiddenAt?: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -73,11 +77,11 @@ export interface FinanceTransaction {
   currency: string
   description: string
   effectiveAt: Date
-  categoryId: string | null
-  transferGroupId: string | null
-  transferMatchedAt: Date | null
-  hiddenAt: Date | null
-  providerOriginal: FinanceTransactionProviderOriginal | null
+  categoryId?: string | null
+  transferGroupId?: string | null
+  transferMatchedAt?: Date | null
+  hiddenAt?: Date | null
+  providerOriginal?: FinanceTransactionProviderOriginal
   createdAt: Date
   updatedAt: Date
 }
@@ -86,17 +90,17 @@ export interface FinanceTransactionProviderOriginal {
   amountMinor: number
   currency: string
   description: string
-  effectiveAt: Date | null
+  effectiveAt?: Date | null
 }
 
 export interface FinanceBankConnectionSchedule {
   connectionId: string
   intervalSeconds: number
-  nextRunAt: Date | null
-  lastScheduledAt: Date | null
-  lastStartedAt: Date | null
-  lastCompletedAt: Date | null
-  lastJobId: string
+  nextRunAt?: Date | null
+  lastScheduledAt?: Date | null
+  lastStartedAt?: Date | null
+  lastCompletedAt?: Date | null
+  lastJobId?: string
   enabled: boolean
   createdAt: Date
   updatedAt: Date
@@ -110,13 +114,13 @@ export interface FinanceBankConnection {
   providerReference: string
   externalId: string
   state: string
-  lastSyncJobId: string
-  lastSyncStartedAt: Date | null
-  lastSuccessfulSyncAt: Date | null
-  lastSyncError: string
+  lastSyncJobId?: string
+  lastSyncStartedAt?: Date | null
+  lastSuccessfulSyncAt?: Date | null
+  lastSyncError?: string
   createdAt: Date
   updatedAt: Date
-  schedule: FinanceBankConnectionSchedule | null
+  schedule?: FinanceBankConnectionSchedule
 }
 
 export interface FinanceDashboardPeriodWindow {
@@ -169,8 +173,8 @@ export interface FinanceDashboardAlert {
 
 export interface FinanceDashboardMissingFx {
   source: string
-  transactionId: string
-  accountId: string
+  transactionId: string | null
+  accountId: string | null
   baseCurrency: string
   quoteCurrency: string
   rateDate: Date
@@ -239,8 +243,8 @@ export interface FinanceCSVImportAudit {
   confirmedByUserId: string
   importedCount: number
   createdAt: Date
-  confirmedAt: Date | null
-  completedAt: Date | null
+  confirmedAt?: Date | null
+  completedAt?: Date | null
 }
 
 export interface FinanceJobRef {
@@ -311,7 +315,7 @@ export interface SignalFinanceApi {
     transactionId: string
     description: string
     amountMinor: number
-    effectiveAt: Date
+    effectiveAt?: Date
     categoryId?: string | null
   }): Promise<FinanceTransaction>
   listConnections(params: { tenantId: string }): Promise<FinanceBankConnection[]>
@@ -333,10 +337,10 @@ export interface SignalFinanceApi {
     tenantId: string
     connectionId: string
     reason: string
-    windowStart?: Date | null
-    windowEnd?: Date | null
+    windowStart?: Date
+    windowEnd?: Date
   }): Promise<FinanceJobRef>
-  getDashboard(params: { tenantId: string; preset?: string; startDate?: string; endDate?: string }): Promise<FinanceDashboard>
+  getDashboard(params: { tenantId: string; preset?: string; startDate?: Date; endDate?: Date }): Promise<FinanceDashboard>
   getFXDiagnostics(): Promise<FinanceFXDiagnostics>
   triggerFXSync(params: {
     provider?: string
@@ -366,6 +370,13 @@ export class FinanceApiError extends Error {
     super(`Finance API ${params.method} ${params.path} failed: ${params.message}`)
     this.name = 'FinanceApiError'
     this.status = params.status
+  }
+}
+
+export class FinanceResponseError extends Error {
+  constructor(params: { field: string; issue: string }) {
+    super(`Finance API response contract violation: ${params.field} ${params.issue}`)
+    this.name = 'FinanceResponseError'
   }
 }
 
@@ -403,7 +414,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
   return {
     async listTenants() {
       const json = await request<{ items?: RawTenantSummary[] }>({ method: 'GET', path: '/finance/tenants' })
-      return (json.items ?? []).map(mapTenant)
+      return requireItems<RawTenantSummary>(json, 'finance.tenants.items').map(mapTenant)
     },
     async createTenant(body) {
       return mapTenant(await request<RawTenantSummary>({ method: 'POST', path: '/finance/tenants', body }))
@@ -420,11 +431,11 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
     },
     async listTenantMembers({ tenantId }) {
       const json = await request<{ items?: RawTenantMember[] }>({ method: 'GET', path: `/finance/tenants/${encodeURIComponent(tenantId)}/members` })
-      return (json.items ?? []).map(mapTenantMember)
+      return requireItems<RawTenantMember>(json, 'finance.tenantMembers.items').map(mapTenantMember)
     },
     async listTenantInvites({ tenantId }) {
       const json = await request<{ items?: RawTenantInvite[] }>({ method: 'GET', path: `/finance/tenants/${encodeURIComponent(tenantId)}/invites` })
-      return (json.items ?? []).map(mapTenantInvite)
+      return requireItems<RawTenantInvite>(json, 'finance.tenantInvites.items').map(mapTenantInvite)
     },
     async createTenantInvite({ tenantId, recipient }) {
       return mapTenantInvite(
@@ -446,7 +457,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/accounts`,
         query: buildSearchParams({ includeHidden }),
       })
-      return (json.items ?? []).map(mapAccount)
+      return requireItems<RawAccount>(json, 'finance.accounts.items').map(mapAccount)
     },
     async createAccount({ tenantId, name, currency, kind }) {
       return mapAccount(
@@ -463,7 +474,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/categories`,
         query: buildSearchParams({ includeHidden }),
       })
-      return (json.items ?? []).map(mapCategory)
+      return requireItems<RawCategory>(json, 'finance.categories.items').map(mapCategory)
     },
     async createCategory({ tenantId, name, kind }) {
       return mapCategory(
@@ -480,7 +491,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/tags`,
         query: buildSearchParams({ includeHidden }),
       })
-      return (json.items ?? []).map(mapTag)
+      return requireItems<RawTag>(json, 'finance.tags.items').map(mapTag)
     },
     async createTag({ tenantId, name }) {
       return mapTag(
@@ -497,7 +508,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions`,
         query: buildSearchParams({ accountId, source, status, includeHidden, limit, offset }),
       })
-      return (json.items ?? []).map(mapTransaction)
+      return requireItems<RawTransaction>(json, 'finance.transactions.items').map(mapTransaction)
     },
     async getTransaction({ tenantId, transactionId }) {
       return mapTransaction(
@@ -524,15 +535,19 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
           body: {
             description: params.description,
             amountMinor: params.amountMinor,
-            effectiveAt: params.effectiveAt,
-            categoryId: params.categoryId ?? null,
+            ...(params.effectiveAt === undefined ? {} : { effectiveAt: serializeRequestTimestamp(params.effectiveAt) }),
+            ...(params.categoryId === undefined
+              ? {}
+              : params.categoryId === null
+                ? { clearCategory: true }
+                : { categoryId: params.categoryId }),
           },
         }),
       )
     },
     async listConnections({ tenantId }) {
       const json = await request<{ items?: RawConnection[] }>({ method: 'GET', path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections` })
-      return (json.items ?? []).map(mapConnection)
+      return requireItems<RawConnection>(json, 'finance.connections.items').map(mapConnection)
     },
     async linkTokenConnection({ tenantId, provider, token }) {
       return mapConnection(
@@ -595,7 +610,11 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       const json = await request<RawJobRef>({
         method: 'POST',
         path: `/finance/tenants/${encodeURIComponent(params.tenantId)}/connections/${encodeURIComponent(params.connectionId)}/sync`,
-        body: { reason: params.reason, windowStart: params.windowStart, windowEnd: params.windowEnd },
+        body: {
+          reason: params.reason,
+          ...(params.windowStart === undefined ? {} : { windowStart: serializeRequestTimestamp(params.windowStart) }),
+          ...(params.windowEnd === undefined ? {} : { windowEnd: serializeRequestTimestamp(params.windowEnd) }),
+        },
       })
       return mapJobRef(json)
     },
@@ -604,7 +623,11 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         await request<RawDashboard>({
           method: 'GET',
           path: `/finance/tenants/${encodeURIComponent(tenantId)}/dashboard`,
-          query: buildSearchParams({ preset, startDate, endDate }),
+          query: buildSearchParams({
+            preset,
+            startDate: startDate === undefined ? undefined : serializeRequestTimestamp(startDate),
+            endDate: endDate === undefined ? undefined : serializeRequestTimestamp(endDate),
+          }),
         }),
       )
     },
@@ -612,7 +635,15 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       return mapFXDiagnostics(await request<RawFXDiagnostics>({ method: 'GET', path: '/finance/fx/diagnostics' }))
     },
     async triggerFXSync(params) {
-      return mapJobRef(await request<RawJobRef>({ method: 'POST', path: '/finance/fx/sync', body: params }))
+      return mapJobRef(await request<RawJobRef>({
+        method: 'POST',
+        path: '/finance/fx/sync',
+        body: {
+          ...params,
+          startDate: serializeRequestTimestamp(params.startDate),
+          endDate: serializeRequestTimestamp(params.endDate),
+        },
+      }))
     },
     async previewCSVImport(params) {
       return mapCSVPreview(
@@ -647,128 +678,248 @@ export function createSignalFinanceApiForAuth(params: { baseUrl: string; authSto
   return createSignalFinanceApi({ baseUrl: params.baseUrl, fetch: createAuthFetch(params.authStore) })
 }
 
-interface RawTenantSummary { id: string; name: string; displayCurrency: string; joinedAt: string; createdAt: string; updatedAt: string }
+interface RawTenantSummary { id: string; name: string; displayCurrency: string; archivedAt?: string | null; joinedAt: string; createdAt: string; updatedAt: string }
 interface RawTenantMember { tenantId: string; userId: string; joinedAt: string }
 interface RawTenantInvite { id: string; tenantId: string; code: string; recipient: string; createdByUserId: string; acceptedByUserId?: string | null; createdAt: string; acceptedAt?: string | null }
-interface RawAccount { id: string; tenantId: string; name: string; currency: string; kind: string; provider?: string; providerAccountId?: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
+interface RawAccount { id: string; tenantId: string; name: string; currency: string; kind: string; bookedBalanceMinor: number; pendingBalanceMinor: number; provider?: string; providerAccountId?: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawCategory { id: string; tenantId: string; name: string; kind: string; seededDefault: boolean; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTag { id: string; tenantId: string; name: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTransactionProviderOriginal { amountMinor: number; currency: string; description: string; effectiveAt?: string | null }
-interface RawTransaction { id: string; tenantId: string; accountId: string; source: string; status: string; kind: string; amountMinor: number; currency: string; description: string; effectiveAt: string; categoryId?: string | null; transferGroupId?: string | null; transferMatchedAt?: string | null; hiddenAt?: string | null; providerOriginal?: RawTransactionProviderOriginal | null; createdAt: string; updatedAt: string }
+interface RawTransaction { id: string; tenantId: string; accountId: string; source: string; status: string; kind: string; amountMinor: number; currency: string; description: string; effectiveAt: string; categoryId?: string | null; transferGroupId?: string | null; transferMatchedAt?: string | null; hiddenAt?: string | null; providerOriginal?: RawTransactionProviderOriginal; createdAt: string; updatedAt: string }
 interface RawConnectionSchedule { connectionId: string; intervalSeconds: number; nextRunAt?: string | null; lastScheduledAt?: string | null; lastStartedAt?: string | null; lastCompletedAt?: string | null; lastJobId?: string; enabled: boolean; createdAt: string; updatedAt: string }
-interface RawConnection { id: string; tenantId: string; provider: string; displayName: string; providerReference: string; externalId: string; state: string; lastSyncJobId?: string; lastSyncStartedAt?: string | null; lastSuccessfulSyncAt?: string | null; lastSyncError?: string; createdAt: string; updatedAt: string; schedule?: RawConnectionSchedule | null }
+interface RawConnection { id: string; tenantId: string; provider: string; displayName: string; providerReference: string; externalId: string; state: string; lastSyncJobId?: string; lastSyncStartedAt?: string | null; lastSuccessfulSyncAt?: string | null; lastSyncError?: string; createdAt: string; updatedAt: string; schedule?: RawConnectionSchedule }
 interface RawConnectionRedirectStart { provider: string; authorizationUrl: string; state: string }
 interface RawSyntheticLinkStateConfiguredAccount { key: string; name: string; currency: string }
 interface RawSyntheticLinkState {
   provider: string
   state: string
-  configuredAccounts?: RawSyntheticLinkStateConfiguredAccount[]
+  configuredAccounts: RawSyntheticLinkStateConfiguredAccount[]
   canFinish: boolean
 }
 interface RawDashboardPeriodWindow { startDate: string; endDate: string }
 interface RawDashboardPeriod { preset: string; startDate: string; endDate: string; previous: RawDashboardPeriodWindow; next: RawDashboardPeriodWindow }
 interface RawMoneySummary { displayCurrency: string; incomeMinor: number; expenseMinor: number; netMinor: number; transactionCount: number; complete: boolean }
 interface RawCategoryBreakdown { categoryId: string; categoryName: string; kind: string; incomeMinor: number; expenseMinor: number; transactionCount: number }
-interface RawAccountBalance { accountId: string; accountName: string; currency: string; nativeBookedMinor: number; nativePendingMinor: number; displayBookedMinor?: number | null; displayPendingMinor?: number | null; missingFx: boolean }
+interface RawAccountBalance { accountId: string; accountName: string; currency: string; nativeBookedMinor: number; nativePendingMinor: number; displayBookedMinor: number | null; displayPendingMinor: number | null; missingFx: boolean }
 interface RawDashboardAlert { code: string; severity: string; count: number }
-interface RawMissingFX { source: string; transactionId?: string; accountId?: string; baseCurrency: string; quoteCurrency: string; rateDate: string; provider: string }
+interface RawMissingFX { source: string; transactionId: string | null; accountId: string | null; baseCurrency: string; quoteCurrency: string; rateDate: string; provider: string }
 interface RawCurrencyTotal { currency: string; incomeMinor: number; expenseMinor: number; netMinor: number }
-interface RawDashboard { period: RawDashboardPeriod; settled: RawMoneySummary; pending: RawMoneySummary; categoryBreakdowns?: RawCategoryBreakdown[]; accountBalances?: RawAccountBalance[]; alerts?: RawDashboardAlert[]; missingFx?: RawMissingFX[]; nativeSettledTotals?: RawCurrencyTotal[] }
-interface RawFXDiagnostics { defaultProvider: string; storedRatesCount: number; providers?: RawFXProvider[] }
+interface RawDashboard { period: RawDashboardPeriod; settled: RawMoneySummary; pending: RawMoneySummary; categoryBreakdowns: RawCategoryBreakdown[]; accountBalances: RawAccountBalance[]; alerts: RawDashboardAlert[]; missingFx: RawMissingFX[]; nativeSettledTotals: RawCurrencyTotal[] }
+interface RawFXDiagnostics { defaultProvider: string; storedRatesCount: number; providers: RawFXProvider[] }
 interface RawFXProvider { name: string; default: boolean; ready: boolean }
 interface RawCSVRejectedRow { rowNumber: number; reason: string }
-interface RawCSVImportPreview { importId: string; importType: string; headers?: string[]; mapping?: Record<string, string>; duplicateRows?: RawCSVRejectedRow[]; rejectedRows?: RawCSVRejectedRow[]; wouldCreateAccounts?: string[]; wouldCreateCategories?: string[]; wouldCreateTags?: string[] }
+interface RawCSVImportPreview { importId: string; importType: string; headers: string[]; mapping: Record<string, string>; duplicateRows: RawCSVRejectedRow[]; rejectedRows: RawCSVRejectedRow[]; wouldCreateAccounts: string[]; wouldCreateCategories: string[]; wouldCreateTags: string[] }
 interface RawCSVImportConfirmation { importId: string; jobId: string; jobType: string }
 interface RawCSVImportAudit { importId: string; tenantId: string; importType: string; status: string; jobId: string; confirmedByUserId: string; importedCount: number; createdAt: string; confirmedAt?: string | null; completedAt?: string | null }
 interface RawJobRef { jobId: string; jobType: string; provider?: string }
 
 function mapTenant(item: RawTenantSummary): FinanceTenantSummary {
-  return { ...item, joinedAt: new Date(item.joinedAt), createdAt: new Date(item.createdAt), updatedAt: new Date(item.updatedAt) }
+  requireFields(item, 'finance.tenant', ['id', 'name', 'displayCurrency', 'joinedAt', 'createdAt', 'updatedAt'])
+  return { ...item, archivedAt: parseOptionalDate(item.archivedAt, 'finance.tenant.archivedAt'), joinedAt: parseRequiredDate(item.joinedAt, 'finance.tenant.joinedAt'), createdAt: parseRequiredDate(item.createdAt, 'finance.tenant.createdAt'), updatedAt: parseRequiredDate(item.updatedAt, 'finance.tenant.updatedAt') }
 }
-function mapTenantMember(item: RawTenantMember): FinanceTenantMember { return { ...item, joinedAt: new Date(item.joinedAt) } }
-function mapTenantInvite(item: RawTenantInvite): FinanceTenantInvite { return { ...item, acceptedByUserId: item.acceptedByUserId ?? null, createdAt: new Date(item.createdAt), acceptedAt: parseOptionalDate(item.acceptedAt) } }
-function mapAccount(item: RawAccount): FinanceAccount { return { ...item, provider: item.provider ?? '', providerAccountId: item.providerAccountId ?? '', hiddenAt: parseOptionalDate(item.hiddenAt), createdAt: new Date(item.createdAt), updatedAt: new Date(item.updatedAt) } }
-function mapCategory(item: RawCategory): FinanceCategory { return { ...item, hiddenAt: parseOptionalDate(item.hiddenAt), createdAt: new Date(item.createdAt), updatedAt: new Date(item.updatedAt) } }
-function mapTag(item: RawTag): FinanceTag { return { ...item, hiddenAt: parseOptionalDate(item.hiddenAt), createdAt: new Date(item.createdAt), updatedAt: new Date(item.updatedAt) } }
+function mapTenantMember(item: RawTenantMember): FinanceTenantMember {
+  requireFields(item, 'finance.tenantMember', ['tenantId', 'userId', 'joinedAt'])
+  return { ...item, joinedAt: parseRequiredDate(item.joinedAt, 'finance.tenantMember.joinedAt') }
+}
+function mapTenantInvite(item: RawTenantInvite): FinanceTenantInvite {
+  requireFields(item, 'finance.tenantInvite', ['id', 'tenantId', 'code', 'recipient', 'createdByUserId', 'createdAt'])
+  return { ...item, createdAt: parseRequiredDate(item.createdAt, 'finance.tenantInvite.createdAt'), acceptedAt: parseOptionalDate(item.acceptedAt, 'finance.tenantInvite.acceptedAt') }
+}
+function mapAccount(item: RawAccount): FinanceAccount {
+  requireFields(item, 'finance.account', ['id', 'tenantId', 'name', 'currency', 'kind', 'bookedBalanceMinor', 'pendingBalanceMinor', 'createdAt', 'updatedAt'])
+  return { ...item, hiddenAt: parseOptionalDate(item.hiddenAt, 'finance.account.hiddenAt'), createdAt: parseRequiredDate(item.createdAt, 'finance.account.createdAt'), updatedAt: parseRequiredDate(item.updatedAt, 'finance.account.updatedAt') }
+}
+function mapCategory(item: RawCategory): FinanceCategory {
+  requireFields(item, 'finance.category', ['id', 'tenantId', 'name', 'kind', 'seededDefault', 'createdAt', 'updatedAt'])
+  return { ...item, hiddenAt: parseOptionalDate(item.hiddenAt, 'finance.category.hiddenAt'), createdAt: parseRequiredDate(item.createdAt, 'finance.category.createdAt'), updatedAt: parseRequiredDate(item.updatedAt, 'finance.category.updatedAt') }
+}
+function mapTag(item: RawTag): FinanceTag {
+  requireFields(item, 'finance.tag', ['id', 'tenantId', 'name', 'createdAt', 'updatedAt'])
+  return { ...item, hiddenAt: parseOptionalDate(item.hiddenAt, 'finance.tag.hiddenAt'), createdAt: parseRequiredDate(item.createdAt, 'finance.tag.createdAt'), updatedAt: parseRequiredDate(item.updatedAt, 'finance.tag.updatedAt') }
+}
 function mapTransaction(item: RawTransaction): FinanceTransaction {
+  requireFields(item, 'finance.transaction', ['id', 'tenantId', 'accountId', 'source', 'status', 'kind', 'amountMinor', 'currency', 'description', 'effectiveAt', 'createdAt', 'updatedAt'])
+  const { providerOriginal, ...transaction } = item
+  const effectiveAt = parseRequiredDate(item.effectiveAt, 'finance.transaction.effectiveAt')
   return {
-    ...item,
-    categoryId: item.categoryId ?? null,
-    transferGroupId: item.transferGroupId ?? null,
-    transferMatchedAt: parseOptionalDate(item.transferMatchedAt),
-    hiddenAt: parseOptionalDate(item.hiddenAt),
-    providerOriginal: item.providerOriginal
-      ? {
-          ...item.providerOriginal,
-          effectiveAt: parseOptionalDate(item.providerOriginal.effectiveAt),
-        }
-      : null,
-    effectiveAt: new Date(item.effectiveAt),
-    createdAt: new Date(item.createdAt),
-    updatedAt: new Date(item.updatedAt),
+    ...transaction,
+    transferMatchedAt: parseOptionalDate(item.transferMatchedAt, 'finance.transaction.transferMatchedAt'),
+    hiddenAt: parseOptionalDate(item.hiddenAt, 'finance.transaction.hiddenAt'),
+    ...(providerOriginal === undefined ? {} : {
+      providerOriginal: {
+        ...requireFields(providerOriginal, 'finance.transaction.providerOriginal', ['amountMinor', 'currency', 'description']),
+        effectiveAt: parseOptionalDate(providerOriginal.effectiveAt, 'finance.transaction.providerOriginal.effectiveAt'),
+      },
+    }),
+    effectiveAt,
+    createdAt: parseRequiredDate(item.createdAt, 'finance.transaction.createdAt'),
+    updatedAt: parseRequiredDate(item.updatedAt, 'finance.transaction.updatedAt'),
   }
 }
 function mapConnection(item: RawConnection): FinanceBankConnection {
+  requireFields(item, 'finance.connection', ['id', 'tenantId', 'provider', 'displayName', 'providerReference', 'externalId', 'state', 'createdAt', 'updatedAt'])
+  const { schedule, ...connection } = item
   return {
-    ...item,
-    lastSyncJobId: item.lastSyncJobId ?? '',
-    lastSyncStartedAt: parseOptionalDate(item.lastSyncStartedAt),
-    lastSuccessfulSyncAt: parseOptionalDate(item.lastSuccessfulSyncAt),
-    lastSyncError: item.lastSyncError ?? '',
-    createdAt: new Date(item.createdAt),
-    updatedAt: new Date(item.updatedAt),
-    schedule: item.schedule ? { ...item.schedule, lastJobId: item.schedule.lastJobId ?? '', nextRunAt: parseOptionalDate(item.schedule.nextRunAt), lastScheduledAt: parseOptionalDate(item.schedule.lastScheduledAt), lastStartedAt: parseOptionalDate(item.schedule.lastStartedAt), lastCompletedAt: parseOptionalDate(item.schedule.lastCompletedAt), createdAt: new Date(item.schedule.createdAt), updatedAt: new Date(item.schedule.updatedAt) } : null,
+    ...connection,
+    lastSyncStartedAt: parseOptionalDate(item.lastSyncStartedAt, 'finance.connection.lastSyncStartedAt'),
+    lastSuccessfulSyncAt: parseOptionalDate(item.lastSuccessfulSyncAt, 'finance.connection.lastSuccessfulSyncAt'),
+    createdAt: parseRequiredDate(item.createdAt, 'finance.connection.createdAt'),
+    updatedAt: parseRequiredDate(item.updatedAt, 'finance.connection.updatedAt'),
+    ...(schedule === undefined ? {} : {
+      schedule: {
+        ...requireFields(schedule, 'finance.connection.schedule', ['connectionId', 'intervalSeconds', 'enabled', 'createdAt', 'updatedAt']),
+        nextRunAt: parseOptionalDate(schedule.nextRunAt, 'finance.connection.schedule.nextRunAt'),
+        lastScheduledAt: parseOptionalDate(schedule.lastScheduledAt, 'finance.connection.schedule.lastScheduledAt'),
+        lastStartedAt: parseOptionalDate(schedule.lastStartedAt, 'finance.connection.schedule.lastStartedAt'),
+        lastCompletedAt: parseOptionalDate(schedule.lastCompletedAt, 'finance.connection.schedule.lastCompletedAt'),
+        createdAt: parseRequiredDate(schedule.createdAt, 'finance.connection.schedule.createdAt'),
+        updatedAt: parseRequiredDate(schedule.updatedAt, 'finance.connection.schedule.updatedAt'),
+      },
+    }),
   }
 }
 function mapConnectionRedirectStart(item: RawConnectionRedirectStart): FinanceConnectionRedirectStart { return item }
 function mapSyntheticLinkState(item: RawSyntheticLinkState): FinanceSyntheticLinkState {
+  requireFields(item, 'finance.syntheticLinkState', ['provider', 'state', 'configuredAccounts', 'canFinish'])
+  requireArray(item.configuredAccounts, 'finance.syntheticLinkState.configuredAccounts')
   return {
     ...item,
-    configuredAccounts: item.configuredAccounts ?? [],
   }
 }
 function mapDashboard(item: RawDashboard): FinanceDashboard {
+  requireFields(item, 'finance.dashboard', ['period', 'settled', 'pending', 'categoryBreakdowns', 'accountBalances', 'alerts', 'missingFx', 'nativeSettledTotals'])
+  requireFields(item.period, 'finance.dashboard.period', ['preset', 'startDate', 'endDate', 'previous', 'next'])
+  requireFields(item.period.previous, 'finance.dashboard.period.previous', ['startDate', 'endDate'])
+  requireFields(item.period.next, 'finance.dashboard.period.next', ['startDate', 'endDate'])
+  requireArray(item.categoryBreakdowns, 'finance.dashboard.categoryBreakdowns')
+  requireArray(item.accountBalances, 'finance.dashboard.accountBalances')
+  requireArray(item.alerts, 'finance.dashboard.alerts')
+  requireArray(item.missingFx, 'finance.dashboard.missingFx')
+  requireArray(item.nativeSettledTotals, 'finance.dashboard.nativeSettledTotals')
+  requireFields(item.settled, 'finance.dashboard.settled', ['displayCurrency', 'incomeMinor', 'expenseMinor', 'netMinor', 'transactionCount', 'complete'])
+  requireFields(item.pending, 'finance.dashboard.pending', ['displayCurrency', 'incomeMinor', 'expenseMinor', 'netMinor', 'transactionCount', 'complete'])
+  item.categoryBreakdowns.forEach((breakdown, index) => requireFields(breakdown, `finance.dashboard.categoryBreakdowns[${index}]`, ['categoryId', 'categoryName', 'kind', 'incomeMinor', 'expenseMinor', 'transactionCount']))
+  item.accountBalances.forEach((balance, index) => {
+    requireFields(balance, `finance.dashboard.accountBalances[${index}]`, ['accountId', 'accountName', 'currency', 'nativeBookedMinor', 'nativePendingMinor', 'missingFx'])
+    requirePresentFields(balance, `finance.dashboard.accountBalances[${index}]`, ['displayBookedMinor', 'displayPendingMinor'])
+  })
+  item.alerts.forEach((alert, index) => requireFields(alert, `finance.dashboard.alerts[${index}]`, ['code', 'severity', 'count']))
+  item.missingFx.forEach((missing, index) => {
+    requireFields(missing, `finance.dashboard.missingFx[${index}]`, ['source', 'baseCurrency', 'quoteCurrency', 'rateDate', 'provider'])
+    requirePresentFields(missing, `finance.dashboard.missingFx[${index}]`, ['transactionId', 'accountId'])
+  })
+  item.nativeSettledTotals.forEach((total, index) => requireFields(total, `finance.dashboard.nativeSettledTotals[${index}]`, ['currency', 'incomeMinor', 'expenseMinor', 'netMinor']))
   return {
     period: {
       preset: item.period.preset,
-      startDate: new Date(item.period.startDate),
-      endDate: new Date(item.period.endDate),
-      previous: { startDate: new Date(item.period.previous.startDate), endDate: new Date(item.period.previous.endDate) },
-      next: { startDate: new Date(item.period.next.startDate), endDate: new Date(item.period.next.endDate) },
+      startDate: parseRequiredDate(item.period.startDate, 'finance.dashboard.period.startDate'),
+      endDate: parseRequiredDate(item.period.endDate, 'finance.dashboard.period.endDate'),
+      previous: {
+        startDate: parseRequiredDate(item.period.previous.startDate, 'finance.dashboard.period.previous.startDate'),
+        endDate: parseRequiredDate(item.period.previous.endDate, 'finance.dashboard.period.previous.endDate'),
+      },
+      next: {
+        startDate: parseRequiredDate(item.period.next.startDate, 'finance.dashboard.period.next.startDate'),
+        endDate: parseRequiredDate(item.period.next.endDate, 'finance.dashboard.period.next.endDate'),
+      },
     },
     settled: item.settled,
     pending: item.pending,
-    categoryBreakdowns: item.categoryBreakdowns ?? [],
-    accountBalances: (item.accountBalances ?? []).map((balance) => ({
+    categoryBreakdowns: item.categoryBreakdowns,
+    accountBalances: item.accountBalances.map((balance) => ({
       ...balance,
-      displayBookedMinor: balance.displayBookedMinor ?? null,
-      displayPendingMinor: balance.displayPendingMinor ?? null,
     })),
-    alerts: item.alerts ?? [],
-    missingFx: (item.missingFx ?? []).map((missing) => ({ ...missing, transactionId: missing.transactionId ?? '', accountId: missing.accountId ?? '', rateDate: new Date(missing.rateDate) })),
-    nativeSettledTotals: item.nativeSettledTotals ?? [],
+    alerts: item.alerts,
+    missingFx: item.missingFx.map((missing) => ({ ...missing, rateDate: parseRequiredDate(missing.rateDate, 'finance.dashboard.missingFx.rateDate') })),
+    nativeSettledTotals: item.nativeSettledTotals,
   }
 }
-function mapFXDiagnostics(item: RawFXDiagnostics): FinanceFXDiagnostics { return { defaultProvider: item.defaultProvider, storedRatesCount: item.storedRatesCount, providers: item.providers ?? [] } }
+function mapFXDiagnostics(item: RawFXDiagnostics): FinanceFXDiagnostics {
+  requireFields(item, 'finance.fxDiagnostics', ['defaultProvider', 'storedRatesCount', 'providers'])
+  requireArray(item.providers, 'finance.fxDiagnostics.providers')
+  return { defaultProvider: item.defaultProvider, storedRatesCount: item.storedRatesCount, providers: item.providers }
+}
 function mapCSVPreview(item: RawCSVImportPreview): FinanceCSVImportPreview {
+  requireFields(item, 'finance.csvPreview', ['importId', 'importType', 'headers', 'mapping', 'duplicateRows', 'rejectedRows', 'wouldCreateAccounts', 'wouldCreateCategories', 'wouldCreateTags'])
+  requireArray(item.headers, 'finance.csvPreview.headers')
+  requireArray(item.duplicateRows, 'finance.csvPreview.duplicateRows')
+  requireArray(item.rejectedRows, 'finance.csvPreview.rejectedRows')
+  requireArray(item.wouldCreateAccounts, 'finance.csvPreview.wouldCreateAccounts')
+  requireArray(item.wouldCreateCategories, 'finance.csvPreview.wouldCreateCategories')
+  requireArray(item.wouldCreateTags, 'finance.csvPreview.wouldCreateTags')
   return {
     importId: item.importId,
     importType: item.importType,
-    headers: item.headers ?? [],
-    mapping: item.mapping ?? {},
-    duplicateRows: item.duplicateRows ?? [],
-    rejectedRows: item.rejectedRows ?? [],
-    wouldCreateAccounts: item.wouldCreateAccounts ?? [],
-    wouldCreateCategories: item.wouldCreateCategories ?? [],
-    wouldCreateTags: item.wouldCreateTags ?? [],
+    headers: item.headers,
+    mapping: item.mapping,
+    duplicateRows: item.duplicateRows,
+    rejectedRows: item.rejectedRows,
+    wouldCreateAccounts: item.wouldCreateAccounts,
+    wouldCreateCategories: item.wouldCreateCategories,
+    wouldCreateTags: item.wouldCreateTags,
   }
 }
 function mapCSVImportConfirmation(item: RawCSVImportConfirmation): FinanceCSVImportConfirmation { return item }
-function mapCSVImportAudit(item: RawCSVImportAudit): FinanceCSVImportAudit { return { ...item, createdAt: new Date(item.createdAt), confirmedAt: parseOptionalDate(item.confirmedAt), completedAt: parseOptionalDate(item.completedAt) } }
+function mapCSVImportAudit(item: RawCSVImportAudit): FinanceCSVImportAudit {
+  requireFields(item, 'finance.csvAudit', ['importId', 'tenantId', 'importType', 'status', 'jobId', 'confirmedByUserId', 'importedCount', 'createdAt'])
+  return { ...item, createdAt: parseRequiredDate(item.createdAt, 'finance.csvAudit.createdAt'), confirmedAt: parseOptionalDate(item.confirmedAt, 'finance.csvAudit.confirmedAt'), completedAt: parseOptionalDate(item.completedAt, 'finance.csvAudit.completedAt') }
+}
 function mapJobRef(item: RawJobRef): FinanceJobRef { return { jobId: item.jobId, jobType: item.jobType, ...(item.provider ? { provider: item.provider } : {}) } }
 
-function parseOptionalDate(value?: string | null): Date | null {
-  return value ? new Date(value) : null
+function parseRequiredDate(value: unknown, field: string): Date {
+  try {
+    return parseRequiredResponseTimestamp(value, { api: 'Finance', field })
+  } catch (error) {
+    if (error instanceof ResponseTimestampError) {
+      throw new FinanceResponseError({ field, issue: error.message.split(`${field} `)[1] ?? 'is invalid' })
+    }
+    throw error
+  }
+}
+
+function parseOptionalDate(value: unknown, field: string): Date | null | undefined {
+  if (value === undefined || value === null) {
+    return value
+  }
+  return parseRequiredDate(value, field)
+}
+
+function requireItems<T>(value: unknown, field: string): T[] {
+  if (!value || typeof value !== 'object') {
+    throw new FinanceResponseError({ field, issue: 'must be an object with an items array' })
+  }
+  return requireArray((value as { items?: T[] }).items, field)
+}
+
+function requireArray<T>(value: T[] | undefined, field: string): T[] {
+  if (!Array.isArray(value)) {
+    throw new FinanceResponseError({ field, issue: 'must be present as an array' })
+  }
+  return value
+}
+
+function requireFields<T extends object>(value: T, scope: string, fields: string[]): T {
+  if (!value || typeof value !== 'object') {
+    throw new FinanceResponseError({ field: scope, issue: 'must be an object' })
+  }
+  for (const field of fields) {
+    if (!(field in value) || (value as Record<string, unknown>)[field] === null || (value as Record<string, unknown>)[field] === undefined) {
+      throw new FinanceResponseError({ field: `${scope}.${field}`, issue: 'is required' })
+    }
+  }
+  return value
+}
+
+function requirePresentFields<T extends object>(value: T, scope: string, fields: string[]): T {
+  if (!value || typeof value !== 'object') {
+    throw new FinanceResponseError({ field: scope, issue: 'must be an object' })
+  }
+  for (const field of fields) {
+    if (!(field in value) || (value as Record<string, unknown>)[field] === undefined) {
+      throw new FinanceResponseError({ field: `${scope}.${field}`, issue: 'is required' })
+    }
+  }
+  return value
 }
 
 function extractErrorMessage(response: Response, json: unknown): string {
@@ -780,7 +931,7 @@ function extractErrorMessage(response: Response, json: unknown): string {
 
 function serializeJson(value: unknown): unknown {
   if (value instanceof Date) {
-    return value.toISOString()
+    return serializeRequestTimestamp(value)
   }
   if (Array.isArray(value)) {
     return value.map(serializeJson)

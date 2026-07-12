@@ -168,7 +168,7 @@ func runMonobankTransactions(
 	return monobankTransactionsOutput{
 		Provider:         monobankCommandName,
 		Operation:        monobankTransactionsOp,
-		FetchedAt:        deps.Now().UTC().Format(time.RFC3339),
+		FetchedAt:        deps.Now().Format(time.RFC3339),
 		Account:          account,
 		From:             fromDate.Format(financePOCDateLayout),
 		To:               toDate.Format(financePOCDateLayout),
@@ -230,7 +230,7 @@ func sleepMonobankBetweenChunks(
 
 func makeMonobankStatementChunks(account string, fromDate time.Time, toDate time.Time) []monobankStatementChunk {
 	chunks := make([]monobankStatementChunk, 0, 1)
-	chunkFrom := fromDate.UTC()
+	chunkFrom := fromDate
 	for {
 		chunkTo := chunkFrom.Add(monobankStatementMaxChunkRange)
 		if chunkTo.After(toDate) {

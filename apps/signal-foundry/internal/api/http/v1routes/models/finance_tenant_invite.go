@@ -19,7 +19,7 @@ type FinanceTenantInvite struct {
 	Code string `json:"code"`
 	Recipient string `json:"recipient"`
 	CreatedByUserID string `json:"createdByUserId"`
-	AcceptedByUserID string `json:"acceptedByUserId,omitempty"`
+	AcceptedByUserID *string `json:"acceptedByUserId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
-	AcceptedAt time.Time `json:"acceptedAt,omitempty"`
+	AcceptedAt *time.Time `json:"acceptedAt,omitempty"`
 }

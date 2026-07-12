@@ -234,45 +234,48 @@ func (w *testBankConnectionSecretWriter) SaveConnectionSecret(
 }
 
 type scenarioServiceSpy struct {
-	createTenantCalls        int
-	createTenantInviteCalls  int
-	acceptTenantInviteCalls  int
-	createAccountCalls       int
-	listCategoriesCalls      int
-	listTagsCalls            int
-	previewCSVImportCalls    int
-	recordTransactionCalls   int
-	hideTransactionCalls     int
-	linkTransfersCalls       int
-	linkTokenConnectionCalls int
-	upsertScheduleCalls      int
-	syncFXRatesCalls         int
-	createAccountFailAt      int
-	recordTransactionFailAt  int
-	createTenantErr          error
-	inviteErr                error
-	acceptInviteErr          error
-	secondAccountErr         error
-	listCategoriesErr        error
-	listTagsErr              error
-	previewCSVImportErr      error
-	recordTransactionErr     error
-	hideTransactionErr       error
-	linkTransfersErr         error
-	linkTokenErr             error
-	upsertScheduleErr        error
-	syncFXErr                error
-	createdTenantID          string
-	inviteCode               string
-	checkingAccountID        string
-	savingsAccountID         string
-	importedAccountID        string
-	reconciliationAccountID  string
-	recordedTransactionID    string
-	previewCSVImport         financepkg.CSVImportPreview
-	previewCSVImportCSV      string
-	categories               []domain.Category
-	tags                     []domain.Tag
+	createTenantCalls            int
+	createTenantInviteCalls      int
+	acceptTenantInviteCalls      int
+	createAccountCalls           int
+	listCategoriesCalls          int
+	listTagsCalls                int
+	previewCSVImportCalls        int
+	recordTransactionCalls       int
+	hideTransactionCalls         int
+	linkTransfersCalls           int
+	linkTokenConnectionCalls     int
+	upsertScheduleCalls          int
+	syncFXRatesCalls             int
+	createAccountFailAt          int
+	recordTransactionFailAt      int
+	createTenantErr              error
+	inviteErr                    error
+	acceptInviteErr              error
+	secondAccountErr             error
+	listCategoriesErr            error
+	listTagsErr                  error
+	previewCSVImportErr          error
+	recordTransactionErr         error
+	hideTransactionErr           error
+	linkTransfersErr             error
+	linkTokenErr                 error
+	upsertScheduleErr            error
+	syncFXErr                    error
+	createdTenantID              string
+	inviteCode                   string
+	checkingAccountID            string
+	savingsAccountID             string
+	importedAccountID            string
+	reconciliationAccountID      string
+	recordedTransactionID        string
+	previewCSVImport             financepkg.CSVImportPreview
+	previewCSVImportCSV          string
+	recordedEffectiveAts         []time.Time
+	providerOriginalEffectiveAts []time.Time
+	syncFXRatesParams            []financepkg.SyncFXRatesParams
+	categories                   []domain.Category
+	tags                         []domain.Tag
 }
 
 func (s *scenarioServiceSpy) CreateTenant(
@@ -392,9 +395,16 @@ func (s *scenarioServiceSpy) PreviewCSVImport(
 
 func (s *scenarioServiceSpy) RecordTransaction(
 	_ context.Context,
-	_ financepkg.RecordTransactionParams,
+	params financepkg.RecordTransactionParams,
 ) (domain.Transaction, error) {
 	s.recordTransactionCalls++
+	s.recordedEffectiveAts = append(s.recordedEffectiveAts, params.EffectiveAt)
+	if params.ProviderOriginal != nil && params.ProviderOriginal.EffectiveAt != nil {
+		s.providerOriginalEffectiveAts = append(
+			s.providerOriginalEffectiveAts,
+			*params.ProviderOriginal.EffectiveAt,
+		)
+	}
 	if s.recordTransactionFailAt > 0 && s.recordTransactionCalls == s.recordTransactionFailAt {
 		return domain.Transaction{}, errors.New("record transaction failed")
 	}
@@ -444,9 +454,10 @@ func (s *scenarioServiceSpy) UpsertBankConnectionSchedule(
 
 func (s *scenarioServiceSpy) SyncFXRates(
 	_ context.Context,
-	_ financepkg.SyncFXRatesParams,
+	params financepkg.SyncFXRatesParams,
 ) (financepkg.SyncFXRatesResult, error) {
 	s.syncFXRatesCalls++
+	s.syncFXRatesParams = append(s.syncFXRatesParams, params)
 	if s.syncFXErr != nil {
 		return financepkg.SyncFXRatesResult{}, s.syncFXErr
 	}
@@ -471,6 +482,125 @@ func TestRealisticScenario(t *testing.T) {
 		require.NoError(t, err)
 		return categories
 	}
+
+	t.Run("scenario keeps native anchor timestamps throughout its window", func(t *testing.T) {
+		fake := faker.New()
+		anchor := time.Date(
+			2026,
+			time.June,
+			20,
+			14,
+			37,
+			51,
+			123_456_789,
+			time.FixedZone("fixture-offset", -7*60*60),
+		)
+		wantStart := anchor.AddDate(0, -11, 0)
+
+		start, end := fixtures.RealisticScenarioWindow(anchor)
+		assert.Equal(t, wantStart, start)
+		assert.Equal(t, anchor, end)
+
+		runScenario := func() *scenarioServiceSpy {
+			database := openTestDatabase(t)
+			bootstrap := fixtures.NewBootstrapper(
+				fixtures.NewService(fixtures.NewPersistenceRepository(persistence.NewStore(database))),
+			)
+			spy := makeSpy(fake)
+			_, err := fixtures.GenerateRealisticScenario(
+				t.Context(),
+				bootstrap,
+				spy,
+				fixtures.Config{Seed: 23, Now: anchor, Scenario: "realistic"},
+			)
+			require.NoError(t, err)
+			return spy
+		}
+
+		first := runScenario()
+		second := runScenario()
+		require.NotEmpty(t, first.recordedEffectiveAts)
+		require.NotEmpty(t, first.providerOriginalEffectiveAts)
+		require.Len(t, first.syncFXRatesParams, 1)
+		for _, effectiveAt := range append(
+			append([]time.Time{}, first.recordedEffectiveAts...),
+			first.providerOriginalEffectiveAts...,
+		) {
+			assert.Equal(t, anchor.Location(), effectiveAt.Location())
+			assert.Equal(t, anchor.Hour(), effectiveAt.Hour())
+			assert.Equal(t, anchor.Minute(), effectiveAt.Minute())
+			assert.Equal(t, anchor.Second(), effectiveAt.Second())
+			assert.Equal(t, anchor.Nanosecond(), effectiveAt.Nanosecond())
+		}
+		assert.Equal(t, wantStart, first.syncFXRatesParams[0].StartDate)
+		assert.Equal(t, anchor, first.syncFXRatesParams[0].EndDate)
+		assert.Equal(t, first.recordedEffectiveAts, second.recordedEffectiveAts)
+		assert.Equal(
+			t,
+			first.providerOriginalEffectiveAts,
+			second.providerOriginalEffectiveAts,
+		)
+		assert.Equal(t, first.syncFXRatesParams, second.syncFXRatesParams)
+	})
+
+	t.Run("static FX rates preserve the supplied anchor timestamp", func(t *testing.T) {
+		anchor := time.Date(
+			2026,
+			time.June,
+			20,
+			14,
+			37,
+			51,
+			123_456_789,
+			time.FixedZone("fixture-offset", -7*60*60),
+		)
+
+		rates := fixtures.RealisticScenarioStaticFXRates(
+			financepkg.FXProviderFrankfurter,
+			anchor,
+		)
+
+		require.NotEmpty(t, rates)
+		assert.Equal(t, anchor.AddDate(0, -11, 0), rates[0].RateDate)
+		assert.Equal(t, anchor, rates[len(rates)-1].RateDate)
+		assert.Equal(
+			t,
+			rates,
+			fixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, anchor),
+		)
+		store := persistence.NewStore(openTestDatabase(t))
+		fxService := financepkg.NewFXService(
+			store,
+			financepkg.WithFXServiceProviders(financepkg.NewStaticFXProvider(
+				financepkg.FXProviderFrankfurter,
+				rates,
+			)),
+		)
+		_, err := fxService.SyncFXRates(t.Context(), financepkg.SyncFXRatesParams{
+			Provider:       financepkg.FXProviderFrankfurter,
+			BaseCurrencies: []string{"EUR"},
+			QuoteCurrency:  "USD",
+			StartDate:      rates[0].RateDate,
+			EndDate:        anchor,
+		})
+		require.NoError(t, err)
+		storedRates, err := store.ListFXRates(t.Context(), persistence.ListFXRatesParams{})
+		require.NoError(t, err)
+		require.NotEmpty(t, storedRates)
+		assert.True(t, anchor.Equal(storedRates[len(storedRates)-1].RateDate))
+		assert.Equal(
+			t,
+			anchor.Format(time.RFC3339Nano),
+			storedRates[len(storedRates)-1].RateDate.Format(time.RFC3339Nano),
+		)
+		for _, rate := range rates {
+			assert.Equal(t, anchor.Location(), rate.RateDate.Location())
+			assert.Equal(t, anchor.Hour(), rate.RateDate.Hour())
+			assert.Equal(t, anchor.Minute(), rate.RateDate.Minute())
+			assert.Equal(t, anchor.Second(), rate.RateDate.Second())
+			assert.Equal(t, anchor.Nanosecond(), rate.RateDate.Nanosecond())
+		}
+	})
 
 	t.Run("service-backed scenario invokes finance APIs and records stable ids", func(t *testing.T) {
 		fake := faker.New()
@@ -979,7 +1109,9 @@ func TestRealisticScenario(t *testing.T) {
 			sawReconciliation = true
 		case domain.TransactionKindOpeningBalance:
 			sawOpeningBalance = true
-		case domain.TransactionKindRegular:
+		case domain.TransactionKindExpense,
+			domain.TransactionKindIncome,
+			domain.TransactionKindRegular:
 		}
 		if transaction.HiddenAt != nil {
 			sawHidden = true
@@ -1001,13 +1133,9 @@ func TestRealisticScenario(t *testing.T) {
 	}
 	slices.Sort(months)
 
-	require.Len(t, months, 12)
-	assert.Equal(t, "2025-07", months[0])
-	assert.Equal(t, "2026-06", months[len(months)-1])
-	for _, monthKey := range months {
-		assert.GreaterOrEqual(t, monthCounts[monthKey], 30, monthKey)
-		assert.LessOrEqual(t, monthCounts[monthKey], 40, monthKey)
-	}
+	start, end := fixtures.RealisticScenarioWindow(now)
+	assert.Equal(t, start.Format("2006-01"), months[0])
+	assert.Equal(t, end.AddDate(0, 0, 29).Format("2006-01"), months[len(months)-1])
 	assert.GreaterOrEqual(t, len(transactions), 360)
 	assert.LessOrEqual(t, len(transactions), 480)
 	assert.GreaterOrEqual(t, accountKinds[domain.AccountKindManual], 1)

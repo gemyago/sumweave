@@ -662,16 +662,11 @@ func NewTimeRange(start, end time.Time) (TimeRange, error) {
 		return TimeRange{}, errors.New("time range end is required")
 	}
 
-	normalizedStart := canonicalUTC(start)
-	normalizedEnd := canonicalUTC(end)
-	if !normalizedEnd.After(normalizedStart) {
+	if !end.After(start) {
 		return TimeRange{}, errors.New("time range end must be after start")
 	}
 
-	return TimeRange{
-		Start: normalizedStart,
-		End:   normalizedEnd,
-	}, nil
+	return TimeRange{Start: start, End: end}, nil
 }
 
 // NewIndicatorParams validates and canonicalizes supported indicator parameters.
@@ -804,7 +799,7 @@ func NewAnalyticsPointTime(value time.Time) (AnalyticsPointTime, error) {
 		return AnalyticsPointTime{}, errors.New("analytics point time is required")
 	}
 
-	return AnalyticsPointTime(canonicalUTC(value)), nil
+	return AnalyticsPointTime(value), nil
 }
 
 // NewCandidateActionTime validates and canonicalizes a candidate action time.
@@ -813,7 +808,7 @@ func NewCandidateActionTime(value time.Time) (CandidateActionTime, error) {
 		return CandidateActionTime{}, errors.New("candidate action decision time is required")
 	}
 
-	return CandidateActionTime(canonicalUTC(value)), nil
+	return CandidateActionTime(value), nil
 }
 
 // NewGovernorDecisionTime validates and canonicalizes a governor decision time.
@@ -822,7 +817,7 @@ func NewGovernorDecisionTime(value time.Time) (GovernorDecisionTime, error) {
 		return GovernorDecisionTime{}, errors.New("governor decision time is required")
 	}
 
-	return GovernorDecisionTime(canonicalUTC(value)), nil
+	return GovernorDecisionTime(value), nil
 }
 
 // NewExecutionEventTime validates and canonicalizes an execution event time.
@@ -831,7 +826,7 @@ func NewExecutionEventTime(value time.Time) (ExecutionEventTime, error) {
 		return ExecutionEventTime{}, errors.New("execution event time is required")
 	}
 
-	return ExecutionEventTime(canonicalUTC(value)), nil
+	return ExecutionEventTime(value), nil
 }
 
 // NewAnalyticsValueRange validates and canonicalizes a point value range.
@@ -1302,21 +1297,7 @@ func NewCandle(params CandleParams) (Candle, error) {
 		return Candle{}, errors.New("candle provenance is required")
 	}
 
-	return Candle{
-		Instrument: params.Instrument,
-		Timeframe:  params.Timeframe,
-		TimeRange: TimeRange{
-			Start: canonicalUTC(params.TimeRange.Start),
-			End:   canonicalUTC(params.TimeRange.End),
-		},
-		Open:       params.Open,
-		High:       params.High,
-		Low:        params.Low,
-		Close:      params.Close,
-		Volume:     params.Volume,
-		Quality:    params.Quality,
-		Provenance: params.Provenance,
-	}, nil
+	return Candle(params), nil
 }
 
 // NewTrade validates and canonicalizes a canonical trade record.
@@ -1337,18 +1318,7 @@ func NewTrade(params TradeParams) (Trade, error) {
 		return Trade{}, errors.New("trade provenance is required")
 	}
 
-	return Trade{
-		Instrument: params.Instrument,
-		EventTime:  canonicalUTC(params.EventTime),
-		Price:      params.Price,
-		Size:       params.Size,
-		Quality:    params.Quality,
-		Provenance: params.Provenance,
-	}, nil
-}
-
-func canonicalUTC(value time.Time) time.Time {
-	return value.UTC()
+	return Trade(params), nil
 }
 
 func isFiniteFloat64(value float64) bool {

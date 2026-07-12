@@ -3,6 +3,7 @@ package synthetic
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -132,18 +133,15 @@ func TestConnector(t *testing.T) {
 
 		require.Len(t, batch.Accounts, 2)
 		require.Len(t, batch.Balances, 2)
-		assert.GreaterOrEqual(t, len(batch.Transactions), 6)
-		assert.LessOrEqual(t, len(batch.Transactions), 12)
+		assert.GreaterOrEqual(t, len(batch.Transactions), 4)
+		assert.LessOrEqual(t, len(batch.Transactions), 8)
 		require.Len(t, batch.RawPayloads, len(batch.Accounts)+len(batch.Transactions))
 		assert.Equal(t, connection, batch.Accounts[0].Connection)
 		assert.Equal(t, connection, batch.Balances[0].Connection)
 
-		normalizedWindow := newWindowKey(requestedWindow)
-		generatedDays := []time.Time{
-			normalizedWindow.NormalizedStartUTC,
-			normalizedWindow.NormalizedStartUTC.Add(24 * time.Hour),
-			normalizedWindow.NormalizedStartUTC.Add(48 * time.Hour),
-		}
+		windowKey := newWindowKey(requestedWindow)
+		generatedInstants := windowInstants(windowKey)
+		assert.Equal(t, requestedWindow, batch.RequestedWindow)
 		accountCurrencies := map[string]string{}
 		for _, account := range batch.Accounts {
 			accountCurrencies[account.ProviderAccountID] = account.Currency
@@ -154,7 +152,7 @@ func TestConnector(t *testing.T) {
 		assert.Equal(t, batch.Accounts[0].Currency, batch.Accounts[1].Currency)
 
 		seenTransactionIDs := map[string]struct{}{}
-		seenDaysByAccount := map[string]map[string]int{}
+		seenIntervalsByAccount := map[string]map[int]int{}
 		for _, transaction := range batch.Transactions {
 			_, duplicate := seenTransactionIDs[transaction.ProviderTransactionID]
 			assert.False(t, duplicate)
@@ -165,16 +163,32 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, transaction.AmountMinor, transaction.ProviderOriginal.AmountMinor)
 			assert.Equal(t, transaction.Currency, transaction.ProviderOriginal.Currency)
 			assert.NotEmpty(t, transaction.Fingerprint)
-			dayKey := transaction.EffectiveAt.UTC().Format(time.DateOnly)
-			if _, ok := seenDaysByAccount[transaction.ProviderAccountID]; !ok {
-				seenDaysByAccount[transaction.ProviderAccountID] = map[string]int{}
+			assert.Contains(
+				t,
+				transaction.ProviderTransactionID,
+				strconv.FormatInt(transaction.EffectiveAt.UnixNano(), 10),
+			)
+			intervalIndex := -1
+			for index, instant := range generatedInstants {
+				intervalEnd := instant.Add(syntheticWindowStep)
+				if requestedWindow.End.Before(intervalEnd) {
+					intervalEnd = requestedWindow.End
+				}
+				if !transaction.EffectiveAt.Before(instant) && transaction.EffectiveAt.Before(intervalEnd) {
+					intervalIndex = index
+					break
+				}
 			}
-			seenDaysByAccount[transaction.ProviderAccountID][dayKey]++
+			require.NotEqual(t, -1, intervalIndex)
+			if _, ok := seenIntervalsByAccount[transaction.ProviderAccountID]; !ok {
+				seenIntervalsByAccount[transaction.ProviderAccountID] = map[int]int{}
+			}
+			seenIntervalsByAccount[transaction.ProviderAccountID][intervalIndex]++
 		}
 		for _, account := range batch.Accounts {
-			require.Len(t, seenDaysByAccount[account.ProviderAccountID], len(generatedDays))
-			for _, day := range generatedDays {
-				count := seenDaysByAccount[account.ProviderAccountID][day.Format(time.DateOnly)]
+			require.Len(t, seenIntervalsByAccount[account.ProviderAccountID], len(generatedInstants))
+			for intervalIndex := range generatedInstants {
+				count := seenIntervalsByAccount[account.ProviderAccountID][intervalIndex]
 				assert.GreaterOrEqual(t, count, 1)
 				assert.LessOrEqual(t, count, 2)
 			}
@@ -183,9 +197,9 @@ func TestConnector(t *testing.T) {
 		require.NotNil(t, stateStore.savedState)
 		assert.Equal(t, connection.ProviderReference, stateStore.savedState.ProviderReference)
 		require.Len(t, stateStore.savedState.Envelope.WindowHistory, 1)
-		assert.Equal(t, normalizedWindow, stateStore.savedState.Envelope.WindowHistory[0].Window)
+		assert.Equal(t, windowKey, stateStore.savedState.Envelope.WindowHistory[0].Window)
 		assert.Equal(t, 1, stateStore.savedState.Envelope.WindowHistory[0].RepeatCount)
-		require.Len(t, stateStore.savedState.Envelope.SequenceCounters, len(batch.Accounts)*len(generatedDays))
+		require.Len(t, stateStore.savedState.Envelope.SequenceCounters, len(batch.Accounts)*len(generatedInstants))
 		assert.Equal(t, now, stateStore.savedState.UpdatedAt)
 	})
 
@@ -196,8 +210,9 @@ func TestConnector(t *testing.T) {
 			Start: time.Date(2026, time.June, 20, 15, 0, 0, 0, time.UTC),
 			End:   time.Date(2026, time.June, 22, 0, 0, 0, 0, time.UTC),
 		}
-		normalizedWindow := newWindowKey(requestedWindow)
-		lastDay := normalizedWindow.NormalizedEndExclusiveUTC.Add(-24 * time.Hour)
+		windowKey := newWindowKey(requestedWindow)
+		generationInstants := windowInstants(windowKey)
+		lastInstant := generationInstants[len(generationInstants)-1]
 		firstAccountKey := "synthetic-account-a-" + fake.UUID().V4()
 		secondAccountKey := "synthetic-account-b-" + fake.UUID().V4()
 		stateStore := &stubProviderStateStore{state: &domain.SyntheticProviderState{
@@ -209,13 +224,13 @@ func TestConnector(t *testing.T) {
 					{Key: secondAccountKey, Name: "wallet-b-" + fake.Lorem().Word(), Currency: "USD"},
 				},
 				WindowHistory: []domain.SyntheticWindowHistoryEntry{{
-					Window:      normalizedWindow,
+					Window:      windowKey,
 					RepeatCount: 1,
 				}},
-				SequenceCounters: []domain.SyntheticAccountDaySequenceCounter{
-					{AccountKey: firstAccountKey, DayUTC: lastDay, NextSequence: 3},
-					{AccountKey: secondAccountKey, DayUTC: lastDay, NextSequence: 8},
-					{AccountKey: firstAccountKey, DayUTC: lastDay.Add(-24 * time.Hour), NextSequence: 5},
+				SequenceCounters: []domain.SyntheticAccountInstantSequenceCounter{
+					{AccountKey: firstAccountKey, Instant: lastInstant, NextSequence: 3},
+					{AccountKey: secondAccountKey, Instant: lastInstant, NextSequence: 8},
+					{AccountKey: firstAccountKey, Instant: lastInstant.Add(-24 * time.Hour), NextSequence: 5},
 				},
 			},
 		}}
@@ -236,12 +251,13 @@ func TestConnector(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, batch.Transactions)
 		for _, transaction := range batch.Transactions {
-			assert.Equal(t, lastDay.Format(time.DateOnly), transaction.EffectiveAt.UTC().Format(time.DateOnly))
+			assert.False(t, transaction.EffectiveAt.Before(lastInstant))
+			assert.True(t, transaction.EffectiveAt.Before(requestedWindow.End))
 		}
 		require.NotNil(t, stateStore.savedState)
 		assert.Equal(t, 2, stateStore.savedState.Envelope.WindowHistory[0].RepeatCount)
 		for _, counter := range stateStore.savedState.Envelope.SequenceCounters {
-			if counter.AccountKey == firstAccountKey && counter.DayUTC.Equal(lastDay) {
+			if counter.AccountKey == firstAccountKey && counter.Instant.Equal(lastInstant) {
 				assert.GreaterOrEqual(t, counter.NextSequence, 4)
 			}
 		}
@@ -354,17 +370,39 @@ func TestConnector(t *testing.T) {
 		_, err = NewConnector(failingStore).Fetch(t.Context(), providers.FetchRequest{Connection: connection})
 		require.ErrorContains(t, err, "load synthetic provider state")
 
+		windowLocation := time.FixedZone("UTC+2", 2*60*60)
 		assert.Equal(
 			t,
-			[]time.Time{time.Date(2026, time.June, 24, 0, 0, 0, 0, time.UTC)},
-			windowDays(newWindowKey(domain.ProviderSyncWindow{
-				Start: time.Date(2026, time.June, 24, 12, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60)),
+			[]time.Time{
+				time.Date(2026, time.June, 24, 12, 0, 0, 0, windowLocation),
+			},
+			windowInstants(newWindowKey(domain.ProviderSyncWindow{
+				Start: time.Date(2026, time.June, 24, 12, 0, 0, 0, windowLocation),
 				End:   time.Date(2026, time.June, 25, 0, 0, 0, 0, time.UTC),
 			})),
 		)
 		assert.Equal(t, -1, windowHistoryIndex(nil, domain.SyntheticWindowKey{}))
 		assert.Equal(t, "value-with-bad-chars", sanitizeIDPart(" value:with/bad-chars "))
 		assert.Contains(t, providerAccountID(connection, "account:key"), connection.ConnectionID)
+	})
+
+	t.Run("keeps window key timestamps in the supplied representations", func(t *testing.T) {
+		startLocation := time.FixedZone("start", 2*60*60)
+		endLocation := time.FixedZone("end", -4*60*60)
+		window := domain.ProviderSyncWindow{
+			Start: time.Date(2026, time.June, 20, 15, 0, 0, 0, startLocation),
+			End:   time.Date(2026, time.June, 22, 8, 45, 0, 0, endLocation),
+		}
+
+		key := newWindowKey(window)
+		assert.Equal(t, window.Start, key.Start)
+		assert.Equal(t, window.End, key.End)
+
+		equivalentKey := newWindowKey(domain.ProviderSyncWindow{
+			Start: time.Date(2026, time.June, 20, 15, 0, 0, 0, time.FixedZone("start", 2*60*60)),
+			End:   time.Date(2026, time.June, 22, 8, 45, 0, 0, time.FixedZone("end", -4*60*60)),
+		})
+		assert.Equal(t, 0, windowHistoryIndex([]domain.SyntheticWindowHistoryEntry{{Window: key}}, equivalentKey))
 	})
 
 	t.Run("covers connector options helper branches", func(t *testing.T) {
@@ -385,15 +423,46 @@ func TestConnector(t *testing.T) {
 		connector.randomIntn = func(int) int { return -9 }
 		assert.Equal(t, 1, connector.randomBounded(4))
 
-		counters := []domain.SyntheticAccountDaySequenceCounter{{
+		counters := []domain.SyntheticAccountInstantSequenceCounter{{
 			AccountKey:   "account-1",
-			DayUTC:       time.Date(2026, time.June, 24, 0, 0, 0, 0, time.UTC),
+			Instant:      time.Date(2026, time.June, 24, 9, 17, 0, 0, time.UTC),
 			NextSequence: 0,
 		}}
-		assert.Equal(t, 1, nextSequence(&counters, "account-1", counters[0].DayUTC))
+		assert.Equal(t, 1, nextSequence(&counters, "account-1", counters[0].Instant))
 		assert.Equal(t, 2, counters[0].NextSequence)
 
-		_, err := payloadJSON(make(chan int))
+		windowKey := domain.SyntheticWindowKey{
+			Start: time.Date(2026, time.June, 24, 9, 17, 11, 123, time.FixedZone("UTC+2", 2*60*60)),
+			End:   time.Date(2026, time.June, 25, 9, 17, 11, 123, time.FixedZone("UTC+2", 2*60*60)),
+		}
+		configuredAccount := domain.SyntheticConfiguredAccount{
+			Key:      "stable-account",
+			Name:     "Stable account",
+			Currency: "USD",
+		}
+		first, _, err := connector.makeTransaction(
+			domain.ProviderConnectionRef{ConnectionID: "stable-connection"},
+			windowKey,
+			"firstWindow",
+			configuredAccount,
+			"stable-provider-account",
+			windowKey.Start,
+			1,
+		)
+		require.NoError(t, err)
+		second, _, err := connector.makeTransaction(
+			domain.ProviderConnectionRef{ConnectionID: "stable-connection"},
+			windowKey,
+			"firstWindow",
+			configuredAccount,
+			"stable-provider-account",
+			windowKey.Start,
+			1,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, first.ProviderTransactionID, second.ProviderTransactionID)
+
+		_, err = payloadJSON(make(chan int))
 		require.ErrorContains(t, err, "marshal synthetic payload")
 	})
 }

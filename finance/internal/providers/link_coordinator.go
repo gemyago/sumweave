@@ -193,7 +193,7 @@ func (c *LinkCoordinator) StartRedirectLink(
 		return StartLinkResult{}, fmt.Errorf("start redirect link: %w", err)
 	}
 
-	now := c.now().UTC()
+	now := c.now()
 	_, err = c.pendingStartStore.SavePendingStart(ctx, domain.PendingBankConnectionLinkStart{
 		ID:                c.newID(),
 		TenantID:          strings.TrimSpace(request.TenantID),
@@ -235,7 +235,7 @@ func (c *LinkCoordinator) FinishRedirectLink(
 		return domain.BankConnection{}, ErrRedirectCodeRequired
 	}
 
-	now := c.now().UTC()
+	now := c.now()
 	pendingStart, err := c.pendingStartStore.ConsumePendingStart(ctx, ConsumePendingStartRequest{
 		TenantID:    strings.TrimSpace(request.TenantID),
 		ActorUserID: strings.TrimSpace(request.ActorUserID),
@@ -326,7 +326,7 @@ func (c *LinkCoordinator) restorePendingStartOnError(
 		ProviderID:  profile.ProviderID,
 		ConnectorID: profile.ConnectorID,
 		State:       strings.TrimSpace(request.State),
-		RestoredAt:  c.now().UTC(),
+		RestoredAt:  c.now(),
 	})
 	if restoreErr != nil {
 		return fmt.Errorf(
@@ -354,7 +354,7 @@ func (c *LinkCoordinator) saveLinkedConnection(
 		return domain.BankConnection{}, fmt.Errorf("save connection secret: %w", err)
 	}
 
-	now := c.now().UTC()
+	now := c.now()
 	connection := domain.BankConnection{
 		ID:                c.newID(),
 		TenantID:          tenantID,
@@ -388,7 +388,7 @@ func (c *LinkCoordinator) saveLinkedConnection(
 		return domain.BankConnection{}, fmt.Errorf("save bank connection: %w", err)
 	}
 	for _, payload := range result.RawPayloads {
-		capturedAt := payload.CapturedAt.UTC()
+		capturedAt := payload.CapturedAt
 		if capturedAt.IsZero() {
 			capturedAt = now
 		}

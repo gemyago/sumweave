@@ -510,16 +510,17 @@ func TestHistoricalRawCandleBackfillRunner(t *testing.T) {
 		require.Equal(t, historicalRawCandleBackfillSource, startedRun.Source)
 		require.Equal(t, venueedge.HyperliquidPerpsVenueName, startedRun.Venue)
 		require.Equal(t, data.IngestionRunStatusStarted, startedRun.Status)
-		require.Equal(t, startedAt.UTC(), startedRun.StartedAt)
-		require.True(t, startedRun.CompletedAt.IsZero())
+		require.Equal(t, startedAt, startedRun.StartedAt)
+		require.Nil(t, startedRun.CompletedAt)
 		require.Zero(t, startedRun.RecordCount)
 		require.Empty(t, startedRun.ErrorSummary)
 
 		succeededRun := recorder.calls[1]
 		require.Equal(t, request.RunID, succeededRun.ID)
 		require.Equal(t, data.IngestionRunStatusSucceeded, succeededRun.Status)
-		require.Equal(t, startedAt.UTC(), succeededRun.StartedAt)
-		require.Equal(t, completedAt.UTC(), succeededRun.CompletedAt)
+		require.Equal(t, startedAt, succeededRun.StartedAt)
+		require.NotNil(t, succeededRun.CompletedAt)
+		require.Equal(t, completedAt, *succeededRun.CompletedAt)
 		require.Equal(t, 1, succeededRun.RecordCount)
 		require.Empty(t, succeededRun.ErrorSummary)
 
@@ -609,8 +610,9 @@ func TestHistoricalRawCandleBackfillRunner(t *testing.T) {
 				require.Equal(t, data.IngestionRunStatusStarted, recorder.calls[0].Status)
 				failedRun := recorder.calls[1]
 				require.Equal(t, data.IngestionRunStatusFailed, failedRun.Status)
-				require.Equal(t, startedAt.UTC(), failedRun.StartedAt)
-				require.Equal(t, failedAt.UTC(), failedRun.CompletedAt)
+				require.Equal(t, startedAt, failedRun.StartedAt)
+				require.NotNil(t, failedRun.CompletedAt)
+				require.Equal(t, failedAt, *failedRun.CompletedAt)
 				require.Zero(t, failedRun.RecordCount)
 				require.Contains(t, failedRun.ErrorSummary, testCase.wantErrorSummary)
 			})
@@ -988,7 +990,7 @@ func candleKey(candle domain.Candle) string {
 	return strings.Join([]string{
 		instrumentKey(candle.Instrument),
 		candle.Timeframe.String(),
-		strconv.FormatInt(candle.TimeRange.Start.UTC().UnixNano(), 10),
-		strconv.FormatInt(candle.TimeRange.End.UTC().UnixNano(), 10),
+		strconv.FormatInt(candle.TimeRange.Start.UnixNano(), 10),
+		strconv.FormatInt(candle.TimeRange.End.UnixNano(), 10),
 	}, "|")
 }

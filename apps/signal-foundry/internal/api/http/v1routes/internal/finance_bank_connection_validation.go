@@ -34,9 +34,9 @@ func NewFinanceBankConnectionValidator() FieldValidator[*FinanceBankConnection] 
 	)
 	validateLastSyncJobID := NewSimpleFieldValidator[string](
 	)
-	validateLastSyncStartedAt := NewSimpleFieldValidator[time.Time](
+	validateLastSyncStartedAt := NewSimpleFieldValidator[*time.Time](
 	)
-	validateLastSuccessfulSyncAt := NewSimpleFieldValidator[time.Time](
+	validateLastSuccessfulSyncAt := NewSimpleFieldValidator[*time.Time](
 	)
 	validateLastSyncError := NewSimpleFieldValidator[string](
 	)

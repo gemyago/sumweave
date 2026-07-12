@@ -26,10 +26,10 @@ func (c *Client) GetAccountTransactions(
 ) (*GetAccountTransactionsResponse, error) {
 	query := url.Values{}
 	if !params.DateFrom.IsZero() {
-		query.Set("date_from", params.DateFrom.UTC().Format(time.DateOnly))
+		query.Set("date_from", params.DateFrom.Format(time.DateOnly))
 	}
 	if !params.DateTo.IsZero() {
-		query.Set("date_to", params.DateTo.UTC().Format(time.DateOnly))
+		query.Set("date_to", params.DateTo.Format(time.DateOnly))
 	}
 	if strings.TrimSpace(params.Strategy) != "" {
 		query.Set("strategy", strings.TrimSpace(params.Strategy))

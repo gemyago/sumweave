@@ -1,6 +1,7 @@
 package finance
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/domain"
 )
+
+var ErrInvalidDashboardPeriod = errors.New("invalid dashboard period")
 
 type DashboardPeriodPreset string
 
@@ -21,7 +24,6 @@ const (
 	DashboardPeriodPresetCustom        DashboardPeriodPreset = "custom"
 
 	dashboardAlertsCapacity = 2
-	hoursPerDay             = 24
 )
 
 type DashboardParams struct {
@@ -133,6 +135,26 @@ type dashboardComputation struct {
 	nativeSettledTotals []DashboardCurrencyTotal
 }
 
+func ValidateDashboardParams(params DashboardParams) error {
+	preset := params.Preset
+	if preset == "" {
+		preset = DashboardPeriodPresetCurrentMonth
+	}
+	switch preset {
+	case DashboardPeriodPresetCurrentMonth,
+		DashboardPeriodPresetPreviousMonth,
+		DashboardPeriodPresetLast3Months,
+		DashboardPeriodPresetLast6Months,
+		DashboardPeriodPresetThisYear,
+		DashboardPeriodPresetPreviousYear:
+		return nil
+	case DashboardPeriodPresetCustom:
+		return ValidateRequiredTimestampRange(params.StartDate, params.EndDate)
+	default:
+		return fmt.Errorf("%w: %q", ErrInvalidDashboardPeriod, preset)
+	}
+}
+
 func buildDashboardAlerts(
 	missing []DashboardMissingFXDiagnostic,
 	pendingCount int,
@@ -222,49 +244,49 @@ func resolveDashboardPeriod(now time.Time, params DashboardParams) DashboardPeri
 	if preset == "" {
 		preset = DashboardPeriodPresetCurrentMonth
 	}
-	current := startOfDay(now)
+	current := now
 	var startDate time.Time
 	var endDate time.Time
-	var shiftMonths int
-	var shiftYears int
 	switch preset {
 	case DashboardPeriodPresetCurrentMonth:
-		monthStart := time.Date(current.Year(), current.Month(), 1, 0, 0, 0, 0, time.UTC)
-		startDate = monthStart
-		endDate = monthStart.AddDate(0, 1, -1)
-		shiftMonths = 1
+		startDate = time.Date(
+			current.Year(), current.Month(), 1,
+			current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location(),
+		)
+		endDate = current
 	case DashboardPeriodPresetPreviousMonth:
-		monthStart := time.Date(current.Year(), current.Month(), 1, 0, 0, 0, 0, time.UTC)
-		startDate = monthStart.AddDate(0, -1, 0)
-		endDate = monthStart.AddDate(0, 0, -1)
-		shiftMonths = 1
+		currentMonthStart := time.Date(
+			current.Year(), current.Month(), 1,
+			current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location(),
+		)
+		startDate = currentMonthStart.AddDate(0, -1, 0)
+		endDate = currentMonthStart.Add(-time.Nanosecond)
 	case DashboardPeriodPresetLast3Months:
-		monthStart := time.Date(current.Year(), current.Month(), 1, 0, 0, 0, 0, time.UTC)
-		startDate = monthStart.AddDate(0, -2, 0)
-		endDate = monthStart.AddDate(0, 1, -1)
-		shiftMonths = 3
+		startDate = current.AddDate(0, -3, 0)
+		endDate = current
 	case DashboardPeriodPresetLast6Months:
-		monthStart := time.Date(current.Year(), current.Month(), 1, 0, 0, 0, 0, time.UTC)
-		startDate = monthStart.AddDate(0, -5, 0)
-		endDate = monthStart.AddDate(0, 1, -1)
-		shiftMonths = 6
+		startDate = current.AddDate(0, -6, 0)
+		endDate = current
 	case DashboardPeriodPresetThisYear:
-		startDate = time.Date(current.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
-		endDate = time.Date(current.Year(), time.December, 31, 0, 0, 0, 0, time.UTC)
-		shiftYears = 1
+		startDate = time.Date(
+			current.Year(), time.January, 1,
+			current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location(),
+		)
+		endDate = current
 	case DashboardPeriodPresetPreviousYear:
-		startDate = time.Date(current.Year()-1, time.January, 1, 0, 0, 0, 0, time.UTC)
-		endDate = time.Date(current.Year()-1, time.December, 31, 0, 0, 0, 0, time.UTC)
-		shiftYears = 1
+		currentYearStart := time.Date(
+			current.Year(), time.January, 1,
+			current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location(),
+		)
+		startDate = currentYearStart.AddDate(-1, 0, 0)
+		endDate = currentYearStart.Add(-time.Nanosecond)
 	case DashboardPeriodPresetCustom:
-		startDate = startOfDay(params.StartDate)
-		endDate = startOfDay(params.EndDate)
+		startDate = params.StartDate
+		endDate = params.EndDate
 	}
 	previousStart, previousEnd, nextStart, nextEnd := shiftPeriodWindow(
 		startDate,
 		endDate,
-		shiftMonths,
-		shiftYears,
 	)
 	return DashboardPeriod{
 		Preset:    preset,
@@ -278,20 +300,12 @@ func resolveDashboardPeriod(now time.Time, params DashboardParams) DashboardPeri
 func shiftPeriodWindow(
 	startDate time.Time,
 	endDate time.Time,
-	shiftMonths int,
-	shiftYears int,
 ) (time.Time, time.Time, time.Time, time.Time) {
-	if shiftMonths == 0 && shiftYears == 0 {
-		spanDays := int(endDate.Sub(startDate).Hours()/hoursPerDay) + 1
-		return startDate.AddDate(0, 0, -spanDays),
-			endDate.AddDate(0, 0, -spanDays),
-			startDate.AddDate(0, 0, spanDays),
-			endDate.AddDate(0, 0, spanDays)
-	}
-	previousStart := startDate.AddDate(-shiftYears, -shiftMonths, 0)
-	previousEnd := startDate.AddDate(0, 0, -1)
-	nextStart := endDate.AddDate(0, 0, 1)
-	nextEnd := nextStart.AddDate(shiftYears, shiftMonths, -1)
+	span := endDate.Sub(startDate) + time.Nanosecond
+	previousStart := startDate.Add(-span)
+	previousEnd := startDate.Add(-time.Nanosecond)
+	nextStart := endDate.Add(time.Nanosecond)
+	nextEnd := endDate.Add(span)
 	return previousStart, previousEnd, nextStart, nextEnd
 }
 
@@ -300,8 +314,7 @@ func transactionInPeriod(
 	startDate time.Time,
 	endDate time.Time,
 ) bool {
-	effectiveDate := startOfDay(transaction.EffectiveAt)
-	return !effectiveDate.Before(startDate) && !effectiveDate.After(endDate)
+	return !transaction.EffectiveAt.Before(startDate) && !transaction.EffectiveAt.After(endDate)
 }
 
 func reportingContribution(transaction domain.Transaction) (int64, int64, bool) {
@@ -322,7 +335,9 @@ func reportingContribution(transaction domain.Transaction) (int64, int64, bool) 
 		return 0, 0, true
 	case domain.TransactionKindRefund:
 		return 0, -transaction.AmountMinor, true
-	case domain.TransactionKindRegular:
+	case domain.TransactionKindExpense,
+		domain.TransactionKindIncome,
+		domain.TransactionKindRegular:
 		if transaction.AmountMinor > 0 {
 			return transaction.AmountMinor, 0, true
 		}
@@ -371,21 +386,12 @@ func addNativeTotal(
 }
 
 type fxRateLookup struct {
-	exact  map[string]float64
 	latest map[string][]domain.FXRate
 }
 
 func newFXRateLookup(rates []domain.FXRate) fxRateLookup {
-	lookup := fxRateLookup{exact: map[string]float64{}, latest: map[string][]domain.FXRate{}}
+	lookup := fxRateLookup{latest: map[string][]domain.FXRate{}}
 	for _, rate := range rates {
-		exactKey := fmt.Sprintf(
-			"%s|%s|%s|%s",
-			rate.Provider,
-			rate.BaseCurrency,
-			rate.QuoteCurrency,
-			startOfDay(rate.RateDate).Format(time.DateOnly),
-		)
-		lookup.exact[exactKey] = rate.Rate
 		pairKey := fmt.Sprintf("%s|%s|%s", rate.Provider, rate.BaseCurrency, rate.QuoteCurrency)
 		lookup.latest[pairKey] = append(lookup.latest[pairKey], rate)
 	}
@@ -408,19 +414,20 @@ func convertTransactionContribution(
 	if transaction.Currency == displayCurrency {
 		return incomeMinor, expenseMinor, true
 	}
-	key := fmt.Sprintf(
-		"%s|%s|%s|%s",
-		provider,
-		transaction.Currency,
-		displayCurrency,
-		startOfDay(transaction.EffectiveAt).Format(time.DateOnly),
-	)
-	rate, ok := lookup.exact[key]
-	if !ok {
+	pairKey := fmt.Sprintf("%s|%s|%s", provider, transaction.Currency, displayCurrency)
+	var rate *domain.FXRate
+	for index := range lookup.latest[pairKey] {
+		candidate := &lookup.latest[pairKey][index]
+		if candidate.RateDate.After(transaction.EffectiveAt) {
+			break
+		}
+		rate = candidate
+	}
+	if rate == nil {
 		return 0, 0, false
 	}
-	return int64(math.Round(float64(incomeMinor) * rate)),
-		int64(math.Round(float64(expenseMinor) * rate)),
+	return int64(math.Round(float64(incomeMinor) * rate.Rate)),
+		int64(math.Round(float64(expenseMinor) * rate.Rate)),
 		true
 }
 
@@ -444,7 +451,7 @@ func convertBalanceAmount(
 	if len(rates) == 0 {
 		return 0, false
 	}
-	asOfDate := startOfDay(endDate)
+	asOfDate := endDate
 	selected := rates[0]
 	for _, rate := range rates {
 		if rate.RateDate.After(asOfDate) {

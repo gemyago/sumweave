@@ -41,13 +41,13 @@ func NewFinanceTransactionValidator() FieldValidator[*FinanceTransaction] {
 	validateEffectiveAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
-	validateCategoryID := NewSimpleFieldValidator[string](
+	validateCategoryID := NewSimpleFieldValidator[*string](
 	)
-	validateTransferGroupID := NewSimpleFieldValidator[string](
+	validateTransferGroupID := NewSimpleFieldValidator[*string](
 	)
-	validateTransferMatchedAt := NewSimpleFieldValidator[time.Time](
+	validateTransferMatchedAt := NewSimpleFieldValidator[*time.Time](
 	)
-	validateHiddenAt := NewSimpleFieldValidator[time.Time](
+	validateHiddenAt := NewSimpleFieldValidator[*time.Time](
 	)
 	validateProviderOriginal := NewObjectFieldValidator(
 		ObjectFieldValidatorParams{Required: false, Nullable: false},

@@ -1,0 +1,42 @@
+# Crew manager configuration for generated surface entrypoints.
+# manager.model: short label for delegation messages in prompt-driven environments
+# manager.opencode_model: fully-qualified OpenCode model (provider/model)
+# Each sub-agent role must have a matching instruction file:
+#   .agents/prompts/crew-manager/agent-<role>.md
+manager:
+  agent_name: crew-manager
+  description: General purpose orchestrator agent for coordinating tasks and workflows.
+  model: gpt-5.6-sol
+  opencode_model: openai/gpt-5.6-sol
+  reasoning_effort: high
+sub-agents:
+  p1-buddy:
+    sub_agent_name: crew-p1-buddy
+    description: P1 entry level software engineer. Does its work very fast, but needs simple work like fixing lint errors, minor test fixes, commits, pull requests, checking, collecting information, renaming files, and similar bounded tasks.
+    model: gpt-5.3-codex-spark
+    opencode_model: openai/gpt-5.3-codex-spark
+    reasoning_effort: high
+  p2-buddy:
+    sub_agent_name: crew-p2-buddy
+    description: P2 software engineer, good for simple coding tasks, small bug fixes, housekeeping, information gathering, and summarization. Needs detailed instructions.
+    model: gpt-5.4-mini
+    opencode_model: openai/gpt-5.4-mini
+    reasoning_effort: high
+  p3-buddy:
+    sub_agent_name: crew-p3-buddy
+    description: P3 software engineer, good for general-purpose coding where things are more or less clear and the scope is established.
+    model: gpt-5.6-terra
+    opencode_model: openai/gpt-5.6-terra
+    reasoning_effort: medium
+  p4-buddy:
+    sub_agent_name: crew-p4-buddy
+    description: P4 software engineer. Good for moderately complex planning, research. Can handle quite complex coding work most of the time.
+    model: gpt-5.6-terra
+    opencode_model: openai/gpt-5.6-terra
+    reasoning_effort: high
+  p5-buddy:
+    sub_agent_name: crew-p5-buddy
+    description: P5 principal software engineer. Good for the most complex planning, research, architecture, and very complex coding tasks.
+    model: gpt-5.6-sol
+    opencode_model: openai/gpt-5.6-sol
+    reasoning_effort: high

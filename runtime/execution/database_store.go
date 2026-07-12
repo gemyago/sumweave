@@ -39,11 +39,11 @@ type executionCommandModel struct {
 	ReduceOnly                bool      `gorm:"column:reduce_only;not null"`
 	ApprovedQuantity          float64   `gorm:"column:approved_quantity;not null"`
 	ApprovedNotional          float64   `gorm:"column:approved_notional;not null"`
-	ApprovedInstrumentActive  bool      `gorm:"column:approved_instrument_active"`
-	ApprovedTimeframe         string    `gorm:"column:approved_timeframe;size:32"`
-	ApprovedInputStart        time.Time `gorm:"column:approved_input_start"`
-	ApprovedInputEnd          time.Time `gorm:"column:approved_input_end"`
-	ApprovedQuality           string    `gorm:"column:approved_quality;size:32"`
+	ApprovedInstrumentActive  bool      `gorm:"column:approved_instrument_active;not null"`
+	ApprovedTimeframe         string    `gorm:"column:approved_timeframe;size:32;not null"`
+	ApprovedInputStart        time.Time `gorm:"column:approved_input_start;not null"`
+	ApprovedInputEnd          time.Time `gorm:"column:approved_input_end;not null"`
+	ApprovedQuality           string    `gorm:"column:approved_quality;size:32;not null"`
 	DecisionStatus            string    `gorm:"column:decision_status;size:32;not null"`
 	DecisionReason            string    `gorm:"column:decision_reason;size:64;not null"`
 	DecisionTime              time.Time `gorm:"column:decision_time;not null"`
@@ -146,9 +146,7 @@ func NewDatabaseStore(sqlDB *sql.DB, dsn string, opts DatabaseStoreOpts) (*Datab
 		TablePrefix:    opts.TablePrefix,
 		TranslateError: true,
 	})
-	cfg.NowFunc = func() time.Time {
-		return time.Now().UTC()
-	}
+	cfg.NowFunc = time.Now
 
 	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
@@ -464,7 +462,7 @@ func executionCommandModelToDomain(model executionCommandModel) (domain.Executio
 		Venue:      domain.Venue(model.Venue),
 		Symbol:     domain.Symbol(model.Symbol),
 		AssetClass: domain.AssetClass(model.AssetClass),
-		Active:     approvedInstrumentActive(model),
+		Active:     model.ApprovedInstrumentActive,
 	})
 	if err != nil {
 		return domain.ExecutionCommand{}, fmt.Errorf("execution command instrument: %w", err)
@@ -473,13 +471,16 @@ func executionCommandModelToDomain(model executionCommandModel) (domain.Executio
 	action, err := domain.NewCandidateAction(domain.CandidateActionParams{
 		Strategy: domain.StrategyIdentity{
 			Instrument: instrument,
-			Timeframe:  approvedTimeframe(model),
+			Timeframe:  domain.Timeframe(model.ApprovedTimeframe),
 			Kind:       domain.StrategyKindMovingAverageCrossover,
 		},
 		Kind:         domain.CandidateActionKind(model.ActionKind),
 		DecisionTime: model.DecisionTime,
-		InputRange:   approvedInputRange(model),
-		Quality:      approvedQuality(model),
+		InputRange: domain.TimeRange{
+			Start: model.ApprovedInputStart,
+			End:   model.ApprovedInputEnd,
+		},
+		Quality: domain.DataQuality(model.ApprovedQuality),
 	})
 	if err != nil {
 		return domain.ExecutionCommand{}, fmt.Errorf("execution command candidate action: %w", err)
@@ -516,47 +517,6 @@ func executionCommandModelToDomain(model executionCommandModel) (domain.Executio
 		Notional:                  model.ApprovedNotional,
 		EventTime:                 model.EventTime,
 	})
-}
-
-func approvedInstrumentActive(model executionCommandModel) bool {
-	if model.ApprovedTimeframe == "" &&
-		model.ApprovedQuality == "" &&
-		model.ApprovedInputStart.IsZero() &&
-		model.ApprovedInputEnd.IsZero() {
-		return true
-	}
-
-	return model.ApprovedInstrumentActive
-}
-
-func approvedTimeframe(model executionCommandModel) domain.Timeframe {
-	if model.ApprovedTimeframe == "" {
-		return domain.Timeframe1m
-	}
-
-	return domain.Timeframe(model.ApprovedTimeframe)
-}
-
-func approvedInputRange(model executionCommandModel) domain.TimeRange {
-	if model.ApprovedInputStart.IsZero() || model.ApprovedInputEnd.IsZero() {
-		return domain.TimeRange{
-			Start: model.DecisionTime,
-			End:   model.DecisionTime.Add(time.Minute),
-		}
-	}
-
-	return domain.TimeRange{
-		Start: model.ApprovedInputStart,
-		End:   model.ApprovedInputEnd,
-	}
-}
-
-func approvedQuality(model executionCommandModel) domain.DataQuality {
-	if model.ApprovedQuality == "" {
-		return domain.DataQualityValidated
-	}
-
-	return domain.DataQuality(model.ApprovedQuality)
 }
 
 func executionOrderToModel(order domain.ExecutionOrder) (executionOrderModel, error) {

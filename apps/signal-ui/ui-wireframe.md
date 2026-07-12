@@ -38,6 +38,11 @@
 - While restoring: `authStore.restoring` is `true` and a loading indicator is shown instead of the shell.
 - After restore completes: Router renders and route guards apply.
 
+**Response timestamp safety**
+
+- Product-instant response fields must be valid RFC3339 instants. The current client parser additionally limits them to Go's signed Unix-nanosecond range.
+- Missing, `null`, empty, malformed, year-one, or out-of-range values fail through the route's existing bounded API error state unless that field explicitly supports omitted or `null`. Finance ranges and FX values are ordinary timestamp instants.
+
 **Route guarding**
 
 - `/chat`, `/data`, `/jobs*`, `/finance*`, `/admin*`, `/providers`, `/strategies*`, and `/evaluations*`: protected with `svelte-spa-router`’s `wrap` + `conditions`.
@@ -182,8 +187,8 @@
 - Each availability entry shows:
   - nested timeframe summaries (**timeframe**, **count**, **start/end range**)
   - that entry’s deterministic **default slice** (**timeframe**, **start**, **end**)
-- Filter form remains available below availability, with fields for **venue**, **symbol**, **asset class**, **timeframe**, a shared UTC-aware range picker, and optional **ingestion run ID**.
-- The shared UTC range picker shows separate UTC **date** and **time** controls, an inline calendar, visible resolved UTC ISO `start` / `end` values, and deterministic quick presets whenever the selected availability/timeframe exposes an anchor.
+- Filter form remains available below availability, with fields for **venue**, **symbol**, **asset class**, **timeframe**, a shared client-local range picker, and optional **ingestion run ID**.
+- The shared range picker stores native JavaScript `Date` values and shows separate client-local **date** and **time** DOM controls, visible resolved instant `start` / `end` values, and deterministic quick presets whenever the selected availability/timeframe exposes an anchor. ISO/RFC3339 remains transport or deep-link serialization only.
 - Results below the form in this order once a candle scope exists:
   - explicit **Start historical backfill** panel using the current form scope; this is the only mutating path on the page and shows the created job link/status when successful
   - summary cards (**N normalized candles**, raw payload metadata loaded/not loaded, selected candle status, selected availability entry when present)
@@ -211,7 +216,7 @@
 - For the current Hyperliquid v0 contract, the backfill panel maps the Data-page `crypto` browse asset-class label to the backend job request's expected `future` asset-class value and calls this out in panel copy.
 - Client-side validation covers:
   - missing required fields
-  - invalid or incomplete UTC range values before a valid ISO range is resolved
+  - invalid or incomplete range values before a valid instant range is resolved
   - `start >= end`
   - the documented 10,000-interval cap using the selected timeframe (matching the server rule and message)
   - selected availability window bounds when the current timeframe has persisted availability
@@ -231,7 +236,7 @@
 | Availability compatibility fallback | Availability endpoint returns `404 Not Found` | Non-alert note explains this is usually a stale/older backend mismatch and manual exact candle reads remain available. |
 | Availability empty | Availability response has no items | Availability empty message; form stays editable; no guessed candle scope. |
 | Availability default scope loading | First availability page includes `defaultSelection` | Availability list renders; matching entry selected; normalized candle status shown while the exact default slice loads. |
-| Validation error | Required field missing, invalid UTC range, selected range exceeds 10,000 intervals, or selected range leaves the chosen availability window | Inline alert semantics above results; **Load candles** does not call APIs. |
+| Validation error | Required field missing, invalid range, selected range exceeds 10,000 intervals, or selected range leaves the chosen availability window | Inline alert semantics above results; **Load candles** does not call APIs. |
 | Backfill validation / create error | Explicit **Start historical backfill** used with invalid scope/page size (negative values only; `0` is valid) or the job API fails | Inline alert in the backfill panel; no job is created implicitly. |
 | Backfill created | Job create succeeds | Success copy shows created job id/status plus a link to `#/jobs/:jobId`. |
 | Candle empty | Candle response has no items | "No normalized candles matched these filters." |
@@ -298,7 +303,7 @@
 - Multi-tenant tenant selection is shell-owned and compact; dashboard/content routes do not repeat tenant picker panels or tenant-workspace explainer blocks.
 - Single-tenant tenant-scoped finance routes do not show a tenant selector in normal shell chrome.
 - Finance detail flows prefer separate routes over split panes; the first slice uses `/finance/accounts/:accountId` and `/finance/jobs/:jobId` for that purpose.
-- Finance user-facing dates render in browser-local date or date-time format instead of raw ISO strings.
+- Finance timestamps render in browser-local date or date-time format instead of raw ISO strings. Native date controls create local JavaScript `Date` values and serialize them at the API boundary; timezone and calendar edge cases are deferred until production evidence.
 - At narrow widths, the finance rail remains fully visible but stacks above the utility header and route body as a full-width Bootstrap aside; there is no separate menu-toggle state.
 - At narrow mobile widths, the utility row keeps only compact route/tenant/auth controls and hides non-essential explainer copy.
 
@@ -330,8 +335,8 @@
 
 **Accounts (`/finance/accounts`, `/finance/accounts/:accountId`)**
 
-- Accounts list: tenant picker, include-hidden toggle, create-account form card, Bootstrap list/card account summaries, and explicit **Open account detail** links.
-- Account detail: one focused account summary card plus a recent-transactions table and backlinks to Accounts and Transactions.
+- Accounts list: tenant picker, include-hidden toggle, create-account form card, Bootstrap list/card account summaries with booked and pending native-currency balances, and explicit **Open account detail** links.
+- Account detail: one focused account summary card with booked and pending native-currency balances, a recent-transactions table, and backlinks to Accounts and Transactions.
 - Direct entry to `#/finance/accounts/:accountId` preserves the requested route after tenant resolution instead of bouncing to another finance page.
 - If multiple tenants are joined and no active tenant is stored yet, the detail route shows a tenant selector plus an explicit “select active tenant” message before loading account data.
 
@@ -341,7 +346,7 @@
 - Browse results: table-first ledger with explicit state badges for pending, hidden, transfer, refund, and reconciliation signals plus direct **Edit** row actions.
 - Browse results load fixed 20-row pages with simple Previous/Next controls; changing tenant or filters returns to the first page.
 - The browse route does not render a selected-transaction inspector; row editing opens the dedicated detail route.
-- Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly form, explicit save/cancel actions, visible transaction state context, and provider-original values when present.
+- Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly form, explicit save/cancel actions, visible transaction state context, and provider-original values when present. The browser's local `datetime-local` control uses native JavaScript millisecond precision, rejects skipped spring-forward wall times, and uses the browser's first fall-back occurrence when ambiguous.
 - Edit route: loads one tenant-scoped transaction directly, keeps finance navigation context intact, and shows provider-original values when present so synced data stays distinguishable from operator edits.
 
 **Categories / tags (`/finance/categories`)**
@@ -509,16 +514,16 @@
 - History results render as stacked run summaries rather than a wide audit table.
 - Run form loads ready strategy versions from `listStrategies()` and offers a single select of `displayName — strategyId/version`.
 - `/evaluations/run/:strategyId/:version` preselects the run form when that ready version is available, and later route-param changes update the selected ready version instead of leaving stale form state behind.
-- Run form fields: selected strategy version, shared UTC-aware range picker, quantity, optional note.
-- Evaluation range controls include deterministic Last 24h / 7d / 30d / 90d / 180d presets that resolve once to explicit UTC values and remain stable until changed again.
-- Client validation prevents requests for missing selection, invalid UTC range values, `start >= end`, or non-positive quantity.
+- Run form fields: selected strategy version, shared client-local range picker, quantity, optional note.
+- Evaluation range controls include deterministic Last 24h / 7d / 30d / 90d / 180d presets that resolve once to explicit instants and remain stable until changed again.
+- Client validation prevents requests for missing selection, invalid range values, `start >= end`, or non-positive quantity.
 - Successful create keeps the operator on the history page, shows the returned synchronous status/result (`completed` or `failed`), refreshes history, and exposes an **Open evaluation detail** link.
 
 **History summaries**
 
 - Loads from `GET /api/v1/evaluations/backtests` on mount.
 - Filters: strategy id and status at minimum; **Apply filters** reruns the list call.
-- Each run summary surfaces run id, strategy id/version, artifact hash, instrument triple, timeframe, full tested range, status, decision, trade counts, blocked/rejected counts, and UTC created/updated lifecycle timestamps.
+- Each run summary surfaces run id, strategy id/version, artifact hash, instrument triple, timeframe, full tested range, status, decision, trade counts, blocked/rejected counts, and client-local created/updated lifecycle timestamps.
 - Dense history rows may compact run ids and hashes for readability while preserving the full value in navigation/detail affordances.
 
 **Detail page**
@@ -532,7 +537,7 @@
 | State | When | UI |
 | :--- | :--- | :--- |
 | Ready versions loading | `listStrategies()` in flight on run page | Strategy select disabled with loading state. |
-| Run validation error | Missing selection, bad UTC range, or invalid quantity | Inline alert list; create request not sent. |
+| Run validation error | Missing selection, bad range, or invalid quantity | Inline alert list; create request not sent. |
 | Run in flight | `createEvaluationBacktest()` in flight | **Start evaluation** button shows loading state. |
 | Run created | Create call returns a run detail | Inline result panel with run id, status, and **Open evaluation detail** link. |
 | History empty | No rows matched current filters | Non-error empty state. |

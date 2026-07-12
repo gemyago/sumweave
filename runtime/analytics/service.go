@@ -255,9 +255,9 @@ func validateReplayCandlesMatchRequest(
 				fmt.Sprintf(
 					"replay candle %d start time %s is outside requested range [%s, %s)",
 					idx,
-					replayStart.UTC().Format(time.RFC3339Nano),
-					request.TimeRange.Start.UTC().Format(time.RFC3339Nano),
-					request.TimeRange.End.UTC().Format(time.RFC3339Nano),
+					replayStart.Format(time.RFC3339Nano),
+					request.TimeRange.Start.Format(time.RFC3339Nano),
+					request.TimeRange.End.Format(time.RFC3339Nano),
 				),
 			)
 		}

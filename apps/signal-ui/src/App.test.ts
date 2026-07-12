@@ -143,10 +143,10 @@ describe('App shell', () => {
     financeApiMocks.getDashboard.mockResolvedValue({
       period: {
         preset: 'current_month',
-        startDate: now,
-        endDate: now,
-        previous: { startDate: now, endDate: now },
-        next: { startDate: now, endDate: now },
+        startDate: new Date(2026, 5, 20),
+        endDate: new Date(2026, 5, 20),
+        previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) },
+        next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) },
       },
       settled: { displayCurrency: 'USD', incomeMinor: 10000, expenseMinor: 5000, netMinor: 5000, transactionCount: 2, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1000, netMinor: -1000, transactionCount: 1, complete: true },

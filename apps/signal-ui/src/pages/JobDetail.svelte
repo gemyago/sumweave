@@ -2,7 +2,12 @@
   import { onDestroy } from 'svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
-  import { createSignalJobsApiForAuth, type JobDetail as JobDetailModel } from '../lib/jobs/api'
+  import {
+    createSignalJobsApiForAuth,
+    isHistoricalDataBackfillJob,
+    type JobDetail as JobDetailModel,
+  } from '../lib/jobs/api'
+  import { formatLocalDateTime } from '../lib/timestamp'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
 
@@ -16,7 +21,7 @@
     primaryBackLabel = 'Back to jobs',
     secondaryBackHref = '/data',
     secondaryBackLabel = 'Back to data',
-    formatDateValue = (value: Date | null) => (value ? value.toISOString() : '—'),
+    formatDateValue = formatLocalDateTime,
   } = $props<{
     params?: { jobId?: string }
     heading?: string
@@ -25,7 +30,7 @@
     primaryBackLabel?: string
     secondaryBackHref?: string
     secondaryBackLabel?: string
-    formatDateValue?: (value: Date | null) => string
+    formatDateValue?: (value: Date | null | undefined) => string
   }>()
 
   let loading = $state(true)
@@ -93,6 +98,9 @@
   }
 
   function buildDataScopeHref(item: JobDetailModel): string {
+    if (!isHistoricalDataBackfillJob(item)) {
+      throw new Error('Historical data scope is only available for historical backfill jobs.')
+    }
     const query = new URLSearchParams({
       venue: item.input.venue,
       symbol: item.input.symbol,
@@ -104,12 +112,8 @@
     return `/data?${query.toString()}`
   }
 
-  function hasHistoricalInput(item: JobDetailModel): boolean {
-    return Boolean(item.input.venue || item.input.symbol || item.input.ingestionRunId)
-  }
-
   function hasHistoricalResult(item: JobDetailModel): boolean {
-    return item.result !== undefined && item.jobType.includes('historical')
+    return isHistoricalDataBackfillJob(item) && item.result !== undefined
   }
 </script>
 
@@ -122,7 +126,7 @@
       <div class="page-links">
         <a href={primaryBackHref} use:link>{primaryBackLabel}</a>
         <a href={secondaryBackHref} use:link>{secondaryBackLabel}</a>
-        {#if detail && hasHistoricalInput(detail)}
+        {#if detail && isHistoricalDataBackfillJob(detail)}
           <a href={buildDataScopeHref(detail)} use:link>Open data scope</a>
         {/if}
       </div>
@@ -145,7 +149,7 @@
       </dl>
     </section>
 
-    {#if hasHistoricalInput(detail)}
+    {#if isHistoricalDataBackfillJob(detail)}
       <section class="panel">
         <h2>Input</h2>
         <dl class="summary-grid">
@@ -200,7 +204,7 @@
           </div>
         {/if}
       </section>
-    {:else if !detail.jobType.includes('historical')}
+    {:else if !isHistoricalDataBackfillJob(detail)}
       <section class="panel">
         <h2>Result</h2>
         <p class="muted">Result details are not yet specialized for this job type.</p>

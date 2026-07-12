@@ -3,7 +3,12 @@
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { formatCompactIdentifier } from '../lib/compact-identifier'
-  import { createSignalJobsApiForAuth, type JobSummary } from '../lib/jobs/api'
+  import {
+    createSignalJobsApiForAuth,
+    isHistoricalDataBackfillJob,
+    type JobSummary,
+  } from '../lib/jobs/api'
+  import { formatLocalDateTime } from '../lib/timestamp'
 
   let {
     heading = 'Jobs',
@@ -74,11 +79,10 @@
     await loadJobs({ cursor: nextCursor, append: true })
   }
 
-  function formatDate(value: Date | null): string {
-    return value ? value.toISOString() : '—'
-  }
-
   function formatScope(item: JobSummary): string {
+    if (!isHistoricalDataBackfillJob(item)) {
+      return 'Not available for this job type'
+    }
     return `${item.input.venue} / ${item.input.symbol} / ${item.input.assetClass} / ${item.input.timeframe}`
   }
 </script>
@@ -158,7 +162,7 @@
             </div>
             <div>
               <dt>Created</dt>
-              <dd>{formatDate(item.createdAt)}</dd>
+              <dd>{formatLocalDateTime(item.createdAt)}</dd>
             </div>
             <div>
               <dt>Attempts</dt>

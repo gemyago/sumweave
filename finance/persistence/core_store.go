@@ -24,6 +24,8 @@ const (
 	columnState             = "state"
 	columnConnectionID      = "connection_id"
 	columnProviderAccountID = "provider_account_id"
+	columnEffectiveAt       = "effective_at"
+	columnFingerprint       = "fingerprint"
 )
 
 var (
@@ -106,6 +108,7 @@ func (s *Store) ListTenantsForUser(
 		Where("m.user_id = ?", userID).
 		Where("t.archived_at IS NULL").
 		Order("t.created_at ASC").
+		Order("t.id ASC").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list tenants for user: %w", err)
@@ -117,14 +120,14 @@ func (s *Store) ListTenantsForUser(
 				ID:              row.TenantID,
 				Name:            row.Name,
 				DisplayCurrency: row.DisplayCurrency,
-				CreatedAt:       normalizeUTC(row.TenantCreatedAt),
-				UpdatedAt:       normalizeUTC(row.TenantUpdatedAt),
+				CreatedAt:       row.TenantCreatedAt,
+				UpdatedAt:       row.TenantUpdatedAt,
 			},
 			Membership: domain.TenantMembership{
 				TenantID:  row.TenantID,
 				UserID:    userID,
-				JoinedAt:  normalizeUTC(row.MembershipJoined),
-				CreatedAt: normalizeUTC(row.MembershipCreated),
+				JoinedAt:  row.MembershipJoined,
+				CreatedAt: row.MembershipCreated,
 			},
 		})
 	}
@@ -226,7 +229,7 @@ func (s *Store) ListTenantMembers(
 		members = append(members, domain.TenantMember{
 			TenantID: model.TenantID,
 			UserID:   model.UserID,
-			JoinedAt: normalizeUTC(model.JoinedAt),
+			JoinedAt: model.JoinedAt,
 		})
 	}
 	return members, nil
@@ -455,7 +458,7 @@ func (s *Store) saveTransactionWithDB(db *gorm.DB, model transactionModel) error
 				"amount_minor",
 				columnCurrency,
 				"description",
-				"effective_at",
+				columnEffectiveAt,
 				"category_id",
 				"transfer_group_id",
 				"transfer_matched_at",

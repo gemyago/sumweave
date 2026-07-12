@@ -173,11 +173,14 @@ func TestProviderLinkPersistence(t *testing.T) {
 		tenantID := "tenant-" + fake.UUID().V4()
 		connectionID := "connection-" + fake.UUID().V4()
 		rawPayloadID := "payload-" + fake.UUID().V4()
+		observedAt := time.Now().UTC()
 
 		savedConnection, err := persistence.SaveBankConnection(t.Context(), domain.BankConnection{
-			ID:       connectionID,
-			TenantID: tenantID,
-			Provider: string(domain.ProviderIDPKO),
+			ID:        connectionID,
+			TenantID:  tenantID,
+			Provider:  string(domain.ProviderIDPKO),
+			CreatedAt: observedAt,
+			UpdatedAt: observedAt,
 		})
 		require.NoError(t, err)
 		require.Equal(t, connectionID, savedConnection.ID)

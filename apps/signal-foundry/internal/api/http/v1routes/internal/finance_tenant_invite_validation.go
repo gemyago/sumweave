@@ -26,12 +26,12 @@ func NewFinanceTenantInviteValidator() FieldValidator[*FinanceTenantInvite] {
 	validateCreatedByUserID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateAcceptedByUserID := NewSimpleFieldValidator[string](
+	validateAcceptedByUserID := NewSimpleFieldValidator[*string](
 	)
 	validateCreatedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
-	validateAcceptedAt := NewSimpleFieldValidator[time.Time](
+	validateAcceptedAt := NewSimpleFieldValidator[*time.Time](
 	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceTenantInvite) {

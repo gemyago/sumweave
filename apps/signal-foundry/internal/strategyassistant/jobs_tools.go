@@ -144,16 +144,16 @@ func mapJobSummary(job jobspkg.Job) JobSummary {
 		Status:       string(job.Status),
 		Requester:    mapJobRequester(job.Requester),
 		Input:        mapHistoricalDataBackfillJobInput(job.Input),
-		CreatedAt:    job.CreatedAt.UTC(),
-		UpdatedAt:    job.UpdatedAt.UTC(),
+		CreatedAt:    job.CreatedAt,
+		UpdatedAt:    job.UpdatedAt,
 		AttemptCount: job.AttemptCount,
 	}
 	if job.StartedAt != nil {
-		startedAt := job.StartedAt.UTC()
+		startedAt := *job.StartedAt
 		result.StartedAt = &startedAt
 	}
 	if job.CompletedAt != nil {
-		completedAt := job.CompletedAt.UTC()
+		completedAt := *job.CompletedAt
 		result.CompletedAt = &completedAt
 	}
 	if job.Result != nil {
@@ -173,7 +173,7 @@ func mapJobDetail(job jobspkg.Job) *JobDetail {
 		WorkerID:   job.WorkerID,
 	}
 	if job.LastAttemptAt != nil {
-		lastAttemptAt := job.LastAttemptAt.UTC()
+		lastAttemptAt := *job.LastAttemptAt
 		result.LastAttemptAt = &lastAttemptAt
 	}
 	return result
@@ -188,8 +188,8 @@ func mapHistoricalDataBackfillJobInput(
 		Symbol:         input.Symbol,
 		AssetClass:     input.AssetClass,
 		Timeframe:      input.Timeframe,
-		Start:          input.Start.UTC(),
-		End:            input.End.UTC(),
+		Start:          input.Start,
+		End:            input.End,
 		PageSize:       input.PageSize,
 	}
 }
@@ -206,11 +206,11 @@ func mapHistoricalDataBackfillJobResult(
 		MissingIntervalPreviewCap: result.MissingIntervalPreviewCap,
 	}
 	if result.FirstPersistedStart != nil {
-		first := result.FirstPersistedStart.UTC()
+		first := *result.FirstPersistedStart
 		mapped.FirstPersistedStart = &first
 	}
 	if result.LastPersistedEnd != nil {
-		last := result.LastPersistedEnd.UTC()
+		last := *result.LastPersistedEnd
 		mapped.LastPersistedEnd = &last
 	}
 	if result.RawPayloadCount != nil {
@@ -221,8 +221,8 @@ func mapHistoricalDataBackfillJobResult(
 		mapped.MissingIntervalPreview = make([]JobTimeRange, 0, len(result.MissingIntervalPreview))
 		for i := range result.MissingIntervalPreview {
 			mapped.MissingIntervalPreview = append(mapped.MissingIntervalPreview, JobTimeRange{
-				Start: result.MissingIntervalPreview[i].Start.UTC(),
-				End:   result.MissingIntervalPreview[i].End.UTC(),
+				Start: result.MissingIntervalPreview[i].Start,
+				End:   result.MissingIntervalPreview[i].End,
 			})
 		}
 	}

@@ -370,8 +370,11 @@ func TestIngestionFlow(t *testing.T) {
 		for idx, candle := range readCandles {
 			require.False(t, candle.TimeRange.Start.Before(candleRequest.TimeRange.Start))
 			require.True(t, candle.TimeRange.Start.Before(candleRequest.TimeRange.End))
-			require.Equal(t, time.UTC, candle.TimeRange.Start.Location())
-			require.Equal(t, time.UTC, candle.TimeRange.End.Location())
+			_, expectedOffset := candleRequest.TimeRange.Start.Zone()
+			_, startOffset := candle.TimeRange.Start.Zone()
+			_, endOffset := candle.TimeRange.End.Zone()
+			require.Equal(t, expectedOffset, startOffset)
+			require.Equal(t, expectedOffset, endOffset)
 			require.Equal(t, domain.DataQualityValidated, candle.Quality)
 			require.True(t, strings.HasPrefix(candle.Provenance.Source, "sandbox-int-sandbox"))
 			if idx > 0 {
@@ -383,7 +386,9 @@ func TestIngestionFlow(t *testing.T) {
 		for idx, trade := range readTrades {
 			require.False(t, trade.EventTime.Before(tradeRequest.TimeRange.Start))
 			require.True(t, trade.EventTime.Before(tradeRequest.TimeRange.End))
-			require.Equal(t, time.UTC, trade.EventTime.Location())
+			_, expectedOffset := tradeRequest.TimeRange.Start.Zone()
+			_, eventOffset := trade.EventTime.Zone()
+			require.Equal(t, expectedOffset, eventOffset)
 			require.Equal(t, domain.DataQualityValidated, trade.Quality)
 			require.True(t, strings.HasPrefix(trade.Provenance.Source, "sandbox-int-sandbox"))
 			if idx > 0 {

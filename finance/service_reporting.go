@@ -61,7 +61,7 @@ func NewReportingService(store reportingServiceStore, opts ...ReportingServiceOp
 	service := &ReportingService{
 		store:             store,
 		access:            newAccessGuard(store),
-		now:               func() time.Time { return time.Now().UTC() },
+		now:               time.Now,
 		defaultFXProvider: FXProviderFrankfurter,
 	}
 	for _, opt := range opts {
@@ -72,6 +72,9 @@ func NewReportingService(store reportingServiceStore, opts ...ReportingServiceOp
 }
 
 func (s *ReportingService) GetDashboard(ctx context.Context, params DashboardParams) (Dashboard, error) {
+	if err := ValidateDashboardParams(params); err != nil {
+		return Dashboard{}, err
+	}
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return Dashboard{}, err
 	}
@@ -211,7 +214,7 @@ func (s *ReportingService) processDashboardTransaction(
 			AccountID:     transaction.AccountID,
 			BaseCurrency:  transaction.Currency,
 			QuoteCurrency: data.tenant.DisplayCurrency,
-			RateDate:      startOfDay(transaction.EffectiveAt),
+			RateDate:      transaction.EffectiveAt,
 			Provider:      s.defaultFXProvider,
 		})
 		markIncompleteDashboardSummary(transaction.Status, settled, pending)
@@ -239,7 +242,7 @@ func (s *ReportingService) buildDashboardAccountBalances(
 ) ([]DashboardAccountBalance, []DashboardMissingFXDiagnostic) {
 	accountBalances := make([]DashboardAccountBalance, 0, len(data.accounts))
 	missing := make([]DashboardMissingFXDiagnostic, 0)
-	cutoffDate := startOfDay(data.period.EndDate)
+	cutoffDate := data.period.EndDate
 	balanceByAccountID := make(map[string]domain.AccountBalance, len(data.balances))
 	for _, item := range data.balances {
 		balanceByAccountID[item.AccountID] = item

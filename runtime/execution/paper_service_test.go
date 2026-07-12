@@ -58,7 +58,7 @@ func TestPaperService(t *testing.T) {
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 59),
 			fake.IntBetween(0, 999999999),
-			time.FixedZone(randomWord(t, fake, "zone"), fake.IntBetween(-11, 12)*3600),
+			time.FixedZone("", fake.IntBetween(-11, 12)*3600),
 		)
 	}
 
@@ -382,6 +382,7 @@ func TestPaperService(t *testing.T) {
 
 		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"execution_commands", []string{"command_id"}))
 		require.True(t, hasUniqueIndexWithColumns(t, store, tablePrefix+"execution_orders", []string{"order_id"}))
+		require.True(t, store.db.Migrator().HasIndex(&executionFillModel{}, "idx_execution_fills_mode_time_id"))
 		require.True(
 			t,
 			hasUniqueIndexWithColumns(
@@ -427,7 +428,7 @@ func TestPaperService(t *testing.T) {
 		require.Equal(t, int64(1), readCount(t, store, tablePrefix+"execution_fills"))
 	})
 
-	t.Run("persists refs UTC timestamps and deterministic client order id", func(t *testing.T) {
+	t.Run("persists refs timestamp instants and deterministic client order id", func(t *testing.T) {
 		t.Parallel()
 
 		fake := newFake(t)
@@ -469,10 +470,10 @@ func TestPaperService(t *testing.T) {
 		require.Equal(t, intent.OrderType, firstResult.Order.OrderType)
 		require.Equal(t, domain.TimeInForceGTC, firstResult.Order.TimeInForce)
 		require.NotEmpty(t, firstResult.Command.GovernorDecisionReference)
-		require.Equal(t, time.UTC, firstResult.Command.EventTime.Time().Location())
-		require.Equal(t, time.UTC, firstResult.Order.EventTime.Time().Location())
+		require.True(t, decisionTime.Equal(firstResult.Command.EventTime.Time()))
+		require.True(t, decisionTime.Equal(firstResult.Order.EventTime.Time()))
 		require.NotNil(t, firstResult.Fill)
-		require.Equal(t, time.UTC, firstResult.Fill.EventTime.Time().Location())
+		require.True(t, fillCandle.Candle.TimeRange.End.Equal(firstResult.Fill.EventTime.Time()))
 	})
 
 	t.Run("preserves approved decision candidate action fields across reloads", func(t *testing.T) {

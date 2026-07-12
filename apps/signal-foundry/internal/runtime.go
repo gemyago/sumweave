@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -40,7 +39,8 @@ type RuntimeDeps struct {
 
 	// DataDir is the base directory for agent data storage.
 	// Defaults to "data" relative to the working directory.
-	DataDir string `name:"config.dataDir"`
+	DataDir            string `name:"config.dataDir"`
+	PlatformAgentsPath string `name:"config.workspacefs.platformAgentsPath"`
 
 	// Exec tool configuration for workspacefs.
 	ExecEnabled           bool          `name:"config.workspacefs.exec.enabled"`
@@ -166,11 +166,6 @@ func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOp
 	if err := os.MkdirAll(agentTempDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create workspacefs agent temp directory: %w", err)
 	}
-	platformAgentsDir, err := bundledPlatformAgentsDir()
-	if err != nil {
-		return nil, err
-	}
-
 	registerOpts := []workspacefs.RegisterToolsOpt{
 		workspacefs.WithWorkspaces([]workspacefs.WorkspaceConfig{
 			{
@@ -181,7 +176,7 @@ func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOp
 			{
 				Identifier:  platformAgentsWorkspace,
 				Description: "Bundled platform-agent docs and skills live here",
-				Path:        platformAgentsDir,
+				Path:        deps.PlatformAgentsPath,
 			},
 		}),
 		workspacefs.WithLogger(deps.RootLogger),
@@ -195,15 +190,6 @@ func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOp
 	}
 
 	return registerOpts, nil
-}
-
-func bundledPlatformAgentsDir() (string, error) {
-	_, currentFile, _, ok := goruntime.Caller(0)
-	if !ok {
-		return "", errors.New("resolve bundled platform-agents directory: caller unavailable")
-	}
-
-	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", "..", ".platform-agents")), nil
 }
 
 func registerStrategyAssistantTools(deps RuntimeDeps, toolsRegistry *agent.ToolsRegistry) error {

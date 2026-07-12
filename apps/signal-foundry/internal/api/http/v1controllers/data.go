@@ -232,10 +232,26 @@ func (c *DataController) ListDataRawPayloads(
 		*models.RawPayloadMetadataListResponse,
 	],
 ) http.Handler {
-	inner := builder.HandleWith(func(
-		ctx context.Context,
+	inner := builder.HandleWithHTTP(func(
+		_ http.ResponseWriter,
+		req *http.Request,
 		params *models.ListDataRawPayloadsParams,
 	) (*models.RawPayloadMetadataListResponse, error) {
+		startValue, startSupplied, err := parseOptionalTimestampQuery(req, "start", params.Start)
+		if err != nil {
+			return nil, err
+		}
+		endValue, endSupplied, err := parseOptionalTimestampQuery(req, "end", params.End)
+		if err != nil {
+			return nil, err
+		}
+		var start, end *time.Time
+		if startSupplied {
+			start = &startValue
+		}
+		if endSupplied {
+			end = &endValue
+		}
 		venue, err := validateSupportedVenue(params.Venue)
 		if err != nil {
 			return nil, err
@@ -246,8 +262,8 @@ func (c *DataController) ListDataRawPayloads(
 			Symbol:         domain.Symbol(params.Symbol),
 			AssetClass:     domain.AssetClass(params.AssetClass),
 			Timeframe:      domain.Timeframe(params.Timeframe),
-			StartAt:        params.Start,
-			EndAt:          params.End,
+			StartAt:        start,
+			EndAt:          end,
 			IngestionRunID: params.IngestionRunID,
 			EntityHint:     params.EntityHint,
 			Endpoint:       params.Endpoint,
@@ -259,7 +275,7 @@ func (c *DataController) ListDataRawPayloads(
 			return nil, mapDataReadError(err, "raw-payloads")
 		}
 
-		result, err := c.deps.LineageService.ListRawPayloadMetadata(ctx, query)
+		result, err := c.deps.LineageService.ListRawPayloadMetadata(req.Context(), query)
 		if err != nil {
 			return nil, mapDataReadError(err, "raw-payloads")
 		}
@@ -274,6 +290,17 @@ func (c *DataController) ListDataRawPayloads(
 	})
 
 	return c.deps.AuthMiddleware(inner)
+}
+
+func parseOptionalTimestampQuery(req *http.Request, name, value string) (time.Time, bool, error) {
+	if _, supplied := req.URL.Query()[name]; !supplied {
+		return time.Time{}, false, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, false, app.NewErrInvalidInput(name, "must be an RFC3339 timestamp")
+	}
+	return parsed, true, nil
 }
 
 func validateCandleRequest(
@@ -396,8 +423,8 @@ func mapReplayCandle(item data.ReplayCandle) (models.DataCandle, error) {
 		Symbol:             item.Candle.Instrument.Symbol.String(),
 		AssetClass:         item.Candle.Instrument.AssetClass.String(),
 		Timeframe:          item.Candle.Timeframe.String(),
-		Start:              &item.Candle.TimeRange.Start,
-		End:                &item.Candle.TimeRange.End,
+		Start:              item.Candle.TimeRange.Start,
+		End:                item.Candle.TimeRange.End,
 		Open:               item.Candle.Open,
 		High:               item.Candle.High,
 		Low:                item.Candle.Low,

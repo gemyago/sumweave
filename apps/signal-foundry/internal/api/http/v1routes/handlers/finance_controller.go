@@ -144,10 +144,10 @@ type FinanceController interface {
 	//
 	// Request type: GetFinanceDashboardParams,
 	//
-	// Response type: map[string]interface{}
+	// Response type: FinanceDashboardResponse
 	GetFinanceDashboard(HandlerBuilder[
 		*GetFinanceDashboardParams,
-		*map[string]interface{},
+		*FinanceDashboardResponse,
 	]) http.Handler
 
 	// GET /api/v1/finance/fx/diagnostics

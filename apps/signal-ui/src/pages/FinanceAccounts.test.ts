@@ -12,7 +12,7 @@ describe('Finance accounts page', () => {
     window.localStorage.clear()
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTenants.mockResolvedValue([{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now }])
-    mocks.listAccounts.mockResolvedValue([{ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now }])
+    mocks.listAccounts.mockResolvedValue([{ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', bookedBalanceMinor: 0, pendingBalanceMinor: -125, provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now }])
     mocks.createAccount.mockResolvedValue({})
   })
 
@@ -20,6 +20,13 @@ describe('Finance accounts page', () => {
     render(FinanceAccounts)
     expect(await screen.findByText('Checking')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open account detail' })).toHaveAttribute('href', '#/finance/accounts/account-1')
+  })
+
+  it('renders booked and pending balances without treating zero as absent', async () => {
+    render(FinanceAccounts)
+
+    expect(await screen.findByText('Booked balance 0.00 USD')).toBeInTheDocument()
+    expect(screen.getByText('Pending balance -1.25 USD')).toBeInTheDocument()
   })
 
   it('submits the create-account form', async () => {

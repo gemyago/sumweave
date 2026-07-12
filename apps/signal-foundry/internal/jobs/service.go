@@ -179,22 +179,24 @@ func (s *Service) enqueueJSONInTx(
 		}
 	}
 	idempotencyKey := strings.TrimSpace(params.IdempotencyKey)
-	now := s.clock().UTC()
+	now := s.clock()
 	job := Job{
-		ID:             s.idGenerator.MustNewV7().String(),
-		JobType:        params.JobType,
-		Status:         JobStatusQueued,
-		Requester:      requester,
-		IdempotencyKey: idempotencyKey,
-		InputHash:      inputHash,
-		InputJSON:      params.InputJSON,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-		QueuedAt:       now,
-		AttemptCount:   0,
-		MaxAttempts:    handler.maxAttempts(),
-		CorrelationID:  strings.TrimSpace(params.CorrelationID),
-		ScheduleID:     strings.TrimSpace(params.ScheduleID),
+		ID:                 s.idGenerator.MustNewV7().String(),
+		JobType:            params.JobType,
+		Status:             JobStatusQueued,
+		Requester:          requester,
+		IdempotencyKey:     idempotencyKey,
+		InputHash:          inputHash,
+		InputJSON:          params.InputJSON,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		QueuedAt:           now,
+		AttemptCount:       0,
+		MaxAttempts:        handler.maxAttempts(),
+		CorrelationID:      strings.TrimSpace(params.CorrelationID),
+		ScheduleID:         strings.TrimSpace(params.ScheduleID),
+		ScheduledAt:        params.ScheduledAt,
+		ScheduledNextRunAt: params.ScheduledNextRunAt,
 	}
 	var created Job
 	createdNew := false
@@ -272,11 +274,13 @@ func (s *Service) Retry(ctx context.Context, jobID string) (*Job, error) {
 		return nil, app.NewErrConflict("job", "job retry is not supported")
 	}
 	return s.EnqueueJSON(ctx, EnqueueJSONParams{
-		JobType:       job.JobType,
-		Requester:     job.Requester,
-		CorrelationID: job.CorrelationID,
-		ScheduleID:    job.ScheduleID,
-		InputJSON:     job.InputJSON,
+		JobType:            job.JobType,
+		Requester:          job.Requester,
+		CorrelationID:      job.CorrelationID,
+		ScheduleID:         job.ScheduleID,
+		ScheduledAt:        job.ScheduledAt,
+		ScheduledNextRunAt: job.ScheduledNextRunAt,
+		InputJSON:          job.InputJSON,
 	})
 }
 

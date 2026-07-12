@@ -274,28 +274,45 @@ func registerBankSyncJobHandler(
 			jobspkg.TypedHandlerSpec[bankConnectionSyncJobInput, financepkg.BankConnectionSyncResult, struct{}]{
 				JobType:       jobspkg.JobType(financepkg.BankConnectionSyncJobType),
 				SupportsRetry: true,
-				Run: func(ctx context.Context, input bankConnectionSyncJobInput, _ func(struct{}) error) (financepkg.BankConnectionSyncResult, error) {
-					return service.RunBankConnectionSync(ctx, makeRunBankConnectionSyncParams(input))
+				RunJob: func(ctx context.Context, job jobspkg.Job, input bankConnectionSyncJobInput, _ func(struct{}) error) (financepkg.BankConnectionSyncResult, error) {
+					return service.RunBankConnectionSync(ctx, makeRunBankConnectionSyncParams(job, input))
+				},
+				OnScheduled: func(ctx context.Context, job jobspkg.Job) error {
+					input, err := jobspkg.DecodeJobInput[bankConnectionSyncJobInput](job)
+					if err != nil {
+						return fmt.Errorf("decode scheduled bank sync input: %w", err)
+					}
+					if job.ScheduledAt == nil || job.ScheduledNextRunAt == nil {
+						return errors.New("scheduled bank sync occurrence timestamps are required")
+					}
+					_, err = service.RecordBankConnectionSyncScheduled(
+						ctx,
+						financepkg.RecordBankConnectionSyncScheduledParams{
+							ConnectionID: input.ConnectionID,
+							JobID:        job.ID,
+							ScheduledAt:  *job.ScheduledAt,
+							NextRunAt:    *job.ScheduledNextRunAt,
+						},
+					)
+					return err
 				},
 			},
 		)
 	})
 }
 
-func makeRunBankConnectionSyncParams(input bankConnectionSyncJobInput) financepkg.RunBankConnectionSyncParams {
-	var windowStart time.Time
-	var windowEnd time.Time
-	if input.WindowStart != nil {
-		windowStart = input.WindowStart.UTC()
-	}
-	if input.WindowEnd != nil {
-		windowEnd = input.WindowEnd.UTC()
-	}
+func makeRunBankConnectionSyncParams(
+	job jobspkg.Job,
+	input bankConnectionSyncJobInput,
+) financepkg.RunBankConnectionSyncParams {
 	return financepkg.RunBankConnectionSyncParams{
-		ConnectionID: input.ConnectionID,
-		Reason:       input.Reason,
-		WindowStart:  windowStart,
-		WindowEnd:    windowEnd,
+		ConnectionID:       input.ConnectionID,
+		JobID:              job.ID,
+		Reason:             input.Reason,
+		WindowStart:        input.WindowStart,
+		WindowEnd:          input.WindowEnd,
+		ScheduledAt:        job.ScheduledAt,
+		ScheduledNextRunAt: job.ScheduledNextRunAt,
 	}
 }
 
@@ -396,12 +413,13 @@ func (w bankConnectionSyncScheduleWriter) UpsertBankConnectionSyncSchedule(
 	if err != nil {
 		return fmt.Errorf("encode bank connection sync schedule: %w", err)
 	}
-	var nextRunAt time.Time
+	var nextRunAt *time.Time
 	if schedule.Enabled {
-		nextRunAt = time.Now().UTC()
+		now := time.Now()
+		nextRunAt = &now
 	}
 	if schedule.NextRunAt != nil {
-		nextRunAt = schedule.NextRunAt.UTC()
+		nextRunAt = schedule.NextRunAt
 	}
 	return w.store.UpsertSchedule(ctx, jobspkg.Schedule{
 		ID:      strings.TrimSpace(schedule.ScheduleID),

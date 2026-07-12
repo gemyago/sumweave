@@ -82,25 +82,5 @@ func effectiveAtAfterCutoff(effectiveAt time.Time, cutoff *time.Time) bool {
 	if cutoff == nil {
 		return false
 	}
-	effectiveDay := time.Date(
-		effectiveAt.UTC().Year(),
-		effectiveAt.UTC().Month(),
-		effectiveAt.UTC().Day(),
-		0,
-		0,
-		0,
-		0,
-		time.UTC,
-	)
-	cutoffDay := time.Date(
-		cutoff.UTC().Year(),
-		cutoff.UTC().Month(),
-		cutoff.UTC().Day(),
-		0,
-		0,
-		0,
-		0,
-		time.UTC,
-	)
-	return effectiveDay.After(cutoffDay)
+	return effectiveAt.After(*cutoff)
 }

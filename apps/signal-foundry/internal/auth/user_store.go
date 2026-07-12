@@ -115,7 +115,7 @@ func (s *UserStore) Create(ctx context.Context, params CreateUserParams) (*User,
 		return nil, ErrUsernameExists
 	}
 
-	now := time.Now().UTC()
+	now := time.Now().Round(0)
 	user := &User{
 		ID:           s.deps.IDGen.MustNewV7().String(),
 		Username:     params.Username,
@@ -204,7 +204,7 @@ func (s *UserStore) UpdatePassword(ctx context.Context, id string, newHash strin
 	}
 
 	user.PasswordHash = newHash
-	user.UpdatedAt = time.Now().UTC()
+	user.UpdatedAt = time.Now().Round(0)
 
 	err = s.writeUser(user)
 	if err != nil {

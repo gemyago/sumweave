@@ -240,7 +240,11 @@ func TestDataBackfillRawCandlesCmd(t *testing.T) {
 		require.Len(t, runner.requests, 1)
 		assert.Equal(t, 1, factoryCalls)
 
-		requestedRange, err := domain.NewTimeRange(start.UTC(), end.UTC())
+		requestedStart, err := time.Parse(time.RFC3339, start.Format(time.RFC3339))
+		require.NoError(t, err)
+		requestedEnd, err := time.Parse(time.RFC3339, end.Format(time.RFC3339))
+		require.NoError(t, err)
+		requestedRange, err := domain.NewTimeRange(requestedStart, requestedEnd)
 		require.NoError(t, err)
 		assert.Equal(t, flows.HistoricalRawCandleBackfillRequest{
 			RunID:      "run-123",

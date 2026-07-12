@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { link } from 'svelte-spa-router'
-  import UtcDateRangePicker from '../components/UtcDateRangePicker.svelte'
+  import DateRangePicker from '../components/DateRangePicker.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { formatCompactIdentifier } from '../lib/compact-identifier'
   import {
@@ -10,7 +10,8 @@
     type EvaluationRow,
     type StrategyVersionRow,
   } from '../lib/strategy-workspace/api'
-  import { validateUtcRange } from '../lib/utc-date-range'
+  import { validateRange } from '../lib/date-range'
+  import { formatLocalDateTime } from '../lib/timestamp'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
 
@@ -29,8 +30,8 @@
   let history = $state<EvaluationRow[]>([])
 
   let runSelection = $state('')
-  let rangeStart = $state('')
-  let rangeEnd = $state('')
+  let rangeStart = $state<Date | undefined>()
+  let rangeEnd = $state<Date | undefined>()
   let quantity = $state('1')
   let note = $state('')
   let runErrors = $state<string[]>([])
@@ -135,17 +136,17 @@
     if (!selected) {
       errors.push('Select a ready strategy version before starting an evaluation.')
     }
-    const rangeErrors = validateUtcRange({
-      startIso: rangeStart,
-      endIso: rangeEnd,
-      requiredStartMessage: 'Enter a valid UTC start timestamp.',
-      requiredEndMessage: 'Enter a valid UTC end timestamp.',
-      invalidStartMessage: 'Enter a valid UTC start timestamp.',
-      invalidEndMessage: 'Enter a valid UTC end timestamp.',
-      notEarlierMessage: 'UTC start must be earlier than UTC end.',
+    const rangeErrors = validateRange({
+      start: rangeStart,
+      end: rangeEnd,
+       requiredStartMessage: 'Enter a valid start timestamp.',
+       requiredEndMessage: 'Enter a valid end timestamp.',
+       invalidStartMessage: 'Enter a valid start timestamp.',
+       invalidEndMessage: 'Enter a valid end timestamp.',
+       notEarlierMessage: 'Start must be earlier than end.',
     })
-    const start = rangeErrors.length === 0 ? new Date(rangeStart) : null
-    const end = rangeErrors.length === 0 ? new Date(rangeEnd) : null
+    const start = rangeErrors.length === 0 ? rangeStart ?? null : null
+    const end = rangeErrors.length === 0 ? rangeEnd ?? null : null
     errors.push(...rangeErrors)
     if (!quantityText.trim() || Number(quantityText) <= 0) {
       errors.push('Quantity must be a positive number.')
@@ -184,10 +185,6 @@
     } finally {
       runSubmitting = false
     }
-  }
-
-  function formatDate(value: Date): string {
-    return value.toISOString().replace('T', ' ').slice(0, 16) + 'Z'
   }
 
   function formatInstrument(item: EvaluationRow): string {
@@ -230,18 +227,18 @@
 
       <div class="field-row field-row--range">
         <div class="run-form__range">
-          <p class="run-form__range-label">UTC range</p>
-          <UtcDateRangePicker
+           <p class="run-form__range-label">Date range</p>
+           <DateRangePicker
             bind:startValue={rangeStart}
             bind:endValue={rangeEnd}
             disabled={runSubmitting}
             showValidation={showRangeValidation}
-            presetAnchorIso={new Date().toISOString()}
-            requiredStartMessage="Enter a valid UTC start timestamp."
-            requiredEndMessage="Enter a valid UTC end timestamp."
-            invalidStartMessage="Enter a valid UTC start timestamp."
-            invalidEndMessage="Enter a valid UTC end timestamp."
-            notEarlierMessage="UTC start must be earlier than UTC end."
+            presetAnchor={new Date()}
+             requiredStartMessage="Enter a valid start timestamp."
+             requiredEndMessage="Enter a valid end timestamp."
+             invalidStartMessage="Enter a valid start timestamp."
+             invalidEndMessage="Enter a valid end timestamp."
+             notEarlierMessage="Start must be earlier than end."
           />
         </div>
         <label>
@@ -373,7 +370,7 @@
               </div>
               <div class="history-item__wide">
                 <dt>Tested range</dt>
-                <dd>{formatDate(item.testedRangeStart)} → {formatDate(item.testedRangeEnd)}</dd>
+                <dd>{formatLocalDateTime(item.testedRangeStart)} → {formatLocalDateTime(item.testedRangeEnd)}</dd>
               </div>
               <div>
                 <dt>Metrics</dt>
@@ -386,8 +383,8 @@
               <div class="history-item__wide">
                 <dt>Lifecycle</dt>
                 <dd class="history-lifecycle">
-                  <span>Created: {formatDate(item.createdAt)}</span>
-                  <span>Updated: {formatDate(item.updatedAt)}</span>
+                   <span>Created: {formatLocalDateTime(item.createdAt)}</span>
+                   <span>Updated: {formatLocalDateTime(item.updatedAt)}</span>
                 </dd>
               </div>
             </dl>

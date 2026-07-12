@@ -23,6 +23,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Keep browser-local datetime tests deterministic, including the DST fall-back overlap.
+    env: { TZ: 'America/New_York' },
     setupFiles: ['./src/vitest-setup.ts'],
     include: ['src/**/*.{test,spec}.{js,ts}'],
     coverage: {

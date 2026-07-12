@@ -24,10 +24,10 @@ type FinanceTransaction struct {
 	Currency string `json:"currency"`
 	Description string `json:"description"`
 	EffectiveAt time.Time `json:"effectiveAt"`
-	CategoryID string `json:"categoryId,omitempty"`
-	TransferGroupID string `json:"transferGroupId,omitempty"`
-	TransferMatchedAt time.Time `json:"transferMatchedAt,omitempty"`
-	HiddenAt time.Time `json:"hiddenAt,omitempty"`
+	CategoryID *string `json:"categoryId,omitempty"`
+	TransferGroupID *string `json:"transferGroupId,omitempty"`
+	TransferMatchedAt *time.Time `json:"transferMatchedAt,omitempty"`
+	HiddenAt *time.Time `json:"hiddenAt,omitempty"`
 	ProviderOriginal *FinanceTransactionProviderOriginal `json:"providerOriginal,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`

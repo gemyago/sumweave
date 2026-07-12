@@ -114,6 +114,8 @@ const (
 type TransactionKind string
 
 const (
+	TransactionKindExpense        TransactionKind = "expense"
+	TransactionKindIncome         TransactionKind = "income"
 	TransactionKindRegular        TransactionKind = "regular"
 	TransactionKindRefund         TransactionKind = "refund"
 	TransactionKindTransfer       TransactionKind = "transfer"

@@ -80,6 +80,7 @@ func TestNewRuntime(t *testing.T) {
 	makeDeps := func(t *testing.T) RuntimeDeps {
 		t.Helper()
 		dataDir := t.TempDir()
+		platformAgentsPath := t.TempDir()
 		tablePrefix := strings.ReplaceAll("data_"+fake.Lorem().Word(), "-", "_") + "_"
 		dataLayerDSN := filepath.Join(t.TempDir(), fake.Lorem().Word()+".db")
 		sqlDB, err := sqlconn.Open(dataLayerDSN)
@@ -112,6 +113,7 @@ func TestNewRuntime(t *testing.T) {
 		return RuntimeDeps{
 			RootLogger:                   rootLogger,
 			DataDir:                      dataDir,
+			PlatformAgentsPath:           platformAgentsPath,
 			DataLayerDatabaseDSN:         dataLayerDSN,
 			DataLayerDatabaseTablePrefix: tablePrefix,
 			SkillsEnabled:                false,
@@ -661,6 +663,7 @@ func makeWiredRuntimeContainer(t *testing.T) (*dig.Container, string) {
 	cfg := config.New()
 	cfg.Set("env", "test")
 	cfg.Set("dataDir", t.TempDir())
+	cfg.Set("workspacefs.platformAgentsPath", filepath.Dir(bundledPlatformSkillsRoot))
 	cfg.Set("dataLayer.database.dsn", filepath.Join(t.TempDir(), "data-layer.db"))
 	cfg.Set("dataLayer.rawPayloadBlobStore.path", filepath.Join(t.TempDir(), "raw-payloads"))
 	cfg.Set("jobs.worker.enabled", true)

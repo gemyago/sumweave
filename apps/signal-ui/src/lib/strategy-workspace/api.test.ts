@@ -283,6 +283,26 @@ describe('createSignalStrategyWorkspaceApi', () => {
     expect(detail.traces[0]?.decisionTime).toBeInstanceOf(Date)
   })
 
+  it('preserves omitted optional execution time but rejects empty or malformed response timestamps', async () => {
+    const base = makeEvaluationDetailJson()
+    const valid = { ...base, executionRecords: [{ ...base.executionRecords[0], eventTime: undefined }] }
+    const malformed = makeStrategyRowJson()
+    malformed.createdAt = ''
+    const authFetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(valid), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [malformed] }), { status: 200 }))
+    const api = createSignalStrategyWorkspaceApi({ baseUrl: '/api/v1', fetch: authFetch })
+
+    const detail = await api.getEvaluationBacktest({ runId: valid.runId })
+
+    expect(detail.executionRecords[0]?.eventTime).toBeUndefined()
+    await expect(api.listStrategies()).rejects.toMatchObject({
+      name: 'StrategyWorkspaceResponseError',
+      field: 'strategy.version.createdAt',
+    })
+  })
+
   it('maps report and evidence responses with omitted optional fields', async () => {
     const runId = faker.string.uuid()
     const authFetch = vi

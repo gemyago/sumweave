@@ -113,12 +113,12 @@ func NewConnector(args Args, opts ...Option) *Connector {
 	stateProvider := args.StateProvider
 	if stateProvider == nil {
 		stateProvider = func() (string, error) {
-			return fmt.Sprintf("state-%d", time.Now().UTC().UnixNano()), nil
+			return fmt.Sprintf("state-%d", time.Now().UnixNano()), nil
 		}
 	}
 	now := args.Now
 	if now == nil {
-		now = func() time.Time { return time.Now().UTC() }
+		now = time.Now
 	}
 	validDays := args.ValidDays
 	if validDays <= 0 {
@@ -193,7 +193,7 @@ func (c *Connector) StartLink(
 			Scope:            domain.RawPayloadScopeConnection,
 			ProviderObjectID: providerObjectID,
 			PayloadJSON:      mustJSON(response),
-			CapturedAt:       c.now().UTC(),
+			CapturedAt:       c.now(),
 		}},
 	}, nil
 }
@@ -245,7 +245,7 @@ func (c *Connector) FinishLink(
 				Access:            response.Access,
 				Accounts:          response.Accounts,
 			}),
-			CapturedAt: c.now().UTC(),
+			CapturedAt: c.now(),
 		}},
 	}, nil
 }
@@ -296,7 +296,7 @@ func (c *Connector) mapBatch(
 	request providers.FetchRequest,
 	session *enablebankingclient.SessionResponse,
 ) (domain.ProviderSyncBatch, error) {
-	capturedAt := c.now().UTC()
+	capturedAt := c.now()
 	accountItems := session.Accounts
 	batch := newSyncBatch(request, session, capturedAt, len(accountItems))
 	for _, typedAccount := range accountItems {
@@ -494,7 +494,7 @@ func (c *Connector) buildOfficialStartLinkRequest(
 	redirectURL string,
 	state string,
 ) *enablebankingclient.CreateAuthRequest {
-	validUntil := c.now().UTC().Add(time.Duration(c.validDays) * 24 * time.Hour)
+	validUntil := c.now().Add(time.Duration(c.validDays) * 24 * time.Hour)
 	return &enablebankingclient.CreateAuthRequest{
 		Access: enablebankingclient.CreateAuthAccess{
 			ValidUntil: validUntil.Format(time.RFC3339),
@@ -638,7 +638,7 @@ func transactionTime(transaction enablebankingclient.AccountTransaction) time.Ti
 		for _, layout := range []string{time.RFC3339, time.DateOnly} {
 			parsed, err := time.Parse(layout, value)
 			if err == nil {
-				return parsed.UTC()
+				return parsed
 			}
 		}
 	}

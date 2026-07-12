@@ -27,7 +27,7 @@ function makeJobSummary(overrides: Record<string, unknown> = {}) {
   const updatedAt = faker.date.soon({ refDate: createdAt })
   return {
     id: faker.string.uuid(),
-    jobType: 'historical_raw_candle_backfill',
+    jobType: 'data.historical_raw_candle_backfill',
     status: 'queued',
     requester: { userId: faker.string.uuid(), source: 'operator', agentSessionId: '', agentRunId: '' },
     input: {

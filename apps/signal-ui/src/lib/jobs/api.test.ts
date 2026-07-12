@@ -6,7 +6,7 @@ vi.mock('../auth/auth-fetch', () => ({
 }))
 
 import { createAuthFetch } from '../auth/auth-fetch'
-import { JobsApiError, createSignalJobsApi, createSignalJobsApiForAuth } from './api'
+import { JobsApiError, createSignalJobsApi, createSignalJobsApiForAuth, isHistoricalDataBackfillJob } from './api'
 
 const mockCreateAuthFetch = vi.mocked(createAuthFetch)
 
@@ -21,7 +21,7 @@ function baseJobJson() {
   const completedAt = faker.date.soon({ refDate: startedAt })
   return {
     id: faker.string.uuid(),
-    jobType: 'historical_raw_candle_backfill',
+    jobType: 'data.historical_raw_candle_backfill',
     status: 'succeeded',
     requester: {
       userId: faker.string.uuid(),
@@ -71,6 +71,28 @@ function baseJobJson() {
   }
 }
 
+// Successful scheduled Finance sync observed through the public jobs detail endpoint
+// in the invocation 044/050 lifecycle run. Finance deliberately omits historical
+// backfill input and result payloads.
+const scheduledFinanceSyncJson = {
+  id: '019f4dca-c2ad-729d-a5ce-2f9bfa61703a',
+  jobType: 'finance.bank_connection_sync',
+  status: 'succeeded',
+  requester: {
+    userId: '',
+    source: 'system',
+    agentSessionId: '',
+    agentRunId: '',
+  },
+  createdAt: '2026-07-10T22:48:10.777316+02:00',
+  updatedAt: '2026-07-10T22:49:22.004058+02:00',
+  startedAt: '2026-07-10T22:49:21.992094+02:00',
+  completedAt: '2026-07-10T22:49:22.004058+02:00',
+  attemptCount: 1,
+  workerId: '',
+  lastAttemptAt: '2026-07-10T22:49:22.004058+02:00',
+}
+
 describe('createSignalJobsApi', () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
@@ -99,7 +121,7 @@ describe('createSignalJobsApi', () => {
 
     const response = await api.listJobs({
       status: ['queued', 'running'],
-      jobType: ['historical_raw_candle_backfill'],
+      jobType: ['data.historical_raw_candle_backfill'],
       source: ['operator', 'agent'],
       limit: 25,
       cursor: 'cursor-1',
@@ -108,7 +130,7 @@ describe('createSignalJobsApi', () => {
     const requestUrl = new URL(authFetch.mock.calls[0][0] as string)
     expect(requestUrl.pathname).toBe('/api/v1/jobs')
     expect(requestUrl.searchParams.getAll('status')).toEqual(['queued', 'running'])
-    expect(requestUrl.searchParams.getAll('jobType')).toEqual(['historical_raw_candle_backfill'])
+    expect(requestUrl.searchParams.getAll('jobType')).toEqual(['data.historical_raw_candle_backfill'])
     expect(requestUrl.searchParams.getAll('source')).toEqual(['operator', 'agent'])
     expect(requestUrl.searchParams.get('limit')).toBe('25')
     expect(requestUrl.searchParams.get('cursor')).toBe('cursor-1')
@@ -146,11 +168,83 @@ describe('createSignalJobsApi', () => {
     const list = await api.listJobs({})
     const detail = await api.getJob({ jobId: job.id })
 
-    expect(list.items[0].createdAt).toBeInstanceOf(Date)
-    expect(list.items[0].input.start).toBeInstanceOf(Date)
-    expect(list.items[0].result?.missingIntervalPreview[0].start).toBeInstanceOf(Date)
+    const listedJob = list.items[0]
+    if (!isHistoricalDataBackfillJob(listedJob)) {
+      throw new Error('Expected the historical fixture to map as a historical backfill job.')
+    }
+    expect(listedJob.createdAt).toBeInstanceOf(Date)
+    expect(listedJob.input.start).toBeInstanceOf(Date)
+    expect(listedJob.result?.missingIntervalPreview[0].start).toBeInstanceOf(Date)
     expect(detail.completedAt).toBeInstanceOf(Date)
     expect(detail.lastAttemptAt).toBeInstanceOf(Date)
+  })
+
+  it('maps the public successful scheduled Finance sync response without historical input or result', async () => {
+    const authFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(scheduledFinanceSyncJson), { status: 200 }),
+    )
+    const api = createSignalJobsApi({ baseUrl: '/api/v1', fetch: authFetch })
+
+    const detail = await api.getJob({ jobId: scheduledFinanceSyncJson.id })
+
+    expect(detail).toMatchObject({
+      id: '019f4dca-c2ad-729d-a5ce-2f9bfa61703a',
+      jobType: 'finance.bank_connection_sync',
+      status: 'succeeded',
+      attemptCount: 1,
+    })
+    expect(detail.input).toBeUndefined()
+    expect(detail.result).toBeUndefined()
+    expect(detail.startedAt).toBeInstanceOf(Date)
+    expect(detail.completedAt).toBeInstanceOf(Date)
+    expect(detail.lastAttemptAt).toBeInstanceOf(Date)
+  })
+
+  it('rejects a historical job that omits its required input', async () => {
+    const historicalWithoutInput = { ...makeJobJson(), input: undefined }
+    const authFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(historicalWithoutInput), { status: 200 }))
+
+    await expect(createSignalJobsApi({ baseUrl: '/api/v1', fetch: authFetch }).getJob({ jobId: historicalWithoutInput.id })).rejects.toMatchObject({
+      name: 'JobsResponseError',
+      field: 'jobs.job.input',
+    })
+  })
+
+  it('keeps an unknown job bounded to generic metadata instead of interpreting an unsupported payload', async () => {
+    const unknownJob = {
+      ...scheduledFinanceSyncJson,
+      jobType: 'future.reconciliation',
+      input: { unsupported: 'payload' },
+      result: { unsupported: 'result' },
+    }
+    const authFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(unknownJob), { status: 200 }))
+
+    const detail = await createSignalJobsApi({ baseUrl: '/api/v1', fetch: authFetch }).getJob({ jobId: unknownJob.id })
+
+    expect(detail.jobType).toBe('future.reconciliation')
+    expect(detail.input).toBeUndefined()
+    expect(detail.result).toBeUndefined()
+    expect(detail.completedAt).toBeInstanceOf(Date)
+  })
+
+  it('preserves nullable and omitted job timestamps but rejects empty or malformed response timestamps', async () => {
+    const nullable = { ...makeJobJson(), startedAt: null, completedAt: undefined, lastAttemptAt: undefined }
+    const malformed = makeJobJson({ createdAt: '', updatedAt: 'not-a-timestamp' })
+    const authFetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(nullable), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(malformed), { status: 200 }))
+    const api = createSignalJobsApi({ baseUrl: '/api/v1', fetch: authFetch })
+
+    const detail = await api.getJob({ jobId: nullable.id })
+
+    expect(detail.startedAt).toBeNull()
+    expect(detail.completedAt).toBeUndefined()
+    expect(detail.lastAttemptAt).toBeUndefined()
+    await expect(api.getJob({ jobId: malformed.id })).rejects.toMatchObject({
+      name: 'JobsResponseError',
+      field: 'jobs.job.createdAt',
+    })
   })
 
   it('serializes create requests and maps the response', async () => {

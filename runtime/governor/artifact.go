@@ -103,9 +103,7 @@ func NewArtifactDatabaseStore(
 		TablePrefix:    opts.TablePrefix,
 		TranslateError: true,
 	})
-	cfg.NowFunc = func() time.Time {
-		return time.Now().UTC()
-	}
+	cfg.NowFunc = time.Now
 
 	db, err := gorm.Open(gormsignalfoundry.NewGormDialectorWithConn(dsn, sqlDB), cfg)
 	if err != nil {
@@ -313,7 +311,7 @@ func governorPolicyArtifactModelToValue(model governorPolicyArtifactModel) (Arti
 		Policy:        policyValue,
 		CanonicalJSON: append([]byte(nil), model.CanonicalJSON...),
 		Hash:          model.Hash,
-		CreatedAt:     model.CreatedAt.UTC(),
+		CreatedAt:     model.CreatedAt,
 	}, nil
 }
 

@@ -195,7 +195,7 @@ func doJSONRequest[TBody any](
 
 func (c *Client) applyAuthorization(ctx context.Context, request *http.Request) error {
 	if c.usesSignedRequests() {
-		token, err := c.newSignedAccessToken(c.now().UTC())
+		token, err := c.newSignedAccessToken(c.now())
 		if err != nil {
 			return err
 		}
@@ -232,8 +232,8 @@ func (c *Client) newSignedAccessToken(now time.Time) (string, error) {
 	claims := jwt.MapClaims{
 		"iss": jwtIssuer,
 		"aud": jwtAudience,
-		"iat": jwt.NewNumericDate(now.UTC()),
-		"exp": jwt.NewNumericDate(now.UTC().Add(jwtLifetime)),
+		"iat": jwt.NewNumericDate(now),
+		"exp": jwt.NewNumericDate(now.Add(jwtLifetime)),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = c.appID

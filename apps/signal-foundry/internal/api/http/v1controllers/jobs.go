@@ -174,20 +174,22 @@ func mapJobSummary(job jobspkg.Job) models.JobSummary {
 		ID:           job.ID,
 		JobType:      string(job.JobType),
 		Status:       string(job.Status),
-		CreatedAt:    job.CreatedAt.UTC(),
-		UpdatedAt:    job.UpdatedAt.UTC(),
+		CreatedAt:    job.CreatedAt,
+		UpdatedAt:    job.UpdatedAt,
 		AttemptCount: int64(job.AttemptCount),
 	}
 	requester := mapJobRequester(job.Requester)
 	response.Requester = &requester
-	input := mapHistoricalDataBackfillInput(job.Input)
-	response.Input = &input
+	if job.JobType == jobspkg.JobTypeHistoricalRawCandleBackfill {
+		input := mapHistoricalDataBackfillInput(job.Input)
+		response.Input = &input
+	}
 	if job.StartedAt != nil {
-		startedAt := job.StartedAt.UTC()
+		startedAt := *job.StartedAt
 		response.StartedAt = &startedAt
 	}
 	if job.CompletedAt != nil {
-		completedAt := job.CompletedAt.UTC()
+		completedAt := *job.CompletedAt
 		response.CompletedAt = &completedAt
 	}
 	if job.Result != nil {
@@ -206,25 +208,27 @@ func mapJobDetail(job jobspkg.Job) models.JobDetailResponse {
 		ID:           job.ID,
 		JobType:      string(job.JobType),
 		Status:       string(job.Status),
-		CreatedAt:    job.CreatedAt.UTC(),
-		UpdatedAt:    job.UpdatedAt.UTC(),
+		CreatedAt:    job.CreatedAt,
+		UpdatedAt:    job.UpdatedAt,
 		WorkerID:     job.WorkerID,
 		AttemptCount: int64(job.AttemptCount),
 	}
 	requester := mapJobRequester(job.Requester)
 	response.Requester = &requester
-	input := mapHistoricalDataBackfillInput(job.Input)
-	response.Input = &input
+	if job.JobType == jobspkg.JobTypeHistoricalRawCandleBackfill {
+		input := mapHistoricalDataBackfillInput(job.Input)
+		response.Input = &input
+	}
 	if job.StartedAt != nil {
-		startedAt := job.StartedAt.UTC()
+		startedAt := *job.StartedAt
 		response.StartedAt = &startedAt
 	}
 	if job.CompletedAt != nil {
-		completedAt := job.CompletedAt.UTC()
+		completedAt := *job.CompletedAt
 		response.CompletedAt = &completedAt
 	}
 	if job.LastAttemptAt != nil {
-		lastAttemptAt := job.LastAttemptAt.UTC()
+		lastAttemptAt := *job.LastAttemptAt
 		response.LastAttemptAt = &lastAttemptAt
 	}
 	if job.Result != nil {
@@ -256,8 +260,8 @@ func mapHistoricalDataBackfillInput(
 		Symbol:         input.Symbol,
 		AssetClass:     input.AssetClass,
 		Timeframe:      input.Timeframe,
-		Start:          input.Start.UTC(),
-		End:            input.End.UTC(),
+		Start:          input.Start,
+		End:            input.End,
 		PageSize:       int64(input.PageSize),
 	}
 }
@@ -274,11 +278,11 @@ func mapHistoricalDataBackfillResult(
 		MissingIntervalPreviewCap: int64(result.MissingIntervalPreviewCap),
 	}
 	if result.FirstPersistedStart != nil {
-		firstPersistedStart := result.FirstPersistedStart.UTC()
+		firstPersistedStart := *result.FirstPersistedStart
 		response.FirstPersistedStart = &firstPersistedStart
 	}
 	if result.LastPersistedEnd != nil {
-		lastPersistedEnd := result.LastPersistedEnd.UTC()
+		lastPersistedEnd := *result.LastPersistedEnd
 		response.LastPersistedEnd = &lastPersistedEnd
 	}
 	if result.RawPayloadCount != nil {
@@ -289,8 +293,8 @@ func mapHistoricalDataBackfillResult(
 		response.MissingIntervalPreview = make([]*models.JobTimeRange, 0, len(result.MissingIntervalPreview))
 		for i := range result.MissingIntervalPreview {
 			interval := models.JobTimeRange{
-				Start: result.MissingIntervalPreview[i].Start.UTC(),
-				End:   result.MissingIntervalPreview[i].End.UTC(),
+				Start: result.MissingIntervalPreview[i].Start,
+				End:   result.MissingIntervalPreview[i].End,
 			}
 			response.MissingIntervalPreview = append(response.MissingIntervalPreview, &interval)
 		}

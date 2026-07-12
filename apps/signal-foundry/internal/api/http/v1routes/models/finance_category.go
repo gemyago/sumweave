@@ -19,7 +19,7 @@ type FinanceCategory struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
 	SeededDefault bool `json:"seededDefault"`
-	HiddenAt time.Time `json:"hiddenAt,omitempty"`
+	HiddenAt *time.Time `json:"hiddenAt,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

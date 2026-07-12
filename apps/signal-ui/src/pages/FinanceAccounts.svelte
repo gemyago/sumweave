@@ -3,7 +3,7 @@
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { createSignalFinanceApiForAuth, type FinanceAccount } from '../lib/finance/api'
-  import { formatFinanceDateTime } from '../lib/finance/format'
+  import { formatFinanceDateTime, formatFinanceMoney } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
@@ -228,6 +228,10 @@
                           <p class="small text-body-secondary mb-0">
                             Provider {account.provider || 'manual'} · Updated {formatFinanceDateTime(account.updatedAt)}
                           </p>
+                          <div class="d-flex flex-wrap gap-2 small">
+                            <span>Booked balance {formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</span>
+                            <span>Pending balance {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</span>
+                          </div>
                         </div>
 
                         <a class="btn btn-outline-secondary btn-sm align-self-start" href={`/finance/accounts/${encodeURIComponent(account.id)}`} use:link>

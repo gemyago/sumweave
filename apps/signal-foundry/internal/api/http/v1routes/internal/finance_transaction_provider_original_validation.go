@@ -20,7 +20,7 @@ func NewFinanceTransactionProviderOriginalValidator() FieldValidator[*FinanceTra
 	validateDescription := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateEffectiveAt := NewSimpleFieldValidator[time.Time](
+	validateEffectiveAt := NewSimpleFieldValidator[*time.Time](
 	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceTransactionProviderOriginal) {

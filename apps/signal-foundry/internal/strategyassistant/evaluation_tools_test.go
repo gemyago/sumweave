@@ -250,7 +250,7 @@ func TestEvaluationTools(t *testing.T) {
 		instrument := makeInstrument()
 		decision := "needs-review"
 		metrics := makeMetrics()
-		createdAt := time.Now().UTC().Truncate(time.Second)
+		createdAt := time.Date(2026, time.June, 18, 15, 30, 0, 0, time.FixedZone("UTC-04", -4*60*60))
 		service := &fakeEvaluationWorkspaceService{}
 		service.listFunc = func(
 			_ context.Context,
@@ -365,6 +365,9 @@ func TestEvaluationTools(t *testing.T) {
 		require.NotNil(t, detailResponse.Detail)
 		assert.Equal(t, "dataset-1", detailResponse.Detail.DatasetReference.DatasetID)
 		assert.Equal(t, "policy-1", detailResponse.Detail.PolicyReference.PolicyID)
+		assert.Equal(t, createdAt.Add(-2*time.Hour), detailResponse.Detail.CreatedAt)
+		assert.Equal(t, createdAt, detailResponse.Detail.UpdatedAt)
+		assert.Equal(t, createdAt, detailResponse.Detail.DatasetReference.CreatedAt)
 
 		reportResponse, err := newGetBacktestReportTool(RegisterDeps{EvaluationWorkspace: service}).Handler(
 			nil,
