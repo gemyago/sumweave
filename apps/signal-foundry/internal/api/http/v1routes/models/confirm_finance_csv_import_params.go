@@ -17,5 +17,4 @@ var _ = fmt.Sprint
 type ConfirmFinanceCsvImportParams struct { 
 	TenantID string `json:"tenantId"`
 	ImportID string `json:"importId"`
-	Payload *FinanceCsvImportConfirmRequest `json:"payload"`
 }

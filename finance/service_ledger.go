@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ type ledgerServiceStore interface {
 	IsTenantMember(ctx context.Context, tenantID string, userID string) (bool, error)
 	GetAccount(ctx context.Context, accountID string) (*domain.Account, error)
 	GetCategory(ctx context.Context, categoryID string) (*domain.Category, error)
+	GetTag(ctx context.Context, tagID string) (*domain.Tag, error)
 	SaveTransaction(ctx context.Context, transaction domain.Transaction) (domain.Transaction, error)
 	SaveLinkedTransferPair(
 		ctx context.Context,
@@ -34,8 +36,23 @@ type ledgerServiceStore interface {
 	) ([]domain.Transaction, error)
 }
 
+type ledgerTransactionStore interface {
+	SaveTransaction(ctx context.Context, transaction domain.Transaction) (domain.Transaction, error)
+	GetTransaction(ctx context.Context, transactionID string) (*domain.Transaction, error)
+	ListTransactions(
+		ctx context.Context,
+		tenantID string,
+		accountID string,
+		source domain.TransactionSource,
+		status domain.TransactionStatus,
+		includeHidden bool,
+		page ...persistence.ListTransactionsPage,
+	) ([]domain.Transaction, error)
+}
+
 type LedgerService struct {
 	store        ledgerServiceStore
+	transactions ledgerTransactionStore
 	balanceStore accountBalanceReadStore
 	access       *accessGuard
 	now          func() time.Time
@@ -62,12 +79,19 @@ func WithLedgerServiceIDGenerator(newID func() string) LedgerServiceOption {
 	}
 }
 
+func WithLedgerServiceTransactionStore(store ledgerTransactionStore) LedgerServiceOption {
+	return func(service *LedgerService) {
+		service.transactions = store
+	}
+}
+
 func NewLedgerService(store ledgerServiceStore, opts ...LedgerServiceOption) *LedgerService {
 	service := &LedgerService{
-		store:  store,
-		access: newAccessGuard(store),
-		now:    time.Now,
-		newID:  uuid.NewString,
+		store:        store,
+		transactions: store,
+		access:       newAccessGuard(store),
+		now:          time.Now,
+		newID:        uuid.NewString,
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -129,7 +153,7 @@ func (s *LedgerService) requireTenantTransaction(
 	if err := s.access.requireTenantMember(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(userID)); err != nil {
 		return domain.Transaction{}, err
 	}
-	txn, err := s.store.GetTransaction(ctx, strings.TrimSpace(transactionID))
+	txn, err := s.transactions.GetTransaction(ctx, strings.TrimSpace(transactionID))
 	if err != nil {
 		if errors.Is(err, persistence.ErrTransactionNotFound) {
 			return domain.Transaction{}, ErrTransactionNotFound
@@ -140,6 +164,35 @@ func (s *LedgerService) requireTenantTransaction(
 		return domain.Transaction{}, ErrTransactionNotFound
 	}
 	return *txn, nil
+}
+
+func (s *LedgerService) requireTenantTagIDs(
+	ctx context.Context,
+	tenantID string,
+	tagIDs []string,
+) ([]string, error) {
+	result := make([]string, 0, len(tagIDs))
+	seen := make(map[string]struct{}, len(tagIDs))
+	for _, tagID := range tagIDs {
+		trimmedTagID := strings.TrimSpace(tagID)
+		if _, ok := seen[trimmedTagID]; ok {
+			return nil, ErrDuplicateTagID
+		}
+		seen[trimmedTagID] = struct{}{}
+		tag, err := s.store.GetTag(ctx, trimmedTagID)
+		if err != nil {
+			if errors.Is(err, persistence.ErrTagNotFound) {
+				return nil, ErrTagNotAssignable
+			}
+			return nil, fmt.Errorf("get tag: %w", err)
+		}
+		if tag.TenantID != strings.TrimSpace(tenantID) || tag.HiddenAt != nil {
+			return nil, ErrTagNotAssignable
+		}
+		result = append(result, tag.ID)
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 func (s *LedgerService) RecordTransaction(
@@ -170,6 +223,10 @@ func (s *LedgerService) RecordTransaction(
 	if trimmedTransferGroupID := strings.TrimSpace(params.TransferGroupID); trimmedTransferGroupID != "" {
 		transferGroupID = &trimmedTransferGroupID
 	}
+	tagIDs, err := s.requireTenantTagIDs(ctx, params.TenantID, params.TagIDs)
+	if err != nil {
+		return domain.Transaction{}, err
+	}
 	now := s.now()
 	txn := domain.Transaction{
 		ID:               s.newID(),
@@ -183,13 +240,17 @@ func (s *LedgerService) RecordTransaction(
 		Description:      strings.TrimSpace(params.Description),
 		EffectiveAt:      params.EffectiveAt,
 		CategoryID:       categoryID,
+		TagIDs:           tagIDs,
 		TransferGroupID:  transferGroupID,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 		ProviderOriginal: params.ProviderOriginal,
 	}
-	saved, err := s.store.SaveTransaction(ctx, txn)
+	saved, err := s.transactions.SaveTransaction(ctx, txn)
 	if err != nil {
+		if errors.Is(err, persistence.ErrTagNotFound) || errors.Is(err, persistence.ErrDuplicateTransactionTag) {
+			return domain.Transaction{}, ErrTagNotAssignable
+		}
 		return domain.Transaction{}, fmt.Errorf("record transaction: %w", err)
 	}
 	return saved, nil
@@ -222,14 +283,22 @@ func (s *LedgerService) UpdateTransaction(
 		}
 		txn.CategoryID = &category.ID
 	}
+	tagIDs, err := s.requireTenantTagIDs(ctx, params.TenantID, params.TagIDs)
+	if err != nil {
+		return domain.Transaction{}, err
+	}
 	txn.Description = strings.TrimSpace(params.Description)
 	txn.AmountMinor = params.AmountMinor
+	txn.TagIDs = tagIDs
 	if params.EffectiveAt != nil {
 		txn.EffectiveAt = *params.EffectiveAt
 	}
 	txn.UpdatedAt = s.now()
-	saved, err := s.store.SaveTransaction(ctx, txn)
+	saved, err := s.transactions.SaveTransaction(ctx, txn)
 	if err != nil {
+		if errors.Is(err, persistence.ErrTagNotFound) || errors.Is(err, persistence.ErrDuplicateTransactionTag) {
+			return domain.Transaction{}, ErrTagNotAssignable
+		}
 		return domain.Transaction{}, fmt.Errorf("update transaction: %w", err)
 	}
 	return saved, nil
@@ -314,7 +383,7 @@ func (s *LedgerService) ListTransactions(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return nil, err
 	}
-	items, err := s.store.ListTransactions(
+	items, err := s.transactions.ListTransactions(
 		ctx,
 		strings.TrimSpace(params.TenantID),
 		strings.TrimSpace(params.AccountID),

@@ -25,7 +25,10 @@ data/financial-poc/
 # Want to figure-out how to make it nice and not bloat the repo
 # Ignoring for now.
 .cursor
-.opencode
+.opencode/*
+!.opencode/agents/
+.opencode/agents/*
+!.opencode/agents/crew-*.md
 .codex
 .codex-artifacts
 

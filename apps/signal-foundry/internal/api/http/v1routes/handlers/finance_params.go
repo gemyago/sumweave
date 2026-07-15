@@ -66,10 +66,45 @@ func newParamsParserFinanceArchiveFinanceTenant(rootHandler *RootHandler) params
 	}
 }
 
+type paramsParserFinanceConfirmFinanceAccountCsvImport struct {
+	bindTenantID requestParamBinder[string, string]
+	bindImportID requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceConfirmFinanceAccountCsvImport) parse(router httpRouter, req *http.Request) (*ConfirmFinanceAccountCsvImportParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &ConfirmFinanceAccountCsvImportParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindImportID(pathParamsCtx.Fork("importId"), readPathValue("importId", router, req), &reqParams.ImportID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceConfirmFinanceAccountCsvImport(rootHandler *RootHandler) paramsParser[*ConfirmFinanceAccountCsvImportParams] {
+	return &paramsParserFinanceConfirmFinanceAccountCsvImport{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindImportID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
 type paramsParserFinanceConfirmFinanceCsvImport struct {
 	bindTenantID requestParamBinder[string, string]
 	bindImportID requestParamBinder[string, string]
-	bindPayload requestParamBinder[*http.Request, *FinanceCsvImportConfirmRequest]
 }
 
 func (p *paramsParserFinanceConfirmFinanceCsvImport) parse(router httpRouter, req *http.Request) (*ConfirmFinanceCsvImportParams, error) {
@@ -79,8 +114,6 @@ func (p *paramsParserFinanceConfirmFinanceCsvImport) parse(router httpRouter, re
 	pathParamsCtx := bindingCtx.Fork("path")
 	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
 	p.bindImportID(pathParamsCtx.Fork("importId"), readPathValue("importId", router, req), &reqParams.ImportID)
-	// body params
-	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
 	return reqParams, bindingCtx.AggregatedError()
 }
 
@@ -101,13 +134,6 @@ func newParamsParserFinanceConfirmFinanceCsvImport(rootHandler *RootHandler) par
 			),
 			validateValue: NewSimpleFieldValidator[string](
 			),
-		}),
-		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceCsvImportConfirmRequest]{
-			required: true,
-			parseValue: parseSoloValueParamAsSoloValue(
-				parseJSONPayload[*FinanceCsvImportConfirmRequest],
-			),
-			validateValue: NewFinanceCsvImportConfirmRequestValidator(),
 		}),
 	}
 }
@@ -414,6 +440,42 @@ func newParamsParserFinanceGetFinanceAccount(rootHandler *RootHandler) paramsPar
 			),
 		}),
 		bindAccountID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
+type paramsParserFinanceGetFinanceAccountCsvImportAudit struct {
+	bindTenantID requestParamBinder[string, string]
+	bindImportID requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceGetFinanceAccountCsvImportAudit) parse(router httpRouter, req *http.Request) (*GetFinanceAccountCsvImportAuditParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &GetFinanceAccountCsvImportAuditParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindImportID(pathParamsCtx.Fork("importId"), readPathValue("importId", router, req), &reqParams.ImportID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceGetFinanceAccountCsvImportAudit(rootHandler *RootHandler) paramsParser[*GetFinanceAccountCsvImportAuditParams] {
+	return &paramsParserFinanceGetFinanceAccountCsvImportAudit{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindImportID: newRequestParamBinder(binderParams[string, string]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
 				rootHandler.knownParsers.stringParser,
@@ -939,6 +1001,68 @@ func newParamsParserFinanceListFinanceTransactions(rootHandler *RootHandler) par
 	}
 }
 
+type paramsParserFinanceListRecentFinanceCsvImportAudits struct {
+	bindTenantID requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceListRecentFinanceCsvImportAudits) parse(router httpRouter, req *http.Request) (*ListRecentFinanceCsvImportAuditsParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &ListRecentFinanceCsvImportAuditsParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceListRecentFinanceCsvImportAudits(rootHandler *RootHandler) paramsParser[*ListRecentFinanceCsvImportAuditsParams] {
+	return &paramsParserFinanceListRecentFinanceCsvImportAudits{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
+type paramsParserFinancePreviewFinanceAccountCsvImport struct {
+	bindTenantID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceCsvImportPreviewRequest]
+}
+
+func (p *paramsParserFinancePreviewFinanceAccountCsvImport) parse(router httpRouter, req *http.Request) (*PreviewFinanceAccountCsvImportParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &PreviewFinanceAccountCsvImportParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinancePreviewFinanceAccountCsvImport(rootHandler *RootHandler) paramsParser[*PreviewFinanceAccountCsvImportParams] {
+	return &paramsParserFinancePreviewFinanceAccountCsvImport{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceCsvImportPreviewRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceCsvImportPreviewRequest],
+			),
+			validateValue: NewFinanceCsvImportPreviewRequestValidator(),
+		}),
+	}
+}
+
 type paramsParserFinancePreviewFinanceCsvImport struct {
 	bindTenantID requestParamBinder[string, string]
 	bindPayload requestParamBinder[*http.Request, *FinanceCsvImportPreviewRequest]
@@ -1234,6 +1358,18 @@ type financeControllerBuilder struct {
 		httpHandlerActionFuncNoResponse[*ArchiveFinanceTenantParams, void],
 	]
 
+	// POST /api/v1/finance/tenants/{tenantId}/account-imports/{importId}/confirm
+	//
+	// Request type: ConfirmFinanceAccountCsvImportParams,
+	//
+	// Response type: FinanceCsvImportConfirmResponse
+	ConfirmFinanceAccountCsvImport genericHandlerBuilder[
+		*ConfirmFinanceAccountCsvImportParams,
+		*FinanceCsvImportConfirmResponse,
+		handlerActionFunc[*ConfirmFinanceAccountCsvImportParams, *FinanceCsvImportConfirmResponse],
+		httpHandlerActionFunc[*ConfirmFinanceAccountCsvImportParams, *FinanceCsvImportConfirmResponse],
+	]
+
 	// POST /api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm
 	//
 	// Request type: ConfirmFinanceCsvImportParams,
@@ -1352,6 +1488,18 @@ type financeControllerBuilder struct {
 		*FinanceAccount,
 		handlerActionFunc[*GetFinanceAccountParams, *FinanceAccount],
 		httpHandlerActionFunc[*GetFinanceAccountParams, *FinanceAccount],
+	]
+
+	// GET /api/v1/finance/tenants/{tenantId}/account-imports/{importId}
+	//
+	// Request type: GetFinanceAccountCsvImportAuditParams,
+	//
+	// Response type: FinanceCsvImportAuditResponse
+	GetFinanceAccountCsvImportAudit genericHandlerBuilder[
+		*GetFinanceAccountCsvImportAuditParams,
+		*FinanceCsvImportAuditResponse,
+		handlerActionFunc[*GetFinanceAccountCsvImportAuditParams, *FinanceCsvImportAuditResponse],
+		httpHandlerActionFunc[*GetFinanceAccountCsvImportAuditParams, *FinanceCsvImportAuditResponse],
 	]
 
 	// GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
@@ -1534,6 +1682,30 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*ListFinanceTransactionsParams, *FinanceTransactionsResponse],
 	]
 
+	// GET /api/v1/finance/tenants/{tenantId}/imports
+	//
+	// Request type: ListRecentFinanceCsvImportAuditsParams,
+	//
+	// Response type: FinanceCsvImportAuditsResponse
+	ListRecentFinanceCsvImportAudits genericHandlerBuilder[
+		*ListRecentFinanceCsvImportAuditsParams,
+		*FinanceCsvImportAuditsResponse,
+		handlerActionFunc[*ListRecentFinanceCsvImportAuditsParams, *FinanceCsvImportAuditsResponse],
+		httpHandlerActionFunc[*ListRecentFinanceCsvImportAuditsParams, *FinanceCsvImportAuditsResponse],
+	]
+
+	// POST /api/v1/finance/tenants/{tenantId}/account-imports/preview
+	//
+	// Request type: PreviewFinanceAccountCsvImportParams,
+	//
+	// Response type: FinanceAccountCsvImportPreviewResponse
+	PreviewFinanceAccountCsvImport genericHandlerBuilder[
+		*PreviewFinanceAccountCsvImportParams,
+		*FinanceAccountCsvImportPreviewResponse,
+		handlerActionFunc[*PreviewFinanceAccountCsvImportParams, *FinanceAccountCsvImportPreviewResponse],
+		httpHandlerActionFunc[*PreviewFinanceAccountCsvImportParams, *FinanceAccountCsvImportPreviewResponse],
+	]
+
 	// POST /api/v1/finance/tenants/{tenantId}/imports/preview
 	//
 	// Request type: PreviewFinanceCsvImportParams,
@@ -1659,6 +1831,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 				defaultStatus: 204,
 				voidResult:    true,
 				paramsParser:  newParamsParserFinanceArchiveFinanceTenant(app),
+			},
+		),
+
+		// POST /api/v1/finance/tenants/{tenantId}/account-imports/{importId}/confirm
+		ConfirmFinanceAccountCsvImport: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*ConfirmFinanceAccountCsvImportParams,
+				*FinanceCsvImportConfirmResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*ConfirmFinanceAccountCsvImportParams,
+				*FinanceCsvImportConfirmResponse,
+			](),
+			makeActionBuilderParams[
+				*ConfirmFinanceAccountCsvImportParams,
+				*FinanceCsvImportConfirmResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserFinanceConfirmFinanceAccountCsvImport(app),
 			},
 		),
 
@@ -1860,6 +2052,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinanceGetFinanceAccount(app),
+			},
+		),
+
+		// GET /api/v1/finance/tenants/{tenantId}/account-imports/{importId}
+		GetFinanceAccountCsvImportAudit: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*GetFinanceAccountCsvImportAuditParams,
+				*FinanceCsvImportAuditResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*GetFinanceAccountCsvImportAuditParams,
+				*FinanceCsvImportAuditResponse,
+			](),
+			makeActionBuilderParams[
+				*GetFinanceAccountCsvImportAuditParams,
+				*FinanceCsvImportAuditResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserFinanceGetFinanceAccountCsvImportAudit(app),
 			},
 		),
 
@@ -2160,6 +2372,46 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinanceListFinanceTransactions(app),
+			},
+		),
+
+		// GET /api/v1/finance/tenants/{tenantId}/imports
+		ListRecentFinanceCsvImportAudits: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*ListRecentFinanceCsvImportAuditsParams,
+				*FinanceCsvImportAuditsResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*ListRecentFinanceCsvImportAuditsParams,
+				*FinanceCsvImportAuditsResponse,
+			](),
+			makeActionBuilderParams[
+				*ListRecentFinanceCsvImportAuditsParams,
+				*FinanceCsvImportAuditsResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserFinanceListRecentFinanceCsvImportAudits(app),
+			},
+		),
+
+		// POST /api/v1/finance/tenants/{tenantId}/account-imports/preview
+		PreviewFinanceAccountCsvImport: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*PreviewFinanceAccountCsvImportParams,
+				*FinanceAccountCsvImportPreviewResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*PreviewFinanceAccountCsvImportParams,
+				*FinanceAccountCsvImportPreviewResponse,
+			](),
+			makeActionBuilderParams[
+				*PreviewFinanceAccountCsvImportParams,
+				*FinanceAccountCsvImportPreviewResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserFinancePreviewFinanceAccountCsvImport(app),
 			},
 		),
 

@@ -3,7 +3,6 @@ package persistence
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -37,33 +36,6 @@ func TestStore(t *testing.T) {
 			fmt.Sprintf("%T", domain.ConnectionSecret{}),
 			fmt.Sprintf("%T", connectionSecretModel{}),
 		)
-	})
-
-	t.Run("applies finance-prefixed schema via auto-migrate", func(t *testing.T) {
-		store := makeStore(t)
-
-		sqlDB, err := store.db.DB()
-		require.NoError(t, err)
-
-		rows, err := sqlDB.QueryContext(
-			t.Context(),
-			"SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'finance_%' ORDER BY name",
-		)
-		require.NoError(t, err)
-		defer rows.Close()
-
-		var tableNames []string
-		for rows.Next() {
-			var tableName string
-			require.NoError(t, rows.Scan(&tableName))
-			tableNames = append(tableNames, tableName)
-		}
-		require.NoError(t, rows.Err())
-		require.NotEmpty(t, tableNames)
-		assert.NotContains(t, tableNames, "finance_schema_migrations")
-		for _, tableName := range tableNames {
-			assert.True(t, strings.HasPrefix(tableName, "finance_"))
-		}
 	})
 
 	t.Run("orders core entity canonical timestamps", func(t *testing.T) {
@@ -208,6 +180,33 @@ func TestStore(t *testing.T) {
 		require.Equal(t, later.Format(time.RFC3339Nano), transactions[0].EffectiveAt.Format(time.RFC3339Nano))
 	})
 
+	t.Run("enforces invite code uniqueness", func(t *testing.T) {
+		store := makeStore(t)
+		fake := faker.New()
+		now := time.Date(2026, time.June, 21, 10, 0, 0, 0, time.UTC)
+		tenant := domain.Tenant{
+			ID:              "tenant-" + fake.UUID().V4(),
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		_, err := store.SaveTenant(t.Context(), tenant)
+		require.NoError(t, err)
+
+		inviteCode := "code-" + fake.UUID().V4()
+		_, err = store.SaveTenantInvite(t.Context(), domain.TenantInvite{
+			ID: "invite-1-" + fake.UUID().V4(), TenantID: tenant.ID, Code: inviteCode,
+			Recipient: fake.Internet().Email(), CreatedByUserID: "user-1-" + fake.UUID().V4(), CreatedAt: now,
+		})
+		require.NoError(t, err)
+		_, err = store.SaveTenantInvite(t.Context(), domain.TenantInvite{
+			ID: "invite-2-" + fake.UUID().V4(), TenantID: tenant.ID, Code: inviteCode,
+			Recipient: fake.Internet().Email(), CreatedByUserID: "user-2-" + fake.UUID().V4(), CreatedAt: now,
+		})
+		require.Error(t, err)
+	})
+
 	t.Run("persists csv import records and reports missing imports", func(t *testing.T) {
 		store := makeStore(t)
 		fake := faker.New()
@@ -240,11 +239,18 @@ func TestStore(t *testing.T) {
 			Mapping:               map[string]string{"accountName": "accountName"},
 			DuplicateRows:         []domain.CSVImportRejectedRow{{RowNumber: 2, Reason: "duplicate"}},
 			RejectedRows:          []domain.CSVImportRejectedRow{{RowNumber: 3, Reason: "invalid"}},
+			ImportableCount:       1,
 			WouldCreateAccounts:   []string{"wallet"},
 			WouldCreateCategories: []string{"groceries"},
 			WouldCreateTags:       []string{"team"},
-			CreatedAt:             now,
-			UpdatedAt:             now,
+			AccountOptions: []domain.CSVImportAccountOption{{
+				Name:           "wallet",
+				SourceRowCount: 2,
+				Selected:       true,
+			}},
+			SelectedAccountNames: []string{"wallet"},
+			CreatedAt:            now,
+			UpdatedAt:            now,
 		}
 
 		saved, err := store.SaveCSVImport(t.Context(), record)

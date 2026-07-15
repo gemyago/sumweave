@@ -11,19 +11,23 @@ import (
 var _ = time.Time{}
 
 func NewFinanceCsvImportPreviewRequestValidator() FieldValidator[*FinanceCsvImportPreviewRequest] {
-	validateImportType := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
-	)
 	validateFileName := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
 	validateCsv := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
+		NewMinMaxLengthValidator[string, string](67108864, false),
+	)
+	validateSelectedAccountNames := NewArrayValidator[string](
+		NewSimpleFieldValidator[[]string](
+		),
+		NewSimpleFieldValidator[string](
+			),
 	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceCsvImportPreviewRequest) {
-		validateImportType(bindingCtx.Fork("importType"), value.ImportType)
 		validateFileName(bindingCtx.Fork("fileName"), value.FileName)
 		validateCsv(bindingCtx.Fork("csv"), value.Csv)
+		validateSelectedAccountNames(bindingCtx.Fork("selectedAccountNames"), value.SelectedAccountNames)
 	}
 }

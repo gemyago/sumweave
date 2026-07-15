@@ -32,10 +32,17 @@ func New(cfg *Config) (*Finance, error) {
 	}
 
 	store := persistence.NewStore(cfg.Database)
+	transactionStore := persistence.NewTransactionTagStore(cfg.Database)
+	csvImportStore := persistence.NewCSVImportStore(cfg.Database)
 	connectors := newConnectors(cfg, store)
 	connectorRegistry := internalproviders.NewStaticConnectorRegistry(connectors...)
 	profileRegistry := newProviderProfileRegistry(cfg)
-	services := newFocusedServices(store, focusedServicesConfigFromConfig(cfg, connectors))
+	services := newFocusedServices(
+		store,
+		transactionStore,
+		csvImportStore,
+		focusedServicesConfigFromConfig(cfg, connectors),
+	)
 
 	bankConnectionService, err := newBankConnectionService(bankConnectionServiceArgs{
 		Store:                   store,

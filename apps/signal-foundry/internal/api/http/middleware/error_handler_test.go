@@ -22,12 +22,13 @@ func TestNewAppErrorHandler(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 
-	t.Run("InvalidInputError sets 400", func(t *testing.T) {
+	t.Run("InvalidInputError sets 400 with empty body", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		err := app.NewErrInvalidInput("email", "invalid")
 		handler(w, req, err)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Empty(t, w.Body.String())
 	})
 
 	t.Run("ConflictError sets 409", func(t *testing.T) {
@@ -36,6 +37,7 @@ func TestNewAppErrorHandler(t *testing.T) {
 		err := app.NewErrConflict("email", "exists")
 		handler(w, req, err)
 		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Empty(t, w.Body.String())
 	})
 
 	t.Run("UnauthorizedError sets 401 with empty body", func(t *testing.T) {
@@ -61,5 +63,6 @@ func TestNewAppErrorHandler(t *testing.T) {
 		err := errors.New("some error")
 		handler(w, req, err)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Empty(t, w.Body.String())
 	})
 }

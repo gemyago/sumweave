@@ -16,11 +16,12 @@ var _ = fmt.Sprint
 type FinanceCsvImportAuditResponse struct { 
 	ImportID string `json:"importId"`
 	TenantID string `json:"tenantId"`
-	ImportType string `json:"importType"`
 	Status string `json:"status"`
 	JobID string `json:"jobId"`
 	ConfirmedByUserID string `json:"confirmedByUserId"`
 	ImportedCount int64 `json:"importedCount"`
+	RejectedRows []*FinanceCsvImportRowDiagnostic `json:"rejectedRows"`
+	RowOutcomes []*FinanceCsvImportRowOutcome `json:"rowOutcomes"`
 	CreatedAt time.Time `json:"createdAt"`
 	ConfirmedAt *time.Time `json:"confirmedAt,omitempty"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`

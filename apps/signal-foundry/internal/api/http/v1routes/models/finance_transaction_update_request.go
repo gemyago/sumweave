@@ -19,4 +19,5 @@ type FinanceTransactionUpdateRequest struct {
 	EffectiveAt *time.Time `json:"effectiveAt,omitempty"`
 	CategoryID string `json:"categoryId,omitempty"`
 	ClearCategory bool `json:"clearCategory,omitempty"`
+	TagIDs []string `json:"tagIds,omitempty"`
 }

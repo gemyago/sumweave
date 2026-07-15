@@ -270,7 +270,6 @@ func TestFocusedPublicServices(t *testing.T) {
 		confirmed, err := service.ConfirmCSVImport(t.Context(), ConfirmCSVImportParams{
 			ActorUserID: ownerUserID,
 			ImportID:    preview.ImportID,
-			Mapping:     preview.Mapping,
 		})
 		require.NoError(t, err)
 

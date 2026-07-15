@@ -23,5 +23,6 @@ type FinanceTransactionCreateRequest struct {
 	Description string `json:"description"`
 	EffectiveAt time.Time `json:"effectiveAt"`
 	CategoryID string `json:"categoryId,omitempty"`
+	TagIDs []string `json:"tagIds,omitempty"`
 	TransferGroupID string `json:"transferGroupId,omitempty"`
 }

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
   listAccounts: vi.fn(),
   listCategories: vi.fn(),
+  listTags: vi.fn(),
   getTransaction: vi.fn(),
   createTransaction: vi.fn(),
   updateTransaction: vi.fn(),
@@ -36,6 +37,10 @@ describe('Finance transaction editor page', () => {
       { id: 'cat-1', tenantId: 'tenant-1', name: 'Groceries', kind: 'expense', seededDefault: true, hiddenAt: null, createdAt: now, updatedAt: now },
       { id: 'cat-2', tenantId: 'tenant-1', name: 'Travel', kind: 'expense', seededDefault: false, hiddenAt: null, createdAt: now, updatedAt: now },
     ])
+    mocks.listTags.mockResolvedValue([
+      { id: 'tag-1', tenantId: 'tenant-1', name: 'Household', hiddenAt: null, createdAt: now, updatedAt: now },
+      { id: 'tag-2', tenantId: 'tenant-1', name: 'Shared', hiddenAt: null, createdAt: now, updatedAt: now },
+    ])
     mocks.getTransaction.mockResolvedValue({
       id: 'tx-1',
       tenantId: 'tenant-1',
@@ -48,6 +53,7 @@ describe('Finance transaction editor page', () => {
       description: 'Refund',
       effectiveAt: now,
       categoryId: 'cat-1',
+      tagIds: ['tag-1', 'tag-2'],
       transferGroupId: 'transfer-1',
       transferMatchedAt: null,
       hiddenAt: null,
@@ -72,6 +78,7 @@ describe('Finance transaction editor page', () => {
       description: 'Coffee',
       effectiveAt: now,
       categoryId: 'cat-1',
+      tagIds: ['tag-1'],
       transferGroupId: null,
       transferMatchedAt: null,
       hiddenAt: null,
@@ -91,6 +98,7 @@ describe('Finance transaction editor page', () => {
       description: 'Refund updated',
       effectiveAt: new Date('2026-06-21T12:00:00Z'),
       categoryId: null,
+      tagIds: [],
       transferGroupId: 'transfer-1',
       transferMatchedAt: null,
       hiddenAt: null,
@@ -110,19 +118,27 @@ describe('Finance transaction editor page', () => {
     render(FinanceTransactionEditor, { params: {} })
 
     expect(await screen.findByRole('heading', { name: 'Record transaction' })).toBeInTheDocument()
+    expect(screen.queryByText('Transaction editor')).not.toBeInTheDocument()
     expect(mocks.getTransaction).not.toHaveBeenCalled()
     await screen.findByLabelText('Amount minor')
+
+    expect(screen.getByLabelText('Transaction kind')).toHaveValue('expense')
+    expect(screen.getByLabelText('Transaction effective at')).toHaveValue(localTodayAtMidnight())
+    expect(screen.getByRole('combobox', { name: 'Transaction currency' })).toHaveValue('USD')
 
     await user.clear(screen.getByLabelText('Amount minor'))
     await user.type(screen.getByLabelText('Amount minor'), '1200')
     await user.clear(screen.getByLabelText('Transaction description'))
     await user.type(screen.getByLabelText('Transaction description'), 'Coffee')
+    await user.clear(screen.getByLabelText('Transaction effective at'))
     await user.type(screen.getByLabelText('Transaction effective at'), '2026-06-20T12:00')
     await user.selectOptions(screen.getByLabelText('Transaction category'), 'cat-1')
+    await user.click(screen.getByLabelText('Household'))
     await user.click(screen.getByRole('button', { name: 'Save transaction' }))
 
     await waitFor(() => expect(mocks.createTransaction).toHaveBeenCalled())
     expect(await screen.findByText('Transaction recorded.')).toBeInTheDocument()
+    expect(mocks.createTransaction).toHaveBeenCalledWith(expect.objectContaining({ tagIds: ['tag-1'] }))
     expect(screen.getByRole('link', { name: 'Cancel' })).toHaveAttribute('href', '#/finance/transactions')
   })
 
@@ -143,6 +159,18 @@ describe('Finance transaction editor page', () => {
     expect(screen.getAllByText('transfer').length).toBeGreaterThan(0)
   })
 
+  it('uses the supported currency selector and keeps the mobile field order task-first', async () => {
+    render(FinanceTransactionEditor, { params: {} })
+
+    await screen.findByLabelText('Transaction account')
+
+    expect(screen.queryByRole('textbox', { name: 'Transaction currency' })).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Transaction currency' })).toHaveTextContent('USDEURPLNUAH')
+
+    const fields = Array.from(document.querySelectorAll('form label, form legend')).map((field) => field.textContent)
+    expect(fields.slice(0, 8)).toEqual(['Account', 'Category', 'Tags', 'Household', 'Shared', 'Kind', 'Amount minor', 'Currency'])
+  })
+
   it('loads edit mode through the detail endpoint, shows provider-original context, and saves nullable category updates', async () => {
     const user = userEvent.setup()
     render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
@@ -155,6 +183,8 @@ describe('Finance transaction editor page', () => {
       }),
     )
     await screen.findByText('Provider refund')
+    expect(screen.getByLabelText('Household')).toBeChecked()
+    expect(screen.getByLabelText('Shared')).toBeChecked()
     expect(screen.getAllByText('pending').length).toBeGreaterThan(0)
     expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
 
@@ -163,6 +193,8 @@ describe('Finance transaction editor page', () => {
     await user.clear(screen.getByLabelText('Transaction description'))
     await user.type(screen.getByLabelText('Transaction description'), 'Refund updated')
     await user.selectOptions(screen.getByLabelText('Transaction category'), '')
+    await user.click(screen.getByLabelText('Household'))
+    await user.click(screen.getByLabelText('Shared'))
     await user.clear(screen.getByLabelText('Transaction effective at'))
     await user.type(screen.getByLabelText('Transaction effective at'), '2026-06-21T12:00')
     await user.click(screen.getByRole('button', { name: 'Save transaction' }))
@@ -175,6 +207,7 @@ describe('Finance transaction editor page', () => {
         amountMinor: 800,
         effectiveAt: new Date('2026-06-21T12:00'),
         categoryId: null,
+        tagIds: [],
       }),
     )
     expect(await screen.findByRole('status')).toHaveTextContent('Transaction updated.')
@@ -189,7 +222,7 @@ describe('Finance transaction editor page', () => {
       const localTime = new Date(2026, 10, 1, 1, 30)
       mocks.getTransaction.mockResolvedValueOnce({
         id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'pending', kind: 'refund',
-        amountMinor: 900, currency: 'USD', description: 'Refund', effectiveAt: localTime, categoryId: 'cat-1',
+        amountMinor: 900, currency: 'USD', description: 'Refund', effectiveAt: localTime, categoryId: 'cat-1', tagIds: ['tag-1'],
         transferGroupId: 'transfer-1', transferMatchedAt: null, hiddenAt: null, providerOriginal: null,
         createdAt: new Date('2026-06-20T12:00:00Z'), updatedAt: new Date('2026-06-20T12:00:00Z'),
       })
@@ -261,6 +294,12 @@ describe('Finance transaction editor page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Finance API response contract violation: finance.transaction.effectiveAt',
     )
-    expect(screen.getByLabelText('Transaction effective at')).toHaveValue('')
+    expect(screen.getByLabelText('Transaction effective at')).toHaveValue(localTodayAtMidnight())
   })
 })
+
+function localTodayAtMidnight(): string {
+  const today = new Date()
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}T00:00`
+}

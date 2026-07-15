@@ -23,6 +23,12 @@ func NewFinanceTransactionUpdateRequestValidator() FieldValidator[*FinanceTransa
 	)
 	validateClearCategory := NewSimpleFieldValidator[bool](
 	)
+	validateTagIDs := NewArrayValidator[string](
+		NewSimpleFieldValidator[[]string](
+		),
+		NewSimpleFieldValidator[string](
+			),
+	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceTransactionUpdateRequest) {
 		validateDescription(bindingCtx.Fork("description"), value.Description)
@@ -30,5 +36,6 @@ func NewFinanceTransactionUpdateRequestValidator() FieldValidator[*FinanceTransa
 		validateEffectiveAt(bindingCtx.Fork("effectiveAt"), value.EffectiveAt)
 		validateCategoryID(bindingCtx.Fork("categoryId"), value.CategoryID)
 		validateClearCategory(bindingCtx.Fork("clearCategory"), value.ClearCategory)
+		validateTagIDs(bindingCtx.Fork("tagIds"), value.TagIDs)
 	}
 }

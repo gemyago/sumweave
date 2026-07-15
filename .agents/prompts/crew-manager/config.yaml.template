@@ -1,44 +1,47 @@
 # Use this file to configure crew-manager generated surfaces.
-# Copy it to .agents/prompts/crew-manager/config.yaml and modify the configuration.
+# Copy it to config.yaml in this directory and modify the configuration.
 # manager.model: short label for delegation messages in prompt-driven environments
 # manager.opencode_model: fully-qualified OpenCode model (provider/model)
-# Each sub-agent role must have a matching instruction file:
-#   .agents/prompts/crew-manager/agent-<role>.md
-# After editing, run: .agents/prompts/crew-manager/setup.sh
+# After editing, run setup.sh from this directory.
 manager:
   agent_name: crew-manager
   description: General purpose orchestrator agent for coordinating tasks and workflows.
   model: gpt-5.6-sol
   opencode_model: openai/gpt-5.6-sol
   reasoning_effort: high
+  delegation_policy:
+    - Choose the lowest-tier agent whose description clearly covers the task.
+    - Prefer P3 for ordinary engineering work instead of escalating by default.
+    - Importance alone does not justify P4 or P5; complexity, ambiguity, context, and risk do.
+    - Use P5 only when its description fits and P4 is likely insufficient.
 sub-agents:
-  p1-buddy:
-    sub_agent_name: crew-p1-buddy
-    description: P1 entry level software engineer. Best for simple, bounded tasks.
+  p2-fast:
+    sub_agent_name: crew-p2-fast
+    description: Fast focused P2 software engineer for narrow, well-specified work with limited context, such as targeted code edits, small fixes, focused tests, lint failures, commits, status checks, and precise information collection. Prefer when speed matters and the expected output is explicit. Avoid broad investigation, browser or e2e work, architecture, and ambiguous multi-module tasks.
     model: gpt-5.3-codex-spark
     opencode_model: openai/gpt-5.3-codex-spark
     reasoning_effort: high
-  p2-buddy:
-    sub_agent_name: crew-p2-buddy
-    description: P2 software engineer for small coding tasks and focused investigation.
+  p2-general:
+    sub_agent_name: crew-p2-general
+    description: General P2 software engineer for small bounded work that needs more context or judgment than P2 Fast, including focused investigation, small bug fixes, housekeeping, simple coding or test changes, and concise summaries. Give clear scope and expected results. Use P3 for ordinary feature or refactor work.
     model: gpt-5.6-luna
     opencode_model: openai/gpt-5.6-luna
     reasoning_effort: high
   p3-buddy:
     sub_agent_name: crew-p3-buddy
-    description: P3 software engineer for ordinary implementation work with clear scope.
+    description: Default engineer for most ordinary, well-scoped product work, including feature slices, bug fixes, refactors, tests, and investigations with moderate context. Prefer P3 over P4 or P5 when the goal is clear and risk is normal, even when the task is important.
     model: gpt-5.6-terra
     opencode_model: openai/gpt-5.6-terra
     reasoning_effort: medium
   p4-buddy:
     sub_agent_name: crew-p4-buddy
-    description: P4 software engineer for complex debugging, planning, and review.
+    description: Senior engineer for genuinely complex or ambiguous work, including unclear failures, cross-module investigation, difficult debugging, higher-risk implementation, complex planning or research, and review requiring broad context. Use when P3 is likely insufficient, not merely because correctness matters.
     model: gpt-5.6-terra
     opencode_model: openai/gpt-5.6-terra
     reasoning_effort: high
   p5-buddy:
     sub_agent_name: crew-p5-buddy
-    description: P5 principal software engineer for the hardest technical work.
+    description: Principal engineer reserved for architecture, ambiguous product or technical direction, deep system-wide root-cause analysis, major design decisions, and exceptional high-risk work where P4 is likely insufficient. Do not use for routine planning, research, implementation, or review.
     model: gpt-5.6-sol
     opencode_model: openai/gpt-5.6-sol
     reasoning_effort: high

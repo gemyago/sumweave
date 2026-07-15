@@ -6,6 +6,8 @@ import FinanceTransactions from './FinanceTransactions.svelte'
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
   listAccounts: vi.fn(),
+  listCategories: vi.fn(),
+  listTags: vi.fn(),
   listTransactions: vi.fn(),
 }))
 
@@ -27,6 +29,13 @@ describe('Finance transactions page', () => {
     mocks.listAccounts.mockResolvedValue([
       { id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now },
     ])
+    mocks.listCategories.mockResolvedValue([
+      { id: 'cat-1', tenantId: 'tenant-1', name: 'Groceries', kind: 'expense', seededDefault: true, hiddenAt: null, createdAt: now, updatedAt: now },
+    ])
+    mocks.listTags.mockResolvedValue([
+      { id: 'tag-1', tenantId: 'tenant-1', name: 'Household', hiddenAt: null, createdAt: now, updatedAt: now },
+      { id: 'tag-2', tenantId: 'tenant-1', name: 'Shared', hiddenAt: null, createdAt: now, updatedAt: now },
+    ])
     mocks.listTransactions.mockResolvedValue([
       {
         id: 'tx-1',
@@ -40,6 +49,7 @@ describe('Finance transactions page', () => {
         description: 'Refund',
         effectiveAt: now,
         categoryId: 'cat-1',
+        tagIds: ['tag-1', 'tag-2'],
         transferGroupId: 'transfer-1',
         transferMatchedAt: null,
         hiddenAt: now,
@@ -62,6 +72,34 @@ describe('Finance transactions page', () => {
     expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
   })
 
+  it('resolves category labels from the tenant category catalog', async () => {
+    render(FinanceTransactions)
+
+    expect(await screen.findByText('Groceries')).toBeInTheDocument()
+    expect(screen.queryByText('cat-1')).not.toBeInTheDocument()
+    expect(mocks.listCategories).toHaveBeenCalledWith({ tenantId: 'tenant-1' })
+  })
+
+  it('resolves tag labels from the tenant tag catalog and hides raw IDs', async () => {
+    render(FinanceTransactions)
+
+    expect((await screen.findAllByText('Household')).length).toBeGreaterThan(1)
+    expect(screen.getByText('Shared')).toBeInTheDocument()
+    expect(screen.queryByText('tag-1')).not.toBeInTheDocument()
+    expect(mocks.listTags).toHaveBeenCalledWith({ tenantId: 'tenant-1' })
+  })
+
+  it('shows unknown tag when an assigned ID is absent from the tag catalog', async () => {
+    mocks.listTransactions.mockResolvedValueOnce([{
+      id: 'tx-unknown-tag', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100, currency: 'USD', description: 'Unknown tag transaction', effectiveAt: new Date('2026-06-20T12:00:00Z'), categoryId: null, tagIds: ['missing-tag'], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: new Date('2026-06-20T12:00:00Z'), updatedAt: new Date('2026-06-20T12:00:00Z'),
+    }])
+
+    render(FinanceTransactions)
+
+    expect(await screen.findByText('Unknown tag')).toBeInTheDocument()
+    expect(screen.queryByText('missing-tag')).not.toBeInTheDocument()
+  })
+
   it('renders the empty state when filters return no transactions', async () => {
     mocks.listTransactions.mockResolvedValueOnce([])
     render(FinanceTransactions)
@@ -72,8 +110,8 @@ describe('Finance transactions page', () => {
     const earlier = new Date('2026-06-19T12:00:00Z')
     const later = new Date('2026-06-20T12:00:00Z')
     mocks.listTransactions.mockResolvedValueOnce([
-      { id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 300, currency: 'USD', description: 'Later', effectiveAt: later, categoryId: null, transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: later, updatedAt: later },
-      { id: 'tx-2', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'reconciliation', amountMinor: 100, currency: 'USD', description: 'Earlier', effectiveAt: earlier, categoryId: null, transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: earlier, updatedAt: earlier },
+      { id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 300, currency: 'USD', description: 'Later', effectiveAt: later, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: later, updatedAt: later },
+      { id: 'tx-2', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'reconciliation', amountMinor: 100, currency: 'USD', description: 'Earlier', effectiveAt: earlier, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: earlier, updatedAt: earlier },
     ])
     const user = userEvent.setup()
     const { container } = render(FinanceTransactions)
@@ -101,6 +139,7 @@ describe('Finance transactions page', () => {
         description: 'Card charge',
         effectiveAt: now,
         categoryId: null,
+        tagIds: [],
         transferGroupId: null,
         transferMatchedAt: null,
         hiddenAt: null,
@@ -138,6 +177,7 @@ describe('Finance transactions page', () => {
           description: 'Refund',
           effectiveAt: new Date('2026-06-20T12:00:00Z'),
           categoryId: 'cat-1',
+          tagIds: [],
           transferGroupId: null,
           transferMatchedAt: null,
           hiddenAt: null,
@@ -191,6 +231,7 @@ describe('Finance transactions page', () => {
         description: `Transaction ${index + 1}`,
         effectiveAt: now,
         categoryId: null,
+        tagIds: [],
         transferGroupId: null,
         transferMatchedAt: null,
         hiddenAt: null,
@@ -199,7 +240,7 @@ describe('Finance transactions page', () => {
         updatedAt: now,
       })))
       .mockResolvedValueOnce([
-        { id: 'tx-21', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 1200, currency: 'USD', description: 'Transaction 21', effectiveAt: now, categoryId: null, transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now },
+        { id: 'tx-21', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 1200, currency: 'USD', description: 'Transaction 21', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now },
       ])
 
     render(FinanceTransactions)
@@ -248,6 +289,7 @@ describe('Finance transactions page', () => {
         description: 'Hotel',
         effectiveAt: now,
         categoryId: null,
+        tagIds: [],
         transferGroupId: null,
         transferMatchedAt: null,
         hiddenAt: null,
@@ -289,6 +331,7 @@ describe('Finance transactions page', () => {
         description: 'Hotel',
         effectiveAt: now,
         categoryId: null,
+        tagIds: [],
         transferGroupId: null,
         transferMatchedAt: null,
         hiddenAt: null,

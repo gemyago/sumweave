@@ -14,7 +14,7 @@ var _ = json.Unmarshal
 var _ = fmt.Sprint
 
 type FinanceCsvImportPreviewRequest struct { 
-	ImportType string `json:"importType"`
 	FileName string `json:"fileName"`
 	Csv string `json:"csv"`
+	SelectedAccountNames []string `json:"selectedAccountNames,omitempty"`
 }

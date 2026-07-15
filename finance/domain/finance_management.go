@@ -142,6 +142,7 @@ type Transaction struct {
 	Description       string
 	EffectiveAt       time.Time
 	CategoryID        *string
+	TagIDs            []string
 	TransferGroupID   *string
 	TransferMatchedAt *time.Time
 	HiddenAt          *time.Time

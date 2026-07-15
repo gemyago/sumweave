@@ -1399,6 +1399,74 @@ func (_c *mockfinanceService_ListCategories_Call) RunAndReturn(run func(context1
 	return _c
 }
 
+// ListRecentCSVImportAudits provides a mock function for the type mockfinanceService
+func (_mock *mockfinanceService) ListRecentCSVImportAudits(context1 context.Context, listRecentCSVImportAuditsParams finance.ListRecentCSVImportAuditsParams) ([]finance.CSVImportAudit, error) {
+	ret := _mock.Called(context1, listRecentCSVImportAuditsParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListRecentCSVImportAudits")
+	}
+
+	var r0 []finance.CSVImportAudit
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.ListRecentCSVImportAuditsParams) ([]finance.CSVImportAudit, error)); ok {
+		return returnFunc(context1, listRecentCSVImportAuditsParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.ListRecentCSVImportAuditsParams) []finance.CSVImportAudit); ok {
+		r0 = returnFunc(context1, listRecentCSVImportAuditsParams)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]finance.CSVImportAudit)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.ListRecentCSVImportAuditsParams) error); ok {
+		r1 = returnFunc(context1, listRecentCSVImportAuditsParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockfinanceService_ListRecentCSVImportAudits_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListRecentCSVImportAudits'
+type mockfinanceService_ListRecentCSVImportAudits_Call struct {
+	*mock.Call
+}
+
+// ListRecentCSVImportAudits is a helper method to define mock.On call
+//   - context1 context.Context
+//   - listRecentCSVImportAuditsParams finance.ListRecentCSVImportAuditsParams
+func (_e *mockfinanceService_Expecter) ListRecentCSVImportAudits(context1 interface{}, listRecentCSVImportAuditsParams interface{}) *mockfinanceService_ListRecentCSVImportAudits_Call {
+	return &mockfinanceService_ListRecentCSVImportAudits_Call{Call: _e.mock.On("ListRecentCSVImportAudits", context1, listRecentCSVImportAuditsParams)}
+}
+
+func (_c *mockfinanceService_ListRecentCSVImportAudits_Call) Run(run func(context1 context.Context, listRecentCSVImportAuditsParams finance.ListRecentCSVImportAuditsParams)) *mockfinanceService_ListRecentCSVImportAudits_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.ListRecentCSVImportAuditsParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.ListRecentCSVImportAuditsParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockfinanceService_ListRecentCSVImportAudits_Call) Return(cSVImportAudits []finance.CSVImportAudit, err error) *mockfinanceService_ListRecentCSVImportAudits_Call {
+	_c.Call.Return(cSVImportAudits, err)
+	return _c
+}
+
+func (_c *mockfinanceService_ListRecentCSVImportAudits_Call) RunAndReturn(run func(context1 context.Context, listRecentCSVImportAuditsParams finance.ListRecentCSVImportAuditsParams) ([]finance.CSVImportAudit, error)) *mockfinanceService_ListRecentCSVImportAudits_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListTags provides a mock function for the type mockfinanceService
 func (_mock *mockfinanceService) ListTags(context1 context.Context, listTagsParams finance.ListTagsParams) ([]domain.Tag, error) {
 	ret := _mock.Called(context1, listTagsParams)

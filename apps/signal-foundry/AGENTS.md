@@ -91,6 +91,7 @@ The rules are:
 - Put required test defaults in test.yaml, not per-test env.
 - Keep files referenced by test.yaml as committed test fixtures, never use real secrets or ssh keys, generate fake random values instead.
 - Run local backend CLI commands with `apps/signal-foundry` as CWD.
+- Error responses stay empty unless a documented endpoint contract justifies a safe body.
 
 ## Purpose (directional)
 

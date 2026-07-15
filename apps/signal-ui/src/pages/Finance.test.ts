@@ -290,6 +290,40 @@ describe('Finance dashboard page', () => {
     expect(request.endDate).toEqual(endDate)
   })
 
+  it('uses inclusive local calendar bounds for selected custom dates so midnight imported rows are included', async () => {
+    const user = userEvent.setup()
+    const importedAtMidnight = new Date(2026, 4, 29, 0, 0, 0, 0)
+    const initialDashboard = {
+      period: {
+        preset: 'current_month',
+        startDate: new Date(2026, 4, 1, 9, 40),
+        endDate: new Date(2026, 5, 3, 9, 40),
+        previous: { startDate: new Date(2026, 3, 1), endDate: new Date(2026, 4, 1) },
+        next: { startDate: new Date(2026, 5, 4), endDate: new Date(2026, 6, 4) },
+      },
+      settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 830000, netMinor: -830000, transactionCount: 1, complete: true },
+      pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], nativeSettledTotals: [{ currency: 'PLN', incomeMinor: 0, expenseMinor: 830000, netMinor: -830000 }],
+    }
+    mocks.getDashboard.mockResolvedValue(initialDashboard)
+
+    render(Finance)
+    await user.click(await screen.findByText('Custom range'))
+    await user.clear(screen.getByLabelText('Custom start date'))
+    await user.type(screen.getByLabelText('Custom start date'), '2026-05-29')
+    await user.clear(screen.getByLabelText('Custom end date'))
+    await user.type(screen.getByLabelText('Custom end date'), '2026-06-03')
+    await user.click(screen.getByRole('button', { name: 'Apply custom range' }))
+
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    const request = mocks.getDashboard.mock.calls[1][0]
+    expect(request.startDate).toEqual(new Date(2026, 4, 29, 0, 0, 0, 0))
+    expect(request.endDate).toEqual(new Date(2026, 5, 3, 23, 59, 59, 999))
+    expect(importedAtMidnight.getTime()).toBeGreaterThanOrEqual(request.startDate.getTime())
+    expect(importedAtMidnight.getTime()).toBeLessThanOrEqual(request.endDate.getTime())
+    expect(await screen.findByText('PLN')).toBeInTheDocument()
+  })
+
   it('renders honest empty states when the dashboard has no activity', async () => {
     mocks.getDashboard.mockResolvedValueOnce({
       period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },

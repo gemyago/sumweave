@@ -6,10 +6,12 @@
     createSignalFinanceApiForAuth,
     type FinanceAccount,
     type FinanceCategory,
+    type FinanceTag,
     type FinanceTransaction,
   } from '../lib/finance/api'
   import { formatFinanceDateTime, formatFinanceMoney } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
+  import { supportedFinanceTenantDisplayCurrencies } from '../lib/finance/tenant-display-currencies'
 
   let { params = {} } = $props<{ params?: { transactionId?: string } }>()
 
@@ -24,6 +26,7 @@
   let saveMessage = $state<string | null>(null)
   let accounts = $state<FinanceAccount[]>([])
   let categories = $state<FinanceCategory[]>([])
+  let tags = $state<FinanceTag[]>([])
   let transaction = $state<FinanceTransaction | null>(null)
   let form = $state(makeBlankForm())
   let reactiveReady = $state(false)
@@ -44,8 +47,9 @@
       amountMinor: '0',
       currency: 'USD',
       description: '',
-      effectiveAt: '',
+      effectiveAt: localTodayDateTimeValue(),
       categoryId: '',
+      tagIds: [] as string[],
       transferGroupId: '',
     }
   }
@@ -61,6 +65,7 @@
       description: item.description,
       effectiveAt: toDateTimeLocalValue(item.effectiveAt),
       categoryId: item.categoryId ?? '',
+      tagIds: [...item.tagIds],
       transferGroupId: item.transferGroupId ?? '',
     }
   }
@@ -103,6 +108,7 @@
       if (!financeShell.selectedTenantId) {
         accounts = []
         categories = []
+        tags = []
         transaction = null
         form = makeBlankForm()
         return
@@ -123,9 +129,10 @@
     }
 
     saveMessage = null
-    ;[accounts, categories] = await Promise.all([
+    ;[accounts, categories, tags] = await Promise.all([
       financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
       financeApi.listCategories({ tenantId: financeShell.selectedTenantId }),
+      financeApi.listTags({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
     ])
 
     if (isCreateMode) {
@@ -158,6 +165,12 @@
     }
     const pad = (part: number) => String(part).padStart(2, '0')
     return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`
+  }
+
+  function localTodayDateTimeValue(): string {
+    const today = new Date()
+    const pad = (part: number) => String(part).padStart(2, '0')
+    return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}T00:00`
   }
 
   function fromDateTimeLocalValue(value: string): Date {
@@ -199,6 +212,7 @@
           description: form.description,
           effectiveAt: fromDateTimeLocalValue(form.effectiveAt),
           categoryId: form.categoryId || undefined,
+          tagIds: form.tagIds,
           transferGroupId: form.transferGroupId || undefined,
         })
         transaction = created
@@ -212,6 +226,7 @@
           amountMinor: Number(form.amountMinor),
           effectiveAt: fromDateTimeLocalValue(form.effectiveAt),
           categoryId: form.categoryId || null,
+          tagIds: form.tagIds,
         })
         saveMessage = 'Transaction updated.'
         if (transaction) {
@@ -242,7 +257,6 @@
     <header class="card border-0 shadow-sm">
       <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
         <div>
-          <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Transaction editor</p>
           <h1 id="finance-transaction-editor-heading" class="h3 mb-2">
             {#if isCreateMode}Record transaction{:else}Edit transaction{/if}
           </h1>
@@ -333,6 +347,11 @@
                 {form.source} · {form.status} · {form.kind} · {form.currency}
               {/if}
             </p>
+            {#if transaction?.tagIds.length}
+              <p class="small text-body-secondary mb-0 mt-2">
+                Tags: {transaction.tagIds.map((tagId) => tags.find((tag) => tag.id === tagId)?.name ?? 'Unknown tag').join(', ')}
+              </p>
+            {/if}
           </div>
 
           <div class="d-flex flex-wrap gap-2" aria-label="Transaction state flags">
@@ -390,6 +409,23 @@
               </select>
             </div>
 
+            <fieldset class="col-12">
+              <legend class="form-label mb-2">Tags</legend>
+              {#if tags.length === 0}
+                <p class="form-text mb-0">No tenant tags are available. Manage tags from Categories.</p>
+              {:else}
+                <div class="d-flex flex-wrap gap-3" aria-label="Transaction tags">
+                  {#each tags as tag (tag.id)}
+                    <div class="form-check">
+                      <input id={`finance-transaction-tag-${tag.id}`} class="form-check-input" type="checkbox" value={tag.id} bind:group={form.tagIds} disabled={Boolean(tag.hiddenAt) && !form.tagIds.includes(tag.id)} />
+                      <label class="form-check-label" for={`finance-transaction-tag-${tag.id}`}>{tag.name}{tag.hiddenAt ? ' (hidden)' : ''}</label>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              <p class="form-text mb-0">Choose existing tenant tags. Create tags from Categories.</p>
+            </fieldset>
+
             <div class="col-12 col-md-4">
               <label class="form-label" for="finance-transaction-kind">Kind</label>
               <select id="finance-transaction-kind" class="form-select" bind:value={form.kind} aria-label="Transaction kind" disabled={!isCreateMode}>
@@ -399,6 +435,30 @@
                 <option value="transfer">transfer</option>
                 <option value="reconciliation">reconciliation</option>
               </select>
+            </div>
+
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="finance-transaction-amount">Amount minor</label>
+              <input id="finance-transaction-amount" class="form-control" bind:value={form.amountMinor} aria-label="Amount minor" type="number" required />
+            </div>
+
+            <div class="col-12 col-md-4">
+              <label class="form-label" for="finance-transaction-currency">Currency</label>
+              <select id="finance-transaction-currency" class="form-select" bind:value={form.currency} aria-label="Transaction currency" disabled={!isCreateMode} required>
+                {#each supportedFinanceTenantDisplayCurrencies as currencyCode (currencyCode)}
+                  <option value={currencyCode}>{currencyCode}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label" for="finance-transaction-description">Description</label>
+              <input id="finance-transaction-description" class="form-control" bind:value={form.description} aria-label="Transaction description" />
+            </div>
+
+            <div class="col-12 col-lg-6">
+              <label class="form-label" for="finance-transaction-effective-at">Effective at</label>
+              <input id="finance-transaction-effective-at" class="form-control" bind:value={form.effectiveAt} aria-label="Transaction effective at" type="datetime-local" required />
             </div>
 
             <div class="col-12 col-md-4">
@@ -420,28 +480,8 @@
             </div>
 
             <div class="col-12 col-md-4">
-              <label class="form-label" for="finance-transaction-currency">Currency</label>
-              <input id="finance-transaction-currency" class="form-control" bind:value={form.currency} aria-label="Transaction currency" disabled={!isCreateMode} required />
-            </div>
-
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="finance-transaction-amount">Amount minor</label>
-              <input id="finance-transaction-amount" class="form-control" bind:value={form.amountMinor} aria-label="Amount minor" type="number" required />
-            </div>
-
-            <div class="col-12 col-md-4">
               <label class="form-label" for="finance-transaction-transfer-group">Transfer group</label>
               <input id="finance-transaction-transfer-group" class="form-control" bind:value={form.transferGroupId} aria-label="Transfer group" disabled={!isCreateMode} />
-            </div>
-
-            <div class="col-12">
-              <label class="form-label" for="finance-transaction-description">Description</label>
-              <input id="finance-transaction-description" class="form-control" bind:value={form.description} aria-label="Transaction description" />
-            </div>
-
-            <div class="col-12 col-lg-6">
-              <label class="form-label" for="finance-transaction-effective-at">Effective at</label>
-              <input id="finance-transaction-effective-at" class="form-control" bind:value={form.effectiveAt} aria-label="Transaction effective at" type="datetime-local" required />
             </div>
           </div>
 

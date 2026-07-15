@@ -146,7 +146,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "list transactions", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/transactions?accountId=account-a&source=manual&status=booked&includeHidden=true&limit=20"},
 			{name: "create transaction", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/transactions", body: `{"accountId":"account-a","source":"manual","status":"booked","kind":"regular","amountMinor":-2500,"currency":"USD","description":"Coffee","effectiveAt":"2026-06-20T14:00:00Z"}`},
 			{name: "get transaction", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/transactions/transaction-a"},
-			{name: "update transaction", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/transactions/transaction-a", body: `{"description":"Coffee update","amountMinor":-3100,"effectiveAt":"2026-06-21T10:00:00Z"}`},
+			{name: "update transaction", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/transactions/transaction-a", body: `{"description":"Coffee update","amountMinor":-3100,"effectiveAt":"2026-06-21T10:00:00Z","tagIds":[]}`},
 			{name: "list connections", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/connections"},
 			{name: "delete connection", method: http.MethodDelete, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a"},
 			{name: "link connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-token", body: `{"provider":"monobank","token":"token-1"}`},
@@ -166,6 +166,36 @@ func TestFinanceController(t *testing.T) {
 				require.Equal(t, http.StatusUnauthorized, resp.Code)
 			})
 		}
+	})
+
+	t.Run("transaction CSV preview returns 400 with an empty body for invalid input", func(t *testing.T) {
+		userID := fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		service := newMockfinanceService(t)
+		service.EXPECT().PreviewCSVImport(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.PreviewCSVImportParams) (financepkg.CSVImportPreview, error) {
+				require.Equal(t, financepkg.CSVImportTypeTransactions, params.ImportType)
+				return financepkg.CSVImportPreview{}, fmt.Errorf(
+					"%w: currency %q must be one of USD, EUR, PLN, UAH",
+					financepkg.ErrInvalidCSVImport,
+					"gBp",
+				)
+			},
+		).Once()
+
+		resp := httptest.NewRecorder()
+		newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+			resp,
+			newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants/"+tenantID+"/imports/preview",
+				`{"fileName":"invalid.csv","csv":"Date,Account,Category,Tags,Expense amount,Income amount,Currency\n29.05.26,Wallet,,,1,,gBp"}`,
+				true,
+			),
+		)
+
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Empty(t, resp.Body.String())
 	})
 
 	t.Run("tenant routes delegate into finance service", func(t *testing.T) {
@@ -751,7 +781,7 @@ func TestFinanceController(t *testing.T) {
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions?accountId=" + accountID + "&source=manual&status=booked&includeHidden=true&limit=20&offset=5", field: "items", want: 1},
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, field: "id", want: transactionID},
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/transactions", body: `{"accountId":"` + accountID + `","source":"manual","status":"booked","kind":"regular","amountMinor":-2500,"currency":"USD","description":"Coffee","effectiveAt":"2026-06-20T14:00:00Z","categoryId":"` + categoryID + `","transferGroupId":"group-1"}`, field: "id", want: transactionID},
-			{method: http.MethodPatch, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, body: `{"description":"Coffee update","amountMinor":-3100,"effectiveAt":"2026-06-21T10:00:00Z","categoryId":"` + updatedCategoryID + `"}`, field: "id", want: transactionID},
+			{method: http.MethodPatch, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, body: `{"description":"Coffee update","amountMinor":-3100,"effectiveAt":"2026-06-21T10:00:00Z","categoryId":"` + updatedCategoryID + `","tagIds":[]}`, field: "id", want: transactionID},
 		} {
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, newRequest(tc.method, tc.target, tc.body, true))
@@ -809,7 +839,7 @@ func TestFinanceController(t *testing.T) {
 			newRequest(
 				http.MethodPatch,
 				"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
-				`{"description":"Coffee cleared","amountMinor":-3200,"effectiveAt":"2026-06-21T11:00:00Z","clearCategory":true}`,
+				`{"description":"Coffee cleared","amountMinor":-3200,"effectiveAt":"2026-06-21T11:00:00Z","clearCategory":true,"tagIds":[]}`,
 				true,
 			),
 		)
@@ -851,7 +881,7 @@ func TestFinanceController(t *testing.T) {
 			newRequest(
 				http.MethodPatch,
 				"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
-				`{"description":"Coffee retained","amountMinor":-3300,"effectiveAt":"2026-06-21T12:00:00Z"}`,
+				`{"description":"Coffee retained","amountMinor":-3300,"effectiveAt":"2026-06-21T12:00:00Z","tagIds":[]}`,
 				true,
 			),
 		)
@@ -868,7 +898,7 @@ func TestFinanceController(t *testing.T) {
 			newRequest(
 				http.MethodPatch,
 				"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
-				`{"description":"contradictory","amountMinor":-3300,"categoryId":"`+categoryID+`","clearCategory":true}`,
+				`{"description":"contradictory","amountMinor":-3300,"categoryId":"`+categoryID+`","clearCategory":true,"tagIds":[]}`,
 				true,
 			),
 		)
@@ -1047,18 +1077,40 @@ func TestFinanceController(t *testing.T) {
 				PreviewCSVImport(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.PreviewCSVImportParams) (financepkg.CSVImportPreview, error) {
 					require.Equal(t, financepkg.CSVImportTypeTransactions, params.ImportType)
+					require.Equal(t, "demo.csv", params.FileName)
+					require.Equal(t, []string{"Checking"}, params.SelectedAccountNames)
 					return financepkg.CSVImportPreview{
-						ImportID:            importID,
-						ImportType:          params.ImportType,
-						Headers:             []string{"account", "amount"},
-						Mapping:             map[string]string{"account": "account"},
+						ImportID:        importID,
+						ImportType:      params.ImportType,
+						ImportableCount: 0,
+						Headers: []string{
+							"Date",
+							"Account",
+							"Category",
+							"Tags",
+							"Expense amount",
+							"Income amount",
+							"Currency",
+							"Description",
+						},
+						RejectedRows: []financepkg.CSVImportRejectedRow{{
+							RowNumber: 3,
+							Field:     "currency",
+							Reason:    "currency must be one of USD, EUR, PLN, UAH",
+						}},
 						WouldCreateAccounts: []string{"Checking"},
+						AccountOptions: []financepkg.CSVImportAccountOption{{
+							Name:           "Checking",
+							SourceRowCount: 1,
+							Selected:       true,
+						}},
 					}, nil
 				})
 			service.EXPECT().
 				ConfirmCSVImport(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.ConfirmCSVImportParams) (financepkg.CSVImportConfirmation, error) {
 					require.Equal(t, importID, params.ImportID)
+					require.Equal(t, financepkg.CSVImportTypeTransactions, params.ExpectedImportType)
 					return financepkg.CSVImportConfirmation{
 						ImportID: importID,
 						JobID:    "job-import-1",
@@ -1079,10 +1131,40 @@ func TestFinanceController(t *testing.T) {
 						JobID:             "job-import-1",
 						ConfirmedByUserID: userID,
 						ImportedCount:     4,
-						CreatedAt:         now,
-						ConfirmedAt:       &confirmedAt,
-						CompletedAt:       &completedAt,
+						RejectedRows: []financepkg.CSVImportRejectedRow{{
+							RowNumber: 3,
+							Field:     "currency",
+							Reason:    "currency must be one of USD, EUR, PLN, UAH",
+						}},
+						RowOutcomes: []domain.CSVImportRowOutcome{{
+							RowNumber: 2,
+							Status:    domain.CSVImportRowOutcomeImported,
+							CreatedAt: now,
+							UpdatedAt: now,
+						}},
+						CreatedAt:   now,
+						ConfirmedAt: &confirmedAt,
+						CompletedAt: &completedAt,
 					}, nil
+				})
+			service.EXPECT().
+				ListRecentCSVImportAudits(mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, params financepkg.ListRecentCSVImportAuditsParams) ([]financepkg.CSVImportAudit, error) {
+					require.Equal(t, userID, params.ActorUserID)
+					require.Equal(t, tenantID, params.TenantID)
+					require.Equal(t, financepkg.CSVImportTypeTransactions, params.ExpectedImportType)
+					return []financepkg.CSVImportAudit{{
+						ImportID:          importID,
+						TenantID:          tenantID,
+						ImportType:        financepkg.CSVImportTypeTransactions,
+						Status:            financepkg.CSVImportStatusCompleted,
+						JobID:             "job-import-1",
+						ConfirmedByUserID: userID,
+						ImportedCount:     4,
+						RejectedRows:      []financepkg.CSVImportRejectedRow{},
+						RowOutcomes:       []domain.CSVImportRowOutcome{},
+						CreatedAt:         now,
+					}}, nil
 				})
 
 			cases := []struct {
@@ -1162,7 +1244,7 @@ func TestFinanceController(t *testing.T) {
 				{
 					method: http.MethodPost,
 					target: "/api/v1/finance/tenants/" + tenantID + "/imports/preview",
-					body:   `{"importType":"transactions","fileName":"demo.csv","csv":"account,amount\nChecking,100"}`,
+					body:   `{"fileName":"demo.csv","csv":"Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n29.05.26,Checking,,,1,,USD,Coffee","selectedAccountNames":["Checking"]}`,
 					field:  "importId",
 					want:   importID,
 					status: http.StatusOK,
@@ -1170,9 +1252,16 @@ func TestFinanceController(t *testing.T) {
 				{
 					method: http.MethodPost,
 					target: "/api/v1/finance/tenants/" + tenantID + "/imports/" + importID + "/confirm",
-					body:   `{"mapping":{"account":"account"}}`,
+					body:   `{}`,
 					field:  "jobId",
 					want:   "job-import-1",
+					status: http.StatusOK,
+				},
+				{
+					method: http.MethodGet,
+					target: "/api/v1/finance/tenants/" + tenantID + "/imports",
+					field:  "items",
+					want:   1,
 					status: http.StatusOK,
 				},
 				{
@@ -1193,6 +1282,10 @@ func TestFinanceController(t *testing.T) {
 					continue
 				}
 				payload := decode(t, resp)
+				if tc.target == "/api/v1/finance/tenants/"+tenantID+"/imports/preview" {
+					assert.InDelta(t, 0, payload["importableCount"], 0)
+					assert.Equal(t, "Checking", payload["accountOptions"].([]any)[0].(map[string]any)["name"])
+				}
 				if tc.field == "items" {
 					assert.Len(t, payload[tc.field].([]any), tc.want.(int))
 					continue
@@ -1212,26 +1305,30 @@ func TestFinanceController(t *testing.T) {
 				assert.Equal(t, tc.want, payload[tc.field])
 			}
 
-			t.Run("CSV confirm rejects missing, null, empty-key, and empty-value mappings", func(t *testing.T) {
-				for _, body := range []string{
+			t.Run("CSV confirm uses the fixed transaction contract without mapping", func(t *testing.T) {
+				confirmationService := newMockfinanceService(t)
+				confirmationService.EXPECT().ConfirmCSVImport(mock.Anything, mock.Anything).RunAndReturn(
+					func(_ context.Context, params financepkg.ConfirmCSVImportParams) (financepkg.CSVImportConfirmation, error) {
+						require.Equal(t, financepkg.CSVImportTypeTransactions, params.ExpectedImportType)
+						return financepkg.CSVImportConfirmation{
+							ImportID: importID,
+							JobID:    "job-confirm",
+							JobType:  financepkg.CSVImportJobTypeTransactions,
+						}, nil
+					},
+				)
+				resp := httptest.NewRecorder()
+				newHandler(
+					confirmationService,
+					newMockbankConnectionService(t),
+					makeAuthMiddleware(userID),
+				).ServeHTTP(resp, newRequest(
+					http.MethodPost,
+					"/api/v1/finance/tenants/"+tenantID+"/imports/"+importID+"/confirm",
 					`{}`,
-					`{"mapping":null}`,
-					`{"mapping":{"":"account"}}`,
-					`{"mapping":{"account":""}}`,
-				} {
-					resp := httptest.NewRecorder()
-					newHandler(
-						newMockfinanceService(t),
-						newMockbankConnectionService(t),
-						makeAuthMiddleware(userID),
-					).ServeHTTP(resp, newRequest(
-						http.MethodPost,
-						"/api/v1/finance/tenants/"+tenantID+"/imports/"+importID+"/confirm",
-						body,
-						true,
-					))
-					require.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
-				}
+					true,
+				))
+				require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
 			})
 
 			t.Run("provider and callback validation stay explicit", func(t *testing.T) {
@@ -2008,8 +2105,8 @@ func TestFinanceController(t *testing.T) {
 				})
 			call.Times(2)
 			for _, body := range []string{
-				`{"description":"omitted time","amountMinor":1}`,
-				`{"description":"null time","amountMinor":1,"effectiveAt":null}`,
+				`{"description":"omitted time","amountMinor":1,"tagIds":[]}`,
+				`{"description":"null time","amountMinor":1,"effectiveAt":null,"tagIds":[]}`,
 			} {
 				resp := httptest.NewRecorder()
 				newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
@@ -2049,7 +2146,7 @@ func TestFinanceController(t *testing.T) {
 				})
 			resp := httptest.NewRecorder()
 			body := `{"description":"updated time","amountMinor":1,"effectiveAt":"` +
-				requestAt.Format(time.RFC3339Nano) + `"}`
+				requestAt.Format(time.RFC3339Nano) + `","tagIds":[]}`
 			newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
 				resp,
 				newRequest(
@@ -2079,7 +2176,7 @@ func TestFinanceController(t *testing.T) {
 				).ServeHTTP(resp, newRequest(
 					http.MethodPatch,
 					"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
-					`{"description":"invalid time","amountMinor":1,"effectiveAt":`+testCase.value+`}`,
+					`{"description":"invalid time","amountMinor":1,"effectiveAt":`+testCase.value+`,"tagIds":[]}`,
 					true,
 				))
 				assert.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
@@ -2459,12 +2556,13 @@ func TestFinanceController(t *testing.T) {
 			assert.Equal(t, "provider-account-1", mappedAccount.ProviderAccountID)
 
 			mappedPreview := mapCSVPreview(financepkg.CSVImportPreview{
-				ImportID:   "import-1",
-				ImportType: financepkg.CSVImportTypeTransactions,
-				Headers:    []string{"account", "amount"},
-				Mapping:    map[string]string{"account": "account"},
+				ImportID:        "import-1",
+				ImportType:      financepkg.CSVImportTypeTransactions,
+				ImportableCount: 2,
+				Headers:         []string{"account", "amount"},
+				Mapping:         map[string]string{"account": "account"},
 				DuplicateRows: []financepkg.CSVImportRejectedRow{
-					{RowNumber: 2, Reason: "duplicate"},
+					{RowNumber: 2, Field: "description", Reason: "duplicate"},
 				},
 				RejectedRows: []financepkg.CSVImportRejectedRow{
 					{RowNumber: 3, Reason: "invalid amount"},
@@ -2472,7 +2570,9 @@ func TestFinanceController(t *testing.T) {
 			})
 			require.Len(t, mappedPreview.DuplicateRows, 1)
 			require.Len(t, mappedPreview.RejectedRows, 1)
-			assert.Equal(t, 2, mappedPreview.DuplicateRows[0]["rowNumber"])
+			assert.Equal(t, int64(2), mappedPreview.DuplicateRows[0].RowNumber)
+			assert.Equal(t, "description", mappedPreview.DuplicateRows[0].Field)
+			assert.Equal(t, int64(2), mappedPreview.ImportableCount)
 
 			boom := errors.New("boom")
 			assert.Same(t, boom, mapCSVImportError(boom))
@@ -2619,6 +2719,168 @@ func TestFinanceController(t *testing.T) {
 			).Error(),
 			"APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME",
 		)
+	})
+
+	t.Run("transaction tag IDs map through registered create read list update and clear routes", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		transactionID := "transaction-" + fake.UUID().V4()
+		firstTagID := "tag-first-" + fake.UUID().V4()
+		secondTagID := "tag-second-" + fake.UUID().V4()
+		now := time.Date(2026, time.July, 12, 15, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		transaction := func(tagIDs []string) domain.Transaction {
+			return domain.Transaction{
+				ID:          transactionID,
+				TenantID:    tenantID,
+				AccountID:   "account-" + fake.UUID().V4(),
+				Source:      domain.TransactionSourceManual,
+				Status:      domain.TransactionStatusBooked,
+				Kind:        domain.TransactionKindRegular,
+				AmountMinor: -123,
+				Currency:    "USD",
+				Description: "transaction-" + fake.Lorem().Word(),
+				EffectiveAt: now,
+				TagIDs:      tagIDs,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+		}
+		stringValues := func(values []any) []string {
+			result := make([]string, 0, len(values))
+			for _, value := range values {
+				result = append(result, value.(string))
+			}
+			return result
+		}
+		service := newMockfinanceService(t)
+		service.EXPECT().RecordTransaction(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.RecordTransactionParams) (domain.Transaction, error) {
+				require.Equal(t, []string{secondTagID, firstTagID}, params.TagIDs)
+				return transaction(params.TagIDs), nil
+			},
+		)
+		service.EXPECT().GetTransaction(mock.Anything, mock.Anything).Return(
+			transaction([]string{firstTagID, secondTagID}), nil,
+		)
+		service.EXPECT().ListTransactions(mock.Anything, mock.Anything).Return(
+			[]domain.Transaction{transaction([]string{firstTagID, secondTagID})}, nil,
+		)
+		service.EXPECT().UpdateTransaction(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.UpdateTransactionParams) (domain.Transaction, error) {
+				require.Empty(t, params.TagIDs)
+				return transaction(params.TagIDs), nil
+			},
+		)
+		handler := newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID))
+		for _, testCase := range []struct {
+			method string
+			target string
+			body   string
+			want   []string
+		}{
+			{
+				method: http.MethodPost,
+				target: "/api/v1/finance/tenants/" + tenantID + "/transactions",
+				body:   `{"accountId":"account","source":"manual","status":"booked","kind":"regular","amountMinor":-123,"currency":"USD","description":"created","effectiveAt":"2026-07-12T15:00:00+02:00","tagIds":["` + secondTagID + `","` + firstTagID + `"]}`,
+				want:   []string{secondTagID, firstTagID},
+			},
+			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, want: []string{firstTagID, secondTagID}},
+			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions?limit=20", want: []string{firstTagID, secondTagID}},
+			{method: http.MethodPatch, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, body: `{"description":"cleared","amountMinor":-123,"tagIds":[]}`, want: []string{}},
+		} {
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, newRequest(testCase.method, testCase.target, testCase.body, true))
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			payload := decode(t, resp)
+			if testCase.method == http.MethodGet && strings.HasSuffix(testCase.target, "?limit=20") {
+				payload = payload["items"].([]any)[0].(map[string]any)
+			}
+			assert.Equal(t, testCase.want, stringValues(payload["tagIds"].([]any)))
+		}
+
+		missingTagIDsResp := httptest.NewRecorder()
+		newHandler(newMockfinanceService(t), newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+			missingTagIDsResp,
+			newRequest(
+				http.MethodPatch,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
+				`{"description":"missing tag IDs","amountMinor":-123}`,
+				true,
+			),
+		)
+		require.Equal(t, http.StatusBadRequest, missingTagIDsResp.Code)
+	})
+
+	t.Run("account-only imports use a separately scoped route contract", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		importID := "import-" + fake.UUID().V4()
+		now := time.Date(2026, time.July, 13, 10, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60))
+		service := newMockfinanceService(t)
+		service.EXPECT().PreviewCSVImport(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.PreviewCSVImportParams) (financepkg.CSVImportPreview, error) {
+				require.Equal(t, financepkg.CSVImportTypeAccounts, params.ImportType)
+				return financepkg.CSVImportPreview{
+					ImportID:            importID,
+					Headers:             []string{"name", "currency", "kind"},
+					WouldCreateAccounts: []string{"Wallet"},
+				}, nil
+			},
+		)
+		service.EXPECT().ConfirmCSVImport(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.ConfirmCSVImportParams) (financepkg.CSVImportConfirmation, error) {
+				require.Equal(t, financepkg.CSVImportTypeAccounts, params.ExpectedImportType)
+				return financepkg.CSVImportConfirmation{
+					ImportID: importID,
+					JobID:    "job-account",
+					JobType:  financepkg.CSVImportJobTypeAccounts,
+				}, nil
+			},
+		)
+		service.EXPECT().GetCSVImportAudit(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.GetCSVImportAuditParams) (financepkg.CSVImportAudit, error) {
+				require.Equal(t, financepkg.CSVImportTypeAccounts, params.ExpectedImportType)
+				return financepkg.CSVImportAudit{
+					ImportID:      importID,
+					TenantID:      tenantID,
+					Status:        financepkg.CSVImportStatusCompleted,
+					JobID:         "job-account",
+					ImportedCount: 1,
+					CreatedAt:     now,
+				}, nil
+			},
+		)
+		handler := newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID))
+
+		previewResp := httptest.NewRecorder()
+		handler.ServeHTTP(previewResp, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/account-imports/preview",
+			`{"fileName":"accounts.csv","csv":"name,currency,kind\nWallet,USD,manual"}`,
+			true,
+		))
+		require.Equal(t, http.StatusOK, previewResp.Code, previewResp.Body.String())
+		previewPayload := decode(t, previewResp)
+		assert.NotContains(t, previewPayload, "mapping")
+
+		confirmResp := httptest.NewRecorder()
+		handler.ServeHTTP(confirmResp, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/account-imports/"+importID+"/confirm",
+			`{}`,
+			true,
+		))
+		require.Equal(t, http.StatusOK, confirmResp.Code, confirmResp.Body.String())
+
+		auditResp := httptest.NewRecorder()
+		handler.ServeHTTP(auditResp, newRequest(
+			http.MethodGet,
+			"/api/v1/finance/tenants/"+tenantID+"/account-imports/"+importID,
+			"",
+			true,
+		))
+		require.Equal(t, http.StatusOK, auditResp.Code, auditResp.Body.String())
+		assert.NotContains(t, decode(t, auditResp), "importType")
 	})
 }
 

@@ -56,7 +56,7 @@ func TestFinanceComposition(t *testing.T) {
 			BankSyncJobEnqueuer:    bankEnqueuer,
 			BankSyncScheduleWriter: bankWriter,
 		}, connectors)
-		services := newFocusedServices(store, serviceConfig)
+		services := newFocusedServices(store, persistence.NewTransactionTagStore(database), serviceConfig)
 
 		require.Same(t, fxEnqueuer, services.FXService.fxJobEnqueuer)
 		require.Same(t, fxWriter, services.FXService.fxScheduleWriter)

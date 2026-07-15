@@ -226,10 +226,9 @@ func GenerateRealisticScenario(
 						TenantID:    tenant.ID,
 						ImportType:  financepkg.CSVImportTypeTransactions,
 						FileName:    "realistic-tag-preview.csv",
-						CSV: "accountName,currency,effectiveAt,amountMinor,description,category,tag,status\n" +
-							importedCard.Name + "," + fixtureCurrencyUSD + "," +
-							startDate.AddDate(0, 0, 8).Format(time.DateOnly) +
-							",-15000,travel import preview,Travel & Vacation,Travel,booked\n",
+						CSV: "Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n" +
+							startDate.AddDate(0, 0, 8).Format("02.01.06") + "," + importedCard.Name +
+							",Travel & Vacation,Travel,150.00,," + fixtureCurrencyUSD + ",travel import preview\n",
 					},
 				)
 				if err != nil {

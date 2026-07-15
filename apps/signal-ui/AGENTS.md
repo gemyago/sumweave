@@ -81,6 +81,10 @@ The rules are:
 - Canonical Bootstrap login and Finance pages must not add route-local `<style>` blocks or `style=` layout/styling attributes.
 - Canonical Bootstrap CSS exceptions must live in shared stylesheets with a short reason comment.
 - Canonical Bootstrap CSS exceptions are limited to shell containment, widget sizing, bridge vars, and a11y/browser fixes.
+- Finance transaction fields follow the documented mobile-first entry order.
+- Transaction CSV imports use seven fixed required headers plus optional Description.
+- Transaction CSV imports support at most 250,000 data rows and 64 MiB files.
+- Keep import actions and their active results adjacent and visible.
 - Do not add Svelte Bootstrap wrappers or another utility CSS framework for canonical Finance/login work.
 - Keep non-finance routes on the existing stack unless broader Bootstrap promotion is explicitly approved.
 - Do not preserve legacy `#/v2/*` finance/login routes or docs without explicit approval.

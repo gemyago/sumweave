@@ -43,6 +43,13 @@ func NewFinanceTransactionValidator() FieldValidator[*FinanceTransaction] {
 	)
 	validateCategoryID := NewSimpleFieldValidator[*string](
 	)
+	validateTagIDs := NewArrayValidator[string](
+		NewSimpleFieldValidator[[]string](
+			EnsureArrayFieldRequired,
+		),
+		NewSimpleFieldValidator[string](
+			),
+	)
 	validateTransferGroupID := NewSimpleFieldValidator[*string](
 	)
 	validateTransferMatchedAt := NewSimpleFieldValidator[*time.Time](
@@ -72,6 +79,7 @@ func NewFinanceTransactionValidator() FieldValidator[*FinanceTransaction] {
 		validateDescription(bindingCtx.Fork("description"), value.Description)
 		validateEffectiveAt(bindingCtx.Fork("effectiveAt"), value.EffectiveAt)
 		validateCategoryID(bindingCtx.Fork("categoryId"), value.CategoryID)
+		validateTagIDs(bindingCtx.Fork("tagIds"), value.TagIDs)
 		validateTransferGroupID(bindingCtx.Fork("transferGroupId"), value.TransferGroupID)
 		validateTransferMatchedAt(bindingCtx.Fork("transferMatchedAt"), value.TransferMatchedAt)
 		validateHiddenAt(bindingCtx.Fork("hiddenAt"), value.HiddenAt)

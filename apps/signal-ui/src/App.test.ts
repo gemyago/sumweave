@@ -68,6 +68,7 @@ const financeApiMocks = vi.hoisted(() => ({
   previewCSVImport: vi.fn(),
   confirmCSVImport: vi.fn(),
   getCSVImportAudit: vi.fn(),
+  listRecentCSVImportAudits: vi.fn(),
   getTenant: vi.fn(),
 }))
 
@@ -180,6 +181,7 @@ describe('App shell', () => {
       description: 'Coffee',
       effectiveAt: now,
       categoryId: null,
+      tagIds: [],
       transferGroupId: null,
       transferMatchedAt: null,
       hiddenAt: null,
@@ -206,6 +208,7 @@ describe('App shell', () => {
     financeApiMocks.previewCSVImport.mockResolvedValue(undefined)
     financeApiMocks.confirmCSVImport.mockResolvedValue(undefined)
     financeApiMocks.getCSVImportAudit.mockResolvedValue(undefined)
+    financeApiMocks.listRecentCSVImportAudits.mockResolvedValue([])
     financeApiMocks.getTenant.mockResolvedValue(undefined)
   })
 

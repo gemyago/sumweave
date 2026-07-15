@@ -465,6 +465,20 @@
     }
     await loadDashboard({ preset: 'custom', startDate: customStartDate, endDate: customEndDate })
   }
+
+  function customRangeStartDate(value: string): Date | undefined {
+    const date = withDateInput(undefined, value)
+    if (!date) return undefined
+    date.setHours(0, 0, 0, 0)
+    return date
+  }
+
+  function customRangeEndDate(value: string): Date | undefined {
+    const date = withDateInput(undefined, value)
+    if (!date) return undefined
+    date.setHours(23, 59, 59, 999)
+    return date
+  }
 </script>
 
 <section
@@ -532,7 +546,7 @@
                     class="form-control"
                     type="date"
                     value={dateInputValue(customStartDate)}
-                    oninput={(event) => customStartDate = withDateInput(customStartDate, event.currentTarget.value)}
+                    oninput={(event) => customStartDate = customRangeStartDate(event.currentTarget.value)}
                     aria-label="Custom start date"
                   />
                 </div>
@@ -543,7 +557,7 @@
                     class="form-control"
                     type="date"
                     value={dateInputValue(customEndDate)}
-                    oninput={(event) => customEndDate = withDateInput(customEndDate, event.currentTarget.value)}
+                    oninput={(event) => customEndDate = customRangeEndDate(event.currentTarget.value)}
                     aria-label="Custom end date"
                   />
                 </div>

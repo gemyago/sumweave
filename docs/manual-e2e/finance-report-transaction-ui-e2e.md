@@ -47,14 +47,16 @@ Expected:
 - its displayed currency is `USD`
 - it is not labeled **Hidden**
 
-## 4. Report a transaction
+## 4. Create tenant tags and report a transaction
 
-1. Open `#/finance/transactions`.
-2. Select **Create transaction**.
-3. Confirm the browser opens `#/finance/transactions/new` and shows **Record transaction**.
-4. Fill the editor with:
+1. Open `#/finance/categories` and create `Transaction UI tag A <run-tag>` and `Transaction UI tag B <run-tag>` in the Tags card.
+2. Open `#/finance/transactions`.
+3. Select **Create transaction**.
+4. Confirm the browser opens `#/finance/transactions/new` and shows **Record transaction**.
+5. Fill the editor with:
    - **Account**: `Transaction UI account <run-tag>`
-   - **Category**: `No category`
+    - **Category**: `No category`
+    - **Tags**: select both run-tagged tenant tags
    - **Kind**: `expense`
    - **Status**: `booked`
    - **Source**: `manual`
@@ -63,11 +65,12 @@ Expected:
    - **Transfer group**: empty
    - **Description**: `Transaction UI e2e <run-tag>`
    - **Effective at**: a valid local date and time
-5. Select **Save transaction** once.
+6. Select **Save transaction** once.
 
 Expected:
 
 - one `POST /api/v1/finance/tenants/<tenant-id>/transactions` request is sent
+- its request body contains both selected `tagIds`
 - the request returns `200`
 - the page shows **Transaction recorded.**
 - the editor remains usable and shows the persisted transaction values
@@ -79,13 +82,17 @@ Expected:
 3. If needed, select the run-tagged account in **Account** and keep **Status** set to `Any status`.
 4. Find the row whose description is `Transaction UI e2e <run-tag>`.
 5. Confirm the row shows the run-tagged account, `-12.34 USD`, `booked`, and `manual`.
-6. Open the row's **Edit** action and confirm the dedicated edit route loads the same description, amount, and effective date.
+6. Confirm the row displays both run-tagged tag labels and no tag IDs.
+7. Open the row's **Edit** action and confirm the dedicated edit route loads the same description, amount, effective date, and both selected tags.
+8. Clear both tag selections and select **Save transaction**. Reload the edit route and confirm no tags are selected.
+9. Return to the ledger and confirm the row no longer shows either tag label.
 
 Expected:
 
 - the created transaction appears exactly once
 - the amount, account, status, source, and description match the submitted form
 - the transaction detail request succeeds and the edit route preserves the selected tenant
+- selected tags persist through create, edit reload, and ledger display; an update with no selected tags clears them
 
 ## 6. Verify account and dashboard effects
 

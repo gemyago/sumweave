@@ -5,6 +5,8 @@
   import {
     createSignalFinanceApiForAuth,
     type FinanceAccount,
+    type FinanceCategory,
+    type FinanceTag,
     type FinanceTransaction,
   } from '../lib/finance/api'
   import { formatFinanceDateTime, formatFinanceMoney } from '../lib/finance/format'
@@ -18,6 +20,8 @@
   let loading = $state(true)
   let error = $state<string | null>(null)
   let accounts = $state<FinanceAccount[]>([])
+  let categories = $state<FinanceCategory[]>([])
+  let tags = $state<FinanceTag[]>([])
   let transactions = $state<FinanceTransaction[]>([])
   let accountFilter = $state('')
   let statusFilter = $state('')
@@ -36,6 +40,8 @@
     ),
   )
   const accountNameById = $derived.by(() => new Map(accounts.map((account) => [account.id, account.name])))
+  const categoryNameById = $derived.by(() => new Map(categories.map((category) => [category.id, category.name])))
+  const tagNameById = $derived.by(() => new Map(tags.map((tag) => [tag.id, tag.name])))
   const visiblePendingCount = $derived(visibleTransactions.filter((item) => item.status === 'pending').length)
   const visibleHiddenCount = $derived(visibleTransactions.filter((item) => item.hiddenAt !== null).length)
   const activeFilterCount = $derived([accountFilter, statusFilter, sourceFilter].filter(Boolean).length)
@@ -58,6 +64,8 @@
         await loadTenantData()
       } else {
         accounts = []
+        categories = []
+        tags = []
         transactions = []
       }
     } catch (loadError) {
@@ -72,6 +80,8 @@
   async function loadTenantData() {
     if (!financeShell.selectedTenantId) {
       accounts = []
+      categories = []
+      tags = []
       transactions = []
       return
     }
@@ -80,8 +90,10 @@
     error = null
 
     try {
-      const [loadedAccounts, loadedTransactions] = await Promise.all([
+      const [loadedAccounts, loadedCategories, loadedTags, loadedTransactions] = await Promise.all([
         financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
+        financeApi.listCategories({ tenantId: financeShell.selectedTenantId }),
+        financeApi.listTags({ tenantId: financeShell.selectedTenantId }),
         financeApi.listTransactions({
           tenantId: financeShell.selectedTenantId,
           accountId: accountFilter,
@@ -93,6 +105,8 @@
       ])
 
       accounts = loadedAccounts
+      categories = loadedCategories
+      tags = loadedTags
       transactions = loadedTransactions
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load transactions'
@@ -113,6 +127,15 @@
 
   function accountName(accountId: string): string {
     return accountNameById.get(accountId) ?? 'Unknown account'
+  }
+
+  function categoryName(categoryId: string | null | undefined): string {
+    if (!categoryId) return '—'
+    return categoryNameById.get(categoryId) ?? 'Unknown category'
+  }
+
+  function tagNames(tagIds: string[]): string[] {
+    return tagIds.map((tagId) => tagNameById.get(tagId) ?? 'Unknown tag')
   }
 
   function badgeClass(flag: string): string {
@@ -307,6 +330,7 @@
                     <th scope="col">Effective</th>
                     <th scope="col">Account</th>
                     <th scope="col">Category</th>
+                    <th scope="col">Tags</th>
                     <th scope="col">Source</th>
                     <th scope="col">Amount</th>
                     <th scope="col">State</th>
@@ -322,7 +346,18 @@
                       </td>
                       <td>{formatFinanceDateTime(item.effectiveAt)}</td>
                       <td>{accountName(item.accountId)}</td>
-                      <td>{item.categoryId || '—'}</td>
+                      <td>{categoryName(item.categoryId)}</td>
+                      <td>
+                        {#if item.tagIds.length}
+                          <div class="d-flex flex-wrap gap-1" aria-label="Transaction tags">
+                            {#each tagNames(item.tagIds) as tagName, index (`${item.id}-${index}`)}
+                              <span class="badge text-bg-light border text-body">{tagName}</span>
+                            {/each}
+                          </div>
+                        {:else}
+                          <span class="text-body-secondary">—</span>
+                        {/if}
+                      </td>
                       <td>{item.source}</td>
                       <td>{formatFinanceMoney(item.amountMinor, item.currency)}</td>
                       <td>

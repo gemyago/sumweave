@@ -69,7 +69,21 @@ func focusedServicesConfigFromConfig(
 	return serviceConfig
 }
 
-func newFocusedServices(store *persistence.Store, cfg focusedServicesConfig) focusedServices {
+func newFocusedServices(
+	store *persistence.Store,
+	transactionStore *persistence.TransactionTagStore,
+	values ...any,
+) focusedServices {
+	var csvImportStore *persistence.CSVImportStore
+	var cfg focusedServicesConfig
+	for _, value := range values {
+		switch typed := value.(type) {
+		case *persistence.CSVImportStore:
+			csvImportStore = typed
+		case focusedServicesConfig:
+			cfg = typed
+		}
+	}
 	tenantOpts := []TenantServiceOption{
 		WithTenantServiceNow(cfg.now),
 		WithTenantServiceIDGenerator(cfg.newID),
@@ -81,6 +95,7 @@ func newFocusedServices(store *persistence.Store, cfg focusedServicesConfig) foc
 	ledgerOpts := []LedgerServiceOption{
 		WithLedgerServiceNow(cfg.now),
 		WithLedgerServiceIDGenerator(cfg.newID),
+		WithLedgerServiceTransactionStore(transactionStore),
 	}
 	reportingOpts := []ReportingServiceOption{
 		WithReportingServiceNow(cfg.now),
@@ -105,6 +120,7 @@ func newFocusedServices(store *persistence.Store, cfg focusedServicesConfig) foc
 	csvImportOpts := []CSVImportServiceOption{
 		WithCSVImportServiceNow(cfg.now),
 		WithCSVImportServiceIDGenerator(cfg.newID),
+		WithCSVImportServiceRowStore(csvImportStore),
 	}
 	if cfg.csvImportJobEnqueuer != nil {
 		csvImportOpts = append(csvImportOpts, WithCSVImportServiceJobEnqueuer(cfg.csvImportJobEnqueuer))

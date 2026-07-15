@@ -132,6 +132,8 @@ The rules are:
 - Avoid markdown tables, prefer lists or other formatting. Tables are hard to read by humans. Use tables only when user explicitly requests it.
 - Do not explicitly normalize dates or timestamps to UTC.
 - Consider SQLite as local-dev only storage. Small issues and inconsistencies are tolerable.
+- Keep API responses single-purpose by default (e.g operating on a single entity); Composition must have a good justification.
+- Keep migration tests shallow; allow one smoke test, no detailed schema checks.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

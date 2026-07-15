@@ -140,6 +140,13 @@ type transactionModel struct {
 
 func (transactionModel) TableName() string { return "finance_transactions" }
 
+type transactionTagModel struct {
+	TransactionID string `gorm:"column:transaction_id;size:255;not null;primaryKey;index:idx_finance_transaction_tags_tag_id,priority:2"`
+	TagID         string `gorm:"column:tag_id;size:255;not null;primaryKey;index:idx_finance_transaction_tags_tag_id,priority:1"`
+}
+
+func (transactionTagModel) TableName() string { return "finance_transaction_tags" }
+
 type fxRateModel struct {
 	ID            string    `gorm:"column:id;size:255;not null;primaryKey"`
 	Provider      string    `gorm:"column:provider;size:64;not null;index:idx_finance_fx_rates_pair_time,unique,priority:1"`
@@ -164,9 +171,12 @@ type csvImportModel struct {
 	MappingJSON           string     `gorm:"column:mapping_json;type:text;not null"`
 	DuplicateRowsJSON     string     `gorm:"column:duplicate_rows_json;type:text;not null"`
 	RejectedRowsJSON      string     `gorm:"column:rejected_rows_json;type:text;not null"`
+	ImportableCount       int64      `gorm:"column:importable_count;not null;default:0"`
 	WouldCreateAccounts   string     `gorm:"column:would_create_accounts_json;type:text;not null"`
 	WouldCreateCategories string     `gorm:"column:would_create_categories_json;type:text;not null"`
 	WouldCreateTags       string     `gorm:"column:would_create_tags_json;type:text;not null"`
+	AccountOptionsJSON    string     `gorm:"column:account_options_json;type:text;not null;default:'[]'"`
+	SelectedAccountsJSON  string     `gorm:"column:selected_account_names_json;type:text;not null;default:'[]'"`
 	JobID                 string     `gorm:"column:job_id;size:255;not null;default:''"`
 	ConfirmedByUserID     string     `gorm:"column:confirmed_by_user_id;size:255;not null;default:''"`
 	ConfirmedAt           *time.Time `gorm:"column:confirmed_at"`
@@ -177,6 +187,18 @@ type csvImportModel struct {
 }
 
 func (csvImportModel) TableName() string { return "finance_csv_imports" }
+
+type csvImportRowOutcomeModel struct {
+	ImportID      string    `gorm:"column:import_id;size:255;not null;primaryKey"`
+	RowNumber     int       `gorm:"column:row_number;not null;primaryKey"`
+	TransactionID string    `gorm:"column:transaction_id;size:255;not null;default:''"`
+	Status        string    `gorm:"column:status;size:64;not null"`
+	Reason        string    `gorm:"column:reason;type:text;not null;default:''"`
+	CreatedAt     time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt     time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (csvImportRowOutcomeModel) TableName() string { return "finance_csv_import_row_outcomes" }
 
 type bankConnectionModel struct {
 	ID                   string     `gorm:"column:id;size:255;not null;primaryKey"`
@@ -406,9 +428,12 @@ func newCSVImportModel(record domain.CSVImportRecord) csvImportModel {
 		MappingJSON:           mustJSON(record.Mapping),
 		DuplicateRowsJSON:     mustJSON(record.DuplicateRows),
 		RejectedRowsJSON:      mustJSON(record.RejectedRows),
+		ImportableCount:       int64(record.ImportableCount),
 		WouldCreateAccounts:   mustJSON(record.WouldCreateAccounts),
 		WouldCreateCategories: mustJSON(record.WouldCreateCategories),
 		WouldCreateTags:       mustJSON(record.WouldCreateTags),
+		AccountOptionsJSON:    mustJSON(record.AccountOptions),
+		SelectedAccountsJSON:  mustJSON(record.SelectedAccountNames),
 		JobID:                 record.JobID,
 		ConfirmedByUserID:     record.ConfirmedByUserID,
 		ConfirmedAt:           record.ConfirmedAt,
@@ -427,6 +452,8 @@ func csvImportFromModel(model csvImportModel) domain.CSVImportRecord {
 	var wouldCreateAccounts []string
 	var wouldCreateCategories []string
 	var wouldCreateTags []string
+	var accountOptions []domain.CSVImportAccountOption
+	var selectedAccountNames []string
 	mustUnmarshalJSON(model.HeadersJSON, &headers)
 	mustUnmarshalJSON(model.MappingJSON, &mapping)
 	mustUnmarshalJSON(model.DuplicateRowsJSON, &duplicateRows)
@@ -434,6 +461,8 @@ func csvImportFromModel(model csvImportModel) domain.CSVImportRecord {
 	mustUnmarshalJSON(model.WouldCreateAccounts, &wouldCreateAccounts)
 	mustUnmarshalJSON(model.WouldCreateCategories, &wouldCreateCategories)
 	mustUnmarshalJSON(model.WouldCreateTags, &wouldCreateTags)
+	mustUnmarshalJSON(model.AccountOptionsJSON, &accountOptions)
+	mustUnmarshalJSON(model.SelectedAccountsJSON, &selectedAccountNames)
 	return domain.CSVImportRecord{
 		ID:                    model.ID,
 		TenantID:              model.TenantID,
@@ -445,9 +474,12 @@ func csvImportFromModel(model csvImportModel) domain.CSVImportRecord {
 		Mapping:               mapping,
 		DuplicateRows:         duplicateRows,
 		RejectedRows:          rejectedRows,
+		ImportableCount:       int(model.ImportableCount),
 		WouldCreateAccounts:   wouldCreateAccounts,
 		WouldCreateCategories: wouldCreateCategories,
 		WouldCreateTags:       wouldCreateTags,
+		AccountOptions:        accountOptions,
+		SelectedAccountNames:  selectedAccountNames,
 		JobID:                 model.JobID,
 		ConfirmedByUserID:     model.ConfirmedByUserID,
 		ConfirmedAt:           model.ConfirmedAt,
@@ -455,6 +487,18 @@ func csvImportFromModel(model csvImportModel) domain.CSVImportRecord {
 		ImportedCount:         int(model.ImportedCount),
 		CreatedAt:             model.CreatedAt,
 		UpdatedAt:             model.UpdatedAt,
+	}
+}
+
+func csvImportRowOutcomeFromModel(model csvImportRowOutcomeModel) domain.CSVImportRowOutcome {
+	return domain.CSVImportRowOutcome{
+		ImportID:      model.ImportID,
+		RowNumber:     model.RowNumber,
+		TransactionID: model.TransactionID,
+		Status:        domain.CSVImportRowOutcomeStatus(model.Status),
+		Reason:        model.Reason,
+		CreatedAt:     model.CreatedAt,
+		UpdatedAt:     model.UpdatedAt,
 	}
 }
 

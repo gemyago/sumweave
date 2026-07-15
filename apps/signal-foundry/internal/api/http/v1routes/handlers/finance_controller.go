@@ -31,6 +31,16 @@ type FinanceController interface {
 		*ArchiveFinanceTenantParams,
 	]) http.Handler
 
+	// POST /api/v1/finance/tenants/{tenantId}/account-imports/{importId}/confirm
+	//
+	// Request type: ConfirmFinanceAccountCsvImportParams,
+	//
+	// Response type: FinanceCsvImportConfirmResponse
+	ConfirmFinanceAccountCsvImport(HandlerBuilder[
+		*ConfirmFinanceAccountCsvImportParams,
+		*FinanceCsvImportConfirmResponse,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm
 	//
 	// Request type: ConfirmFinanceCsvImportParams,
@@ -128,6 +138,16 @@ type FinanceController interface {
 	GetFinanceAccount(HandlerBuilder[
 		*GetFinanceAccountParams,
 		*FinanceAccount,
+	]) http.Handler
+
+	// GET /api/v1/finance/tenants/{tenantId}/account-imports/{importId}
+	//
+	// Request type: GetFinanceAccountCsvImportAuditParams,
+	//
+	// Response type: FinanceCsvImportAuditResponse
+	GetFinanceAccountCsvImportAudit(HandlerBuilder[
+		*GetFinanceAccountCsvImportAuditParams,
+		*FinanceCsvImportAuditResponse,
 	]) http.Handler
 
 	// GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
@@ -278,6 +298,26 @@ type FinanceController interface {
 		*FinanceTransactionsResponse,
 	]) http.Handler
 
+	// GET /api/v1/finance/tenants/{tenantId}/imports
+	//
+	// Request type: ListRecentFinanceCsvImportAuditsParams,
+	//
+	// Response type: FinanceCsvImportAuditsResponse
+	ListRecentFinanceCsvImportAudits(HandlerBuilder[
+		*ListRecentFinanceCsvImportAuditsParams,
+		*FinanceCsvImportAuditsResponse,
+	]) http.Handler
+
+	// POST /api/v1/finance/tenants/{tenantId}/account-imports/preview
+	//
+	// Request type: PreviewFinanceAccountCsvImportParams,
+	//
+	// Response type: FinanceAccountCsvImportPreviewResponse
+	PreviewFinanceAccountCsvImport(HandlerBuilder[
+		*PreviewFinanceAccountCsvImportParams,
+		*FinanceAccountCsvImportPreviewResponse,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/imports/preview
 	//
 	// Request type: PreviewFinanceCsvImportParams,
@@ -354,6 +394,8 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/archive
 // 
+// - POST /api/v1/finance/tenants/{tenantId}/account-imports/{importId}/confirm
+// 
 // - POST /api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/accounts
@@ -373,6 +415,8 @@ type FinanceController interface {
 // - POST /api/v1/finance/tenants/{tenantId}/connections/link-redirect/finish
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}
+// 
+// - GET /api/v1/finance/tenants/{tenantId}/account-imports/{importId}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 // 
@@ -404,6 +448,10 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/transactions
 // 
+// - GET /api/v1/finance/tenants/{tenantId}/imports
+// 
+// - POST /api/v1/finance/tenants/{tenantId}/account-imports/preview
+// 
 // - POST /api/v1/finance/tenants/{tenantId}/imports/preview
 // 
 // - PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
@@ -423,6 +471,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	builder := newFinanceControllerBuilder(rootHandler)
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/invites/accept", controller.AcceptFinanceTenantInvite(builder.AcceptFinanceTenantInvite))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/archive", controller.ArchiveFinanceTenant(builder.ArchiveFinanceTenant))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/account-imports/{importId}/confirm", controller.ConfirmFinanceAccountCsvImport(builder.ConfirmFinanceAccountCsvImport))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm", controller.ConfirmFinanceCsvImport(builder.ConfirmFinanceCsvImport))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/accounts", controller.CreateFinanceAccount(builder.CreateFinanceAccount))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/categories", controller.CreateFinanceCategory(builder.CreateFinanceCategory))
@@ -433,6 +482,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}", controller.DeleteFinanceConnection(builder.DeleteFinanceConnection))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/finish", controller.FinishFinanceConnectionRedirectLink(builder.FinishFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.GetFinanceAccount(builder.GetFinanceAccount))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/account-imports/{importId}", controller.GetFinanceAccountCsvImportAudit(builder.GetFinanceAccountCsvImportAudit))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports/{importId}", controller.GetFinanceCsvImportAudit(builder.GetFinanceCsvImportAudit))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/dashboard", controller.GetFinanceDashboard(builder.GetFinanceDashboard))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/fx/diagnostics", controller.GetFinanceFxDiagnostics(builder.GetFinanceFxDiagnostics))
@@ -448,6 +498,8 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/members", controller.ListFinanceTenantMembers(builder.ListFinanceTenantMembers))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants", controller.ListFinanceTenants(builder.ListFinanceTenants))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions", controller.ListFinanceTransactions(builder.ListFinanceTransactions))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports", controller.ListRecentFinanceCsvImportAudits(builder.ListRecentFinanceCsvImportAudits))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/account-imports/preview", controller.PreviewFinanceAccountCsvImport(builder.PreviewFinanceAccountCsvImport))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/imports/preview", controller.PreviewFinanceCsvImport(builder.PreviewFinanceCsvImport))
 	rootHandler.router.HandleRoute("PUT", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}", controller.PutFinanceSyntheticLinkState(builder.PutFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/start", controller.StartFinanceConnectionRedirectLink(builder.StartFinanceConnectionRedirectLink))

@@ -100,8 +100,8 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 		_, err := service.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
 			ActorUserID: outsiderUserID,
 			TenantID:    tenant.ID,
-			ImportType:  CSVImportTypeAccounts,
-			CSV:         "name,currency,kind\nwallet,USD,manual\n",
+			ImportType:  CSVImportTypeTransactions,
+			CSV:         "Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n29.05.26,wallet,,,1,,USD,purchase\n",
 		})
 		require.Error(t, err)
 
@@ -123,6 +123,18 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			ImportID:    preview.ImportID,
 		})
 		require.ErrorIs(t, err, ErrTenantAccessDenied)
+		_, err = service.ListRecentCSVImportAudits(t.Context(), ListRecentCSVImportAuditsParams{
+			ActorUserID:        outsiderUserID,
+			TenantID:           tenant.ID,
+			ExpectedImportType: CSVImportTypeTransactions,
+		})
+		require.ErrorIs(t, err, ErrTenantAccessDenied)
+		_, err = service.ListRecentCSVImportAudits(t.Context(), ListRecentCSVImportAuditsParams{
+			ActorUserID:        ownerUserID,
+			TenantID:           tenant.ID,
+			ExpectedImportType: CSVImportTypeTransactions,
+		})
+		require.ErrorContains(t, err, "csv import row store is required")
 	})
 
 	t.Run("csv import focused service propagates preview confirm and run persistence failures", func(t *testing.T) {
@@ -140,10 +152,103 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 		_, err := previewService.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
 			ActorUserID: "actor-1",
 			TenantID:    "tenant-1",
-			ImportType:  CSVImportTypeAccounts,
-			CSV:         "name,currency,kind\nwallet,USD,manual\n",
+			ImportType:  CSVImportTypeTransactions,
+			CSV:         "Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n29.05.26,wallet,,,1,,USD,purchase\n",
 		})
 		require.ErrorIs(t, err, previewErr)
+
+		previewSaveErr := errors.New("save preview failed")
+		previewSaveService := NewCSVImportService(
+			stubStore{
+				isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+				saveCSVImportFn: func(context.Context, domain.CSVImportRecord) (domain.CSVImportRecord, error) {
+					return domain.CSVImportRecord{}, previewSaveErr
+				},
+			},
+			&CatalogService{},
+			&LedgerService{},
+		)
+		_, err = previewSaveService.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+			ActorUserID: "actor-1",
+			TenantID:    "tenant-1",
+			ImportType:  CSVImportTypeTransactions,
+			CSV:         "Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n29.05.26,wallet,,,1,,USD,purchase\n",
+		})
+		require.ErrorIs(t, err, previewSaveErr)
+
+		previewTagsErr := errors.New("list tags failed")
+		previewTagsService := NewCSVImportService(
+			stubStore{
+				isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+				listTagsFn: func(context.Context, string, bool) ([]domain.Tag, error) {
+					return nil, previewTagsErr
+				},
+			},
+			&CatalogService{},
+			&LedgerService{},
+		)
+		_, err = previewTagsService.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+			ActorUserID: "actor-1",
+			TenantID:    "tenant-1",
+			ImportType:  CSVImportTypeTransactions,
+			CSV:         "Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n29.05.26,wallet,,,1,,USD,purchase\n",
+		})
+		require.ErrorIs(t, err, previewTagsErr)
+
+		previewCategoriesErr := errors.New("list categories failed")
+		previewCategoriesService := NewCSVImportService(
+			stubStore{
+				isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+				listCategoriesFn: func(context.Context, string, bool) ([]domain.Category, error) {
+					return nil, previewCategoriesErr
+				},
+			},
+			&CatalogService{},
+			&LedgerService{},
+		)
+		_, err = previewCategoriesService.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+			ActorUserID: "actor-1",
+			TenantID:    "tenant-1",
+			ImportType:  CSVImportTypeTransactions,
+			CSV:         "Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n29.05.26,wallet,,,1,,USD,purchase\n",
+		})
+		require.ErrorIs(t, err, previewCategoriesErr)
+
+		previewTransactionsErr := errors.New("list transactions failed")
+		previewTransactionsService := NewCSVImportService(
+			stubStore{
+				isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+				listTransactionsFn: func(context.Context, string, string, domain.TransactionSource, domain.TransactionStatus, bool) ([]domain.Transaction, error) {
+					return nil, previewTransactionsErr
+				},
+			},
+			&CatalogService{},
+			&LedgerService{},
+		)
+		_, err = previewTransactionsService.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+			ActorUserID: "actor-1",
+			TenantID:    "tenant-1",
+			ImportType:  CSVImportTypeTransactions,
+			CSV:         "Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n29.05.26,wallet,,,1,,USD,purchase\n",
+		})
+		require.ErrorIs(t, err, previewTransactionsErr)
+
+		_, err = NewCSVImportService(stubStore{}, &CatalogService{}, &LedgerService{}).ConfirmCSVImport(
+			t.Context(),
+			ConfirmCSVImportParams{ActorUserID: "actor-1", ImportID: "missing-import"},
+		)
+		require.Error(t, err)
+
+		auditErr := errors.New("load csv import audit failed")
+		auditService := NewCSVImportService(
+			stubStore{getCSVImportFn: func(context.Context, string) (*domain.CSVImportRecord, error) {
+				return nil, auditErr
+			}},
+			&CatalogService{},
+			&LedgerService{},
+		)
+		_, err = auditService.GetCSVImportAudit(t.Context(), GetCSVImportAuditParams{ImportID: "missing-import"})
+		require.ErrorIs(t, err, auditErr)
 
 		invalidStatusService := NewCSVImportService(
 			stubStore{

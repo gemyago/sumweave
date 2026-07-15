@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Refresh generated OpenCode agents for crew-manager.
-# Usage: .agents/prompts/crew-manager/setup.sh [path-to-yaml]
+# Usage: ./setup.sh [path-to-yaml]
 
 set -euo pipefail
 

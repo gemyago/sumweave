@@ -37,6 +37,12 @@ func NewFinanceTransactionCreateRequestValidator() FieldValidator[*FinanceTransa
 	)
 	validateCategoryID := NewSimpleFieldValidator[string](
 	)
+	validateTagIDs := NewArrayValidator[string](
+		NewSimpleFieldValidator[[]string](
+		),
+		NewSimpleFieldValidator[string](
+			),
+	)
 	validateTransferGroupID := NewSimpleFieldValidator[string](
 	)
 	
@@ -50,6 +56,7 @@ func NewFinanceTransactionCreateRequestValidator() FieldValidator[*FinanceTransa
 		validateDescription(bindingCtx.Fork("description"), value.Description)
 		validateEffectiveAt(bindingCtx.Fork("effectiveAt"), value.EffectiveAt)
 		validateCategoryID(bindingCtx.Fork("categoryId"), value.CategoryID)
+		validateTagIDs(bindingCtx.Fork("tagIds"), value.TagIDs)
 		validateTransferGroupID(bindingCtx.Fork("transferGroupId"), value.TransferGroupID)
 	}
 }

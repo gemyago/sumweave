@@ -9,6 +9,8 @@ type MockTenantSummary = {
 
 const mocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
+  listCategories: vi.fn(),
+  listTags: vi.fn(),
   listTransactions: vi.fn(),
   shellState: {
     embedded: true,
@@ -32,6 +34,8 @@ vi.mock('../lib/finance/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/finance/api')>()),
   createSignalFinanceApiForAuth: vi.fn(() => ({
     listAccounts: mocks.listAccounts,
+    listCategories: mocks.listCategories,
+    listTags: mocks.listTags,
     listTransactions: mocks.listTransactions,
   })),
 }))
@@ -48,7 +52,11 @@ import FinanceTransactions from './FinanceTransactions.svelte'
 describe('Finance transactions page inside the embedded shell', () => {
   beforeEach(() => {
     mocks.listAccounts.mockReset()
+    mocks.listCategories.mockReset()
+    mocks.listTags.mockReset()
     mocks.listTransactions.mockReset()
+    mocks.listCategories.mockResolvedValue([])
+    mocks.listTags.mockResolvedValue([])
     mocks.shellState.selectedTenantId = 'tenant-1'
     mocks.shellState.selectedTenant = {
       id: 'tenant-1',
@@ -76,6 +84,7 @@ describe('Finance transactions page inside the embedded shell', () => {
         description: 'Groceries',
         effectiveAt: now,
         categoryId: null,
+        tagIds: [],
         transferGroupId: null,
         transferMatchedAt: null,
         hiddenAt: null,
@@ -109,6 +118,7 @@ describe('Finance transactions page inside the embedded shell', () => {
         description: 'Groceries',
         effectiveAt: now,
         categoryId: null,
+        tagIds: [],
         transferGroupId: null,
         transferMatchedAt: null,
         hiddenAt: null,

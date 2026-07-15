@@ -16,6 +16,7 @@ import (
 	"go.uber.org/dig"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/api/http/middleware"
+	financepkg "github.com/gemyago/signal-foundry/finance"
 )
 
 type HTTPServerDeps struct {
@@ -105,6 +106,8 @@ func (srv *HTTPServer) Start(ctx context.Context) error {
 
 type RouterMiddleware func(http.Handler) http.Handler
 
+const maxFinanceCSVImportRequestBodyBytes = 2*financepkg.MaxCSVImportBytes + 1<<20
+
 type RouterMiddlewareDeps struct {
 	dig.In
 
@@ -133,6 +136,8 @@ func NewRouterMiddleware(deps RouterMiddlewareDeps) RouterMiddleware {
 	chain := middleware.Chain(
 		middleware.Middleware(deps.OTELMiddleware), // otel goes first
 		middleware.NewCorrelationMiddleware(deps.IDGen),
+		// CSV JSON escaping can double the 64 MiB raw CSV size; reserve 1 MiB for envelope fields.
+		middleware.NewRequestBodyLimitMiddleware(maxFinanceCSVImportRequestBodyBytes),
 		sloghttp.NewWithConfig(deps.RootLogger, sloghttp.Config{
 			DefaultLevel:     defaultLogLevel,
 			ClientErrorLevel: clientErrorLevel,

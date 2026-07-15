@@ -63,6 +63,52 @@ func TestNewFinanceStoreFromDI(t *testing.T) {
 	require.ErrorContains(t, err, "no such table")
 }
 
+func TestCSVImportJobEnqueuer(t *testing.T) {
+	fake := faker.New()
+	dsn := fmt.Sprintf("file:finance-csv-import-jobs-%s?mode=memory&cache=shared", fake.UUID().V4())
+	sqlDB, err := sqlconn.Open(dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	store, err := jobspkg.NewStore(sqlDB, dsn, jobspkg.StoreOpts{TablePrefix: "finance_csv_"})
+	require.NoError(t, err)
+	require.NoError(t, store.AutoMigrate())
+	registry := jobspkg.NewRegistry()
+	require.NoError(t, jobspkg.RegisterTypedHandler(
+		registry,
+		jobspkg.TypedHandlerSpec[csvImportJobInput, financepkg.CSVImportRunResult, struct{}]{
+			JobType:       jobspkg.JobType(financepkg.CSVImportJobTypeTransactions),
+			SupportsRetry: true,
+			Run: func(context.Context, csvImportJobInput, func(struct{}) error) (financepkg.CSVImportRunResult, error) {
+				return financepkg.CSVImportRunResult{}, nil
+			},
+		},
+	))
+	jobs, err := jobspkg.NewService(jobspkg.ServiceDeps{
+		Store: store, IDGenerator: ident.NewMockGenerator(), Publisher: publisherStub{}, Registry: registry,
+	})
+	require.NoError(t, err)
+	enqueuer := csvImportJobEnqueuer{jobs: jobs}
+	request := financepkg.CSVImportJobRequest{
+		JobType:        financepkg.CSVImportJobTypeTransactions,
+		ImportID:       "import-" + fake.UUID().V4(),
+		TenantID:       "tenant-" + fake.UUID().V4(),
+		ActorID:        "user-" + fake.UUID().V4(),
+		IdempotencyKey: "finance.csv-import:" + fake.UUID().V4(),
+	}
+
+	first, err := enqueuer.EnqueueCSVImport(t.Context(), request)
+	require.NoError(t, err)
+	second, err := enqueuer.EnqueueCSVImport(t.Context(), request)
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
+	persisted, err := store.Get(t.Context(), first.ID)
+	require.NoError(t, err)
+	assert.Equal(t, request.IdempotencyKey, persisted.IdempotencyKey)
+	var input csvImportJobInput
+	require.NoError(t, json.Unmarshal(persisted.InputJSON, &input))
+	assert.Equal(t, request.ImportID, input.ImportID)
+}
+
 //nolint:cyclop,gocyclo // Keeps closely related DI integration scenarios together.
 func TestNewFinanceServiceFromDI(t *testing.T) {
 	memoryDSNOrdinal := 0

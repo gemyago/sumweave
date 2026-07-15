@@ -253,8 +253,16 @@ func registerCSVImportJobHandler(
 			jobspkg.TypedHandlerSpec[csvImportJobInput, financepkg.CSVImportRunResult, struct{}]{
 				JobType:       jobType,
 				SupportsRetry: true,
-				Run: func(ctx context.Context, input csvImportJobInput, _ func(struct{}) error) (financepkg.CSVImportRunResult, error) {
-					return service.RunCSVImportJob(ctx, financepkg.RunCSVImportJobParams{ImportID: input.ImportID})
+				RunJob: func(
+					ctx context.Context,
+					job jobspkg.Job,
+					input csvImportJobInput,
+					_ func(struct{}) error,
+				) (financepkg.CSVImportRunResult, error) {
+					return service.RunCSVImportJob(ctx, financepkg.RunCSVImportJobParams{
+						ImportID: input.ImportID,
+						JobID:    job.ID,
+					})
 				},
 			},
 		)
@@ -362,7 +370,8 @@ func (e csvImportJobEnqueuer) EnqueueCSVImport(
 			UserID: strings.TrimSpace(request.ActorID),
 			Source: jobspkg.RequesterSourceOperator,
 		},
-		Input: csvImportJobInput{ImportID: strings.TrimSpace(request.ImportID)},
+		Input:          csvImportJobInput{ImportID: strings.TrimSpace(request.ImportID)},
+		IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
 	})
 	if err != nil {
 		return financepkg.CSVImportJobRef{}, err

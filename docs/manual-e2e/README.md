@@ -5,6 +5,7 @@ Manual guides:
 - [finance-tenants-management-e2e.md](./finance-tenants-management-e2e.md) — create, list, get by id, archive, then verify archived tenants disappear from active list and get-by-id.
 - [finance-account-balances-e2e.md](./finance-account-balances-e2e.md) — create a tenant and accounts, record mixed booked/pending transactions, then verify account balances.
 - [finance-report-transaction-ui-e2e.md](./finance-report-transaction-ui-e2e.md) — create a tenant and manual account in the UI, report a transaction through the dedicated editor, then verify the new ledger row.
+- [finance-transaction-csv-import-e2e.md](./finance-transaction-csv-import-e2e.md) — preview, confirm, and observe a fixed-contract Finance transaction CSV import.
 - [finance-ui-shell-smoke-e2e.md](./finance-ui-shell-smoke-e2e.md) — smoke canonical Bootstrap login, default Finance landing, Finance shell/dashboard and route groups, responsive behavior, and a quick non-finance regression path.
 - [bank-linking-e2e.md](./bank-linking-e2e.md) — bank-linking API e2e guide.
 - [enable-banking-mock-aspsp-ui-e2e.md](./enable-banking-mock-aspsp-ui-e2e.md) — headed-browser PKO linking through Enable Banking Mock ASPSP, including mock accounts, transactions, authorization, and sync.

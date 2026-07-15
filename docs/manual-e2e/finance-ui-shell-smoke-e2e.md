@@ -54,7 +54,7 @@ Expected:
    - category or spending summary section
    - recent transactions section
    - compact needs-attention or follow-up states
-3. Change the reporting range if that control is available and confirm the page updates without losing shell state.
+3. Change the reporting range if that control is available and confirm the page updates without losing shell state. For custom date-only values, confirm the selected start is reported from local start-of-day and the selected end through local end-of-day, including any imported row recorded at local midnight on the first day.
 
 Expected:
 

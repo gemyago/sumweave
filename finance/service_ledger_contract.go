@@ -8,7 +8,11 @@ import (
 	"github.com/gemyago/signal-foundry/finance/domain"
 )
 
-var ErrTransactionNotFound = errors.New("transaction not found")
+var (
+	ErrTransactionNotFound = errors.New("transaction not found")
+	ErrDuplicateTagID      = errors.New("duplicate tag id")
+	ErrTagNotAssignable    = errors.New("tag is not assignable")
+)
 
 type RecordTransactionParams struct {
 	ActorUserID      string
@@ -22,6 +26,7 @@ type RecordTransactionParams struct {
 	Description      string
 	EffectiveAt      time.Time
 	CategoryID       string
+	TagIDs           []string
 	TransferGroupID  string
 	ProviderOriginal *domain.ProviderTransactionOriginal
 }
@@ -35,6 +40,7 @@ type UpdateTransactionParams struct {
 	EffectiveAt   *time.Time
 	CategoryID    string
 	ClearCategory bool
+	TagIDs        []string
 }
 
 type HideTransactionParams struct {

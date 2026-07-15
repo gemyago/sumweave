@@ -78,6 +78,7 @@ export interface FinanceTransaction {
   description: string
   effectiveAt: Date
   categoryId?: string | null
+  tagIds: string[]
   transferGroupId?: string | null
   transferMatchedAt?: Date | null
   hiddenAt?: Date | null
@@ -213,19 +214,35 @@ export interface FinanceFXDiagnostics {
 
 export interface FinanceCSVRejectedRow {
   rowNumber: number
+  field?: string
   reason: string
+}
+
+export interface FinanceCSVImportAccountOption {
+  name: string
+  sourceRowCount: number
+  selected: boolean
+}
+
+export interface FinanceCSVImportRowOutcome {
+  rowNumber: number
+  transactionId?: string
+  status: string
+  reason: string
+  createdAt: Date
+  updatedAt: Date
 }
 
 export interface FinanceCSVImportPreview {
   importId: string
-  importType: string
+  importableCount: number
   headers: string[]
-  mapping: Record<string, string>
   duplicateRows: FinanceCSVRejectedRow[]
   rejectedRows: FinanceCSVRejectedRow[]
   wouldCreateAccounts: string[]
   wouldCreateCategories: string[]
   wouldCreateTags: string[]
+  accountOptions: FinanceCSVImportAccountOption[]
 }
 
 export interface FinanceCSVImportConfirmation {
@@ -237,11 +254,12 @@ export interface FinanceCSVImportConfirmation {
 export interface FinanceCSVImportAudit {
   importId: string
   tenantId: string
-  importType: string
   status: string
   jobId: string
   confirmedByUserId: string
   importedCount: number
+  rejectedRows: FinanceCSVRejectedRow[]
+  rowOutcomes: FinanceCSVImportRowOutcome[]
   createdAt: Date
   confirmedAt?: Date | null
   completedAt?: Date | null
@@ -308,6 +326,7 @@ export interface SignalFinanceApi {
     description: string
     effectiveAt: Date
     categoryId?: string
+    tagIds: string[]
     transferGroupId?: string
   }): Promise<FinanceTransaction>
   updateTransaction(params: {
@@ -317,6 +336,7 @@ export interface SignalFinanceApi {
     amountMinor: number
     effectiveAt?: Date
     categoryId?: string | null
+    tagIds: string[]
   }): Promise<FinanceTransaction>
   listConnections(params: { tenantId: string }): Promise<FinanceBankConnection[]>
   linkTokenConnection(params: { tenantId: string; provider: string; token: string }): Promise<FinanceBankConnection>
@@ -351,16 +371,16 @@ export interface SignalFinanceApi {
   }): Promise<FinanceJobRef>
   previewCSVImport(params: {
     tenantId: string
-    importType: string
     fileName: string
     csv: string
+    selectedAccountNames?: string[]
   }): Promise<FinanceCSVImportPreview>
   confirmCSVImport(params: {
     tenantId: string
     importId: string
-    mapping: Record<string, string>
   }): Promise<FinanceCSVImportConfirmation>
   getCSVImportAudit(params: { tenantId: string; importId: string }): Promise<FinanceCSVImportAudit>
+  listRecentCSVImportAudits(params: { tenantId: string }): Promise<FinanceCSVImportAudit[]>
 }
 
 export class FinanceApiError extends Error {
@@ -399,15 +419,15 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       },
       ...(requestParams.body ? { body: JSON.stringify(serializeJson(requestParams.body)) } : {}),
     })
-    const json = await response.json().catch(() => undefined)
     if (!response.ok) {
       throw new FinanceApiError({
         status: response.status,
         method: requestParams.method,
         path: requestParams.path,
-        message: extractErrorMessage(response, json),
+        message: response.statusText || 'Request failed',
       })
     }
+    const json = await response.json().catch(() => undefined)
     return json as T
   }
 
@@ -523,7 +543,18 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         await request<RawTransaction>({
           method: 'POST',
           path: `/finance/tenants/${encodeURIComponent(params.tenantId)}/transactions`,
-          body: params,
+          body: {
+            source: params.source,
+            status: params.status,
+            kind: params.kind,
+            amountMinor: params.amountMinor,
+            currency: params.currency,
+            description: params.description,
+            effectiveAt: serializeRequestTimestamp(params.effectiveAt),
+            ...(params.categoryId === undefined ? {} : { categoryId: params.categoryId }),
+            tagIds: params.tagIds,
+            ...(params.transferGroupId === undefined ? {} : { transferGroupId: params.transferGroupId }),
+          },
         }),
       )
     },
@@ -540,7 +571,8 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
               ? {}
               : params.categoryId === null
                 ? { clearCategory: true }
-                : { categoryId: params.categoryId }),
+                 : { categoryId: params.categoryId }),
+            tagIds: params.tagIds,
           },
         }),
       )
@@ -650,7 +682,11 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         await request<RawCSVImportPreview>({
           method: 'POST',
           path: `/finance/tenants/${encodeURIComponent(params.tenantId)}/imports/preview`,
-          body: params,
+          body: {
+            fileName: params.fileName,
+            csv: params.csv,
+            ...(params.selectedAccountNames === undefined ? {} : { selectedAccountNames: params.selectedAccountNames }),
+          },
         }),
       )
     },
@@ -659,7 +695,6 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         await request<RawCSVImportConfirmation>({
           method: 'POST',
           path: `/finance/tenants/${encodeURIComponent(params.tenantId)}/imports/${encodeURIComponent(params.importId)}/confirm`,
-          body: { mapping: params.mapping },
         }),
       )
     },
@@ -670,6 +705,13 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
           path: `/finance/tenants/${encodeURIComponent(params.tenantId)}/imports/${encodeURIComponent(params.importId)}`,
         }),
       )
+    },
+    async listRecentCSVImportAudits(params) {
+      const response = await request<{ items: RawCSVImportAudit[] }>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(params.tenantId)}/imports`,
+      })
+      return requireItems<RawCSVImportAudit>(response, 'finance.csvAudits').map(mapCSVImportAudit)
     },
   }
 }
@@ -685,7 +727,7 @@ interface RawAccount { id: string; tenantId: string; name: string; currency: str
 interface RawCategory { id: string; tenantId: string; name: string; kind: string; seededDefault: boolean; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTag { id: string; tenantId: string; name: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTransactionProviderOriginal { amountMinor: number; currency: string; description: string; effectiveAt?: string | null }
-interface RawTransaction { id: string; tenantId: string; accountId: string; source: string; status: string; kind: string; amountMinor: number; currency: string; description: string; effectiveAt: string; categoryId?: string | null; transferGroupId?: string | null; transferMatchedAt?: string | null; hiddenAt?: string | null; providerOriginal?: RawTransactionProviderOriginal; createdAt: string; updatedAt: string }
+interface RawTransaction { id: string; tenantId: string; accountId: string; source: string; status: string; kind: string; amountMinor: number; currency: string; description: string; effectiveAt: string; categoryId?: string | null; tagIds: string[]; transferGroupId?: string | null; transferMatchedAt?: string | null; hiddenAt?: string | null; providerOriginal?: RawTransactionProviderOriginal; createdAt: string; updatedAt: string }
 interface RawConnectionSchedule { connectionId: string; intervalSeconds: number; nextRunAt?: string | null; lastScheduledAt?: string | null; lastStartedAt?: string | null; lastCompletedAt?: string | null; lastJobId?: string; enabled: boolean; createdAt: string; updatedAt: string }
 interface RawConnection { id: string; tenantId: string; provider: string; displayName: string; providerReference: string; externalId: string; state: string; lastSyncJobId?: string; lastSyncStartedAt?: string | null; lastSuccessfulSyncAt?: string | null; lastSyncError?: string; createdAt: string; updatedAt: string; schedule?: RawConnectionSchedule }
 interface RawConnectionRedirectStart { provider: string; authorizationUrl: string; state: string }
@@ -707,10 +749,12 @@ interface RawCurrencyTotal { currency: string; incomeMinor: number; expenseMinor
 interface RawDashboard { period: RawDashboardPeriod; settled: RawMoneySummary; pending: RawMoneySummary; categoryBreakdowns: RawCategoryBreakdown[]; accountBalances: RawAccountBalance[]; alerts: RawDashboardAlert[]; missingFx: RawMissingFX[]; nativeSettledTotals: RawCurrencyTotal[] }
 interface RawFXDiagnostics { defaultProvider: string; storedRatesCount: number; providers: RawFXProvider[] }
 interface RawFXProvider { name: string; default: boolean; ready: boolean }
-interface RawCSVRejectedRow { rowNumber: number; reason: string }
-interface RawCSVImportPreview { importId: string; importType: string; headers: string[]; mapping: Record<string, string>; duplicateRows: RawCSVRejectedRow[]; rejectedRows: RawCSVRejectedRow[]; wouldCreateAccounts: string[]; wouldCreateCategories: string[]; wouldCreateTags: string[] }
+interface RawCSVRejectedRow { rowNumber: number; field?: string; reason: string }
+interface RawCSVImportAccountOption { name: string; sourceRowCount: number; selected: boolean }
+interface RawCSVImportPreview { importId: string; importableCount: number; headers: string[]; duplicateRows: RawCSVRejectedRow[]; rejectedRows: RawCSVRejectedRow[]; wouldCreateAccounts: string[]; wouldCreateCategories: string[]; wouldCreateTags: string[]; accountOptions: RawCSVImportAccountOption[] }
 interface RawCSVImportConfirmation { importId: string; jobId: string; jobType: string }
-interface RawCSVImportAudit { importId: string; tenantId: string; importType: string; status: string; jobId: string; confirmedByUserId: string; importedCount: number; createdAt: string; confirmedAt?: string | null; completedAt?: string | null }
+interface RawCSVImportRowOutcome { rowNumber: number; transactionId?: string; status: string; reason: string; createdAt: string; updatedAt: string }
+interface RawCSVImportAudit { importId: string; tenantId: string; status: string; jobId: string; confirmedByUserId: string; importedCount: number; rejectedRows: RawCSVRejectedRow[]; rowOutcomes: RawCSVImportRowOutcome[]; createdAt: string; confirmedAt?: string | null; completedAt?: string | null }
 interface RawJobRef { jobId: string; jobType: string; provider?: string }
 
 function mapTenant(item: RawTenantSummary): FinanceTenantSummary {
@@ -738,7 +782,8 @@ function mapTag(item: RawTag): FinanceTag {
   return { ...item, hiddenAt: parseOptionalDate(item.hiddenAt, 'finance.tag.hiddenAt'), createdAt: parseRequiredDate(item.createdAt, 'finance.tag.createdAt'), updatedAt: parseRequiredDate(item.updatedAt, 'finance.tag.updatedAt') }
 }
 function mapTransaction(item: RawTransaction): FinanceTransaction {
-  requireFields(item, 'finance.transaction', ['id', 'tenantId', 'accountId', 'source', 'status', 'kind', 'amountMinor', 'currency', 'description', 'effectiveAt', 'createdAt', 'updatedAt'])
+  requireFields(item, 'finance.transaction', ['id', 'tenantId', 'accountId', 'source', 'status', 'kind', 'amountMinor', 'currency', 'description', 'effectiveAt', 'tagIds', 'createdAt', 'updatedAt'])
+  requireArray(item.tagIds, 'finance.transaction.tagIds')
   const { providerOriginal, ...transaction } = item
   const effectiveAt = parseRequiredDate(item.effectiveAt, 'finance.transaction.effectiveAt')
   return {
@@ -840,29 +885,46 @@ function mapFXDiagnostics(item: RawFXDiagnostics): FinanceFXDiagnostics {
   return { defaultProvider: item.defaultProvider, storedRatesCount: item.storedRatesCount, providers: item.providers }
 }
 function mapCSVPreview(item: RawCSVImportPreview): FinanceCSVImportPreview {
-  requireFields(item, 'finance.csvPreview', ['importId', 'importType', 'headers', 'mapping', 'duplicateRows', 'rejectedRows', 'wouldCreateAccounts', 'wouldCreateCategories', 'wouldCreateTags'])
+  requireFields(item, 'finance.csvPreview', ['importId', 'importableCount', 'headers', 'duplicateRows', 'rejectedRows', 'wouldCreateAccounts', 'wouldCreateCategories', 'wouldCreateTags', 'accountOptions'])
   requireArray(item.headers, 'finance.csvPreview.headers')
   requireArray(item.duplicateRows, 'finance.csvPreview.duplicateRows')
   requireArray(item.rejectedRows, 'finance.csvPreview.rejectedRows')
   requireArray(item.wouldCreateAccounts, 'finance.csvPreview.wouldCreateAccounts')
   requireArray(item.wouldCreateCategories, 'finance.csvPreview.wouldCreateCategories')
   requireArray(item.wouldCreateTags, 'finance.csvPreview.wouldCreateTags')
+  requireArray(item.accountOptions, 'finance.csvPreview.accountOptions')
+  item.accountOptions.forEach((option, index) => requireFields(option, `finance.csvPreview.accountOptions[${index}]`, ['name', 'sourceRowCount', 'selected']))
   return {
     importId: item.importId,
-    importType: item.importType,
+    importableCount: item.importableCount,
     headers: item.headers,
-    mapping: item.mapping,
     duplicateRows: item.duplicateRows,
     rejectedRows: item.rejectedRows,
     wouldCreateAccounts: item.wouldCreateAccounts,
     wouldCreateCategories: item.wouldCreateCategories,
     wouldCreateTags: item.wouldCreateTags,
+    accountOptions: item.accountOptions,
   }
 }
 function mapCSVImportConfirmation(item: RawCSVImportConfirmation): FinanceCSVImportConfirmation { return item }
 function mapCSVImportAudit(item: RawCSVImportAudit): FinanceCSVImportAudit {
-  requireFields(item, 'finance.csvAudit', ['importId', 'tenantId', 'importType', 'status', 'jobId', 'confirmedByUserId', 'importedCount', 'createdAt'])
-  return { ...item, createdAt: parseRequiredDate(item.createdAt, 'finance.csvAudit.createdAt'), confirmedAt: parseOptionalDate(item.confirmedAt, 'finance.csvAudit.confirmedAt'), completedAt: parseOptionalDate(item.completedAt, 'finance.csvAudit.completedAt') }
+  requireFields(item, 'finance.csvAudit', ['importId', 'tenantId', 'status', 'jobId', 'confirmedByUserId', 'importedCount', 'rejectedRows', 'rowOutcomes', 'createdAt'])
+  requireArray(item.rejectedRows, 'finance.csvAudit.rejectedRows')
+  requireArray(item.rowOutcomes, 'finance.csvAudit.rowOutcomes')
+  return {
+    ...item,
+    createdAt: parseRequiredDate(item.createdAt, 'finance.csvAudit.createdAt'),
+    confirmedAt: parseOptionalDate(item.confirmedAt, 'finance.csvAudit.confirmedAt'),
+    completedAt: parseOptionalDate(item.completedAt, 'finance.csvAudit.completedAt'),
+    rowOutcomes: item.rowOutcomes.map((outcome, index) => {
+      requireFields(outcome, `finance.csvAudit.rowOutcomes[${index}]`, ['rowNumber', 'status', 'reason', 'createdAt', 'updatedAt'])
+      return {
+        ...outcome,
+        createdAt: parseRequiredDate(outcome.createdAt, `finance.csvAudit.rowOutcomes[${index}].createdAt`),
+        updatedAt: parseRequiredDate(outcome.updatedAt, `finance.csvAudit.rowOutcomes[${index}].updatedAt`),
+      }
+    }),
+  }
 }
 function mapJobRef(item: RawJobRef): FinanceJobRef { return { jobId: item.jobId, jobType: item.jobType, ...(item.provider ? { provider: item.provider } : {}) } }
 
@@ -920,13 +982,6 @@ function requirePresentFields<T extends object>(value: T, scope: string, fields:
     }
   }
   return value
-}
-
-function extractErrorMessage(response: Response, json: unknown): string {
-  if (json && typeof json === 'object' && 'message' in json && typeof json.message === 'string') {
-    return json.message
-  }
-  return response.statusText || 'Request failed'
 }
 
 function serializeJson(value: unknown): unknown {

@@ -303,7 +303,7 @@
 - Multi-tenant tenant selection is shell-owned and compact; dashboard/content routes do not repeat tenant picker panels or tenant-workspace explainer blocks.
 - Single-tenant tenant-scoped finance routes do not show a tenant selector in normal shell chrome.
 - Finance detail flows prefer separate routes over split panes; the first slice uses `/finance/accounts/:accountId` and `/finance/jobs/:jobId` for that purpose.
-- Finance timestamps render in browser-local date or date-time format instead of raw ISO strings. Native date controls create local JavaScript `Date` values and serialize them at the API boundary; timezone and calendar edge cases are deferred until production evidence.
+- Finance timestamps render in browser-local date or date-time format instead of raw ISO strings. Native date controls create local JavaScript `Date` values and serialize them at the API boundary; dashboard custom date-only controls resolve selected starts to local start-of-day and ends to local end-of-day.
 - At narrow widths, the finance rail remains fully visible but stacks above the utility header and route body as a full-width Bootstrap aside; there is no separate menu-toggle state.
 - At narrow mobile widths, the utility row keeps only compact route/tenant/auth controls and hides non-essential explainer copy.
 
@@ -344,9 +344,10 @@
 
 - Transactions browse route: Bootstrap filter card, tenant/account/status/source/sort filters, route-level action links, and visible summary chips.
 - Browse results: table-first ledger with explicit state badges for pending, hidden, transfer, refund, and reconciliation signals plus direct **Edit** row actions.
+- Browse results resolve each assigned category ID against the tenant-local categories endpoint and show its category name; a missing catalog entry is shown as `Unknown category`, never as an opaque ID. They separately load the tenant tag catalog, resolve every transaction `tagIds` value to compact labels, and show `Unknown tag` for IDs absent from that catalog rather than raw IDs.
 - Browse results load fixed 20-row pages with simple Previous/Next controls; changing tenant or filters returns to the first page.
 - The browse route does not render a selected-transaction inspector; row editing opens the dedicated detail route.
-- Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly form, explicit save/cancel actions, visible transaction state context, and provider-original values when present. The browser's local `datetime-local` control uses native JavaScript millisecond precision, rejects skipped spring-forward wall times, and uses the browser's first fall-back occurrence when ambiguous.
+- Shared transaction editor: reused for both create and edit routes, with a single-column mobile-friendly form, explicit save/cancel actions, visible transaction state context, and provider-original values when present. It separately loads the tenant tag catalog and provides a labeled native checkbox group immediately after Category; it assigns existing tags only, preselects persisted IDs, and never creates tags inline. New records default to `expense` and the user's local calendar day; edit records retain their persisted effective value. Currency is a selector backed by the product-supported currency-code list, not free text. On mobile the fields are ordered account, category, tags, kind, amount, currency, description, effective date, then status, source, and transfer group. Create sends selected `tagIds`; every update replaces assignments with selected `tagIds`, including `[]` to clear. The browser's local `datetime-local` control uses native JavaScript millisecond precision, rejects skipped spring-forward wall times, and uses the browser's first fall-back occurrence when ambiguous.
 - Edit route: loads one tenant-scoped transaction directly, keeps finance navigation context intact, and shows provider-original values when present so synced data stays distinguishable from operator edits.
 
 **Categories / tags (`/finance/categories`)**
@@ -374,9 +375,22 @@
 
 **Imports (`/finance/imports`)**
 
-- Workflow stays step-by-step: preview form → preview/mapping card → import audit card.
-- Preview card shows resolved headers, editable mapping fields, would-create lists, and confirm action.
-- Audit card exposes import status and a deep link to `#/finance/jobs/:jobId`.
+- Transaction workflow stays step-by-step: Step 1 fixed CSV source → always-present Step 2 active workspace → secondary durable-import history.
+- The page is transaction-only. Account-only CSV imports remain on their separately routed/API flow and are not selectable here.
+- Input supports CSV file selection plus paste/edit. It shows a copyable and downloadable sample with the seven required headers: `Date,Account,Category,Tags,Expense amount,Income amount,Currency`, plus optional `Description`. Supported headers are matched by name in any order; missing or blank descriptions become `n/a`; unsupported extra columns are ignored wherever they occur.
+- Transaction CSVs support up to 250,000 data rows (header excluded) and 64 MiB; oversized selected files are rejected before reading.
+- Contract help states strict `dd.MM.yy` dates (`00`–`99` means 2000–2099), USD/EUR/PLN/UAH support, quoted multi-tags, and quoted localized amounts such as `"8 300,00"`.
+- The active workspace is directly below Step 1 and is always present for pending preview, preview result, confirmation, audit, terminal/error, and idle states; Recent imports remains below it.
+- Initial preview sends only `{fileName,csv}`. It returns preview-specific textual account options with name, source-row count, and selected state; these are not account entities. Step 2 renders them as native accessible checkboxes, all checked initially. Changing a checkbox debounces a replacement preview request with `{fileName,csv,selectedAccountNames}`; reparsing/re-uploading is intentional for this occasional workflow.
+- Checked account names are the only rows included in diagnostics, duplicate checks, creation summaries, and confirmation. An explicit empty selection remains empty, reports `Transactions to import: 0`, and disables confirmation. Blank or otherwise unassignable account diagnostics remain visible.
+- While account selection is dirty or its replacement preview is pending, confirmation is disabled and Step 2 shows `Updating preview…`. Only the latest account-selection response may replace the workspace, and background replacement previews do not scroll or move focus. Clicking **Preview transactions** immediately disables the duplicate action, exposes a polite pending status, and scrolls/focuses the active workspace before rendering headers, rejected and duplicate rows as row/field/reason, and would-create account/category/tag summaries.
+- A rejected preview request shows the stable generic message `We could not validate this CSV preview. Check the file and try again.`; it does not display an HTTP error body.
+- Preview separately names the matched required headers and any ignored source headers; unsupported columns are never presented as resolved.
+- Preview visibly reports the API-provided `Transactions to import: N` count after rejected and duplicate rows are excluded, including `0` when no row can be confirmed.
+- Confirmation sends no body. When preview excludes rejected or duplicate rows, copy explicitly says confirmation queues only remaining valid rows.
+- Repeated confirmation is idempotent and recovers the existing import/job; terminal audits remove the confirmation action.
+- Audit refreshes while status is running/non-terminal, also offers manual refresh, and renders final rejected rows plus durable row outcomes. Terminal audit loads synchronize the matching Recent imports summary; background polling does not move focus.
+- A tenant-scoped recent-import list reopens durable confirmed audits after navigation or refresh; previews without a durable job do not appear in this history. Opening an audit immediately marks that item as loading, then scrolls/focuses the active workspace; the loaded item remains visibly selected.
 
 **Finance job detail (`/finance/jobs/:jobId`)**
 

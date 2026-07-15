@@ -14,8 +14,9 @@ func NewFinanceCsvImportPreviewResponseValidator() FieldValidator[*FinanceCsvImp
 	validateImportID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateImportType := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
+	validateImportableCount := NewSimpleFieldValidator[int64](
+		EnsureNonDefault[int64],
+		NewMinMaxValueValidator[int64](0, false, true),
 	)
 	validateHeaders := NewArrayValidator[string](
 		NewSimpleFieldValidator[[]string](
@@ -24,21 +25,17 @@ func NewFinanceCsvImportPreviewResponseValidator() FieldValidator[*FinanceCsvImp
 		NewSimpleFieldValidator[string](
 			),
 	)
-	validateMapping := NewSimpleFieldValidator[map[string]string](
-	)
-	validateDuplicateRows := NewArrayValidator[map[string]interface{}](
-		NewSimpleFieldValidator[[]map[string]interface{}](
+	validateDuplicateRows := NewArrayValidator[*FinanceCsvImportRowDiagnostic](
+		NewSimpleFieldValidator[[]*FinanceCsvImportRowDiagnostic](
 			EnsureArrayFieldRequired,
 		),
-		NewSimpleFieldValidator[map[string]interface{}](
-			),
+		NewFinanceCsvImportRowDiagnosticValidator(),
 	)
-	validateRejectedRows := NewArrayValidator[map[string]interface{}](
-		NewSimpleFieldValidator[[]map[string]interface{}](
+	validateRejectedRows := NewArrayValidator[*FinanceCsvImportRowDiagnostic](
+		NewSimpleFieldValidator[[]*FinanceCsvImportRowDiagnostic](
 			EnsureArrayFieldRequired,
 		),
-		NewSimpleFieldValidator[map[string]interface{}](
-			),
+		NewFinanceCsvImportRowDiagnosticValidator(),
 	)
 	validateWouldCreateAccounts := NewArrayValidator[string](
 		NewSimpleFieldValidator[[]string](
@@ -61,16 +58,22 @@ func NewFinanceCsvImportPreviewResponseValidator() FieldValidator[*FinanceCsvImp
 		NewSimpleFieldValidator[string](
 			),
 	)
+	validateAccountOptions := NewArrayValidator[*FinanceCsvImportAccountOption](
+		NewSimpleFieldValidator[[]*FinanceCsvImportAccountOption](
+			EnsureArrayFieldRequired,
+		),
+		NewFinanceCsvImportAccountOptionValidator(),
+	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceCsvImportPreviewResponse) {
 		validateImportID(bindingCtx.Fork("importId"), value.ImportID)
-		validateImportType(bindingCtx.Fork("importType"), value.ImportType)
+		validateImportableCount(bindingCtx.Fork("importableCount"), value.ImportableCount)
 		validateHeaders(bindingCtx.Fork("headers"), value.Headers)
-		validateMapping(bindingCtx.Fork("mapping"), value.Mapping)
 		validateDuplicateRows(bindingCtx.Fork("duplicateRows"), value.DuplicateRows)
 		validateRejectedRows(bindingCtx.Fork("rejectedRows"), value.RejectedRows)
 		validateWouldCreateAccounts(bindingCtx.Fork("wouldCreateAccounts"), value.WouldCreateAccounts)
 		validateWouldCreateCategories(bindingCtx.Fork("wouldCreateCategories"), value.WouldCreateCategories)
 		validateWouldCreateTags(bindingCtx.Fork("wouldCreateTags"), value.WouldCreateTags)
+		validateAccountOptions(bindingCtx.Fork("accountOptions"), value.AccountOptions)
 	}
 }

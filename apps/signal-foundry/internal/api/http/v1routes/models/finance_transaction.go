@@ -25,6 +25,7 @@ type FinanceTransaction struct {
 	Description string `json:"description"`
 	EffectiveAt time.Time `json:"effectiveAt"`
 	CategoryID *string `json:"categoryId,omitempty"`
+	TagIDs []string `json:"tagIds"`
 	TransferGroupID *string `json:"transferGroupId,omitempty"`
 	TransferMatchedAt *time.Time `json:"transferMatchedAt,omitempty"`
 	HiddenAt *time.Time `json:"hiddenAt,omitempty"`

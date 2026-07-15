@@ -17,9 +17,6 @@ func NewFinanceCsvImportAuditResponseValidator() FieldValidator[*FinanceCsvImpor
 	validateTenantID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateImportType := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
-	)
 	validateStatus := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
@@ -32,6 +29,18 @@ func NewFinanceCsvImportAuditResponseValidator() FieldValidator[*FinanceCsvImpor
 	validateImportedCount := NewSimpleFieldValidator[int64](
 		EnsureNonDefault[int64],
 	)
+	validateRejectedRows := NewArrayValidator[*FinanceCsvImportRowDiagnostic](
+		NewSimpleFieldValidator[[]*FinanceCsvImportRowDiagnostic](
+			EnsureArrayFieldRequired,
+		),
+		NewFinanceCsvImportRowDiagnosticValidator(),
+	)
+	validateRowOutcomes := NewArrayValidator[*FinanceCsvImportRowOutcome](
+		NewSimpleFieldValidator[[]*FinanceCsvImportRowOutcome](
+			EnsureArrayFieldRequired,
+		),
+		NewFinanceCsvImportRowOutcomeValidator(),
+	)
 	validateCreatedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
@@ -43,11 +52,12 @@ func NewFinanceCsvImportAuditResponseValidator() FieldValidator[*FinanceCsvImpor
 	return func(bindingCtx *BindingContext, value *FinanceCsvImportAuditResponse) {
 		validateImportID(bindingCtx.Fork("importId"), value.ImportID)
 		validateTenantID(bindingCtx.Fork("tenantId"), value.TenantID)
-		validateImportType(bindingCtx.Fork("importType"), value.ImportType)
 		validateStatus(bindingCtx.Fork("status"), value.Status)
 		validateJobID(bindingCtx.Fork("jobId"), value.JobID)
 		validateConfirmedByUserID(bindingCtx.Fork("confirmedByUserId"), value.ConfirmedByUserID)
 		validateImportedCount(bindingCtx.Fork("importedCount"), value.ImportedCount)
+		validateRejectedRows(bindingCtx.Fork("rejectedRows"), value.RejectedRows)
+		validateRowOutcomes(bindingCtx.Fork("rowOutcomes"), value.RowOutcomes)
 		validateCreatedAt(bindingCtx.Fork("createdAt"), value.CreatedAt)
 		validateConfirmedAt(bindingCtx.Fork("confirmedAt"), value.ConfirmedAt)
 		validateCompletedAt(bindingCtx.Fork("completedAt"), value.CompletedAt)

@@ -15,12 +15,12 @@ var _ = fmt.Sprint
 
 type FinanceCsvImportPreviewResponse struct { 
 	ImportID string `json:"importId"`
-	ImportType string `json:"importType"`
+	ImportableCount int64 `json:"importableCount"`
 	Headers []string `json:"headers"`
-	Mapping map[string]string `json:"mapping,omitempty"`
-	DuplicateRows []map[string]interface{} `json:"duplicateRows"`
-	RejectedRows []map[string]interface{} `json:"rejectedRows"`
+	DuplicateRows []*FinanceCsvImportRowDiagnostic `json:"duplicateRows"`
+	RejectedRows []*FinanceCsvImportRowDiagnostic `json:"rejectedRows"`
 	WouldCreateAccounts []string `json:"wouldCreateAccounts"`
 	WouldCreateCategories []string `json:"wouldCreateCategories"`
 	WouldCreateTags []string `json:"wouldCreateTags"`
+	AccountOptions []*FinanceCsvImportAccountOption `json:"accountOptions"`
 }

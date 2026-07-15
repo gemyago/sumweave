@@ -109,6 +109,10 @@ type csvImportService interface {
 		context.Context,
 		financepkg.GetCSVImportAuditParams,
 	) (financepkg.CSVImportAudit, error)
+	ListRecentCSVImportAudits(
+		context.Context,
+		financepkg.ListRecentCSVImportAuditsParams,
+	) ([]financepkg.CSVImportAudit, error)
 }
 
 type financeService interface {
@@ -212,27 +216,53 @@ func (c *FinanceController) ConfirmFinanceCsvImport(
 		if err != nil {
 			return nil, err
 		}
-		if params.Payload.Mapping == nil {
-			return nil, app.NewErrInvalidInput("mapping", "is required")
-		}
-		for source, target := range params.Payload.Mapping {
-			if source == "" || target == "" {
-				return nil, app.NewErrInvalidInput("mapping", "keys and values must not be empty")
-			}
-		}
-
 		item, err := c.deps.CSVImportService.ConfirmCSVImport(
 			ctx,
 			financepkg.ConfirmCSVImportParams{
-				ActorUserID: userID,
-				ImportID:    params.ImportID,
-				Mapping:     params.Payload.Mapping,
+				ActorUserID:        userID,
+				ImportID:           params.ImportID,
+				ExpectedImportType: financepkg.CSVImportTypeTransactions,
 			},
 		)
 		if err != nil {
 			return nil, mapCSVImportError(err)
 		}
 
+		return &models.FinanceCsvImportConfirmResponse{
+			ImportID: item.ImportID,
+			JobID:    item.JobID,
+			JobType:  item.JobType,
+		}, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) ConfirmFinanceAccountCsvImport(
+	builder handlers.HandlerBuilder[
+		*models.ConfirmFinanceAccountCsvImportParams,
+		*models.FinanceCsvImportConfirmResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.ConfirmFinanceAccountCsvImportParams,
+	) (*models.FinanceCsvImportConfirmResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		item, err := c.deps.CSVImportService.ConfirmCSVImport(
+			ctx,
+			financepkg.ConfirmCSVImportParams{
+				ActorUserID:        userID,
+				ImportID:           params.ImportID,
+				ExpectedImportType: financepkg.CSVImportTypeAccounts,
+			},
+		)
+		if err != nil {
+			return nil, mapCSVImportError(err)
+		}
 		return &models.FinanceCsvImportConfirmResponse{
 			ImportID: item.ImportID,
 			JobID:    item.JobID,
@@ -498,11 +528,12 @@ func (c *FinanceController) CreateFinanceTransaction(
 				Description:     params.Payload.Description,
 				EffectiveAt:     params.Payload.EffectiveAt,
 				CategoryID:      params.Payload.CategoryID,
+				TagIDs:          params.Payload.TagIDs,
 				TransferGroupID: params.Payload.TransferGroupID,
 			},
 		)
 		if err != nil {
-			return nil, err
+			return nil, mapTransactionTagError(err)
 		}
 
 		mapped := mapTransaction(item)
@@ -558,27 +589,82 @@ func (c *FinanceController) GetFinanceCsvImportAudit(
 		item, err := c.deps.CSVImportService.GetCSVImportAudit(
 			ctx,
 			financepkg.GetCSVImportAuditParams{
-				ActorUserID: userID,
-				TenantID:    params.TenantID,
-				ImportID:    params.ImportID,
+				ActorUserID:        userID,
+				TenantID:           params.TenantID,
+				ImportID:           params.ImportID,
+				ExpectedImportType: financepkg.CSVImportTypeTransactions,
 			},
 		)
 		if err != nil {
 			return nil, mapCSVImportError(err)
 		}
 
-		return &models.FinanceCsvImportAuditResponse{
-			ImportID:          item.ImportID,
-			TenantID:          item.TenantID,
-			ImportType:        string(item.ImportType),
-			Status:            string(item.Status),
-			JobID:             item.JobID,
-			ConfirmedByUserID: item.ConfirmedByUserID,
-			ImportedCount:     int64(item.ImportedCount),
-			CreatedAt:         item.CreatedAt,
-			ConfirmedAt:       item.ConfirmedAt,
-			CompletedAt:       item.CompletedAt,
-		}, nil
+		response := mapCSVImportAudit(item)
+		return &response, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) ListRecentFinanceCsvImportAudits(
+	builder handlers.HandlerBuilder[
+		*models.ListRecentFinanceCsvImportAuditsParams,
+		*models.FinanceCsvImportAuditsResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.ListRecentFinanceCsvImportAuditsParams,
+	) (*models.FinanceCsvImportAuditsResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items, err := c.deps.CSVImportService.ListRecentCSVImportAudits(
+			ctx,
+			financepkg.ListRecentCSVImportAuditsParams{
+				ActorUserID:        userID,
+				TenantID:           params.TenantID,
+				ExpectedImportType: financepkg.CSVImportTypeTransactions,
+			},
+		)
+		if err != nil {
+			return nil, mapCSVImportError(err)
+		}
+		return mapCSVImportAuditsResponse(items), nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) GetFinanceAccountCsvImportAudit(
+	builder handlers.HandlerBuilder[
+		*models.GetFinanceAccountCsvImportAuditParams,
+		*models.FinanceCsvImportAuditResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.GetFinanceAccountCsvImportAuditParams,
+	) (*models.FinanceCsvImportAuditResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		item, err := c.deps.CSVImportService.GetCSVImportAudit(
+			ctx,
+			financepkg.GetCSVImportAuditParams{
+				ActorUserID:        userID,
+				TenantID:           params.TenantID,
+				ImportID:           params.ImportID,
+				ExpectedImportType: financepkg.CSVImportTypeAccounts,
+			},
+		)
+		if err != nil {
+			return nil, mapCSVImportError(err)
+		}
+		response := mapCSVImportAudit(item)
+		return &response, nil
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -1282,6 +1368,9 @@ func (c *FinanceController) UpdateFinanceTransaction(
 		if params.Payload.ClearCategory && params.Payload.CategoryID != "" {
 			return nil, app.NewErrInvalidInput("categoryId", "must be omitted when clearCategory is true")
 		}
+		if params.Payload.TagIDs == nil {
+			return nil, app.NewErrInvalidInput("tagIds", "is required")
+		}
 
 		item, err := c.deps.LedgerService.UpdateTransaction(
 			ctx,
@@ -1294,10 +1383,11 @@ func (c *FinanceController) UpdateFinanceTransaction(
 				EffectiveAt:   params.Payload.EffectiveAt,
 				CategoryID:    params.Payload.CategoryID,
 				ClearCategory: params.Payload.ClearCategory,
+				TagIDs:        params.Payload.TagIDs,
 			},
 		)
 		if err != nil {
-			return nil, err
+			return nil, mapTransactionTagError(err)
 		}
 
 		mapped := mapTransaction(item)
@@ -1322,19 +1412,54 @@ func (c *FinanceController) PreviewFinanceCsvImport(
 		item, err := c.deps.CSVImportService.PreviewCSVImport(
 			ctx,
 			financepkg.PreviewCSVImportParams{
+				ActorUserID:          userID,
+				TenantID:             params.TenantID,
+				ImportType:           financepkg.CSVImportTypeTransactions,
+				FileName:             params.Payload.FileName,
+				CSV:                  params.Payload.Csv,
+				SelectedAccountNames: params.Payload.SelectedAccountNames,
+			},
+		)
+		if err != nil {
+			return nil, mapCSVImportError(err)
+		}
+
+		mapped := mapCSVPreview(item)
+		return &mapped, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) PreviewFinanceAccountCsvImport(
+	builder handlers.HandlerBuilder[
+		*models.PreviewFinanceAccountCsvImportParams,
+		*models.FinanceAccountCsvImportPreviewResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.PreviewFinanceAccountCsvImportParams,
+	) (*models.FinanceAccountCsvImportPreviewResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		item, err := c.deps.CSVImportService.PreviewCSVImport(
+			ctx,
+			financepkg.PreviewCSVImportParams{
 				ActorUserID: userID,
 				TenantID:    params.TenantID,
-				ImportType:  financepkg.CSVImportType(params.Payload.ImportType),
+				ImportType:  financepkg.CSVImportTypeAccounts,
 				FileName:    params.Payload.FileName,
 				CSV:         params.Payload.Csv,
 			},
 		)
 		if err != nil {
-			return nil, err
+			return nil, mapCSVImportError(err)
 		}
-
-		mapped := mapCSVPreview(item)
-		return &mapped, nil
+		response := mapAccountCSVPreview(item)
+		return &response, nil
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -1444,6 +1569,13 @@ func mapFinanceRangeError(err error) error {
 	return err
 }
 
+func mapTransactionTagError(err error) error {
+	if errors.Is(err, financepkg.ErrDuplicateTagID) || errors.Is(err, financepkg.ErrTagNotAssignable) {
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("tagIds", err.Error()), err)
+	}
+	return err
+}
+
 func validateFinanceTimestamp(field string, value time.Time) error {
 	if value.IsZero() {
 		return fmt.Errorf("%s must be a non-zero timestamp", field)
@@ -1460,6 +1592,13 @@ func mapCSVImportError(err error) error {
 	case errors.Is(err, financepkg.ErrCSVImportAlreadyConfirmed),
 		errors.Is(err, financepkg.ErrCSVImportAlreadyCompleted):
 		return fmt.Errorf("%w: %w", app.NewErrConflict("csv import", err.Error()), err)
+	case errors.Is(err, financepkg.ErrCSVImportTypeMismatch):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("csv import", "wrong import path"), err)
+	case errors.Is(err, financepkg.ErrInvalidCSVImport):
+		return app.NewErrInvalidInput(
+			"csv",
+			strings.TrimPrefix(err.Error(), financepkg.ErrInvalidCSVImport.Error()+": "),
+		)
 	default:
 		return err
 	}
@@ -1596,6 +1735,7 @@ func mapTransaction(item domain.Transaction) models.FinanceTransaction {
 		Description:       item.Description,
 		EffectiveAt:       item.EffectiveAt,
 		CategoryID:        item.CategoryID,
+		TagIDs:            nonNilTagIDs(item.TagIDs),
 		TransferGroupID:   item.TransferGroupID,
 		TransferMatchedAt: item.TransferMatchedAt,
 		HiddenAt:          item.HiddenAt,
@@ -1611,6 +1751,13 @@ func mapTransaction(item domain.Transaction) models.FinanceTransaction {
 		}
 	}
 	return response
+}
+
+func nonNilTagIDs(tagIDs []string) []string {
+	if tagIDs == nil {
+		return []string{}
+	}
+	return tagIDs
 }
 
 func mapConnection(
@@ -1804,30 +1951,92 @@ func stringPointerOrNil(value string) *string {
 func mapCSVPreview(
 	item financepkg.CSVImportPreview,
 ) models.FinanceCsvImportPreviewResponse {
-	response := models.FinanceCsvImportPreviewResponse{
+	return models.FinanceCsvImportPreviewResponse{
 		ImportID:              item.ImportID,
-		ImportType:            string(item.ImportType),
+		ImportableCount:       int64(item.ImportableCount),
 		Headers:               append([]string{}, item.Headers...),
-		Mapping:               item.Mapping,
-		DuplicateRows:         make([]map[string]interface{}, 0, len(item.DuplicateRows)),
-		RejectedRows:          make([]map[string]interface{}, 0, len(item.RejectedRows)),
+		DuplicateRows:         mapCSVImportDiagnostics(item.DuplicateRows),
+		RejectedRows:          mapCSVImportDiagnostics(item.RejectedRows),
 		WouldCreateAccounts:   append([]string{}, item.WouldCreateAccounts...),
 		WouldCreateCategories: append([]string{}, item.WouldCreateCategories...),
 		WouldCreateTags:       append([]string{}, item.WouldCreateTags...),
+		AccountOptions:        mapCSVImportAccountOptions(item.AccountOptions),
 	}
-	for _, row := range item.DuplicateRows {
-		response.DuplicateRows = append(response.DuplicateRows, map[string]interface{}{
-			"rowNumber": row.RowNumber,
-			"reason":    row.Reason,
+}
+
+func mapCSVImportAccountOptions(items []financepkg.CSVImportAccountOption) []*models.FinanceCsvImportAccountOption {
+	result := make([]*models.FinanceCsvImportAccountOption, 0, len(items))
+	for _, item := range items {
+		result = append(result, &models.FinanceCsvImportAccountOption{
+			Name:           item.Name,
+			SourceRowCount: int64(item.SourceRowCount),
+			Selected:       item.Selected,
 		})
 	}
-	for _, row := range item.RejectedRows {
-		response.RejectedRows = append(response.RejectedRows, map[string]interface{}{
-			"rowNumber": row.RowNumber,
-			"reason":    row.Reason,
+	return result
+}
+
+func mapCSVImportDiagnostics(items []financepkg.CSVImportRejectedRow) []*models.FinanceCsvImportRowDiagnostic {
+	result := make([]*models.FinanceCsvImportRowDiagnostic, 0, len(items))
+	for _, item := range items {
+		result = append(result, &models.FinanceCsvImportRowDiagnostic{
+			RowNumber: int64(item.RowNumber),
+			Field:     item.Field,
+			Reason:    item.Reason,
 		})
+	}
+	return result
+}
+
+func mapAccountCSVPreview(item financepkg.CSVImportPreview) models.FinanceAccountCsvImportPreviewResponse {
+	return models.FinanceAccountCsvImportPreviewResponse{
+		ImportID:            item.ImportID,
+		Headers:             append([]string{}, item.Headers...),
+		RejectedRows:        mapCSVImportDiagnostics(item.RejectedRows),
+		WouldCreateAccounts: append([]string{}, item.WouldCreateAccounts...),
+	}
+}
+
+func mapCSVImportAudit(item financepkg.CSVImportAudit) models.FinanceCsvImportAuditResponse {
+	return models.FinanceCsvImportAuditResponse{
+		ImportID:          item.ImportID,
+		TenantID:          item.TenantID,
+		Status:            string(item.Status),
+		JobID:             item.JobID,
+		ConfirmedByUserID: item.ConfirmedByUserID,
+		ImportedCount:     int64(item.ImportedCount),
+		CreatedAt:         item.CreatedAt,
+		ConfirmedAt:       item.ConfirmedAt,
+		CompletedAt:       item.CompletedAt,
+		RejectedRows:      mapCSVImportDiagnostics(item.RejectedRows),
+		RowOutcomes:       mapCSVImportRowOutcomes(item.RowOutcomes),
+	}
+}
+
+func mapCSVImportAuditsResponse(items []financepkg.CSVImportAudit) *models.FinanceCsvImportAuditsResponse {
+	response := &models.FinanceCsvImportAuditsResponse{
+		Items: make([]*models.FinanceCsvImportAuditResponse, 0, len(items)),
+	}
+	for _, item := range items {
+		mapped := mapCSVImportAudit(item)
+		response.Items = append(response.Items, &mapped)
 	}
 	return response
+}
+
+func mapCSVImportRowOutcomes(items []domain.CSVImportRowOutcome) []*models.FinanceCsvImportRowOutcome {
+	result := make([]*models.FinanceCsvImportRowOutcome, 0, len(items))
+	for _, item := range items {
+		result = append(result, &models.FinanceCsvImportRowOutcome{
+			RowNumber:     int64(item.RowNumber),
+			TransactionID: item.TransactionID,
+			Status:        string(item.Status),
+			Reason:        item.Reason,
+			CreatedAt:     item.CreatedAt,
+			UpdatedAt:     item.UpdatedAt,
+		})
+	}
+	return result
 }
 
 func ValidateFinanceRedirectCallbackURL(raw string) error {
