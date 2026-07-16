@@ -12,11 +12,120 @@ import (
 var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
+type GetFinanceDashboardParamsPreset string
+
+// List of GetFinanceDashboardParamsPreset values.
+const (
+	GetFinanceDashboardParamsPresetCurrentMonth GetFinanceDashboardParamsPreset = "current_month"
+	GetFinanceDashboardParamsPresetPreviousMonth GetFinanceDashboardParamsPreset = "previous_month"
+	GetFinanceDashboardParamsPresetNextMonth GetFinanceDashboardParamsPreset = "next_month"
+	GetFinanceDashboardParamsPresetLast3Months GetFinanceDashboardParamsPreset = "last_3_months"
+	GetFinanceDashboardParamsPresetLast6Months GetFinanceDashboardParamsPreset = "last_6_months"
+	GetFinanceDashboardParamsPresetThisYear GetFinanceDashboardParamsPreset = "this_year"
+	GetFinanceDashboardParamsPresetPreviousYear GetFinanceDashboardParamsPreset = "previous_year"
+	GetFinanceDashboardParamsPresetCustom GetFinanceDashboardParamsPreset = "custom"
+)
+
+func(v GetFinanceDashboardParamsPreset) IsCurrentMonth() bool {
+  return v == GetFinanceDashboardParamsPresetCurrentMonth
+}
+
+func(v GetFinanceDashboardParamsPreset) IsPreviousMonth() bool {
+  return v == GetFinanceDashboardParamsPresetPreviousMonth
+}
+
+func(v GetFinanceDashboardParamsPreset) IsNextMonth() bool {
+  return v == GetFinanceDashboardParamsPresetNextMonth
+}
+
+func(v GetFinanceDashboardParamsPreset) IsLast3Months() bool {
+  return v == GetFinanceDashboardParamsPresetLast3Months
+}
+
+func(v GetFinanceDashboardParamsPreset) IsLast6Months() bool {
+  return v == GetFinanceDashboardParamsPresetLast6Months
+}
+
+func(v GetFinanceDashboardParamsPreset) IsThisYear() bool {
+  return v == GetFinanceDashboardParamsPresetThisYear
+}
+
+func(v GetFinanceDashboardParamsPreset) IsPreviousYear() bool {
+  return v == GetFinanceDashboardParamsPresetPreviousYear
+}
+
+func(v GetFinanceDashboardParamsPreset) IsCustom() bool {
+  return v == GetFinanceDashboardParamsPresetCustom
+}
+
+func(v GetFinanceDashboardParamsPreset) String() string {
+	return string(v)
+}
+
+type assignableGetFinanceDashboardParamsPreset interface {
+	IsCurrentMonth() bool
+	IsPreviousMonth() bool
+	IsNextMonth() bool
+	IsLast3Months() bool
+	IsLast6Months() bool
+	IsThisYear() bool
+	IsPreviousYear() bool
+	IsCustom() bool
+	String() string
+}
+
+func AsGetFinanceDashboardParamsPreset(v assignableGetFinanceDashboardParamsPreset) (GetFinanceDashboardParamsPreset) {
+	return GetFinanceDashboardParamsPreset(v.String())
+}
+
+func ParseGetFinanceDashboardParamsPreset(str string, target *GetFinanceDashboardParamsPreset) error {
+	switch str {
+	case "current_month":
+		*target = GetFinanceDashboardParamsPresetCurrentMonth
+	case "previous_month":
+		*target = GetFinanceDashboardParamsPresetPreviousMonth
+	case "next_month":
+		*target = GetFinanceDashboardParamsPresetNextMonth
+	case "last_3_months":
+		*target = GetFinanceDashboardParamsPresetLast3Months
+	case "last_6_months":
+		*target = GetFinanceDashboardParamsPresetLast6Months
+	case "this_year":
+		*target = GetFinanceDashboardParamsPresetThisYear
+	case "previous_year":
+		*target = GetFinanceDashboardParamsPresetPreviousYear
+	case "custom":
+		*target = GetFinanceDashboardParamsPresetCustom
+	default:
+		return fmt.Errorf("unexpected GetFinanceDashboardParamsPreset value: %s", str)
+	}
+	return nil
+}
+
+func (v *GetFinanceDashboardParamsPreset) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	return ParseGetFinanceDashboardParamsPreset(str, v)
+}
+
+// All allowed values of GetFinanceDashboardParamsPreset enum.
+var AllowableGetFinanceDashboardParamsPresetValues = []GetFinanceDashboardParamsPreset{
+	GetFinanceDashboardParamsPresetCurrentMonth,
+	GetFinanceDashboardParamsPresetPreviousMonth,
+	GetFinanceDashboardParamsPresetNextMonth,
+	GetFinanceDashboardParamsPresetLast3Months,
+	GetFinanceDashboardParamsPresetLast6Months,
+	GetFinanceDashboardParamsPresetThisYear,
+	GetFinanceDashboardParamsPresetPreviousYear,
+	GetFinanceDashboardParamsPresetCustom,
+}
 
 // GetFinanceDashboardParams - Parameters for the getFinanceDashboard operation.
 type GetFinanceDashboardParams struct { 
 	TenantID string `json:"tenantId"`
-	Preset string `json:"preset,omitempty"`
+	Preset GetFinanceDashboardParamsPreset `json:"preset,omitempty"`
 	StartDate string `json:"startDate,omitempty"`
 	EndDate string `json:"endDate,omitempty"`
 }

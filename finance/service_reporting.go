@@ -3,6 +3,7 @@ package finance
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,18 +25,28 @@ type reportingServiceStore interface {
 	) ([]domain.Transaction, error)
 	ListAccounts(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Account, error)
 	ListCategories(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Category, error)
-	ListFXRates(ctx context.Context, params persistence.ListFXRatesParams) ([]domain.FXRate, error)
+}
+
+type reportingFXRateStore interface {
+	ListCurrentFXRates(ctx context.Context, params persistence.ListCurrentFXRatesParams) ([]domain.FXRate, error)
 }
 
 type ReportingService struct {
 	store             reportingServiceStore
+	fxRates           reportingFXRateStore
 	balanceStore      accountBalanceReadStore
 	access            *accessGuard
 	now               func() time.Time
 	defaultFXProvider string
 }
 
+const dashboardFXStaleAfter = 48 * time.Hour
+
 type ReportingServiceOption func(*ReportingService)
+
+func WithReportingServiceFXRateStore(store reportingFXRateStore) ReportingServiceOption {
+	return func(service *ReportingService) { service.fxRates = store }
+}
 
 func WithReportingServiceAccountBalanceStore(store accountBalanceReadStore) ReportingServiceOption {
 	return func(service *ReportingService) {
@@ -67,6 +78,9 @@ func NewReportingService(store reportingServiceStore, opts ...ReportingServiceOp
 	for _, opt := range opts {
 		opt(service)
 	}
+	if service.fxRates == nil {
+		service.fxRates, _ = store.(reportingFXRateStore)
+	}
 	assignAccountBalanceReadStore(store, &service.balanceStore)
 	return service
 }
@@ -94,8 +108,27 @@ func (s *ReportingService) GetDashboard(ctx context.Context, params DashboardPar
 		AccountBalances:     accountBalances,
 		Alerts:              buildDashboardAlerts(missing, computation.pending.TransactionCount),
 		MissingFX:           missing,
+		CurrentFXRates:      dashboardFXRates(data.rateLookup, s.now()),
 		NativeSettledTotals: computation.nativeSettledTotals,
 	}, nil
+}
+
+func dashboardFXRates(lookup fxRateLookup, now time.Time) []DashboardFXRate {
+	items := make([]DashboardFXRate, 0, len(lookup.latest))
+	for _, rate := range lookup.latest {
+		items = append(items, DashboardFXRate{
+			Provider: rate.Provider, BaseCurrency: rate.BaseCurrency, QuoteCurrency: rate.QuoteCurrency,
+			EffectiveAt: rate.EffectiveAt, LastSuccessfulRefreshAt: rate.LastSuccessfulRefreshAt,
+			Stale: now.Sub(rate.LastSuccessfulRefreshAt) > dashboardFXStaleAfter,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].BaseCurrency != items[j].BaseCurrency {
+			return items[i].BaseCurrency < items[j].BaseCurrency
+		}
+		return items[i].QuoteCurrency < items[j].QuoteCurrency
+	})
+	return items
 }
 
 func (s *ReportingService) loadDashboardData(
@@ -128,9 +161,8 @@ func (s *ReportingService) loadDashboardData(
 	if err != nil {
 		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)
 	}
-	fxRates, err := s.store.ListFXRates(ctx, persistence.ListFXRatesParams{
+	fxRates, err := s.fxRates.ListCurrentFXRates(ctx, persistence.ListCurrentFXRatesParams{
 		Provider: s.defaultFXProvider,
-		EndDate:  period.EndDate,
 	})
 	if err != nil {
 		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)
@@ -142,8 +174,51 @@ func (s *ReportingService) loadDashboardData(
 		accounts:     accounts,
 		balances:     balanceItems,
 		categories:   categories,
-		rateLookup:   newFXRateLookup(fxRates),
+		rateLookup: newFXRateLookup(filterDashboardFXRates(
+			tenant.DisplayCurrency,
+			period,
+			accounts,
+			transactions,
+			fxRates,
+		)),
 	}, nil
+}
+
+func filterDashboardFXRates(
+	displayCurrency string,
+	period DashboardPeriod,
+	accounts []domain.Account,
+	transactions []domain.Transaction,
+	rates []domain.FXRate,
+) []domain.FXRate {
+	pairs := make(map[string]struct{})
+	addPair := func(baseCurrency string) {
+		base := strings.ToUpper(strings.TrimSpace(baseCurrency))
+		quote := strings.ToUpper(strings.TrimSpace(displayCurrency))
+		if base != "" && quote != "" && base != quote {
+			pairs[base+"|"+quote] = struct{}{}
+		}
+	}
+	for _, account := range accounts {
+		addPair(account.Currency)
+	}
+	for _, transaction := range transactions {
+		if transaction.HiddenAt != nil || !transactionInPeriod(transaction, period.StartDate, period.EndDate) {
+			continue
+		}
+		if _, _, included := reportingContribution(transaction); included {
+			addPair(transaction.Currency)
+		}
+	}
+	items := make([]domain.FXRate, 0, len(rates))
+	for _, rate := range rates {
+		key := strings.ToUpper(strings.TrimSpace(rate.BaseCurrency)) + "|" +
+			strings.ToUpper(strings.TrimSpace(rate.QuoteCurrency))
+		if _, ok := pairs[key]; ok {
+			items = append(items, rate)
+		}
+	}
+	return items
 }
 
 func (s *ReportingService) computeDashboard(data dashboardData) dashboardComputation {
@@ -242,7 +317,6 @@ func (s *ReportingService) buildDashboardAccountBalances(
 ) ([]DashboardAccountBalance, []DashboardMissingFXDiagnostic) {
 	accountBalances := make([]DashboardAccountBalance, 0, len(data.accounts))
 	missing := make([]DashboardMissingFXDiagnostic, 0)
-	cutoffDate := data.period.EndDate
 	balanceByAccountID := make(map[string]domain.AccountBalance, len(data.balances))
 	for _, item := range data.balances {
 		balanceByAccountID[item.AccountID] = item
@@ -260,7 +334,6 @@ func (s *ReportingService) buildDashboardAccountBalances(
 			balance.NativeBookedMinor,
 			account.Currency,
 			data.tenant.DisplayCurrency,
-			data.period.EndDate,
 			s.defaultFXProvider,
 			data.rateLookup,
 		)
@@ -268,7 +341,6 @@ func (s *ReportingService) buildDashboardAccountBalances(
 			balance.NativePendingMinor,
 			account.Currency,
 			data.tenant.DisplayCurrency,
-			data.period.EndDate,
 			s.defaultFXProvider,
 			data.rateLookup,
 		)
@@ -287,7 +359,7 @@ func (s *ReportingService) buildDashboardAccountBalances(
 				AccountID:     account.ID,
 				BaseCurrency:  account.Currency,
 				QuoteCurrency: data.tenant.DisplayCurrency,
-				RateDate:      cutoffDate,
+				RateDate:      data.period.EndDate,
 				Provider:      s.defaultFXProvider,
 			})
 		}

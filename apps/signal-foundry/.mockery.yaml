@@ -27,4 +27,5 @@ packages:
       AuthenticatingService:
       bankConnectionService:
       financeService:
+      transferDetailService:
       jobsService:

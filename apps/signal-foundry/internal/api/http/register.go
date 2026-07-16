@@ -14,7 +14,7 @@ import (
 	"go.uber.org/dig"
 )
 
-//go:generate sh -c "go run github.com/gemyago/apigen server ./v1routes.yaml ./v1routes"
+//go:generate go run github.com/gemyago/apigen server ./v1routes.yaml ./v1routes
 
 type V1RoutesDeps struct {
 	dig.In

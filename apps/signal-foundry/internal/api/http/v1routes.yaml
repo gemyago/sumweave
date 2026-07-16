@@ -990,6 +990,64 @@ paths:
           description: unexpected error
           content:
             application/json:
+                schema:
+                  $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence:
+    get:
+      summary: List finance account provider evidence metadata
+      operationId: listFinanceAccountProviderEvidence
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Provider evidence metadata for a finance account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProviderEvidenceListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}:
+    get:
+      summary: Get sanitized finance account provider evidence
+      operationId: getFinanceAccountProviderEvidence
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: evidenceId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sanitized provider evidence for a finance account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProviderEvidence"
+        default:
+          description: unexpected error
+          content:
+            application/json:
               schema:
                 $ref: "#/components/schemas/Error"
   /api/v1/finance/tenants/{tenantId}/categories:
@@ -1201,8 +1259,8 @@ paths:
           description: unexpected error
           content:
             application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+                schema:
+                  $ref: "#/components/schemas/Error"
     patch:
       summary: Update finance transaction
       operationId: updateFinanceTransaction
@@ -1220,6 +1278,182 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FinanceTransaction"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                  $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-candidates:
+    get:
+      summary: List visible in-range finance transfer candidates
+      operationId: listFinanceTransferCandidates
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: effectiveFrom
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: effectiveBefore
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          required: true
+          schema: { type: integer, format: int64, minimum: 1, maximum: 200 }
+        - in: query
+          name: offset
+          schema: { type: integer, format: int64, minimum: 0 }
+      responses:
+        '200':
+          description: Visible finance transfer candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTransactionsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner:
+    get:
+      summary: Get the exact matched finance transfer partner
+      operationId: getFinanceTransferPartner
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Matched finance transfer partner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTransaction"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/transfer-links:
+    post:
+      summary: Link two booked finance transactions as one transfer
+      operationId: linkFinanceTransferPair
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTransferPairRequest"
+      responses:
+        '204':
+          description: Finance transfer pair linked
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      summary: Unlink one finance transfer pair and restore regular transactions
+      operationId: unlinkFinanceTransferPair
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTransferPairRequest"
+      responses:
+        '204':
+          description: Finance transfer pair unlinked
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence:
+    get:
+      summary: List finance transaction provider evidence metadata
+      operationId: listFinanceTransactionProviderEvidence
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Provider evidence metadata for a finance transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProviderEvidenceListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}:
+    get:
+      summary: Get sanitized finance transaction provider evidence
+      operationId: getFinanceTransactionProviderEvidence
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: evidenceId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sanitized provider evidence for a finance transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProviderEvidence"
         default:
           description: unexpected error
           content:
@@ -1243,6 +1477,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FinanceConnectionsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts:
+    get:
+      summary: List resolved synced accounts for a finance bank connection
+      operationId: listFinanceConnectionSyncedAccounts
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: connectionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Resolved synced accounts for a finance bank connection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceConnectionSyncedAccountsResponse"
         default:
           description: unexpected error
           content:
@@ -1336,7 +1597,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}:
+  /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}:
     get:
       summary: Get pending synthetic finance link-state configuration
       operationId: getFinanceSyntheticLinkState
@@ -1463,7 +1724,9 @@ paths:
           schema: { type: string }
         - in: query
           name: preset
-          schema: { type: string }
+          schema:
+            type: string
+            enum: [current_month, previous_month, next_month, last_3_months, last_6_months, this_year, previous_year, custom]
         - in: query
           name: startDate
           schema: { type: string }
@@ -3029,6 +3292,29 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/FinanceAccount" }
+    FinanceProviderEvidenceMetadata:
+      type: object
+      required: [id, scope, providerObjectId, capturedAt]
+      properties:
+        id: { type: string }
+        scope: { type: string }
+        providerObjectId: { type: string }
+        capturedAt: { type: string, format: date-time }
+    FinanceProviderEvidenceListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceProviderEvidenceMetadata" }
+    FinanceProviderEvidence:
+      allOf:
+        - $ref: "#/components/schemas/FinanceProviderEvidenceMetadata"
+        - type: object
+          properties:
+            payload:
+              type: object
+              additionalProperties: true
     FinanceCategoryCreateRequest:
       type: object
       required: [name, kind]
@@ -3136,6 +3422,12 @@ components:
         tagIds:
           type: array
           items: { type: string }
+    FinanceTransferPairRequest:
+      type: object
+      required: [firstTransactionId, secondTransactionId]
+      properties:
+        firstTransactionId: { type: string }
+        secondTransactionId: { type: string }
     FinanceTransactionProviderOriginal:
       type: object
       required: [amountMinor, currency, description]
@@ -3252,11 +3544,26 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/FinanceBankConnection" }
+    FinanceConnectionSyncedAccount:
+      type: object
+      required: [financeAccountId, name, currency]
+      properties:
+        financeAccountId: { type: string }
+        name: { type: string }
+        currency: { type: string }
+        lastSuccessfulSyncAt: { type: string, format: date-time, nullable: true }
+    FinanceConnectionSyncedAccountsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceConnectionSyncedAccount" }
     FinanceDashboardResponse:
       type: object
       description: Aggregated finance dashboard response.
       additionalProperties: false
-      required: [period, settled, pending, categoryBreakdowns, accountBalances, alerts, missingFx, nativeSettledTotals]
+      required: [period, settled, pending, categoryBreakdowns, accountBalances, alerts, missingFx, currentFxRates, nativeSettledTotals]
       properties:
         period: { $ref: "#/components/schemas/FinanceDashboardPeriod" }
         settled: { $ref: "#/components/schemas/FinanceDashboardMoneySummary" }
@@ -3273,6 +3580,10 @@ components:
         missingFx:
           type: array
           items: { $ref: "#/components/schemas/FinanceDashboardMissingFx" }
+        currentFxRates:
+          type: array
+          description: Latest successful provider rates used to value every selected period.
+          items: { $ref: "#/components/schemas/FinanceDashboardCurrentFxRate" }
         nativeSettledTotals:
           type: array
           items: { $ref: "#/components/schemas/FinanceDashboardCurrencyTotal" }
@@ -3348,6 +3659,17 @@ components:
         quoteCurrency: { type: string }
         rateDate: { type: string, format: date-time }
         provider: { type: string }
+    FinanceDashboardCurrentFxRate:
+      type: object
+      additionalProperties: false
+      required: [provider, baseCurrency, quoteCurrency, effectiveAt, lastSuccessfulRefreshAt, stale]
+      properties:
+        provider: { type: string }
+        baseCurrency: { type: string }
+        quoteCurrency: { type: string }
+        effectiveAt: { type: string, format: date-time }
+        lastSuccessfulRefreshAt: { type: string, format: date-time }
+        stale: { type: boolean }
     FinanceDashboardCurrencyTotal:
       type: object
       additionalProperties: false
@@ -3374,15 +3696,14 @@ components:
         storedRatesCount: { type: integer, format: int64 }
     FinanceFxSyncRequest:
       type: object
-      required: [baseCurrencies, quoteCurrency, startDate, endDate]
+      description: Refreshes current FX valuations; transaction dates are not used.
+      required: [baseCurrencies, quoteCurrency]
       properties:
         provider: { type: string }
         baseCurrencies:
           type: array
           items: { type: string }
         quoteCurrency: { type: string }
-        startDate: { type: string, format: date-time }
-        endDate: { type: string, format: date-time }
     FinanceFxSyncResponse:
       type: object
       required: [jobId, jobType]

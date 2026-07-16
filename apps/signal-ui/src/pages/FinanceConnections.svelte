@@ -5,6 +5,7 @@
   import {
     createSignalFinanceApiForAuth,
     type FinanceBankConnection,
+    type FinanceConnectionSyncedAccount,
   } from '../lib/finance/api'
   import { formatFinanceDateTime } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
@@ -26,6 +27,10 @@
   let confirmDeleteConnectionId = $state('')
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+  let syncedAccountsByConnection = $state<Record<string, FinanceConnectionSyncedAccount[]>>({})
+  let syncedAccountsLoadingId = $state('')
+  let syncedAccountsErrors = $state<Record<string, string>>({})
+  let syncedAccountsOpen = $state<Record<string, boolean>>({})
 
   onMount(() => {
     void loadPage()
@@ -58,6 +63,8 @@
     }
 
     confirmDeleteConnectionId = ''
+    syncedAccountsByConnection = {}
+    syncedAccountsErrors = {}
     connections = await financeApi.listConnections({ tenantId: financeShell.selectedTenantId })
   }
 
@@ -167,9 +174,51 @@
         reason: 'operator_ui',
       })
       lastJobId = job.jobId
+      const remainingAccounts = { ...syncedAccountsByConnection }
+      delete remainingAccounts[connectionId]
+      syncedAccountsByConnection = remainingAccounts
+      const remainingErrors = { ...syncedAccountsErrors }
+      delete remainingErrors[connectionId]
+      syncedAccountsErrors = remainingErrors
       await loadConnections()
+      if (syncedAccountsOpen[connectionId]) {
+        void loadSyncedAccounts(connectionId)
+      }
     } catch (syncError) {
       error = syncError instanceof Error ? syncError.message : 'Failed to trigger sync'
+    }
+  }
+
+  async function loadSyncedAccounts(connectionId: string, force = false) {
+    if (!financeShell.selectedTenantId || syncedAccountsLoadingId === connectionId || (!force && connectionId in syncedAccountsByConnection)) {
+      return
+    }
+
+    syncedAccountsLoadingId = connectionId
+    const remainingErrors = { ...syncedAccountsErrors }
+    delete remainingErrors[connectionId]
+    syncedAccountsErrors = remainingErrors
+    try {
+      const accounts = await financeApi.listConnectionSyncedAccounts({
+        tenantId: financeShell.selectedTenantId,
+        connectionId,
+      })
+      syncedAccountsByConnection = { ...syncedAccountsByConnection, [connectionId]: accounts }
+    } catch (loadError) {
+      syncedAccountsErrors = {
+        ...syncedAccountsErrors,
+        [connectionId]: loadError instanceof Error ? loadError.message : 'Failed to load synced accounts',
+      }
+    } finally {
+      syncedAccountsLoadingId = ''
+    }
+  }
+
+  function handleSyncedAccountsToggle(connectionId: string, event: Event) {
+    const open = (event.currentTarget as HTMLDetailsElement).open
+    syncedAccountsOpen = { ...syncedAccountsOpen, [connectionId]: open }
+    if (open) {
+      void loadSyncedAccounts(connectionId)
     }
   }
 
@@ -459,6 +508,35 @@
                         <a href={`/finance/jobs/${encodeURIComponent(connection.lastSyncJobId)}`} use:link>Open last sync job</a>
                       </div>
                     {/if}
+
+                    <details class="border rounded p-3" ontoggle={(event) => handleSyncedAccountsToggle(connection.id, event)}>
+                      <summary class="fw-semibold">Synced accounts</summary>
+                      <div class="mt-3 d-grid gap-2">
+                        {#if syncedAccountsLoadingId === connection.id}
+                          <div class="text-body-secondary" role="status">Loading synced accounts…</div>
+                        {:else if syncedAccountsErrors[connection.id]}
+                          <div class="alert alert-danger mb-0 d-flex flex-wrap justify-content-between gap-2 align-items-center" role="alert">
+                            <span>{syncedAccountsErrors[connection.id]}</span>
+                            <button class="btn btn-outline-danger btn-sm" type="button" onclick={() => void loadSyncedAccounts(connection.id, true)}>Retry synced accounts</button>
+                          </div>
+                        {:else if connection.id in syncedAccountsByConnection}
+                          {#if syncedAccountsByConnection[connection.id].length === 0}
+                            <div class="text-body-secondary" role="status">No synced accounts yet.</div>
+                          {:else}
+                            <div class="list-group list-group-flush">
+                              {#each syncedAccountsByConnection[connection.id] as account (account.financeAccountId)}
+                                <a class="list-group-item list-group-item-action d-flex flex-column flex-md-row justify-content-between gap-1" href={`/finance/accounts/${encodeURIComponent(account.financeAccountId)}`} use:link>
+                                  <span>{account.name} · {account.currency}</span>
+                                  <span class="small text-body-secondary">Last successful sync: {formatFinanceDateTime(account.lastSuccessfulSyncAt)}</span>
+                                </a>
+                              {/each}
+                            </div>
+                          {/if}
+                        {:else}
+                          <div class="text-body-secondary">Open to load account names, currencies, and last successful sync times.</div>
+                        {/if}
+                      </div>
+                    </details>
 
                     {#if confirmDeleteConnectionId === connection.id}
                       <div class="alert alert-danger mb-0" aria-live="polite">

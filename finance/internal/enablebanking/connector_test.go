@@ -387,6 +387,17 @@ func TestConnector(t *testing.T) {
 				Description: "coffee",
 				EffectiveAt: &firstEffectiveAt,
 			},
+			RawPayloadJSON: mustJSON(enablebankingclient.AccountTransaction{
+				EntryReference:       firstTransactionID,
+				TransactionID:        firstTransactionDetailsID,
+				Status:               "BOOKED",
+				BookingDate:          "2026-06-11",
+				CreditDebitIndicator: "DBIT",
+				TransactionAmount:    &enablebankingclient.TransactionAmount{Amount: "12.34", Currency: "pln"},
+				RemittanceInformation: []string{
+					"coffee",
+				},
+			}),
 		}, batch.Transactions[0])
 		assert.Equal(t, domain.ProviderTransactionObservation{
 			Connection:            connection,
@@ -410,10 +421,21 @@ func TestConnector(t *testing.T) {
 				Description: "refund",
 				EffectiveAt: &secondEffectiveAt,
 			},
+			RawPayloadJSON: mustJSON(enablebankingclient.AccountTransaction{
+				EntryReference:       secondTransactionID,
+				TransactionID:        secondTransactionDetailsID,
+				Status:               "BOOKED",
+				BookingDate:          "2026-06-12T10:30:00Z",
+				CreditDebitIndicator: "CRDT",
+				TransactionAmount:    &enablebankingclient.TransactionAmount{Amount: "50.50", Currency: "pln"},
+				RemittanceInformation: []string{
+					"refund",
+				},
+			}),
 		}, batch.Transactions[1])
 	})
 
-	t.Run("fetch fills account name from details when session only returns account IDs", func(t *testing.T) {
+	t.Run("fetch fills account name from account details when session only returns account IDs", func(t *testing.T) {
 		connection := makeConnection()
 		connection.ExternalID = "session-" + fake.UUID().V4()
 		accountID := "account-" + fake.UUID().V4()
@@ -430,7 +452,7 @@ func TestConnector(t *testing.T) {
 				))
 			case "/accounts/" + accountID + "/details":
 				_, _ = w.Write([]byte(
-					`{"name":"` + accountName + `","currency":"eur","account_id":{"iban":"FI1234567890123456"}}`,
+					`{"details":"` + accountName + `","currency":"eur","account_id":{"iban":"FI1234567890123456"}}`,
 				))
 			case "/accounts/" + accountID + "/balances":
 				_, _ = w.Write([]byte(`{"balances":[]}`))
@@ -468,6 +490,57 @@ func TestConnector(t *testing.T) {
 			IBAN:              "FI1234567890123456",
 		}, batch.Accounts[0])
 		require.Len(t, batch.RawPayloads, 4)
+	})
+
+	t.Run("normalizes account display names without exposing IBAN by default", func(t *testing.T) {
+		accountID := "account-" + fake.UUID().V4()
+		iban := "PL" + fake.RandomStringWithLength(26)
+		name := "name-" + fake.Lorem().Word()
+		details := "details-" + fake.Lorem().Word()
+		product := "product-" + fake.Lorem().Word()
+
+		makeAccount := func(name string, details string, product string) enablebankingclient.Account {
+			return enablebankingclient.Account{
+				Name:     name,
+				Details:  details,
+				Product:  product,
+				IBAN:     iban,
+				Currency: "pln",
+			}
+		}
+
+		for _, scenario := range []struct {
+			name    string
+			account enablebankingclient.Account
+			want    string
+		}{
+			{
+				name:    "uses standard name first",
+				account: makeAccount(name, details, product),
+				want:    name,
+			},
+			{
+				name:    "uses details when standard name is absent",
+				account: makeAccount("", details, product),
+				want:    details,
+			},
+			{
+				name:    "uses product when name and details are absent",
+				account: makeAccount("", "", product),
+				want:    product,
+			},
+			{
+				name:    "uses provider ID rather than IBAN as final fallback",
+				account: makeAccount("", "", ""),
+				want:    accountID,
+			},
+		} {
+			t.Run(scenario.name, func(t *testing.T) {
+				account := normalizeAccount(makeConnection(), accountID, scenario.account)
+
+				assert.Equal(t, scenario.want, account.Name)
+			})
+		}
 	})
 
 	t.Run(

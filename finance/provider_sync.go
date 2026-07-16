@@ -210,9 +210,22 @@ type ListBankConnectionsParams struct {
 	TenantID    string
 }
 
+type ListBankConnectionSyncedAccountsParams struct {
+	ActorUserID  string
+	TenantID     string
+	ConnectionID string
+}
+
 type BankConnectionView struct {
 	Connection domain.BankConnection
 	Schedule   *domain.BankConnectionSchedule
+}
+
+type BankConnectionSyncedAccount struct {
+	FinanceAccountID     string
+	Name                 string
+	Currency             string
+	LastSuccessfulSyncAt *time.Time
 }
 
 type bankProviderRef struct {

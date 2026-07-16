@@ -3,7 +3,9 @@ package finance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -316,50 +319,50 @@ func TestReportingAndFX(t *testing.T) {
 			assert.Equal(t, DashboardPeriodPresetCurrentMonth, dashboard.Period.Preset)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
 				dashboard.Period.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC),
 				dashboard.Period.EndDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.May, 13, 11, 59, 59, 999999999, time.UTC),
+				time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC),
 				dashboard.Period.Previous.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 1, 11, 59, 59, 999999999, time.UTC),
+				time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC),
 				dashboard.Period.Previous.EndDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 20, 12, 0, 0, 1, time.UTC),
+				time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
 				dashboard.Period.Next.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.July, 9, 12, 0, 0, 1, time.UTC),
+				time.Date(2026, time.July, 31, 23, 59, 59, 999999999, time.UTC),
 				dashboard.Period.Next.EndDate,
 			)
 
 			assert.Equal(t, "PLN", dashboard.Settled.DisplayCurrency)
-			assert.Equal(t, int64(400_00), dashboard.Settled.IncomeMinor)
-			assert.Equal(t, int64(170_00), dashboard.Settled.ExpenseMinor)
-			assert.Equal(t, int64(230_00), dashboard.Settled.NetMinor)
+			assert.Equal(t, int64(420_00), dashboard.Settled.IncomeMinor)
+			assert.Equal(t, int64(176_00), dashboard.Settled.ExpenseMinor)
+			assert.Equal(t, int64(244_00), dashboard.Settled.NetMinor)
 			assert.False(t, dashboard.Settled.Complete)
 
-			assert.Equal(t, int64(82_00), dashboard.Pending.ExpenseMinor)
-			assert.Equal(t, int64(-82_00), dashboard.Pending.NetMinor)
+			assert.Equal(t, int64(84_00), dashboard.Pending.ExpenseMinor)
+			assert.Equal(t, int64(-84_00), dashboard.Pending.NetMinor)
 			assert.Equal(t, 1, dashboard.Pending.TransactionCount)
 
 			require.Len(t, dashboard.CategoryBreakdowns, 2)
 			assert.Equal(t, salaryCategory.ID, dashboard.CategoryBreakdowns[0].CategoryID)
-			assert.Equal(t, int64(400_00), dashboard.CategoryBreakdowns[0].IncomeMinor)
+			assert.Equal(t, int64(420_00), dashboard.CategoryBreakdowns[0].IncomeMinor)
 			assert.Equal(t, groceriesCategory.ID, dashboard.CategoryBreakdowns[1].CategoryID)
-			assert.Equal(t, int64(170_00), dashboard.CategoryBreakdowns[1].ExpenseMinor)
+			assert.Equal(t, int64(176_00), dashboard.CategoryBreakdowns[1].ExpenseMinor)
 
 			require.Len(t, dashboard.AccountBalances, 4)
 			assert.Equal(t, usdAccount.ID, dashboard.AccountBalances[0].AccountID)
@@ -367,8 +370,8 @@ func TestReportingAndFX(t *testing.T) {
 			assert.Equal(t, int64(-20_00), dashboard.AccountBalances[0].NativePendingMinor)
 			require.NotNil(t, dashboard.AccountBalances[0].DisplayBookedMinor)
 			require.NotNil(t, dashboard.AccountBalances[0].DisplayPendingMinor)
-			assert.Equal(t, int64(656_00), *dashboard.AccountBalances[0].DisplayBookedMinor)
-			assert.Equal(t, int64(-82_00), *dashboard.AccountBalances[0].DisplayPendingMinor)
+			assert.Equal(t, int64(672_00), *dashboard.AccountBalances[0].DisplayBookedMinor)
+			assert.Equal(t, int64(-84_00), *dashboard.AccountBalances[0].DisplayPendingMinor)
 			assert.Equal(t, eurAccount.ID, dashboard.AccountBalances[2].AccountID)
 			assert.True(t, dashboard.AccountBalances[2].MissingFX)
 			assert.Nil(t, dashboard.AccountBalances[2].DisplayBookedMinor)
@@ -428,36 +431,36 @@ func TestReportingAndFX(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(
 				t,
-				time.Date(2026, time.May, 1, 12, 0, 0, 0, time.UTC),
+				time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC),
 				previousMonth.Period.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 1, 11, 59, 59, 999999999, time.UTC),
+				time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC),
 				previousMonth.Period.EndDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.March, 31, 12, 0, 0, 0, time.UTC),
+				time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC),
 				previousMonth.Period.Previous.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.May, 1, 11, 59, 59, 999999999, time.UTC),
+				time.Date(2026, time.April, 30, 23, 59, 59, 999999999, time.UTC),
 				previousMonth.Period.Previous.EndDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC),
+				time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
 				previousMonth.Period.Next.StartDate,
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.July, 2, 11, 59, 59, 999999999, time.UTC),
+				time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC),
 				previousMonth.Period.Next.EndDate,
 			)
-			assert.Equal(t, int64(390_00), previousMonth.Settled.IncomeMinor)
-			assert.Equal(t, int64(390_00), previousMonth.Settled.NetMinor)
+			assert.Equal(t, int64(420_00), previousMonth.Settled.IncomeMinor)
+			assert.Equal(t, int64(420_00), previousMonth.Settled.NetMinor)
 
 			customRange, err := service.GetDashboard(t.Context(), DashboardParams{
 				ActorUserID: ownerUserID,
@@ -467,9 +470,9 @@ func TestReportingAndFX(t *testing.T) {
 				EndDate:     time.Date(2026, time.June, 4, 0, 0, 0, 0, time.UTC),
 			})
 			require.NoError(t, err)
-			assert.Equal(t, int64(400_00), customRange.Settled.IncomeMinor)
-			assert.Equal(t, int64(160_00), customRange.Settled.ExpenseMinor)
-			assert.Equal(t, int64(240_00), customRange.Settled.NetMinor)
+			assert.Equal(t, int64(420_00), customRange.Settled.IncomeMinor)
+			assert.Equal(t, int64(168_00), customRange.Settled.ExpenseMinor)
+			assert.Equal(t, int64(252_00), customRange.Settled.NetMinor)
 			assert.Equal(t, int64(160_00), customRange.AccountBalances[0].NativeBookedMinor)
 			assert.Equal(t, int64(0), customRange.AccountBalances[0].NativePendingMinor)
 
@@ -570,8 +573,8 @@ func TestReportingAndFX(t *testing.T) {
 				RequestedByUser: "system",
 			})
 			require.NoError(t, err)
-			assert.Equal(t, FXSyncJobType, schedule.JobType)
-			assert.Equal(t, FXSyncJobType, scheduler.schedule.JobType)
+			assert.Equal(t, FXRefreshJobType, schedule.JobType)
+			assert.Equal(t, FXRefreshJobType, scheduler.schedule.JobType)
 			assert.Equal(t, provider.Name(), scheduler.schedule.Input.Provider)
 
 			diagnostics, err := service.GetFXAdminDiagnostics(
@@ -600,16 +603,266 @@ func TestReportingAndFX(t *testing.T) {
 		},
 	)
 
+	t.Run("refreshes required pairs safely", func(t *testing.T) {
+		makeRequiredPairs := func(t *testing.T, currencies ...string) (*persistence.Database, *persistence.CurrentFXRateStore) {
+			t.Helper()
+			database := openTestDatabase(t)
+			store := persistence.NewStore(database)
+			fake := faker.New()
+			now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+			tenant := domain.Tenant{
+				ID:              "tenant-" + fake.UUID().V4(),
+				Name:            "tenant-" + fake.Company().Name(),
+				DisplayCurrency: "PLN",
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}
+			_, err := store.SaveTenant(t.Context(), tenant)
+			require.NoError(t, err)
+			for _, currency := range currencies {
+				_, err = store.SaveAccount(t.Context(), domain.Account{
+					ID:        "account-" + fake.UUID().V4(),
+					TenantID:  tenant.ID,
+					Name:      "account-" + fake.Lorem().Word(),
+					Currency:  currency,
+					Kind:      domain.AccountKindManual,
+					CreatedAt: now,
+					UpdatedAt: now,
+				})
+				require.NoError(t, err)
+			}
+			return database, persistence.NewCurrentFXRateStore(database)
+		}
+
+		t.Run("writes every required pair after successful responses", func(t *testing.T) {
+			database, rateStore := makeRequiredPairs(t, "USD", "EUR")
+			provider := NewMockFXRatesProvider(t)
+			providerName := "provider-" + faker.New().Lorem().Word()
+			refreshedAt := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+			provider.EXPECT().Name().Return(providerName).Once()
+			provider.EXPECT().FetchLatestRates(mock.Anything, mock.Anything).RunAndReturn(func(
+				_ context.Context,
+				query FXProviderQuery,
+			) ([]domain.FXRate, error) {
+				return []domain.FXRate{{
+					Provider: providerName, BaseCurrency: query.BaseCurrency,
+					QuoteCurrency: query.QuoteCurrencies[0], EffectiveAt: refreshedAt.Add(-time.Hour), Rate: 4.2,
+				}}, nil
+			}).Twice()
+			service := NewFXService(
+				rateStore,
+				WithFXServiceNow(func() time.Time { return refreshedAt }),
+				WithFXServiceProviders(provider),
+				WithFXServiceDefaultProvider(providerName),
+				WithFXServiceRequiredPairs(persistence.NewFXPairDiscoveryStore(database)),
+			)
+
+			result, err := service.RefreshRequiredFXRates(t.Context(), RefreshFXRatesParams{})
+			require.NoError(t, err)
+			assert.Equal(t, SyncFXRatesResult{Provider: providerName, ImportedCount: 2}, result)
+			rates, err := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
+				Provider: providerName,
+			})
+			require.NoError(t, err)
+			require.Len(t, rates, 2)
+			assert.Equal(t, refreshedAt, rates[0].LastSuccessfulRefreshAt)
+			assert.Equal(t, refreshedAt, rates[1].LastSuccessfulRefreshAt)
+		})
+
+		t.Run("keeps all last-good rates when a required pair fails", func(t *testing.T) {
+			database, rateStore := makeRequiredPairs(t, "USD", "EUR")
+			provider := NewMockFXRatesProvider(t)
+			providerName := "provider-" + faker.New().Lorem().Word()
+			lastGoodAt := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
+			existing := []domain.FXRate{
+				{
+					Provider: providerName, BaseCurrency: "USD", QuoteCurrency: "PLN", EffectiveAt: lastGoodAt,
+					LastSuccessfulRefreshAt: lastGoodAt, Rate: 4.1,
+				},
+				{
+					Provider: providerName, BaseCurrency: "EUR", QuoteCurrency: "PLN", EffectiveAt: lastGoodAt,
+					LastSuccessfulRefreshAt: lastGoodAt, Rate: 4.3,
+				},
+			}
+			require.NoError(t, rateStore.SaveCurrentFXRates(t.Context(), existing))
+			before, err := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
+				Provider: providerName,
+			})
+			require.NoError(t, err)
+			provider.EXPECT().Name().Return(providerName).Once()
+			provider.EXPECT().FetchLatestRates(mock.Anything, mock.Anything).RunAndReturn(func(
+				_ context.Context,
+				query FXProviderQuery,
+			) ([]domain.FXRate, error) {
+				if query.BaseCurrency == "EUR" {
+					return nil, errors.New("provider unavailable")
+				}
+				return []domain.FXRate{{
+					Provider:      providerName,
+					BaseCurrency:  "USD",
+					QuoteCurrency: "PLN",
+					EffectiveAt:   lastGoodAt.Add(time.Hour),
+					Rate:          4.2,
+				}}, nil
+			}).Once()
+			service := NewFXService(
+				rateStore,
+				WithFXServiceProviders(provider),
+				WithFXServiceDefaultProvider(providerName),
+				WithFXServiceRequiredPairs(persistence.NewFXPairDiscoveryStore(database)),
+			)
+
+			_, err = service.RefreshRequiredFXRates(t.Context(), RefreshFXRatesParams{})
+			require.Error(t, err)
+			rates, listErr := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
+				Provider: providerName,
+			})
+			require.NoError(t, listErr)
+			assert.Equal(t, before, rates)
+		})
+
+		t.Run("rejects malformed provider responses without replacing last-good rates", func(t *testing.T) {
+			malformedRates := func(providerName string, effectiveAt time.Time) map[string][]domain.FXRate {
+				makeRate := func(provider string, baseCurrency string, rate float64) domain.FXRate {
+					return domain.FXRate{
+						Provider: provider, BaseCurrency: baseCurrency, QuoteCurrency: "PLN",
+						EffectiveAt: effectiveAt, Rate: rate,
+					}
+				}
+				return map[string][]domain.FXRate{
+					"empty":          nil,
+					"wrong provider": {makeRate("other-provider", "USD", 4.2)},
+					"wrong pair":     {makeRate(providerName, "EUR", 4.2)},
+					"duplicate": {
+						makeRate(providerName, "USD", 4.2),
+						makeRate(providerName, "USD", 4.2),
+					},
+					"zero":     {makeRate(providerName, "USD", 0)},
+					"negative": {makeRate(providerName, "USD", -4.2)},
+					"NaN":      {makeRate(providerName, "USD", math.NaN())},
+					"infinite": {makeRate(providerName, "USD", math.Inf(1))},
+				}
+			}
+			for name, response := range malformedRates("provider", time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC)) {
+				t.Run(name, func(t *testing.T) {
+					database, rateStore := makeRequiredPairs(t, "USD")
+					provider := NewMockFXRatesProvider(t)
+					providerName := "provider"
+					lastGoodAt := time.Date(2026, time.July, 13, 12, 0, 0, 0, time.UTC)
+					lastGood := domain.FXRate{
+						Provider: providerName, BaseCurrency: "USD", QuoteCurrency: "PLN", EffectiveAt: lastGoodAt,
+						LastSuccessfulRefreshAt: lastGoodAt, Rate: 4.1,
+					}
+					require.NoError(t, rateStore.SaveCurrentFXRates(t.Context(), []domain.FXRate{lastGood}))
+					before, listErr := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
+						Provider: providerName,
+					})
+					require.NoError(t, listErr)
+					provider.EXPECT().Name().Return(providerName).Once()
+					provider.EXPECT().FetchLatestRates(mock.Anything, mock.Anything).Return(response, nil).Once()
+					service := NewFXService(
+						rateStore,
+						WithFXServiceProviders(provider),
+						WithFXServiceDefaultProvider(providerName),
+						WithFXServiceRequiredPairs(persistence.NewFXPairDiscoveryStore(database)),
+					)
+
+					_, err := service.RefreshRequiredFXRates(t.Context(), RefreshFXRatesParams{})
+					require.Error(t, err)
+					rates, listErr := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
+						Provider: providerName,
+					})
+					require.NoError(t, listErr)
+					assert.Equal(t, before, rates)
+				})
+			}
+		})
+
+		t.Run("succeeds without a provider call when no pairs are required", func(t *testing.T) {
+			database := openTestDatabase(t)
+			provider := NewMockFXRatesProvider(t)
+			providerName := "provider-" + faker.New().Lorem().Word()
+			provider.EXPECT().Name().Return(providerName).Once()
+			service := NewFXService(
+				persistence.NewCurrentFXRateStore(database),
+				WithFXServiceProviders(provider),
+				WithFXServiceDefaultProvider(providerName),
+				WithFXServiceRequiredPairs(persistence.NewFXPairDiscoveryStore(database)),
+			)
+			result, err := service.RefreshRequiredFXRates(t.Context(), RefreshFXRatesParams{})
+			require.NoError(t, err)
+			assert.Equal(t, SyncFXRatesResult{Provider: providerName}, result)
+		})
+	})
+
+	t.Run("returns only current FX metadata relevant to the dashboard tenant", func(t *testing.T) {
+		store := makeStore(t)
+		now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+		fake := faker.New()
+		service := NewService(store, WithNow(func() time.Time { return now }))
+		firstOwnerID := "owner-first-" + fake.UUID().V4()
+		secondOwnerID := "owner-second-" + fake.UUID().V4()
+		firstTenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID: firstOwnerID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "PLN",
+		})
+		require.NoError(t, err)
+		secondTenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID: secondOwnerID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "PLN",
+		})
+		require.NoError(t, err)
+		_, err = service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: firstOwnerID, TenantID: firstTenant.ID, Name: "account-" + fake.Lorem().Word(),
+			Currency: "USD", Kind: domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+		_, err = service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: secondOwnerID, TenantID: secondTenant.ID, Name: "account-" + fake.Lorem().Word(),
+			Currency: "EUR", Kind: domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+		require.NoError(t, store.SaveCurrentFXRates(t.Context(), []domain.FXRate{
+			{
+				Provider:                FXProviderFrankfurter,
+				BaseCurrency:            "USD",
+				QuoteCurrency:           "PLN",
+				EffectiveAt:             now,
+				LastSuccessfulRefreshAt: now, Rate: 4.2,
+			},
+			{
+				Provider:                FXProviderFrankfurter,
+				BaseCurrency:            "EUR",
+				QuoteCurrency:           "PLN",
+				EffectiveAt:             now.Add(-72 * time.Hour),
+				LastSuccessfulRefreshAt: now.Add(-72 * time.Hour), Rate: 4.3,
+			},
+		}))
+
+		dashboard, err := service.GetDashboard(t.Context(), DashboardParams{
+			ActorUserID: firstOwnerID, TenantID: firstTenant.ID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []DashboardFXRate{{
+			Provider:                FXProviderFrankfurter,
+			BaseCurrency:            "USD",
+			QuoteCurrency:           "PLN",
+			EffectiveAt:             now,
+			LastSuccessfulRefreshAt: now, Stale: false,
+		}}, dashboard.CurrentFXRates)
+		assert.Empty(t, dashboard.Alerts)
+	})
+
 	t.Run(
 		"parses frankfurter payloads and keeps nbp ecb provider seams available",
 		func(t *testing.T) {
 			server := httptest.NewServer(
 				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					assert.Equal(t, "/2026-06-20", r.URL.Path)
-					assert.Equal(t, "USD", r.URL.Query().Get("from"))
-					assert.Equal(t, "PLN,EUR", r.URL.Query().Get("to"))
+					assert.Equal(t, "/v2/rates", r.URL.Path)
+					assert.Equal(t, "USD", r.URL.Query().Get("base"))
+					assert.Equal(t, "PLN,EUR", r.URL.Query().Get("quotes"))
+					assert.Empty(t, r.URL.Query().Get("from"))
+					assert.Empty(t, r.URL.Query().Get("to"))
 					_, err := w.Write([]byte(
-						`{"amount":1,"base":"USD","date":"2026-06-20","rates":{"PLN":4.1234,"EUR":0.8811}}`,
+						`[{"date":"2026-06-20","base":"USD","quote":"PLN","rate":4.1234},{"date":"2026-06-20","base":"USD","quote":"EUR","rate":0.8811}]`,
 					))
 					assert.NoError(t, err)
 				}),
@@ -645,4 +898,36 @@ func TestReportingAndFX(t *testing.T) {
 			assert.Equal(t, FXProviderECB, NewECBFXProvider(nil, "").Name())
 		},
 	)
+
+	t.Run("rejects frankfurter non-success and malformed latest responses", func(t *testing.T) {
+		makeProvider := func(t *testing.T, status int, body string) *FrankfurterFXProvider {
+			t.Helper()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, err := w.Write([]byte(body))
+				assert.NoError(t, err)
+			}))
+			t.Cleanup(server.Close)
+			return NewFrankfurterFXProvider(server.Client(), server.URL)
+		}
+		query := FXProviderQuery{BaseCurrency: "USD", QuoteCurrencies: []string{"PLN"}}
+
+		_, err := makeProvider(t, http.StatusNotFound, `{"message":"not found"}`).FetchLatestRates(t.Context(), query)
+		require.Error(t, err)
+
+		for _, body := range []string{
+			`{`,
+			`[]`,
+			`[{"date":"","base":"USD","quote":"PLN","rate":4.1}]`,
+			`[{"date":"2026-06-20","base":"","quote":"PLN","rate":4.1}]`,
+			`[{"date":"2026-06-20","base":"USD","quote":"","rate":4.1}]`,
+			`[{"date":"2026-06-20","base":"EUR","quote":"PLN","rate":4.1}]`,
+			`[{"date":"2026-06-20","base":"USD","quote":"EUR","rate":4.1}]`,
+			`[{"date":"2026-06-20","base":"USD","quote":"PLN","rate":0}]`,
+			`[{"date":"2026-06-20","base":"USD","quote":"PLN","rate":4.1,"unexpected":true}]`,
+		} {
+			_, fetchErr := makeProvider(t, http.StatusOK, body).FetchLatestRates(t.Context(), query)
+			require.Error(t, fetchErr)
+		}
+	})
 }

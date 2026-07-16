@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listCategories: vi.fn(),
   listTags: vi.fn(),
   listTransactions: vi.fn(),
+  updateTransaction: vi.fn(),
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => ({
@@ -58,18 +59,203 @@ describe('Finance transactions page', () => {
         updatedAt: now,
       },
     ])
+    mocks.updateTransaction.mockImplementation(async (params) => ({
+      ...((await mocks.listTransactions.mock.results[0]?.value)?.[0] ?? {}),
+      ...params,
+      id: params.transactionId,
+      categoryId: params.categoryId ?? null,
+    }))
   })
 
-  it('renders the ledger table and row editor navigation links', async () => {
+  it('renders the shared transaction list and full-editor navigation link', async () => {
     render(FinanceTransactions)
     expect(await screen.findByText('Refund')).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: 'Transactions ledger' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Transactions ledger')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Create transaction' })).toHaveAttribute('href', '#/finance/transactions/new')
-    expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '#/finance/transactions/tx-1')
+    expect(screen.getByRole('link', { name: 'Open full transaction details' })).toHaveAttribute('href', '#/finance/transactions/tx-1')
     expect(screen.queryByLabelText('Selected transaction details')).not.toBeInTheDocument()
     expect(screen.getAllByText('pending').length).toBeGreaterThan(0)
     expect(screen.getByText('hidden')).toBeInTheDocument()
     expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
+  })
+
+  it('marks repeated inline icon actions for the shared mobile touch-target treatment', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+
+    for (const name of ['Edit description', 'Edit category', 'Edit tags', 'Open full transaction details']) {
+      expect(screen.getByRole(name === 'Open full transaction details' ? 'link' : 'button', { name })).toHaveClass('finance-transaction-list-action')
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Edit description' }))
+    expect(screen.getByRole('button', { name: 'Save description' })).toHaveClass('finance-transaction-list-action')
+    expect(screen.getByRole('button', { name: 'Cancel description edit' })).toHaveClass('finance-transaction-list-action')
+  })
+
+  it('keeps active category and tag editors beside their actions', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+
+    await user.click(screen.getByRole('button', { name: 'Edit category' }))
+    const category = screen.getByLabelText('Category')
+    const categoryRow = category.closest('.finance-transaction-list-editor-row')
+    expect(categoryRow).toHaveClass('flex-nowrap')
+    expect(categoryRow).toContainElement(screen.getByRole('button', { name: 'Save category' }))
+    expect(categoryRow).toContainElement(screen.getByRole('button', { name: 'Cancel category edit' }))
+
+    await user.click(screen.getByRole('button', { name: 'Cancel category edit' }))
+    await user.click(screen.getByRole('button', { name: 'Edit tags' }))
+    const tags = screen.getByRole('group', { name: 'Tags' })
+    const tagsRow = tags.closest('.finance-transaction-list-editor-row')
+    const tagChoices = tags.querySelector('.finance-transaction-list-tag-choices')
+    expect(tagsRow).toHaveClass('flex-nowrap')
+    expect(tagsRow).toContainElement(screen.getByRole('button', { name: 'Save tags' }))
+    expect(tagsRow).toContainElement(screen.getByRole('button', { name: 'Cancel tags edit' }))
+    expect(tagChoices).toHaveClass('flex-wrap')
+  })
+
+  it('keeps a matched transfer to one transfer badge while retaining inline category and tag actions', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.listTransactions.mockResolvedValueOnce([
+      {
+        id: 'tx-transfer',
+        tenantId: 'tenant-1',
+        accountId: 'account-1',
+        source: 'manual',
+        status: 'booked',
+        kind: 'transfer',
+        amountMinor: 900,
+        currency: 'USD',
+        description: 'Transfer out',
+        effectiveAt: now,
+        categoryId: 'cat-1',
+        tagIds: ['tag-1'],
+        transferGroupId: 'transfer-1',
+        transferMatchedAt: now,
+        hiddenAt: null,
+        providerOriginal: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ])
+
+    render(FinanceTransactions)
+
+    expect(await screen.findByText('Transfer out')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit category' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit tags' })).toBeInTheDocument()
+    expect(screen.getAllByText('internal transfer')).toHaveLength(1)
+    expect(screen.queryByText('transfer', { exact: true })).not.toBeInTheDocument()
+  })
+
+  it('withholds unavailable category and tag edits, then retries each catalog without blocking description editing', async () => {
+    const user = userEvent.setup()
+    mocks.listCategories.mockRejectedValueOnce(new Error('Categories unavailable'))
+    mocks.listTags.mockRejectedValueOnce(new Error('Tags unavailable'))
+    render(FinanceTransactions)
+
+    expect(await screen.findByText('Categories could not load.')).toBeInTheDocument()
+    expect(screen.getByText('Tags could not load.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit category' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit tags' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save category' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save tags' })).not.toBeInTheDocument()
+    expect(mocks.updateTransaction).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Edit description' }))
+    expect(screen.getByLabelText('Description')).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Cancel description edit' }))
+
+    await user.click(screen.getByRole('button', { name: 'Retry category catalog' }))
+    expect(await screen.findByRole('button', { name: 'Edit category' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit tags' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Retry tag catalog' }))
+    expect(await screen.findByRole('button', { name: 'Edit tags' })).toBeInTheDocument()
+    expect(mocks.updateTransaction).not.toHaveBeenCalled()
+  })
+
+  it('saves a focused inline description update without navigating away', async () => {
+    const user = userEvent.setup()
+    mocks.updateTransaction.mockResolvedValueOnce({
+      ...(await mocks.listTransactions.mock.results[0]?.value)?.[0],
+      id: 'tx-1', description: 'Refund corrected', tagIds: ['tag-1', 'tag-2'], categoryId: 'cat-1',
+    })
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+
+    await user.click(screen.getByRole('button', { name: 'Edit description' }))
+    const description = screen.getByLabelText('Description')
+    await user.clear(description)
+    await user.type(description, 'Refund corrected')
+    await user.click(screen.getByRole('button', { name: 'Save description' }))
+
+    await waitFor(() => expect(mocks.updateTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: 'tenant-1', transactionId: 'tx-1', description: 'Refund corrected', categoryId: 'cat-1', tagIds: ['tag-1', 'tag-2'],
+    })))
+    expect(await screen.findByText('Refund corrected')).toBeInTheDocument()
+  })
+
+  it('autofocuses the description editor, submits with Enter, and cancels with Escape', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+
+    await user.click(screen.getByRole('button', { name: 'Edit description' }))
+    const description = screen.getByLabelText('Description')
+    expect(description).toHaveFocus()
+    await user.clear(description)
+    await user.type(description, 'Enter saves')
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(mocks.updateTransaction).toHaveBeenCalledWith(expect.objectContaining({ description: 'Enter saves' })))
+
+    await user.click(screen.getByRole('button', { name: 'Edit description' }))
+    await user.type(screen.getByLabelText('Description'), ' discarded')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByLabelText('Description')).not.toBeInTheDocument()
+    expect(mocks.updateTransaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('can clear a category inline while preserving description and tags', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.updateTransaction.mockResolvedValueOnce({
+      id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'pending', kind: 'refund', amountMinor: 900, currency: 'USD', description: 'Refund', effectiveAt: now, categoryId: null, tagIds: ['tag-1', 'tag-2'], createdAt: now, updatedAt: now,
+    })
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+
+    await user.click(screen.getByRole('button', { name: 'Edit category' }))
+    await user.selectOptions(screen.getByLabelText('Category'), '')
+    await user.click(screen.getByRole('button', { name: 'Save category' }))
+
+    await waitFor(() => expect(mocks.updateTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      categoryId: null, description: 'Refund', tagIds: ['tag-1', 'tag-2'],
+    })))
+    expect(await screen.findByText('No category')).toBeInTheDocument()
+  })
+
+  it('cancels an inline tag edit without calling the API', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+
+    await user.click(screen.getByRole('button', { name: 'Edit tags' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Household' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel tags edit' }))
+
+    expect(mocks.updateTransaction).not.toHaveBeenCalled()
+    expect(screen.getByText('Shared')).toBeInTheDocument()
+  })
+
+  it('keeps all transfer selection and pairing controls off the browse route', async () => {
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+    expect(screen.queryByLabelText(/Select Refund/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Internal transfer pairing')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /link.*transfer/i })).not.toBeInTheDocument()
   })
 
   it('resolves category labels from the tenant category catalog', async () => {
@@ -83,14 +269,14 @@ describe('Finance transactions page', () => {
   it('resolves tag labels from the tenant tag catalog and hides raw IDs', async () => {
     render(FinanceTransactions)
 
-    expect((await screen.findAllByText('Household')).length).toBeGreaterThan(1)
+    expect((await screen.findAllByText('Household')).length).toBeGreaterThan(0)
     expect(screen.getByText('Shared')).toBeInTheDocument()
     expect(screen.queryByText('tag-1')).not.toBeInTheDocument()
     expect(mocks.listTags).toHaveBeenCalledWith({ tenantId: 'tenant-1' })
   })
 
   it('shows unknown tag when an assigned ID is absent from the tag catalog', async () => {
-    mocks.listTransactions.mockResolvedValueOnce([{
+    mocks.listTransactions.mockResolvedValue([{
       id: 'tx-unknown-tag', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100, currency: 'USD', description: 'Unknown tag transaction', effectiveAt: new Date('2026-06-20T12:00:00Z'), categoryId: null, tagIds: ['missing-tag'], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: new Date('2026-06-20T12:00:00Z'), updatedAt: new Date('2026-06-20T12:00:00Z'),
     }])
 
@@ -117,10 +303,10 @@ describe('Finance transactions page', () => {
     const { container } = render(FinanceTransactions)
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Sort order' }), 'asc')
     await waitFor(() => {
-      const rows = Array.from(container.querySelectorAll('tbody tr'))
+      const rows = Array.from(container.querySelectorAll('article'))
       expect(rows[0]?.textContent).toContain('Earlier')
     })
-    expect(screen.getByText('clear')).toBeInTheDocument()
+    expect(screen.getAllByText('booked').length).toBeGreaterThan(0)
     expect(screen.getAllByText('reconciliation').length).toBeGreaterThan(0)
   })
 
@@ -246,7 +432,7 @@ describe('Finance transactions page', () => {
     render(FinanceTransactions)
 
     expect(await screen.findByText('Transaction 1')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Transaction pages: next page' }))
 
     expect(await screen.findByText('Transaction 21')).toBeInTheDocument()
     expect(mocks.listTransactions).toHaveBeenLastCalledWith({
@@ -257,6 +443,52 @@ describe('Finance transactions page', () => {
       limit: 20,
       offset: 20,
     })
+  })
+
+  it('keeps the ledger and pager mounted while a page request is pending', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    let resolveNextPage!: (transactions: Awaited<ReturnType<typeof mocks.listTransactions>>) => void
+    mocks.listTransactions
+      .mockResolvedValueOnce(Array.from({ length: 20 }, (_, index) => ({
+        id: `tx-${index}`, tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100,
+        currency: 'USD', description: `Transaction ${index}`, effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+      })))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNextPage = resolve }))
+    render(FinanceTransactions)
+
+    expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
+    const next = screen.getByRole('button', { name: 'Transaction pages: next page' })
+    await user.click(next)
+
+    await waitFor(() => expect(next).toBeDisabled())
+    expect(screen.getByText('Transaction 0')).toBeInTheDocument()
+    expect(screen.getByText('Loading transaction page…')).toBeInTheDocument()
+    resolveNextPage([{ id: 'tx-20', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100, currency: 'USD', description: 'Transaction 20', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now }])
+
+    expect(await screen.findByText('Transaction 20')).toBeInTheDocument()
+    expect(next).toHaveFocus()
+  })
+
+  it('keeps the current ledger page usable after a pager failure', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.listTransactions
+      .mockResolvedValueOnce(Array.from({ length: 20 }, (_, index) => ({
+        id: `tx-${index}`, tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100,
+        currency: 'USD', description: `Transaction ${index}`, effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+      })))
+      .mockRejectedValueOnce(new Error('Page unavailable'))
+    render(FinanceTransactions)
+
+    expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
+    const next = screen.getByRole('button', { name: 'Transaction pages: next page' })
+    await user.click(next)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Page unavailable')
+    expect(screen.getByText('Transaction 0')).toBeInTheDocument()
+    expect(next).toBeEnabled()
+    expect(screen.getByText('Page 1')).toBeInTheDocument()
   })
 
   it('renders a no-tenant state and keeps the create link available', async () => {

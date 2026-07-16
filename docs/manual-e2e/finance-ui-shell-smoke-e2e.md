@@ -46,7 +46,7 @@ Expected:
 1. Stay on `#/finance`.
 2. Confirm the dashboard hierarchy is visible for the selected tenant:
    - compact page header
-   - visible reporting-period summary with previous/current/next controls
+    - visible reporting-period summary with **Previous month**, **Current month**, and **Next month** controls
    - balance-first summary with booked balance before secondary sections
    - compact income, expense, and pending summaries
    - one primary cash-flow or equivalent summary visual in the first viewport
@@ -54,7 +54,7 @@ Expected:
    - category or spending summary section
    - recent transactions section
    - compact needs-attention or follow-up states
-3. Change the reporting range if that control is available and confirm the page updates without losing shell state. For custom date-only values, confirm the selected start is reported from local start-of-day and the selected end through local end-of-day, including any imported row recorded at local midnight on the first day.
+3. Select each month button and confirm its matching direct preset request updates the page without deriving dates from the prior response. Use **Custom range** separately; for custom date-only values, confirm the selected start is reported from local start-of-day and the selected end through local end-of-day, including any imported row recorded at local midnight on the first day.
 
 Expected:
 
@@ -74,7 +74,7 @@ Expected:
 2. Confirm each route keeps the shared Finance shell active and renders Bootstrap-first headings, actions, forms, cards, lists, tables, alerts, and empty/loading/error states appropriate to the page.
 3. From Accounts, open one account detail route and confirm `#/finance/accounts/:accountId` preserves Finance context.
 4. From Transactions, open the dedicated create route and, if seeded data exists, one existing edit route. Confirm the browse page remains table-first and detail/editor flows stay on dedicated routes.
-5. From Connections, start the synthetic flow if safe for the environment and confirm the app reaches `#/finance/connections/synthetic`; if no pending `state` exists, confirm the route shows guidance instead of crashing.
+5. From Connections, open **Synced accounts** on one card. Confirm it lazily loads account name/currency/last sync and account links; retry a failed card-local load, then use **Sync now** and reopen the disclosure to confirm its cached details are refreshed. Start the synthetic flow if safe for the environment and confirm the app reaches `#/finance/connections/synthetic`; if no pending `state` exists, confirm the route shows guidance instead of crashing.
 6. If Imports or Connections exposes a Finance job deep link, open it and confirm `#/finance/jobs/:jobId` stays inside Finance context after tenant resolution.
 
 Expected:
@@ -89,8 +89,8 @@ Expected:
 2. Check the same routes at a narrow viewport such as `390x844`.
 3. On both `#/finance` and `#/finance/transactions`, look for:
     - the desktop rail uses the wider workspace well
-    - on narrow viewports, the full Finance nav stacks above the utility header and page content as a full-width section
-    - the utility header wraps compactly below the stacked nav without introducing a menu-toggle-only state
+    - on narrow viewports, the full Finance nav stacks above the utility header and page content as a full-width section with compact wrapping link rows
+    - the utility header wraps compactly below the stacked nav, omits duplicate route labels when space is tight, and does not introduce a menu-toggle-only state
     - tenant switching, when present, stays shell-owned rather than becoming a large page-level block
     - the dashboard still reads cleanly after the stacked shell chrome without overlap or clipped controls
     - headings, actions, and filter rows remain readable

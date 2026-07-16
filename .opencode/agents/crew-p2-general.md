@@ -5,7 +5,7 @@ description: General P2 software engineer for small bounded work that needs more
   simple coding or test changes, and concise summaries. Give clear scope and expected
   results. Use P3 for ordinary feature or refactor work.
 mode: subagent
-model: openai/gpt-5.4-mini
+model: openai/gpt-5.6-luna
 reasoningEffort: high
 permission:
   '*': allow

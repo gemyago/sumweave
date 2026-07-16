@@ -17,7 +17,6 @@ type serviceStore interface {
 	catalogServiceStore
 	ledgerServiceStore
 	reportingServiceStore
-	fxServiceStore
 	csvImportFocusedStore
 }
 
@@ -31,6 +30,7 @@ type Service struct {
 	ledger                 *LedgerService
 	reporting              *ReportingService
 	fx                     *FXService
+	currentFXRates         fxServiceStore
 	csvImports             *CSVImportService
 	bankSync               *BankSyncService
 	fxProviders            map[string]FXRatesProvider
@@ -139,6 +139,11 @@ func NewService(store serviceStore, opts ...ServiceOption) *Service {
 }
 
 func (s *Service) bindServices() {
+	if store, ok := s.store.(*persistence.Store); ok {
+		s.currentFXRates = persistence.NewCurrentFXRateStoreFromStore(store)
+	} else {
+		s.currentFXRates, _ = s.store.(fxServiceStore)
+	}
 	s.access = newAccessGuard(s.store)
 	s.tenants = NewTenantService(s.store, WithTenantServiceNow(s.now), WithTenantServiceIDGenerator(s.newID))
 	s.catalog = NewCatalogService(s.store, WithCatalogServiceNow(s.now), WithCatalogServiceIDGenerator(s.newID))
@@ -147,9 +152,10 @@ func (s *Service) bindServices() {
 		s.store,
 		WithReportingServiceNow(s.now),
 		WithReportingServiceDefaultFXProvider(s.defaultFXProvider),
+		WithReportingServiceFXRateStore(s.currentFXRates),
 	)
 	s.fx = NewFXService(
-		s.store,
+		s.currentFXRates,
 		WithFXServiceNow(s.now),
 		WithFXServiceProviders(mapFXProviders(s.fxProviders)...),
 		WithFXServiceDefaultProvider(s.defaultFXProvider),
@@ -389,6 +395,13 @@ func (s *Service) LinkTransfers(
 	params LinkTransfersParams,
 ) error {
 	return s.ledger.LinkTransfers(ctx, params)
+}
+
+func (s *Service) UnlinkTransfers(
+	ctx context.Context,
+	params UnlinkTransfersParams,
+) error {
+	return s.ledger.UnlinkTransfers(ctx, params)
 }
 
 func (s *Service) ListTransactions(

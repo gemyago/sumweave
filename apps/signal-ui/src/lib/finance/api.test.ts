@@ -13,7 +13,7 @@ describe('finance api', () => {
   it('maps tenant, dashboard, connection, import, and fx responses', async () => {
     const responses = [
       { ok: true, json: { items: [{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: '2026-06-20T12:00:00Z', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] } },
-      { ok: true, json: { period: { preset: 'current_month', startDate: '2026-06-01T00:00:00-07:00', endDate: '2026-06-30T00:00:00-07:00', previous: { startDate: '2026-05-01T00:00:00-07:00', endDate: '2026-05-31T00:00:00-07:00' }, next: { startDate: '2026-07-01T00:00:00-07:00', endDate: '2026-07-31T00:00:00-07:00' } }, settled: { displayCurrency: 'USD', incomeMinor: 10, expenseMinor: 5, netMinor: 5, transactionCount: 1, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1, netMinor: -1, transactionCount: 1, complete: true }, categoryBreakdowns: [], accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 10, nativePendingMinor: 1, displayBookedMinor: null, displayPendingMinor: 0, missingFx: false }], alerts: [], missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: '2026-06-20T12:00:00+02:00', provider: 'frankfurter' }], nativeSettledTotals: [] } },
+      { ok: true, json: { period: { preset: 'current_month', startDate: '2026-06-01T00:00:00-07:00', endDate: '2026-06-30T00:00:00-07:00', previous: { startDate: '2026-05-01T00:00:00-07:00', endDate: '2026-05-31T00:00:00-07:00' }, next: { startDate: '2026-07-01T00:00:00-07:00', endDate: '2026-07-31T00:00:00-07:00' } }, settled: { displayCurrency: 'USD', incomeMinor: 10, expenseMinor: 5, netMinor: 5, transactionCount: 1, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1, netMinor: -1, transactionCount: 1, complete: true }, categoryBreakdowns: [], accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 10, nativePendingMinor: 1, displayBookedMinor: null, displayPendingMinor: 0, missingFx: false }], alerts: [], missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: '2026-06-20T12:00:00+02:00', provider: 'frankfurter' }], currentFxRates: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', effectiveAt: '2026-06-20T00:00:00Z', lastSuccessfulRefreshAt: '2026-06-20T12:00:00Z', stale: false }], nativeSettledTotals: [] } },
       { ok: true, json: { items: [{ id: 'connection-1', tenantId: 'tenant-1', provider: 'monobank', displayName: 'Mono', providerReference: 'ref', externalId: 'ext', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z', schedule: { connectionId: 'connection-1', intervalSeconds: 900, enabled: true, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' } }] } },
       { ok: true, json: { importId: 'import-1', importableCount: 1, headers: ['Date'], duplicateRows: [], rejectedRows: [], wouldCreateAccounts: ['Checking'], wouldCreateCategories: [], wouldCreateTags: [], accountOptions: [{ name: 'Checking', sourceRowCount: 1, selected: true }] } },
       { ok: true, json: { jobId: 'job-1', jobType: 'finance.fx_rates_sync', provider: 'frankfurter' } },
@@ -33,7 +33,7 @@ describe('finance api', () => {
     const dashboard = await api.getDashboard({ tenantId: 'tenant-1', preset: 'current_month' })
     const connections = await api.listConnections({ tenantId: 'tenant-1' })
     const preview = await api.previewCSVImport({ tenantId: 'tenant-1', fileName: 'demo.csv', csv: 'Date\n29.05.26' })
-    const job = await api.triggerFXSync({ provider: 'frankfurter', baseCurrencies: ['USD'], quoteCurrency: 'PLN', startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30) })
+    const job = await api.triggerFXSync({ provider: 'frankfurter', baseCurrencies: ['USD'], quoteCurrency: 'PLN' })
 
     expect(tenants[0].joinedAt).toBeInstanceOf(Date)
     expect(dashboard.period.startDate).toEqual(new Date('2026-06-01T00:00:00-07:00'))
@@ -41,6 +41,7 @@ describe('finance api', () => {
     expect(dashboard.accountBalances[0].displayPendingMinor).toBe(0)
     expect(dashboard.accountBalances[0].missingFx).toBe(false)
     expect(dashboard.missingFx[0].rateDate).toEqual(new Date('2026-06-20T12:00:00+02:00'))
+    expect(dashboard.currentFxRates[0].lastSuccessfulRefreshAt).toEqual(new Date('2026-06-20T12:00:00Z'))
     expect(connections[0].schedule?.intervalSeconds).toBe(900)
     expect(preview.wouldCreateAccounts).toEqual(['Checking'])
     expect(preview.accountOptions).toEqual([{ name: 'Checking', sourceRowCount: 1, selected: true }])
@@ -67,12 +68,114 @@ describe('finance api', () => {
     expect(JSON.parse(requestInit?.body as string)).toMatchObject({ selectedAccountNames: [] })
   })
 
+  it('submits a latest-only manual FX refresh without date-range fields', async () => {
+    let requestInit: RequestInit | undefined
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestInit = init
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ jobId: 'job-fx', jobType: 'finance.fx_rates_sync' }) } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await api.triggerFXSync({ provider: 'frankfurter', baseCurrencies: ['EUR', 'USD'], quoteCurrency: 'PLN' })
+
+    expect(JSON.parse(String(requestInit?.body))).toEqual({ provider: 'frankfurter', baseCurrencies: ['EUR', 'USD'], quoteCurrency: 'PLN' })
+  })
+
+  it('loads provider evidence metadata separately from an explicit sanitized detail reveal', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const responses = [
+      { items: [{ id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: '2026-06-20T12:00:00Z' }] },
+      { id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: '2026-06-20T12:00:00Z', payload: { amount: 'sanitized' } },
+    ]
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return { ok: true, status: 200, statusText: 'OK', json: async () => responses.shift() } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    const metadata = await api.listTransactionProviderEvidence({ tenantId: 'tenant-1', transactionId: 'tx-1' })
+    expect(metadata[0].capturedAt).toEqual(new Date('2026-06-20T12:00:00Z'))
+    expect(String(calls[0].input)).toContain('/transactions/tx-1/evidence')
+    expect(String(calls[0].input)).not.toContain('evidence-1')
+
+    const evidence = await api.getTransactionProviderEvidence({ tenantId: 'tenant-1', transactionId: 'tx-1', evidenceId: 'evidence-1' })
+    expect(evidence.payload).toEqual({ amount: 'sanitized' })
+    expect(String(calls[1].input)).toContain('/transactions/tx-1/evidence/evidence-1')
+  })
+
+  it('calls the transfer pair link and unlink APIs with the selected records', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return { ok: true, status: 204, statusText: 'No Content', json: async () => undefined } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+    const params = { tenantId: 'tenant-1', firstTransactionId: 'tx-out', secondTransactionId: 'tx-in' }
+
+    await api.linkTransferPair(params)
+    await api.unlinkTransferPair(params)
+
+    expect(calls.map((call) => call.init?.method)).toEqual(['POST', 'DELETE'])
+    expect(calls.map((call) => String(call.input))).toEqual([
+      expect.stringContaining('/finance/tenants/tenant-1/transactions/transfer-links'),
+      expect.stringContaining('/finance/tenants/tenant-1/transactions/transfer-links'),
+    ])
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ firstTransactionId: 'tx-out', secondTransactionId: 'tx-in' })
+  })
+
+  it('loads transfer candidates and the exact matched partner with local-range instants', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const transaction = {
+      id: 'tx-in', tenantId: 'tenant-1', accountId: 'account-2', source: 'provider', status: 'booked', kind: 'regular', amountMinor: 100,
+      currency: 'USD', description: 'Transfer in', effectiveAt: '2026-06-20T12:00:00-07:00', tagIds: [], createdAt: '2026-06-20T12:00:00-07:00', updatedAt: '2026-06-20T12:00:00-07:00',
+    }
+    const responses = [{ items: [transaction] }, { ...transaction, kind: 'transfer', transferGroupId: 'group-1', transferMatchedAt: '2026-06-20T12:05:00-07:00' }]
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return { ok: true, status: 200, statusText: 'OK', json: async () => responses.shift() } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    const candidates = await api.listTransferCandidates({
+      tenantId: 'tenant-1', transactionId: 'tx-out', effectiveFrom: new Date('2026-06-18T00:00:00-07:00'), effectiveBefore: new Date('2026-06-23T00:00:00-07:00'), limit: 20, offset: 20,
+    })
+    const partner = await api.getTransferPartner({ tenantId: 'tenant-1', transactionId: 'tx-out' })
+
+    const candidateUrl = new URL(String(calls[0].input))
+    expect(candidateUrl.pathname).toBe('/api/v1/finance/tenants/tenant-1/transactions/tx-out/transfer-candidates')
+    expect(candidateUrl.searchParams.get('limit')).toBe('20')
+    expect(candidateUrl.searchParams.get('offset')).toBe('20')
+    expect(candidateUrl.searchParams.get('effectiveFrom')).toBe('2026-06-18T07:00:00.000Z')
+    expect(candidates.items[0].effectiveAt).toEqual(new Date('2026-06-20T12:00:00-07:00'))
+    expect(new URL(String(calls[1].input)).pathname).toBe('/api/v1/finance/tenants/tenant-1/transactions/tx-out/transfer-partner')
+    expect(partner.transferMatchedAt).toEqual(new Date('2026-06-20T12:05:00-07:00'))
+  })
+
+  it('calls the account evidence metadata and sanitized-detail APIs', async () => {
+    const calls: Array<RequestInfo | URL> = []
+    const responses = [
+      { items: [{ id: 'evidence-1', scope: 'account', providerObjectId: 'provider-account', capturedAt: '2026-06-20T12:00:00Z' }] },
+      { id: 'evidence-1', scope: 'account', providerObjectId: 'provider-account', capturedAt: '2026-06-20T12:00:00Z', payload: { balance: 'sanitized' } },
+    ]
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(input)
+      return { ok: true, status: 200, statusText: 'OK', json: async () => responses.shift() } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await api.listAccountProviderEvidence({ tenantId: 'tenant-1', accountId: 'account-1' })
+    await api.getAccountProviderEvidence({ tenantId: 'tenant-1', accountId: 'account-1', evidenceId: 'evidence-1' })
+
+    expect(String(calls[0])).toContain('/accounts/account-1/evidence')
+    expect(String(calls[1])).toContain('/accounts/account-1/evidence/evidence-1')
+  })
+
   it('rejects malformed or missing required dashboard timestamps and nested fields', async () => {
     const dashboard = {
       period: { preset: 'current_month', startDate: '2026-03-29T00:00:00+14:00', endDate: '2026-03-31', previous: { startDate: '2026-02-01', endDate: '2026-02-28' }, next: { startDate: '2026-04-01', endDate: '2026-04-30' } },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: false },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: false },
-      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], nativeSettledTotals: [],
+      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], currentFxRates: [], nativeSettledTotals: [],
     }
     const malformedDateFetch = vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => dashboard }) as Response)
     await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch: malformedDateFetch }).getDashboard({ tenantId: 'tenant-1' })).rejects.toBeInstanceOf(FinanceResponseError)
@@ -123,6 +226,65 @@ describe('finance api', () => {
     expect(audit.confirmedAt).toBeUndefined()
     expect(recentAudits).toHaveLength(1)
     expect(String(calls[3].input)).toContain('/finance/tenants/tenant-1/imports')
+  })
+
+  it('submits a create-transaction payload with accountId and exact minor amount', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          id: 'tx-1',
+          tenantId: 'tenant-1',
+          accountId: 'account-2',
+          source: 'manual',
+          status: 'booked',
+          kind: 'expense',
+          amountMinor: -55300,
+          currency: 'USD',
+          description: 'Coffee',
+          effectiveAt: '2026-06-20T12:00:00Z',
+          categoryId: 'cat-2',
+          tagIds: ['tag-2'],
+          createdAt: '2026-06-20T12:00:00Z',
+          updatedAt: '2026-06-20T12:00:00Z',
+        }),
+      } as Response
+    })
+
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await api.createTransaction({
+      tenantId: 'tenant-1',
+      accountId: 'account-2',
+      source: 'manual',
+      status: 'booked',
+      kind: 'expense',
+      amountMinor: -55300,
+      currency: 'USD',
+      description: 'Coffee',
+      effectiveAt: new Date('2026-06-20T12:00:00Z'),
+      categoryId: 'cat-2',
+      tagIds: ['tag-2'],
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(String(calls[0].input)).toContain('/finance/tenants/tenant-1/transactions')
+    expect(JSON.parse(String(calls[0].init?.body))).toMatchObject({
+      accountId: 'account-2',
+      amountMinor: -55300,
+      source: 'manual',
+      status: 'booked',
+      kind: 'expense',
+      currency: 'USD',
+      description: 'Coffee',
+      effectiveAt: '2026-06-20T12:00:00.000Z',
+      categoryId: 'cat-2',
+      tagIds: ['tag-2'],
+    })
   })
 
   it('omits undefined connection sync windows and preserves supplied instants', async () => {
@@ -290,7 +452,7 @@ describe('finance api', () => {
     expect(loaded.configuredAccounts[0].key).toBe('dup-1')
     expect(loaded.configuredAccounts[1].key).toBe('dup-2')
     expect(saved.configuredAccounts[1].key).toBe('dup-3')
-    expect(new URL(String(calls[0].input)).pathname).toBe('/api/v1/finance/tenants/tenant-1/connections/synthetic-link-states/state-1')
+    expect(new URL(String(calls[0].input)).pathname).toBe('/api/v1/finance/tenants/tenant-1/connections/synthetic-link-states/state/state-1')
     expect(String(calls[1].init?.body)).toBe('{"configuredAccounts":[{"key":"dup-1","name":"Cash","currency":"USD"},{"name":"Brokerage","currency":"EUR"}]}')
   })
 

@@ -8,6 +8,8 @@ packages:
   github.com/gemyago/signal-foundry/finance:
     interfaces:
       accessGuardStore:
+      FXRatesProvider:
+      providerEvidenceServiceStore:
   github.com/gemyago/signal-foundry/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:

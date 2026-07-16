@@ -24,6 +24,8 @@ type Finance struct {
 	BankConnectionService     *BankConnectionService
 	SyntheticLinkStateService *SyntheticLinkStateService
 	BankSyncService           *BankSyncService
+	ProviderEvidenceService   *ProviderEvidenceService
+	TransferDetailService     *TransferDetailService
 }
 
 func New(cfg *Config) (*Finance, error) {
@@ -32,8 +34,12 @@ func New(cfg *Config) (*Finance, error) {
 	}
 
 	store := persistence.NewStore(cfg.Database)
+	currentFXRateStore := persistence.NewCurrentFXRateStore(cfg.Database)
+	fxPairDiscoveryStore := persistence.NewFXPairDiscoveryStore(cfg.Database)
 	transactionStore := persistence.NewTransactionTagStore(cfg.Database)
 	csvImportStore := persistence.NewCSVImportStore(cfg.Database)
+	providerEvidenceStore := persistence.NewProviderEvidenceStore(cfg.Database)
+	transferCandidateStore := persistence.NewTransferCandidateStore(cfg.Database)
 	connectors := newConnectors(cfg, store)
 	connectorRegistry := internalproviders.NewStaticConnectorRegistry(connectors...)
 	profileRegistry := newProviderProfileRegistry(cfg)
@@ -41,6 +47,9 @@ func New(cfg *Config) (*Finance, error) {
 		store,
 		transactionStore,
 		csvImportStore,
+		providerEvidenceStore,
+		currentFXRateStore,
+		fxPairDiscoveryStore,
 		focusedServicesConfigFromConfig(cfg, connectors),
 	)
 
@@ -71,7 +80,9 @@ func New(cfg *Config) (*Finance, error) {
 			WithSyntheticLinkStateServiceNow(cfg.Now),
 			WithSyntheticLinkStateServiceIDGenerator(cfg.NewID),
 		),
-		BankSyncService: services.BankSyncService,
+		BankSyncService:         services.BankSyncService,
+		ProviderEvidenceService: NewProviderEvidenceService(providerEvidenceStore),
+		TransferDetailService:   NewTransferDetailService(transferCandidateStore),
 	}, nil
 }
 
@@ -232,6 +243,7 @@ func providerSyncResultFromBatch(batch domain.ProviderSyncBatch) ProviderSyncRes
 			EffectiveAt:           item.EffectiveAt,
 			Fingerprint:           item.Fingerprint,
 			ProviderOriginal:      item.ProviderOriginal,
+			RawPayloadJSON:        item.RawPayloadJSON,
 		})
 	}
 	for _, item := range batch.RawPayloads {

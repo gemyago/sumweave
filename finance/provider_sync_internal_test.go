@@ -551,7 +551,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		assert.False(t, claimed)
 	})
 
-	t.Run("refreshes existing linked finance account names from provider metadata", func(t *testing.T) {
+	t.Run("refreshes existing provider-ID fallback linked account names on sync", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
 		service := NewService(store, WithConnectionSecretCipher(makeCipher(t)))

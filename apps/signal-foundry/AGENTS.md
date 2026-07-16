@@ -37,6 +37,8 @@ API Routes are generated using [apigen](https://github.com/gemyago/apigen) which
 - Add the new route to the `v1routes.yaml` file.
 - Run `go generate ./internal/api/http/register.go` to generate the new routes.
 - Implement new controller/new methods in the `v1controllers` package.
+- No generated-route post-processing workaround unless explicitly justified.
+- apigen issues/improvements discovered, need to be presented to the user and submitted to apigen after user approval. Such submissions must include: high level overview, steps to reproduce, suggested fix (if applicable) and why the issue matters.
 
 Key rules:
 - Controllers are defined with tags in the openapi spec
@@ -54,6 +56,8 @@ Invoke repo-scoped PM2 commands from the repo root:
 Before starting or restarting backend processes that rely on persisted tables, change to `apps/signal-foundry` and run `go run ./cmd/signal-foundry db-migrate --env local`.
 
 Standard local backend workflow uses `apps/signal-foundry` as the working directory: run `go run ./cmd/signal-foundry db-migrate --env local` and then `go run ./cmd/signal-foundry start-all --env local`. Local filesystem paths are app-root-relative; arbitrary working directories are unsupported.
+
+For the optional HTTPS backend and Vite development workflow, follow [../../docs/local-https.md](../../docs/local-https.md). It uses ignored local certificate files and `APP_HTTPSERVER_TLS_CERTFILE` / `APP_HTTPSERVER_TLS_KEYFILE`.
 
 Release build workflow from `apps/signal-foundry` is `make dist/bin`; it rebuilds the SPA into the backend embed directory, validates `dist/index.html`, and then produces the backend binary with embedded UI assets. Runtime UI serving is embedded-only: if embedded `dist/index.html` is absent, the backend stays API-only.
 

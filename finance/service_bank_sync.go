@@ -9,18 +9,37 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/finance/domain"
+	internalproviders "github.com/gemyago/signal-foundry/finance/internal/providers"
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/google/uuid"
 )
 
 type bankSyncFocusedStore interface {
 	IsTenantMember(ctx context.Context, tenantID string, userID string) (bool, error)
+	GetTenant(ctx context.Context, tenantID string) (*domain.Tenant, error)
 	ListAccounts(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Account, error)
+	ListTransactions(
+		ctx context.Context,
+		tenantID string,
+		accountID string,
+		source domain.TransactionSource,
+		status domain.TransactionStatus,
+		includeHidden bool,
+		page ...persistence.ListTransactionsPage,
+	) ([]domain.Transaction, error)
 	SaveAccount(ctx context.Context, account domain.Account) (domain.Account, error)
 	GetTransaction(ctx context.Context, transactionID string) (*domain.Transaction, error)
 	SaveTransaction(ctx context.Context, transaction domain.Transaction) (domain.Transaction, error)
 	bankSyncStore
 	connectionSecretStore
+}
+
+type providerEvidenceWriter interface {
+	SaveProviderEvidence(context.Context, domain.ProviderEvidence) (domain.ProviderEvidence, error)
+}
+
+type providerEvidenceConnectionDeleter interface {
+	DeleteProviderEvidenceByConnection(context.Context, string) error
 }
 
 type BankSyncService struct {
@@ -33,6 +52,7 @@ type BankSyncService struct {
 	bankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
 	bankSyncScheduleWriter BankConnectionSyncScheduleWriter
 	logger                 *slog.Logger
+	evidenceWriter         providerEvidenceWriter
 }
 
 const (
@@ -81,6 +101,10 @@ func WithBankSyncServiceLogger(logger *slog.Logger) BankSyncServiceOption {
 			service.logger = logger
 		}
 	}
+}
+
+func WithBankSyncServiceEvidenceWriter(writer providerEvidenceWriter) BankSyncServiceOption {
+	return func(service *BankSyncService) { service.evidenceWriter = writer }
 }
 
 func NewBankSyncService(store bankSyncFocusedStore, opts ...BankSyncServiceOption) *BankSyncService {
@@ -260,6 +284,9 @@ func (s *BankSyncService) DeleteBankConnection(
 		if txErr := txStore.WithTransaction(ctx, func(store *persistence.Store) error {
 			txService := *s
 			txService.store = store
+			if _, evidenceStore := s.evidenceWriter.(*persistence.ProviderEvidenceStore); evidenceStore {
+				txService.evidenceWriter = persistence.NewProviderEvidenceStoreFromStore(store)
+			}
 			return deleteConnection(&txService)
 		}); txErr != nil {
 			return txErr
@@ -421,6 +448,9 @@ func (s *BankSyncService) ApplyProviderSyncResult(
 		err := txStore.WithTransaction(ctx, func(store *persistence.Store) error {
 			txService := *s
 			txService.store = store
+			if _, evidenceStore := s.evidenceWriter.(*persistence.ProviderEvidenceStore); evidenceStore {
+				txService.evidenceWriter = persistence.NewProviderEvidenceStoreFromStore(store)
+			}
 			var applyErr error
 			result, applyErr = txService.applyProviderSyncResult(ctx, params, true)
 			return applyErr
@@ -457,6 +487,33 @@ func (s *BankSyncService) ListBankConnections(
 		views = append(views, BankConnectionView{Connection: connection, Schedule: schedule})
 	}
 	return views, nil
+}
+
+func (s *BankSyncService) ListBankConnectionSyncedAccounts(
+	ctx context.Context,
+	params ListBankConnectionSyncedAccountsParams,
+) ([]BankConnectionSyncedAccount, error) {
+	connection, err := s.requireTenantBankConnection(ctx, params.TenantID, params.ActorUserID, params.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	accounts, err := s.store.ListConnectionProviderAccounts(ctx, connection.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list bank connection synced accounts: %w", err)
+	}
+	items := make([]BankConnectionSyncedAccount, 0, len(accounts))
+	for _, account := range accounts {
+		if account.FinanceAccountID == "" {
+			continue
+		}
+		items = append(items, BankConnectionSyncedAccount{
+			FinanceAccountID:     account.FinanceAccountID,
+			Name:                 account.Name,
+			Currency:             account.Currency,
+			LastSuccessfulSyncAt: account.LastSuccessfulSyncAt,
+		})
+	}
+	return items, nil
 }
 
 func (s *BankSyncService) writeBankConnectionSyncSchedule(
@@ -566,6 +623,11 @@ func (s *BankSyncService) deleteBankConnectionOwnedMetadata(
 	ctx context.Context,
 	connection domain.BankConnection,
 ) error {
+	if evidenceDeleter, ok := s.evidenceWriter.(providerEvidenceConnectionDeleter); ok {
+		if err := evidenceDeleter.DeleteProviderEvidenceByConnection(ctx, connection.ID); err != nil {
+			return fmt.Errorf("delete bank connection provider evidence: %w", err)
+		}
+	}
 	for _, step := range []func(context.Context) error{
 		func(ctx context.Context) error { return s.store.DeleteProviderTransactionMatches(ctx, connection.ID) },
 		func(ctx context.Context) error { return s.store.DeleteBankConnectionSyncRuns(ctx, connection.ID) },
@@ -989,8 +1051,18 @@ func (s *BankSyncService) applyProviderTransaction(
 		if getErr != nil {
 			return false, fmt.Errorf("get transaction: %w", getErr)
 		}
-		transaction.ID = existing.ID
-		transaction.CreatedAt = existing.CreatedAt
+		transaction = internalproviders.NewMergePolicy().MergeTransaction(
+			*existing,
+			domain.ProviderTransactionObservation{
+				Status:           item.Status,
+				AmountMinor:      item.AmountMinor,
+				Currency:         strings.ToUpper(strings.TrimSpace(item.Currency)),
+				Description:      item.Description,
+				EffectiveAt:      item.EffectiveAt,
+				ProviderOriginal: item.ProviderOriginal,
+			},
+		)
+		transaction.UpdatedAt = now
 	}
 	if _, saveErr := s.store.SaveTransaction(ctx, transaction); saveErr != nil {
 		return false, fmt.Errorf("save transaction: %w", saveErr)
@@ -1011,6 +1083,11 @@ func (s *BankSyncService) applyProviderTransaction(
 	}
 	if _, saveErr := s.store.SaveProviderTransactionMatch(ctx, providerMatch); saveErr != nil {
 		return false, fmt.Errorf("save provider transaction match: %w", saveErr)
+	}
+	if evidenceErr := s.persistTransactionProviderEvidence(
+		ctx, connection, providerAccount, transaction, item, now,
+	); evidenceErr != nil {
+		return false, evidenceErr
 	}
 	return updated, nil
 }
@@ -1078,22 +1155,54 @@ func (s *BankSyncService) applyProviderTransactions(
 		} else {
 			importedCount++
 		}
-		if len(item.RawPayloadJSON) == 0 {
-			continue
-		}
-		_, err = s.store.SaveRawPayload(ctx, domain.RawPayload{
-			ID:               s.newID(),
-			ConnectionID:     connection.ID,
-			Scope:            domain.RawPayloadScopeTransaction,
-			ProviderObjectID: firstNonEmpty(item.ProviderTransactionID, item.Fingerprint),
-			PayloadJSON:      item.RawPayloadJSON,
-			CapturedAt:       now,
-		})
-		if err != nil {
-			return 0, 0, fmt.Errorf("save raw payload: %w", err)
-		}
 	}
 	return importedCount, updatedCount, nil
+}
+
+func (s *BankSyncService) persistTransactionProviderEvidence(
+	ctx context.Context,
+	connection domain.BankConnection,
+	providerAccount domain.ConnectionProviderAccount,
+	transaction domain.Transaction,
+	item ProviderNormalizedTransaction,
+	capturedAt time.Time,
+) error {
+	if len(item.RawPayloadJSON) == 0 {
+		return nil
+	}
+	sanitizedPayload, err := domain.SanitizeProviderEvidenceJSON(item.RawPayloadJSON)
+	if err != nil {
+		return fmt.Errorf("sanitize transaction provider evidence: %w", err)
+	}
+	if s.evidenceWriter != nil {
+		_, saveErr := s.evidenceWriter.SaveProviderEvidence(ctx, domain.ProviderEvidence{
+			ID:                   s.newID(),
+			TenantID:             connection.TenantID,
+			ConnectionID:         connection.ID,
+			FinanceAccountID:     providerAccount.FinanceAccountID,
+			FinanceTransactionID: transaction.ID,
+			Subject:              domain.ProviderEvidenceSubjectTransaction,
+			Scope:                domain.RawPayloadScopeTransaction,
+			ProviderObjectID:     firstNonEmpty(item.ProviderTransactionID, item.Fingerprint),
+			PayloadJSON:          sanitizedPayload,
+			CapturedAt:           capturedAt,
+		})
+		if saveErr != nil {
+			return fmt.Errorf("save transaction provider evidence: %w", saveErr)
+		}
+	}
+	_, saveErr := s.store.SaveRawPayload(ctx, domain.RawPayload{
+		ID:               s.newID(),
+		ConnectionID:     connection.ID,
+		Scope:            domain.RawPayloadScopeTransaction,
+		ProviderObjectID: firstNonEmpty(item.ProviderTransactionID, item.Fingerprint),
+		PayloadJSON:      sanitizedPayload,
+		CapturedAt:       capturedAt,
+	})
+	if saveErr != nil {
+		return fmt.Errorf("save raw payload: %w", saveErr)
+	}
+	return nil
 }
 
 func (s *BankSyncService) resolveProviderAccountForTransaction(
@@ -1124,17 +1233,73 @@ func (s *BankSyncService) persistProviderRawPayloads(
 	now time.Time,
 ) error {
 	for _, payload := range payloads {
+		sanitizedPayload, sanitizeErr := domain.SanitizeProviderEvidenceJSON(payload.PayloadJSON)
+		if sanitizeErr != nil {
+			return fmt.Errorf("sanitize provider raw payload: %w", sanitizeErr)
+		}
 		_, err := s.store.SaveRawPayload(ctx, domain.RawPayload{
 			ID:               s.newID(),
 			ConnectionID:     connectionID,
 			Scope:            payload.Scope,
 			ProviderObjectID: payload.ProviderObjectID,
-			PayloadJSON:      payload.PayloadJSON,
+			PayloadJSON:      sanitizedPayload,
 			CapturedAt:       now,
 		})
 		if err != nil {
 			return fmt.Errorf("save raw payload: %w", err)
 		}
+		if evidenceErr := s.persistPageProviderEvidence(
+			ctx,
+			connectionID,
+			payload,
+			sanitizedPayload,
+			now,
+		); evidenceErr != nil {
+			return evidenceErr
+		}
+	}
+	return nil
+}
+
+func (s *BankSyncService) persistPageProviderEvidence(
+	ctx context.Context,
+	connectionID string,
+	payload ProviderRawPayload,
+	sanitizedPayload []byte,
+	capturedAt time.Time,
+) error {
+	if s.evidenceWriter == nil {
+		return nil
+	}
+	connection, err := s.store.GetBankConnection(ctx, connectionID)
+	if err != nil {
+		return fmt.Errorf("get bank connection for provider evidence: %w", err)
+	}
+	evidence := domain.ProviderEvidence{
+		ID:               s.newID(),
+		TenantID:         connection.TenantID,
+		ConnectionID:     connection.ID,
+		Subject:          domain.ProviderEvidenceSubjectConnection,
+		Scope:            payload.Scope,
+		ProviderObjectID: payload.ProviderObjectID,
+		PayloadJSON:      sanitizedPayload,
+		CapturedAt:       capturedAt,
+	}
+	if payload.Scope == domain.RawPayloadScopeAccount {
+		accounts, accountsErr := s.store.ListConnectionProviderAccounts(ctx, connectionID)
+		if accountsErr != nil {
+			return fmt.Errorf("list provider accounts for provider evidence: %w", accountsErr)
+		}
+		for _, account := range accounts {
+			if account.ProviderAccountID == payload.ProviderObjectID {
+				evidence.FinanceAccountID = account.FinanceAccountID
+				evidence.Subject = domain.ProviderEvidenceSubjectAccount
+				break
+			}
+		}
+	}
+	if _, saveErr := s.evidenceWriter.SaveProviderEvidence(ctx, evidence); saveErr != nil {
+		return fmt.Errorf("save page provider evidence: %w", saveErr)
 	}
 	return nil
 }

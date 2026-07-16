@@ -12,10 +12,14 @@
     formatFinanceMoney,
   } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
+  import FinanceProviderEvidence from '../components/FinanceProviderEvidence.svelte'
+  import FinancePager from '../components/FinancePager.svelte'
+  import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
 
   let { params = {} } = $props<{ params?: { accountId?: string } }>()
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
+  const recentTransactionPageSize = 10
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
   const financeShell = useFinanceShellState()
 
@@ -23,6 +27,8 @@
   let error = $state<string | null>(null)
   let account = $state<FinanceAccount | null>(null)
   let transactions = $state<FinanceTransaction[]>([])
+  let transactionOffset = $state(0)
+  let loadingTransactions = $state(false)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
 
@@ -53,31 +59,69 @@
     }
   }
 
-  async function loadAccountDetail() {
-    account = null
-    transactions = []
+  const recentPageNumber = $derived(Math.floor(transactionOffset / recentTransactionPageSize) + 1)
+  const hasPreviousPage = $derived(transactionOffset > 0)
+  const hasNextPage = $derived(transactions.length === recentTransactionPageSize)
 
+  async function loadAccountDetail(offset = transactionOffset): Promise<boolean> {
     if (!financeShell.selectedTenantId || !params.accountId) {
-      return
+      return false
     }
 
-    const [accounts, tx] = await Promise.all([
-      financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
-      financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, accountId: params.accountId, limit: 10 }),
-    ])
+    loadingTransactions = true
+    try {
+      const [accounts, tx] = await Promise.all([
+        financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
+        financeApi.listTransactions({
+          tenantId: financeShell.selectedTenantId,
+          accountId: params.accountId,
+          limit: recentTransactionPageSize,
+          offset,
+        }),
+      ])
 
-    account = accounts.find((item) => item.id === params.accountId) ?? null
-    transactions = tx
+      account = accounts.find((item) => item.id === params.accountId) ?? null
+      transactions = tx
+      return true
+    } catch (loadError) {
+      error = loadError instanceof Error ? loadError.message : 'Failed to load account detail'
+      return false
+    } finally {
+      loadingTransactions = false
+    }
+  }
+
+  async function loadPreviousPage(): Promise<boolean> {
+    if (!hasPreviousPage) return false
+    const nextOffset = Math.max(0, transactionOffset - recentTransactionPageSize)
+    if (!await loadAccountDetail(nextOffset)) return false
+    transactionOffset = nextOffset
+    return true
+  }
+
+  async function loadNextPage(): Promise<boolean> {
+    if (!hasNextPage) return false
+    const nextOffset = transactionOffset + recentTransactionPageSize
+    if (!await loadAccountDetail(nextOffset)) return false
+    transactionOffset = nextOffset
+    return true
+  }
+
+  function applyTransactionUpdate(updated: FinanceTransaction) {
+    transactions = transactions.map((item) => item.id === updated.id ? updated : item)
   }
 
   $effect(() => {
     if (financeShell.loading || !reactiveReady) return
-    void financeShell.selectedTenantId
-    void params.accountId
+    const tenantId = financeShell.selectedTenantId
+    const accountId = params.accountId
     if (skipNextReactiveLoad) {
       skipNextReactiveLoad = false
       return
     }
+    transactionOffset = 0
+    void tenantId
+    void accountId
     void loadAccountDetail()
   })
 </script>
@@ -137,35 +181,33 @@
         Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before opening this account detail route.
       </div>
     {:else if account}
-      <div class="row g-4">
-        <div class="col-12 col-xl-5">
-          <section class="card shadow-sm h-100">
-            <div class="card-body p-4 d-grid gap-3">
-              <div class="d-flex flex-column gap-2">
-                <div>
-                  <h2 class="h4 mb-1">{account.name}</h2>
-                  <div class="d-flex flex-wrap gap-2">
-                    <span class="badge text-bg-secondary">{account.kind}</span>
-                    <span class="badge text-bg-light border text-body">{account.currency}</span>
-                    <span class="badge text-bg-light border text-body">Provider {account.provider || 'manual'}</span>
-                  </div>
-                </div>
-
-                <p class="small text-body-secondary mb-0">
-                  Created {formatFinanceDateTime(account.createdAt)} · Updated {formatFinanceDateTime(account.updatedAt)}
-                </p>
+      <div class="d-grid gap-4">
+        <section class="card shadow-sm">
+          <div class="card-body p-4 d-grid gap-3">
+            <div class="d-flex flex-column gap-2">
+              <div>
+                <h2 class="h4 mb-1">{account.name}</h2>
                 <div class="d-flex flex-wrap gap-2">
-                  <span class="badge text-bg-light border text-body">Booked balance {formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</span>
-                  <span class="badge text-bg-light border text-body">Pending balance {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</span>
+                  <span class="badge text-bg-secondary">{account.kind}</span>
+                  <span class="badge text-bg-light border text-body">{account.currency}</span>
+                  <span class="badge text-bg-light border text-body">Provider {account.provider || 'manual'}</span>
                 </div>
               </div>
-            </div>
-          </section>
-        </div>
 
-        <div class="col-12 col-xl-7">
-          <section class="card shadow-sm h-100">
-            <div class="card-body p-4 d-grid gap-3">
+              <p class="small text-body-secondary mb-0">
+                Created {formatFinanceDateTime(account.createdAt)} · Updated {formatFinanceDateTime(account.updatedAt)}
+              </p>
+              <div class="d-flex flex-wrap gap-2">
+                <span class="badge text-bg-light border text-body">Booked balance {formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</span>
+                <span class="badge text-bg-light border text-body">Pending balance {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</span>
+              </div>
+              <FinanceProviderEvidence tenantId={financeShell.selectedTenantId} entityId={account.id} entityLabel="account" scope="account" />
+            </div>
+          </div>
+        </section>
+
+        <section id="finance-account-recent-transactions" class="card shadow-sm" aria-busy={loadingTransactions}>
+          <div class="card-body p-4 d-grid gap-3">
               <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
                 <div>
                   <h2 class="h5 mb-1">Recent transactions</h2>
@@ -173,52 +215,34 @@
                 </div>
 
                 <span class="badge text-bg-secondary align-self-start align-self-md-center">
-                  {transactions.length} transaction{transactions.length === 1 ? '' : 's'}
+                  {transactions.length} transaction{transactions.length === 1 ? '' : 's'} on this page
                 </span>
               </div>
 
               {#if transactions.length === 0}
                 <div class="alert alert-light border mb-0" role="status">No transactions yet.</div>
               {:else}
-                <div class="table-responsive">
-                  <table class="table align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th scope="col">Description</th>
-                        <th scope="col">When</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Amount</th>
-                        <th scope="col">Open</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {#each transactions as item (item.id)}
-                        <tr>
-                          <td>
-                            <div class="d-grid gap-1">
-                              <strong>{item.description || item.kind}</strong>
-                              <span class="small text-body-secondary">{item.kind}</span>
-                            </div>
-                          </td>
-                          <td>{formatFinanceDateTime(item.effectiveAt)}</td>
-                          <td>
-                            <span class={`badge ${item.status === 'pending' ? 'text-bg-warning' : 'text-bg-success'}`}>
-                              {item.status}
-                            </span>
-                          </td>
-                          <td>{formatFinanceMoney(item.amountMinor, item.currency)}</td>
-                          <td>
-                            <a href={`/finance/transactions/${encodeURIComponent(item.id)}`} use:link>Open transaction</a>
-                          </td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                </div>
+                <FinanceTransactionList
+                  tenantId={financeShell.selectedTenantId}
+                  transactions={transactions}
+                  accountNameById={new Map(account ? [[account.id, account.name]] : [])}
+                  ariaLabel="Recent transactions"
+                  onTransactionUpdated={applyTransactionUpdate}
+                />
+
+                <FinancePager
+                  label="Recent transaction pages"
+                  status={loadingTransactions ? 'Loading recent transaction page…' : `Page ${recentPageNumber}`}
+                  controls="finance-account-recent-transactions"
+                  busy={loadingTransactions}
+                  hasPrevious={hasPreviousPage}
+                  hasNext={hasNextPage}
+                  onPrevious={loadPreviousPage}
+                  onNext={loadNextPage}
+                />
               {/if}
             </div>
-          </section>
-        </div>
+        </section>
       </div>
     {:else}
       <div class="alert alert-light border mb-0" role="status">Account not found for the selected tenant.</div>

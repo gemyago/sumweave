@@ -25,7 +25,7 @@ Browser SPA for Signal Foundry under `apps/signal-ui`: static **`dist/`** from V
 
 ## Configuration and env
 
-- **Client env:** only **`VITE_*`** variables (see **`.env.example`**). Example: **`VITE_APP_TITLE`** for shell copy; **`VITE_AGENT_API_BASE_URL`** — full origin or a same-origin path such as **`/api/v1/runtime/`** when using the Vite dev **`server.proxy`** (see **`vite.config.ts`**); no secrets in repo.
+- **Client env:** only **`VITE_*`** variables (see **`.env.example`**). Example: **`VITE_APP_TITLE`** for shell copy; **`VITE_AGENT_API_BASE_URL`** — full origin or a same-origin path such as **`/api/v1/runtime/`** when using the Vite dev **`server.proxy`** (see **`vite.config.ts`**); `VITE_LOCAL_HTTPS=true` enables the documented local HTTPS Vite server and proxy; no secrets in repo.
 - **Vitest:** committed **`.env.test`** where needed for deterministic test env.
 
 ## Repository integration

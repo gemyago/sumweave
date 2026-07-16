@@ -824,8 +824,22 @@ func TestService(t *testing.T) {
 				Kind:        domain.AccountKindManual,
 			})
 			require.NoError(t, err)
+			otherAccount, err := service.CreateAccount(t.Context(), CreateAccountParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+				Name:        fmt.Sprintf("other-account-%s", fake.Lorem().Word()),
+				Currency:    "PLN",
+				Kind:        domain.AccountKindManual,
+			})
+			require.NoError(t, err)
 
-			recordTransfer := func(amountMinor int64, effectiveAt time.Time, transferGroupID string) domain.Transaction {
+			recordTransfer := func(
+				accountID string,
+				amountMinor int64,
+				currency string,
+				effectiveAt time.Time,
+				transferGroupID string,
+			) domain.Transaction {
 				t.Helper()
 
 				transaction, recordErr := service.RecordTransaction(
@@ -833,12 +847,12 @@ func TestService(t *testing.T) {
 					RecordTransactionParams{
 						ActorUserID:     ownerUserID,
 						TenantID:        tenant.ID,
-						AccountID:       account.ID,
+						AccountID:       accountID,
 						Source:          domain.TransactionSourceCSV,
 						Status:          domain.TransactionStatusBooked,
 						Kind:            domain.TransactionKindTransfer,
 						AmountMinor:     amountMinor,
-						Currency:        "USD",
+						Currency:        currency,
 						Description:     fmt.Sprintf("transfer-%s", fake.Lorem().Word()),
 						EffectiveAt:     effectiveAt,
 						TransferGroupID: transferGroupID,
@@ -848,8 +862,8 @@ func TestService(t *testing.T) {
 				return transaction
 			}
 
-			outgoingTransfer := recordTransfer(-12_00, now.Add(-2*time.Hour), "")
-			incomingTransfer := recordTransfer(9_00, now.Add(-time.Hour), "")
+			outgoingTransfer := recordTransfer(account.ID, -12_00, "USD", now.Add(-2*time.Hour), "")
+			incomingTransfer := recordTransfer(otherAccount.ID, 9_00, "PLN", now.Add(-time.Hour), "")
 
 			summaryBeforeLink, err := service.SummarizeTransactions(
 				t.Context(),
@@ -861,6 +875,18 @@ func TestService(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, int64(9_00), summaryBeforeLink.IncomeMinor)
 			assert.Equal(t, int64(12_00), summaryBeforeLink.ExpenseMinor)
+			outgoingBalanceBeforeLink, err := service.GetAccountBalance(t.Context(), GetAccountBalanceParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+				AccountID:   account.ID,
+			})
+			require.NoError(t, err)
+			incomingBalanceBeforeLink, err := service.GetAccountBalance(t.Context(), GetAccountBalanceParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+				AccountID:   otherAccount.ID,
+			})
+			require.NoError(t, err)
 
 			err = service.LinkTransfers(t.Context(), LinkTransfersParams{
 				ActorUserID:         outsiderUserID,
@@ -889,9 +915,27 @@ func TestService(t *testing.T) {
 			assert.Equal(t, *linkedOutgoing.TransferGroupID, *linkedIncoming.TransferGroupID)
 			assert.Equal(t, now, *linkedOutgoing.TransferMatchedAt)
 			assert.Equal(t, now, *linkedIncoming.TransferMatchedAt)
+			assert.Equal(t, domain.TransactionKindTransfer, linkedOutgoing.Kind)
+			assert.Equal(t, domain.TransactionKindTransfer, linkedIncoming.Kind)
+			outgoingBalanceAfterLink, err := service.GetAccountBalance(t.Context(), GetAccountBalanceParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+				AccountID:   account.ID,
+			})
+			require.NoError(t, err)
+			incomingBalanceAfterLink, err := service.GetAccountBalance(t.Context(), GetAccountBalanceParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+				AccountID:   otherAccount.ID,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, outgoingBalanceBeforeLink, outgoingBalanceAfterLink)
+			assert.Equal(t, incomingBalanceBeforeLink, incomingBalanceAfterLink)
 
 			groupedUnmatchedTransfer := recordTransfer(
+				account.ID,
 				-7_00,
+				"USD",
 				now.Add(-30*time.Minute),
 				"lonely-transfer-group",
 			)
@@ -909,6 +953,38 @@ func TestService(t *testing.T) {
 			assert.Equal(t, int64(0), summaryAfterLink.IncomeMinor)
 			assert.Equal(t, int64(7_00), summaryAfterLink.ExpenseMinor)
 			assert.Equal(t, int64(-7_00), summaryAfterLink.NetMinor)
+
+			require.NoError(t, service.UnlinkTransfers(t.Context(), UnlinkTransfersParams{
+				ActorUserID:         ownerUserID,
+				TenantID:            tenant.ID,
+				FirstTransactionID:  outgoingTransfer.ID,
+				SecondTransactionID: incomingTransfer.ID,
+			}))
+			unlinkedOutgoing, err := service.GetTransaction(t.Context(), GetTransactionParams{
+				ActorUserID:   ownerUserID,
+				TenantID:      tenant.ID,
+				TransactionID: outgoingTransfer.ID,
+			})
+			require.NoError(t, err)
+			unlinkedIncoming, err := service.GetTransaction(t.Context(), GetTransactionParams{
+				ActorUserID:   ownerUserID,
+				TenantID:      tenant.ID,
+				TransactionID: incomingTransfer.ID,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, domain.TransactionKindRegular, unlinkedOutgoing.Kind)
+			assert.Equal(t, domain.TransactionKindRegular, unlinkedIncoming.Kind)
+			assert.Nil(t, unlinkedOutgoing.TransferGroupID)
+			assert.Nil(t, unlinkedIncoming.TransferGroupID)
+			assert.Nil(t, unlinkedOutgoing.TransferMatchedAt)
+			assert.Nil(t, unlinkedIncoming.TransferMatchedAt)
+			summaryAfterUnlink, err := service.SummarizeTransactions(t.Context(), SummarizeTransactionsParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, int64(9_00), summaryAfterUnlink.IncomeMinor)
+			assert.Equal(t, int64(19_00), summaryAfterUnlink.ExpenseMinor)
 		},
 	)
 
@@ -917,8 +993,14 @@ func TestService(t *testing.T) {
 		func(t *testing.T) {
 			now := time.Date(2026, time.June, 20, 17, 30, 0, 0, time.UTC)
 			sentinel := errors.New("atomic link failed")
-			firstTransfer := domain.Transaction{ID: "transaction-1", TenantID: "tenant-1"}
-			secondTransfer := domain.Transaction{ID: "transaction-2", TenantID: "tenant-1"}
+			firstTransfer := domain.Transaction{
+				ID: "transaction-1", TenantID: "tenant-1", AccountID: "account-1",
+				Status: domain.TransactionStatusBooked, AmountMinor: -1,
+			}
+			secondTransfer := domain.Transaction{
+				ID: "transaction-2", TenantID: "tenant-1", AccountID: "account-2",
+				Status: domain.TransactionStatusBooked, AmountMinor: 1,
+			}
 			var saveTransactionCalled bool
 			var savedPairs [][2]domain.Transaction
 
@@ -957,6 +1039,129 @@ func TestService(t *testing.T) {
 			assert.Equal(t, now, *savedPairs[0][1].TransferMatchedAt)
 		},
 	)
+
+	t.Run("rejects invalid transfer pairs without writing either transaction", func(t *testing.T) {
+		fake := faker.New()
+		base := func(id, accountID string, amountMinor int64) domain.Transaction {
+			return domain.Transaction{
+				ID:          id,
+				TenantID:    "tenant-" + fake.UUID().V4(),
+				AccountID:   accountID,
+				Status:      domain.TransactionStatusBooked,
+				AmountMinor: amountMinor,
+			}
+		}
+		for _, tc := range []struct {
+			name   string
+			first  domain.Transaction
+			second domain.Transaction
+		}{
+			{
+				name:   "same transaction",
+				first:  base("transaction-"+fake.UUID().V4(), "account-"+fake.UUID().V4(), -1),
+				second: base("transaction-"+fake.UUID().V4(), "account-"+fake.UUID().V4(), 1),
+			},
+			{
+				name:   "same account",
+				first:  base("transaction-"+fake.UUID().V4(), "account-"+fake.UUID().V4(), -1),
+				second: base("transaction-"+fake.UUID().V4(), "account-"+fake.UUID().V4(), 1),
+			},
+			{
+				name:   "same direction",
+				first:  base("transaction-"+fake.UUID().V4(), "account-first-"+fake.UUID().V4(), -1),
+				second: base("transaction-"+fake.UUID().V4(), "account-second-"+fake.UUID().V4(), -2),
+			},
+			{
+				name:   "zero amount",
+				first:  base("transaction-"+fake.UUID().V4(), "account-first-"+fake.UUID().V4(), 0),
+				second: base("transaction-"+fake.UUID().V4(), "account-second-"+fake.UUID().V4(), 1),
+			},
+			{
+				name:   "not booked",
+				first:  base("transaction-"+fake.UUID().V4(), "account-first-"+fake.UUID().V4(), -1),
+				second: base("transaction-"+fake.UUID().V4(), "account-second-"+fake.UUID().V4(), 1),
+			},
+			{
+				name:   "already linked",
+				first:  base("transaction-"+fake.UUID().V4(), "account-first-"+fake.UUID().V4(), -1),
+				second: base("transaction-"+fake.UUID().V4(), "account-second-"+fake.UUID().V4(), 1),
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				first := tc.first
+				second := tc.second
+				first.TenantID = "tenant-" + fake.UUID().V4()
+				second.TenantID = first.TenantID
+				switch tc.name {
+				case "same transaction":
+					second.ID = first.ID
+				case "same account":
+					second.AccountID = first.AccountID
+				case "not booked":
+					second.Status = domain.TransactionStatusPending
+				case "already linked":
+					groupID := "group-" + fake.UUID().V4()
+					first.TransferGroupID = &groupID
+				}
+				service := NewLedgerService(stubStore{
+					isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+					getTransactionFn: func(_ context.Context, transactionID string) (*domain.Transaction, error) {
+						if transactionID == first.ID {
+							return &first, nil
+						}
+						return &second, nil
+					},
+					saveLinkedTransferPairFn: func(context.Context, domain.Transaction, domain.Transaction) error {
+						t.Fatal("invalid pair must not be persisted")
+						return nil
+					},
+				})
+
+				err := service.LinkTransfers(t.Context(), LinkTransfersParams{
+					ActorUserID:         "user-" + fake.UUID().V4(),
+					TenantID:            first.TenantID,
+					FirstTransactionID:  first.ID,
+					SecondTransactionID: second.ID,
+				})
+				require.ErrorIs(t, err, ErrInvalidTransferPair)
+			})
+		}
+	})
+
+	t.Run("rejects unlinking transactions that are not one linked transfer pair", func(t *testing.T) {
+		fake := faker.New()
+		first := domain.Transaction{
+			ID:          "transaction-first-" + fake.UUID().V4(),
+			TenantID:    "tenant-" + fake.UUID().V4(),
+			AccountID:   "account-first-" + fake.UUID().V4(),
+			Status:      domain.TransactionStatusBooked,
+			AmountMinor: -1,
+		}
+		second := domain.Transaction{
+			ID:          "transaction-second-" + fake.UUID().V4(),
+			TenantID:    first.TenantID,
+			AccountID:   "account-second-" + fake.UUID().V4(),
+			Status:      domain.TransactionStatusBooked,
+			AmountMinor: 1,
+		}
+		service := NewLedgerService(stubStore{
+			isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+			getTransactionFn: func(_ context.Context, transactionID string) (*domain.Transaction, error) {
+				if transactionID == first.ID {
+					return &first, nil
+				}
+				return &second, nil
+			},
+		})
+
+		err := service.UnlinkTransfers(t.Context(), UnlinkTransfersParams{
+			ActorUserID:         "user-" + fake.UUID().V4(),
+			TenantID:            first.TenantID,
+			FirstTransactionID:  first.ID,
+			SecondTransactionID: second.ID,
+		})
+		require.ErrorIs(t, err, ErrTransferNotLinked)
+	})
 
 	t.Run("rejects cross-tenant entity access for tenant-scoped resources", func(t *testing.T) {
 		service := NewService(stubStore{
@@ -1361,9 +1566,15 @@ func TestService(t *testing.T) {
 			isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
 			getTransactionFn: func(_ context.Context, transactionID string) (*domain.Transaction, error) {
 				if transactionID == "transaction-2" {
-					return &domain.Transaction{ID: "transaction-2", TenantID: "tenant-1"}, nil
+					return &domain.Transaction{
+						ID: "transaction-2", TenantID: "tenant-1", AccountID: "account-2",
+						Status: domain.TransactionStatusBooked, AmountMinor: 1,
+					}, nil
 				}
-				return &baseTransaction, nil
+				return &domain.Transaction{
+					ID: "transaction-1", TenantID: "tenant-1", AccountID: "account-1",
+					Status: domain.TransactionStatusBooked, AmountMinor: -1,
+				}, nil
 			},
 			saveLinkedTransferPairFn: func(context.Context, domain.Transaction, domain.Transaction) error {
 				return sentinel
@@ -1435,8 +1646,8 @@ type stubStore struct {
 	getTransactionFn         func(context.Context, string) (*domain.Transaction, error)
 	listTransactionsFn       func(context.Context, string, string, domain.TransactionSource, domain.TransactionStatus, bool) ([]domain.Transaction, error)
 	getTenantFn              func(context.Context, string) (*domain.Tenant, error)
-	saveFXRatesFn            func(context.Context, []domain.FXRate) error
-	listFXRatesFn            func(context.Context, persistence.ListFXRatesParams) ([]domain.FXRate, error)
+	saveCurrentFXRatesFn     func(context.Context, []domain.FXRate) error
+	listCurrentFXRatesFn     func(context.Context, persistence.ListCurrentFXRatesParams) ([]domain.FXRate, error)
 	saveCSVImportFn          func(context.Context, domain.CSVImportRecord) (domain.CSVImportRecord, error)
 	getCSVImportFn           func(context.Context, string) (*domain.CSVImportRecord, error)
 }
@@ -1665,21 +1876,21 @@ func (s stubStore) GetTenant(ctx context.Context, tenantID string) (*domain.Tena
 	return s.getTenantFn(ctx, tenantID)
 }
 
-func (s stubStore) SaveFXRates(ctx context.Context, rates []domain.FXRate) error {
-	if s.saveFXRatesFn == nil {
+func (s stubStore) SaveCurrentFXRates(ctx context.Context, rates []domain.FXRate) error {
+	if s.saveCurrentFXRatesFn == nil {
 		return nil
 	}
-	return s.saveFXRatesFn(ctx, rates)
+	return s.saveCurrentFXRatesFn(ctx, rates)
 }
 
-func (s stubStore) ListFXRates(
+func (s stubStore) ListCurrentFXRates(
 	ctx context.Context,
-	params persistence.ListFXRatesParams,
+	params persistence.ListCurrentFXRatesParams,
 ) ([]domain.FXRate, error) {
-	if s.listFXRatesFn == nil {
+	if s.listCurrentFXRatesFn == nil {
 		return nil, nil
 	}
-	return s.listFXRatesFn(ctx, params)
+	return s.listCurrentFXRatesFn(ctx, params)
 }
 
 func (s stubStore) SaveCSVImport(

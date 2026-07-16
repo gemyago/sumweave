@@ -163,6 +163,7 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, transaction.AmountMinor, transaction.ProviderOriginal.AmountMinor)
 			assert.Equal(t, transaction.Currency, transaction.ProviderOriginal.Currency)
 			assert.NotEmpty(t, transaction.Fingerprint)
+			assert.Contains(t, string(transaction.RawPayloadJSON), transaction.ProviderTransactionID)
 			assert.Contains(
 				t,
 				transaction.ProviderTransactionID,

@@ -75,11 +75,20 @@ func newFocusedServices(
 	values ...any,
 ) focusedServices {
 	var csvImportStore *persistence.CSVImportStore
+	var providerEvidenceStore *persistence.ProviderEvidenceStore
+	var currentFXRateStore *persistence.CurrentFXRateStore
+	var fxPairDiscoveryStore *persistence.FXPairDiscoveryStore
 	var cfg focusedServicesConfig
 	for _, value := range values {
 		switch typed := value.(type) {
 		case *persistence.CSVImportStore:
 			csvImportStore = typed
+		case *persistence.ProviderEvidenceStore:
+			providerEvidenceStore = typed
+		case *persistence.CurrentFXRateStore:
+			currentFXRateStore = typed
+		case *persistence.FXPairDiscoveryStore:
+			fxPairDiscoveryStore = typed
 		case focusedServicesConfig:
 			cfg = typed
 		}
@@ -100,6 +109,7 @@ func newFocusedServices(
 	reportingOpts := []ReportingServiceOption{
 		WithReportingServiceNow(cfg.now),
 		WithReportingServiceDefaultFXProvider(cfg.defaultFXProvider),
+		WithReportingServiceFXRateStore(currentFXRateStore),
 	}
 	fxOpts := []FXServiceOption{
 		WithFXServiceNow(cfg.now),
@@ -116,7 +126,8 @@ func newFocusedServices(
 	catalogService := NewCatalogService(store, catalogOpts...)
 	ledgerService := NewLedgerService(store, ledgerOpts...)
 	reportingService := NewReportingService(store, reportingOpts...)
-	fxService := NewFXService(store, fxOpts...)
+	fxOpts = append(fxOpts, WithFXServiceRequiredPairs(fxPairDiscoveryStore))
+	fxService := NewFXService(currentFXRateStore, fxOpts...)
 	csvImportOpts := []CSVImportServiceOption{
 		WithCSVImportServiceNow(cfg.now),
 		WithCSVImportServiceIDGenerator(cfg.newID),
@@ -131,6 +142,7 @@ func newFocusedServices(
 		WithBankSyncServiceIDGenerator(cfg.newID),
 		WithBankSyncServiceConnectionSecretCipher(cfg.connectionSecretCipher),
 		WithBankSyncServiceProviders(cfg.bankProviders...),
+		WithBankSyncServiceEvidenceWriter(providerEvidenceStore),
 	}
 	if cfg.bankSyncJobEnqueuer != nil {
 		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceJobEnqueuer(cfg.bankSyncJobEnqueuer))

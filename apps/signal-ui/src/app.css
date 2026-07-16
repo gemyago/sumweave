@@ -145,11 +145,24 @@ html:not([data-theme]) {
 }
 
 @media (max-width: 639px) {
+  /* A11y: repeated Finance transaction icon actions need 44px mobile touch targets. */
+  .finance-transaction-list-action {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   :root {
     --font-size-h1: 1.5rem;
     --main-padding-inline: var(--space-16);
     --main-padding-block: var(--space-48);
   }
+}
+
+/* Finance inline editors need shrinkable fields beside fixed action groups. */
+.finance-transaction-list-editor-row,
+.finance-transaction-list-editor,
+.finance-transaction-list-tag-choices {
+  min-width: 0;
 }
 
 html {

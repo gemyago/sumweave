@@ -248,6 +248,10 @@ func TestConnector(t *testing.T) {
 		require.Len(t, batch.Balances, 2)
 		require.Len(t, batch.Transactions, 3)
 		require.Len(t, batch.RawPayloads, 3)
+		for _, transaction := range batch.Transactions {
+			assert.NotEmpty(t, transaction.RawPayloadJSON)
+			assert.Contains(t, string(transaction.RawPayloadJSON), transaction.ProviderTransactionID)
+		}
 
 		assert.Equal(t, domain.ProviderAccountObservation{
 			Connection:        connection,
@@ -308,6 +312,13 @@ func TestConnector(t *testing.T) {
 				Description: firstDescription,
 				EffectiveAt: &firstEffectiveAt,
 			},
+			RawPayloadJSON: fmt.Appendf(
+				nil,
+				`{"id":"%s","time":%d,"description":"%s","hold":true,"amount":-5050,"currencyCode":980,"balance":145450}`,
+				firstTransactionID,
+				firstTime.Unix(),
+				firstDescription,
+			),
 		}, batch.Transactions[0])
 		assert.Equal(t, domain.ProviderTransactionObservation{
 			Connection:            connection,
@@ -331,6 +342,13 @@ func TestConnector(t *testing.T) {
 				Description: secondDescription,
 				EffectiveAt: &secondEffectiveAt,
 			},
+			RawPayloadJSON: fmt.Appendf(
+				nil,
+				`{"id":"%s","time":%d,"description":"%s","amount":250000,"currencyCode":980,"balance":395450}`,
+				secondTransactionID,
+				secondTime.Unix(),
+				secondDescription,
+			),
 		}, batch.Transactions[1])
 		assert.Equal(t, domain.ProviderTransactionObservation{
 			Connection:            connection,
@@ -354,6 +372,13 @@ func TestConnector(t *testing.T) {
 				Description: thirdDescription,
 				EffectiveAt: &thirdEffectiveAt,
 			},
+			RawPayloadJSON: fmt.Appendf(
+				nil,
+				`{"id":"%s","time":%d,"description":"%s","amount":-1200,"currencyCode":840,"balance":49300}`,
+				thirdTransactionID,
+				thirdTime.Unix(),
+				thirdDescription,
+			),
 		}, batch.Transactions[2])
 
 		assert.Equal(t, domain.ProviderRawPayloadObservation{

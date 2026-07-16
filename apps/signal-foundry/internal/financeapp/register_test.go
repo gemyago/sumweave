@@ -109,6 +109,71 @@ func TestCSVImportJobEnqueuer(t *testing.T) {
 	assert.Equal(t, request.ImportID, input.ImportID)
 }
 
+func TestFXSyncJobHandler(t *testing.T) {
+	fake := faker.New()
+	financeDSN := fmt.Sprintf("file:finance-fx-%s?mode=memory&cache=shared", fake.UUID().V4())
+	financeSQLDB, err := sqlconn.Open(financeDSN)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, financeSQLDB.Close()) })
+	financeDatabase, err := persistence.NewDatabase(financeSQLDB, financeDSN)
+	require.NoError(t, err)
+	require.NoError(t, persistence.NewMigrator(financeDatabase).Migrate(t.Context()))
+	financeStore := persistence.NewStore(financeDatabase)
+
+	rateDate := time.Date(2026, time.June, 9, 0, 0, 0, 0, time.UTC)
+	fxService := financepkg.NewFXService(
+		financeStore,
+		financepkg.WithFXServiceProviders(financepkg.NewStaticFXProvider(
+			financepkg.FXProviderFrankfurter,
+			[]domain.FXRate{{
+				Provider:      financepkg.FXProviderFrankfurter,
+				BaseCurrency:  "EUR",
+				QuoteCurrency: "PLN",
+				RateDate:      rateDate,
+				Rate:          4.25,
+			}},
+		)),
+	)
+
+	jobsDSN := fmt.Sprintf("file:finance-fx-jobs-%s?mode=memory&cache=shared", fake.UUID().V4())
+	jobsSQLDB, err := sqlconn.Open(jobsDSN)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, jobsSQLDB.Close()) })
+	jobsStore, err := jobspkg.NewStore(jobsSQLDB, jobsDSN, jobspkg.StoreOpts{TablePrefix: "finance_fx_"})
+	require.NoError(t, err)
+	require.NoError(t, jobsStore.AutoMigrate())
+	registry := jobspkg.NewRegistry()
+	require.NoError(t, registerFXSyncJobHandler(registry, fxService))
+	jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
+		Store: jobsStore, IDGenerator: ident.NewMockGenerator(), Publisher: publisherStub{}, Registry: registry,
+	})
+	require.NoError(t, err)
+	enqueuer := fxSyncJobEnqueuer{jobs: jobsService}
+	jobRef, err := enqueuer.EnqueueFXSync(t.Context(), financepkg.FXSyncJobRequest{
+		JobType:   financepkg.FXSyncJobType,
+		Requester: financepkg.FXSyncRequester{Source: financepkg.FXSyncRequesterSourceSystem},
+		Input: financepkg.SyncFXRatesParams{
+			BaseCurrencies: []string{"EUR"}, QuoteCurrency: "PLN", StartDate: rateDate, EndDate: rateDate,
+		},
+	})
+	require.NoError(t, err)
+	worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
+		Store: jobsStore, Registry: registry, WorkerID: "worker-" + fake.UUID().V4(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, worker.ProcessJob(t.Context(), jobRef.ID))
+
+	job, err := jobsStore.Get(t.Context(), jobRef.ID)
+	require.NoError(t, err)
+	assert.Equal(t, jobspkg.JobStatusSucceeded, job.Status)
+	storedRates, err := financeStore.ListFXRates(t.Context(), persistence.ListFXRatesParams{
+		Provider: financepkg.FXProviderFrankfurter, BaseCurrency: "EUR", QuoteCurrency: "PLN",
+	})
+	require.NoError(t, err)
+	require.Len(t, storedRates, 1)
+	assert.InDelta(t, 4.25, storedRates[0].Rate, 0.00001)
+}
+
 //nolint:cyclop,gocyclo // Keeps closely related DI integration scenarios together.
 func TestNewFinanceServiceFromDI(t *testing.T) {
 	memoryDSNOrdinal := 0
@@ -212,6 +277,88 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			},
 		})
 	}
+
+	t.Run("starts one daily FX refresh schedule and keeps its persisted next run", func(t *testing.T) {
+		database := makeDatabase(t, makeSQLiteMemoryDSN("finance-fx-refresh"))
+		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
+		financeStore := persistence.NewStore(database)
+		registry := jobspkg.NewRegistry()
+		jobsService, jobsStore := makeJobsService(t, registry, makeSQLiteMemoryDSN("jobs-fx-refresh"))
+		deps := financeServiceDeps{
+			Database:             database,
+			Store:                financeStore,
+			Jobs:                 jobsService,
+			JobsStore:            jobsStore,
+			Registry:             registry,
+			RootLogger:           slog.New(slog.DiscardHandler),
+			HTTPClientFactory:    makeHTTPClientFactory(t, nil),
+			JWT:                  "jwt-key-for-fx-refresh-tests",
+			EnableURL:            "https://" + faker.New().Internet().Domain(),
+			EnableAppID:          "app-" + faker.New().UUID().V4(),
+			EnablePrivateKeyPath: makePrivateKeyPath(t),
+			EnableASPSPName:      "ASPSP-" + faker.New().Company().Name(),
+			EnableCountry:        "PL",
+			EnablePSUType:        "personal",
+			EnableValidDays:      90,
+		}
+		_, err := newFinanceModuleFromDI(deps)
+		require.NoError(t, err)
+		initialSchedule, err := jobsStore.GetSchedule(t.Context(), financepkg.FXDailyRefreshScheduleID)
+		require.NoError(t, err)
+		require.NotNil(t, initialSchedule.NextRunAt)
+		assert.Equal(t, jobspkg.JobType(financepkg.FXRefreshJobType), initialSchedule.JobType)
+
+		scheduler, err := jobspkg.NewScheduler(jobspkg.SchedulerDeps{
+			Store: jobsStore, Service: jobsService, Clock: func() time.Time { return *initialSchedule.NextRunAt },
+		})
+		require.NoError(t, err)
+		enqueued, err := scheduler.EnqueueDue(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, 1, enqueued)
+		enqueued, err = scheduler.EnqueueDue(t.Context())
+		require.NoError(t, err)
+		assert.Zero(t, enqueued)
+		scheduledJobs, err := jobsStore.List(t.Context(), jobspkg.ListParams{
+			JobTypes: []jobspkg.JobType{jobspkg.JobType(financepkg.FXRefreshJobType)},
+		})
+		require.NoError(t, err)
+		require.Len(t, scheduledJobs.Items, 1)
+		worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
+			Store: jobsStore, Registry: registry, WorkerID: "worker-" + faker.New().UUID().V4(),
+		})
+		require.NoError(t, err)
+		require.NoError(t, worker.ProcessJob(t.Context(), scheduledJobs.Items[0].ID))
+		processed, err := jobsStore.Get(t.Context(), scheduledJobs.Items[0].ID)
+		require.NoError(t, err)
+		assert.Equal(t, jobspkg.JobStatusSucceeded, processed.Status)
+
+		failedInput, err := json.Marshal(financepkg.RefreshFXRatesParams{Provider: "missing-provider"})
+		require.NoError(t, err)
+		failedJob, err := jobsService.EnqueueJSON(t.Context(), jobspkg.EnqueueJSONParams{
+			JobType:   jobspkg.JobType(financepkg.FXRefreshJobType),
+			Requester: jobspkg.Requester{Source: jobspkg.RequesterSourceOperator},
+			InputJSON: failedInput,
+		})
+		require.NoError(t, err)
+		require.NoError(t, worker.ProcessJob(t.Context(), failedJob.ID))
+		failedJob, err = jobsStore.Get(t.Context(), failedJob.ID)
+		require.NoError(t, err)
+		assert.Equal(t, jobspkg.JobStatusFailed, failedJob.Status)
+		_, err = jobsService.Retry(t.Context(), failedJob.ID)
+		require.NoError(t, err)
+
+		advancedSchedule, err := jobsStore.GetSchedule(t.Context(), financepkg.FXDailyRefreshScheduleID)
+		require.NoError(t, err)
+		require.NotNil(t, advancedSchedule.NextRunAt)
+		persistedNextRunAt := *advancedSchedule.NextRunAt
+		deps.Registry = jobspkg.NewRegistry()
+		_, err = newFinanceModuleFromDI(deps)
+		require.NoError(t, err)
+		reconstructedSchedule, err := jobsStore.GetSchedule(t.Context(), financepkg.FXDailyRefreshScheduleID)
+		require.NoError(t, err)
+		require.NotNil(t, reconstructedSchedule.NextRunAt)
+		assert.Equal(t, persistedNextRunAt, *reconstructedSchedule.NextRunAt)
+	})
 
 	t.Run("registers monobank and pko product choices and keeps sync job-backed", func(t *testing.T) {
 		monoToken := "mono-token-test"

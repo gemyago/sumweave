@@ -70,6 +70,8 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		// http server config
 		provideConfigValue(cfg, "httpServer.host").asString(),
 		provideConfigValue(cfg, "httpServer.port").asInt(),
+		provideConfigValue(cfg, "httpServer.tls.certFile").asString(),
+		provideConfigValue(cfg, "httpServer.tls.keyFile").asString(),
 		provideConfigValue(cfg, "httpServer.idleTimeout").asDuration(),
 		provideConfigValue(cfg, "httpServer.readHeaderTimeout").asDuration(),
 		provideConfigValue(cfg, "httpServer.readTimeout").asDuration(),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -199,9 +200,16 @@ func (c *Connector) Fetch(
 				CapturedAt:       capturedAt,
 			})
 			for _, item := range statementResponse.Items {
+				transaction, normalizeErr := normalizeTransaction(request.Connection, chunk.accountID, item)
+				if normalizeErr != nil {
+					return domain.ProviderSyncBatch{}, fmt.Errorf(
+						"serialize monobank transaction evidence: %w",
+						normalizeErr,
+					)
+				}
 				batch.Transactions = append(
 					batch.Transactions,
-					normalizeTransaction(request.Connection, chunk.accountID, item),
+					transaction,
 				)
 			}
 		}
@@ -266,7 +274,11 @@ func normalizeTransaction(
 	connection domain.ProviderConnectionRef,
 	providerAccountID string,
 	item monobankclient.PersonalStatementItem,
-) domain.ProviderTransactionObservation {
+) (domain.ProviderTransactionObservation, error) {
+	rawPayloadJSON, err := json.Marshal(item)
+	if err != nil {
+		return domain.ProviderTransactionObservation{}, fmt.Errorf("marshal monobank transaction: %w", err)
+	}
 	effectiveAt := time.Unix(item.Time, 0)
 	description := strings.TrimSpace(item.Description)
 	currency := currencyCodeToISO(item.CurrencyCode)
@@ -286,7 +298,8 @@ func normalizeTransaction(
 			Description: description,
 			EffectiveAt: &effectiveAt,
 		},
-	}
+		RawPayloadJSON: rawPayloadJSON,
+	}, nil
 }
 
 func makeChunks(accountID string, window domain.ProviderSyncWindow) []statementChunk {

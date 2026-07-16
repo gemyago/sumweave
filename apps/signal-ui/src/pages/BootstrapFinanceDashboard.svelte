@@ -9,11 +9,13 @@
     type FinanceTransaction,
   } from '../lib/finance/api'
   import {
+    formatFinanceDate,
     formatFinanceDateTime,
     formatFinanceMoney,
   } from '../lib/finance/format'
   import { dateInputValue, withDateInput } from '../lib/date-range'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
+  import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
 
   type BootstrapTone = 'primary' | 'success' | 'warning' | 'danger' | 'secondary'
 
@@ -100,12 +102,6 @@
     return `${label.slice(0, 1).toUpperCase()}${label.slice(1)}`
   }
 
-  function transactionBadgeClass(status: string): string {
-    if (status === 'pending') return 'text-bg-warning'
-    if (status === 'booked') return 'text-bg-success'
-    return 'text-bg-secondary'
-  }
-
   const cashFlowMetrics = $derived.by<VisualMetric[]>(() => {
     if (!dashboard) return []
 
@@ -160,19 +156,17 @@
   const balanceSummary = $derived.by(() => {
     if (!dashboard) return null
 
-    const bookedMinor = dashboard.accountBalances.reduce(
-      (total, account) => total + (account.displayBookedMinor ?? account.nativeBookedMinor),
-      0,
-    )
-    const pendingMinor = dashboard.accountBalances.reduce(
-      (total, account) => total + (account.displayPendingMinor ?? account.nativePendingMinor),
-      0,
-    )
+    const completeBooked = dashboard.accountBalances.every((account) => account.displayBookedMinor !== null)
+    const completePending = dashboard.accountBalances.every((account) => account.displayPendingMinor !== null)
 
     return {
       currency: dashboard.settled.displayCurrency,
-      bookedMinor,
-      pendingMinor,
+      bookedMinor: completeBooked
+        ? dashboard.accountBalances.reduce((total, account) => total + (account.displayBookedMinor ?? 0), 0)
+        : null,
+      pendingMinor: completePending
+        ? dashboard.accountBalances.reduce((total, account) => total + (account.displayPendingMinor ?? 0), 0)
+        : null,
       accountCount: dashboard.accountBalances.length,
     }
   })
@@ -183,8 +177,7 @@
     return [...dashboard.accountBalances]
       .sort(
         (left, right) =>
-          Math.abs(right.displayBookedMinor ?? right.nativeBookedMinor) -
-          Math.abs(left.displayBookedMinor ?? left.nativeBookedMinor),
+          Math.abs(right.displayBookedMinor ?? 0) - Math.abs(left.displayBookedMinor ?? 0),
       )
       .slice(0, ACCOUNT_SECTION_LIMIT)
   })
@@ -235,13 +228,13 @@
 
     const currency = dashboard.settled.displayCurrency
     const baseItems = visibleAccountBalances.map((account) => {
-      const value = account.displayBookedMinor ?? account.nativeBookedMinor
+      const value = account.displayBookedMinor ?? 0
       return {
         key: account.accountId,
         label: account.accountName,
         detail: `${account.currency}${account.missingFx ? ' · Missing FX' : ''}`,
         value,
-        formattedValue: formatFinanceMoney(value, currency),
+        formattedValue: account.displayBookedMinor === null ? 'Unavailable' : formatFinanceMoney(value, currency),
         tone: account.missingFx ? ('warning' as const) : toneFromMoney(value),
       }
     })
@@ -259,6 +252,7 @@
   })
 
   const visibleRecentTransactions = $derived.by(() => recentTransactions.slice(0, TRANSACTION_SECTION_LIMIT))
+  const accountNameById = $derived(new Map((dashboard?.accountBalances ?? []).map((account) => [account.accountId, account.accountName])))
 
   const cashFlowHasActivity = $derived.by(() =>
     dashboard
@@ -274,6 +268,10 @@
   const failedSyncConnections = $derived.by(() =>
     recentConnections.filter((connection) => (connection.lastSyncError?.trim().length ?? 0) > 0),
   )
+
+  const currentFxRates = $derived.by(() => dashboard?.currentFxRates ?? [])
+  const staleFxRates = $derived.by(() => currentFxRates.filter((rate) => rate.stale))
+  const isHistoricalPeriod = $derived.by(() => dashboard?.period.preset !== 'current_month')
 
   const attentionItems = $derived.by<AttentionItem[]>(() => {
     if (!dashboard) return []
@@ -297,7 +295,7 @@
       items.push({
         key: 'missing-fx',
         title: 'Missing FX coverage',
-        detail: `${activeDashboard.missingFx.length} transaction${activeDashboard.missingFx.length === 1 ? '' : 's'} still need FX follow-up.`,
+        detail: `${activeDashboard.missingFx.length} value${activeDashboard.missingFx.length === 1 ? '' : 's'} cannot be converted with a current FX rate.`,
         value: `${activeDashboard.missingFx.length} gap${activeDashboard.missingFx.length === 1 ? '' : 's'}`,
         tone: 'warning',
         href: '/admin/finance/fx',
@@ -396,8 +394,8 @@
         financeApi.getDashboard({
           tenantId: financeShell.selectedTenantId,
           preset: overrides.preset ?? dashboardPreset,
-          startDate: overrides.startDate ?? customStartDate,
-          endDate: overrides.endDate ?? customEndDate,
+          startDate: overrides.preset && overrides.preset !== 'custom' ? undefined : overrides.startDate ?? customStartDate,
+          endDate: overrides.preset && overrides.preset !== 'custom' ? undefined : overrides.endDate ?? customEndDate,
         }),
         financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, includeHidden: true, limit: TRANSACTION_SECTION_LIMIT }),
         financeApi.listConnections({ tenantId: financeShell.selectedTenantId }),
@@ -435,11 +433,8 @@
   })
 
   async function openPreviousPeriod() {
-    if (!dashboard) return
-    dashboardPreset = 'custom'
-    customStartDate = dashboard.period.previous.startDate
-    customEndDate = dashboard.period.previous.endDate
-    await loadDashboard({ preset: 'custom', startDate: dashboard.period.previous.startDate, endDate: dashboard.period.previous.endDate })
+    dashboardPreset = 'previous_month'
+    await loadDashboard({ preset: 'previous_month' })
   }
 
   async function openCurrentMonth() {
@@ -448,11 +443,8 @@
   }
 
   async function openNextPeriod() {
-    if (!dashboard) return
-    dashboardPreset = 'custom'
-    customStartDate = dashboard.period.next.startDate
-    customEndDate = dashboard.period.next.endDate
-    await loadDashboard({ preset: 'custom', startDate: dashboard.period.next.startDate, endDate: dashboard.period.next.endDate })
+    dashboardPreset = 'next_month'
+    await loadDashboard({ preset: 'next_month' })
   }
 
   async function applyCustomRange(event: SubmitEvent) {
@@ -464,6 +456,10 @@
       return
     }
     await loadDashboard({ preset: 'custom', startDate: customStartDate, endDate: customEndDate })
+  }
+
+  function applyTransactionUpdate(updated: FinanceTransaction) {
+    recentTransactions = recentTransactions.map((item) => item.id === updated.id ? updated : item)
   }
 
   function customRangeStartDate(value: string): Date | undefined {
@@ -488,35 +484,42 @@
 >
   <div class="d-grid gap-4">
     <header class="card border-0 shadow-sm">
-      <div class="card-body p-4 p-xl-5">
+      <div class="card-body p-3 p-xl-5">
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
           <div>
-            <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Finance overview</p>
+            <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Finance overview</p>
             <h1 id="finance-dashboard-heading" class="h3 mb-2">Finance dashboard</h1>
-            <p class="text-body-secondary mb-0">
-              Balances, cash flow, and recent activity for the selected reporting window.
+            <p class="d-none d-sm-block text-body-secondary mb-0">
+              Display-currency balances, flows, categories, and pending values use current FX valuation and can change after a rate refresh.
             </p>
           </div>
 
           <div class="d-flex flex-wrap gap-2 align-content-start">
-            <a class="btn btn-primary btn-sm" href="/finance/transactions/new" use:link>Add transaction</a>
-            <a class="btn btn-outline-secondary btn-sm" href="/finance/accounts" use:link>Open accounts</a>
-            <a class="btn btn-outline-secondary btn-sm" href="/finance/transactions" use:link>
-              Open transactions
+            <a class="btn btn-primary btn-sm" href="/finance/transactions/new" use:link aria-label="Add transaction">
+              <span class="d-sm-none">Add</span><span class="d-none d-sm-inline">Add transaction</span>
+            </a>
+            <a class="btn btn-outline-secondary btn-sm" href="/finance/accounts" use:link aria-label="Open accounts">
+              <span class="d-sm-none">Accounts</span><span class="d-none d-sm-inline">Open accounts</span>
+            </a>
+            <a class="btn btn-outline-secondary btn-sm" href="/finance/transactions" use:link aria-label="Open transactions">
+              <span class="d-sm-none">Transactions</span><span class="d-none d-sm-inline">Open transactions</span>
             </a>
           </div>
         </div>
 
-        <hr class="my-4" />
+        <hr class="my-3 my-xl-4" />
 
         <div class="row g-4 align-items-start">
           <div class="col-12 col-xl-5">
-            <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Reporting period</p>
+            <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Reporting period</p>
             {#if dashboard}
               <h2 class="h5 mb-1">
-                {formatFinanceDateTime(dashboard.period.startDate)} → {formatFinanceDateTime(dashboard.period.endDate)}
+                {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(dashboard.period.endDate)}
               </h2>
               <p class="text-body-secondary mb-2">Preset: {dashboard.period.preset || 'custom'}</p>
+              {#if isHistoricalPeriod}
+                <p class="text-body-secondary small mb-0">Past activity is valued using today’s latest FX rates, not an end-of-period rate.</p>
+              {/if}
             {:else}
               <h2 class="h5 mb-1">Choose a tenant and period</h2>
               <p class="text-body-secondary mb-2">Use the header tenant selector to load this dashboard.</p>
@@ -526,21 +529,21 @@
           <div class="col-12 col-xl-7">
             <div class="d-flex flex-wrap gap-2 mb-3">
               <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openPreviousPeriod()} disabled={!dashboard}>
-                Previous period
+                Previous month
               </button>
               <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openCurrentMonth()} disabled={!financeShell.selectedTenantId}>
                 Current month
               </button>
               <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openNextPeriod()} disabled={!dashboard}>
-                Next period
+                Next month
               </button>
             </div>
 
-            <details class="border rounded-3 p-3">
+            <details class="border rounded-3 p-2">
               <summary class="fw-semibold">Custom range</summary>
-              <form class="row g-3 mt-1" onsubmit={applyCustomRange}>
-                <div class="col-12 col-md-4">
-                  <label class="form-label" for="finance-start-date">Custom start date</label>
+              <form class="row g-2 mt-1" onsubmit={applyCustomRange}>
+                <div class="col-12 col-md-5">
+                  <label class="form-label mb-1" for="finance-start-date">Custom start date</label>
                   <input
                     id="finance-start-date"
                     class="form-control"
@@ -550,8 +553,8 @@
                     aria-label="Custom start date"
                   />
                 </div>
-                <div class="col-12 col-md-4">
-                  <label class="form-label" for="finance-end-date">Custom end date</label>
+                <div class="col-12 col-md-5">
+                  <label class="form-label mb-1" for="finance-end-date">Custom end date</label>
                   <input
                     id="finance-end-date"
                     class="form-control"
@@ -561,9 +564,9 @@
                     aria-label="Custom end date"
                   />
                 </div>
-                <div class="col-12 col-md-4 d-grid align-content-end">
+                <div class="col-12 col-md-2 d-grid align-content-end">
                   <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId}>
-                    Apply custom range
+                    Apply
                   </button>
                 </div>
               </form>
@@ -596,6 +599,13 @@
     {:else if loadingDashboard}
       <div class="alert alert-secondary mb-0" role="status">Loading tenant dashboard…</div>
     {:else if dashboard}
+      {#if staleFxRates.length > 0}
+        <div class="alert alert-warning mb-0" role="alert">
+          <strong>Current FX valuation may be stale.</strong>
+          {staleFxRates.length} rate{staleFxRates.length === 1 ? '' : 's'} exceeded the refresh threshold; displayed values use the last successful rate.
+          <a class="alert-link" href="/admin/finance/fx" use:link>Refresh current rates</a>.
+        </div>
+      {/if}
       <div class="row g-4">
         <div class="col-12 col-xxl-7">
           <div class="card shadow-sm h-100">
@@ -605,9 +615,13 @@
                   <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Balance-first summary</p>
                   <h2 class="h5 mb-2">Booked balance story</h2>
                   {#if balanceSummary && balanceSummary.accountCount > 0}
-                    <p class="display-6 mb-1">{formatFinanceMoney(balanceSummary.bookedMinor, balanceSummary.currency)}</p>
+                    {#if balanceSummary.bookedMinor === null}
+                      <p class="display-6 mb-1">Booked total unavailable</p>
+                    {:else}
+                      <p class="display-6 mb-1">{formatFinanceMoney(balanceSummary.bookedMinor, balanceSummary.currency)}</p>
+                    {/if}
                     <p class="text-body-secondary mb-0">
-                      {balanceSummary.accountCount} accounts · pending movement {formatFinanceMoney(balanceSummary.pendingMinor, balanceSummary.currency)}
+                      {balanceSummary.accountCount} accounts · pending movement {balanceSummary.pendingMinor === null ? 'unavailable' : formatFinanceMoney(balanceSummary.pendingMinor, balanceSummary.currency)}
                     </p>
                   {:else}
                     <p class="h4 mb-1">No booked balances yet</p>
@@ -617,10 +631,29 @@
                   {/if}
                 </div>
 
-                {#if balanceSummary}
+                {#if balanceSummary && balanceSummary.bookedMinor !== null}
                   <span class={`badge ${badgeClass(toneFromMoney(balanceSummary.bookedMinor))}`}>
                     {balanceSummary.bookedMinor < 0 ? 'Net outflow' : balanceSummary.bookedMinor > 0 ? 'Net inflow' : 'Even period'}
                   </span>
+                {/if}
+              </div>
+
+              <div class="border rounded-3 p-3 bg-body-tertiary">
+                <div class="d-flex flex-column flex-md-row justify-content-between gap-2">
+                  <div>
+                    <p class="text-uppercase text-body-secondary fw-semibold small mb-1">Current FX valuation</p>
+                    <p class="small text-body-secondary mb-0">Latest successful rates revalue display-currency totals after refresh; native totals below remain separate corroboration.</p>
+                  </div>
+                  <span class="badge text-bg-secondary align-self-md-start">{currentFxRates.length} current rate{currentFxRates.length === 1 ? '' : 's'}</span>
+                </div>
+                {#if currentFxRates.length > 0}
+                  <div class="small text-body-secondary mt-2 d-grid gap-1">
+                    {#each currentFxRates as rate (`${rate.provider}-${rate.baseCurrency}-${rate.quoteCurrency}`)}
+                      <div><strong>{rate.baseCurrency} → {rate.quoteCurrency}</strong> · {rate.provider} · effective {formatFinanceDateTime(rate.effectiveAt)} · refreshed {formatFinanceDateTime(rate.lastSuccessfulRefreshAt)}{rate.stale ? ' · stale' : ''}</div>
+                    {/each}
+                  </div>
+                {:else}
+                  <p class="small text-body-secondary mt-2 mb-0">No current FX rates are available for this dashboard.</p>
                 {/if}
               </div>
 
@@ -654,6 +687,14 @@
                 </div>
               </div>
 
+              {#if !dashboard.settled.complete}
+                <div class="alert alert-warning mb-0" role="alert">
+                  <strong>Income and expense totals are incomplete.</strong>
+                   {dashboard.missingFx.length} value{dashboard.missingFx.length === 1 ? '' : 's'} were excluded because current FX rates are missing. Display totals are partial; native totals remain separate below.
+                  <a class="alert-link" href="/admin/finance/fx" use:link>Open FX diagnostics</a>.
+                </div>
+              {/if}
+
               {#if dashboard.nativeSettledTotals.length > 0}
                 <div>
                   <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Native totals</p>
@@ -682,7 +723,7 @@
               <div>
                 <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Cash-flow visual</p>
                 <h2 class="h5 mb-1">Period flow</h2>
-                <p class="text-body-secondary mb-0">Booked and pending movement for the current reporting window.</p>
+                <p class="text-body-secondary mb-0">Booked and pending movement for the reporting window, valued with current FX.</p>
               </div>
 
               {#if !cashFlowHasActivity}
@@ -739,7 +780,7 @@
                 <div>
                   <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Spending focus</p>
                   <h2 class="h5 mb-1">Top categories</h2>
-                  <p class="text-body-secondary mb-0">Largest income and expense categories for the selected period.</p>
+                  <p class="text-body-secondary mb-0">Largest income and expense categories for the selected period, valued with current FX.</p>
                 </div>
                 <a class="btn btn-outline-secondary btn-sm" href="/finance/categories" use:link>View all categories</a>
               </div>
@@ -775,7 +816,7 @@
                 <div>
                   <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Account snapshot</p>
                   <h2 class="h5 mb-1">Largest balances</h2>
-                  <p class="text-body-secondary mb-0">Largest booked and pending balances across connected accounts.</p>
+                  <p class="text-body-secondary mb-0">Largest booked and pending balances across connected accounts, valued with current FX.</p>
                 </div>
                 <a class="btn btn-outline-secondary btn-sm" href="/finance/accounts" use:link>View all accounts</a>
               </div>
@@ -824,8 +865,14 @@
                                 </div>
                               </div>
                             </td>
-                            <td>{formatFinanceMoney(account.displayBookedMinor ?? account.nativeBookedMinor, dashboard.settled.displayCurrency)}</td>
-                            <td>{formatFinanceMoney(account.displayPendingMinor ?? account.nativePendingMinor, dashboard.settled.displayCurrency)}</td>
+                            <td>
+                              {account.displayBookedMinor === null ? 'Unavailable' : formatFinanceMoney(account.displayBookedMinor, dashboard.settled.displayCurrency)}
+                              <span class="d-block small text-body-secondary">Native {formatFinanceMoney(account.nativeBookedMinor, account.currency)}</span>
+                            </td>
+                            <td>
+                              {account.displayPendingMinor === null ? 'Unavailable' : formatFinanceMoney(account.displayPendingMinor, dashboard.settled.displayCurrency)}
+                              <span class="d-block small text-body-secondary">Native {formatFinanceMoney(account.nativePendingMinor, account.currency)}</span>
+                            </td>
                           </tr>
                         {/each}
                       </tbody>
@@ -837,7 +884,7 @@
           </div>
         </div>
 
-        <div class="col-12 col-xl-7">
+        <div class="col-12">
           <div class="card shadow-sm h-100">
             <div class="card-body p-4 d-grid gap-4">
               <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
@@ -852,59 +899,33 @@
               {#if visibleRecentTransactions.length === 0}
                 <div class="alert alert-light border mb-0" role="status">No recent transactions for this tenant yet.</div>
               {:else}
-                <div class="table-responsive">
-                  <table class="table align-middle mb-0">
-                    <thead>
-                      <tr>
-                        <th scope="col">Description</th>
-                        <th scope="col">When</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Amount</th>
-                        <th scope="col">Open</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {#each visibleRecentTransactions as transaction (transaction.id)}
-                        <tr>
-                          <td>
-                            <div class="d-grid gap-1">
-                              <strong>{transaction.description || transaction.kind}</strong>
-                              <span class="small text-body-secondary">{transaction.kind}</span>
-                            </div>
-                          </td>
-                          <td>{formatFinanceDateTime(transaction.effectiveAt)}</td>
-                          <td>
-                            <span class={`badge ${transactionBadgeClass(transaction.status)}`}>{transaction.status}</span>
-                          </td>
-                          <td>{formatFinanceMoney(transaction.amountMinor, transaction.currency)}</td>
-                          <td>
-                            <a href={`/finance/transactions/${transaction.id}`} use:link>Open record</a>
-                          </td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                </div>
+                <FinanceTransactionList
+                  tenantId={financeShell.selectedTenantId}
+                  transactions={visibleRecentTransactions}
+                  accountNameById={accountNameById}
+                  ariaLabel="Recent transactions"
+                  onTransactionUpdated={applyTransactionUpdate}
+                />
               {/if}
             </div>
           </div>
         </div>
 
-        <div class="col-12 col-xl-5">
-          <div class="card shadow-sm h-100">
-            <div class="card-body p-4 d-grid gap-4">
-              <div>
-                <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Attention states</p>
-                <h2 class="h5 mb-1">Needs attention</h2>
-                <p class="text-body-secondary mb-0">Alerts, FX gaps, and sync issues stay visible near the first activity viewport.</p>
+        <div class="col-12">
+          <div class="card shadow-sm">
+            <div class="card-body p-3 d-grid gap-3">
+              <div class="d-flex flex-column flex-md-row justify-content-between gap-1 align-items-md-baseline">
+                <h2 class="h6 mb-0">Needs attention</h2>
+                <p class="small text-body-secondary mb-0">Follow-up signals for pending activity, FX, syncs, and imports.</p>
               </div>
 
               {#if attentionItems.length === 0}
                 <div class="alert alert-success mb-0" role="status">No active attention signals right now.</div>
               {:else}
-                <div class="list-group">
+                <div class="row g-2">
                   {#each attentionItems as item (item.key)}
-                    <div class="list-group-item d-grid gap-2">
+                    <div class="col-12 col-md-6 col-xl-4">
+                    <div class="border rounded p-2 h-100 d-grid gap-2">
                       <div class="d-flex flex-wrap justify-content-between gap-2 align-items-start">
                         <div>
                           <strong>{item.title}</strong>
@@ -917,6 +938,7 @@
                           <a href={item.href} use:link>{item.hrefLabel}</a>
                         </div>
                       {/if}
+                    </div>
                     </div>
                   {/each}
                 </div>

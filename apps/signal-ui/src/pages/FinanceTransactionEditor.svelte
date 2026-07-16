@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -10,8 +10,16 @@
     type FinanceTransaction,
   } from '../lib/finance/api'
   import { formatFinanceDateTime, formatFinanceMoney } from '../lib/finance/format'
+  import { formatMinorAmountForInput, parseMajorAmountToMinor } from '../lib/finance/money'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
   import { supportedFinanceTenantDisplayCurrencies } from '../lib/finance/tenant-display-currencies'
+  import { isMatchedTransfer, transferLinkEligibilityIssue } from '../lib/finance/transfer-eligibility'
+  import {
+    defaultTransferCandidateRange,
+    transferCandidateRangeFromDateInputs,
+  } from '../lib/finance/transfer-range'
+  import FinanceProviderEvidence from '../components/FinanceProviderEvidence.svelte'
+  import FinancePager from '../components/FinancePager.svelte'
 
   let { params = {} } = $props<{ params?: { transactionId?: string } }>()
 
@@ -23,16 +31,41 @@
   let loading = $state(true)
   let saving = $state(false)
   let error = $state<string | null>(null)
+  let saveError = $state<string | null>(null)
   let saveMessage = $state<string | null>(null)
+  let saveStatus = $state<HTMLElement | undefined>(undefined)
   let accounts = $state<FinanceAccount[]>([])
   let categories = $state<FinanceCategory[]>([])
   let tags = $state<FinanceTag[]>([])
   let transaction = $state<FinanceTransaction | null>(null)
   let form = $state(makeBlankForm())
+  let transferPartner = $state<FinanceTransaction | null>(null)
+  let partnerLoading = $state(false)
+  let partnerError = $state<string | null>(null)
+  let candidateOpen = $state(false)
+  let candidates = $state<FinanceTransaction[]>([])
+  let candidateOffset = $state(0)
+  let candidateFromDate = $state('')
+  let candidateBeforeDate = $state('')
+  let selectedCandidateId = $state('')
+  let candidatesLoading = $state(false)
+  let candidateError = $state<string | null>(null)
+  let confirmingTransfer = $state(false)
+  let unlinkConfirmationOpen = $state(false)
+  let unlinkingTransfer = $state(false)
+  let transferMessage = $state<string | null>(null)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
 
-  const stateFlags = $derived(makeTransactionFlags())
+  const candidatePageSize = 20
+  const hasMatchedTransfer = $derived(transaction ? isMatchedTransfer(transaction) : false)
+  const hasPreviousCandidatePage = $derived(candidateOffset > 0)
+  const hasNextCandidatePage = $derived(candidates.length === candidatePageSize)
+  const candidatePageNumber = $derived(Math.floor(candidateOffset / candidatePageSize) + 1)
+  const selectedCandidate = $derived(candidates.find((item) => item.id === selectedCandidateId) ?? null)
+  const selectedCandidateIssue = $derived(transaction && selectedCandidate
+    ? transferLinkEligibilityIssue(transaction, selectedCandidate)
+    : null)
 
   onMount(() => {
     void loadPage()
@@ -44,13 +77,12 @@
       source: 'manual',
       status: 'booked',
       kind: 'expense',
-      amountMinor: '0',
+      amount: '0.00',
       currency: 'USD',
       description: '',
       effectiveAt: localTodayDateTimeValue(),
       categoryId: '',
       tagIds: [] as string[],
-      transferGroupId: '',
     }
   }
 
@@ -60,41 +92,13 @@
       source: item.source,
       status: item.status,
       kind: item.kind,
-      amountMinor: String(item.amountMinor),
+      amount: formatMinorAmountForInput(item.amountMinor),
       currency: item.currency,
       description: item.description,
       effectiveAt: toDateTimeLocalValue(item.effectiveAt),
       categoryId: item.categoryId ?? '',
       tagIds: [...item.tagIds],
-      transferGroupId: item.transferGroupId ?? '',
     }
-  }
-
-  function makeTransactionFlags(): string[] {
-    if (transaction) {
-      return [
-        transaction.status === 'pending' ? 'pending' : '',
-        transaction.hiddenAt ? 'hidden' : '',
-        transaction.transferGroupId ? 'transfer' : '',
-        transaction.kind === 'refund' ? 'refund' : '',
-        transaction.kind === 'reconciliation' ? 'reconciliation' : '',
-      ].filter(Boolean)
-    }
-
-    return [
-      form.status === 'pending' ? 'pending' : '',
-      form.transferGroupId ? 'transfer' : '',
-      form.kind === 'refund' ? 'refund' : '',
-      form.kind === 'reconciliation' ? 'reconciliation' : '',
-    ].filter(Boolean)
-  }
-
-  function flagBadgeClass(flag: string): string {
-    if (flag === 'pending') return 'text-bg-warning'
-    if (flag === 'hidden') return 'text-bg-secondary'
-    if (flag === 'refund') return 'text-bg-success'
-    if (flag === 'reconciliation') return 'text-bg-primary'
-    return 'text-bg-light border text-body'
   }
 
   async function loadPage() {
@@ -129,6 +133,10 @@
     }
 
     saveMessage = null
+    transferPartner = null
+    partnerError = null
+    closeCandidateWorkflow()
+    unlinkConfirmationOpen = false
     ;[accounts, categories, tags] = await Promise.all([
       financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
       financeApi.listCategories({ tenantId: financeShell.selectedTenantId }),
@@ -150,6 +158,146 @@
       transactionId: params.transactionId ?? '',
     })
     fillFormFromTransaction(transaction)
+    if (isMatchedTransfer(transaction)) {
+      void loadTransferPartner(transaction)
+    }
+  }
+
+  function accountName(accountId: string): string {
+    return accounts.find((account) => account.id === accountId)?.name ?? 'Unknown account'
+  }
+
+  function candidateIssue(candidate: FinanceTransaction): string | null {
+    return transaction ? transferLinkEligibilityIssue(transaction, candidate) : 'Transaction details are unavailable.'
+  }
+
+  function openCandidateWorkflow() {
+    if (!transaction) return
+    const range = defaultTransferCandidateRange(transaction.effectiveAt)
+    candidateFromDate = range.effectiveFromDate
+    candidateBeforeDate = range.effectiveBeforeDate
+    candidateOffset = 0
+    selectedCandidateId = ''
+    candidateError = null
+    candidateOpen = true
+    void loadCandidates()
+  }
+
+  function closeCandidateWorkflow() {
+    candidateOpen = false
+    candidates = []
+    candidateOffset = 0
+    selectedCandidateId = ''
+    candidateError = null
+  }
+
+  async function loadCandidates(offset = candidateOffset): Promise<boolean> {
+    if (!transaction || !financeShell.selectedTenantId) return false
+    candidatesLoading = true
+    candidateError = null
+    try {
+      const range = transferCandidateRangeFromDateInputs(candidateFromDate, candidateBeforeDate)
+      const page = await financeApi.listTransferCandidates({
+        tenantId: financeShell.selectedTenantId,
+        transactionId: transaction.id,
+        effectiveFrom: range.effectiveFrom,
+        effectiveBefore: range.effectiveBefore,
+        limit: candidatePageSize,
+        offset,
+      })
+      candidates = page.items
+      if (!candidates.some((candidate) => candidate.id === selectedCandidateId)) {
+        selectedCandidateId = ''
+      }
+      return true
+    } catch (loadError) {
+      candidateError = loadError instanceof Error ? loadError.message : 'Failed to load transfer candidates.'
+      return false
+    } finally {
+      candidatesLoading = false
+    }
+  }
+
+  function applyCandidateRange() {
+    candidateOffset = 0
+    selectedCandidateId = ''
+    void loadCandidates()
+  }
+
+  async function loadPreviousCandidatePage(): Promise<boolean> {
+    if (!hasPreviousCandidatePage) return false
+    const nextOffset = Math.max(0, candidateOffset - candidatePageSize)
+    if (!await loadCandidates(nextOffset)) return false
+    candidateOffset = nextOffset
+    selectedCandidateId = ''
+    return true
+  }
+
+  async function loadNextCandidatePage(): Promise<boolean> {
+    if (!hasNextCandidatePage) return false
+    const nextOffset = candidateOffset + candidatePageSize
+    if (!await loadCandidates(nextOffset)) return false
+    candidateOffset = nextOffset
+    selectedCandidateId = ''
+    return true
+  }
+
+  async function loadTransferPartner(source: FinanceTransaction) {
+    if (!financeShell.selectedTenantId) return
+    partnerLoading = true
+    partnerError = null
+    try {
+      transferPartner = await financeApi.getTransferPartner({
+        tenantId: financeShell.selectedTenantId,
+        transactionId: source.id,
+      })
+    } catch (loadError) {
+      partnerError = loadError instanceof Error ? loadError.message : 'Failed to load the linked transfer partner.'
+    } finally {
+      partnerLoading = false
+    }
+  }
+
+  async function confirmTransferLink() {
+    if (!transaction || !selectedCandidate || selectedCandidateIssue || !financeShell.selectedTenantId) return
+    confirmingTransfer = true
+    candidateError = null
+    try {
+      await financeApi.linkTransferPair({
+        tenantId: financeShell.selectedTenantId,
+        firstTransactionId: transaction.id,
+        secondTransactionId: selectedCandidate.id,
+      })
+      transferMessage = 'Internal transfer linked. The matched pair is excluded from income and expense reporting.'
+      await loadEditorData()
+    } catch (linkError) {
+      candidateError = linkError instanceof Error
+        ? `Transfer link could not be completed. The record may have changed; refresh candidates and try again. ${linkError.message}`
+        : 'Transfer link could not be completed. The record may have changed; refresh candidates and try again.'
+    } finally {
+      confirmingTransfer = false
+    }
+  }
+
+  async function confirmTransferUnlink() {
+    if (!transaction || !transferPartner || !financeShell.selectedTenantId) return
+    unlinkingTransfer = true
+    partnerError = null
+    try {
+      await financeApi.unlinkTransferPair({
+        tenantId: financeShell.selectedTenantId,
+        firstTransactionId: transaction.id,
+        secondTransactionId: transferPartner.id,
+      })
+      transferMessage = 'Internal transfer unlinked. Both records return to income and expense reporting.'
+      await loadEditorData()
+    } catch (unlinkError) {
+      partnerError = unlinkError instanceof Error
+        ? `Transfer unlink could not be completed. Refresh the linked record and try again. ${unlinkError.message}`
+        : 'Transfer unlink could not be completed. Refresh the linked record and try again.'
+    } finally {
+      unlinkingTransfer = false
+    }
   }
 
   function syncCurrencyWithAccount() {
@@ -196,10 +344,11 @@
     }
 
     saving = true
-    error = null
+    saveError = null
     saveMessage = null
 
     try {
+      const amountMinor = parseMajorAmountToMinor(form.amount)
       if (isCreateMode) {
         const created = await financeApi.createTransaction({
           tenantId: financeShell.selectedTenantId,
@@ -207,13 +356,12 @@
           source: form.source,
           status: form.status,
           kind: form.kind,
-          amountMinor: Number(form.amountMinor),
+          amountMinor,
           currency: form.currency,
           description: form.description,
           effectiveAt: fromDateTimeLocalValue(form.effectiveAt),
           categoryId: form.categoryId || undefined,
           tagIds: form.tagIds,
-          transferGroupId: form.transferGroupId || undefined,
         })
         transaction = created
         saveMessage = 'Transaction recorded.'
@@ -223,7 +371,7 @@
           tenantId: financeShell.selectedTenantId,
           transactionId: params.transactionId ?? '',
           description: form.description,
-          amountMinor: Number(form.amountMinor),
+          amountMinor,
           effectiveAt: fromDateTimeLocalValue(form.effectiveAt),
           categoryId: form.categoryId || null,
           tagIds: form.tagIds,
@@ -233,11 +381,18 @@
           fillFormFromTransaction(transaction)
         }
       }
-    } catch (saveError) {
-      error = saveError instanceof Error ? saveError.message : 'Failed to save transaction'
+      await tick()
+      saveStatus?.focus({ preventScroll: true })
+    } catch (saveFailure) {
+      saveError = saveFailure instanceof Error ? saveFailure.message : 'Failed to save transaction'
     } finally {
       saving = false
     }
+  }
+
+  function clearSaveFeedback() {
+    saveError = null
+    saveMessage = null
   }
 
   $effect(() => {
@@ -257,16 +412,7 @@
     <header class="card border-0 shadow-sm">
       <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
         <div>
-          <h1 id="finance-transaction-editor-heading" class="h3 mb-2">
-            {#if isCreateMode}Record transaction{:else}Edit transaction{/if}
-          </h1>
-          <p class="text-body-secondary mb-0">
-            {#if isCreateMode}
-              Dedicated single-record entry screen for finance transactions.
-            {:else}
-              Focused edit route with provider-original context preserved beside operator-controlled reporting fields.
-            {/if}
-          </p>
+          <h1 id="finance-transaction-editor-heading" class="h3 mb-0">{#if isCreateMode}Record transaction{:else}Transaction{/if}</h1>
         </div>
 
         <a class="btn btn-outline-secondary align-self-start align-self-lg-center" href="/finance/transactions" use:link>
@@ -279,8 +425,8 @@
       <div class="alert alert-danger mb-0" role="alert">{error}</div>
     {/if}
 
-    {#if saveMessage}
-      <div class="alert alert-success mb-0" role="status">{saveMessage}</div>
+    {#if transferMessage}
+      <div class="alert alert-success mb-0" role="status">{transferMessage}</div>
     {/if}
 
     {#if loading}
@@ -336,38 +482,32 @@
         </section>
       {/if}
 
-      <section class="card shadow-sm">
-        <div class="card-body p-4 d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
-          <div>
-            <h2 class="h5 mb-1">Transaction context</h2>
-            <p class="text-body-secondary mb-0">
-              {#if transaction}
-                {transaction.source} · {transaction.status} · {transaction.kind} · {transaction.currency}
-              {:else}
-                {form.source} · {form.status} · {form.kind} · {form.currency}
-              {/if}
-            </p>
-            {#if transaction?.tagIds.length}
-              <p class="small text-body-secondary mb-0 mt-2">
-                Tags: {transaction.tagIds.map((tagId) => tags.find((tag) => tag.id === tagId)?.name ?? 'Unknown tag').join(', ')}
-              </p>
-            {/if}
+      <form class="card shadow-sm" onsubmit={saveTransaction} oninput={clearSaveFeedback} onchange={clearSaveFeedback}>
+        <div class="card-body p-4 d-grid gap-4">
+          <h2 class="h5 mb-0">Details</h2>
+          <div class="row g-3">
+            <div class="col-12 col-md-6"><label class="form-label" for="finance-transaction-account">Account</label><select id="finance-transaction-account" class="form-select" bind:value={form.accountId} onchange={syncCurrencyWithAccount} aria-label="Transaction account" disabled={!isCreateMode} required><option value="">Select account</option>{#each accounts as account (account.id)}<option value={account.id}>{account.name}</option>{/each}</select></div>
+            <div class="col-12 col-md-6"><label class="form-label" for="finance-transaction-category">Category</label><select id="finance-transaction-category" class="form-select" bind:value={form.categoryId} aria-label="Transaction category"><option value="">No category</option>{#each categories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}</select></div>
+            <fieldset class="col-12"><legend class="form-label mb-2">Tags</legend>{#if tags.length === 0}<p class="form-text mb-0">No tenant tags are available.</p>{:else}<div class="d-flex flex-wrap gap-3" aria-label="Transaction tags">{#each tags as tag (tag.id)}<div class="form-check"><input id={`finance-transaction-tag-${tag.id}`} class="form-check-input" type="checkbox" value={tag.id} bind:group={form.tagIds} disabled={Boolean(tag.hiddenAt) && !form.tagIds.includes(tag.id)} /><label class="form-check-label" for={`finance-transaction-tag-${tag.id}`}>{tag.name}{tag.hiddenAt ? ' (hidden)' : ''}</label></div>{/each}</div>{/if}</fieldset>
+            <div class="col-12 col-md-4"><label class="form-label" for="finance-transaction-kind">Kind</label><select id="finance-transaction-kind" class="form-select" bind:value={form.kind} aria-label="Transaction kind" disabled={!isCreateMode}><option value="expense">expense</option><option value="income">income</option><option value="regular">regular</option><option value="refund">refund</option><option value="transfer">transfer</option><option value="reconciliation">reconciliation</option></select></div>
+            <div class="col-12 col-md-4"><label class="form-label" for="finance-transaction-amount">Amount</label><input id="finance-transaction-amount" class="form-control" bind:value={form.amount} aria-label="Amount" inputmode="decimal" type="text" required /><div class="form-text">Major units, up to two decimal places.</div></div>
+            <div class="col-12 col-md-4"><label class="form-label" for="finance-transaction-currency">Currency</label><select id="finance-transaction-currency" class="form-select" bind:value={form.currency} aria-label="Transaction currency" disabled={!isCreateMode} required>{#each supportedFinanceTenantDisplayCurrencies as currencyCode (currencyCode)}<option value={currencyCode}>{currencyCode}</option>{/each}</select></div>
+            <div class="col-12"><label class="form-label" for="finance-transaction-description">Description</label><input id="finance-transaction-description" class="form-control" bind:value={form.description} aria-label="Transaction description" /></div>
+            <div class="col-12 col-lg-6"><label class="form-label" for="finance-transaction-effective-at">Effective at</label><input id="finance-transaction-effective-at" class="form-control" bind:value={form.effectiveAt} aria-label="Transaction effective at" type="datetime-local" required /></div>
+            <div class="col-12 col-md-4"><label class="form-label" for="finance-transaction-status">Status</label><select id="finance-transaction-status" class="form-select" bind:value={form.status} aria-label="Transaction status" disabled={!isCreateMode}><option value="booked">booked</option><option value="pending">pending</option></select></div>
+            <div class="col-12 col-md-4"><label class="form-label" for="finance-transaction-source">Source</label><select id="finance-transaction-source" class="form-select" bind:value={form.source} aria-label="Transaction source" disabled={!isCreateMode}><option value="manual">manual</option><option value="provider">provider</option><option value="csv">csv</option><option value="system">system</option></select></div>
           </div>
-
-          <div class="d-flex flex-wrap gap-2" aria-label="Transaction state flags">
-            {#each stateFlags as flag (flag)}
-              <span class={`badge ${flagBadgeClass(flag)}`}>{flag}</span>
-            {/each}
-          </div>
+          <div class="d-flex flex-wrap gap-2"><button class="btn btn-primary" type="submit" disabled={saving || !financeShell.selectedTenantId}>{#if saving}Saving…{:else}Save transaction{/if}</button><a class="btn btn-outline-secondary" href="/finance/transactions" use:link>Cancel</a></div>
+          {#if saveError}<div class="alert alert-danger mb-0" role="alert">{saveError}</div>{/if}
+          {#if saveMessage}<div class="alert alert-success mb-0" role="status" tabindex="-1" bind:this={saveStatus}>{saveMessage}</div>{/if}
         </div>
-      </section>
+      </form>
 
       {#if transaction?.providerOriginal}
         <section class="card shadow-sm">
           <div class="card-body p-4 d-grid gap-3">
             <div>
-              <h2 class="h5 mb-1">Provider original</h2>
-              <p class="text-body-secondary mb-0">Original synced values remain visible next to editable reporting fields.</p>
+              <h2 class="h5 mb-1">Original synced values</h2>
             </div>
 
             <div class="row g-3">
@@ -379,120 +519,154 @@
         </section>
       {/if}
 
-      <form class="card shadow-sm" onsubmit={saveTransaction}>
-        <div class="card-body p-4 d-grid gap-4">
-          <div>
-            <h2 class="h5 mb-1">{#if isCreateMode}Create details{:else}Editable reporting fields{/if}</h2>
-            <p class="text-body-secondary mb-0">
-              Shared single-record editor for both dedicated create and dedicated edit routes.
-            </p>
-          </div>
+      {#if transaction}
+        <section class="card shadow-sm" aria-labelledby="finance-transfer-workflow-heading">
+          <div class="card-body p-4 d-grid gap-3">
+            <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-center">
+              <div>
+                <h2 id="finance-transfer-workflow-heading" class="h5 mb-1">Internal transfer</h2>
+                <p class="text-body-secondary mb-0">
+                  {#if hasMatchedTransfer}
+                    This record is linked as an internal transfer. Account balances remain unchanged and the pair is excluded from income and expense reporting.
+                  {:else}
+                    Match this booked record to an opposite-direction record in another account.
+                  {/if}
+                </p>
+              </div>
 
-          <div class="row g-3">
-            <div class="col-12 col-md-6">
-              <label class="form-label" for="finance-transaction-account">Account</label>
-              <select id="finance-transaction-account" class="form-select" bind:value={form.accountId} onchange={syncCurrencyWithAccount} aria-label="Transaction account" disabled={!isCreateMode} required>
-                <option value="">Select account</option>
-                {#each accounts as account (account.id)}
-                  <option value={account.id}>{account.name}</option>
-                {/each}
-              </select>
-            </div>
-
-            <div class="col-12 col-md-6">
-              <label class="form-label" for="finance-transaction-category">Category</label>
-              <select id="finance-transaction-category" class="form-select" bind:value={form.categoryId} aria-label="Transaction category">
-                <option value="">No category</option>
-                {#each categories as category (category.id)}
-                  <option value={category.id}>{category.name}</option>
-                {/each}
-              </select>
-            </div>
-
-            <fieldset class="col-12">
-              <legend class="form-label mb-2">Tags</legend>
-              {#if tags.length === 0}
-                <p class="form-text mb-0">No tenant tags are available. Manage tags from Categories.</p>
-              {:else}
-                <div class="d-flex flex-wrap gap-3" aria-label="Transaction tags">
-                  {#each tags as tag (tag.id)}
-                    <div class="form-check">
-                      <input id={`finance-transaction-tag-${tag.id}`} class="form-check-input" type="checkbox" value={tag.id} bind:group={form.tagIds} disabled={Boolean(tag.hiddenAt) && !form.tagIds.includes(tag.id)} />
-                      <label class="form-check-label" for={`finance-transaction-tag-${tag.id}`}>{tag.name}{tag.hiddenAt ? ' (hidden)' : ''}</label>
-                    </div>
-                  {/each}
-                </div>
+              {#if !hasMatchedTransfer}
+                <button class="btn btn-primary align-self-start align-self-md-center" type="button" onclick={openCandidateWorkflow}>
+                  Link transfer
+                </button>
               {/if}
-              <p class="form-text mb-0">Choose existing tenant tags. Create tags from Categories.</p>
-            </fieldset>
-
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="finance-transaction-kind">Kind</label>
-              <select id="finance-transaction-kind" class="form-select" bind:value={form.kind} aria-label="Transaction kind" disabled={!isCreateMode}>
-                <option value="expense">expense</option>
-                <option value="income">income</option>
-                <option value="refund">refund</option>
-                <option value="transfer">transfer</option>
-                <option value="reconciliation">reconciliation</option>
-              </select>
             </div>
 
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="finance-transaction-amount">Amount minor</label>
-              <input id="finance-transaction-amount" class="form-control" bind:value={form.amountMinor} aria-label="Amount minor" type="number" required />
-            </div>
+            {#if hasMatchedTransfer}
+              {#if partnerLoading}
+                <div class="alert alert-secondary mb-0" role="status">Loading linked transfer…</div>
+              {:else if partnerError}
+                <div class="alert alert-danger mb-0 d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center" role="alert">
+                  <span>{partnerError}</span>
+                  <button class="btn btn-outline-danger btn-sm align-self-start" type="button" onclick={() => transaction && void loadTransferPartner(transaction)}>Retry linked transfer</button>
+                </div>
+              {:else if transferPartner}
+                <div class="border rounded p-3 d-grid gap-2">
+                  <strong>Linked with {accountName(transferPartner.accountId)}</strong>
+                  <span>{transferPartner.description || transferPartner.kind} · {transferPartner.kind} · {formatFinanceDateTime(transferPartner.effectiveAt)}</span>
+                   <span>{formatFinanceMoney(transferPartner.amountMinor, transferPartner.currency)}</span>
+                   <div class="d-flex flex-wrap gap-2">
+                     <a class="btn btn-outline-primary btn-sm" href={`/finance/transactions/${encodeURIComponent(transferPartner.id)}`} use:link>Open linked transaction</a>
+                     <button class="btn btn-outline-danger btn-sm" type="button" onclick={() => unlinkConfirmationOpen = true}>Unlink transfer</button>
+                   </div>
+                </div>
 
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="finance-transaction-currency">Currency</label>
-              <select id="finance-transaction-currency" class="form-select" bind:value={form.currency} aria-label="Transaction currency" disabled={!isCreateMode} required>
-                {#each supportedFinanceTenantDisplayCurrencies as currencyCode (currencyCode)}
-                  <option value={currencyCode}>{currencyCode}</option>
-                {/each}
-              </select>
-            </div>
+                {#if unlinkConfirmationOpen}
+                  <div class="alert alert-warning mb-0 d-grid gap-2" aria-label="Confirm unlink transfer">
+                    <strong>Unlink this internal transfer?</strong>
+                    <span>{transaction.description || transaction.kind} ({accountName(transaction.accountId)}) will be unlinked from {transferPartner.description || transferPartner.kind} ({accountName(transferPartner.accountId)}).</span>
+                    <span>Both records will return to income and expense reporting.</span>
+                    <div class="d-flex flex-wrap gap-2">
+                      <button class="btn btn-danger btn-sm" type="button" onclick={() => void confirmTransferUnlink()} disabled={unlinkingTransfer}>
+                        {unlinkingTransfer ? 'Unlinking…' : 'Confirm unlink'}
+                      </button>
+                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => unlinkConfirmationOpen = false} disabled={unlinkingTransfer}>Cancel</button>
+                    </div>
+                  </div>
+                {/if}
+              {/if}
+            {:else if candidateOpen}
+              <div id="finance-transfer-candidates" class="border rounded p-3 d-grid gap-3" aria-label="Transfer candidates" aria-busy={candidatesLoading}>
+                <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+                  <div>
+                    <h3 class="h6 mb-1">Transfer candidates</h3>
+                    <p class="small text-body-secondary mb-0">Candidates include all visible accounts. The effective-before boundary is exclusive.</p>
+                  </div>
+                  <button class="btn btn-outline-secondary btn-sm align-self-start" type="button" onclick={closeCandidateWorkflow}>Close candidates</button>
+                </div>
 
-            <div class="col-12">
-              <label class="form-label" for="finance-transaction-description">Description</label>
-              <input id="finance-transaction-description" class="form-control" bind:value={form.description} aria-label="Transaction description" />
-            </div>
+                <div class="row g-3 align-items-end">
+                  <div class="col-12 col-md-5">
+                    <label class="form-label" for="finance-transfer-effective-from">Effective from</label>
+                    <input id="finance-transfer-effective-from" class="form-control" type="date" bind:value={candidateFromDate} />
+                  </div>
+                  <div class="col-12 col-md-5">
+                    <label class="form-label" for="finance-transfer-effective-before">Effective before (exclusive)</label>
+                    <input id="finance-transfer-effective-before" class="form-control" type="date" bind:value={candidateBeforeDate} />
+                  </div>
+                  <div class="col-12 col-md-2">
+                    <button class="btn btn-outline-primary w-100" type="button" onclick={applyCandidateRange} disabled={candidatesLoading}>Apply</button>
+                  </div>
+                </div>
 
-            <div class="col-12 col-lg-6">
-              <label class="form-label" for="finance-transaction-effective-at">Effective at</label>
-              <input id="finance-transaction-effective-at" class="form-control" bind:value={form.effectiveAt} aria-label="Transaction effective at" type="datetime-local" required />
-            </div>
+                {#if candidateError}
+                  <div class="alert alert-danger mb-0 d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center" role="alert">
+                    <span>{candidateError}</span>
+                    <button class="btn btn-outline-danger btn-sm align-self-start" type="button" onclick={() => void loadCandidates()} disabled={candidatesLoading}>Refresh candidates</button>
+                  </div>
+                {/if}
 
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="finance-transaction-status">Status</label>
-              <select id="finance-transaction-status" class="form-select" bind:value={form.status} aria-label="Transaction status" disabled={!isCreateMode}>
-                <option value="booked">booked</option>
-                <option value="pending">pending</option>
-              </select>
-            </div>
+                {#if candidates.length === 0}
+                  {#if candidatesLoading}
+                    <div class="alert alert-secondary mb-0" role="status">Loading transfer candidates…</div>
+                  {:else}
+                  <div class="alert alert-light border mb-0" role="status">No transfer candidates matched this date range.</div>
+                  {/if}
+                {:else}
+                  <div class="table-responsive">
+                    <table class="table align-middle mb-0" aria-label="Transfer candidates">
+                      <thead>
+                        <tr><th scope="col">Select</th><th scope="col" class="d-none d-md-table-cell">Account</th><th scope="col">Description</th><th scope="col" class="d-none d-md-table-cell">Kind</th><th scope="col" class="d-none d-md-table-cell">Effective</th><th scope="col" class="d-none d-md-table-cell">Amount</th></tr>
+                      </thead>
+                      <tbody>
+                        {#each candidates as candidate (candidate.id)}
+                            {@const issue = candidateIssue(candidate)}
+                            <tr>
+                            <td><input class="form-check-input" type="radio" name="transfer-candidate" value={candidate.id} checked={selectedCandidateId === candidate.id} onchange={() => selectedCandidateId = candidate.id} disabled={Boolean(issue)} aria-label={`Select ${candidate.description || candidate.kind}`} /></td>
+                            <td class="d-none d-md-table-cell">{accountName(candidate.accountId)}</td>
+                            <td><div>{candidate.description || candidate.kind}</div><small class="d-md-none text-body-secondary d-block">{candidate.kind} · {accountName(candidate.accountId)} · {formatFinanceDateTime(candidate.effectiveAt)} · {formatFinanceMoney(candidate.amountMinor, candidate.currency)}</small>{#if issue}<small class="text-danger d-block">Eligibility: {issue}</small>{/if}</td>
+                            <td class="d-none d-md-table-cell">{candidate.kind}</td>
+                            <td class="d-none d-md-table-cell">{formatFinanceDateTime(candidate.effectiveAt)}</td>
+                            <td class="d-none d-md-table-cell">{formatFinanceMoney(candidate.amountMinor, candidate.currency)}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
 
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="finance-transaction-source">Source</label>
-              <select id="finance-transaction-source" class="form-select" bind:value={form.source} aria-label="Transaction source" disabled={!isCreateMode}>
-                <option value="manual">manual</option>
-                <option value="provider">provider</option>
-                <option value="csv">csv</option>
-                <option value="system">system</option>
-              </select>
-            </div>
+                  <FinancePager
+                    label="Transfer candidate pages"
+                    status={candidatesLoading ? 'Loading transfer candidate page…' : `Page ${candidatePageNumber}`}
+                    controls="finance-transfer-candidates"
+                    busy={candidatesLoading}
+                    hasPrevious={hasPreviousCandidatePage}
+                    hasNext={hasNextCandidatePage}
+                    onPrevious={loadPreviousCandidatePage}
+                    onNext={loadNextCandidatePage}
+                  />
+                {/if}
 
-            <div class="col-12 col-md-4">
-              <label class="form-label" for="finance-transaction-transfer-group">Transfer group</label>
-              <input id="finance-transaction-transfer-group" class="form-control" bind:value={form.transferGroupId} aria-label="Transfer group" disabled={!isCreateMode} />
-            </div>
+                {#if selectedCandidate}
+                  <div class="alert alert-info mb-0 d-grid gap-2" aria-label="Confirm transfer link">
+                    <strong>Confirm internal transfer</strong>
+                    <span>{transaction.description || transaction.kind} ({accountName(transaction.accountId)}, {formatFinanceDateTime(transaction.effectiveAt)}, {formatFinanceMoney(transaction.amountMinor, transaction.currency)}) will link with {selectedCandidate.description || selectedCandidate.kind} ({accountName(selectedCandidate.accountId)}, {formatFinanceDateTime(selectedCandidate.effectiveAt)}, {formatFinanceMoney(selectedCandidate.amountMinor, selectedCandidate.currency)}).</span>
+                    <span>The matched pair will be excluded from income and expense reporting; account balances remain unchanged.</span>
+                    <div><button class="btn btn-primary btn-sm" type="button" onclick={() => void confirmTransferLink()} disabled={confirmingTransfer || Boolean(selectedCandidateIssue)}>{confirmingTransfer ? 'Linking…' : 'Confirm link transfer'}</button></div>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
+        </section>
+      {/if}
 
-          <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-primary" type="submit" disabled={saving || !financeShell.selectedTenantId}>
-              {#if saving}Saving…{:else}Save transaction{/if}
-            </button>
-            <a class="btn btn-outline-secondary" href="/finance/transactions" use:link>Cancel</a>
+      {#if transaction}
+        <section class="card shadow-sm">
+          <div class="card-body p-4">
+            <FinanceProviderEvidence tenantId={financeShell.selectedTenantId} entityId={transaction.id} entityLabel="transaction" scope="transaction" />
           </div>
-        </div>
-      </form>
+        </section>
+      {/if}
+
     {/if}
   </div>
 </section>

@@ -112,6 +112,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByLabelText('Custom start date')).not.toBeVisible()
     expect(screen.getByLabelText('Custom end date')).not.toBeVisible()
     expect(screen.queryByText('2026-06-20T12:00:00.000Z')).not.toBeInTheDocument()
+    expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026')).toBeInTheDocument()
   })
 
   it('renders compact needs-attention items for pending, missing FX, failed sync, and failed import signals', async () => {
@@ -158,6 +159,28 @@ describe('Finance dashboard page', () => {
     expect(screen.getByRole('link', { name: 'Review imports' })).toHaveAttribute('href', '#/finance/imports')
   })
 
+  it('places an incomplete income and expense warning beside the totals with excluded count and FX diagnostics link', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { preset: 'current_month', startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30), previous: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31) }, next: { startDate: new Date(2026, 6, 1), endDate: new Date(2026, 6, 31) } },
+      settled: { displayCurrency: 'PLN', incomeMinor: 100, expenseMinor: 200, netMinor: -100, transactionCount: 2, complete: false },
+      pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [],
+      missingFx: [
+        { source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'PLN', rateDate: new Date(2026, 5, 20), provider: 'frankfurter' },
+        { source: 'provider', transactionId: 'tx-2', accountId: 'acc-1', baseCurrency: 'USD', quoteCurrency: 'PLN', rateDate: new Date(2026, 5, 20), provider: 'frankfurter' },
+      ],
+      nativeSettledTotals: [],
+    })
+
+    render(Finance)
+
+    const warning = (await screen.findByText('Income and expense totals are incomplete.')).parentElement!
+    expect(warning).toHaveTextContent('Income and expense totals are incomplete.')
+    expect(warning).toHaveTextContent('2 values were excluded')
+    expect(screen.getByRole('link', { name: 'Open FX diagnostics' })).toHaveAttribute('href', '#/admin/finance/fx')
+    expect(screen.getByText('Income').compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('shows the tenant-create prompt when no tenants exist', async () => {
     mocks.listTenants.mockResolvedValueOnce([])
 
@@ -179,7 +202,7 @@ describe('Finance dashboard page', () => {
     expect(await screen.findByText('Select an active tenant to continue on this finance route.')).toBeInTheDocument()
   })
 
-  it('supports previous and custom period actions through the existing dashboard contract', async () => {
+  it('calls the exact previous-month preset without deriving a custom window', async () => {
     const user = userEvent.setup()
     mocks.getDashboard
       .mockResolvedValueOnce({
@@ -233,8 +256,9 @@ describe('Finance dashboard page', () => {
 
     render(Finance)
 
-    await user.click(await screen.findByRole('button', { name: 'Previous period' }))
+    await user.click(await screen.findByRole('button', { name: 'Previous month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'previous_month', startDate: undefined, endDate: undefined })
 
     await user.click(screen.getByText('Custom range'))
     expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-05-01')
@@ -244,26 +268,28 @@ describe('Finance dashboard page', () => {
     await user.type(screen.getByLabelText('Custom start date'), '2026-06-01')
     await user.clear(screen.getByLabelText('Custom end date'))
     await user.type(screen.getByLabelText('Custom end date'), '2026-06-30')
-    await user.click(screen.getByRole('button', { name: 'Apply custom range' }))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
 
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
     expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-06-01')
     expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-06-30')
   })
 
-  it('supports current-month and next-period actions', async () => {
+  it('calls the exact current- and next-month presets', async () => {
     const user = userEvent.setup()
     render(Finance)
 
     await user.click(await screen.findByRole('button', { name: 'Current month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'current_month', startDate: undefined, endDate: undefined })
 
     await user.click(screen.getByText('Custom range'))
     expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-06-20')
     expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-06-20')
 
-    await user.click(screen.getByRole('button', { name: 'Next period' }))
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+    expect(mocks.getDashboard.mock.calls[2][0]).toEqual({ tenantId: 'tenant-1', preset: 'next_month', startDate: undefined, endDate: undefined })
   })
 
   it('keeps dashboard custom range instants until the date control changes them', async () => {
@@ -280,7 +306,7 @@ describe('Finance dashboard page', () => {
 
     render(Finance)
     await user.click(await screen.findByText('Custom range'))
-    await user.click(screen.getByRole('button', { name: 'Apply custom range' }))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
 
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
     const request = mocks.getDashboard.mock.calls[1][0]
@@ -313,7 +339,7 @@ describe('Finance dashboard page', () => {
     await user.type(screen.getByLabelText('Custom start date'), '2026-05-29')
     await user.clear(screen.getByLabelText('Custom end date'))
     await user.type(screen.getByLabelText('Custom end date'), '2026-06-03')
-    await user.click(screen.getByRole('button', { name: 'Apply custom range' }))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
 
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
     const request = mocks.getDashboard.mock.calls[1][0]
@@ -477,6 +503,53 @@ describe('Finance dashboard page', () => {
     expect(screen.getByText('Settled ok')).toBeInTheDocument()
     expect(screen.getByText('Hotel')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Review connections' })).toHaveAttribute('href', '#/finance/connections')
+  })
+
+  it('does not add native foreign minor values into an unavailable display balance', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { preset: 'current_month', startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30), previous: { startDate: new Date(), endDate: new Date() }, next: { startDate: new Date(), endDate: new Date() } },
+      settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [],
+      accountBalances: [
+        { accountId: 'pln', accountName: 'PLN', currency: 'PLN', nativeBookedMinor: 10000, nativePendingMinor: 0, displayBookedMinor: 10000, displayPendingMinor: 0, missingFx: false },
+        { accountId: 'eur', accountName: 'EUR', currency: 'EUR', nativeBookedMinor: 20000, nativePendingMinor: 0, displayBookedMinor: null, displayPendingMinor: null, missingFx: true },
+      ],
+      alerts: [], missingFx: [{ source: 'account', transactionId: null, accountId: 'eur', baseCurrency: 'EUR', quoteCurrency: 'PLN', rateDate: new Date(), provider: 'frankfurter' }], currentFxRates: [], nativeSettledTotals: [],
+    })
+
+    render(Finance)
+
+    expect(await screen.findByText('Booked total unavailable')).toBeInTheDocument()
+    expect(screen.getAllByText('Unavailable')).not.toHaveLength(0)
+    expect(screen.getByText('Native 200.00 EUR')).toBeInTheDocument()
+    expect(screen.queryByText('300.00 PLN')).not.toBeInTheDocument()
+  })
+
+  it('explains that a prior period uses current FX valuation', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { preset: 'custom', startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31), previous: { startDate: new Date(), endDate: new Date() }, next: { startDate: new Date(), endDate: new Date() } },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], currentFxRates: [], nativeSettledTotals: [],
+    })
+    render(Finance)
+    expect(await screen.findByText('Past activity is valued using today’s latest FX rates, not an end-of-period rate.')).toBeInTheDocument()
+  })
+
+  it('shows fresh rate metadata and a prominent stale-rate warning', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { preset: 'current_month', startDate: new Date(), endDate: new Date(), previous: { startDate: new Date(), endDate: new Date() }, next: { startDate: new Date(), endDate: new Date() } },
+      settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true }, pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], nativeSettledTotals: [],
+      currentFxRates: [
+        { provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'PLN', effectiveAt: new Date('2026-06-19T00:00:00Z'), lastSuccessfulRefreshAt: new Date('2026-06-20T12:00:00Z'), stale: false },
+        { provider: 'frankfurter', baseCurrency: 'USD', quoteCurrency: 'PLN', effectiveAt: new Date('2026-06-18T00:00:00Z'), lastSuccessfulRefreshAt: new Date('2026-06-18T12:00:00Z'), stale: true },
+      ],
+    })
+    render(Finance)
+    expect(await screen.findByText('Current FX valuation may be stale.')).toBeInTheDocument()
+    expect(screen.getByText('EUR → PLN')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Refresh current rates' })).toHaveAttribute('href', '#/admin/finance/fx')
   })
 
   it('caps account, category, and recent transaction sections to keep the dashboard scannable', async () => {

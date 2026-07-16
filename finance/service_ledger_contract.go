@@ -12,6 +12,8 @@ var (
 	ErrTransactionNotFound = errors.New("transaction not found")
 	ErrDuplicateTagID      = errors.New("duplicate tag id")
 	ErrTagNotAssignable    = errors.New("tag is not assignable")
+	ErrInvalidTransferPair = errors.New("invalid transfer pair")
+	ErrTransferNotLinked   = errors.New("transfer pair is not linked")
 )
 
 type RecordTransactionParams struct {
@@ -56,6 +58,13 @@ type GetTransactionParams struct {
 }
 
 type LinkTransfersParams struct {
+	ActorUserID         string
+	TenantID            string
+	FirstTransactionID  string
+	SecondTransactionID string
+}
+
+type UnlinkTransfersParams struct {
 	ActorUserID         string
 	TenantID            string
 	FirstTransactionID  string

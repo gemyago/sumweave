@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -13,8 +14,12 @@ import (
 )
 
 type fxServiceStore interface {
-	SaveFXRates(ctx context.Context, rates []domain.FXRate) error
-	ListFXRates(ctx context.Context, params persistence.ListFXRatesParams) ([]domain.FXRate, error)
+	SaveCurrentFXRates(ctx context.Context, rates []domain.FXRate) error
+	ListCurrentFXRates(ctx context.Context, params persistence.ListCurrentFXRatesParams) ([]domain.FXRate, error)
+}
+
+type requiredFXPairLister interface {
+	ListRequiredFXPairs(context.Context) ([]persistence.RequiredFXPair, error)
 }
 
 type FXService struct {
@@ -24,6 +29,7 @@ type FXService struct {
 	defaultFXProvider string
 	fxJobEnqueuer     FXSyncJobEnqueuer
 	fxScheduleWriter  FXSyncScheduleWriter
+	requiredPairs     requiredFXPairLister
 }
 
 type FXServiceOption func(*FXService)
@@ -67,6 +73,10 @@ func WithFXServiceScheduleWriter(writer FXSyncScheduleWriter) FXServiceOption {
 	}
 }
 
+func WithFXServiceRequiredPairs(lister requiredFXPairLister) FXServiceOption {
+	return func(service *FXService) { service.requiredPairs = lister }
+}
+
 func NewFXService(store fxServiceStore, opts ...FXServiceOption) *FXService {
 	service := &FXService{
 		store:             store,
@@ -84,32 +94,68 @@ func (s *FXService) SyncFXRates(
 	ctx context.Context,
 	params SyncFXRatesParams,
 ) (SyncFXRatesResult, error) {
-	if err := ValidateRequiredTimestampRange(params.StartDate, params.EndDate); err != nil {
-		return SyncFXRatesResult{}, err
-	}
 	providerName, err := s.resolveFXProviderName(params.Provider)
 	if err != nil {
 		return SyncFXRatesResult{}, err
 	}
 	provider := s.fxProviders[providerName]
+	refreshAt := s.now()
 	items := make([]domain.FXRate, 0)
 	for _, baseCurrency := range canonicalizeCurrencies(params.BaseCurrencies) {
-		rates, fetchErr := provider.FetchHistoricalRates(ctx, FXProviderQuery{
+		rates, fetchErr := provider.FetchLatestRates(ctx, FXProviderQuery{
 			BaseCurrency:    baseCurrency,
 			QuoteCurrencies: []string{strings.ToUpper(strings.TrimSpace(params.QuoteCurrency))},
-			StartDate:       params.StartDate,
-			EndDate:         params.EndDate,
 		})
 		if fetchErr != nil {
 			return SyncFXRatesResult{}, fmt.Errorf("sync fx rates: %w", fetchErr)
 		}
-		if validationErr := validateProviderFXRates(rates); validationErr != nil {
+		rate, validationErr := validateProviderFXRates(providerName, baseCurrency, params.QuoteCurrency, rates)
+		if validationErr != nil {
 			return SyncFXRatesResult{}, fmt.Errorf("sync fx rates: %w", validationErr)
 		}
-		items = append(items, rates...)
+		rate.LastSuccessfulRefreshAt = refreshAt
+		items = append(items, rate)
 	}
-	if saveErr := s.store.SaveFXRates(ctx, items); saveErr != nil {
+	if saveErr := s.store.SaveCurrentFXRates(ctx, items); saveErr != nil {
 		return SyncFXRatesResult{}, fmt.Errorf("sync fx rates: %w", saveErr)
+	}
+	return SyncFXRatesResult{Provider: providerName, ImportedCount: len(items)}, nil
+}
+
+func (s *FXService) RefreshRequiredFXRates(
+	ctx context.Context,
+	params RefreshFXRatesParams,
+) (SyncFXRatesResult, error) {
+	if s.requiredPairs == nil {
+		return SyncFXRatesResult{}, errors.New("required fx pair lister is required")
+	}
+	providerName, err := s.resolveFXProviderName(params.Provider)
+	if err != nil {
+		return SyncFXRatesResult{}, err
+	}
+	pairs, err := s.requiredPairs.ListRequiredFXPairs(ctx)
+	if err != nil {
+		return SyncFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", err)
+	}
+	items := make([]domain.FXRate, 0, len(pairs))
+	refreshAt := s.now()
+	provider := s.fxProviders[providerName]
+	for _, pair := range pairs {
+		rates, fetchErr := provider.FetchLatestRates(ctx, FXProviderQuery{
+			BaseCurrency: pair.BaseCurrency, QuoteCurrencies: []string{pair.QuoteCurrency},
+		})
+		if fetchErr != nil {
+			return SyncFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", fetchErr)
+		}
+		rate, validationErr := validateProviderFXRates(providerName, pair.BaseCurrency, pair.QuoteCurrency, rates)
+		if validationErr != nil {
+			return SyncFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", validationErr)
+		}
+		rate.LastSuccessfulRefreshAt = refreshAt
+		items = append(items, rate)
+	}
+	if saveErr := s.store.SaveCurrentFXRates(ctx, items); saveErr != nil {
+		return SyncFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", saveErr)
 	}
 	return SyncFXRatesResult{Provider: providerName, ImportedCount: len(items)}, nil
 }
@@ -118,9 +164,6 @@ func (s *FXService) TriggerFXSync(
 	ctx context.Context,
 	params TriggerFXSyncParams,
 ) (FXSyncJobRef, error) {
-	if err := ValidateRequiredTimestampRange(params.StartDate, params.EndDate); err != nil {
-		return FXSyncJobRef{}, err
-	}
 	if s.fxJobEnqueuer == nil {
 		return FXSyncJobRef{}, errors.New("fx job enqueuer is required")
 	}
@@ -138,8 +181,6 @@ func (s *FXService) TriggerFXSync(
 			Provider:       providerName,
 			BaseCurrencies: canonicalizeCurrencies(params.BaseCurrencies),
 			QuoteCurrency:  strings.ToUpper(strings.TrimSpace(params.QuoteCurrency)),
-			StartDate:      params.StartDate,
-			EndDate:        params.EndDate,
 		},
 	})
 	if err != nil {
@@ -148,13 +189,37 @@ func (s *FXService) TriggerFXSync(
 	return jobRef, nil
 }
 
-func validateProviderFXRates(rates []domain.FXRate) error {
-	for _, rate := range rates {
-		if rate.RateDate.IsZero() {
-			return fmt.Errorf("%w: provider rate timestamp is required", ErrInvalidTimestampRange)
-		}
+func validateProviderFXRates(
+	providerName string,
+	baseCurrency string,
+	quoteCurrency string,
+	rates []domain.FXRate,
+) (domain.FXRate, error) {
+	if len(rates) != 1 {
+		return domain.FXRate{}, fmt.Errorf("provider returned %d rates for one requested pair", len(rates))
 	}
-	return nil
+	rate := rates[0]
+	if strings.TrimSpace(rate.Provider) != providerName {
+		return domain.FXRate{}, errors.New("provider rate identity does not match requested provider")
+	}
+	requestedBase := strings.ToUpper(strings.TrimSpace(baseCurrency))
+	requestedQuote := strings.ToUpper(strings.TrimSpace(quoteCurrency))
+	rate.BaseCurrency = strings.ToUpper(strings.TrimSpace(rate.BaseCurrency))
+	rate.QuoteCurrency = strings.ToUpper(strings.TrimSpace(rate.QuoteCurrency))
+	if rate.BaseCurrency != requestedBase || rate.QuoteCurrency != requestedQuote {
+		return domain.FXRate{}, errors.New("provider rate pair does not match requested pair")
+	}
+	if rate.EffectiveAt.IsZero() {
+		rate.EffectiveAt = rate.RateDate
+	}
+	if rate.EffectiveAt.IsZero() {
+		return domain.FXRate{}, fmt.Errorf("%w: provider rate timestamp is required", ErrInvalidTimestampRange)
+	}
+	if rate.Rate <= 0 || math.IsNaN(rate.Rate) || math.IsInf(rate.Rate, 0) {
+		return domain.FXRate{}, errors.New("provider rate must be positive and finite")
+	}
+	rate.Provider = providerName
+	return rate, nil
 }
 
 func (s *FXService) EnsureFXSyncSchedule(
@@ -168,23 +233,16 @@ func (s *FXService) EnsureFXSyncSchedule(
 	if err != nil {
 		return FXSyncSchedule{}, err
 	}
-	now := s.now()
 	schedule := FXSyncSchedule{
 		ScheduleID: strings.TrimSpace(params.ScheduleID),
-		JobType:    FXSyncJobType,
+		JobType:    FXRefreshJobType,
 		Requester: FXSyncRequester{
 			UserID: strings.TrimSpace(params.RequestedByUser),
 			Source: FXSyncRequesterSourceSystem,
 		},
 		Interval: params.Interval,
-		Input: SyncFXRatesParams{
-			Provider:       providerName,
-			BaseCurrencies: canonicalizeCurrencies(params.BaseCurrencies),
-			QuoteCurrency:  strings.ToUpper(strings.TrimSpace(params.QuoteCurrency)),
-			StartDate:      now,
-			EndDate:        now,
-		},
-		Enabled: true,
+		Input:    RefreshFXRatesParams{Provider: providerName},
+		Enabled:  true,
 	}
 	if upsertErr := s.fxScheduleWriter.UpsertFXSyncSchedule(ctx, schedule); upsertErr != nil {
 		return FXSyncSchedule{}, fmt.Errorf("ensure fx sync schedule: %w", upsertErr)
@@ -197,7 +255,7 @@ func (s *FXService) GetFXAdminDiagnostics(
 	params FXAdminDiagnosticsParams,
 ) (FXAdminDiagnostics, error) {
 	_ = params
-	storedRates, err := s.store.ListFXRates(ctx, persistence.ListFXRatesParams{})
+	storedRates, err := s.store.ListCurrentFXRates(ctx, persistence.ListCurrentFXRatesParams{})
 	if err != nil {
 		return FXAdminDiagnostics{}, fmt.Errorf("get fx admin diagnostics: %w", err)
 	}

@@ -60,6 +60,7 @@ type ProviderTransactionObservation struct {
 	EffectiveAt           time.Time
 	Fingerprint           string
 	ProviderOriginal      *ProviderTransactionOriginal
+	RawPayloadJSON        []byte
 }
 
 type ProviderRawPayloadObservation struct {

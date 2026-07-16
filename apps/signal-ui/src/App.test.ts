@@ -88,11 +88,41 @@ const mocks = vi.hoisted(() => ({
   clearAuth: vi.fn(),
   accessToken: null as string | null,
   user: null as { id: string; username: string } | null,
+  notifyAuthChange: () => {},
+  completeRestore: () => {},
 }))
 
-vi.mock('./lib/auth/auth-store.svelte', () => ({
-  authStore: mocks,
-}))
+vi.mock('./lib/auth/auth-store.svelte', async () => {
+  const { SvelteMap } = await import('svelte/reactivity')
+  const changes = new SvelteMap<string, number>()
+
+  mocks.notifyAuthChange = () => {
+    changes.set('auth', (changes.get('auth') ?? 0) + 1)
+  }
+
+  return {
+    authStore: {
+      get isAuthenticated() {
+        changes.get('auth')
+        return mocks.isAuthenticated
+      },
+      get restoring() {
+        changes.get('auth')
+        return mocks.restoring
+      },
+      tryRestoreSession: mocks.tryRestoreSession,
+      clearAuth: mocks.clearAuth,
+      get accessToken() {
+        changes.get('auth')
+        return mocks.accessToken
+      },
+      get user() {
+        changes.get('auth')
+        return mocks.user
+      },
+    },
+  }
+})
 
 function navigateHash(hash: string) {
   window.location.hash = hash
@@ -342,7 +372,7 @@ describe('App shell', () => {
       ['#/finance/connections/synthetic?state=state-1', 'Synthetic setup'],
       ['#/finance/transactions', 'Finance transactions'],
       ['#/finance/transactions/new', 'Record transaction'],
-      ['#/finance/transactions/tx-1', 'Edit transaction'],
+      ['#/finance/transactions/tx-1', 'Transaction'],
       ['#/finance/categories', 'Finance categories'],
       ['#/finance/imports', 'Finance imports'],
       ['#/finance/jobs/job-1', 'Finance job detail'],
@@ -401,7 +431,7 @@ describe('App shell', () => {
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/transactions', 'Finance transactions'],
       ['#/finance/transactions/new', 'Record transaction'],
-      ['#/finance/transactions/tx-1', 'Edit transaction'],
+      ['#/finance/transactions/tx-1', 'Transaction'],
       ['#/finance/categories', 'Finance categories'],
       ['#/finance/connections', 'Finance connections'],
       ['#/finance/imports', 'Finance imports'],
@@ -426,7 +456,7 @@ describe('App shell', () => {
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/transactions', 'Finance transactions'],
       ['#/finance/transactions/new', 'Record transaction'],
-      ['#/finance/transactions/tx-1', 'Edit transaction'],
+      ['#/finance/transactions/tx-1', 'Transaction'],
       ['#/finance/categories', 'Finance categories'],
       ['#/finance/connections', 'Finance connections'],
       ['#/finance/connections/synthetic?state=state-1', 'Synthetic setup'],
@@ -499,7 +529,7 @@ describe('App shell', () => {
     render(App)
     navigateHash('#/finance/transactions/tx-1')
 
-    expect(await screen.findByRole('heading', { name: 'Edit transaction' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Transaction' })).toBeInTheDocument()
     expect(screen.queryByText('Select an active tenant to continue on this finance route.')).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Active tenant' })).toHaveValue('tenant-2')
   })
@@ -514,7 +544,7 @@ describe('App shell', () => {
 
     navigateHash('#/finance/transactions/tx-1')
     expect(
-      await screen.findByRole('heading', { name: 'Edit transaction' }),
+      await screen.findByRole('heading', { name: 'Transaction' }),
     ).toBeInTheDocument()
   })
 
@@ -620,6 +650,62 @@ describe('App shell', () => {
     expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe(
       '/finance/transactions/new',
     )
+  })
+
+  it('waits for successful session restoration before guarding a protected route', async () => {
+    window.location.hash = '#/data'
+    mocks.isAuthenticated = false
+    mocks.restoring = true
+    mocks.tryRestoreSession.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          mocks.completeRestore = () => {
+            mocks.isAuthenticated = true
+            mocks.restoring = false
+            mocks.notifyAuthChange()
+            resolve()
+          }
+        }),
+    )
+
+    render(App)
+
+    expect(screen.getByLabelText('Loading')).toBeInTheDocument()
+    expect(window.location.hash).toBe('#/data')
+
+    mocks.completeRestore()
+
+    expect(await screen.findByRole('heading', { name: 'Historical data' })).toBeInTheDocument()
+    expect(window.location.hash).toBe('#/data')
+    expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBeNull()
+  })
+
+  it('redirects after a failed initial restoration attempt on a protected route', async () => {
+    window.location.hash = '#/data'
+    mocks.isAuthenticated = false
+    mocks.restoring = true
+    mocks.tryRestoreSession.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          mocks.completeRestore = () => {
+            mocks.restoring = false
+            mocks.notifyAuthChange()
+            resolve()
+          }
+        }),
+    )
+
+    render(App)
+
+    expect(screen.getByLabelText('Loading')).toBeInTheDocument()
+    expect(window.location.hash).toBe('#/data')
+
+    mocks.completeRestore()
+
+    await waitFor(() => {
+      expect(window.location.hash).toBe('#/login')
+    })
+    expect(window.sessionStorage.getItem(POST_LOGIN_DESTINATION_KEY)).toBe('/data')
   })
 
   it('does not remember retired v2 finance hashes as protected destinations', async () => {

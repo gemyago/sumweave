@@ -97,16 +97,18 @@ func TestJobsCommand(t *testing.T) {
 		require.NoError(t, rootCmd.Execute())
 		firstPage, err := store.List(t.Context(), jobspkg.ListParams{Limit: 10})
 		require.NoError(t, err)
-		require.Len(t, firstPage.Items, 1)
-		assert.Equal(t, jobspkg.JobStatusQueued, firstPage.Items[0].Status)
-		assert.Nil(t, firstPage.Items[0].StartedAt)
-		assert.Nil(t, firstPage.Items[0].CompletedAt)
+		require.Len(t, firstPage.Items, 2)
+		for _, item := range firstPage.Items {
+			assert.Equal(t, jobspkg.JobStatusQueued, item.Status)
+			assert.Nil(t, item.StartedAt)
+			assert.Nil(t, item.CompletedAt)
+		}
 		rootCmd = setupCommands()
 		rootCmd.SetArgs([]string{"jobs", "enqueue-due", "-e", "test", "--logs-file", testLogFile(t)})
 		require.NoError(t, rootCmd.Execute())
 		secondPage, err := store.List(t.Context(), jobspkg.ListParams{Limit: 10})
 		require.NoError(t, err)
-		require.Len(t, secondPage.Items, 1)
+		require.Len(t, secondPage.Items, 2)
 	})
 
 	t.Run(

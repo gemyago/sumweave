@@ -597,11 +597,24 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 			AccountID:   "finance-account-" + fake.UUID().V4(),
 			Source:      domain.TransactionSourceProvider,
 			Status:      domain.TransactionStatusPending,
-			Kind:        domain.TransactionKindRegular,
+			Kind:        domain.TransactionKindTransfer,
 			AmountMinor: -120_00,
 			Currency:    "PLN",
 			Description: "user-edited-" + fake.Lorem().Word(),
 			EffectiveAt: oldOriginalEffectiveAt,
+			CategoryID: func() *string {
+				value := "category-" + fake.UUID().V4()
+				return &value
+			}(),
+			TagIDs: []string{"tag-" + fake.UUID().V4()},
+			TransferGroupID: func() *string {
+				value := "transfer-group-" + fake.UUID().V4()
+				return &value
+			}(),
+			TransferMatchedAt: func() *time.Time {
+				value := oldOriginalEffectiveAt.Add(time.Hour)
+				return &value
+			}(),
 			ProviderOriginal: &domain.ProviderTransactionOriginal{
 				AmountMinor: -120_00,
 				Currency:    "PLN",
@@ -642,6 +655,11 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 		assert.Equal(t, observation.AmountMinor, merged.AmountMinor)
 		assert.Equal(t, newEffectiveAt, merged.EffectiveAt)
 		assert.Equal(t, observation.Status, merged.Status)
+		assert.Equal(t, domain.TransactionKindTransfer, merged.Kind)
+		assert.Equal(t, existing.CategoryID, merged.CategoryID)
+		assert.Equal(t, existing.TagIDs, merged.TagIDs)
+		assert.Equal(t, existing.TransferGroupID, merged.TransferGroupID)
+		assert.Equal(t, existing.TransferMatchedAt, merged.TransferMatchedAt)
 		require.NotNil(t, merged.ProviderOriginal)
 		assert.Equal(t, observation.ProviderOriginal.Description, merged.ProviderOriginal.Description)
 	})

@@ -540,6 +540,19 @@ func (s *Store) UpsertSchedule(ctx context.Context, schedule Schedule) error {
 	return s.upsertScheduleWithDB(ctx, s.db, schedule)
 }
 
+func (s *Store) GetSchedule(ctx context.Context, scheduleID string) (*Schedule, error) {
+	var model scheduleModel
+	query := s.db.WithContext(ctx).Table(s.scheduleTableName()).Where("id = ?", strings.TrimSpace(scheduleID))
+	if err := query.First(&model).Error; err != nil {
+		return nil, fmt.Errorf("get schedule: %w", err)
+	}
+	schedule, err := scheduleFromModel(model)
+	if err != nil {
+		return nil, fmt.Errorf("get schedule: %w", err)
+	}
+	return &schedule, nil
+}
+
 func (s *Store) upsertScheduleWithDB(ctx context.Context, db *gorm.DB, schedule Schedule) error {
 	if !schedule.Enabled {
 		schedule.NextRunAt = nil

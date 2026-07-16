@@ -5,12 +5,11 @@
   import {
     createSignalFinanceApiForAuth,
     type FinanceAccount,
-    type FinanceCategory,
-    type FinanceTag,
     type FinanceTransaction,
   } from '../lib/finance/api'
-  import { formatFinanceDateTime, formatFinanceMoney } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
+  import FinancePager from '../components/FinancePager.svelte'
+  import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const transactionPageSize = 20
@@ -20,8 +19,6 @@
   let loading = $state(true)
   let error = $state<string | null>(null)
   let accounts = $state<FinanceAccount[]>([])
-  let categories = $state<FinanceCategory[]>([])
-  let tags = $state<FinanceTag[]>([])
   let transactions = $state<FinanceTransaction[]>([])
   let accountFilter = $state('')
   let statusFilter = $state('')
@@ -40,8 +37,6 @@
     ),
   )
   const accountNameById = $derived.by(() => new Map(accounts.map((account) => [account.id, account.name])))
-  const categoryNameById = $derived.by(() => new Map(categories.map((category) => [category.id, category.name])))
-  const tagNameById = $derived.by(() => new Map(tags.map((tag) => [tag.id, tag.name])))
   const visiblePendingCount = $derived(visibleTransactions.filter((item) => item.status === 'pending').length)
   const visibleHiddenCount = $derived(visibleTransactions.filter((item) => item.hiddenAt !== null).length)
   const activeFilterCount = $derived([accountFilter, statusFilter, sourceFilter].filter(Boolean).length)
@@ -64,8 +59,6 @@
         await loadTenantData()
       } else {
         accounts = []
-        categories = []
-        tags = []
         transactions = []
       }
     } catch (loadError) {
@@ -77,73 +70,42 @@
     }
   }
 
-  async function loadTenantData() {
+  async function loadTenantData(offset = transactionOffset): Promise<boolean> {
     if (!financeShell.selectedTenantId) {
       accounts = []
-      categories = []
-      tags = []
       transactions = []
-      return
+      return false
     }
 
     loadingList = true
     error = null
 
     try {
-      const [loadedAccounts, loadedCategories, loadedTags, loadedTransactions] = await Promise.all([
+      const [loadedAccounts, loadedTransactions] = await Promise.all([
         financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
-        financeApi.listCategories({ tenantId: financeShell.selectedTenantId }),
-        financeApi.listTags({ tenantId: financeShell.selectedTenantId }),
         financeApi.listTransactions({
           tenantId: financeShell.selectedTenantId,
           accountId: accountFilter,
           status: statusFilter,
           source: sourceFilter,
           limit: transactionPageSize,
-          offset: transactionOffset,
+          offset,
         }),
       ])
 
       accounts = loadedAccounts
-      categories = loadedCategories
-      tags = loadedTags
       transactions = loadedTransactions
+      return true
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load transactions'
+      return false
     } finally {
       loadingList = false
     }
   }
 
-  function transactionFlags(item: FinanceTransaction): string[] {
-    return [
-      item.status === 'pending' ? 'pending' : '',
-      item.hiddenAt ? 'hidden' : '',
-      item.transferGroupId ? 'transfer' : '',
-      item.kind === 'refund' ? 'refund' : '',
-      item.kind === 'reconciliation' ? 'reconciliation' : '',
-    ].filter(Boolean)
-  }
-
-  function accountName(accountId: string): string {
-    return accountNameById.get(accountId) ?? 'Unknown account'
-  }
-
-  function categoryName(categoryId: string | null | undefined): string {
-    if (!categoryId) return '—'
-    return categoryNameById.get(categoryId) ?? 'Unknown category'
-  }
-
-  function tagNames(tagIds: string[]): string[] {
-    return tagIds.map((tagId) => tagNameById.get(tagId) ?? 'Unknown tag')
-  }
-
-  function badgeClass(flag: string): string {
-    if (flag === 'pending') return 'text-bg-warning'
-    if (flag === 'hidden') return 'text-bg-secondary'
-    if (flag === 'refund') return 'text-bg-success'
-    if (flag === 'reconciliation') return 'text-bg-primary'
-    return 'text-bg-light border text-body'
+  function applyTransactionUpdate(updated: FinanceTransaction) {
+    transactions = transactions.map((item) => item.id === updated.id ? updated : item)
   }
 
   function reloadFirstPage() {
@@ -151,15 +113,19 @@
     void loadTenantData()
   }
 
-  function loadPreviousPage() {
-    transactionOffset = Math.max(0, transactionOffset - transactionPageSize)
-    void loadTenantData()
+  async function loadPreviousPage(): Promise<boolean> {
+    const nextOffset = Math.max(0, transactionOffset - transactionPageSize)
+    if (!await loadTenantData(nextOffset)) return false
+    transactionOffset = nextOffset
+    return true
   }
 
-  function loadNextPage() {
-    if (!hasNextPage) return
-    transactionOffset += transactionPageSize
-    void loadTenantData()
+  async function loadNextPage(): Promise<boolean> {
+    if (!hasNextPage) return false
+    const nextOffset = transactionOffset + transactionPageSize
+    if (!await loadTenantData(nextOffset)) return false
+    transactionOffset = nextOffset
+    return true
   }
 
   function selectTenant(tenantId: string) {
@@ -187,7 +153,7 @@
             <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Transactions workspace</p>
             <h1 id="finance-transactions-heading" class="h3 mb-2">Finance transactions</h1>
             <p class="text-body-secondary mb-0">
-              Browse the ledger table and use row actions to open dedicated create or edit routes when needed.
+              Scan and correct common transaction fields inline, or open the full editor for advanced changes.
             </p>
           </div>
 
@@ -213,7 +179,7 @@
     {#if loading}
       <div class="alert alert-secondary mb-0" role="status">Loading transactions…</div>
     {:else if financeShell.needsTenantSelection}
-      <section class="card shadow-sm">
+       <section id="finance-transactions-ledger" class="card shadow-sm" aria-busy={loadingList}>
         <div class="card-body p-4 d-grid gap-3">
           {#if !financeShell.embedded}
             <div class="col-12 col-lg-5 px-0">
@@ -312,80 +278,34 @@
         </div>
       </section>
 
-      <section class="card shadow-sm">
+      <section id="finance-transactions-ledger" class="card shadow-sm" aria-busy={loadingList}>
         <div class="card-body p-4 d-grid gap-3">
-          <div>
-            <h2 class="h5 mb-1">Ledger</h2>
-            <p class="text-body-secondary mb-0">Use the table to scan transactions and edit a row on the dedicated transaction screen. Showing up to {transactionPageSize} items per page.</p>
-          </div>
+           <div>
+             <h2 class="h5 mb-1">Ledger</h2>
+              <p class="text-body-secondary mb-0">Edit description, category, and tags in place. Open the record icon for all fields. Showing up to {transactionPageSize} items per page.</p>
+           </div>
 
           {#if visibleTransactions.length === 0}
             <div class="alert alert-light border mb-0" role="status">No transactions matched the current filters.</div>
           {:else}
-            <div class="table-responsive">
-              <table class="table table-hover align-middle mb-0" aria-label="Transactions ledger">
-                <thead>
-                  <tr>
-                    <th scope="col">Description</th>
-                    <th scope="col">Effective</th>
-                    <th scope="col">Account</th>
-                    <th scope="col">Category</th>
-                    <th scope="col">Tags</th>
-                    <th scope="col">Source</th>
-                    <th scope="col">Amount</th>
-                    <th scope="col">State</th>
-                    <th scope="col">Edit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each visibleTransactions as item (item.id)}
-                    <tr>
-                      <td>
-                        <span class="d-block fw-semibold text-body">{item.description || item.kind}</span>
-                        <span class="small text-body-secondary">{item.kind} · {item.status}</span>
-                      </td>
-                      <td>{formatFinanceDateTime(item.effectiveAt)}</td>
-                      <td>{accountName(item.accountId)}</td>
-                      <td>{categoryName(item.categoryId)}</td>
-                      <td>
-                        {#if item.tagIds.length}
-                          <div class="d-flex flex-wrap gap-1" aria-label="Transaction tags">
-                            {#each tagNames(item.tagIds) as tagName, index (`${item.id}-${index}`)}
-                              <span class="badge text-bg-light border text-body">{tagName}</span>
-                            {/each}
-                          </div>
-                        {:else}
-                          <span class="text-body-secondary">—</span>
-                        {/if}
-                      </td>
-                      <td>{item.source}</td>
-                      <td>{formatFinanceMoney(item.amountMinor, item.currency)}</td>
-                      <td>
-                        <div class="d-flex flex-wrap gap-1">
-                          {#each transactionFlags(item) as flag (flag)}
-                            <span class={`badge ${badgeClass(flag)}`}>{flag}</span>
-                          {/each}
-                          {#if transactionFlags(item).length === 0}
-                            <span class="badge text-bg-light border text-body">clear</span>
-                          {/if}
-                        </div>
-                      </td>
-                      <td>
-                        <a class="btn btn-outline-primary btn-sm" href={`/finance/transactions/${item.id}`} use:link>Edit</a>
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
+            <FinanceTransactionList
+              tenantId={financeShell.selectedTenantId}
+              transactions={visibleTransactions}
+              accountNameById={accountNameById}
+              ariaLabel="Transactions ledger"
+              onTransactionUpdated={applyTransactionUpdate}
+            />
 
-            <nav class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center" aria-label="Transaction pages">
-              <span class="text-body-secondary small">Page {pageNumber}</span>
-              <div class="btn-group" role="group" aria-label="Transaction pagination controls">
-                <button class="btn btn-outline-secondary btn-sm" type="button" onclick={loadPreviousPage} disabled={loadingList || !hasPreviousPage}>Previous</button>
-                <button class="btn btn-outline-secondary btn-sm" type="button" onclick={loadNextPage} disabled={loadingList || !hasNextPage}>Next</button>
-              </div>
-            </nav>
+             <FinancePager
+               label="Transaction pages"
+                status={loadingList ? 'Loading transaction page…' : `Page ${pageNumber}`}
+               controls="finance-transactions-ledger"
+               busy={loadingList}
+               hasPrevious={hasPreviousPage}
+               hasNext={hasNextPage}
+               onPrevious={loadPreviousPage}
+               onNext={loadNextPage}
+             />
           {/if}
         </div>
       </section>

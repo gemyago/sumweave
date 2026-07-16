@@ -147,18 +147,19 @@ type transactionTagModel struct {
 
 func (transactionTagModel) TableName() string { return "finance_transaction_tags" }
 
-type fxRateModel struct {
-	ID            string    `gorm:"column:id;size:255;not null;primaryKey"`
-	Provider      string    `gorm:"column:provider;size:64;not null;index:idx_finance_fx_rates_pair_time,unique,priority:1"`
-	BaseCurrency  string    `gorm:"column:base_currency;size:16;not null;index:idx_finance_fx_rates_pair_time,unique,priority:2"`
-	QuoteCurrency string    `gorm:"column:quote_currency;size:16;not null;index:idx_finance_fx_rates_pair_time,unique,priority:3"`
-	RateAt        time.Time `gorm:"column:rate_at;not null;index:idx_finance_fx_rates_pair_time,unique,priority:4"`
-	RateValue     float64   `gorm:"column:rate_value;not null"`
-	CreatedAt     time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt     time.Time `gorm:"column:updated_at;not null"`
+type currentFXRateModel struct {
+	ID                      string    `gorm:"column:id;size:255;not null;primaryKey"`
+	Provider                string    `gorm:"column:provider;size:64;not null;index:idx_finance_current_fx_rates_pair,unique,priority:1"`
+	BaseCurrency            string    `gorm:"column:base_currency;size:16;not null;index:idx_finance_current_fx_rates_pair,unique,priority:2"`
+	QuoteCurrency           string    `gorm:"column:quote_currency;size:16;not null;index:idx_finance_current_fx_rates_pair,unique,priority:3"`
+	EffectiveAt             time.Time `gorm:"column:effective_at;not null"`
+	LastSuccessfulRefreshAt time.Time `gorm:"column:last_successful_refresh_at;not null"`
+	RateValue               float64   `gorm:"column:rate_value;not null"`
+	CreatedAt               time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt               time.Time `gorm:"column:updated_at;not null"`
 }
 
-func (fxRateModel) TableName() string { return "finance_fx_rates" }
+func (currentFXRateModel) TableName() string { return "finance_current_fx_rates" }
 
 type csvImportModel struct {
 	ID                    string     `gorm:"column:id;size:255;not null;primaryKey"`
@@ -299,6 +300,21 @@ type rawPayloadModel struct {
 }
 
 func (rawPayloadModel) TableName() string { return "finance_raw_payloads" }
+
+type providerEvidenceModel struct {
+	ID                   string    `gorm:"column:id;size:255;not null;primaryKey"`
+	TenantID             string    `gorm:"column:tenant_id;size:255;not null;index:idx_finance_provider_evidence_account_order,priority:1;index:idx_finance_provider_evidence_transaction_order,priority:1"`
+	ConnectionID         string    `gorm:"column:connection_id;size:255;not null"`
+	FinanceAccountID     string    `gorm:"column:finance_account_id;size:255;not null;default:'';index:idx_finance_provider_evidence_account_order,priority:3"`
+	FinanceTransactionID string    `gorm:"column:finance_transaction_id;size:255;not null;default:'';index:idx_finance_provider_evidence_transaction_order,priority:3"`
+	Subject              string    `gorm:"column:subject;size:64;not null;default:'';index:idx_finance_provider_evidence_account_order,priority:2;index:idx_finance_provider_evidence_transaction_order,priority:2"`
+	Scope                string    `gorm:"column:scope;size:64;not null"`
+	ProviderObjectID     string    `gorm:"column:provider_object_id;size:255;not null;default:''"`
+	PayloadJSON          string    `gorm:"column:payload_json;type:text;not null"`
+	CapturedAt           time.Time `gorm:"column:captured_at;not null;index:idx_finance_provider_evidence_account_order,priority:3;index:idx_finance_provider_evidence_transaction_order,priority:3"`
+}
+
+func (providerEvidenceModel) TableName() string { return "finance_provider_evidence" }
 
 type bankConnectionSyncRunModel struct {
 	ID           string    `gorm:"column:id;size:255;not null;primaryKey"`
@@ -749,28 +765,31 @@ func transactionFromModel(model transactionModel) domain.Transaction {
 	return transaction
 }
 
-func newFXRateModel(rate domain.FXRate) fxRateModel {
-	return fxRateModel{
-		ID:            makeFXRateID(rate.Provider, rate.BaseCurrency, rate.QuoteCurrency, rate.RateDate),
-		Provider:      rate.Provider,
-		BaseCurrency:  rate.BaseCurrency,
-		QuoteCurrency: rate.QuoteCurrency,
-		RateAt:        rate.RateDate,
-		RateValue:     rate.Rate,
-		CreatedAt:     rate.CreatedAt,
-		UpdatedAt:     rate.UpdatedAt,
+func newCurrentFXRateModel(rate domain.FXRate) currentFXRateModel {
+	return currentFXRateModel{
+		ID:                      makeFXRateID(rate.Provider, rate.BaseCurrency, rate.QuoteCurrency),
+		Provider:                rate.Provider,
+		BaseCurrency:            rate.BaseCurrency,
+		QuoteCurrency:           rate.QuoteCurrency,
+		EffectiveAt:             rate.EffectiveAt,
+		LastSuccessfulRefreshAt: rate.LastSuccessfulRefreshAt,
+		RateValue:               rate.Rate,
+		CreatedAt:               rate.CreatedAt,
+		UpdatedAt:               rate.UpdatedAt,
 	}
 }
 
-func fxRateFromModel(model fxRateModel) domain.FXRate {
+func currentFXRateFromModel(model currentFXRateModel) domain.FXRate {
 	return domain.FXRate{
-		Provider:      model.Provider,
-		BaseCurrency:  model.BaseCurrency,
-		QuoteCurrency: model.QuoteCurrency,
-		RateDate:      model.RateAt,
-		Rate:          model.RateValue,
-		CreatedAt:     model.CreatedAt,
-		UpdatedAt:     model.UpdatedAt,
+		Provider:                model.Provider,
+		BaseCurrency:            model.BaseCurrency,
+		QuoteCurrency:           model.QuoteCurrency,
+		EffectiveAt:             model.EffectiveAt,
+		RateDate:                model.EffectiveAt,
+		LastSuccessfulRefreshAt: model.LastSuccessfulRefreshAt,
+		Rate:                    model.RateValue,
+		CreatedAt:               model.CreatedAt,
+		UpdatedAt:               model.UpdatedAt,
 	}
 }
 
@@ -778,10 +797,9 @@ func makeFXRateID(
 	provider string,
 	baseCurrency string,
 	quoteCurrency string,
-	rateDate time.Time,
 ) string {
 	hash := sha256.Sum256([]byte(
-		provider + "\n" + baseCurrency + "\n" + quoteCurrency + "\n" + rateDate.Format(time.RFC3339Nano),
+		provider + "\n" + baseCurrency + "\n" + quoteCurrency,
 	))
 	return hex.EncodeToString(hash[:16])
 }
@@ -997,6 +1015,36 @@ func rawPayloadFromModel(model rawPayloadModel) domain.RawPayload {
 		ProviderObjectID: model.ProviderObjectID,
 		PayloadJSON:      []byte(model.PayloadJSON),
 		CapturedAt:       model.CapturedAt,
+	}
+}
+
+func newProviderEvidenceModel(evidence domain.ProviderEvidence) providerEvidenceModel {
+	return providerEvidenceModel{
+		ID:                   evidence.ID,
+		TenantID:             evidence.TenantID,
+		ConnectionID:         evidence.ConnectionID,
+		FinanceAccountID:     evidence.FinanceAccountID,
+		FinanceTransactionID: evidence.FinanceTransactionID,
+		Subject:              string(evidence.Subject),
+		Scope:                string(evidence.Scope),
+		ProviderObjectID:     evidence.ProviderObjectID,
+		PayloadJSON:          string(evidence.PayloadJSON),
+		CapturedAt:           evidence.CapturedAt,
+	}
+}
+
+func providerEvidenceFromModel(model providerEvidenceModel) domain.ProviderEvidence {
+	return domain.ProviderEvidence{
+		ID:                   model.ID,
+		TenantID:             model.TenantID,
+		ConnectionID:         model.ConnectionID,
+		FinanceAccountID:     model.FinanceAccountID,
+		FinanceTransactionID: model.FinanceTransactionID,
+		Subject:              domain.ProviderEvidenceSubject(model.Subject),
+		Scope:                domain.RawPayloadScope(model.Scope),
+		ProviderObjectID:     model.ProviderObjectID,
+		PayloadJSON:          []byte(model.PayloadJSON),
+		CapturedAt:           model.CapturedAt,
 	}
 }
 

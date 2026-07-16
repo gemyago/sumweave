@@ -1233,7 +1233,7 @@ func TestStore(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("persists fx rates by provider pair and date", func(t *testing.T) {
+	t.Run("persists one current fx rate per provider pair", func(t *testing.T) {
 		store := makeStore(t)
 		firstDate := time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC)
 		secondDate := time.Date(2026, time.June, 21, 0, 0, 0, 0, time.UTC)
@@ -1276,10 +1276,9 @@ func TestStore(t *testing.T) {
 			QuoteCurrency: "PLN",
 		})
 		require.NoError(t, err)
-		require.Len(t, frankfurterRates, 2)
+		require.Len(t, frankfurterRates, 1)
 		assert.InDelta(t, 4.15, frankfurterRates[0].Rate, 0.00001)
 		assert.Equal(t, firstDate, frankfurterRates[0].RateDate)
-		assert.InDelta(t, 4.12, frankfurterRates[1].Rate, 0.00001)
 
 		windowRates, err := store.ListFXRates(t.Context(), ListFXRatesParams{
 			BaseCurrency:  "USD",
@@ -1288,15 +1287,17 @@ func TestStore(t *testing.T) {
 			EndDate:       secondDate,
 		})
 		require.NoError(t, err)
-		require.Len(t, windowRates, 1)
-		assert.Equal(t, "frankfurter", windowRates[0].Provider)
-		assert.InDelta(t, 4.12, windowRates[0].Rate, 0.00001)
+		require.Len(t, windowRates, 2)
+		assert.Equal(t, "ecb", windowRates[0].Provider)
+		assert.InDelta(t, 4.11, windowRates[0].Rate, 0.00001)
+		assert.Equal(t, "frankfurter", windowRates[1].Provider)
+		assert.InDelta(t, 4.15, windowRates[1].Rate, 0.00001)
 
 		_, err = store.ListFXRates(t.Context(), ListFXRatesParams{
 			StartDate: secondDate,
 			EndDate:   firstDate,
 		})
-		require.Error(t, err)
+		require.NoError(t, err)
 
 		err = store.SaveFXRates(t.Context(), []domain.FXRate{{
 			Provider:      "frankfurter",
@@ -1305,5 +1306,92 @@ func TestStore(t *testing.T) {
 			Rate:          4.15,
 		}})
 		require.Error(t, err)
+	})
+
+	t.Run("discovers active tenant account and transaction FX pairs", func(t *testing.T) {
+		store := makeStore(t)
+		fake := faker.New()
+		now := time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC)
+		activeTenant := domain.Tenant{
+			ID:              "tenant-active-" + fake.UUID().V4(),
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "PLN",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		archivedTenant := domain.Tenant{
+			ID:              "tenant-archived-" + fake.UUID().V4(),
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "PLN",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		archivedAt := now.Add(time.Minute)
+		archivedTenant.ArchivedAt = &archivedAt
+		require.NoError(t, func() error {
+			_, err := store.SaveTenant(t.Context(), activeTenant)
+			return err
+		}())
+		require.NoError(t, func() error {
+			_, err := store.SaveTenant(t.Context(), archivedTenant)
+			return err
+		}())
+		saveAccount := func(tenantID string, currency string) string {
+			t.Helper()
+			account := domain.Account{
+				ID:        "account-" + fake.UUID().V4(),
+				TenantID:  tenantID,
+				Name:      "account-" + fake.Lorem().Word(),
+				Currency:  currency,
+				Kind:      domain.AccountKindManual,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			_, err := store.SaveAccount(t.Context(), account)
+			require.NoError(t, err)
+			return account.ID
+		}
+		accountID := saveAccount(activeTenant.ID, "EUR")
+		_ = saveAccount(activeTenant.ID, "PLN")
+		_ = saveAccount(archivedTenant.ID, "USD")
+		saveTransaction := func(currency string) {
+			t.Helper()
+			_, err := store.SaveTransaction(t.Context(), domain.Transaction{
+				ID:          "transaction-" + fake.UUID().V4(),
+				TenantID:    activeTenant.ID,
+				AccountID:   accountID,
+				Source:      domain.TransactionSourceManual,
+				Status:      domain.TransactionStatusBooked,
+				Kind:        domain.TransactionKindRegular,
+				AmountMinor: -100,
+				Currency:    currency,
+				Description: "transaction-" + fake.Lorem().Word(),
+				EffectiveAt: now,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			})
+			require.NoError(t, err)
+		}
+		saveTransaction("GBP")
+		saveTransaction("GBP")
+
+		discovery := NewFXPairDiscoveryStore(&Database{db: store.db})
+		pairs, err := discovery.ListRequiredFXPairs(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, []RequiredFXPair{
+			{BaseCurrency: "EUR", QuoteCurrency: "PLN"},
+			{BaseCurrency: "GBP", QuoteCurrency: "PLN"},
+		}, pairs)
+
+		activeTenant.DisplayCurrency = "EUR"
+		activeTenant.UpdatedAt = now.Add(2 * time.Minute)
+		_, err = store.SaveTenant(t.Context(), activeTenant)
+		require.NoError(t, err)
+		pairs, err = discovery.ListRequiredFXPairs(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, []RequiredFXPair{
+			{BaseCurrency: "GBP", QuoteCurrency: "EUR"},
+			{BaseCurrency: "PLN", QuoteCurrency: "EUR"},
+		}, pairs)
 	})
 }

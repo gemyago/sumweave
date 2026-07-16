@@ -45,6 +45,8 @@ In order to use the web UI you have to also make sure to start the backend serve
 
 From **`apps/signal-ui`**: **`npm run dev`**, **`npm run build`**, **`npm run preview`**. Install deps with **`npm ci`** (`npm install` only when changing deps). Client env: **`VITE_*`** only — see **`.env.example`**.
 
+For optional local HTTPS Vite development with an HTTPS backend, follow [../../docs/local-https.md](../../docs/local-https.md).
+
 For backend embedding, run **`make build-embed-dist EMBED_OUT_DIR=/absolute/output/path`** from `apps/signal-ui`; the backend `make dist/bin` flow already invokes this target for the standard same-origin build and validates the generated `index.html` before compiling the backend binary.
 
 ## Lint / test / API codegen
@@ -82,6 +84,7 @@ The rules are:
 - Canonical Bootstrap CSS exceptions must live in shared stylesheets with a short reason comment.
 - Canonical Bootstrap CSS exceptions are limited to shell containment, widget sizing, bridge vars, and a11y/browser fixes.
 - Finance transaction fields follow the documented mobile-first entry order.
+- Keep active transaction editors single-row; wrap only flexible tag choices.
 - Transaction CSV imports use seven fixed required headers plus optional Description.
 - Transaction CSV imports support at most 250,000 data rows and 64 MiB files.
 - Keep import actions and their active results adjacent and visible.

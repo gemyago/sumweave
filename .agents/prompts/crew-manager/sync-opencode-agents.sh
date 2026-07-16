@@ -41,7 +41,8 @@ except ValueError:
     sys.exit(f"error: config must be inside repository root {repo_root}")
 
 manager_prompt_prefix = f"./{manager_prompts_rel.as_posix()}"
-config_prompt_path = f"./{config_rel.as_posix()}"
+config_prompt_path = config_rel.as_posix()
+config_prompt_read_path = f"./{config_rel.as_posix()}"
 
 with config_path.open(encoding="utf-8") as f:
     config = yaml.safe_load(f) or {}
@@ -100,12 +101,12 @@ manager_frontmatter = {
         },
         "read": {
             "*": "deny",
-            "./**/*.md": "allow",
+            "*.md": "allow",
             config_prompt_path: "allow",
         },
         "edit": {
             "*": "deny",
-            "tmp/crew-manager/**/*.*": "allow",
+            "tmp/crew-manager/**": "allow",
         },
         "bash": {
             "*": "deny",
@@ -123,7 +124,7 @@ manager_extra = [
     f"<!-- {generated_marker} -->",
     "",
     f"Read `@{manager_prompt_prefix}/manager.md` first and follow it as the workflow contract.",
-    f"Read `@{config_prompt_path}` before delegating.",
+    f"Read `@{config_prompt_read_path}` before delegating.",
 ]
 manager_path = agents_dir / f"{manager_name}.md"
 write_agent(manager_path, manager_frontmatter, manager_extra)

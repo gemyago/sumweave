@@ -26,32 +26,24 @@ describe('Admin finance FX page', () => {
     mocks.triggerFXSync.mockResolvedValue({ jobId: 'job-22', jobType: 'finance.fx_rates_sync', provider: 'frankfurter' })
   })
 
-  it('shows diagnostics and can trigger a sync job', async () => {
+  it('shows diagnostics and can trigger a latest-rate refresh job', async () => {
     const user = userEvent.setup()
     render(AdminFinanceFX)
 
-    expect(await screen.findByText(/stored rates 14/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Trigger FX sync' }))
+    expect(await screen.findByText(/current rates 14/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Refresh current FX rates' }))
     await waitFor(() => expect(mocks.triggerFXSync).toHaveBeenCalled())
     const request = mocks.triggerFXSync.mock.calls[0][0]
-    expect(request.startDate).toBeInstanceOf(Date)
-    expect(request.endDate).toBeInstanceOf(Date)
+    expect(request).toEqual({ provider: '', baseCurrencies: ['USD', 'EUR'], quoteCurrency: 'PLN' })
     expect(await screen.findByRole('link', { name: 'open admin job detail' })).toHaveAttribute('href', '#/admin/jobs/job-22')
   })
 
-  it('keeps its initial native date defaults in a negative-offset timezone', async () => {
-    const environment = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env
-    const previousTimezone = environment.TZ
-    environment.TZ = 'America/Los_Angeles'
-    try {
-      render(AdminFinanceFX)
+  it('uses current-rate terminology and has no historical date-range controls', async () => {
+    render(AdminFinanceFX)
 
-      expect((await screen.findByLabelText('FX start date') as HTMLInputElement).value).toBe('2026-01-01')
-      expect((screen.getByLabelText('FX end date') as HTMLInputElement).value).toBe('2026-01-31')
-    } finally {
-      if (previousTimezone === undefined) delete environment.TZ
-      else environment.TZ = previousTimezone
-    }
+    expect(await screen.findByText('Fetches only the latest rates. Transaction dates and historical ranges are not used.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('FX start date')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('FX end date')).not.toBeInTheDocument()
   })
 
   it('renders an error state when diagnostics fail', async () => {
@@ -63,6 +55,6 @@ describe('Admin finance FX page', () => {
   it('renders an empty provider list and fallback default provider label', async () => {
     mocks.getFXDiagnostics.mockResolvedValueOnce({ defaultProvider: '', storedRatesCount: 0, providers: [] })
     render(AdminFinanceFX)
-    expect(await screen.findByText(/Default provider — · stored rates 0/)).toBeInTheDocument()
+    expect(await screen.findByText(/Default provider — · current rates 0/)).toBeInTheDocument()
   })
 })

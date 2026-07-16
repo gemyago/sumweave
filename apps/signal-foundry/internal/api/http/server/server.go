@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -30,6 +31,8 @@ type HTTPServerDeps struct {
 	// config
 	Host              string        `name:"config.httpServer.host"`
 	Port              int           `name:"config.httpServer.port"`
+	TLSCertFile       string        `name:"config.httpServer.tls.certFile"`
+	TLSKeyFile        string        `name:"config.httpServer.tls.keyFile"`
 	IdleTimeout       time.Duration `name:"config.httpServer.idleTimeout"`
 	ReadHeaderTimeout time.Duration `name:"config.httpServer.readHeaderTimeout"`
 	ReadTimeout       time.Duration `name:"config.httpServer.readTimeout"`
@@ -75,6 +78,10 @@ func NewHTTPServer(deps HTTPServerDeps) *HTTPServer {
 }
 
 func (srv *HTTPServer) Start(ctx context.Context) error {
+	if err := srv.configureTLS(); err != nil {
+		return err
+	}
+
 	listenConfig := net.ListenConfig{}
 	listener, err := listenConfig.Listen(ctx, "tcp", srv.httpSrv.Addr)
 	if err != nil {
@@ -82,8 +89,13 @@ func (srv *HTTPServer) Start(ctx context.Context) error {
 	}
 
 	actualAddr := listener.Addr().String()
-	srv.logger.InfoContext(ctx, "Started http listener",
+	protocol := "http"
+	if srv.httpSrv.TLSConfig != nil {
+		protocol = "https"
+	}
+	srv.logger.InfoContext(ctx, "Started HTTP listener",
 		slog.String("addr", actualAddr),
+		slog.String("protocol", protocol),
 		slog.String("idleTimeout", srv.deps.IdleTimeout.String()),
 		slog.String("readHeaderTimeout", srv.deps.ReadHeaderTimeout.String()),
 		slog.String("readTimeout", srv.deps.ReadTimeout.String()),
@@ -95,11 +107,33 @@ func (srv *HTTPServer) Start(ctx context.Context) error {
 		close(srv.deps.listeningSignal)
 	}
 
-	// http.Serve always returns a non-nil error.
+	// http.Server.Serve always returns a non-nil error.
 	// It returns http.ErrServerClosed when Shutdown or Close is called.
+	if srv.httpSrv.TLSConfig != nil {
+		listener = tls.NewListener(listener, srv.httpSrv.TLSConfig)
+	}
 	err = srv.httpSrv.Serve(listener)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("http server Serve error: %w", err)
+		return fmt.Errorf("%s server Serve error: %w", protocol, err)
+	}
+	return nil
+}
+
+func (srv *HTTPServer) configureTLS() error {
+	if srv.deps.TLSCertFile == "" && srv.deps.TLSKeyFile == "" {
+		return nil
+	}
+	if srv.deps.TLSCertFile == "" || srv.deps.TLSKeyFile == "" {
+		return errors.New("both HTTP TLS certificate and key files are required")
+	}
+
+	certificate, err := tls.LoadX509KeyPair(srv.deps.TLSCertFile, srv.deps.TLSKeyFile)
+	if err != nil {
+		return fmt.Errorf("load HTTP TLS certificate: %w", err)
+	}
+	srv.httpSrv.TLSConfig = &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		MinVersion:   tls.VersionTLS12,
 	}
 	return nil
 }

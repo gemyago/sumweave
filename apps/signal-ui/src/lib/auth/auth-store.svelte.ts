@@ -5,8 +5,8 @@ const REFRESH_TOKEN_KEY = 'auth_refresh_token'
 export class AuthStore {
   accessToken = $state<string | null>(null)
   user = $state<AuthUser | null>(null)
-  /** True while tryRestoreSession is in flight. */
-  restoring = $state(false)
+  /** True until the initial refresh-token restoration attempt has completed. */
+  restoring = $state(true)
 
   get isAuthenticated(): boolean {
     return this.accessToken !== null
@@ -27,9 +27,9 @@ export class AuthStore {
   async tryRestoreSession(): Promise<void> {
     const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
     if (!refreshToken) {
+      this.restoring = false
       return
     }
-    this.restoring = true
     try {
       const res = await refreshApi({ refreshToken })
       this.setAuth(res.accessToken, res.refreshToken, res.user)

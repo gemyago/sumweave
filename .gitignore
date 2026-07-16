@@ -37,6 +37,7 @@ node_modules
 .playwright-cli/
 .local-users
 .agentmail
+.local-https/
 
 
 .nx/cache

@@ -23,18 +23,10 @@ func NewFinanceFxSyncRequestValidator() FieldValidator[*FinanceFxSyncRequest] {
 	validateQuoteCurrency := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateStartDate := NewSimpleFieldValidator[time.Time](
-		EnsureNonDefault[time.Time],
-	)
-	validateEndDate := NewSimpleFieldValidator[time.Time](
-		EnsureNonDefault[time.Time],
-	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceFxSyncRequest) {
 		validateProvider(bindingCtx.Fork("provider"), value.Provider)
 		validateBaseCurrencies(bindingCtx.Fork("baseCurrencies"), value.BaseCurrencies)
 		validateQuoteCurrency(bindingCtx.Fork("quoteCurrency"), value.QuoteCurrency)
-		validateStartDate(bindingCtx.Fork("startDate"), value.StartDate)
-		validateEndDate(bindingCtx.Fork("endDate"), value.EndDate)
 	}
 }

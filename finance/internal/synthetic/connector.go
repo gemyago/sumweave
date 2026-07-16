@@ -393,6 +393,7 @@ func (c *Connector) makeTransaction(
 	if err != nil {
 		return domain.ProviderTransactionObservation{}, domain.ProviderRawPayloadObservation{}, err
 	}
+	transaction.RawPayloadJSON = payload
 	return transaction, domain.ProviderRawPayloadObservation{
 		Connection:       connection,
 		Scope:            domain.RawPayloadScopeTransaction,

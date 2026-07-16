@@ -192,6 +192,10 @@ func (c *LinkCoordinator) StartRedirectLink(
 	if err != nil {
 		return StartLinkResult{}, fmt.Errorf("start redirect link: %w", err)
 	}
+	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
+	if err != nil {
+		return StartLinkResult{}, err
+	}
 
 	now := c.now()
 	_, err = c.pendingStartStore.SavePendingStart(ctx, domain.PendingBankConnectionLinkStart{
@@ -264,6 +268,16 @@ func (c *LinkCoordinator) FinishRedirectLink(
 	if err != nil {
 		return domain.BankConnection{}, c.restorePendingStartOnError(ctx, request, profile, err, "finish redirect link")
 	}
+	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
+	if err != nil {
+		return domain.BankConnection{}, c.restorePendingStartOnError(
+			ctx,
+			request,
+			profile,
+			err,
+			"sanitize provider payload",
+		)
+	}
 
 	connection, err := c.saveLinkedConnection(ctx, strings.TrimSpace(request.TenantID), profile, result)
 	if err != nil {
@@ -291,11 +305,30 @@ func (c *LinkCoordinator) LinkToken(
 	if err != nil {
 		return domain.BankConnection{}, fmt.Errorf("link token: %w", err)
 	}
+	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
+	if err != nil {
+		return domain.BankConnection{}, err
+	}
 	connection, err := c.saveLinkedConnection(ctx, strings.TrimSpace(request.TenantID), profile, result)
 	if err != nil {
 		return domain.BankConnection{}, fmt.Errorf("save bank connection: %w", err)
 	}
 	return connection, nil
+}
+
+func sanitizeProviderRawPayloads(
+	payloads []domain.ProviderRawPayloadObservation,
+) ([]domain.ProviderRawPayloadObservation, error) {
+	sanitized := make([]domain.ProviderRawPayloadObservation, 0, len(payloads))
+	for _, payload := range payloads {
+		payloadJSON, err := domain.SanitizeProviderEvidenceJSON(payload.PayloadJSON)
+		if err != nil {
+			return nil, fmt.Errorf("sanitize provider payload: %w", err)
+		}
+		payload.PayloadJSON = payloadJSON
+		sanitized = append(sanitized, payload)
+	}
+	return sanitized, nil
 }
 
 //nolint:ireturn // The connector contract is intentionally resolved behind an interface seam.

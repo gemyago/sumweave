@@ -218,6 +218,153 @@ func TestFinanceProviderSync(t *testing.T) {
 		return connection
 	}
 
+	t.Run("covers bank-synced foreign currency reporting with historical FX coverage", func(t *testing.T) {
+		fake := faker.New()
+		effectiveAt := time.Date(2026, time.June, 9, 10, 0, 0, 0, time.UTC)
+
+		type foreignCurrencySyncFixture struct {
+			service    *Service
+			store      *persistence.Store
+			tenant     domain.Tenant
+			ownerID    string
+			connection domain.BankConnection
+		}
+		makeForeignCurrencySyncFixture := func(
+			t *testing.T,
+			rates []domain.FXRate,
+		) foreignCurrencySyncFixture {
+			t.Helper()
+
+			store := makeStore(t)
+			providerAccountID := "account-" + fake.UUID().V4()
+			providerTransactionID := "transaction-" + fake.UUID().V4()
+			provider := &stubBankProvider{
+				name: "provider-" + fake.Lorem().Word(),
+				syncResults: []ProviderSyncResult{
+					{
+						SyncKey: "sync-" + fake.UUID().V4(),
+						Accounts: []ProviderNormalizedAccount{{
+							ProviderAccountID: providerAccountID,
+							Name:              "account-" + fake.Lorem().Word(),
+							Currency:          "EUR",
+						}},
+						Transactions: []ProviderNormalizedTransaction{{
+							ProviderAccountID:     providerAccountID,
+							ProviderTransactionID: providerTransactionID,
+							Status:                domain.TransactionStatusBooked,
+							AmountMinor:           -100_00,
+							Currency:              "EUR",
+							Description:           "expense-" + fake.Lorem().Word(),
+							EffectiveAt:           effectiveAt,
+							Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+						}},
+					},
+					{
+						SyncKey: "sync-" + fake.UUID().V4(),
+						Transactions: []ProviderNormalizedTransaction{{
+							ProviderAccountID:     providerAccountID,
+							ProviderTransactionID: providerTransactionID,
+							Status:                domain.TransactionStatusBooked,
+							AmountMinor:           -100_00,
+							Currency:              "EUR",
+							Description:           "expense-" + fake.Lorem().Word(),
+							EffectiveAt:           effectiveAt,
+							Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+						}},
+					},
+				},
+			}
+			fxProvider := NewStaticFXProvider(FXProviderFrankfurter, rates)
+			service := NewService(
+				store,
+				WithNow(func() time.Time { return effectiveAt.Add(24 * time.Hour) }),
+				WithConnectionSecretCipher(makeCipher(t)),
+				WithBankProviders(provider),
+				WithFXProviders(fxProvider),
+				WithDefaultFXProvider(fxProvider.Name()),
+			)
+			ownerID := "owner-" + fake.UUID().V4()
+			tenant := makeTenant(t, service, ownerID)
+			connection := saveLinkedConnectionForTest(
+				t,
+				service,
+				tenant.ID,
+				provider.name,
+				domain.ProviderConnectorIDSynthetic,
+				ProviderLinkResult{
+					DisplayName:       "connection-" + fake.Lorem().Word(),
+					ProviderReference: "reference-" + fake.UUID().V4(),
+					Secret:            "secret-" + fake.UUID().V4(),
+					State:             domain.BankConnectionStateActive,
+				},
+			)
+			return foreignCurrencySyncFixture{
+				service: service, store: store, tenant: tenant, ownerID: ownerID, connection: connection,
+			}
+		}
+
+		t.Run("does not backfill or persist historical FX after bank sync", func(t *testing.T) {
+			fixture := makeForeignCurrencySyncFixture(t, []domain.FXRate{{
+				Provider:      FXProviderFrankfurter,
+				BaseCurrency:  "EUR",
+				QuoteCurrency: "PLN",
+				RateDate:      effectiveAt.AddDate(0, 0, -1),
+				Rate:          4.25,
+			}})
+
+			first, err := fixture.service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+				ConnectionID: fixture.connection.ID,
+				JobID:        "job-" + fake.UUID().V4(),
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 1, first.ImportedTransactions)
+			dashboard, err := fixture.service.GetDashboard(t.Context(), DashboardParams{
+				ActorUserID: fixture.ownerID,
+				TenantID:    fixture.tenant.ID,
+			})
+			require.NoError(t, err)
+			assert.Zero(t, dashboard.Settled.ExpenseMinor)
+			assert.False(t, dashboard.Settled.Complete)
+			require.Len(t, dashboard.MissingFX, 2)
+			assert.Equal(t, []DashboardCurrencyTotal{{
+				Currency: "EUR", ExpenseMinor: 100_00, NetMinor: -100_00,
+			}}, dashboard.NativeSettledTotals)
+
+			second, err := fixture.service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+				ConnectionID: fixture.connection.ID,
+				JobID:        "job-" + fake.UUID().V4(),
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 1, second.UpdatedTransactions)
+			storedRates, err := fixture.store.ListFXRates(t.Context(), persistence.ListFXRatesParams{
+				Provider: FXProviderFrankfurter, BaseCurrency: "EUR", QuoteCurrency: "PLN",
+			})
+			require.NoError(t, err)
+			assert.Empty(t, storedRates)
+		})
+
+		t.Run("keeps the dashboard incomplete when no historical rate is available", func(t *testing.T) {
+			fixture := makeForeignCurrencySyncFixture(t, nil)
+			_, err := fixture.service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+				ConnectionID: fixture.connection.ID,
+				JobID:        "job-" + fake.UUID().V4(),
+			})
+			require.NoError(t, err)
+			dashboard, err := fixture.service.GetDashboard(t.Context(), DashboardParams{
+				ActorUserID: fixture.ownerID,
+				TenantID:    fixture.tenant.ID,
+			})
+			require.NoError(t, err)
+			assert.Zero(t, dashboard.Settled.ExpenseMinor)
+			assert.False(t, dashboard.Settled.Complete)
+			require.Len(t, dashboard.MissingFX, 2)
+			assert.Equal(t, DashboardMissingFXSourceTransaction, dashboard.MissingFX[0].Source)
+			assert.Equal(t, []DashboardCurrencyTotal{{
+				Currency: "EUR", ExpenseMinor: 100_00, NetMinor: -100_00,
+			}}, dashboard.NativeSettledTotals)
+		})
+	})
+
 	t.Run(
 		"manages bank connection lifecycle sync persistence schedules and redacted logging",
 		func(t *testing.T) {

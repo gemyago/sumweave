@@ -150,6 +150,16 @@ type FinanceController interface {
 		*FinanceCsvImportAuditResponse,
 	]) http.Handler
 
+	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}
+	//
+	// Request type: GetFinanceAccountProviderEvidenceParams,
+	//
+	// Response type: FinanceProviderEvidence
+	GetFinanceAccountProviderEvidence(HandlerBuilder[
+		*GetFinanceAccountProviderEvidenceParams,
+		*FinanceProviderEvidence,
+	]) http.Handler
+
 	// GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 	//
 	// Request type: GetFinanceCsvImportAuditParams,
@@ -179,7 +189,7 @@ type FinanceController interface {
 		*FinanceFxDiagnosticsResponse,
 	]) http.Handler
 
-	// GET /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+	// GET /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}
 	//
 	// Request type: GetFinanceSyntheticLinkStateParams,
 	//
@@ -209,6 +219,26 @@ type FinanceController interface {
 		*FinanceTransaction,
 	]) http.Handler
 
+	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}
+	//
+	// Request type: GetFinanceTransactionProviderEvidenceParams,
+	//
+	// Response type: FinanceProviderEvidence
+	GetFinanceTransactionProviderEvidence(HandlerBuilder[
+		*GetFinanceTransactionProviderEvidenceParams,
+		*FinanceProviderEvidence,
+	]) http.Handler
+
+	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner
+	//
+	// Request type: GetFinanceTransferPartnerParams,
+	//
+	// Response type: FinanceTransaction
+	GetFinanceTransferPartner(HandlerBuilder[
+		*GetFinanceTransferPartnerParams,
+		*FinanceTransaction,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/connections/link-token
 	//
 	// Request type: LinkFinanceConnectionTokenParams,
@@ -217,6 +247,25 @@ type FinanceController interface {
 	LinkFinanceConnectionToken(HandlerBuilder[
 		*LinkFinanceConnectionTokenParams,
 		*FinanceBankConnection,
+	]) http.Handler
+
+	// POST /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
+	//
+	// Request type: LinkFinanceTransferPairParams,
+	//
+	// Response type: none
+	LinkFinanceTransferPair(NoResponseHandlerBuilder[
+		*LinkFinanceTransferPairParams,
+	]) http.Handler
+
+	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence
+	//
+	// Request type: ListFinanceAccountProviderEvidenceParams,
+	//
+	// Response type: FinanceProviderEvidenceListResponse
+	ListFinanceAccountProviderEvidence(HandlerBuilder[
+		*ListFinanceAccountProviderEvidenceParams,
+		*FinanceProviderEvidenceListResponse,
 	]) http.Handler
 
 	// GET /api/v1/finance/tenants/{tenantId}/accounts
@@ -237,6 +286,16 @@ type FinanceController interface {
 	ListFinanceCategories(HandlerBuilder[
 		*ListFinanceCategoriesParams,
 		*FinanceCategoriesResponse,
+	]) http.Handler
+
+	// GET /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts
+	//
+	// Request type: ListFinanceConnectionSyncedAccountsParams,
+	//
+	// Response type: FinanceConnectionSyncedAccountsResponse
+	ListFinanceConnectionSyncedAccounts(HandlerBuilder[
+		*ListFinanceConnectionSyncedAccountsParams,
+		*FinanceConnectionSyncedAccountsResponse,
 	]) http.Handler
 
 	// GET /api/v1/finance/tenants/{tenantId}/connections
@@ -288,6 +347,16 @@ type FinanceController interface {
 		*FinanceTenantListResponse,
 	]) http.Handler
 
+	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence
+	//
+	// Request type: ListFinanceTransactionProviderEvidenceParams,
+	//
+	// Response type: FinanceProviderEvidenceListResponse
+	ListFinanceTransactionProviderEvidence(HandlerBuilder[
+		*ListFinanceTransactionProviderEvidenceParams,
+		*FinanceProviderEvidenceListResponse,
+	]) http.Handler
+
 	// GET /api/v1/finance/tenants/{tenantId}/transactions
 	//
 	// Request type: ListFinanceTransactionsParams,
@@ -295,6 +364,16 @@ type FinanceController interface {
 	// Response type: FinanceTransactionsResponse
 	ListFinanceTransactions(HandlerBuilder[
 		*ListFinanceTransactionsParams,
+		*FinanceTransactionsResponse,
+	]) http.Handler
+
+	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-candidates
+	//
+	// Request type: ListFinanceTransferCandidatesParams,
+	//
+	// Response type: FinanceTransactionsResponse
+	ListFinanceTransferCandidates(HandlerBuilder[
+		*ListFinanceTransferCandidatesParams,
 		*FinanceTransactionsResponse,
 	]) http.Handler
 
@@ -328,7 +407,7 @@ type FinanceController interface {
 		*FinanceCsvImportPreviewResponse,
 	]) http.Handler
 
-	// PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+	// PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}
 	//
 	// Request type: PutFinanceSyntheticLinkStateParams,
 	//
@@ -366,6 +445,15 @@ type FinanceController interface {
 	TriggerFinanceFxSync(HandlerBuilder[
 		*TriggerFinanceFxSyncParams,
 		*FinanceFxSyncResponse,
+	]) http.Handler
+
+	// DELETE /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
+	//
+	// Request type: UnlinkFinanceTransferPairParams,
+	//
+	// Response type: none
+	UnlinkFinanceTransferPair(NoResponseHandlerBuilder[
+		*UnlinkFinanceTransferPairParams,
 	]) http.Handler
 
 	// PATCH /api/v1/finance/tenants/{tenantId}
@@ -418,23 +506,35 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/account-imports/{importId}
 // 
+// - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}
+// 
 // - GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/dashboard
 // 
 // - GET /api/v1/finance/fx/diagnostics
 // 
-// - GET /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+// - GET /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}
 // 
+// - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}
+// 
+// - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner
+// 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/link-token
+// 
+// - POST /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
+// 
+// - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/accounts
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/categories
+// 
+// - GET /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/connections
 // 
@@ -446,7 +546,11 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants
 // 
+// - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence
+// 
 // - GET /api/v1/finance/tenants/{tenantId}/transactions
+// 
+// - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-candidates
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/imports
 // 
@@ -454,13 +558,15 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/imports/preview
 // 
-// - PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}
+// - PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/link-redirect/start
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync
 // 
 // - POST /api/v1/finance/fx/sync
+// 
+// - DELETE /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
 // 
 // - PATCH /api/v1/finance/tenants/{tenantId}
 // 
@@ -483,28 +589,37 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/finish", controller.FinishFinanceConnectionRedirectLink(builder.FinishFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.GetFinanceAccount(builder.GetFinanceAccount))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/account-imports/{importId}", controller.GetFinanceAccountCsvImportAudit(builder.GetFinanceAccountCsvImportAudit))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}", controller.GetFinanceAccountProviderEvidence(builder.GetFinanceAccountProviderEvidence))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports/{importId}", controller.GetFinanceCsvImportAudit(builder.GetFinanceCsvImportAudit))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/dashboard", controller.GetFinanceDashboard(builder.GetFinanceDashboard))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/fx/diagnostics", controller.GetFinanceFxDiagnostics(builder.GetFinanceFxDiagnostics))
-	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}", controller.GetFinanceSyntheticLinkState(builder.GetFinanceSyntheticLinkState))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}", controller.GetFinanceSyntheticLinkState(builder.GetFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}", controller.GetFinanceTenant(builder.GetFinanceTenant))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}", controller.GetFinanceTransaction(builder.GetFinanceTransaction))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}", controller.GetFinanceTransactionProviderEvidence(builder.GetFinanceTransactionProviderEvidence))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner", controller.GetFinanceTransferPartner(builder.GetFinanceTransferPartner))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-token", controller.LinkFinanceConnectionToken(builder.LinkFinanceConnectionToken))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/transactions/transfer-links", controller.LinkFinanceTransferPair(builder.LinkFinanceTransferPair))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence", controller.ListFinanceAccountProviderEvidence(builder.ListFinanceAccountProviderEvidence))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts", controller.ListFinanceAccounts(builder.ListFinanceAccounts))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/categories", controller.ListFinanceCategories(builder.ListFinanceCategories))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts", controller.ListFinanceConnectionSyncedAccounts(builder.ListFinanceConnectionSyncedAccounts))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections", controller.ListFinanceConnections(builder.ListFinanceConnections))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/tags", controller.ListFinanceTags(builder.ListFinanceTags))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/invites", controller.ListFinanceTenantInvites(builder.ListFinanceTenantInvites))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/members", controller.ListFinanceTenantMembers(builder.ListFinanceTenantMembers))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants", controller.ListFinanceTenants(builder.ListFinanceTenants))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence", controller.ListFinanceTransactionProviderEvidence(builder.ListFinanceTransactionProviderEvidence))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions", controller.ListFinanceTransactions(builder.ListFinanceTransactions))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-candidates", controller.ListFinanceTransferCandidates(builder.ListFinanceTransferCandidates))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports", controller.ListRecentFinanceCsvImportAudits(builder.ListRecentFinanceCsvImportAudits))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/account-imports/preview", controller.PreviewFinanceAccountCsvImport(builder.PreviewFinanceAccountCsvImport))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/imports/preview", controller.PreviewFinanceCsvImport(builder.PreviewFinanceCsvImport))
-	rootHandler.router.HandleRoute("PUT", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/{state}", controller.PutFinanceSyntheticLinkState(builder.PutFinanceSyntheticLinkState))
+	rootHandler.router.HandleRoute("PUT", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}", controller.PutFinanceSyntheticLinkState(builder.PutFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/start", controller.StartFinanceConnectionRedirectLink(builder.StartFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync", controller.TriggerFinanceConnectionSync(builder.TriggerFinanceConnectionSync))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/fx/sync", controller.TriggerFinanceFxSync(builder.TriggerFinanceFxSync))
+	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/transactions/transfer-links", controller.UnlinkFinanceTransferPair(builder.UnlinkFinanceTransferPair))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}", controller.UpdateFinanceTenant(builder.UpdateFinanceTenant))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}", controller.UpdateFinanceTransaction(builder.UpdateFinanceTransaction))
 	return rootHandler

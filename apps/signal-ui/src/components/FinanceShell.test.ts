@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceShell from './FinanceShell.svelte'
 import FinanceShellSource from './FinanceShell.svelte?raw'
+import BootstrapFinanceDashboardSource from '../pages/BootstrapFinanceDashboard.svelte?raw'
 
 const mocks = vi.hoisted(() => {
   const shellState = {
@@ -103,6 +104,33 @@ describe('FinanceShell', () => {
     expect(screen.queryByText('Bootstrap pilot')).not.toBeInTheDocument()
   })
 
+  it('uses compact, wrapping Bootstrap shell chrome on narrow screens while keeping every destination visible', () => {
+    render(FinanceShell, {
+      currentPath: '/finance',
+    })
+
+    expect(screen.getByLabelText('Finance navigation')).toHaveClass('flex-row', 'flex-lg-column', 'gap-2')
+    for (const label of [
+      'Dashboard',
+      'Transactions',
+      'Accounts',
+      'Categories',
+      'Connections & sync',
+      'Imports',
+      'Tenants',
+    ]) {
+      expect(screen.getByRole('link', { name: label })).toHaveClass(
+        'flex-grow-1',
+        'flex-lg-grow-0',
+        'px-2',
+        'px-lg-3',
+        'py-2',
+        'text-nowrap',
+      )
+    }
+    expect(screen.getByText('Finance / Dashboard').parentElement).toHaveClass('d-none', 'd-sm-block')
+  })
+
   it('hides the shared tenant selector on the tenants route', () => {
     render(FinanceShell, {
       currentPath: '/finance/tenants',
@@ -192,5 +220,10 @@ describe('FinanceShell', () => {
   it('does not define route-local styles or style attributes', () => {
     expect(FinanceShellSource).not.toMatch(/<style[\s>]/)
     expect(FinanceShellSource).not.toMatch(/\sstyle=/)
+    expect(BootstrapFinanceDashboardSource).toContain('class="card-body p-3 p-xl-5"')
+    expect(BootstrapFinanceDashboardSource).toContain('class="d-none d-sm-block text-body-secondary mb-0"')
+    expect(BootstrapFinanceDashboardSource).toContain('class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2"')
+    expect(BootstrapFinanceDashboardSource).toContain('<span class="d-sm-none">Transactions</span>')
+    expect(BootstrapFinanceDashboardSource).toContain('class="my-3 my-xl-4"')
   })
 })

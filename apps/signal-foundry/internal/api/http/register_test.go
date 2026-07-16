@@ -537,12 +537,12 @@ func TestSetupV1Routes(t *testing.T) {
 		for _, req := range []*http.Request{
 			httptest.NewRequest(
 				http.MethodGet,
-				"/api/v1/finance/tenants/"+tenant.ID+"/connections/synthetic-link-states/"+startPayload.State,
+				"/api/v1/finance/tenants/"+tenant.ID+"/connections/synthetic-link-states/state/"+startPayload.State,
 				http.NoBody,
 			),
 			httptest.NewRequest(
 				http.MethodPut,
-				"/api/v1/finance/tenants/"+tenant.ID+"/connections/synthetic-link-states/"+startPayload.State,
+				"/api/v1/finance/tenants/"+tenant.ID+"/connections/synthetic-link-states/state/"+startPayload.State,
 				strings.NewReader(`{"configuredAccounts":[{"name":"Checking","currency":"USD"}]}`),
 			),
 		} {

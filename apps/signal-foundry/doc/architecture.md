@@ -46,7 +46,7 @@ HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a
 - **Layers:** embedded **`default.yaml`**, then **`internal/config/<env>.yaml`** (from **`--env` / `-e`**, default **`local`**), then optional **`internal/config/<env>-user.yaml`** for local secrets.
 - **Env:** keys map to **`APP_…`** (Viper `AutomaticEnv()`); nested keys use underscores (e.g. **`APP_OPENAI_APIKEY`** for OpenAI). See **`internal/config/default.yaml`** and **`internal/config/provide.go`** for injected **`name:"config.…"`** bindings.
 - **Database setup:** startup commands no longer auto-migrate app-owned schemas; run **`signal-foundry db-migrate`** before **`start-all`** as the standard local backend workflow, and also before **`start`**, **`jobs worker`**, or **`jobs enqueue-due`** when the environment uses persisted tables.
-- **HTTP defaults:** e.g. **`httpServer.port`** **4501**, **`writeTimeout`** aligned with long SSE/agent runs (see comments in **`default.yaml`**). No secrets in repo.
+- **HTTP defaults:** e.g. **`httpServer.port`** **4501**, **`writeTimeout`** aligned with long SSE/agent runs (see comments in **`default.yaml`**). Set both `httpServer.tls.certFile` and `keyFile` (or their `APP_` equivalents) for local HTTPS; see [../../../docs/local-https.md](../../../docs/local-https.md). No secrets in repo.
 
 ## Repository integration
 

@@ -35,7 +35,7 @@ func (failingReadCloser) Read(p []byte) (int, error) {
 func (failingReadCloser) Close() error { return nil }
 
 func TestReportingAndFXInternals(t *testing.T) {
-	t.Run("rejects missing and reversed timestamp ranges at finance boundaries", func(t *testing.T) {
+	t.Run("keeps dashboard period validation while current FX ignores historical ranges", func(t *testing.T) {
 		validDate := time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC)
 		laterDate := time.Date(2026, time.June, 21, 0, 0, 0, 0, time.UTC)
 		provider := NewStaticFXProvider("static", []domain.FXRate{{
@@ -49,12 +49,12 @@ func TestReportingAndFXInternals(t *testing.T) {
 		_, err := provider.FetchHistoricalRates(t.Context(), FXProviderQuery{
 			BaseCurrency: "USD", QuoteCurrencies: []string{"PLN"}, EndDate: validDate,
 		})
-		require.Error(t, err)
+		require.NoError(t, err)
 
 		_, err = provider.FetchHistoricalRates(t.Context(), FXProviderQuery{
 			BaseCurrency: "USD", QuoteCurrencies: []string{"PLN"}, StartDate: laterDate, EndDate: validDate,
 		})
-		require.Error(t, err)
+		require.NoError(t, err)
 
 		service := NewService(
 			stubStore{isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil }},
@@ -64,18 +64,17 @@ func TestReportingAndFXInternals(t *testing.T) {
 		_, err = service.SyncFXRates(t.Context(), SyncFXRatesParams{
 			BaseCurrencies: []string{"USD"}, QuoteCurrency: "PLN", EndDate: validDate,
 		})
-		require.ErrorIs(t, err, ErrInvalidTimestampRange)
+		require.NoError(t, err)
 
 		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{})
-		require.ErrorIs(t, err, ErrInvalidTimestampRange)
-		require.ErrorIs(t, ValidateRequiredTimestampRange(validDate, time.Time{}), ErrInvalidTimestampRange)
-		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{
-			StartDate: validDate,
-			EndDate:   validDate,
-		})
+		require.Error(t, err)
+		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{})
 		require.Error(t, err)
 
-		require.ErrorIs(t, validateProviderFXRates([]domain.FXRate{{}}), ErrInvalidTimestampRange)
+		_, validationErr := validateProviderFXRates("provider", "USD", "PLN", []domain.FXRate{{
+			Provider: "provider", BaseCurrency: "USD", QuoteCurrency: "PLN", Rate: 4.1,
+		}})
+		require.ErrorIs(t, validationErr, ErrInvalidTimestampRange)
 
 		_, err = service.GetDashboard(t.Context(), DashboardParams{
 			ActorUserID: "user",
@@ -85,6 +84,18 @@ func TestReportingAndFXInternals(t *testing.T) {
 			EndDate:     validDate,
 		})
 		require.Error(t, err)
+	})
+
+	t.Run("validates required timestamp range endpoints", func(t *testing.T) {
+		timestamp := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+		require.ErrorIs(t, ValidateRequiredTimestampRange(time.Time{}, timestamp), ErrInvalidTimestampRange)
+		require.ErrorIs(t, ValidateRequiredTimestampRange(timestamp, time.Time{}), ErrInvalidTimestampRange)
+		require.ErrorIs(
+			t,
+			ValidateRequiredTimestampRange(timestamp, timestamp.Add(-time.Nanosecond)),
+			ErrInvalidTimestampRange,
+		)
+		require.NoError(t, ValidateRequiredTimestampRange(timestamp, timestamp))
 	})
 
 	t.Run("covers fx provider helpers and service error paths", func(t *testing.T) {
@@ -141,7 +152,7 @@ func TestReportingAndFXInternals(t *testing.T) {
 
 		service = NewService(
 			stubStore{
-				saveFXRatesFn: func(_ context.Context, _ []domain.FXRate) error { return sentinel },
+				saveCurrentFXRatesFn: func(_ context.Context, _ []domain.FXRate) error { return sentinel },
 			},
 			WithFXProviders(staticProvider),
 			WithDefaultFXProvider(staticProvider.Name()),
@@ -154,9 +165,9 @@ func TestReportingAndFXInternals(t *testing.T) {
 		})
 		require.ErrorIs(t, err, sentinel)
 
-		service = NewService(stubStore{listFXRatesFn: func(
+		service = NewService(stubStore{listCurrentFXRatesFn: func(
 			_ context.Context,
-			_ persistence.ListFXRatesParams,
+			_ persistence.ListCurrentFXRatesParams,
 		) ([]domain.FXRate, error) {
 			return nil, sentinel
 		}})
@@ -182,7 +193,7 @@ func TestReportingAndFXInternals(t *testing.T) {
 		)
 	})
 
-	t.Run("covers frankfurter range and error responses", func(t *testing.T) {
+	t.Run("covers frankfurter latest-rate and error responses", func(t *testing.T) {
 		errorServer := httptest.NewServer(
 			http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusBadGateway)
@@ -201,20 +212,18 @@ func TestReportingAndFXInternals(t *testing.T) {
 		})
 		require.Error(t, err)
 
-		rangeServer := httptest.NewServer(
+		latestServer := httptest.NewServer(
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "/2026-06-20..2026-06-21", r.URL.Path)
+				assert.Equal(t, "/v2/rates", r.URL.Path)
 				_, writeErr := w.Write(
-					[]byte(
-						`{"base":"USD","rates":{"2026-06-20":{"PLN":4.1},"2026-06-21":{"PLN":4.2}}}`,
-					),
+					[]byte(`[{"base":"USD","date":"2026-06-21","quote":"PLN","rate":4.2}]`),
 				)
 				assert.NoError(t, writeErr)
 			}),
 		)
-		defer rangeServer.Close()
+		defer latestServer.Close()
 
-		provider = NewFrankfurterFXProvider(rangeServer.Client(), rangeServer.URL)
+		provider = NewFrankfurterFXProvider(latestServer.Client(), latestServer.URL)
 		rates, err := provider.FetchHistoricalRates(t.Context(), FXProviderQuery{
 			BaseCurrency:    "USD",
 			QuoteCurrencies: []string{"PLN"},
@@ -222,9 +231,9 @@ func TestReportingAndFXInternals(t *testing.T) {
 			EndDate:         time.Date(2026, time.June, 21, 0, 0, 0, 0, time.UTC),
 		})
 		require.NoError(t, err)
-		require.Len(t, rates, 2)
+		require.Len(t, rates, 1)
 
-		provider = NewFrankfurterFXProvider(rangeServer.Client(), "http://[::1")
+		provider = NewFrankfurterFXProvider(latestServer.Client(), "http://[::1")
 		_, err = provider.FetchHistoricalRates(t.Context(), FXProviderQuery{
 			BaseCurrency:    "USD",
 			QuoteCurrencies: []string{"PLN"},
@@ -310,6 +319,76 @@ func TestReportingAndFXInternals(t *testing.T) {
 			DashboardPeriodPresetCurrentMonth,
 			resolveDashboardPeriod(now, DashboardParams{}).Preset,
 		)
+		for _, testCase := range []struct {
+			name      string
+			now       time.Time
+			preset    DashboardPeriodPreset
+			startDate time.Time
+			endDate   time.Time
+			previous  DashboardPeriodWindow
+			next      DashboardPeriodWindow
+		}{
+			{
+				name: "current month uses complete month in service location",
+				now: time.Date(2026, time.January, 15, 18, 30, 0, 0,
+					time.FixedZone("UTC+14", 14*60*60)),
+				preset: DashboardPeriodPresetCurrentMonth,
+				startDate: time.Date(2026, time.January, 1, 0, 0, 0, 0,
+					time.FixedZone("UTC+14", 14*60*60)),
+				endDate: time.Date(2026, time.January, 31, 23, 59, 59, 999999999,
+					time.FixedZone("UTC+14", 14*60*60)),
+				previous: DashboardPeriodWindow{
+					StartDate: time.Date(2025, time.December, 1, 0, 0, 0, 0,
+						time.FixedZone("UTC+14", 14*60*60)),
+					EndDate: time.Date(2025, time.December, 31, 23, 59, 59, 999999999,
+						time.FixedZone("UTC+14", 14*60*60)),
+				},
+				next: DashboardPeriodWindow{
+					StartDate: time.Date(2026, time.February, 1, 0, 0, 0, 0,
+						time.FixedZone("UTC+14", 14*60*60)),
+					EndDate: time.Date(2026, time.February, 28, 23, 59, 59, 999999999,
+						time.FixedZone("UTC+14", 14*60*60)),
+				},
+			},
+			{
+				name:      "previous month crosses year boundary",
+				now:       time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC),
+				preset:    DashboardPeriodPresetPreviousMonth,
+				startDate: time.Date(2025, time.December, 1, 0, 0, 0, 0, time.UTC),
+				endDate:   time.Date(2025, time.December, 31, 23, 59, 59, 999999999, time.UTC),
+				previous: DashboardPeriodWindow{
+					StartDate: time.Date(2025, time.November, 1, 0, 0, 0, 0, time.UTC),
+					EndDate:   time.Date(2025, time.November, 30, 23, 59, 59, 999999999, time.UTC),
+				},
+				next: DashboardPeriodWindow{
+					StartDate: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+					EndDate:   time.Date(2026, time.January, 31, 23, 59, 59, 999999999, time.UTC),
+				},
+			},
+			{
+				name:      "next month resolves leap February",
+				now:       time.Date(2024, time.January, 31, 12, 0, 0, 0, time.UTC),
+				preset:    DashboardPeriodPresetNextMonth,
+				startDate: time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC),
+				endDate:   time.Date(2024, time.February, 29, 23, 59, 59, 999999999, time.UTC),
+				previous: DashboardPeriodWindow{
+					StartDate: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+					EndDate:   time.Date(2024, time.January, 31, 23, 59, 59, 999999999, time.UTC),
+				},
+				next: DashboardPeriodWindow{
+					StartDate: time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC),
+					EndDate:   time.Date(2024, time.March, 31, 23, 59, 59, 999999999, time.UTC),
+				},
+			},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				period := resolveDashboardPeriod(testCase.now, DashboardParams{Preset: testCase.preset})
+				assert.Equal(t, testCase.startDate, period.StartDate)
+				assert.Equal(t, testCase.endDate, period.EndDate)
+				assert.Equal(t, testCase.previous, period.Previous)
+				assert.Equal(t, testCase.next, period.Next)
+			})
+		}
 		assert.Equal(
 			t,
 			time.Date(2026, time.March, 20, 12, 0, 0, 0, time.UTC),
@@ -346,10 +425,10 @@ func TestReportingAndFXInternals(t *testing.T) {
 			now,
 			DashboardParams{Preset: DashboardPeriodPresetCurrentMonth},
 		)
-		assert.Equal(t, time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC), currentMonth.StartDate)
-		assert.Equal(t, now, currentMonth.EndDate)
-		assert.Equal(t, currentMonth.StartDate.Add(-time.Nanosecond), currentMonth.Previous.EndDate)
-		assert.Equal(t, currentMonth.EndDate.Add(time.Nanosecond), currentMonth.Next.StartDate)
+		assert.Equal(t, time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC), currentMonth.StartDate)
+		assert.Equal(t, time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC), currentMonth.EndDate)
+		assert.Equal(t, time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC), currentMonth.Previous.EndDate)
+		assert.Equal(t, time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC), currentMonth.Next.StartDate)
 		lastThreeMonths := resolveDashboardPeriod(
 			now,
 			DashboardParams{Preset: DashboardPeriodPresetLast3Months},
@@ -421,17 +500,10 @@ func TestReportingAndFXInternals(t *testing.T) {
 			RateDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
 			Rate:          4.1,
 		}})
-		_, ok = convertBalanceAmount(10_00, "EUR", "PLN", now, FXProviderFrankfurter, lookup)
+		_, ok = convertBalanceAmount(10_00, "EUR", "PLN", FXProviderFrankfurter, lookup)
 		assert.False(t, ok)
-		_, ok = convertBalanceAmount(
-			10_00,
-			"USD",
-			"PLN",
-			time.Date(2026, time.June, 19, 0, 0, 0, 0, time.UTC),
-			FXProviderFrankfurter,
-			lookup,
-		)
-		assert.False(t, ok)
+		_, ok = convertBalanceAmount(10_00, "USD", "PLN", FXProviderFrankfurter, lookup)
+		assert.True(t, ok)
 
 		categoryBreakdowns := map[string]*DashboardCategoryBreakdown{}
 		addDashboardCategoryContribution(

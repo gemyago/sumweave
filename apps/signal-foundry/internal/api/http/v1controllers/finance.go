@@ -2,6 +2,7 @@ package v1controllers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -66,10 +67,17 @@ type ledgerService interface {
 		context.Context,
 		financepkg.UpdateTransactionParams,
 	) (domain.Transaction, error)
+	LinkTransfers(context.Context, financepkg.LinkTransfersParams) error
+	UnlinkTransfers(context.Context, financepkg.UnlinkTransfersParams) error
 	ListTransactions(
 		context.Context,
 		financepkg.ListTransactionsParams,
 	) ([]domain.Transaction, error)
+}
+
+type transferDetailService interface {
+	ListTransferCandidates(context.Context, financepkg.ListTransferCandidatesParams) ([]domain.Transaction, error)
+	GetTransferPartner(context.Context, financepkg.GetTransferPartnerParams) (domain.Transaction, error)
 }
 
 type bankSyncService interface {
@@ -77,6 +85,10 @@ type bankSyncService interface {
 		context.Context,
 		financepkg.ListBankConnectionsParams,
 	) ([]financepkg.BankConnectionView, error)
+	ListBankConnectionSyncedAccounts(
+		context.Context,
+		financepkg.ListBankConnectionSyncedAccountsParams,
+	) ([]financepkg.BankConnectionSyncedAccount, error)
 	TriggerBankConnectionSync(
 		context.Context,
 		financepkg.TriggerBankConnectionSyncParams,
@@ -94,6 +106,25 @@ type fxService interface {
 		financepkg.FXAdminDiagnosticsParams,
 	) (financepkg.FXAdminDiagnostics, error)
 	TriggerFXSync(context.Context, financepkg.TriggerFXSyncParams) (financepkg.FXSyncJobRef, error)
+}
+
+type providerEvidenceService interface {
+	ListAccountProviderEvidence(
+		context.Context,
+		financepkg.ListAccountProviderEvidenceParams,
+	) ([]domain.ProviderEvidence, error)
+	GetAccountProviderEvidence(
+		context.Context,
+		financepkg.GetAccountProviderEvidenceParams,
+	) (domain.ProviderEvidence, error)
+	ListTransactionProviderEvidence(
+		context.Context,
+		financepkg.ListTransactionProviderEvidenceParams,
+	) ([]domain.ProviderEvidence, error)
+	GetTransactionProviderEvidence(
+		context.Context,
+		financepkg.GetTransactionProviderEvidenceParams,
+	) (domain.ProviderEvidence, error)
 }
 
 type csvImportService interface {
@@ -122,6 +153,7 @@ type financeService interface {
 	bankSyncService
 	reportingService
 	fxService
+	providerEvidenceService
 	csvImportService
 }
 
@@ -157,9 +189,11 @@ type FinanceControllerDeps struct {
 	TenantService                tenantService
 	CatalogService               catalogService
 	LedgerService                ledgerService
+	TransferDetailService        transferDetailService
 	BankSyncService              bankSyncService
 	ReportingService             reportingService
 	FXService                    fxService
+	ProviderEvidenceService      providerEvidenceService
 	CSVImportService             csvImportService
 	BankConnectionService        bankConnectionService
 	SyntheticLinkStateService    syntheticLinkStateService
@@ -574,6 +608,188 @@ func (c *FinanceController) GetFinanceTransaction(
 	return c.deps.AuthMiddleware(inner)
 }
 
+func (c *FinanceController) ListFinanceTransferCandidates(
+	builder handlers.HandlerBuilder[
+		*models.ListFinanceTransferCandidatesParams,
+		*models.FinanceTransactionsResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.ListFinanceTransferCandidatesParams,
+	) (*models.FinanceTransactionsResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items, err := c.deps.TransferDetailService.ListTransferCandidates(
+			ctx,
+			financepkg.ListTransferCandidatesParams{
+				ActorUserID:     userID,
+				TenantID:        params.TenantID,
+				TransactionID:   params.TransactionID,
+				EffectiveFrom:   params.EffectiveFrom,
+				EffectiveBefore: params.EffectiveBefore,
+				Limit:           params.Limit,
+				Offset:          params.Offset,
+			},
+		)
+		if err != nil {
+			return nil, mapTransferDetailError(err)
+		}
+		return mapTransactionsResponse(items), nil
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) GetFinanceTransferPartner(
+	builder handlers.HandlerBuilder[*models.GetFinanceTransferPartnerParams, *models.FinanceTransaction],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.GetFinanceTransferPartnerParams,
+	) (*models.FinanceTransaction, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		item, err := c.deps.TransferDetailService.GetTransferPartner(
+			ctx,
+			financepkg.GetTransferPartnerParams{
+				ActorUserID:   userID,
+				TenantID:      params.TenantID,
+				TransactionID: params.TransactionID,
+			},
+		)
+		if err != nil {
+			return nil, mapTransferDetailError(err)
+		}
+		mapped := mapTransaction(item)
+		return &mapped, nil
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) LinkFinanceTransferPair(
+	builder handlers.NoResponseHandlerBuilder[*models.LinkFinanceTransferPairParams],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.LinkFinanceTransferPairParams,
+	) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		if linkErr := c.deps.LedgerService.LinkTransfers(ctx, financepkg.LinkTransfersParams{
+			ActorUserID:         userID,
+			TenantID:            params.TenantID,
+			FirstTransactionID:  params.Payload.FirstTransactionID,
+			SecondTransactionID: params.Payload.SecondTransactionID,
+		}); linkErr != nil {
+			return mapTransferPairError(linkErr)
+		}
+		return nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) UnlinkFinanceTransferPair(
+	builder handlers.NoResponseHandlerBuilder[*models.UnlinkFinanceTransferPairParams],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.UnlinkFinanceTransferPairParams,
+	) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		if unlinkErr := c.deps.LedgerService.UnlinkTransfers(ctx, financepkg.UnlinkTransfersParams{
+			ActorUserID:         userID,
+			TenantID:            params.TenantID,
+			FirstTransactionID:  params.Payload.FirstTransactionID,
+			SecondTransactionID: params.Payload.SecondTransactionID,
+		}); unlinkErr != nil {
+			return mapTransferPairError(unlinkErr)
+		}
+		return nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) GetFinanceAccountProviderEvidence(
+	builder handlers.HandlerBuilder[
+		*models.GetFinanceAccountProviderEvidenceParams,
+		*models.FinanceProviderEvidence,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.GetFinanceAccountProviderEvidenceParams,
+	) (*models.FinanceProviderEvidence, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		item, err := c.deps.ProviderEvidenceService.GetAccountProviderEvidence(
+			ctx,
+			financepkg.GetAccountProviderEvidenceParams{
+				ActorUserID: userID,
+				TenantID:    params.TenantID,
+				AccountID:   params.AccountID,
+				EvidenceID:  params.EvidenceID,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		mapped, mapErr := mapProviderEvidence(item)
+		if mapErr != nil {
+			return nil, mapErr
+		}
+		return &mapped, nil
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) GetFinanceTransactionProviderEvidence(
+	builder handlers.HandlerBuilder[
+		*models.GetFinanceTransactionProviderEvidenceParams,
+		*models.FinanceProviderEvidence,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.GetFinanceTransactionProviderEvidenceParams,
+	) (*models.FinanceProviderEvidence, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		item, err := c.deps.ProviderEvidenceService.GetTransactionProviderEvidence(
+			ctx,
+			financepkg.GetTransactionProviderEvidenceParams{
+				ActorUserID:   userID,
+				TenantID:      params.TenantID,
+				TransactionID: params.TransactionID,
+				EvidenceID:    params.EvidenceID,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		mapped, mapErr := mapProviderEvidence(item)
+		if mapErr != nil {
+			return nil, mapErr
+		}
+		return &mapped, nil
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
 func (c *FinanceController) GetFinanceCsvImportAudit(
 	builder handlers.HandlerBuilder[*models.GetFinanceCsvImportAuditParams, *models.FinanceCsvImportAuditResponse],
 ) http.Handler {
@@ -951,6 +1167,36 @@ func (c *FinanceController) ListFinanceAccounts(
 	return c.deps.AuthMiddleware(inner)
 }
 
+func (c *FinanceController) ListFinanceAccountProviderEvidence(
+	builder handlers.HandlerBuilder[
+		*models.ListFinanceAccountProviderEvidenceParams,
+		*models.FinanceProviderEvidenceListResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.ListFinanceAccountProviderEvidenceParams,
+	) (*models.FinanceProviderEvidenceListResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items, err := c.deps.ProviderEvidenceService.ListAccountProviderEvidence(
+			ctx,
+			financepkg.ListAccountProviderEvidenceParams{
+				ActorUserID: userID,
+				TenantID:    params.TenantID,
+				AccountID:   params.AccountID,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		return mapProviderEvidenceMetadataResponse(items), nil
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
 func (c *FinanceController) GetFinanceAccount(
 	builder handlers.HandlerBuilder[*models.GetFinanceAccountParams, *models.FinanceAccount],
 ) http.Handler {
@@ -1146,6 +1392,35 @@ func (c *FinanceController) ListFinanceConnections(
 		}
 
 		return &response, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) ListFinanceConnectionSyncedAccounts(
+	builder handlers.HandlerBuilder[
+		*models.ListFinanceConnectionSyncedAccountsParams,
+		*models.FinanceConnectionSyncedAccountsResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.ListFinanceConnectionSyncedAccountsParams,
+	) (*models.FinanceConnectionSyncedAccountsResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items, err := c.deps.BankSyncService.ListBankConnectionSyncedAccounts(
+			ctx,
+			financepkg.ListBankConnectionSyncedAccountsParams{
+				ActorUserID: userID, TenantID: params.TenantID, ConnectionID: params.ConnectionID,
+			},
+		)
+		if err != nil {
+			return nil, mapBankConnectionError(err, "list finance connection synced accounts")
+		}
+		return mapConnectionSyncedAccountsResponse(items), nil
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -1348,6 +1623,36 @@ func (c *FinanceController) ListFinanceTransactions(
 	return c.deps.AuthMiddleware(inner)
 }
 
+func (c *FinanceController) ListFinanceTransactionProviderEvidence(
+	builder handlers.HandlerBuilder[
+		*models.ListFinanceTransactionProviderEvidenceParams,
+		*models.FinanceProviderEvidenceListResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.ListFinanceTransactionProviderEvidenceParams,
+	) (*models.FinanceProviderEvidenceListResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items, err := c.deps.ProviderEvidenceService.ListTransactionProviderEvidence(
+			ctx,
+			financepkg.ListTransactionProviderEvidenceParams{
+				ActorUserID:   userID,
+				TenantID:      params.TenantID,
+				TransactionID: params.TransactionID,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+		return mapProviderEvidenceMetadataResponse(items), nil
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
 func (c *FinanceController) UpdateFinanceTransaction(
 	builder handlers.HandlerBuilder[*models.UpdateFinanceTransactionParams, *models.FinanceTransaction],
 ) http.Handler {
@@ -1520,12 +1825,6 @@ func (c *FinanceController) TriggerFinanceFxSync(
 		if err != nil {
 			return nil, err
 		}
-		if validationErr := financepkg.ValidateRequiredTimestampRange(
-			params.Payload.StartDate,
-			params.Payload.EndDate,
-		); validationErr != nil {
-			return nil, mapFinanceRangeError(validationErr)
-		}
 		jobRef, err := c.deps.FXService.TriggerFXSync(
 			ctx,
 			financepkg.TriggerFXSyncParams{
@@ -1534,8 +1833,6 @@ func (c *FinanceController) TriggerFinanceFxSync(
 				Provider:          params.Payload.Provider,
 				BaseCurrencies:    params.Payload.BaseCurrencies,
 				QuoteCurrency:     params.Payload.QuoteCurrency,
-				StartDate:         params.Payload.StartDate,
-				EndDate:           params.Payload.EndDate,
 			},
 		)
 		if err != nil {
@@ -1574,6 +1871,29 @@ func mapTransactionTagError(err error) error {
 		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("tagIds", err.Error()), err)
 	}
 	return err
+}
+
+func mapTransferPairError(err error) error {
+	if errors.Is(err, financepkg.ErrInvalidTransferPair) {
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("transferPair", err.Error()), err)
+	}
+	if errors.Is(err, financepkg.ErrTransferNotLinked) {
+		return fmt.Errorf("%w: %w", app.NewErrConflict("transfer pair", err.Error()), err)
+	}
+	return err
+}
+
+func mapTransferDetailError(err error) error {
+	switch {
+	case errors.Is(err, financepkg.ErrInvalidTransferCandidateQuery):
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("transferCandidates", err.Error()), err)
+	case errors.Is(err, financepkg.ErrTransferPartnerNotFound), errors.Is(err, financepkg.ErrTransactionNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("transfer partner", "not found"), err)
+	case errors.Is(err, financepkg.ErrInvalidTransferPartner):
+		return fmt.Errorf("%w: %w", app.NewErrConflict("transfer partner", "unavailable"), err)
+	default:
+		return err
+	}
 }
 
 func validateFinanceTimestamp(field string, value time.Time) error {
@@ -1753,6 +2073,46 @@ func mapTransaction(item domain.Transaction) models.FinanceTransaction {
 	return response
 }
 
+func mapTransactionsResponse(items []domain.Transaction) *models.FinanceTransactionsResponse {
+	response := &models.FinanceTransactionsResponse{Items: make([]*models.FinanceTransaction, 0, len(items))}
+	for _, item := range items {
+		mapped := mapTransaction(item)
+		response.Items = append(response.Items, &mapped)
+	}
+	return response
+}
+
+func mapProviderEvidenceMetadataResponse(
+	items []domain.ProviderEvidence,
+) *models.FinanceProviderEvidenceListResponse {
+	response := models.FinanceProviderEvidenceListResponse{
+		Items: make([]*models.FinanceProviderEvidenceMetadata, 0, len(items)),
+	}
+	for _, item := range items {
+		response.Items = append(response.Items, &models.FinanceProviderEvidenceMetadata{
+			ID:               item.ID,
+			Scope:            string(item.Scope),
+			ProviderObjectID: item.ProviderObjectID,
+			CapturedAt:       item.CapturedAt,
+		})
+	}
+	return &response
+}
+
+func mapProviderEvidence(item domain.ProviderEvidence) (models.FinanceProviderEvidence, error) {
+	payload := map[string]any{}
+	if err := json.Unmarshal(item.PayloadJSON, &payload); err != nil {
+		return models.FinanceProviderEvidence{}, fmt.Errorf("decode provider evidence payload: %w", err)
+	}
+	return models.FinanceProviderEvidence{
+		ID:               item.ID,
+		Scope:            string(item.Scope),
+		ProviderObjectID: item.ProviderObjectID,
+		CapturedAt:       item.CapturedAt,
+		Payload:          payload,
+	}, nil
+}
+
 func nonNilTagIDs(tagIDs []string) []string {
 	if tagIDs == nil {
 		return []string{}
@@ -1791,6 +2151,23 @@ func mapConnection(
 			CreatedAt:       item.Schedule.CreatedAt,
 			UpdatedAt:       item.Schedule.UpdatedAt,
 		}
+	}
+	return response
+}
+
+func mapConnectionSyncedAccountsResponse(
+	items []financepkg.BankConnectionSyncedAccount,
+) *models.FinanceConnectionSyncedAccountsResponse {
+	response := &models.FinanceConnectionSyncedAccountsResponse{
+		Items: make([]*models.FinanceConnectionSyncedAccount, 0, len(items)),
+	}
+	for _, item := range items {
+		response.Items = append(response.Items, &models.FinanceConnectionSyncedAccount{
+			FinanceAccountID:     item.FinanceAccountID,
+			Name:                 item.Name,
+			Currency:             item.Currency,
+			LastSuccessfulSyncAt: item.LastSuccessfulSyncAt,
+		})
 	}
 	return response
 }
@@ -1879,6 +2256,11 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 		),
 		Alerts:    make([]*models.FinanceDashboardAlert, 0, len(item.Alerts)),
 		MissingFx: make([]*models.FinanceDashboardMissingFx, 0, len(item.MissingFX)),
+		CurrentFxRates: make(
+			[]*models.FinanceDashboardCurrentFxRate,
+			0,
+			len(item.CurrentFXRates),
+		),
 		NativeSettledTotals: make(
 			[]*models.FinanceDashboardCurrencyTotal,
 			0,
@@ -1928,6 +2310,17 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 			Provider:      missing.Provider,
 		}
 		response.MissingFx = append(response.MissingFx, &mapped)
+	}
+	for _, rate := range item.CurrentFXRates {
+		mapped := models.FinanceDashboardCurrentFxRate{
+			Provider:                rate.Provider,
+			BaseCurrency:            rate.BaseCurrency,
+			QuoteCurrency:           rate.QuoteCurrency,
+			EffectiveAt:             rate.EffectiveAt,
+			LastSuccessfulRefreshAt: rate.LastSuccessfulRefreshAt,
+			Stale:                   rate.Stale,
+		}
+		response.CurrentFxRates = append(response.CurrentFxRates, &mapped)
 	}
 	for _, total := range item.NativeSettledTotals {
 		mapped := models.FinanceDashboardCurrencyTotal{

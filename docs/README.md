@@ -16,6 +16,7 @@ Use these documents as the active documentation set for this repository.
 - Go coding conventions: [golang-coding-guide.md](./golang-coding-guide.md)
 - Generic testing guidance: [testing-best-practices.md](./testing-best-practices.md)
 - Manual e2e index: [manual-e2e/README.md](./manual-e2e/README.md)
+- Local backend and Vite HTTPS workflow: [local-https.md](./local-https.md)
 - Bank linking v2 manual e2e (API-first): [manual-e2e/bank-linking-e2e.md](./manual-e2e/bank-linking-e2e.md)
 - Hyperliquid venue reference: [hyperliquid.md](./hyperliquid.md)
 - Hyperliquid live smoke runbook: [live-hyperliquid-smoke.md](./live-hyperliquid-smoke.md)

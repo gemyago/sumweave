@@ -357,15 +357,17 @@ func (s *LedgerService) LinkTransfers(ctx context.Context, params LinkTransfersP
 		return err
 	}
 
-	transferGroupID := existingTransferGroupID(firstTransaction, secondTransaction)
-	if transferGroupID == "" {
-		transferGroupID = s.newID()
+	if validationErr := validateTransferPair(firstTransaction, secondTransaction); validationErr != nil {
+		return validationErr
 	}
 
+	transferGroupID := s.newID()
 	now := s.now()
+	firstTransaction.Kind = domain.TransactionKindTransfer
 	firstTransaction.TransferGroupID = &transferGroupID
 	firstTransaction.TransferMatchedAt = &now
 	firstTransaction.UpdatedAt = now
+	secondTransaction.Kind = domain.TransactionKindTransfer
 	secondTransaction.TransferGroupID = &transferGroupID
 	secondTransaction.TransferMatchedAt = &now
 	secondTransaction.UpdatedAt = now
@@ -374,6 +376,76 @@ func (s *LedgerService) LinkTransfers(ctx context.Context, params LinkTransfersP
 	}
 
 	return nil
+}
+
+func (s *LedgerService) UnlinkTransfers(ctx context.Context, params UnlinkTransfersParams) error {
+	firstTransaction, err := s.requireTenantTransaction(
+		ctx,
+		params.TenantID,
+		params.ActorUserID,
+		params.FirstTransactionID,
+	)
+	if err != nil {
+		return err
+	}
+	secondTransaction, err := s.requireTenantTransaction(
+		ctx,
+		params.TenantID,
+		params.ActorUserID,
+		params.SecondTransactionID,
+	)
+	if err != nil {
+		return err
+	}
+
+	if !linkedTransferPair(firstTransaction, secondTransaction) {
+		return ErrTransferNotLinked
+	}
+
+	now := s.now()
+	firstTransaction.Kind = domain.TransactionKindRegular
+	firstTransaction.TransferGroupID = nil
+	firstTransaction.TransferMatchedAt = nil
+	firstTransaction.UpdatedAt = now
+	secondTransaction.Kind = domain.TransactionKindRegular
+	secondTransaction.TransferGroupID = nil
+	secondTransaction.TransferMatchedAt = nil
+	secondTransaction.UpdatedAt = now
+	if saveErr := s.store.SaveLinkedTransferPair(ctx, firstTransaction, secondTransaction); saveErr != nil {
+		return fmt.Errorf("unlink transfers: %w", saveErr)
+	}
+
+	return nil
+}
+
+func validateTransferPair(firstTransaction domain.Transaction, secondTransaction domain.Transaction) error {
+	if firstTransaction.ID == secondTransaction.ID ||
+		firstTransaction.AccountID == secondTransaction.AccountID ||
+		firstTransaction.Status != domain.TransactionStatusBooked ||
+		secondTransaction.Status != domain.TransactionStatusBooked ||
+		firstTransaction.AmountMinor == 0 ||
+		secondTransaction.AmountMinor == 0 ||
+		(firstTransaction.AmountMinor > 0) == (secondTransaction.AmountMinor > 0) ||
+		firstTransaction.TransferGroupID != nil ||
+		secondTransaction.TransferGroupID != nil ||
+		firstTransaction.TransferMatchedAt != nil ||
+		secondTransaction.TransferMatchedAt != nil {
+		return ErrInvalidTransferPair
+	}
+	return nil
+}
+
+func linkedTransferPair(firstTransaction domain.Transaction, secondTransaction domain.Transaction) bool {
+	if firstTransaction.ID == secondTransaction.ID ||
+		firstTransaction.Kind != domain.TransactionKindTransfer ||
+		secondTransaction.Kind != domain.TransactionKindTransfer ||
+		firstTransaction.TransferGroupID == nil ||
+		secondTransaction.TransferGroupID == nil ||
+		firstTransaction.TransferMatchedAt == nil ||
+		secondTransaction.TransferMatchedAt == nil {
+		return false
+	}
+	return *firstTransaction.TransferGroupID == *secondTransaction.TransferGroupID
 }
 
 func (s *LedgerService) ListTransactions(

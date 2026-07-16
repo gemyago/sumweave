@@ -87,7 +87,8 @@ Expected:
 If you want to continue beyond the browser setup smoke test:
 
 1. Click **Sync now** on the new Synthetic card.
-2. Use [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) to verify linked accounts and provider transactions over the API.
+2. Open **Synced accounts** on that card and confirm only account name, currency, last successful sync, and in-app account links are shown; close/reopen to confirm it uses the per-card cache until a new sync invalidates it.
+3. Use [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) to verify linked accounts and provider transactions over the API.
 
 ## 8. If anything is wrong, report it
 

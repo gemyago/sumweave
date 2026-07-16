@@ -446,6 +446,12 @@ func mergeAccountDetails(
 	if strings.TrimSpace(account.Name) == "" {
 		account.Name = details.Name
 	}
+	if strings.TrimSpace(account.Details) == "" {
+		account.Details = details.Details
+	}
+	if strings.TrimSpace(account.Product) == "" {
+		account.Product = details.Product
+	}
 	if strings.TrimSpace(account.Currency) == "" {
 		account.Currency = details.Currency
 	}
@@ -517,7 +523,7 @@ func normalizeAccount(
 	return domain.ProviderAccountObservation{
 		Connection:        connection,
 		ProviderAccountID: accountID,
-		Name:              firstNonEmpty(account.Name, accountID),
+		Name:              firstNonEmpty(account.Name, account.Details, account.Product, accountID),
 		Currency:          strings.ToUpper(account.Currency),
 		IBAN:              account.IBAN,
 	}
@@ -583,6 +589,7 @@ func normalizeTransaction(
 		EffectiveAt:           effectiveAt,
 		Fingerprint:           providerFingerprint(accountID, description, amountMinor, currency, effectiveAt),
 		ProviderOriginal:      providerOriginal,
+		RawPayloadJSON:        mustJSON(transaction),
 	}
 }
 
@@ -684,9 +691,11 @@ func transactionAmountCurrency(amount *enablebankingclient.TransactionAmount) st
 	return amount.Currency
 }
 
+const enableBankingBookedStatus = "BOOKED"
+
 func normalizeTransactionStatus(raw string) domain.TransactionStatus {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
-	case "BOOK", "BOOKED":
+	case "BOOK", enableBankingBookedStatus:
 		return domain.TransactionStatusBooked
 	case "PDNG", "PENDING":
 		return domain.TransactionStatusPending

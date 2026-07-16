@@ -16,11 +16,11 @@ permission:
     notion-user: allow
   read:
     '*': deny
-    ./**/*.md: allow
-    ./.agents/prompts/crew-manager/config.yaml: allow
+    '*.md': allow
+    .agents/prompts/crew-manager/config.yaml: allow
   edit:
     '*': deny
-    tmp/crew-manager/**/*.*: allow
+    tmp/crew-manager/**: allow
   bash:
     '*': deny
   task:

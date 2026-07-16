@@ -10,8 +10,14 @@ const mocks = vi.hoisted(() => ({
   listCategories: vi.fn(),
   listTags: vi.fn(),
   getTransaction: vi.fn(),
+  listTransferCandidates: vi.fn(),
+  getTransferPartner: vi.fn(),
+  linkTransferPair: vi.fn(),
+  unlinkTransferPair: vi.fn(),
   createTransaction: vi.fn(),
   updateTransaction: vi.fn(),
+  listTransactionProviderEvidence: vi.fn(),
+  getTransactionProviderEvidence: vi.fn(),
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => ({
@@ -66,6 +72,10 @@ describe('Finance transaction editor page', () => {
       createdAt: now,
       updatedAt: now,
     })
+    mocks.listTransferCandidates.mockResolvedValue({ items: [] })
+    mocks.getTransferPartner.mockResolvedValue(null)
+    mocks.linkTransferPair.mockResolvedValue(undefined)
+    mocks.unlinkTransferPair.mockResolvedValue(undefined)
     mocks.createTransaction.mockResolvedValue({
       id: 'tx-new',
       tenantId: 'tenant-1',
@@ -111,23 +121,26 @@ describe('Finance transaction editor page', () => {
       createdAt: now,
       updatedAt: now,
     })
+    mocks.listTransactionProviderEvidence.mockResolvedValue([])
+    mocks.getTransactionProviderEvidence.mockResolvedValue({})
   })
 
   it('initializes create mode with a blank editable record and submits through the shared editor', async () => {
     const user = userEvent.setup()
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
     render(FinanceTransactionEditor, { params: {} })
 
     expect(await screen.findByRole('heading', { name: 'Record transaction' })).toBeInTheDocument()
     expect(screen.queryByText('Transaction editor')).not.toBeInTheDocument()
     expect(mocks.getTransaction).not.toHaveBeenCalled()
-    await screen.findByLabelText('Amount minor')
+    await screen.findByLabelText('Amount')
 
     expect(screen.getByLabelText('Transaction kind')).toHaveValue('expense')
     expect(screen.getByLabelText('Transaction effective at')).toHaveValue(localTodayAtMidnight())
     expect(screen.getByRole('combobox', { name: 'Transaction currency' })).toHaveValue('USD')
 
-    await user.clear(screen.getByLabelText('Amount minor'))
-    await user.type(screen.getByLabelText('Amount minor'), '1200')
+    await user.clear(screen.getByLabelText('Amount'))
+    await user.type(screen.getByLabelText('Amount'), '12.00')
     await user.clear(screen.getByLabelText('Transaction description'))
     await user.type(screen.getByLabelText('Transaction description'), 'Coffee')
     await user.clear(screen.getByLabelText('Transaction effective at'))
@@ -138,11 +151,25 @@ describe('Finance transaction editor page', () => {
 
     await waitFor(() => expect(mocks.createTransaction).toHaveBeenCalled())
     expect(await screen.findByText('Transaction recorded.')).toBeInTheDocument()
-    expect(mocks.createTransaction).toHaveBeenCalledWith(expect.objectContaining({ tagIds: ['tag-1'] }))
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+    expect(mocks.createTransaction).toHaveBeenCalledWith(expect.objectContaining({ amountMinor: 1200, tagIds: ['tag-1'] }))
     expect(screen.getByRole('link', { name: 'Cancel' })).toHaveAttribute('href', '#/finance/transactions')
+    focus.mockRestore()
   })
 
-  it('updates create-mode state flags and currency from the selected account', async () => {
+  it('keeps details first, clears stale save feedback after an edit, and omits context copy', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactionEditor, { params: {} })
+
+    await screen.findByRole('heading', { name: 'Details' })
+    expect(screen.queryByText('Transaction context')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+    expect(await screen.findByText('Transaction recorded.')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Transaction description'), ' changed')
+    expect(screen.queryByText('Transaction recorded.')).not.toBeInTheDocument()
+  })
+
+  it('updates create-mode values and currency from the selected account without free-text transfer grouping', async () => {
     const user = userEvent.setup()
     render(FinanceTransactionEditor, { params: {} })
 
@@ -151,12 +178,151 @@ describe('Finance transaction editor page', () => {
     await user.selectOptions(screen.getByLabelText('Transaction account'), 'account-2')
     await user.selectOptions(screen.getByLabelText('Transaction status'), 'pending')
     await user.selectOptions(screen.getByLabelText('Transaction kind'), 'refund')
-    await user.type(screen.getByLabelText('Transfer group'), 'transfer-1')
 
     expect(screen.getByLabelText('Transaction currency')).toHaveValue('EUR')
-    expect(screen.getAllByText('pending').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('transfer').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Transaction status')).toHaveValue('pending')
+    expect(screen.getByLabelText('Transaction kind')).toHaveValue('refund')
+    expect(screen.queryByLabelText('Transfer group')).not.toBeInTheDocument()
+  })
+
+  it('renders persisted regular as a valid transaction kind option', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.getTransaction.mockResolvedValueOnce({
+      id: 'tx-regular', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'booked', kind: 'regular', amountMinor: -100,
+      currency: 'USD', description: 'Regular debit', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    })
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-regular' } })
+
+    expect(await screen.findByLabelText('Transaction kind')).toHaveValue('regular')
+  })
+
+  it('lazily loads all-account candidates, disables ineligible rows, and resets paging when applying the range', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.getTransaction.mockResolvedValueOnce({
+      id: 'tx-out', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'booked', kind: 'regular', amountMinor: -100,
+      currency: 'USD', description: 'Transfer out', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    })
+    mocks.listTransferCandidates.mockResolvedValue({
+      items: Array.from({ length: 20 }, (_, index) => ({
+        id: `candidate-${index}`, tenantId: 'tenant-1', accountId: index === 0 ? 'account-1' : 'account-2', source: 'provider', status: 'booked', kind: 'regular', amountMinor: 100,
+        currency: 'USD', description: `Candidate ${index}`, effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+      })),
+    })
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-out' } })
+
+    await user.click(await screen.findByRole('button', { name: 'Link transfer' }))
+    await waitFor(() => expect(mocks.listTransferCandidates).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-1', transactionId: 'tx-out', limit: 20, offset: 0 })))
+    expect(screen.getByText(/Choose a transaction from a different account\./)).toBeInTheDocument()
+    expect(screen.getByLabelText('Select Candidate 0')).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Transfer candidate pages: next page' }))
+    await waitFor(() => expect(mocks.listTransferCandidates).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 20 })))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(mocks.listTransferCandidates).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 })))
+  })
+
+  it('keeps transfer candidates and their pager usable when a later candidate page fails', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.getTransaction.mockResolvedValueOnce({
+      id: 'tx-out', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'booked', kind: 'regular', amountMinor: -100,
+      currency: 'USD', description: 'Transfer out', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    })
+    mocks.listTransferCandidates
+      .mockResolvedValueOnce({ items: Array.from({ length: 20 }, (_, index) => ({
+        id: `candidate-${index}`, tenantId: 'tenant-1', accountId: 'account-2', source: 'provider', status: 'booked', kind: 'regular', amountMinor: 100,
+        currency: 'USD', description: `Candidate ${index}`, effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+      })) })
+      .mockRejectedValueOnce(new Error('Candidates changed'))
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-out' } })
+
+    await user.click(await screen.findByRole('button', { name: 'Link transfer' }))
+    expect(await screen.findByText('Candidate 0')).toBeInTheDocument()
+    const next = screen.getByRole('button', { name: 'Transfer candidate pages: next page' })
+    await user.click(next)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Candidates changed')
+    expect(screen.getByText('Candidate 0')).toBeInTheDocument()
+    expect(next).toBeEnabled()
+  })
+
+  it('confirms an eligible candidate, surfaces recoverable link failures, and reloads after success', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    const source = {
+      id: 'tx-out', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'booked', kind: 'regular', amountMinor: -100,
+      currency: 'USD', description: 'Transfer out', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    }
+    mocks.getTransaction.mockResolvedValue(source)
+    mocks.listTransferCandidates.mockResolvedValue({ items: [{ ...source, id: 'tx-in', accountId: 'account-2', amountMinor: 100, description: 'Transfer in' }] })
+    mocks.linkTransferPair.mockRejectedValueOnce(new Error('Conflict'))
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-out' } })
+
+    await user.click(await screen.findByRole('button', { name: 'Link transfer' }))
+    await user.click(await screen.findByLabelText('Select Transfer in'))
+    expect(screen.getByText('Confirm internal transfer')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm link transfer' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The record may have changed; refresh candidates and try again.')
+    mocks.linkTransferPair.mockResolvedValueOnce(undefined)
+    await user.click(screen.getByRole('button', { name: 'Confirm link transfer' }))
+    await waitFor(() => expect(mocks.linkTransferPair).toHaveBeenLastCalledWith({ tenantId: 'tenant-1', firstTransactionId: 'tx-out', secondTransactionId: 'tx-in' }))
+    expect(await screen.findByText(/Internal transfer linked/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Transfer candidates')).not.toBeInTheDocument()
+  })
+
+  it('keeps candidate lookup errors recoverable without leaving the detail route', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.getTransaction.mockResolvedValueOnce({
+      id: 'tx-out', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'booked', kind: 'regular', amountMinor: -100,
+      currency: 'USD', description: 'Transfer out', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    })
+    mocks.listTransferCandidates.mockRejectedValueOnce(new Error('Candidate list changed')).mockResolvedValueOnce({ items: [] })
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-out' } })
+
+    await user.click(await screen.findByRole('button', { name: 'Link transfer' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Candidate list changed')
+    await user.click(screen.getByRole('button', { name: 'Refresh candidates' }))
+    expect(await screen.findByText('No transfer candidates matched this date range.')).toBeInTheDocument()
+  })
+
+  it('lazily loads a matched partner and requires confirmation before unlinking', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.getTransaction.mockResolvedValueOnce({
+      id: 'tx-out', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'booked', kind: 'transfer', amountMinor: -100,
+      currency: 'USD', description: 'Transfer out', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: 'group-1', transferMatchedAt: now, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    })
+    mocks.getTransferPartner.mockResolvedValueOnce({
+      id: 'tx-in', tenantId: 'tenant-1', accountId: 'account-2', source: 'provider', status: 'booked', kind: 'transfer', amountMinor: 100,
+      currency: 'USD', description: 'Transfer in', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: 'group-1', transferMatchedAt: now, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    })
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-out' } })
+
+    await waitFor(() => expect(mocks.getTransferPartner).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-out' }))
+    expect(await screen.findByRole('link', { name: 'Open linked transaction' })).toHaveAttribute('href', '#/finance/transactions/tx-in')
+    await user.click(await screen.findByRole('button', { name: 'Unlink transfer' }))
+    expect(screen.getByLabelText('Confirm unlink transfer')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm unlink' }))
+    await waitFor(() => expect(mocks.unlinkTransferPair).toHaveBeenCalledWith({ tenantId: 'tenant-1', firstTransactionId: 'tx-out', secondTransactionId: 'tx-in' }))
+  })
+
+  it('keeps a matched-partner lookup failure recoverable', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.getTransaction.mockResolvedValueOnce({
+      id: 'tx-out', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'booked', kind: 'transfer', amountMinor: -100,
+      currency: 'USD', description: 'Transfer out', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: 'group-1', transferMatchedAt: now, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    })
+    mocks.getTransferPartner.mockRejectedValueOnce(new Error('Partner changed')).mockResolvedValueOnce({
+      id: 'tx-in', tenantId: 'tenant-1', accountId: 'account-2', source: 'provider', status: 'booked', kind: 'transfer', amountMinor: 100,
+      currency: 'USD', description: 'Transfer in', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: 'group-1', transferMatchedAt: now, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    })
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-out' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Partner changed')
+    await user.click(screen.getByRole('button', { name: 'Retry linked transfer' }))
+    expect(await screen.findByText('Linked with Savings')).toBeInTheDocument()
   })
 
   it('uses the supported currency selector and keeps the mobile field order task-first', async () => {
@@ -168,14 +334,14 @@ describe('Finance transaction editor page', () => {
     expect(screen.getByRole('combobox', { name: 'Transaction currency' })).toHaveTextContent('USDEURPLNUAH')
 
     const fields = Array.from(document.querySelectorAll('form label, form legend')).map((field) => field.textContent)
-    expect(fields.slice(0, 8)).toEqual(['Account', 'Category', 'Tags', 'Household', 'Shared', 'Kind', 'Amount minor', 'Currency'])
+    expect(fields.slice(0, 8)).toEqual(['Account', 'Category', 'Tags', 'Household', 'Shared', 'Kind', 'Amount', 'Currency'])
   })
 
   it('loads edit mode through the detail endpoint, shows provider-original context, and saves nullable category updates', async () => {
     const user = userEvent.setup()
     render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
 
-    expect(await screen.findByRole('heading', { name: 'Edit transaction' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Transaction' })).toBeInTheDocument()
     await waitFor(() =>
       expect(mocks.getTransaction).toHaveBeenCalledWith({
         tenantId: 'tenant-1',
@@ -185,11 +351,12 @@ describe('Finance transaction editor page', () => {
     await screen.findByText('Provider refund')
     expect(screen.getByLabelText('Household')).toBeChecked()
     expect(screen.getByLabelText('Shared')).toBeChecked()
-    expect(screen.getAllByText('pending').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
+    expect(screen.getByLabelText('Transaction status')).toHaveValue('pending')
+    expect(screen.getByLabelText('Transaction kind')).toHaveValue('refund')
 
-    await user.clear(screen.getByLabelText('Amount minor'))
-    await user.type(screen.getByLabelText('Amount minor'), '800')
+    expect(screen.getByLabelText('Amount')).toHaveValue('9.00')
+    await user.clear(screen.getByLabelText('Amount'))
+    await user.type(screen.getByLabelText('Amount'), '8.00')
     await user.clear(screen.getByLabelText('Transaction description'))
     await user.type(screen.getByLabelText('Transaction description'), 'Refund updated')
     await user.selectOptions(screen.getByLabelText('Transaction category'), '')
@@ -211,6 +378,56 @@ describe('Finance transaction editor page', () => {
       }),
     )
     expect(await screen.findByRole('status')).toHaveTextContent('Transaction updated.')
+  })
+
+  it('submits a negative major-unit decimal as exact minor units', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactionEditor, { params: {} })
+
+    await user.clear(await screen.findByLabelText('Amount'))
+    await user.type(screen.getByLabelText('Amount'), '-553.00')
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(mocks.createTransaction).toHaveBeenCalled())
+    expect(mocks.createTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accountId: 'account-1',
+        amountMinor: -55300,
+      }),
+    )
+  })
+
+  it('rejects malformed and over-precision major-unit amounts before calling the API', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactionEditor, { params: {} })
+
+    await user.clear(await screen.findByLabelText('Amount'))
+    await user.type(screen.getByLabelText('Amount'), '12.345')
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Amount must be a whole number or have at most two decimal places.')
+    expect(mocks.createTransaction).not.toHaveBeenCalled()
+  })
+
+  it('loads provider evidence metadata only after the detail disclosure opens and content only after reveal', async () => {
+    const user = userEvent.setup()
+    mocks.listTransactionProviderEvidence.mockResolvedValueOnce([
+      { id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: new Date('2026-06-20T12:00:00Z') },
+    ])
+    mocks.getTransactionProviderEvidence.mockResolvedValueOnce({
+      id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: new Date('2026-06-20T12:00:00Z'), payload: { amount: 'sanitized' },
+    })
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
+
+    expect(await screen.findByText('Provider evidence')).toBeInTheDocument()
+    expect(mocks.listTransactionProviderEvidence).not.toHaveBeenCalled()
+    await user.click(screen.getByText('Provider evidence'))
+    await waitFor(() => expect(mocks.listTransactionProviderEvidence).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-1' }))
+    expect(mocks.getTransactionProviderEvidence).not.toHaveBeenCalled()
+    await user.click(await screen.findByRole('button', { name: 'Reveal sanitized details' }))
+    await waitFor(() => expect(mocks.getTransactionProviderEvidence).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-1', evidenceId: 'evidence-1' }))
+    expect(screen.getByText('Sanitized provider evidence')).toBeInTheDocument()
+    expect(screen.getByText(/not the raw provider payload/i)).toBeInTheDocument()
   })
 
   it('round-trips a local datetime value through the transaction editor', async () => {
@@ -276,7 +493,7 @@ describe('Finance transaction editor page', () => {
 
     render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
 
-    await screen.findByRole('heading', { name: 'Edit transaction' })
+    await screen.findByRole('heading', { name: 'Transaction' })
     await screen.findByRole('button', { name: 'Save transaction' })
     await user.click(screen.getByRole('button', { name: 'Save transaction' }))
 

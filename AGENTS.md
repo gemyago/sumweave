@@ -80,6 +80,8 @@ PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from
 - Run `pm2 start|stop|restart id|name` to control specific processes
 - Run `pm2 logs id|name` to see the logs of specific processes
 
+For optional local HTTPS backend and Vite development, follow [docs/local-https.md](./docs/local-https.md). The documented workflow generates ignored local certificates and does not change the normal PM2 HTTP workflow.
+
 ## Nx (monorepo tasks)
 
 This monorepo is managed by Nx. Most typical tasks are:
@@ -130,6 +132,7 @@ The rules are:
 - Reseed means replace local seeded data, then reopen the live DB.
 - Launch local backend CLI commands from `apps/signal-foundry`.
 - Avoid markdown tables, prefer lists or other formatting. Tables are hard to read by humans. Use tables only when user explicitly requests it.
+- Do not run `git diff --check` as a routine verification step.
 - Do not explicitly normalize dates or timestamps to UTC.
 - Consider SQLite as local-dev only storage. Small issues and inconsistencies are tolerable.
 - Keep API responses single-purpose by default (e.g operating on a single entity); Composition must have a good justification.

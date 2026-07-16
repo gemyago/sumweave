@@ -52,7 +52,7 @@ Expected:
 1. Open `#/finance/categories` and create `Transaction UI tag A <run-tag>` and `Transaction UI tag B <run-tag>` in the Tags card.
 2. Open `#/finance/transactions`.
 3. Select **Create transaction**.
-4. Confirm the browser opens `#/finance/transactions/new` and shows **Record transaction**.
+4. Confirm the browser opens `#/finance/transactions/new`, shows **Record transaction**, and places **Details** before any optional edit-only material.
 5. Fill the editor with:
    - **Account**: `Transaction UI account <run-tag>`
     - **Category**: `No category`
@@ -61,11 +61,11 @@ Expected:
    - **Status**: `booked`
    - **Source**: `manual`
    - **Currency**: `USD`
-   - **Amount minor**: `-1234`
+    - **Amount**: `-12.34`
    - **Transfer group**: empty
    - **Description**: `Transaction UI e2e <run-tag>`
    - **Effective at**: a valid local date and time
-6. Select **Save transaction** once.
+6. Select **Save transaction** once. Confirm the success status appears immediately below the save/cancel row without jumping the document, and focus moves to that status without scrolling.
 
 Expected:
 
@@ -74,6 +74,7 @@ Expected:
 - the request returns `200`
 - the page shows **Transaction recorded.**
 - the editor remains usable and shows the persisted transaction values
+- editing a field clears the prior save feedback
 
 ## 5. Verify the ledger row
 

@@ -17,6 +17,7 @@ type DashboardPeriodPreset string
 const (
 	DashboardPeriodPresetCurrentMonth  DashboardPeriodPreset = "current_month"
 	DashboardPeriodPresetPreviousMonth DashboardPeriodPreset = "previous_month"
+	DashboardPeriodPresetNextMonth     DashboardPeriodPreset = "next_month"
 	DashboardPeriodPresetLast3Months   DashboardPeriodPreset = "last_3_months"
 	DashboardPeriodPresetLast6Months   DashboardPeriodPreset = "last_6_months"
 	DashboardPeriodPresetThisYear      DashboardPeriodPreset = "this_year"
@@ -42,6 +43,7 @@ type Dashboard struct {
 	AccountBalances     []DashboardAccountBalance
 	Alerts              []DashboardAlert
 	MissingFX           []DashboardMissingFXDiagnostic
+	CurrentFXRates      []DashboardFXRate
 	NativeSettledTotals []DashboardCurrencyTotal
 }
 
@@ -110,6 +112,15 @@ type DashboardMissingFXDiagnostic struct {
 	Provider      string
 }
 
+type DashboardFXRate struct {
+	Provider                string
+	BaseCurrency            string
+	QuoteCurrency           string
+	EffectiveAt             time.Time
+	LastSuccessfulRefreshAt time.Time
+	Stale                   bool
+}
+
 type DashboardCurrencyTotal struct {
 	Currency     string
 	IncomeMinor  int64
@@ -143,6 +154,7 @@ func ValidateDashboardParams(params DashboardParams) error {
 	switch preset {
 	case DashboardPeriodPresetCurrentMonth,
 		DashboardPeriodPresetPreviousMonth,
+		DashboardPeriodPresetNextMonth,
 		DashboardPeriodPresetLast3Months,
 		DashboardPeriodPresetLast6Months,
 		DashboardPeriodPresetThisYear,
@@ -245,22 +257,16 @@ func resolveDashboardPeriod(now time.Time, params DashboardParams) DashboardPeri
 		preset = DashboardPeriodPresetCurrentMonth
 	}
 	current := now
+	currentMonthStart, _ := calendarMonthWindow(current)
 	var startDate time.Time
 	var endDate time.Time
 	switch preset {
 	case DashboardPeriodPresetCurrentMonth:
-		startDate = time.Date(
-			current.Year(), current.Month(), 1,
-			current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location(),
-		)
-		endDate = current
+		startDate, endDate = calendarMonthWindow(currentMonthStart)
 	case DashboardPeriodPresetPreviousMonth:
-		currentMonthStart := time.Date(
-			current.Year(), current.Month(), 1,
-			current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location(),
-		)
-		startDate = currentMonthStart.AddDate(0, -1, 0)
-		endDate = currentMonthStart.Add(-time.Nanosecond)
+		startDate, endDate = calendarMonthWindow(currentMonthStart.AddDate(0, -1, 0))
+	case DashboardPeriodPresetNextMonth:
+		startDate, endDate = calendarMonthWindow(currentMonthStart.AddDate(0, 1, 0))
 	case DashboardPeriodPresetLast3Months:
 		startDate = current.AddDate(0, -3, 0)
 		endDate = current
@@ -284,10 +290,13 @@ func resolveDashboardPeriod(now time.Time, params DashboardParams) DashboardPeri
 		startDate = params.StartDate
 		endDate = params.EndDate
 	}
-	previousStart, previousEnd, nextStart, nextEnd := shiftPeriodWindow(
-		startDate,
-		endDate,
-	)
+	previousStart, previousEnd, nextStart, nextEnd := shiftPeriodWindow(startDate, endDate)
+	if preset == DashboardPeriodPresetCurrentMonth ||
+		preset == DashboardPeriodPresetPreviousMonth ||
+		preset == DashboardPeriodPresetNextMonth {
+		previousStart, previousEnd = calendarMonthWindow(startDate.AddDate(0, -1, 0))
+		nextStart, nextEnd = calendarMonthWindow(startDate.AddDate(0, 1, 0))
+	}
 	return DashboardPeriod{
 		Preset:    preset,
 		StartDate: startDate,
@@ -295,6 +304,11 @@ func resolveDashboardPeriod(now time.Time, params DashboardParams) DashboardPeri
 		Previous:  DashboardPeriodWindow{StartDate: previousStart, EndDate: previousEnd},
 		Next:      DashboardPeriodWindow{StartDate: nextStart, EndDate: nextEnd},
 	}
+}
+
+func calendarMonthWindow(date time.Time) (time.Time, time.Time) {
+	startDate := time.Date(date.Year(), date.Month(), 1, 0, 0, 0, 0, date.Location())
+	return startDate, startDate.AddDate(0, 1, 0).Add(-time.Nanosecond)
 }
 
 func shiftPeriodWindow(
@@ -386,19 +400,14 @@ func addNativeTotal(
 }
 
 type fxRateLookup struct {
-	latest map[string][]domain.FXRate
+	latest map[string]domain.FXRate
 }
 
 func newFXRateLookup(rates []domain.FXRate) fxRateLookup {
-	lookup := fxRateLookup{latest: map[string][]domain.FXRate{}}
+	lookup := fxRateLookup{latest: map[string]domain.FXRate{}}
 	for _, rate := range rates {
 		pairKey := fmt.Sprintf("%s|%s|%s", rate.Provider, rate.BaseCurrency, rate.QuoteCurrency)
-		lookup.latest[pairKey] = append(lookup.latest[pairKey], rate)
-	}
-	for pairKey := range lookup.latest {
-		sort.Slice(lookup.latest[pairKey], func(i int, j int) bool {
-			return lookup.latest[pairKey][i].RateDate.Before(lookup.latest[pairKey][j].RateDate)
-		})
+		lookup.latest[pairKey] = rate
 	}
 	return lookup
 }
@@ -415,15 +424,8 @@ func convertTransactionContribution(
 		return incomeMinor, expenseMinor, true
 	}
 	pairKey := fmt.Sprintf("%s|%s|%s", provider, transaction.Currency, displayCurrency)
-	var rate *domain.FXRate
-	for index := range lookup.latest[pairKey] {
-		candidate := &lookup.latest[pairKey][index]
-		if candidate.RateDate.After(transaction.EffectiveAt) {
-			break
-		}
-		rate = candidate
-	}
-	if rate == nil {
+	rate, found := lookup.latest[pairKey]
+	if !found {
 		return 0, 0, false
 	}
 	return int64(math.Round(float64(incomeMinor) * rate.Rate)),
@@ -435,7 +437,6 @@ func convertBalanceAmount(
 	amount int64,
 	baseCurrency string,
 	displayCurrency string,
-	endDate time.Time,
 	provider string,
 	lookup fxRateLookup,
 ) (int64, bool) {
@@ -447,19 +448,8 @@ func convertBalanceAmount(
 		return amount, true
 	}
 	pairKey := fmt.Sprintf("%s|%s|%s", provider, baseCurrency, displayCurrency)
-	rates := lookup.latest[pairKey]
-	if len(rates) == 0 {
-		return 0, false
-	}
-	asOfDate := endDate
-	selected := rates[0]
-	for _, rate := range rates {
-		if rate.RateDate.After(asOfDate) {
-			break
-		}
-		selected = rate
-	}
-	if selected.RateDate.After(asOfDate) {
+	selected, found := lookup.latest[pairKey]
+	if !found {
 		return 0, false
 	}
 	return int64(math.Round(float64(amount) * selected.Rate)), true

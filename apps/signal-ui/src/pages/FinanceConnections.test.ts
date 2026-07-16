@@ -7,6 +7,7 @@ import { formatFinanceDateTime } from '../lib/finance/format'
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
   listConnections: vi.fn(),
+  listConnectionSyncedAccounts: vi.fn(),
   linkTokenConnection: vi.fn(),
   startRedirectConnection: vi.fn(),
   finishRedirectConnection: vi.fn(),
@@ -68,6 +69,7 @@ describe('Finance connections page', () => {
     window.history.replaceState({}, '', '/#/finance/connections')
     mocks.listTenants.mockResolvedValue([createTenantFixture()])
     mocks.listConnections.mockResolvedValue([createConnectionFixture()])
+    mocks.listConnectionSyncedAccounts.mockResolvedValue([])
     mocks.linkTokenConnection.mockResolvedValue(createConnectionFixture())
     mocks.startRedirectConnection.mockResolvedValue({ provider: 'pko', authorizationUrl: 'https://bank.example/authorize', state: 'state-1' })
     mocks.finishRedirectConnection.mockResolvedValue(createConnectionFixture())
@@ -82,6 +84,26 @@ describe('Finance connections page', () => {
     expect(await screen.findByText('Mono')).toBeInTheDocument()
     expect(screen.getByText('Provider ref: ref')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open last sync job' })).toHaveAttribute('href', '#/finance/jobs/job-1')
+  })
+
+  it('lazily loads safe synced-account fields once, retries failures, and invalidates after sync', async () => {
+    const user = userEvent.setup()
+    mocks.listConnectionSyncedAccounts
+      .mockRejectedValueOnce(new Error('accounts unavailable'))
+      .mockResolvedValue([{ financeAccountId: 'account-1', name: 'Checking', currency: 'USD', lastSuccessfulSyncAt: new Date('2026-06-20T12:00:00Z') }])
+
+    renderPage()
+    await user.click(await screen.findByText('Synced accounts'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('accounts unavailable')
+    await user.click(screen.getByRole('button', { name: 'Retry synced accounts' }))
+    expect(await screen.findByRole('link', { name: /Checking · USD/ })).toHaveAttribute('href', '#/finance/accounts/account-1')
+    expect(mocks.listConnectionSyncedAccounts).toHaveBeenCalledTimes(2)
+    await user.click(screen.getByText('Synced accounts'))
+    await user.click(screen.getByText('Synced accounts'))
+    expect(mocks.listConnectionSyncedAccounts).toHaveBeenCalledTimes(2)
+    await user.click(screen.getByRole('button', { name: 'Sync now' }))
+    await waitFor(() => expect(mocks.triggerConnectionSync).toHaveBeenCalled())
+    await waitFor(() => expect(mocks.listConnectionSyncedAccounts).toHaveBeenCalledTimes(3))
   })
 
   it('falls back to external id when provider reference is missing', async () => {

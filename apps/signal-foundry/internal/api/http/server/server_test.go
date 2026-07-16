@@ -2,12 +2,21 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -128,6 +137,83 @@ func TestHTTPServer(t *testing.T) {
 			require.NoError(t, srv1.httpSrv.Shutdown(ctx), "httpSrv.Shutdown failed")
 		})
 	})
+
+	t.Run("TLS", func(t *testing.T) {
+		t.Run("serves HTTPS with configured certificate files", func(t *testing.T) {
+			deps := makeDeps()
+			deps.TLSCertFile, deps.TLSKeyFile = writeTestCertificate(t)
+			addr := fmt.Sprintf("localhost:%d", deps.Port)
+			srv := NewHTTPServer(deps)
+			stopCh := make(chan error, 1)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+
+			go func() { stopCh <- srv.Start(ctx) }()
+			awaitListening(ctx, t, deps.listeningSignal, stopCh)
+
+			tlsConfig := &tls.Config{
+				InsecureSkipVerify: true,
+			}
+			client := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}}
+			res, err := client.Get("https://" + addr)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, res.StatusCode)
+			require.NoError(t, res.Body.Close())
+			require.NoError(t, srv.httpSrv.Shutdown(ctx))
+			require.NoError(t, <-stopCh)
+		})
+
+		t.Run("rejects incomplete certificate configuration", func(t *testing.T) {
+			deps := makeDeps()
+			deps.TLSCertFile = filepath.Join(t.TempDir(), "certificate.pem")
+			err := NewHTTPServer(deps).Start(t.Context())
+			require.ErrorContains(t, err, "both HTTP TLS certificate and key files are required")
+		})
+	})
+}
+
+func awaitListening(ctx context.Context, t *testing.T, listening <-chan struct{}, stopped <-chan error) {
+	t.Helper()
+	select {
+	case <-listening:
+	case err := <-stopped:
+		t.Fatalf("server failed to start: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("server failed to signal readiness in time: %v", ctx.Err())
+	}
+}
+
+func writeTestCertificate(t *testing.T) (string, string) {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	certificateTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		DNSNames:     []string{"localhost"},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(time.Minute),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	certificateDER, err := x509.CreateCertificate(
+		rand.Reader,
+		certificateTemplate,
+		certificateTemplate,
+		&privateKey.PublicKey,
+		privateKey,
+	)
+	require.NoError(t, err)
+	directory := t.TempDir()
+	certificateFile := filepath.Join(directory, "certificate.pem")
+	keyFile := filepath.Join(directory, "key.pem")
+	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})
+	require.NoError(t, os.WriteFile(certificateFile, certificatePEM, 0o600))
+	privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER})
+	require.NoError(t, os.WriteFile(keyFile, privateKeyPEM, 0o600))
+	return certificateFile, keyFile
 }
 
 func TestRouterMiddleware(t *testing.T) {

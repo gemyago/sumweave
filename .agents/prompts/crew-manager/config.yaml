@@ -23,7 +23,7 @@ sub-agents:
     sub_agent_name: crew-p2-general
     description: General P2 software engineer for small bounded work that needs more context or judgment than P2 Fast, including focused investigation, small bug fixes, housekeeping, simple coding or test changes, and concise summaries. Give clear scope and expected results. Use P3 for ordinary feature or refactor work.
     model: gpt-5.6-luna
-    opencode_model: openai/gpt-5.4-mini # luna doesn't work yet in opencode
+    opencode_model: openai/gpt-5.6-luna # luna doesn't work yet in opencode
     reasoning_effort: high
   p3-buddy:
     sub_agent_name: crew-p3-buddy

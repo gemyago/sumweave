@@ -97,16 +97,16 @@
 >
   <div class="row g-0 min-vh-100">
     <aside class="col-12 col-lg-4 col-xl-3 col-xxl-2 border-end bg-body-tertiary">
-      <div class="d-flex h-100 flex-column gap-3 p-3">
+      <div class="d-flex h-100 flex-column gap-2 p-2 p-lg-3">
         <div>
           <a class="navbar-brand fw-semibold" href="/finance" use:link>Signal Foundry</a>
-          <p class="mb-0 small text-body-secondary">Finance</p>
+          <p class="d-none d-lg-block mb-0 small text-body-secondary">Finance</p>
         </div>
 
-        <nav class="nav nav-pills flex-column gap-2" aria-label="Finance navigation">
+        <nav class="nav nav-pills flex-row flex-lg-column gap-2" aria-label="Finance navigation">
           {#each navLinks as item (item.href)}
             <a
-              class="nav-link text-nowrap"
+              class="nav-link flex-grow-1 flex-lg-grow-0 px-2 px-lg-3 py-2 text-nowrap"
               class:active={activeNavHref === item.href}
               href={item.href}
               use:link
@@ -121,64 +121,62 @@
 
     <section class="col-12 col-lg-8 col-xl-9 col-xxl-10">
       <header class="border-bottom bg-body" aria-label="Finance utilities">
-        <div class="d-flex flex-column gap-3 p-3 p-lg-4">
-          <div class="d-flex flex-column flex-xl-row justify-content-between gap-3 align-items-xl-center">
-            <div>
-              <p class="mb-1 text-uppercase small text-body-secondary fw-semibold">Finance</p>
-              <p class="mb-0 fw-semibold">Finance / {currentSectionLabel}</p>
-            </div>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 p-2 p-lg-4">
+          <div class="d-none d-sm-block">
+            <p class="mb-1 text-uppercase small text-body-secondary fw-semibold">Finance</p>
+            <p class="mb-0 fw-semibold">Finance / {currentSectionLabel}</p>
+          </div>
 
-            <div class="d-flex flex-wrap justify-content-xl-end align-items-center gap-2 gap-md-3">
-              {#if showsTenantControl}
-                <label class="input-group input-group-sm w-auto">
-                  <span class="input-group-text">Tenant</span>
-                  <select
-                    class="form-select form-select-sm"
-                    value={financeShell.selectedTenantId}
-                    onchange={onTenantChange}
-                    aria-label="Active tenant"
-                    disabled={financeShell.loading}
-                  >
-                    <option value="">{financeShell.hasTenants ? 'Select tenant' : 'No tenants yet'}</option>
-                    {#each financeShell.tenants as tenant (tenant.id)}
-                      <option value={tenant.id}>{tenant.name} · {tenant.displayCurrency}</option>
-                    {/each}
-                  </select>
-                </label>
-              {/if}
-
-              <div class="d-flex align-items-center gap-2">
-                <span class="small text-body-secondary">Theme</span>
-                <div class="btn-group btn-group-sm" role="radiogroup" aria-label="Theme">
-                  {#each themeOptions as option (option.value)}
-                    {@const Icon = option.icon}
-                    {@const checked = themeStore.preference === option.value}
-                    <input
-                      id={`finance-theme-${option.value}`}
-                      class="btn-check"
-                      type="radio"
-                      name="finance-theme-preference"
-                      checked={checked}
-                      onchange={() => setThemePreference(option.value)}
-                    />
-                    <label
-                      class="btn btn-outline-secondary d-inline-flex align-items-center justify-content-center"
-                      class:active={checked}
-                      for={`finance-theme-${option.value}`}
-                      aria-label={option.label}
-                      title={option.label}
-                    >
-                      <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
-                      <span class="visually-hidden">{option.label}</span>
-                    </label>
+          <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
+            {#if showsTenantControl}
+              <label class="input-group input-group-sm w-auto">
+                <span class="input-group-text">Tenant</span>
+                <select
+                  class="form-select form-select-sm"
+                  value={financeShell.selectedTenantId}
+                  onchange={onTenantChange}
+                  aria-label="Active tenant"
+                  disabled={financeShell.loading}
+                >
+                  <option value="">{financeShell.hasTenants ? 'Select tenant' : 'No tenants yet'}</option>
+                  {#each financeShell.tenants as tenant (tenant.id)}
+                    <option value={tenant.id}>{tenant.name} · {tenant.displayCurrency}</option>
                   {/each}
-                </div>
-              </div>
+                </select>
+              </label>
+            {/if}
 
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={signOut}>
-                Sign out
-              </button>
+            <div class="d-flex align-items-center gap-2">
+              <span class="small text-body-secondary">Theme</span>
+              <div class="btn-group btn-group-sm" role="radiogroup" aria-label="Theme">
+                {#each themeOptions as option (option.value)}
+                  {@const Icon = option.icon}
+                  {@const checked = themeStore.preference === option.value}
+                  <input
+                    id={`finance-theme-${option.value}`}
+                    class="btn-check"
+                    type="radio"
+                    name="finance-theme-preference"
+                    checked={checked}
+                    onchange={() => setThemePreference(option.value)}
+                  />
+                  <label
+                    class="btn btn-outline-secondary d-inline-flex align-items-center justify-content-center"
+                    class:active={checked}
+                    for={`finance-theme-${option.value}`}
+                    aria-label={option.label}
+                    title={option.label}
+                  >
+                    <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
+                    <span class="visually-hidden">{option.label}</span>
+                  </label>
+                {/each}
+              </div>
             </div>
+
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick={signOut}>
+              Sign out
+            </button>
           </div>
         </div>
       </header>

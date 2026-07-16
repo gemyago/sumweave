@@ -94,6 +94,21 @@ export interface FinanceTransactionProviderOriginal {
   effectiveAt?: Date | null
 }
 
+export interface FinanceTransferCandidatePage {
+  items: FinanceTransaction[]
+}
+
+export interface FinanceProviderEvidenceMetadata {
+  id: string
+  scope: string
+  providerObjectId: string
+  capturedAt: Date
+}
+
+export interface FinanceProviderEvidence extends FinanceProviderEvidenceMetadata {
+  payload?: Record<string, unknown>
+}
+
 export interface FinanceBankConnectionSchedule {
   connectionId: string
   intervalSeconds: number
@@ -122,6 +137,13 @@ export interface FinanceBankConnection {
   createdAt: Date
   updatedAt: Date
   schedule?: FinanceBankConnectionSchedule
+}
+
+export interface FinanceConnectionSyncedAccount {
+  financeAccountId: string
+  name: string
+  currency: string
+  lastSuccessfulSyncAt?: Date | null
 }
 
 export interface FinanceDashboardPeriodWindow {
@@ -182,6 +204,15 @@ export interface FinanceDashboardMissingFx {
   provider: string
 }
 
+export interface FinanceDashboardCurrentFxRate {
+  provider: string
+  baseCurrency: string
+  quoteCurrency: string
+  effectiveAt: Date
+  lastSuccessfulRefreshAt: Date
+  stale: boolean
+}
+
 export interface FinanceDashboardCurrencyTotal {
   currency: string
   incomeMinor: number
@@ -197,6 +228,7 @@ export interface FinanceDashboard {
   accountBalances: FinanceDashboardAccountBalance[]
   alerts: FinanceDashboardAlert[]
   missingFx: FinanceDashboardMissingFx[]
+  currentFxRates: FinanceDashboardCurrentFxRate[]
   nativeSettledTotals: FinanceDashboardCurrencyTotal[]
 }
 
@@ -301,6 +333,8 @@ export interface SignalFinanceApi {
   acceptTenantInvite(params: { code: string }): Promise<FinanceTenantMember>
   listAccounts(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceAccount[]>
   createAccount(params: { tenantId: string; name: string; currency: string; kind: string }): Promise<FinanceAccount>
+  listAccountProviderEvidence(params: { tenantId: string; accountId: string }): Promise<FinanceProviderEvidenceMetadata[]>
+  getAccountProviderEvidence(params: { tenantId: string; accountId: string; evidenceId: string }): Promise<FinanceProviderEvidence>
   listCategories(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceCategory[]>
   createCategory(params: { tenantId: string; name: string; kind: string }): Promise<FinanceCategory>
   listTags(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceTag[]>
@@ -315,6 +349,8 @@ export interface SignalFinanceApi {
     offset?: number
   }): Promise<FinanceTransaction[]>
   getTransaction(params: { tenantId: string; transactionId: string }): Promise<FinanceTransaction>
+  listTransactionProviderEvidence(params: { tenantId: string; transactionId: string }): Promise<FinanceProviderEvidenceMetadata[]>
+  getTransactionProviderEvidence(params: { tenantId: string; transactionId: string; evidenceId: string }): Promise<FinanceProviderEvidence>
   createTransaction(params: {
     tenantId: string
     accountId: string
@@ -327,7 +363,6 @@ export interface SignalFinanceApi {
     effectiveAt: Date
     categoryId?: string
     tagIds: string[]
-    transferGroupId?: string
   }): Promise<FinanceTransaction>
   updateTransaction(params: {
     tenantId: string
@@ -338,7 +373,19 @@ export interface SignalFinanceApi {
     categoryId?: string | null
     tagIds: string[]
   }): Promise<FinanceTransaction>
+  linkTransferPair(params: { tenantId: string; firstTransactionId: string; secondTransactionId: string }): Promise<void>
+  unlinkTransferPair(params: { tenantId: string; firstTransactionId: string; secondTransactionId: string }): Promise<void>
+  listTransferCandidates(params: {
+    tenantId: string
+    transactionId: string
+    effectiveFrom: Date
+    effectiveBefore: Date
+    limit: number
+    offset?: number
+  }): Promise<FinanceTransferCandidatePage>
+  getTransferPartner(params: { tenantId: string; transactionId: string }): Promise<FinanceTransaction>
   listConnections(params: { tenantId: string }): Promise<FinanceBankConnection[]>
+  listConnectionSyncedAccounts(params: { tenantId: string; connectionId: string }): Promise<FinanceConnectionSyncedAccount[]>
   linkTokenConnection(params: { tenantId: string; provider: string; token: string }): Promise<FinanceBankConnection>
   startRedirectConnection(params: { tenantId: string; provider: string; callbackUrl: string }): Promise<FinanceConnectionRedirectStart>
   finishRedirectConnection(params: { tenantId: string; provider: string; code?: string; state: string }): Promise<FinanceBankConnection>
@@ -366,8 +413,6 @@ export interface SignalFinanceApi {
     provider?: string
     baseCurrencies: string[]
     quoteCurrency: string
-    startDate: Date
-    endDate: Date
   }): Promise<FinanceJobRef>
   previewCSVImport(params: {
     tenantId: string
@@ -488,6 +533,19 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         }),
       )
     },
+    async listAccountProviderEvidence({ tenantId, accountId }) {
+      const json = await request<{ items?: RawProviderEvidenceMetadata[] }>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/accounts/${encodeURIComponent(accountId)}/evidence`,
+      })
+      return requireItems<RawProviderEvidenceMetadata>(json, 'finance.accountEvidence.items').map(mapProviderEvidenceMetadata)
+    },
+    async getAccountProviderEvidence({ tenantId, accountId, evidenceId }) {
+      return mapProviderEvidence(await request<RawProviderEvidence>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/accounts/${encodeURIComponent(accountId)}/evidence/${encodeURIComponent(evidenceId)}`,
+      }))
+    },
     async listCategories({ tenantId, includeHidden }) {
       const json = await request<{ items?: RawCategory[] }>({
         method: 'GET',
@@ -538,22 +596,35 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         }),
       )
     },
-    async createTransaction(params) {
-      return mapTransaction(
-        await request<RawTransaction>({
-          method: 'POST',
-          path: `/finance/tenants/${encodeURIComponent(params.tenantId)}/transactions`,
-          body: {
-            source: params.source,
-            status: params.status,
-            kind: params.kind,
-            amountMinor: params.amountMinor,
-            currency: params.currency,
+    async listTransactionProviderEvidence({ tenantId, transactionId }) {
+      const json = await request<{ items?: RawProviderEvidenceMetadata[] }>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/${encodeURIComponent(transactionId)}/evidence`,
+      })
+      return requireItems<RawProviderEvidenceMetadata>(json, 'finance.transactionEvidence.items').map(mapProviderEvidenceMetadata)
+    },
+    async getTransactionProviderEvidence({ tenantId, transactionId, evidenceId }) {
+      return mapProviderEvidence(await request<RawProviderEvidence>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/${encodeURIComponent(transactionId)}/evidence/${encodeURIComponent(evidenceId)}`,
+      }))
+    },
+      async createTransaction(params) {
+        return mapTransaction(
+          await request<RawTransaction>({
+            method: 'POST',
+            path: `/finance/tenants/${encodeURIComponent(params.tenantId)}/transactions`,
+            body: {
+             accountId: params.accountId,
+              source: params.source,
+              status: params.status,
+              kind: params.kind,
+              amountMinor: params.amountMinor,
+              currency: params.currency,
             description: params.description,
             effectiveAt: serializeRequestTimestamp(params.effectiveAt),
             ...(params.categoryId === undefined ? {} : { categoryId: params.categoryId }),
             tagIds: params.tagIds,
-            ...(params.transferGroupId === undefined ? {} : { transferGroupId: params.transferGroupId }),
           },
         }),
       )
@@ -577,9 +648,49 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         }),
       )
     },
+    async linkTransferPair({ tenantId, firstTransactionId, secondTransactionId }) {
+      await request<void>({
+        method: 'POST',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/transfer-links`,
+        body: { firstTransactionId, secondTransactionId },
+      })
+    },
+    async unlinkTransferPair({ tenantId, firstTransactionId, secondTransactionId }) {
+      await request<void>({
+        method: 'DELETE',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/transfer-links`,
+        body: { firstTransactionId, secondTransactionId },
+      })
+    },
+    async listTransferCandidates({ tenantId, transactionId, effectiveFrom, effectiveBefore, limit, offset }) {
+      const json = await request<{ items?: RawTransaction[] }>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/${encodeURIComponent(transactionId)}/transfer-candidates`,
+        query: buildSearchParams({
+          effectiveFrom: serializeRequestTimestamp(effectiveFrom),
+          effectiveBefore: serializeRequestTimestamp(effectiveBefore),
+          limit,
+          offset,
+        }),
+      })
+      return { items: requireItems<RawTransaction>(json, 'finance.transferCandidates.items').map(mapTransaction) }
+    },
+    async getTransferPartner({ tenantId, transactionId }) {
+      return mapTransaction(await request<RawTransaction>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/${encodeURIComponent(transactionId)}/transfer-partner`,
+      }))
+    },
     async listConnections({ tenantId }) {
       const json = await request<{ items?: RawConnection[] }>({ method: 'GET', path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections` })
       return requireItems<RawConnection>(json, 'finance.connections.items').map(mapConnection)
+    },
+    async listConnectionSyncedAccounts({ tenantId, connectionId }) {
+      const json = await request<{ items?: RawConnectionSyncedAccount[] }>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}/accounts`,
+      })
+      return requireItems<RawConnectionSyncedAccount>(json, 'finance.connectionSyncedAccounts.items').map(mapConnectionSyncedAccount)
     },
     async linkTokenConnection({ tenantId, provider, token }) {
       return mapConnection(
@@ -612,7 +723,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       return mapSyntheticLinkState(
         await request<RawSyntheticLinkState>({
           method: 'GET',
-          path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/synthetic-link-states/${encodeURIComponent(state)}`,
+          path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/synthetic-link-states/state/${encodeURIComponent(state)}`,
         }),
       )
     },
@@ -620,7 +731,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       return mapSyntheticLinkState(
         await request<RawSyntheticLinkState>({
           method: 'PUT',
-          path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/synthetic-link-states/${encodeURIComponent(state)}`,
+          path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/synthetic-link-states/state/${encodeURIComponent(state)}`,
           body: {
             configuredAccounts: configuredAccounts.map((account) => {
               if (account.key) {
@@ -670,11 +781,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       return mapJobRef(await request<RawJobRef>({
         method: 'POST',
         path: '/finance/fx/sync',
-        body: {
-          ...params,
-          startDate: serializeRequestTimestamp(params.startDate),
-          endDate: serializeRequestTimestamp(params.endDate),
-        },
+        body: params,
       }))
     },
     async previewCSVImport(params) {
@@ -727,9 +834,12 @@ interface RawAccount { id: string; tenantId: string; name: string; currency: str
 interface RawCategory { id: string; tenantId: string; name: string; kind: string; seededDefault: boolean; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTag { id: string; tenantId: string; name: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTransactionProviderOriginal { amountMinor: number; currency: string; description: string; effectiveAt?: string | null }
+interface RawProviderEvidenceMetadata { id: string; scope: string; providerObjectId: string; capturedAt: string }
+interface RawProviderEvidence extends RawProviderEvidenceMetadata { payload?: Record<string, unknown> }
 interface RawTransaction { id: string; tenantId: string; accountId: string; source: string; status: string; kind: string; amountMinor: number; currency: string; description: string; effectiveAt: string; categoryId?: string | null; tagIds: string[]; transferGroupId?: string | null; transferMatchedAt?: string | null; hiddenAt?: string | null; providerOriginal?: RawTransactionProviderOriginal; createdAt: string; updatedAt: string }
 interface RawConnectionSchedule { connectionId: string; intervalSeconds: number; nextRunAt?: string | null; lastScheduledAt?: string | null; lastStartedAt?: string | null; lastCompletedAt?: string | null; lastJobId?: string; enabled: boolean; createdAt: string; updatedAt: string }
 interface RawConnection { id: string; tenantId: string; provider: string; displayName: string; providerReference: string; externalId: string; state: string; lastSyncJobId?: string; lastSyncStartedAt?: string | null; lastSuccessfulSyncAt?: string | null; lastSyncError?: string; createdAt: string; updatedAt: string; schedule?: RawConnectionSchedule }
+interface RawConnectionSyncedAccount { financeAccountId: string; name: string; currency: string; lastSuccessfulSyncAt?: string | null }
 interface RawConnectionRedirectStart { provider: string; authorizationUrl: string; state: string }
 interface RawSyntheticLinkStateConfiguredAccount { key: string; name: string; currency: string }
 interface RawSyntheticLinkState {
@@ -745,8 +855,9 @@ interface RawCategoryBreakdown { categoryId: string; categoryName: string; kind:
 interface RawAccountBalance { accountId: string; accountName: string; currency: string; nativeBookedMinor: number; nativePendingMinor: number; displayBookedMinor: number | null; displayPendingMinor: number | null; missingFx: boolean }
 interface RawDashboardAlert { code: string; severity: string; count: number }
 interface RawMissingFX { source: string; transactionId: string | null; accountId: string | null; baseCurrency: string; quoteCurrency: string; rateDate: string; provider: string }
+interface RawCurrentFxRate { provider: string; baseCurrency: string; quoteCurrency: string; effectiveAt: string; lastSuccessfulRefreshAt: string; stale: boolean }
 interface RawCurrencyTotal { currency: string; incomeMinor: number; expenseMinor: number; netMinor: number }
-interface RawDashboard { period: RawDashboardPeriod; settled: RawMoneySummary; pending: RawMoneySummary; categoryBreakdowns: RawCategoryBreakdown[]; accountBalances: RawAccountBalance[]; alerts: RawDashboardAlert[]; missingFx: RawMissingFX[]; nativeSettledTotals: RawCurrencyTotal[] }
+interface RawDashboard { period: RawDashboardPeriod; settled: RawMoneySummary; pending: RawMoneySummary; categoryBreakdowns: RawCategoryBreakdown[]; accountBalances: RawAccountBalance[]; alerts: RawDashboardAlert[]; missingFx: RawMissingFX[]; currentFxRates: RawCurrentFxRate[]; nativeSettledTotals: RawCurrencyTotal[] }
 interface RawFXDiagnostics { defaultProvider: string; storedRatesCount: number; providers: RawFXProvider[] }
 interface RawFXProvider { name: string; default: boolean; ready: boolean }
 interface RawCSVRejectedRow { rowNumber: number; field?: string; reason: string }
@@ -801,6 +912,13 @@ function mapTransaction(item: RawTransaction): FinanceTransaction {
     updatedAt: parseRequiredDate(item.updatedAt, 'finance.transaction.updatedAt'),
   }
 }
+function mapProviderEvidenceMetadata(item: RawProviderEvidenceMetadata): FinanceProviderEvidenceMetadata {
+  requireFields(item, 'finance.providerEvidence', ['id', 'scope', 'providerObjectId', 'capturedAt'])
+  return { ...item, capturedAt: parseRequiredDate(item.capturedAt, 'finance.providerEvidence.capturedAt') }
+}
+function mapProviderEvidence(item: RawProviderEvidence): FinanceProviderEvidence {
+  return { ...mapProviderEvidenceMetadata(item), ...(item.payload === undefined ? {} : { payload: item.payload }) }
+}
 function mapConnection(item: RawConnection): FinanceBankConnection {
   requireFields(item, 'finance.connection', ['id', 'tenantId', 'provider', 'displayName', 'providerReference', 'externalId', 'state', 'createdAt', 'updatedAt'])
   const { schedule, ...connection } = item
@@ -823,6 +941,13 @@ function mapConnection(item: RawConnection): FinanceBankConnection {
     }),
   }
 }
+function mapConnectionSyncedAccount(item: RawConnectionSyncedAccount): FinanceConnectionSyncedAccount {
+  requireFields(item, 'finance.connectionSyncedAccount', ['financeAccountId', 'name', 'currency'])
+  return {
+    ...item,
+    lastSuccessfulSyncAt: parseOptionalDate(item.lastSuccessfulSyncAt, 'finance.connectionSyncedAccount.lastSuccessfulSyncAt'),
+  }
+}
 function mapConnectionRedirectStart(item: RawConnectionRedirectStart): FinanceConnectionRedirectStart { return item }
 function mapSyntheticLinkState(item: RawSyntheticLinkState): FinanceSyntheticLinkState {
   requireFields(item, 'finance.syntheticLinkState', ['provider', 'state', 'configuredAccounts', 'canFinish'])
@@ -832,7 +957,7 @@ function mapSyntheticLinkState(item: RawSyntheticLinkState): FinanceSyntheticLin
   }
 }
 function mapDashboard(item: RawDashboard): FinanceDashboard {
-  requireFields(item, 'finance.dashboard', ['period', 'settled', 'pending', 'categoryBreakdowns', 'accountBalances', 'alerts', 'missingFx', 'nativeSettledTotals'])
+  requireFields(item, 'finance.dashboard', ['period', 'settled', 'pending', 'categoryBreakdowns', 'accountBalances', 'alerts', 'missingFx', 'currentFxRates', 'nativeSettledTotals'])
   requireFields(item.period, 'finance.dashboard.period', ['preset', 'startDate', 'endDate', 'previous', 'next'])
   requireFields(item.period.previous, 'finance.dashboard.period.previous', ['startDate', 'endDate'])
   requireFields(item.period.next, 'finance.dashboard.period.next', ['startDate', 'endDate'])
@@ -840,6 +965,7 @@ function mapDashboard(item: RawDashboard): FinanceDashboard {
   requireArray(item.accountBalances, 'finance.dashboard.accountBalances')
   requireArray(item.alerts, 'finance.dashboard.alerts')
   requireArray(item.missingFx, 'finance.dashboard.missingFx')
+  requireArray(item.currentFxRates, 'finance.dashboard.currentFxRates')
   requireArray(item.nativeSettledTotals, 'finance.dashboard.nativeSettledTotals')
   requireFields(item.settled, 'finance.dashboard.settled', ['displayCurrency', 'incomeMinor', 'expenseMinor', 'netMinor', 'transactionCount', 'complete'])
   requireFields(item.pending, 'finance.dashboard.pending', ['displayCurrency', 'incomeMinor', 'expenseMinor', 'netMinor', 'transactionCount', 'complete'])
@@ -853,6 +979,7 @@ function mapDashboard(item: RawDashboard): FinanceDashboard {
     requireFields(missing, `finance.dashboard.missingFx[${index}]`, ['source', 'baseCurrency', 'quoteCurrency', 'rateDate', 'provider'])
     requirePresentFields(missing, `finance.dashboard.missingFx[${index}]`, ['transactionId', 'accountId'])
   })
+  item.currentFxRates.forEach((rate, index) => requireFields(rate, `finance.dashboard.currentFxRates[${index}]`, ['provider', 'baseCurrency', 'quoteCurrency', 'effectiveAt', 'lastSuccessfulRefreshAt', 'stale']))
   item.nativeSettledTotals.forEach((total, index) => requireFields(total, `finance.dashboard.nativeSettledTotals[${index}]`, ['currency', 'incomeMinor', 'expenseMinor', 'netMinor']))
   return {
     period: {
@@ -876,6 +1003,11 @@ function mapDashboard(item: RawDashboard): FinanceDashboard {
     })),
     alerts: item.alerts,
     missingFx: item.missingFx.map((missing) => ({ ...missing, rateDate: parseRequiredDate(missing.rateDate, 'finance.dashboard.missingFx.rateDate') })),
+    currentFxRates: item.currentFxRates.map((rate, index) => ({
+      ...rate,
+      effectiveAt: parseRequiredDate(rate.effectiveAt, `finance.dashboard.currentFxRates[${index}].effectiveAt`),
+      lastSuccessfulRefreshAt: parseRequiredDate(rate.lastSuccessfulRefreshAt, `finance.dashboard.currentFxRates[${index}].lastSuccessfulRefreshAt`),
+    })),
     nativeSettledTotals: item.nativeSettledTotals,
   }
 }

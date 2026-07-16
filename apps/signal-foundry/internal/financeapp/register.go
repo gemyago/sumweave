@@ -21,6 +21,7 @@ import (
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/google/uuid"
 	"go.uber.org/dig"
+	"gorm.io/gorm"
 )
 
 type disabledFinanceCipher struct{}
@@ -93,6 +94,7 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 		BankSyncJobEnqueuer:    bankConnectionSyncJobEnqueuer{jobs: deps.Jobs},
 		BankSyncScheduleWriter: bankConnectionSyncScheduleWriter{store: deps.JobsStore},
 		FXJobEnqueuer:          fxSyncJobEnqueuer{jobs: deps.Jobs},
+		FXScheduleWriter:       fxSyncScheduleWriter{store: deps.JobsStore},
 		Monobank: financepkg.MonobankConfig{
 			BaseURL: resolveMonobankBaseURL(deps.MonoURL),
 		},
@@ -100,6 +102,13 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 	})
 	if err != nil {
 		return nil, err
+	}
+	fxScheduleParams := financepkg.EnsureFXSyncScheduleParams{
+		ScheduleID: financepkg.FXDailyRefreshScheduleID,
+		Interval:   24 * time.Hour,
+	}
+	if _, err = financeModule.FXService.EnsureFXSyncSchedule(context.Background(), fxScheduleParams); err != nil {
+		return nil, fmt.Errorf("ensure daily fx refresh schedule: %w", err)
 	}
 	registerErr := registerFinanceJobHandlers(
 		deps.Registry,
@@ -132,12 +141,20 @@ func newLedgerServiceFromDI(module *financepkg.Finance) *financepkg.LedgerServic
 	return module.LedgerService
 }
 
+func newTransferDetailServiceFromDI(module *financepkg.Finance) *financepkg.TransferDetailService {
+	return module.TransferDetailService
+}
+
 func newReportingServiceFromDI(module *financepkg.Finance) *financepkg.ReportingService {
 	return module.ReportingService
 }
 
 func newFXServiceFromDI(module *financepkg.Finance) *financepkg.FXService {
 	return module.FXService
+}
+
+func newProviderEvidenceServiceFromDI(module *financepkg.Finance) *financepkg.ProviderEvidenceService {
+	return module.ProviderEvidenceService
 }
 
 func newCSVImportServiceFromDI(module *financepkg.Finance) *financepkg.CSVImportService {
@@ -236,7 +253,26 @@ func registerFinanceJobHandlers(
 		),
 		registerBankSyncJobHandler(registry, bankSyncService),
 		registerFXSyncJobHandler(registry, fxService),
+		registerFXRefreshJobHandler(registry, fxService),
 	)
+}
+
+func registerFXRefreshJobHandler(registry *jobspkg.Registry, service *financepkg.FXService) error {
+	if service == nil {
+		return nil
+	}
+	return registerFinanceJobHandler(registry, jobspkg.JobType(financepkg.FXRefreshJobType), func() error {
+		return jobspkg.RegisterTypedHandler(
+			registry,
+			jobspkg.TypedHandlerSpec[financepkg.RefreshFXRatesParams, financepkg.SyncFXRatesResult, struct{}]{
+				JobType:       jobspkg.JobType(financepkg.FXRefreshJobType),
+				SupportsRetry: true,
+				Run: func(ctx context.Context, input financepkg.RefreshFXRatesParams, _ func(struct{}) error) (financepkg.SyncFXRatesResult, error) {
+					return service.RefreshRequiredFXRates(ctx, input)
+				},
+			},
+		)
+	})
 }
 
 func registerCSVImportJobHandler(
@@ -406,6 +442,8 @@ func (e bankConnectionSyncJobEnqueuer) EnqueueBankConnectionSync(
 
 type fxSyncJobEnqueuer struct{ jobs *jobspkg.Service }
 
+type fxSyncScheduleWriter struct{ store *jobspkg.Store }
+
 type bankConnectionSyncScheduleWriter struct{ store *jobspkg.Store }
 
 func (w bankConnectionSyncScheduleWriter) UpsertBankConnectionSyncSchedule(
@@ -462,6 +500,42 @@ func (e fxSyncJobEnqueuer) EnqueueFXSync(
 	return financepkg.FXSyncJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
 }
 
+func (w fxSyncScheduleWriter) UpsertFXSyncSchedule(
+	ctx context.Context,
+	schedule financepkg.FXSyncSchedule,
+) error {
+	if w.store == nil {
+		return nil
+	}
+	inputJSON, err := json.Marshal(schedule.Input)
+	if err != nil {
+		return fmt.Errorf("encode fx refresh schedule: %w", err)
+	}
+	var nextRunAt *time.Time
+	if schedule.Enabled {
+		now := time.Now()
+		nextRunAt = &now
+		existing, getErr := w.store.GetSchedule(ctx, schedule.ScheduleID)
+		if getErr == nil && existing.Enabled && existing.NextRunAt != nil {
+			nextRunAt = existing.NextRunAt
+		} else if getErr != nil && !errors.Is(getErr, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("get fx refresh schedule: %w", getErr)
+		}
+	}
+	return w.store.UpsertSchedule(ctx, jobspkg.Schedule{
+		ID:      strings.TrimSpace(schedule.ScheduleID),
+		JobType: jobspkg.JobType(schedule.JobType),
+		Requester: jobspkg.Requester{
+			UserID: strings.TrimSpace(schedule.Requester.UserID),
+			Source: jobspkg.RequesterSource(strings.TrimSpace(schedule.Requester.Source)),
+		},
+		InputJSON: inputJSON,
+		Interval:  schedule.Interval,
+		NextRunAt: nextRunAt,
+		Enabled:   schedule.Enabled,
+	})
+}
+
 func Register(container *dig.Container) error {
 	return di.ProvideAll(
 		container,
@@ -471,8 +545,10 @@ func Register(container *dig.Container) error {
 		newTenantServiceFromDI,
 		newCatalogServiceFromDI,
 		newLedgerServiceFromDI,
+		newTransferDetailServiceFromDI,
 		newReportingServiceFromDI,
 		newFXServiceFromDI,
+		newProviderEvidenceServiceFromDI,
 		newCSVImportServiceFromDI,
 		newBankConnectionServiceFromDI,
 		newSyntheticLinkStateServiceFromDI,

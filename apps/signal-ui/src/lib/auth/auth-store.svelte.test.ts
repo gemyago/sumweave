@@ -66,6 +66,9 @@ describe('AuthStore', () => {
 
   it('tryRestoreSession does nothing when no refreshToken in localStorage', async () => {
     const store = new AuthStore()
+
+    expect(store.restoring).toBe(true)
+
     await store.tryRestoreSession()
     expect(store.accessToken).toBeNull()
     expect(store.restoring).toBe(false)

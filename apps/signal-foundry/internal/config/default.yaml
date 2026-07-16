@@ -16,6 +16,11 @@ gracefulShutdownTimeout: 10s
 httpServer:
   host: "[::]"
   port: 4501
+  tls:
+    # Leave both paths empty for HTTP. Set both to enable HTTPS.
+    # Relative paths are resolved from apps/signal-foundry.
+    certFile: ""
+    keyFile: ""
   idleTimeout: 60s
   readHeaderTimeout: 2s
   readTimeout: 2s
