@@ -7,6 +7,7 @@ require (
 	github.com/gemyago/signal-foundry/tools/skills v0.0.0-20260406074131-aa6097596cbc
 	github.com/gemyago/signal-foundry/tools/workspacefs v0.0.0-20260406074131-aa6097596cbc
 	github.com/go-logr/logr v1.4.3
+	github.com/glebarez/sqlite v1.11.0
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jaswdr/faker/v2 v2.9.1
@@ -34,6 +35,8 @@ require (
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.44.0
+	gorm.io/driver/postgres v1.6.0
+	gorm.io/gorm v1.31.1
 )
 
 require (
@@ -64,7 +67,6 @@ require (
 	github.com/gemyago/apigen v0.1.1 // indirect
 	github.com/getkin/kin-openapi v0.134.0 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
-	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
@@ -165,8 +167,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gorm.io/driver/postgres v1.6.0 // indirect
-	gorm.io/gorm v1.31.1 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

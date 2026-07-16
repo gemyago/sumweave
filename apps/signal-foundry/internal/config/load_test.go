@@ -35,7 +35,7 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, "INFO", cfg.GetString("defaultLogLevel"))
-		require.Equal(t, "data/data-layer.db", cfg.GetString("dataLayer.database.dsn"))
+		require.Empty(t, cfg.GetString("dataLayer.database.dsn"))
 	})
 	t.Run("should return error if config is not found", func(t *testing.T) {
 		cfg := New()
@@ -49,7 +49,6 @@ func TestLoad(t *testing.T) {
 
 		require.Equal(t, ":memory:", cfg.GetString("dataLayer.database.dsn"))
 		require.Equal(t, "signal_foundry_data_", cfg.GetString("dataLayer.database.tablePrefix"))
-		require.Empty(t, cfg.GetString("dataLayer.rawPayloadBlobStore.path"))
 	})
 	t.Run("loads explicit app-root-relative local paths without rewriting", func(t *testing.T) {
 		cfg := New()

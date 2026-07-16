@@ -208,14 +208,11 @@ func TestAuthService(t *testing.T) {
 			newRefreshToken := fake.Lorem().Text(40)
 
 			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Validate(t.Context(), oldRefreshToken).
+				Consume(t.Context(), oldRefreshToken).
 				Return(user.ID, nil)
 			deps.UserStore.(*mockuserStore).EXPECT().
 				GetByID(t.Context(), user.ID).
 				Return(user, nil)
-			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Delete(t.Context(), oldRefreshToken).
-				Return(nil)
 			deps.JWTService.(*mockjwtService).EXPECT().
 				GenerateAccessToken(user.ID, user.Username).
 				Return(newAccessToken, nil)
@@ -243,7 +240,7 @@ func TestAuthService(t *testing.T) {
 			invalidToken := fake.Lorem().Text(40)
 
 			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Validate(t.Context(), invalidToken).
+				Consume(t.Context(), invalidToken).
 				Return("", ErrInvalidRefreshToken)
 
 			_, err := svc.Refresh(t.Context(), invalidToken)
@@ -251,21 +248,21 @@ func TestAuthService(t *testing.T) {
 			require.ErrorIs(t, err, ErrInvalidRefreshToken)
 		})
 
-		t.Run("propagates unexpected validate errors", func(t *testing.T) {
+		t.Run("propagates unexpected consume errors", func(t *testing.T) {
 			deps := makeDeps(t)
 			svc := NewAuthService(deps)
 
 			token := fake.Lorem().Text(40)
-			validateErr := errors.New("validate error")
+			consumeErr := errors.New("consume error")
 
 			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Validate(t.Context(), token).
-				Return("", validateErr)
+				Consume(t.Context(), token).
+				Return("", consumeErr)
 
 			_, err := svc.Refresh(t.Context(), token)
 
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "validate refresh token")
+			assert.ErrorContains(t, err, "consume refresh token")
 		})
 
 		t.Run("propagates user store errors", func(t *testing.T) {
@@ -277,7 +274,7 @@ func TestAuthService(t *testing.T) {
 			getUserErr := errors.New("get user error")
 
 			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Validate(t.Context(), token).
+				Consume(t.Context(), token).
 				Return(user.ID, nil)
 			deps.UserStore.(*mockuserStore).EXPECT().
 				GetByID(t.Context(), user.ID).
@@ -289,30 +286,6 @@ func TestAuthService(t *testing.T) {
 			assert.ErrorContains(t, err, "get user by id")
 		})
 
-		t.Run("propagates delete old token errors", func(t *testing.T) {
-			deps := makeDeps(t)
-			svc := NewAuthService(deps)
-
-			user := makeUser()
-			token := fake.Lorem().Text(40)
-			deleteErr := errors.New("delete error")
-
-			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Validate(t.Context(), token).
-				Return(user.ID, nil)
-			deps.UserStore.(*mockuserStore).EXPECT().
-				GetByID(t.Context(), user.ID).
-				Return(user, nil)
-			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Delete(t.Context(), token).
-				Return(deleteErr)
-
-			_, err := svc.Refresh(t.Context(), token)
-
-			require.Error(t, err)
-			assert.ErrorContains(t, err, "delete old refresh token")
-		})
-
 		t.Run("propagates JWT generation errors", func(t *testing.T) {
 			deps := makeDeps(t)
 			svc := NewAuthService(deps)
@@ -322,14 +295,11 @@ func TestAuthService(t *testing.T) {
 			jwtErr := errors.New("jwt error")
 
 			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Validate(t.Context(), token).
+				Consume(t.Context(), token).
 				Return(user.ID, nil)
 			deps.UserStore.(*mockuserStore).EXPECT().
 				GetByID(t.Context(), user.ID).
 				Return(user, nil)
-			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Delete(t.Context(), token).
-				Return(nil)
 			deps.JWTService.(*mockjwtService).EXPECT().
 				GenerateAccessToken(user.ID, user.Username).
 				Return("", jwtErr)
@@ -350,14 +320,11 @@ func TestAuthService(t *testing.T) {
 			createErr := errors.New("create error")
 
 			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Validate(t.Context(), token).
+				Consume(t.Context(), token).
 				Return(user.ID, nil)
 			deps.UserStore.(*mockuserStore).EXPECT().
 				GetByID(t.Context(), user.ID).
 				Return(user, nil)
-			deps.RefreshTokenStore.(*mockrefreshTokenStore).EXPECT().
-				Delete(t.Context(), token).
-				Return(nil)
 			deps.JWTService.(*mockjwtService).EXPECT().
 				GenerateAccessToken(user.ID, user.Username).
 				Return(newAccessToken, nil)

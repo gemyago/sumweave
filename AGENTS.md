@@ -49,7 +49,8 @@ Unless explicitly promoted by the user, everything outside that core package, Go
 ```
 
 ## Security
-- NEVER hardcode secrets. Use env vars/secret stores. Authenticate to GHCR before push/pull when required.
+- Never hardcode real secrets. Obvious local-only placeholders are allowed.
+- Use env vars/secret stores. Authenticate to GHCR before push/pull when required.
 - Validate/sanitize all external inputs. Do not disable security linters without explicit justification.
 
 ## Dev Environment
@@ -137,6 +138,11 @@ The rules are:
 - Consider SQLite as local-dev only storage. Small issues and inconsistencies are tolerable.
 - Keep API responses single-purpose by default (e.g operating on a single entity); Composition must have a good justification.
 - Keep migration tests shallow; allow one smoke test, no detailed schema checks.
+- Build frontend/backend release artifacts on the host; Docker only packages them.
+- Build release artifacts with `make -C build dist`; Docker never compiles source.
+- Render the Helm chart with `make -C deploy lint` before deployment changes.
+- Allow obvious local-only placeholder keys in committed local config.
+- Use environment-specific config values, not runtime environment labels.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

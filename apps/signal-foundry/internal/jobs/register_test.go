@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -58,9 +57,7 @@ func TestRegisterHelpers(t *testing.T) {
 			TradeStore:      store,
 		})
 		require.NoError(t, err)
-		blobStore, err := data.NewLocalRawPayloadBlobStore(filepath.Join(t.TempDir(), "payloads"))
-		require.NoError(t, err)
-		lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: store, BlobStore: blobStore})
+		lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: store, BlobStore: store})
 		require.NoError(t, err)
 		return ingestionService, readService, lineageService
 	}

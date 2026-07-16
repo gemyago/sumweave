@@ -1,0 +1,6 @@
+# Docker receives only host-prepared release artifacts.
+**
+!build/
+build/*
+!build/dist/
+!build/dist/**

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/gemyago/signal-foundry/runtime/agent"
@@ -33,7 +34,9 @@ type DatabaseMigrationDeps struct {
 	DataLayerDatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
 	DataLayerSQLDB               *sql.DB
 
-	DataStore *data.DatabaseStore
+	DataStore         *data.DatabaseStore
+	AuthUsers         *auth.UserStore
+	AuthRefreshTokens *auth.RefreshTokenStore
 }
 
 // DatabaseMigrator runs the explicit backend schema setup flow.
@@ -48,7 +51,9 @@ type DatabaseMigrator struct {
 	dataLayerDatabaseTablePrefix string
 	dataLayerSQLDB               *sql.DB
 
-	dataStore *data.DatabaseStore
+	dataStore         *data.DatabaseStore
+	authUsers         *auth.UserStore
+	authRefreshTokens *auth.RefreshTokenStore
 }
 
 func newDatabaseMigrator(deps DatabaseMigrationDeps) *DatabaseMigrator {
@@ -63,7 +68,9 @@ func newDatabaseMigrator(deps DatabaseMigrationDeps) *DatabaseMigrator {
 		dataLayerDatabaseTablePrefix: deps.DataLayerDatabaseTablePrefix,
 		dataLayerSQLDB:               deps.DataLayerSQLDB,
 
-		dataStore: deps.DataStore,
+		dataStore:         deps.DataStore,
+		authUsers:         deps.AuthUsers,
+		authRefreshTokens: deps.AuthRefreshTokens,
 	}
 }
 
@@ -87,6 +94,7 @@ func (m *DatabaseMigrator) Migrate(ctx context.Context) error {
 	}{
 		{component: "agent runtime", run: m.migrateAgentRuntime},
 		{component: "data layer", run: m.migrateDataLayer},
+		{component: "authentication", run: m.migrateAuthentication},
 		{component: "app dispatch transport", run: m.migrateAppDispatch},
 		{component: "durable jobs", run: m.migrateJobs},
 		{component: "finance", run: m.migrateFinance},
@@ -174,6 +182,22 @@ func (m *DatabaseMigrator) migrateAgentRuntime(_ context.Context) error {
 func (m *DatabaseMigrator) migrateDataLayer(_ context.Context) error {
 	if err := m.dataStore.AutoMigrate(); err != nil {
 		return fmt.Errorf("auto migrate data-layer database: %w", err)
+	}
+	return nil
+}
+
+func (m *DatabaseMigrator) migrateAuthentication(_ context.Context) error {
+	if m.authUsers == nil {
+		return errors.New("auth user store is required")
+	}
+	if m.authRefreshTokens == nil {
+		return errors.New("auth refresh token store is required")
+	}
+	if err := m.authUsers.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate auth users: %w", err)
+	}
+	if err := m.authRefreshTokens.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate auth refresh tokens: %w", err)
 	}
 	return nil
 }

@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -38,12 +38,18 @@ func TestUserCmd(t *testing.T) {
 
 	makeUserCmdDeps := func(t *testing.T) userCmdDeps {
 		t.Helper()
+		dsn := filepath.Join(t.TempDir(), "users.sqlite")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		store, err := auth.NewUserStore(auth.UserStoreDeps{
+			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "test_auth_",
+			IDGen: ident.NewDefaultGenerator(), Logger: slog.Default(),
+		})
+		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
 		return userCmdDeps{
-			store: auth.NewUserStore(auth.UserStoreDeps{
-				DataDir: t.TempDir(),
-				IDGen:   ident.NewDefaultGenerator(),
-				Logger:  slog.Default(),
-			}),
+			store:     store,
 			hasher:    newFastHasher(),
 			container: dig.New(),
 		}
@@ -51,16 +57,16 @@ func TestUserCmd(t *testing.T) {
 
 	makeBrokenStore := func(t *testing.T) *auth.UserStore {
 		t.Helper()
-		// Use a data dir where the users subdirectory is a file (not a dir), causing List to fail.
-		dataDir := t.TempDir()
-		usersPath := filepath.Join(dataDir, "auth", "users")
-		require.NoError(t, os.MkdirAll(filepath.Join(dataDir, "auth"), 0o700))
-		require.NoError(t, os.WriteFile(usersPath, []byte("not a dir"), 0o600))
-		return auth.NewUserStore(auth.UserStoreDeps{
-			DataDir: dataDir,
-			IDGen:   ident.NewDefaultGenerator(),
-			Logger:  slog.Default(),
+		dsn := filepath.Join(t.TempDir(), "users.sqlite")
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		store, err := auth.NewUserStore(auth.UserStoreDeps{
+			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "test_auth_",
+			IDGen: ident.NewDefaultGenerator(), Logger: slog.Default(),
 		})
+		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
+		return store
 	}
 
 	t.Run("newUserCmd", func(t *testing.T) {
@@ -249,6 +255,11 @@ func TestUserCmd(t *testing.T) {
 	t.Run("end-to-end via cobra command", func(t *testing.T) {
 		t.Run("user add and user list work together", func(t *testing.T) {
 			chdirModuleRoot(t)
+			dataLayerDSN := filepath.Join(t.TempDir(), "data-layer.sqlite")
+			agentRuntimeDSN := filepath.Join(t.TempDir(), "agent-runtime.sqlite")
+			t.Setenv("APP_DATALAYER_DATABASE_DSN", dataLayerDSN)
+			t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", agentRuntimeDSN)
+			runDatabaseMigrateCommand(t)
 			// -e test uses dataDir on disk under apps/signal-foundry; faker usernames can collide with
 			// users left from earlier runs or other tests, so the name must be unique per run.
 			username := fmt.Sprintf("%s_%d", fake.Internet().User(), time.Now().UnixNano())
@@ -286,36 +297,6 @@ func TestUserCmd(t *testing.T) {
 			err := runUserList(t.Context(), userListCmdDeps{Store: store}, &buf)
 			require.Error(t, err)
 			assert.ErrorContains(t, err, "list users")
-		})
-
-		t.Run("runUserChangePassword propagates UpdatePassword error", func(t *testing.T) {
-			dataDir := t.TempDir()
-			store := auth.NewUserStore(auth.UserStoreDeps{
-				DataDir: dataDir,
-				IDGen:   ident.NewDefaultGenerator(),
-				Logger:  slog.Default(),
-			})
-			hasher := newFastHasher()
-			username := fake.Internet().User()
-
-			var buf bytes.Buffer
-			require.NoError(t, runUserAdd(t.Context(), userAddCmdDeps{Store: store, Hasher: hasher}, userAddParams{
-				Username: username,
-				Password: fake.Internet().Password(),
-			}, &buf))
-
-			// Make the users directory read-only so UpdatePassword cannot write the updated file.
-			usersDir := filepath.Join(dataDir, "auth", "users")
-			require.NoError(t, os.Chmod(usersDir, 0o500))
-			t.Cleanup(func() { _ = os.Chmod(usersDir, 0o700) })
-
-			var changeBuf bytes.Buffer
-			cpDeps := userChangePasswordCmdDeps{Store: store, Hasher: hasher}
-			err := runUserChangePassword(t.Context(), cpDeps, userChangePasswordParams{
-				Username: username,
-				Password: fake.Internet().Password(),
-			}, &changeBuf)
-			require.Error(t, err)
 		})
 	})
 }

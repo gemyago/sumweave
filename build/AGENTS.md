@@ -2,15 +2,14 @@
 
 ## Overview
 
-**Active.** This folder holds shared build infrastructure, currently centered on shared make fragments under **`make/`**.
+**Active.** This folder holds shared lint infrastructure and the adopted host release pipeline.
 
 ## Template Origin And Boundary
 
 This folder is template-derived support infrastructure, not part of the intended core product surface.
 
-Treat the following as reference-only template material unless the user explicitly adopts or edits it for the real system:
-- `build/make/`
-- release or packaging support revived from template boilerplate
+`build/make/` remains template-derived shared lint support. The release files in
+this directory were explicitly adopted from the pinned upstream boilerplate.
 
 Do not infer product architecture or product commitments from this folder.
 
@@ -22,7 +21,10 @@ Do not infer product architecture or product commitments from this folder.
 |------|------|
 | `golangci-lint.mk` | Shared repo-root pinned `golangci-lint` install/rule fragment reused by Go-module Makefiles; exports per-module cache paths under `.cache/golangci-lint/` |
 
-Package/release pipeline assets were intentionally removed. Do not reintroduce `build/npm` or npm distribution workflows unless the user explicitly asks for them.
+Build the UI and Go binaries on the host with `make -C build dist`. It produces
+Linux amd64/arm64 binaries and staged platform-agent skills. Docker only packages
+those outputs; it never compiles the UI or Go source. Do not reintroduce npm
+distribution workflows.
 
 ## Debugging Makefiles
 
@@ -43,6 +45,7 @@ Project-level rules in root `AGENTS.md` apply. For this module:
 - Prefer shared `build/make/` changes over duplicated per-module lint wiring.
 - Keep removed package/release pipeline paths out unless explicitly requested.
 - For Makefile targets prefer Makefile philosophy: targets are files but not just commands.
+- Run `make -C build test` when changing release scripts.
 
 ## Task Completion Protocol
 

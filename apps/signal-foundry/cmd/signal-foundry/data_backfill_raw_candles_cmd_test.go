@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -257,7 +256,7 @@ func TestDataBackfillRawCandlesCmd(t *testing.T) {
 		}, runner.requests[0])
 	})
 
-	t.Run("reuses app config, database, blob, and Hyperliquid defaults when wiring dependencies", func(t *testing.T) {
+	t.Run("reuses database-backed raw payload dependencies", func(t *testing.T) {
 		chdirModuleRoot(t)
 
 		dataDir := filepath.Join(t.TempDir(), "data")
@@ -277,10 +276,9 @@ func TestDataBackfillRawCandlesCmd(t *testing.T) {
 			type resolvedDeps struct {
 				dig.In
 
-				Runtime             *internal.Runtime
-				ConfiguredDataDir   string `name:"config.dataDir"`
-				ConfiguredDatabase  string `name:"config.dataLayer.database.dsn"`
-				ConfiguredBlobStore string `name:"config.dataLayer.rawPayloadBlobStore.path"`
+				Runtime            *internal.Runtime
+				ConfiguredDataDir  string `name:"config.dataDir"`
+				ConfiguredDatabase string `name:"config.dataLayer.database.dsn"`
 			}
 
 			err = container.Invoke(func(deps resolvedDeps) {
@@ -293,7 +291,6 @@ func TestDataBackfillRawCandlesCmd(t *testing.T) {
 
 				assert.Equal(t, dataDir, deps.ConfiguredDataDir)
 				assert.Equal(t, dataLayerDSN, deps.ConfiguredDatabase)
-				assert.Empty(t, deps.ConfiguredBlobStore)
 
 				instrument, instrumentErr := domain.NewInstrument(domain.InstrumentParams{
 					Venue:      venueedge.HyperliquidPerpsVenueName,
@@ -323,10 +320,6 @@ func TestDataBackfillRawCandlesCmd(t *testing.T) {
 					},
 				)
 				require.NoError(t, recordErr)
-
-				entries, readErr := os.ReadDir(filepath.Join(dataDir, "raw-payloads"))
-				require.NoError(t, readErr)
-				assert.NotEmpty(t, entries)
 			})
 			require.NoError(t, err)
 

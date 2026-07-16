@@ -36,12 +36,10 @@ func TestVenueEdgeWiring(t *testing.T) {
 	makeLineageService := func(t *testing.T) *data.LineageService {
 		t.Helper()
 
-		blobStore, err := data.NewLocalRawPayloadBlobStore(t.TempDir())
-		require.NoError(t, err)
-
+		store := makeStore(t)
 		service, err := data.NewLineageService(data.LineageServiceDeps{
-			Store:     makeStore(t),
-			BlobStore: blobStore,
+			Store:     store,
+			BlobStore: store,
 		})
 		require.NoError(t, err)
 
@@ -169,11 +167,9 @@ func TestVenueEdgeWiring(t *testing.T) {
 			t.Parallel()
 
 			sharedStore := makeStore(t)
-			lineageBlobStore, err := data.NewLocalRawPayloadBlobStore(t.TempDir())
-			require.NoError(t, err)
 			lineageService, err := data.NewLineageService(data.LineageServiceDeps{
 				Store:     sharedStore,
-				BlobStore: lineageBlobStore,
+				BlobStore: sharedStore,
 			})
 			require.NoError(t, err)
 			ingestionService, err := data.NewIngestionService(data.IngestionServiceDeps{

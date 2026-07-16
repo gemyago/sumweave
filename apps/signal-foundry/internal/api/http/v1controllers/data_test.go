@@ -1159,9 +1159,7 @@ func TestDataControllerRegisteredRawPayloadRouteRegression(t *testing.T) {
 	store, err := data.NewDatabaseStore(sqlDB, dsn, data.DatabaseStoreOpts{})
 	require.NoError(t, err)
 	require.NoError(t, store.AutoMigrate())
-	blobStore, err := data.NewLocalRawPayloadBlobStore(filepath.Join(t.TempDir(), "raw-payloads"))
-	require.NoError(t, err)
-	lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: store, BlobStore: blobStore})
+	lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: store, BlobStore: store})
 	require.NoError(t, err)
 	readService, err := data.NewReadService(data.ReadServiceDeps{
 		InstrumentStore: store,

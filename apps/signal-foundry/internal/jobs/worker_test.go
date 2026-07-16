@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -564,9 +563,7 @@ func TestWorker(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.NoError(t, dataStore.AutoMigrate())
-		blobStore, err := data.NewLocalRawPayloadBlobStore(filepath.Join(t.TempDir(), "payloads"))
-		require.NoError(t, err)
-		lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: dataStore, BlobStore: blobStore})
+		lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: dataStore, BlobStore: dataStore})
 		require.NoError(t, err)
 		startedRun, err := data.NewIngestionRun(data.IngestionRunParams{
 			ID:          "run-a",

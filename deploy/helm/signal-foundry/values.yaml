@@ -1,0 +1,79 @@
+# Adapted from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6.
+image:
+  repository: ghcr.io/gemyago/signal-foundry
+  tag: latest-main
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+existingConfigMap: ""
+existingSecret: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  runAsNonRoot: true
+  readOnlyRootFilesystem: true
+
+app:
+  replicaCount: 1
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  args: [--env, production, --json-logs, start]
+  startupProbe:
+    httpGet: {path: /health, port: http}
+    failureThreshold: 30
+    periodSeconds: 2
+  livenessProbe:
+    httpGet: {path: /health, port: http}
+  readinessProbe:
+    httpGet: {path: /health, port: http}
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+
+worker:
+  resources: {}
+  args: [--env, production, --json-logs, jobs, worker]
+
+scheduler:
+  schedule: "* * * * *"
+  startingDeadlineSeconds: 30
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources: {}
+  args: [--env, production, --json-logs, jobs, enqueue-due]
+
+migration:
+  backoffLimit: 1
+  resources: {}
+  args: [--env, production, --json-logs, db-migrate]
+
+service:
+  type: ClusterIP
+  port: 4501
+
+httpRoute:
+  enabled: false
+  nameSuffix: route
+  gatewayName: ""
+  namespace: ""
+  sectionName: ""
+  hostnames: []
+  rules: []

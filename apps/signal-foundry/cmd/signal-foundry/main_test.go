@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -13,8 +14,10 @@ import (
 	"time"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth"
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/finance/persistence"
 	"github.com/gemyago/signal-foundry/runtime/audit"
 	"github.com/gemyago/signal-foundry/runtime/backtest"
@@ -146,6 +149,25 @@ func runAppDatabaseMigrations(dsn string) error {
 	migrateErr := dataStore.AutoMigrate()
 	if migrateErr != nil {
 		return migrateErr
+	}
+	authUsers, err := auth.NewUserStore(auth.UserStoreDeps{
+		SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "signal_foundry_data_auth_",
+		IDGen: ident.NewDefaultGenerator(), Logger: slog.Default(),
+	})
+	if err != nil {
+		return err
+	}
+	if err = authUsers.AutoMigrate(); err != nil {
+		return err
+	}
+	authRefreshTokens, err := auth.NewRefreshTokenStore(auth.RefreshTokenStoreDeps{
+		SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "signal_foundry_data_auth_", Logger: slog.Default(),
+	})
+	if err != nil {
+		return err
+	}
+	if err = authRefreshTokens.AutoMigrate(); err != nil {
+		return err
 	}
 
 	jobsStore, err := jobspkg.NewStore(sqlDB, dsn, jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"})

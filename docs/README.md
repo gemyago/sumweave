@@ -7,6 +7,11 @@ Use these documents as the active documentation set for this repository.
 - Product direction: [ARCHITECTURE.md](./ARCHITECTURE.md)
 - Implementation snapshot: [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)
 
+## Active Plans
+
+- Release and deployment: [release-and-deployment-plan.md](./release-and-deployment-plan.md)
+- Database-backed state: [database-backed-state-plan.md](./database-backed-state-plan.md)
+
 ## Retained Reference Docs
 
 - Product vocabulary: [domain-terminology.md](./domain-terminology.md)

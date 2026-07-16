@@ -551,6 +551,72 @@ func (_m *mockrefreshTokenStore) EXPECT() *mockrefreshTokenStore_Expecter {
 	return &mockrefreshTokenStore_Expecter{mock: &_m.Mock}
 }
 
+// Consume provides a mock function for the type mockrefreshTokenStore
+func (_mock *mockrefreshTokenStore) Consume(ctx context.Context, opaqueToken string) (string, error) {
+	ret := _mock.Called(ctx, opaqueToken)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Consume")
+	}
+
+	var r0 string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return returnFunc(ctx, opaqueToken)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = returnFunc(ctx, opaqueToken)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, opaqueToken)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockrefreshTokenStore_Consume_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Consume'
+type mockrefreshTokenStore_Consume_Call struct {
+	*mock.Call
+}
+
+// Consume is a helper method to define mock.On call
+//   - ctx context.Context
+//   - opaqueToken string
+func (_e *mockrefreshTokenStore_Expecter) Consume(ctx interface{}, opaqueToken interface{}) *mockrefreshTokenStore_Consume_Call {
+	return &mockrefreshTokenStore_Consume_Call{Call: _e.mock.On("Consume", ctx, opaqueToken)}
+}
+
+func (_c *mockrefreshTokenStore_Consume_Call) Run(run func(ctx context.Context, opaqueToken string)) *mockrefreshTokenStore_Consume_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockrefreshTokenStore_Consume_Call) Return(userID string, err error) *mockrefreshTokenStore_Consume_Call {
+	_c.Call.Return(userID, err)
+	return _c
+}
+
+func (_c *mockrefreshTokenStore_Consume_Call) RunAndReturn(run func(ctx context.Context, opaqueToken string) (string, error)) *mockrefreshTokenStore_Consume_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Create provides a mock function for the type mockrefreshTokenStore
 func (_mock *mockrefreshTokenStore) Create(ctx context.Context, userID string, ttl time.Duration) (string, error) {
 	ret := _mock.Called(ctx, userID, ttl)
@@ -623,63 +689,6 @@ func (_c *mockrefreshTokenStore_Create_Call) RunAndReturn(run func(ctx context.C
 	return _c
 }
 
-// Delete provides a mock function for the type mockrefreshTokenStore
-func (_mock *mockrefreshTokenStore) Delete(ctx context.Context, opaqueToken string) error {
-	ret := _mock.Called(ctx, opaqueToken)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Delete")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = returnFunc(ctx, opaqueToken)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// mockrefreshTokenStore_Delete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Delete'
-type mockrefreshTokenStore_Delete_Call struct {
-	*mock.Call
-}
-
-// Delete is a helper method to define mock.On call
-//   - ctx context.Context
-//   - opaqueToken string
-func (_e *mockrefreshTokenStore_Expecter) Delete(ctx interface{}, opaqueToken interface{}) *mockrefreshTokenStore_Delete_Call {
-	return &mockrefreshTokenStore_Delete_Call{Call: _e.mock.On("Delete", ctx, opaqueToken)}
-}
-
-func (_c *mockrefreshTokenStore_Delete_Call) Run(run func(ctx context.Context, opaqueToken string)) *mockrefreshTokenStore_Delete_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *mockrefreshTokenStore_Delete_Call) Return(err error) *mockrefreshTokenStore_Delete_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *mockrefreshTokenStore_Delete_Call) RunAndReturn(run func(ctx context.Context, opaqueToken string) error) *mockrefreshTokenStore_Delete_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // DeleteAllForUser provides a mock function for the type mockrefreshTokenStore
 func (_mock *mockrefreshTokenStore) DeleteAllForUser(ctx context.Context, userID string) error {
 	ret := _mock.Called(ctx, userID)
@@ -733,72 +742,6 @@ func (_c *mockrefreshTokenStore_DeleteAllForUser_Call) Return(err error) *mockre
 }
 
 func (_c *mockrefreshTokenStore_DeleteAllForUser_Call) RunAndReturn(run func(ctx context.Context, userID string) error) *mockrefreshTokenStore_DeleteAllForUser_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Validate provides a mock function for the type mockrefreshTokenStore
-func (_mock *mockrefreshTokenStore) Validate(ctx context.Context, opaqueToken string) (string, error) {
-	ret := _mock.Called(ctx, opaqueToken)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Validate")
-	}
-
-	var r0 string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
-		return returnFunc(ctx, opaqueToken)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) string); ok {
-		r0 = returnFunc(ctx, opaqueToken)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, opaqueToken)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// mockrefreshTokenStore_Validate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Validate'
-type mockrefreshTokenStore_Validate_Call struct {
-	*mock.Call
-}
-
-// Validate is a helper method to define mock.On call
-//   - ctx context.Context
-//   - opaqueToken string
-func (_e *mockrefreshTokenStore_Expecter) Validate(ctx interface{}, opaqueToken interface{}) *mockrefreshTokenStore_Validate_Call {
-	return &mockrefreshTokenStore_Validate_Call{Call: _e.mock.On("Validate", ctx, opaqueToken)}
-}
-
-func (_c *mockrefreshTokenStore_Validate_Call) Run(run func(ctx context.Context, opaqueToken string)) *mockrefreshTokenStore_Validate_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *mockrefreshTokenStore_Validate_Call) Return(userID string, err error) *mockrefreshTokenStore_Validate_Call {
-	_c.Call.Return(userID, err)
-	return _c
-}
-
-func (_c *mockrefreshTokenStore_Validate_Call) RunAndReturn(run func(ctx context.Context, opaqueToken string) (string, error)) *mockrefreshTokenStore_Validate_Call {
 	_c.Call.Return(run)
 	return _c
 }

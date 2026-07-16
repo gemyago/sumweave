@@ -125,7 +125,6 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		// data layer persistence config
 		provideConfigValue(cfg, "dataLayer.database.dsn").asString(),
 		provideConfigValue(cfg, "dataLayer.database.tablePrefix").asString(),
-		provideConfigValue(cfg, "dataLayer.rawPayloadBlobStore.path").asString(),
 
 		// jobs config
 		provideConfigValue(cfg, "jobs.scheduler.loopInterval").asDuration(),

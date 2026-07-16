@@ -47,10 +47,10 @@
         "{workspaceRoot}/apps/signal-ui/vite.config.ts",
         "{workspaceRoot}/apps/signal-ui/Makefile"
       ],
-      "outputs": ["{projectRoot}/dist"],
+      "outputs": ["{workspaceRoot}/build/dist"],
       "options": {
-        "command": "make dist/bin",
-        "cwd": "{projectRoot}"
+        "command": "make -C build dist",
+        "cwd": "{workspaceRoot}"
       }
     },
     "dev": {

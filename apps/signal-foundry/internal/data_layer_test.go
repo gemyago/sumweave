@@ -4,7 +4,6 @@ package internal
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -36,16 +35,6 @@ func TestDataLayerConstructors(t *testing.T) {
 		require.NoError(t, err)
 
 		return store
-	}
-
-	makeBlobStore := func(t *testing.T) *data.LocalRawPayloadBlobStore {
-		t.Helper()
-		blobStore, err := newDataRawPayloadBlobStore(dataLayerBlobStoreDeps{
-			DataDir:                 t.TempDir(),
-			RawPayloadBlobStorePath: filepath.Join("custom", fake.Lorem().Word()),
-		})
-		require.NoError(t, err)
-		return blobStore
 	}
 
 	t.Run("newDataLayerStore", func(t *testing.T) {
@@ -122,37 +111,11 @@ func TestDataLayerConstructors(t *testing.T) {
 		})
 	})
 
-	t.Run("newDataRawPayloadBlobStore", func(t *testing.T) {
-		t.Run("defaults under data dir when path unset", func(t *testing.T) {
-			dataDir := t.TempDir()
-			blobStore, err := newDataRawPayloadBlobStore(dataLayerBlobStoreDeps{DataDir: dataDir})
-			require.NoError(t, err)
-			require.NotNil(t, blobStore)
-		})
-
-		t.Run("resolves relative configured paths from data dir", func(t *testing.T) {
-			dataDir := t.TempDir()
-			blobStore, err := newDataRawPayloadBlobStore(dataLayerBlobStoreDeps{
-				DataDir:                 dataDir,
-				RawPayloadBlobStorePath: filepath.Join("relative", fake.Lorem().Word()),
-			})
-			require.NoError(t, err)
-			require.NotNil(t, blobStore)
-		})
-	})
-
 	t.Run("newDataLineageService", func(t *testing.T) {
-		t.Run("creates service backed by store and blob store", func(t *testing.T) {
-			service, err := newDataLineageService(makeStore(t), makeBlobStore(t))
+		t.Run("creates service backed by one database store", func(t *testing.T) {
+			service, err := newDataLineageService(makeStore(t))
 			require.NoError(t, err)
 			require.NotNil(t, service)
-		})
-
-		t.Run("returns error when blob store is nil", func(t *testing.T) {
-			service, err := newDataLineageService(makeStore(t), nil)
-			require.Error(t, err)
-			require.Nil(t, service)
-			require.ErrorContains(t, err, "raw payload blob store is required")
 		})
 	})
 }

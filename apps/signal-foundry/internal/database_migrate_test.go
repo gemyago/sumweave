@@ -12,7 +12,9 @@ import (
 	"testing"
 
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/appdispatch"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/auth"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/gemyago/signal-foundry/runtime/data"
 	"github.com/stretchr/testify/require"
@@ -36,6 +38,21 @@ func TestDatabaseMigrator(t *testing.T) {
 			TablePrefix: "signal_foundry_data_",
 		})
 		require.NoError(t, err)
+		authUsers, err := auth.NewUserStore(auth.UserStoreDeps{
+			SQLDB:       sharedDB,
+			DatabaseDSN: dsn,
+			TablePrefix: "signal_foundry_data_auth_",
+			IDGen:       ident.NewDefaultGenerator(),
+			Logger:      telemetry.RootTestLogger(),
+		})
+		require.NoError(t, err)
+		authRefreshTokens, err := auth.NewRefreshTokenStore(auth.RefreshTokenStoreDeps{
+			SQLDB:       sharedDB,
+			DatabaseDSN: dsn,
+			TablePrefix: "signal_foundry_data_auth_",
+			Logger:      telemetry.RootTestLogger(),
+		})
+		require.NoError(t, err)
 
 		return DatabaseMigrationDeps{
 			RootLogger:                      telemetry.RootTestLogger(),
@@ -46,6 +63,8 @@ func TestDatabaseMigrator(t *testing.T) {
 			DataLayerDatabaseTablePrefix:    "signal_foundry_data_",
 			DataLayerSQLDB:                  sharedDB,
 			DataStore:                       dataStore,
+			AuthUsers:                       authUsers,
+			AuthRefreshTokens:               authRefreshTokens,
 		}
 	}
 
@@ -139,6 +158,8 @@ func TestDatabaseMigrator(t *testing.T) {
 		requireAnyTable(t, db, "session_metadata", "runtime_session_metadata")
 		for _, tableName := range []string{
 			"signal_foundry_data_instruments",
+			"signal_foundry_data_auth_auth_users",
+			"signal_foundry_data_auth_auth_refresh_tokens",
 			appdispatch.Config{TablePrefix: "signal_foundry_data_"}.MessagesTable(),
 			appdispatch.Config{TablePrefix: "signal_foundry_data_"}.OffsetsTable(),
 			"signal_foundry_data_jobs_jobs",

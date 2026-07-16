@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -134,12 +133,7 @@ func TestHistoricalRawCandleBackfillRunnerWithHyperliquidAdapter(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		blobStore, err := data.NewLocalRawPayloadBlobStore(
-			filepath.Join(t.TempDir(), randomWord("raw-payloads")),
-		)
-		require.NoError(t, err)
-
-		lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: store, BlobStore: blobStore})
+		lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: store, BlobStore: store})
 		require.NoError(t, err)
 
 		flow, err := venueedge.NewIngestionFlow(ingestionService)

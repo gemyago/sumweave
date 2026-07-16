@@ -1,296 +1,122 @@
 package auth
 
 import (
-	"os"
-	"path/filepath"
+	"fmt"
+	"sync"
 	"testing"
 
-	"github.com/jaswdr/faker/v2"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
+	"github.com/jaswdr/faker/v2"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUserStore(t *testing.T) {
 	fake := faker.New()
-
 	makeStore := func(t *testing.T) *UserStore {
 		t.Helper()
-		return NewUserStore(UserStoreDeps{
-			DataDir: t.TempDir(),
-			IDGen:   ident.NewDefaultGenerator(),
-			Logger:  telemetry.RootTestLogger(),
+		dsn := fmt.Sprintf("file:auth-users-%s?mode=memory&cache=shared", fake.UUID().V4())
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		store, err := NewUserStore(UserStoreDeps{
+			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "test_auth_",
+			IDGen: ident.NewDefaultGenerator(), Logger: telemetry.RootTestLogger(),
 		})
+		require.NoError(t, err)
+		require.NoError(t, store.AutoMigrate())
+		return store
+	}
+	makeParams := func(prefix string) CreateUserParams {
+		return CreateUserParams{Username: prefix + "-" + fake.Internet().User(), PasswordHash: fake.Lorem().Text(60)}
 	}
 
-	makeCreateParams := func() CreateUserParams {
-		return CreateUserParams{
-			Username:     fake.Internet().User(),
-			PasswordHash: fake.Lorem().Text(60),
+	t.Run("creates indexed users, lists deterministically, and updates passwords", func(t *testing.T) {
+		store := makeStore(t)
+		firstParams := makeParams("first")
+		secondParams := makeParams("second")
+		first, err := store.Create(t.Context(), firstParams)
+		require.NoError(t, err)
+		second, err := store.Create(t.Context(), secondParams)
+		require.NoError(t, err)
+		byID, err := store.GetByID(t.Context(), first.ID)
+		require.NoError(t, err)
+		require.Equal(t, first.ID, byID.ID)
+		require.Equal(t, first.Username, byID.Username)
+		require.Equal(t, first.PasswordHash, byID.PasswordHash)
+		require.True(t, first.CreatedAt.Equal(byID.CreatedAt))
+		require.True(t, first.UpdatedAt.Equal(byID.UpdatedAt))
+		byUsername, err := store.GetByUsername(t.Context(), second.Username)
+		require.NoError(t, err)
+		require.Equal(t, second.ID, byUsername.ID)
+		require.Equal(t, second.Username, byUsername.Username)
+
+		users, err := store.List(t.Context())
+		require.NoError(t, err)
+		require.Len(t, users, 2)
+		require.LessOrEqual(t, users[0].Username, users[1].Username)
+		newHash := fake.Lorem().Text(60)
+		require.NoError(t, store.UpdatePassword(t.Context(), first.ID, newHash))
+		updated, err := store.GetByID(t.Context(), first.ID)
+		require.NoError(t, err)
+		require.Equal(t, newHash, updated.PasswordHash)
+		require.ErrorIs(t, store.UpdatePassword(t.Context(), fake.UUID().V4(), newHash), ErrUserNotFound)
+	})
+
+	t.Run("maps concurrent duplicate usernames to ErrUsernameExists", func(t *testing.T) {
+		store := makeStore(t)
+		params := makeParams("shared")
+		const attempts = 8
+		errorsByAttempt := make(chan error, attempts)
+		var group sync.WaitGroup
+		for range attempts {
+			group.Go(func() { _, err := store.Create(t.Context(), params); errorsByAttempt <- err })
 		}
-	}
-
-	t.Run("Create", func(t *testing.T) {
-		t.Run("creates user and returns it", func(t *testing.T) {
-			store := makeStore(t)
-			params := makeCreateParams()
-
-			user, err := store.Create(t.Context(), params)
-
-			require.NoError(t, err)
-			assert.NotEmpty(t, user.ID)
-			assert.Equal(t, params.Username, user.Username)
-			assert.Equal(t, params.PasswordHash, user.PasswordHash)
-			assert.NotZero(t, user.CreatedAt)
-			assert.NotZero(t, user.UpdatedAt)
-		})
-
-		t.Run("returns ErrUsernameExists for duplicate username", func(t *testing.T) {
-			store := makeStore(t)
-			params := makeCreateParams()
-
-			_, err := store.Create(t.Context(), params)
-			require.NoError(t, err)
-
-			_, err = store.Create(t.Context(), params)
+		group.Wait()
+		close(errorsByAttempt)
+		successes := 0
+		for err := range errorsByAttempt {
+			if err == nil {
+				successes++
+				continue
+			}
 			require.ErrorIs(t, err, ErrUsernameExists)
-		})
-
-		t.Run("allows different usernames", func(t *testing.T) {
-			store := makeStore(t)
-
-			params1 := makeCreateParams()
-			params2 := makeCreateParams()
-
-			_, err := store.Create(t.Context(), params1)
-			require.NoError(t, err)
-
-			_, err = store.Create(t.Context(), params2)
-			require.NoError(t, err)
-		})
+		}
+		require.Equal(t, 1, successes)
 	})
 
-	t.Run("GetByID", func(t *testing.T) {
-		t.Run("returns created user by ID", func(t *testing.T) {
-			store := makeStore(t)
-			params := makeCreateParams()
-
-			created, err := store.Create(t.Context(), params)
-			require.NoError(t, err)
-
-			got, err := store.GetByID(t.Context(), created.ID)
-			require.NoError(t, err)
-			assert.Equal(t, created, got)
+	t.Run("validates dependencies and maps missing users", func(t *testing.T) {
+		_, err := NewUserStore(UserStoreDeps{})
+		require.ErrorContains(t, err, "user id generator is required")
+		_, err = NewUserStore(UserStoreDeps{IDGen: ident.NewDefaultGenerator()})
+		require.ErrorContains(t, err, "auth user store logger is required")
+		_, err = NewUserStore(UserStoreDeps{
+			IDGen: ident.NewDefaultGenerator(), Logger: telemetry.RootTestLogger(),
 		})
+		require.ErrorContains(t, err, "auth sql database is required")
 
-		t.Run("returns ErrUserNotFound for non-existent ID", func(t *testing.T) {
-			store := makeStore(t)
-
-			_, err := store.GetByID(t.Context(), fake.UUID().V4())
-			require.ErrorIs(t, err, ErrUserNotFound)
-		})
+		store := makeStore(t)
+		_, err = store.GetByID(t.Context(), fake.UUID().V4())
+		require.ErrorIs(t, err, ErrUserNotFound)
+		_, err = store.GetByUsername(t.Context(), fake.Internet().User())
+		require.ErrorIs(t, err, ErrUserNotFound)
+		users, err := store.List(t.Context())
+		require.NoError(t, err)
+		require.Empty(t, users)
 	})
 
-	t.Run("GetByUsername", func(t *testing.T) {
-		t.Run("returns created user by username", func(t *testing.T) {
-			store := makeStore(t)
-			params := makeCreateParams()
-
-			created, err := store.Create(t.Context(), params)
-			require.NoError(t, err)
-
-			got, err := store.GetByUsername(t.Context(), params.Username)
-			require.NoError(t, err)
-			assert.Equal(t, created, got)
-		})
-
-		t.Run("returns ErrUserNotFound for non-existent username", func(t *testing.T) {
-			store := makeStore(t)
-
-			_, err := store.GetByUsername(t.Context(), fake.Internet().User())
-			require.ErrorIs(t, err, ErrUserNotFound)
-		})
-	})
-
-	t.Run("List", func(t *testing.T) {
-		t.Run("returns empty slice when no users", func(t *testing.T) {
-			store := makeStore(t)
-
-			users, err := store.List(t.Context())
-			require.NoError(t, err)
-			assert.Empty(t, users)
-		})
-
-		t.Run("returns all created users", func(t *testing.T) {
-			store := makeStore(t)
-
-			created1, err := store.Create(t.Context(), makeCreateParams())
-			require.NoError(t, err)
-
-			created2, err := store.Create(t.Context(), makeCreateParams())
-			require.NoError(t, err)
-
-			users, err := store.List(t.Context())
-			require.NoError(t, err)
-			assert.Len(t, users, 2)
-			assert.ElementsMatch(t, []User{*created1, *created2}, users)
-		})
-	})
-
-	t.Run("UpdatePassword", func(t *testing.T) {
-		t.Run("updates the password hash", func(t *testing.T) {
-			store := makeStore(t)
-			params := makeCreateParams()
-
-			created, err := store.Create(t.Context(), params)
-			require.NoError(t, err)
-
-			newHash := fake.Lorem().Text(60)
-			err = store.UpdatePassword(t.Context(), created.ID, newHash)
-			require.NoError(t, err)
-
-			got, err := store.GetByID(t.Context(), created.ID)
-			require.NoError(t, err)
-			assert.Equal(t, newHash, got.PasswordHash)
-			assert.Equal(t, created.Username, got.Username)
-			assert.Equal(t, created.CreatedAt, got.CreatedAt)
-			assert.True(t, got.UpdatedAt.After(created.UpdatedAt) || got.UpdatedAt.Equal(created.UpdatedAt))
-		})
-
-		t.Run("returns ErrUserNotFound for non-existent user", func(t *testing.T) {
-			store := makeStore(t)
-
-			err := store.UpdatePassword(t.Context(), fake.UUID().V4(), fake.Lorem().Text(60))
-			require.ErrorIs(t, err, ErrUserNotFound)
-		})
-
-		t.Run("returns error when write fails", func(t *testing.T) {
-			store := makeStore(t)
-			params := makeCreateParams()
-
-			created, err := store.Create(t.Context(), params)
-			require.NoError(t, err)
-
-			// Make directory read-only so write fails.
-			usersDir := filepath.Join(store.deps.DataDir, "auth", "users")
-			require.NoError(t, os.Chmod(usersDir, 0o500))
-			t.Cleanup(func() { _ = os.Chmod(usersDir, 0o700) })
-
-			err = store.UpdatePassword(t.Context(), created.ID, fake.Lorem().Text(60))
-			require.Error(t, err)
-		})
-	})
-
-	t.Run("List error paths", func(t *testing.T) {
-		t.Run("returns error when directory is not readable", func(t *testing.T) {
-			store := makeStore(t)
-			params := makeCreateParams()
-
-			// Create a user to ensure the directory exists.
-			_, err := store.Create(t.Context(), params)
-			require.NoError(t, err)
-
-			// Make auth dir non-readable so ReadDir fails (not ErrNotExist).
-			authDir := filepath.Join(store.deps.DataDir, "auth")
-			require.NoError(t, os.Chmod(authDir, 0o000))
-			t.Cleanup(func() { _ = os.Chmod(authDir, 0o700) })
-
-			_, err = store.List(t.Context())
-			require.Error(t, err)
-		})
-
-		t.Run("skips directories inside users dir", func(t *testing.T) {
-			store := makeStore(t)
-
-			// Create a user to ensure the directory exists.
-			created, err := store.Create(t.Context(), makeCreateParams())
-			require.NoError(t, err)
-
-			// Create a subdirectory inside users dir.
-			subDir := filepath.Join(store.deps.DataDir, "auth", "users", "subdir")
-			require.NoError(t, os.MkdirAll(subDir, 0o700))
-
-			users, err := store.List(t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, []User{*created}, users)
-		})
-
-		t.Run("skips non-JSON files", func(t *testing.T) {
-			store := makeStore(t)
-
-			created, err := store.Create(t.Context(), makeCreateParams())
-			require.NoError(t, err)
-
-			// Write a non-JSON file.
-			nonJSONFile := filepath.Join(store.deps.DataDir, "auth", "users", "somefile.txt")
-			require.NoError(t, os.WriteFile(nonJSONFile, []byte("data"), 0o600))
-
-			users, err := store.List(t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, []User{*created}, users)
-		})
-
-		t.Run("skips temp files", func(t *testing.T) {
-			store := makeStore(t)
-
-			created, err := store.Create(t.Context(), makeCreateParams())
-			require.NoError(t, err)
-
-			// Write a temp JSON file that would match the pattern.
-			tmpFile := filepath.Join(store.deps.DataDir, "auth", "users", fake.UUID().V4()+".tmp.json")
-			require.NoError(t, os.WriteFile(tmpFile, []byte("{}"), 0o600))
-
-			users, err := store.List(t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, []User{*created}, users)
-		})
-
-		t.Run("skips corrupt JSON files and logs warning", func(t *testing.T) {
-			store := makeStore(t)
-
-			created, err := store.Create(t.Context(), makeCreateParams())
-			require.NoError(t, err)
-
-			// Write a corrupt JSON file.
-			corruptFile := filepath.Join(store.deps.DataDir, "auth", "users", fake.UUID().V4()+".json")
-			require.NoError(t, os.WriteFile(corruptFile, []byte("not valid json"), 0o600))
-
-			users, err := store.List(t.Context())
-			require.NoError(t, err)
-			assert.Equal(t, []User{*created}, users)
-		})
-	})
-
-	t.Run("GetByID error paths", func(t *testing.T) {
-		t.Run("returns error for corrupt JSON file", func(t *testing.T) {
-			store := makeStore(t)
-
-			corruptID := fake.UUID().V4()
-			corruptFile := filepath.Join(store.deps.DataDir, "auth", "users", corruptID+".json")
-			usersDir := filepath.Join(store.deps.DataDir, "auth", "users")
-			require.NoError(t, os.MkdirAll(usersDir, 0o700))
-			require.NoError(t, os.WriteFile(corruptFile, []byte("not valid json"), 0o600))
-
-			_, err := store.GetByID(t.Context(), corruptID)
-			require.Error(t, err)
-		})
-	})
-
-	t.Run("Create error paths", func(t *testing.T) {
-		t.Run("returns error when write fails", func(t *testing.T) {
-			store := makeStore(t)
-			params := makeCreateParams()
-
-			// Create the directory first so it exists but is then made read-only.
-			usersDir := filepath.Join(store.deps.DataDir, "auth", "users")
-			require.NoError(t, os.MkdirAll(usersDir, 0o700))
-			require.NoError(t, os.Chmod(usersDir, 0o500))
-			t.Cleanup(func() { _ = os.Chmod(usersDir, 0o700) })
-
-			_, err := store.Create(t.Context(), params)
-			require.Error(t, err)
-		})
+	t.Run("propagates database failures", func(t *testing.T) {
+		store := makeStore(t)
+		sqlDB, err := store.db.DB()
+		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
+		_, err = store.Create(t.Context(), makeParams("closed"))
+		require.Error(t, err)
+		_, err = store.GetByID(t.Context(), fake.UUID().V4())
+		require.Error(t, err)
+		_, err = store.GetByUsername(t.Context(), fake.Internet().User())
+		require.Error(t, err)
+		require.Error(t, store.UpdatePassword(t.Context(), fake.UUID().V4(), fake.Lorem().Text(60)))
 	})
 }

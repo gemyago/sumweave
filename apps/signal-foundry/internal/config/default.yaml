@@ -74,7 +74,7 @@ openTelemetry:
       tokenType: ""
 
 auth:
-  # empty → auto-generate and persist in dataDir; override via APP_AUTH_JWTSIGNINGKEY
+  # Required JWT HMAC key. Production injects APP_AUTH_JWTSIGNINGKEY from a secret.
   jwtSigningKey: ""
   accessTokenTTL: 30m
   refreshTokenTTL: 720h   # 30 days
@@ -92,16 +92,15 @@ workspacefs:
     maxConcurrentJobs: 0
 
 agentRuntime:
-  # Where the embedded agent runtime persists state (sessions, providers config, etc.).
-  # storage.type: "file" (default) or "database"
+  # The application always uses database-backed agent runtime state.
   storage:
-    type: file
+    type: database
   database:
     # Provided via env APP_AGENTRUNTIME_DATABASE_DSN
     dsn: ""
     # Table name prefix for agent runtime database tables (sessions, provider config, etc.).
     # If underlying DB supports schemas, the prefix will serve as the schema name.
-    tablePrefix: ""
+    tablePrefix: "signal_foundry_runtime_"
 
 dataLayer:
   database:
@@ -109,9 +108,6 @@ dataLayer:
     dsn: "data/data-layer.db"
     # Table name prefix for data-layer tables so they can share a database safely.
     tablePrefix: "signal_foundry_data_"
-  rawPayloadBlobStore:
-    # Optional local raw payload blob directory. Empty defaults under dataDir.
-    path: ""
 
 jobs:
   scheduler:

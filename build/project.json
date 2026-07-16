@@ -1,0 +1,21 @@
+{
+  "name": "release-build",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {"command": "make -C build test"}
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {"command": "make -C build test"}
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{"projects": ["signal-foundry", "signal-ui"], "target": "install-deps"}],
+      "options": {"command": "make -C build dist"},
+      "outputs": ["{projectRoot}/dist"]
+    }
+  }
+}

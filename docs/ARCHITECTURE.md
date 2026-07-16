@@ -49,6 +49,18 @@ The standard local backend workflow is:
 
 `start-all` is the normal all-in-one local mode for the backend app. Dedicated `start`, `jobs worker`, and `jobs enqueue-due` commands remain available for split or production-like environments.
 
+## Release and deployment
+
+The UI is built on the host and embedded into one CGO-disabled Go release binary
+for Linux amd64 and arm64. Docker packages only the prepared target binary and
+the staged `.platform-agents/skills` into `ghcr.io/gemyago/signal-foundry`.
+
+The Helm chart deploys that same image as an app Deployment, a singleton worker
+Deployment, an enqueue-only scheduler CronJob, and a migration hook Job.
+Production uses PostgreSQL and database-backed application state; SQLite and
+local files are development-only. Argo CD desired state and environment secrets
+remain outside this repository and should select an immutable commit tag or digest.
+
 ## Original concept pages
 
 The original product slice concepts were drafted in Notion. Those pages are useful for intent, vocabulary, and early design context, but they are not the source of truth for the repository.

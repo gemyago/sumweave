@@ -677,7 +677,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.Equal(t, connection.ID, input.ConnectionID)
 	})
 
-	t.Run("uses auth signing key fallback for monobank token linking", func(t *testing.T) {
+	t.Run("uses configured auth signing key fallback for monobank token linking", func(t *testing.T) {
 		monoToken := "mono-token-fallback"
 		monoServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if request.URL.Path != "/personal/client-info" {
@@ -704,16 +704,14 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			makeSQLiteMemoryDSN("jobs"),
 		)
 
-		dataDir := t.TempDir()
 		container := dig.New()
 		require.NoError(
 			t,
 			di.ProvideAll(
 				container,
-				di.ProvideValue("", dig.Name("config.auth.jwtSigningKey")),
+				di.ProvideValue("test-configured-jwt-key", dig.Name("config.auth.jwtSigningKey")),
 				di.ProvideValue(24*time.Hour, dig.Name("config.auth.accessTokenTTL")),
 				di.ProvideValue(7*24*time.Hour, dig.Name("config.auth.refreshTokenTTL")),
-				di.ProvideValue(dataDir, dig.Name("config.dataDir")),
 				slog.Default,
 				func() *persistence.Database { return database },
 				func() *persistence.Store { return financeStore },
@@ -763,10 +761,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		require.NotNil(t, resolved.BankConnectionService)
 		require.NotNil(t, resolved.SyntheticLinkStateService)
 
-		persistedKeyPath := filepath.Join(dataDir, "auth", "jwt-signing-key")
-		persistedKey, err := os.ReadFile(persistedKeyPath)
-		require.NoError(t, err)
-		require.Equal(t, resolved.JWTKey, string(persistedKey))
+		require.Equal(t, "test-configured-jwt-key", resolved.JWTKey)
 
 		tenant, err := resolved.TenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{
 			ActorUserID:     "user-owner",

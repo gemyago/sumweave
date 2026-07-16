@@ -25,8 +25,7 @@ type jwtService interface {
 
 type refreshTokenStore interface {
 	Create(ctx context.Context, userID string, ttl time.Duration) (opaqueToken string, err error)
-	Validate(ctx context.Context, opaqueToken string) (userID string, err error)
-	Delete(ctx context.Context, opaqueToken string) error
+	Consume(ctx context.Context, opaqueToken string) (userID string, err error)
 	DeleteAllForUser(ctx context.Context, userID string) error
 }
 
@@ -115,21 +114,17 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (*Lo
 }
 
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*RefreshResult, error) {
-	userID, err := s.deps.RefreshTokenStore.Validate(ctx, refreshToken)
+	userID, err := s.deps.RefreshTokenStore.Consume(ctx, refreshToken)
 	if err != nil {
 		if errors.Is(err, ErrInvalidRefreshToken) {
 			return nil, ErrInvalidRefreshToken
 		}
-		return nil, fmt.Errorf("validate refresh token: %w", err)
+		return nil, fmt.Errorf("consume refresh token: %w", err)
 	}
 
 	user, err := s.deps.UserStore.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get user by id: %w", err)
-	}
-
-	if err = s.deps.RefreshTokenStore.Delete(ctx, refreshToken); err != nil {
-		return nil, fmt.Errorf("delete old refresh token: %w", err)
 	}
 
 	accessToken, err := s.deps.JWTService.GenerateAccessToken(user.ID, user.Username)

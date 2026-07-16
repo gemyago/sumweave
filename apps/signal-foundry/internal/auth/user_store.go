@@ -2,15 +2,19 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
+	"github.com/glebarez/sqlite"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 var (
@@ -32,185 +36,159 @@ type CreateUserParams struct {
 }
 
 type UserStoreDeps struct {
-	DataDir string `name:"config.dataDir"`
-	IDGen   ident.Generator
-	Logger  *slog.Logger
+	SQLDB       *sql.DB
+	DatabaseDSN string
+	TablePrefix string
+	IDGen       ident.Generator
+	Logger      *slog.Logger
 }
+
+type authUserModel struct {
+	ID           string    `gorm:"column:id;size:255;not null;primaryKey"`
+	Username     string    `gorm:"column:username;size:255;not null;uniqueIndex"`
+	PasswordHash string    `gorm:"column:password_hash;not null"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
+}
+
+func (authUserModel) TableName(namer schema.Namer) string { return namer.TableName("auth_users") }
 
 type UserStore struct {
-	deps UserStoreDeps
+	db     *gorm.DB
+	idGen  ident.Generator
+	logger *slog.Logger
 }
 
-func NewUserStore(deps UserStoreDeps) *UserStore {
-	return &UserStore{deps: deps}
+func NewUserStore(deps UserStoreDeps) (*UserStore, error) {
+	if deps.IDGen == nil {
+		return nil, errors.New("user id generator is required")
+	}
+	if deps.Logger == nil {
+		return nil, errors.New("auth user store logger is required")
+	}
+	db, err := openAuthDatabase(deps.SQLDB, deps.DatabaseDSN, deps.TablePrefix)
+	if err != nil {
+		return nil, fmt.Errorf("open auth user store database: %w", err)
+	}
+	return &UserStore{db: db, idGen: deps.IDGen, logger: deps.Logger}, nil
 }
 
-func (s *UserStore) usersDir() string {
-	return filepath.Join(s.deps.DataDir, "auth", "users")
-}
-
-func (s *UserStore) userFilePath(id string) string {
-	return filepath.Join(s.usersDir(), id+".json")
-}
-
-func (s *UserStore) ensureUsersDir() error {
-	if err := os.MkdirAll(s.usersDir(), 0o700); err != nil {
-		return fmt.Errorf("create users directory: %w", err)
+func (s *UserStore) AutoMigrate() error {
+	if err := s.db.AutoMigrate(&authUserModel{}); err != nil {
+		return fmt.Errorf("auto migrate auth users: %w", err)
 	}
 	return nil
-}
-
-func (s *UserStore) writeUser(user *User) error {
-	if err := s.ensureUsersDir(); err != nil {
-		return err
-	}
-
-	data, err := json.Marshal(user)
-	if err != nil {
-		return fmt.Errorf("marshal user: %w", err)
-	}
-
-	dest := s.userFilePath(user.ID)
-	tmp := dest + ".tmp"
-
-	err = os.WriteFile(tmp, data, 0o600)
-	if err != nil {
-		return fmt.Errorf("write temp user file: %w", err)
-	}
-
-	err = os.Rename(tmp, dest)
-	if err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename user file: %w", err)
-	}
-
-	return nil
-}
-
-func (s *UserStore) readUser(id string) (*User, error) {
-	data, err := os.ReadFile(s.userFilePath(id))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrUserNotFound
-		}
-		return nil, fmt.Errorf("read user file: %w", err)
-	}
-
-	var user User
-	err = json.Unmarshal(data, &user)
-	if err != nil {
-		return nil, fmt.Errorf("unmarshal user: %w", err)
-	}
-
-	return &user, nil
 }
 
 func (s *UserStore) Create(ctx context.Context, params CreateUserParams) (*User, error) {
-	// Check for duplicate username by scanning existing users.
-	existing, err := s.GetByUsername(ctx, params.Username)
-	if err != nil && !errors.Is(err, ErrUserNotFound) {
-		return nil, fmt.Errorf("check username: %w", err)
-	}
-	if existing != nil {
-		return nil, ErrUsernameExists
-	}
-
 	now := time.Now().Round(0)
-	user := &User{
-		ID:           s.deps.IDGen.MustNewV7().String(),
+	model := authUserModel{
+		ID:           s.idGen.MustNewV7().String(),
 		Username:     params.Username,
 		PasswordHash: params.PasswordHash,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-
-	err = s.writeUser(user)
-	if err != nil {
-		return nil, fmt.Errorf("write user: %w", err)
+	if err := s.db.WithContext(ctx).Create(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return nil, ErrUsernameExists
+		}
+		return nil, fmt.Errorf("create auth user: %w", err)
 	}
-
-	s.deps.Logger.DebugContext(ctx, "user created", slog.String("userID", user.ID))
-	return user, nil
+	user := authUserFromModel(model)
+	s.logger.DebugContext(ctx, "user created", slog.String("userID", user.ID))
+	return &user, nil
 }
 
-func (s *UserStore) GetByID(_ context.Context, id string) (*User, error) {
-	user, err := s.readUser(id)
-	if err != nil {
-		return nil, err
+func (s *UserStore) GetByID(ctx context.Context, id string) (*User, error) {
+	var model authUserModel
+	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("get auth user by id: %w", err)
 	}
-	return user, nil
+	user := authUserFromModel(model)
+	return &user, nil
 }
 
 func (s *UserStore) GetByUsername(ctx context.Context, username string) (*User, error) {
-	users, err := s.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
-	}
-
-	for _, u := range users {
-		if u.Username == username {
-			uCopy := u
-			return &uCopy, nil
+	var model authUserModel
+	if err := s.db.WithContext(ctx).Where("username = ?", username).First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
 		}
+		return nil, fmt.Errorf("get auth user by username: %w", err)
 	}
-
-	return nil, ErrUserNotFound
+	user := authUserFromModel(model)
+	return &user, nil
 }
 
 func (s *UserStore) List(ctx context.Context) ([]User, error) {
-	dir := s.usersDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []User{}, nil
-		}
-		return nil, fmt.Errorf("read users directory: %w", err)
+	var models []authUserModel
+	if err := s.db.WithContext(ctx).Order("username ASC, id ASC").Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("list auth users: %w", err)
 	}
-
-	users := make([]User, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if filepath.Ext(name) != ".json" {
-			continue
-		}
-
-		// Skip temp files.
-		if filepath.Ext(name[:len(name)-5]) == ".tmp" {
-			continue
-		}
-
-		id := name[:len(name)-5] // strip .json
-		var user *User
-		user, err = s.readUser(id)
-		if err != nil {
-			s.deps.Logger.WarnContext(ctx, "failed to read user file, skipping",
-				slog.String("file", name), slog.Any("error", err))
-			continue
-		}
-		users = append(users, *user)
+	users := make([]User, 0, len(models))
+	for _, model := range models {
+		users = append(users, authUserFromModel(model))
 	}
-
 	return users, nil
 }
 
 func (s *UserStore) UpdatePassword(ctx context.Context, id string, newHash string) error {
-	user, err := s.readUser(id)
-	if err != nil {
-		return err
+	result := s.db.WithContext(ctx).Model(&authUserModel{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"password_hash": newHash, "updated_at": time.Now().Round(0)})
+	if result.Error != nil {
+		return fmt.Errorf("update auth user password: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	s.logger.DebugContext(ctx, "user password updated", slog.String("userID", id))
+	return nil
+}
+
+func authUserFromModel(model authUserModel) User {
+	return User(model)
+}
+
+func openAuthDatabase(sqlDB *sql.DB, dsn, tablePrefix string) (*gorm.DB, error) {
+	if sqlDB == nil {
+		return nil, errors.New("auth sql database is required")
+	}
+	if strings.TrimSpace(dsn) == "" {
+		return nil, errors.New("auth database dsn is required")
+	}
+	if err := validateTablePrefix(tablePrefix); err != nil {
+		return nil, err
 	}
 
-	user.PasswordHash = newHash
-	user.UpdatedAt = time.Now().Round(0)
-
-	err = s.writeUser(user)
-	if err != nil {
-		return fmt.Errorf("write user: %w", err)
+	var dialector gorm.Dialector
+	if sqlconn.IsSQLiteDSN(dsn) {
+		dialector = sqlite.Dialector{Conn: sqlDB}
+	} else {
+		dialector = postgres.New(postgres.Config{Conn: sqlDB})
 	}
+	db, err := gorm.Open(dialector, &gorm.Config{
+		NamingStrategy: schema.NamingStrategy{TablePrefix: tablePrefix},
+		TranslateError: true,
+		NowFunc:        time.Now,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open gorm database: %w", err)
+	}
+	return db, nil
+}
 
-	s.deps.Logger.DebugContext(ctx, "user password updated", slog.String("userID", id))
+func validateTablePrefix(prefix string) error {
+	for _, character := range prefix {
+		if (character < 'a' || character > 'z') &&
+			(character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && character != '_' {
+			return errors.New("auth table prefix may contain only letters, digits, and underscores")
+		}
+	}
 	return nil
 }

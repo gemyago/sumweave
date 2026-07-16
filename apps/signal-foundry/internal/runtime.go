@@ -54,9 +54,8 @@ type RuntimeDeps struct {
 	AgentRuntimeDatabaseTablePrefix string `name:"config.agentRuntime.database.tablePrefix"`
 
 	// Data-layer persistence (canonical instruments, candles, trades)
-	DataLayerDatabaseDSN             string `name:"config.dataLayer.database.dsn"`
-	DataLayerDatabaseTablePrefix     string `name:"config.dataLayer.database.tablePrefix"`
-	DataLayerRawPayloadBlobStorePath string `name:"config.dataLayer.rawPayloadBlobStore.path"`
+	DataLayerDatabaseDSN         string `name:"config.dataLayer.database.dsn"`
+	DataLayerDatabaseTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
 
 	// Skills configuration
 	SkillsEnabled           bool     `name:"config.skills.enabled"`
@@ -153,7 +152,6 @@ func registerRuntime(container *dig.Container) error {
 		container,
 		agent.NewToolsRegistry,
 		newDataLayerStore,
-		newDataRawPayloadBlobStore,
 		newDataIngestionService,
 		newDataReadService,
 		newDataLineageService,

@@ -1,0 +1,23 @@
+# Adapted from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6.
+name: Cleanup Docker Images
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with: {python-version: '3.13'}
+      - run: pip install -r build/requirements.txt
+      - name: Remove expired branch and commit-only versions
+        run: python3 build/scripts/ghcr.py --namespace users/gemyago --package signal-foundry --tagged-max-age 604800 --keep-tags-pattern '^(latest|latest-|git-tag-|v[0-9])' --really-remove
+        env: {GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}}

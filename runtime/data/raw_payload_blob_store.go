@@ -6,29 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"strings"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-// LocalRawPayloadBlobStore stores raw payload bodies on the local filesystem.
-type LocalRawPayloadBlobStore struct {
-	basePath string
-}
-
-// NewLocalRawPayloadBlobStore constructs a local raw payload blob store rooted at basePath.
-func NewLocalRawPayloadBlobStore(basePath string) (*LocalRawPayloadBlobStore, error) {
-	canonicalBasePath := strings.TrimSpace(basePath)
-	if canonicalBasePath == "" {
-		return nil, errors.New("base path is required")
-	}
-
-	return &LocalRawPayloadBlobStore{basePath: canonicalBasePath}, nil
-}
-
 // StoreRawPayloadBody stores immutable raw payload bytes and returns a stable reference.
-func (s *LocalRawPayloadBlobStore) StoreRawPayloadBody(
+func (s *DatabaseStore) StoreRawPayloadBody(
 	ctx context.Context,
 	payloadID string,
 	body []byte,
@@ -45,80 +30,47 @@ func (s *LocalRawPayloadBlobStore) StoreRawPayloadBody(
 		return RawPayloadBody{}, validationError("raw payload body is required")
 	}
 
-	ref := makeRawPayloadBlobRef(canonicalPayloadID)
-	fullPath, err := s.blobPath(ref)
-	if err != nil {
-		return RawPayloadBody{}, err
-	}
-	if mkdirErr := os.MkdirAll(filepath.Dir(fullPath), 0o700); mkdirErr != nil {
-		return RawPayloadBody{}, fmt.Errorf("create raw payload blob directory: %w", mkdirErr)
-	}
-
 	checksum := sha256.Sum256(body)
 	hash := hex.EncodeToString(checksum[:])
-
-	if storeErr := writeRawPayloadBlobAtomic(fullPath, body); storeErr == nil {
-		return RawPayloadBody{Ref: ref, Hash: hash}, nil
-	} else if !errors.Is(storeErr, os.ErrExist) {
-		return RawPayloadBody{}, storeErr
+	ref := makeRawPayloadBodyRef(canonicalPayloadID)
+	model := rawPayloadBodyModel{
+		Ref:       ref,
+		PayloadID: canonicalPayloadID,
+		BodyHash:  hash,
+		Body:      append([]byte(nil), body...),
+	}
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&model).Error; err != nil {
+		return RawPayloadBody{}, fmt.Errorf("store raw payload body: %w", err)
 	}
 
-	existingBody, readErr := os.ReadFile(fullPath)
-	if readErr != nil {
-		return RawPayloadBody{}, fmt.Errorf("read existing raw payload blob: %w", readErr)
+	var persisted rawPayloadBodyModel
+	if err := s.db.WithContext(ctx).Where("payload_id = ?", canonicalPayloadID).First(&persisted).Error; err != nil {
+		return RawPayloadBody{}, fmt.Errorf("read stored raw payload body: %w", err)
 	}
-	existingChecksum := sha256.Sum256(existingBody)
-	return RawPayloadBody{Ref: ref, Hash: hex.EncodeToString(existingChecksum[:])}, nil
-}
-
-func writeRawPayloadBlobAtomic(fullPath string, body []byte) error {
-	tempFile, err := os.CreateTemp(filepath.Dir(fullPath), filepath.Base(fullPath)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp raw payload blob: %w", err)
-	}
-	tempPath := tempFile.Name()
-	defer func() {
-		_ = os.Remove(tempPath)
-	}()
-
-	if written, writeErr := tempFile.Write(body); writeErr != nil {
-		_ = tempFile.Close()
-		return fmt.Errorf("write temp raw payload blob: %w", writeErr)
-	} else if written != len(body) {
-		_ = tempFile.Close()
-		return fmt.Errorf("write temp raw payload blob: %w", io.ErrShortWrite)
-	}
-	if syncErr := tempFile.Sync(); syncErr != nil {
-		_ = tempFile.Close()
-		return fmt.Errorf("sync temp raw payload blob: %w", syncErr)
-	}
-	if closeErr := tempFile.Close(); closeErr != nil {
-		return fmt.Errorf("close temp raw payload blob: %w", closeErr)
-	}
-	if linkErr := os.Link(tempPath, fullPath); linkErr != nil {
-		return fmt.Errorf("publish raw payload blob: %w", linkErr)
-	}
-
-	return nil
+	return RawPayloadBody{Ref: persisted.Ref, Hash: persisted.BodyHash}, nil
 }
 
 // ReadRawPayloadBody loads raw payload bytes by blob reference.
-func (s *LocalRawPayloadBlobStore) ReadRawPayloadBody(ctx context.Context, ref string) ([]byte, error) {
+func (s *DatabaseStore) ReadRawPayloadBody(ctx context.Context, ref string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	fullPath, err := s.blobPath(ref)
-	if err != nil {
-		return nil, err
+	canonicalRef := strings.TrimSpace(ref)
+	if canonicalRef == "" {
+		return nil, validationError("raw payload body ref is required")
 	}
-	body, err := os.ReadFile(fullPath)
-	if err != nil {
-		return nil, fmt.Errorf("read raw payload blob: %w", err)
+
+	var row rawPayloadBodyModel
+	if err := s.db.WithContext(ctx).Select("body").Where("ref = ?", canonicalRef).First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrRawPayloadNotFound
+		}
+		return nil, fmt.Errorf("read raw payload body: %w", err)
 	}
-	return body, nil
+	return append([]byte(nil), row.Body...), nil
 }
 
-func (s *LocalRawPayloadBlobStore) readRawPayloadBodyPreview(
+func (s *DatabaseStore) readRawPayloadBodyPreview(
 	ctx context.Context,
 	ref string,
 	limit int,
@@ -130,72 +82,44 @@ func (s *LocalRawPayloadBlobStore) readRawPayloadBodyPreview(
 		return rawPayloadBodyPreview{}, validationError("raw payload preview limit must be zero or greater")
 	}
 
-	fullPath, err := s.blobPath(ref)
-	if err != nil {
-		return rawPayloadBodyPreview{}, err
+	canonicalRef := strings.TrimSpace(ref)
+	if canonicalRef == "" {
+		return rawPayloadBodyPreview{}, validationError("raw payload body ref is required")
 	}
 
-	file, err := os.Open(fullPath)
-	if err != nil {
-		return rawPayloadBodyPreview{}, fmt.Errorf("open raw payload blob: %w", err)
+	type previewRow struct {
+		SizeBytes int    `gorm:"column:size_bytes"`
+		Preview   []byte `gorm:"column:preview"`
 	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	info, err := file.Stat()
-	if err != nil {
-		return rawPayloadBodyPreview{}, fmt.Errorf("stat raw payload blob: %w", err)
+	var row previewRow
+	query := s.db.WithContext(ctx).Table((rawPayloadBodyModel{}).TableName(s.db.NamingStrategy))
+	if s.db.Dialector.Name() == "postgres" {
+		query = query.Select(
+			"octet_length(body) AS size_bytes, substring(body FROM 1 FOR ?) AS preview",
+			limit+1,
+		)
+	} else {
+		query = query.Select("length(body) AS size_bytes, substr(body, 1, ?) AS preview", limit+1)
 	}
-
-	previewLimit := int64(limit)
-	if limit < int(^uint(0)>>1) {
-		previewLimit++
+	result := query.Where("ref = ?", canonicalRef).Scan(&row)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return rawPayloadBodyPreview{}, ErrRawPayloadNotFound
+		}
+		return rawPayloadBodyPreview{}, fmt.Errorf("read raw payload body preview: %w", result.Error)
 	}
-
-	preview, err := io.ReadAll(io.LimitReader(file, previewLimit))
-	if err != nil {
-		return rawPayloadBodyPreview{}, fmt.Errorf("read raw payload blob preview: %w", err)
+	if result.RowsAffected == 0 {
+		return rawPayloadBodyPreview{}, ErrRawPayloadNotFound
 	}
-
-	truncated := len(preview) > limit
-	if truncated {
-		preview = preview[:limit]
-	}
-
-	sizeBytes := max(int(info.Size()), len(preview))
-	if truncated && sizeBytes < limit+1 {
-		sizeBytes = limit + 1
-	}
-
+	previewEnd := min(len(row.Preview), limit)
 	return rawPayloadBodyPreview{
-		sizeBytes: sizeBytes,
-		preview:   preview,
-		truncated: truncated,
+		sizeBytes: row.SizeBytes,
+		preview:   append([]byte(nil), row.Preview[:previewEnd]...),
+		truncated: row.SizeBytes > limit,
 	}, nil
 }
 
-func makeRawPayloadBlobRef(payloadID string) string {
+func makeRawPayloadBodyRef(payloadID string) string {
 	sum := sha256.Sum256([]byte(payloadID))
-	key := hex.EncodeToString(sum[:])
-	return filepath.ToSlash(filepath.Join(key[:2], key+".blob"))
-}
-
-func (s *LocalRawPayloadBlobStore) blobPath(ref string) (string, error) {
-	canonicalRef := strings.TrimSpace(ref)
-	if canonicalRef == "" {
-		return "", validationError("raw payload body ref is required")
-	}
-	if filepath.IsAbs(canonicalRef) {
-		return "", validationError("raw payload body ref must be relative")
-	}
-
-	fullPath := filepath.Join(s.basePath, filepath.FromSlash(canonicalRef))
-	cleanBase := filepath.Clean(s.basePath)
-	cleanPath := filepath.Clean(fullPath)
-	if cleanPath != cleanBase && !strings.HasPrefix(cleanPath, cleanBase+string(os.PathSeparator)) {
-		return "", validationError("raw payload body ref must stay within blob store base path")
-	}
-
-	return cleanPath, nil
+	return hex.EncodeToString(sum[:])
 }

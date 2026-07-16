@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"database/sql"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -13,9 +15,11 @@ import (
 type userStoreDIParams struct {
 	dig.In
 
-	DataDir string `name:"config.dataDir"`
-	IDGen   ident.Generator
-	Logger  *slog.Logger
+	SQLDB           *sql.DB
+	DatabaseDSN     string `name:"config.dataLayer.database.dsn"`
+	DataTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	IDGen           ident.Generator
+	Logger          *slog.Logger
 }
 
 // jwtSigningKeyDIParams resolves the effective JWT signing key for DI consumers.
@@ -23,7 +27,6 @@ type jwtSigningKeyDIParams struct {
 	dig.In
 
 	SigningKey string `name:"config.auth.jwtSigningKey"`
-	DataDir    string `name:"config.dataDir"`
 }
 
 // jwtServiceDIParams is the DI-aware version of JWTServiceDeps for container wiring.
@@ -39,8 +42,10 @@ type jwtServiceDIParams struct {
 type refreshStoreDIParams struct {
 	dig.In
 
-	DataDir string `name:"config.dataDir"`
-	Logger  *slog.Logger
+	SQLDB           *sql.DB
+	DatabaseDSN     string `name:"config.dataLayer.database.dsn"`
+	DataTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	Logger          *slog.Logger
 }
 
 // authServiceDIParams is the DI-aware version of ServiceDeps for container wiring.
@@ -55,16 +60,22 @@ type authServiceDIParams struct {
 	Logger            *slog.Logger
 }
 
-func newUserStoreFromDI(params userStoreDIParams) *UserStore {
-	return NewUserStore(UserStoreDeps{
-		DataDir: params.DataDir,
-		IDGen:   params.IDGen,
-		Logger:  params.Logger,
+func newUserStoreFromDI(params userStoreDIParams) (*UserStore, error) {
+	store, err := NewUserStore(UserStoreDeps{
+		SQLDB:       params.SQLDB,
+		DatabaseDSN: params.DatabaseDSN,
+		TablePrefix: params.DataTablePrefix + "auth_",
+		IDGen:       params.IDGen,
+		Logger:      params.Logger,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("create auth user store: %w", err)
+	}
+	return store, nil
 }
 
 func newJWTSigningKeyFromDI(params jwtSigningKeyDIParams) (string, error) {
-	key, err := resolveSigningKey(params.SigningKey, params.DataDir)
+	key, err := resolveSigningKey(params.SigningKey)
 	if err != nil {
 		return "", err
 	}
@@ -80,11 +91,17 @@ func newJWTServiceFromDI(params jwtServiceDIParams) (*JWTService, error) {
 	})
 }
 
-func newRefreshTokenStoreFromDI(params refreshStoreDIParams) *RefreshTokenStore {
-	return NewRefreshTokenStore(RefreshTokenStoreDeps{
-		DataDir: params.DataDir,
-		Logger:  params.Logger,
+func newRefreshTokenStoreFromDI(params refreshStoreDIParams) (*RefreshTokenStore, error) {
+	store, err := NewRefreshTokenStore(RefreshTokenStoreDeps{
+		SQLDB:       params.SQLDB,
+		DatabaseDSN: params.DatabaseDSN,
+		TablePrefix: params.DataTablePrefix + "auth_",
+		Logger:      params.Logger,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("create refresh token store: %w", err)
+	}
+	return store, nil
 }
 
 func newAuthServiceFromDI(params authServiceDIParams) *AuthService {

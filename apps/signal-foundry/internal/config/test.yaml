@@ -6,6 +6,13 @@ dataLayer:
   database:
     dsn: ":memory:"
 
+agentRuntime:
+  database:
+    dsn: ":memory:"
+
+auth:
+  jwtSigningKey: test-secret-key
+
 finance:
   providers:
     enableBanking:

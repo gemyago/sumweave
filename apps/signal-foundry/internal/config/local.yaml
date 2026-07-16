@@ -9,6 +9,13 @@ dataLayer:
   database:
     dsn: data/data-layer.db
 
+agentRuntime:
+  database:
+    dsn: data/agent-runtime.db
+
+auth:
+  jwtSigningKey: local-secret-key
+
 finance:
   fixtures:
     database:

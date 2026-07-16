@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "signal-foundry.fullname" . }}-app
+  labels: {{- include "signal-foundry.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.app.autoscaling.enabled }}
+  replicas: {{ .Values.app.replicaCount }}
+  {{- end }}
+  strategy: {type: RollingUpdate}
+  selector:
+    matchLabels: {{- include "signal-foundry.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      {{- with .Values.app.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels: {{- include "signal-foundry.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+        {{- with .Values.app.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: {{ include "signal-foundry.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: app
+          image: {{ include "signal-foundry.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: {{- toYaml .Values.app.args | nindent 12 }}
+          {{- if or .Values.existingConfigMap .Values.existingSecret }}
+          envFrom: {{- include "signal-foundry.envFrom" . | nindent 12 }}
+          {{- end }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          ports: [{name: http, containerPort: {{ .Values.service.port }}, protocol: TCP}]
+          startupProbe: {{- toYaml .Values.app.startupProbe | nindent 12 }}
+          livenessProbe: {{- toYaml .Values.app.livenessProbe | nindent 12 }}
+          readinessProbe: {{- toYaml .Values.app.readinessProbe | nindent 12 }}
+          resources: {{- toYaml .Values.app.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}

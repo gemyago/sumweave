@@ -24,7 +24,7 @@ dist/bin:
 	mkdir -p dist/bin
 	$(MAKE) -C ../signal-ui build-embed-dist EMBED_OUT_DIR="$(ui_embed_dist_dir)"
 	test -f "$(ui_embed_dist_dir)/index.html"
-	go build \
+	CGO_ENABLED=0 go build \
 		-tags=release \
 		-o dist/bin/signal-foundry \
 		./cmd/signal-foundry;

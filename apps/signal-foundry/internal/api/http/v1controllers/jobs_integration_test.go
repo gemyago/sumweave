@@ -146,10 +146,7 @@ func TestJobsControllerIntegration(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	blobStore, err := data.NewLocalRawPayloadBlobStore(filepath.Join(t.TempDir(), "raw-payloads"))
-	require.NoError(t, err)
-
-	lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: dataStore, BlobStore: blobStore})
+	lineageService, err := data.NewLineageService(data.LineageServiceDeps{Store: dataStore, BlobStore: dataStore})
 	require.NoError(t, err)
 
 	ingestionFlow, err := venueedge.NewIngestionFlow(ingestionService)

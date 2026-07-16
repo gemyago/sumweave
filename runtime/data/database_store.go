@@ -147,6 +147,18 @@ func (rawVenuePayloadModel) TableName(namer schema.Namer) string {
 	return namer.TableName("raw_venue_payloads")
 }
 
+type rawPayloadBodyModel struct {
+	Ref       string    `gorm:"column:ref;size:255;not null;primaryKey"`
+	PayloadID string    `gorm:"column:payload_id;size:255;not null;uniqueIndex"`
+	BodyHash  string    `gorm:"column:body_hash;size:64;not null"`
+	Body      []byte    `gorm:"column:body;not null"`
+	CreatedAt time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+}
+
+func (rawPayloadBodyModel) TableName(namer schema.Namer) string {
+	return namer.TableName("raw_payload_bodies")
+}
+
 type normalizationRunModel struct {
 	ID                   string     `gorm:"column:id;size:255;not null;primaryKey;uniqueIndex:idx_normalization_runs_id"`
 	Status               string     `gorm:"column:status;size:32;not null"`
@@ -273,6 +285,7 @@ func (s *DatabaseStore) AutoMigrate() error {
 		&tradeModel{},
 		&ingestionRunModel{},
 		&rawVenuePayloadModel{},
+		&rawPayloadBodyModel{},
 		&normalizationRunModel{},
 		&normalizationRunRawPayloadLinkModel{},
 		&dataBatchModel{},

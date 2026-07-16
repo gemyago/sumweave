@@ -90,8 +90,6 @@ func TestNewRuntime(t *testing.T) {
 			TablePrefix: tablePrefix,
 		})
 		require.NoError(t, err)
-		rawPayloadBlobStore, err := data.NewLocalRawPayloadBlobStore(filepath.Join(dataDir, "raw-payloads"))
-		require.NoError(t, err)
 		dataIngestionService, err := data.NewIngestionService(data.IngestionServiceDeps{
 			InstrumentStore: dataStore,
 			CandleStore:     dataStore,
@@ -106,7 +104,7 @@ func TestNewRuntime(t *testing.T) {
 		require.NoError(t, err)
 		dataLineageService, err := data.NewLineageService(data.LineageServiceDeps{
 			Store:     dataStore,
-			BlobStore: rawPayloadBlobStore,
+			BlobStore: dataStore,
 		})
 		require.NoError(t, err)
 
@@ -665,7 +663,6 @@ func makeWiredRuntimeContainer(t *testing.T) (*dig.Container, string) {
 	cfg.Set("dataDir", t.TempDir())
 	cfg.Set("workspacefs.platformAgentsPath", filepath.Dir(bundledPlatformSkillsRoot))
 	cfg.Set("dataLayer.database.dsn", filepath.Join(t.TempDir(), "data-layer.db"))
-	cfg.Set("dataLayer.rawPayloadBlobStore.path", filepath.Join(t.TempDir(), "raw-payloads"))
 	cfg.Set("jobs.worker.enabled", true)
 	cfg.Set("jobs.worker.pollInterval", "10ms")
 	cfg.Set("skills.enabled", true)

@@ -1,0 +1,11 @@
+# Copied from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6
+/dist/
+/bin/
+/tmp/
+# Obsolete local npm staging; npm distribution is not a release input.
+/npm/
+/docker/.labels
+/docker/.local-*
+/docker/.remote-*
+*.pyc
+__pycache__/

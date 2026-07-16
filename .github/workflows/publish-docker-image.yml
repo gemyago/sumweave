@@ -1,0 +1,50 @@
+# Adapted from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6.
+name: Publish Docker Image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Branch, tag, or SHA to publish (maintainer-trusted source)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix apps/signal-ui
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.work
+          cache-dependency-path: go.work.sum
+      - name: Build prepared host artifacts
+        run: make -C build dist
+      - name: Record checked-out source metadata
+        run: |
+          echo "SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "SOURCE_REF=${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || 'main' }}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        env: {GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+      - name: Package and publish prepared artifacts
+        run: make -C build docker/remote-image
+        env:
+          GIT_COMMIT_SHA: ${{ env.SOURCE_SHA }}
+          GIT_REF: ${{ env.SOURCE_REF }}

@@ -1,13 +1,9 @@
 package auth
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -22,32 +18,32 @@ type JWTClaims struct {
 
 // JWTServiceDeps are the dependencies for JWTService.
 type JWTServiceDeps struct {
-	// SigningKey is the HMAC-SHA256 signing key. If empty, a key is
-	// auto-generated and persisted to <DataDir>/auth/jwt-signing-key.
+	// SigningKey is the required HMAC-SHA256 signing key.
 	SigningKey     string        `name:"config.auth.jwtSigningKey"`
 	AccessTokenTTL time.Duration `name:"config.auth.accessTokenTTL"`
-	DataDir        string        `name:"config.dataDir"`
 	Logger         *slog.Logger
 }
 
 // JWTService issues and validates JWT access tokens.
 type JWTService struct {
-	signingKey []byte
-	ttl        time.Duration
-	logger     *slog.Logger
+	signingKey    []byte
+	signingMethod jwt.SigningMethod
+	ttl           time.Duration
+	logger        *slog.Logger
 }
 
 // NewJWTService creates a JWTService, resolving the signing key.
 func NewJWTService(deps JWTServiceDeps) (*JWTService, error) {
-	key, err := resolveSigningKey(deps.SigningKey, deps.DataDir)
+	key, err := resolveSigningKey(deps.SigningKey)
 	if err != nil {
 		return nil, fmt.Errorf("resolve JWT signing key: %w", err)
 	}
 
 	return &JWTService{
-		signingKey: key,
-		ttl:        deps.AccessTokenTTL,
-		logger:     deps.Logger,
+		signingKey:    key,
+		signingMethod: jwt.SigningMethodHS256,
+		ttl:           deps.AccessTokenTTL,
+		logger:        deps.Logger,
 	}, nil
 }
 
@@ -63,7 +59,7 @@ func (s *JWTService) GenerateAccessToken(userID, username string) (string, error
 		Username: username,
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token := jwt.NewWithClaims(s.signingMethod, claims)
 	signed, err := token.SignedString(s.signingKey)
 	if err != nil {
 		return "", fmt.Errorf("sign access token: %w", err)
@@ -85,46 +81,15 @@ func (s *JWTService) ValidateAccessToken(tokenStr string) (*JWTClaims, error) {
 	}
 
 	claims, ok := token.Claims.(*JWTClaims)
-	if !ok || !token.Valid {
+	if !ok {
 		return nil, errors.New("invalid access token claims")
 	}
-
 	return claims, nil
 }
 
-// resolveSigningKey returns the signing key bytes.
-// Priority: explicit config value → persisted file → auto-generate and persist.
-func resolveSigningKey(configKey, dataDir string) ([]byte, error) {
-	if configKey != "" {
-		return []byte(configKey), nil
+func resolveSigningKey(configKey string) ([]byte, error) {
+	if configKey == "" {
+		return nil, errors.New("JWT signing key is required")
 	}
-
-	keyFile := filepath.Join(dataDir, "auth", "jwt-signing-key")
-
-	data, err := os.ReadFile(keyFile)
-	if err == nil {
-		return data, nil
-	}
-
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read jwt signing key file: %w", err)
-	}
-
-	// Generate a random 256-bit key and persist it.
-	raw := make([]byte, 32)
-	if _, err = rand.Read(raw); err != nil {
-		return nil, fmt.Errorf("generate jwt signing key: %w", err)
-	}
-
-	encoded := []byte(hex.EncodeToString(raw))
-
-	if err = os.MkdirAll(filepath.Dir(keyFile), 0o700); err != nil {
-		return nil, fmt.Errorf("create auth directory: %w", err)
-	}
-
-	if err = os.WriteFile(keyFile, encoded, 0o600); err != nil {
-		return nil, fmt.Errorf("write jwt signing key file: %w", err)
-	}
-
-	return encoded, nil
+	return []byte(configKey), nil
 }

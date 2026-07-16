@@ -59,7 +59,7 @@ Standard local backend workflow uses `apps/signal-foundry` as the working direct
 
 For the optional HTTPS backend and Vite development workflow, follow [../../docs/local-https.md](../../docs/local-https.md). It uses ignored local certificate files and `APP_HTTPSERVER_TLS_CERTFILE` / `APP_HTTPSERVER_TLS_KEYFILE`.
 
-Release build workflow from `apps/signal-foundry` is `make dist/bin`; it rebuilds the SPA into the backend embed directory, validates `dist/index.html`, and then produces the backend binary with embedded UI assets. Runtime UI serving is embedded-only: if embedded `dist/index.html` is absent, the backend stays API-only.
+Release build workflow is `make -C build dist` from the repository root. It builds the SPA once, embeds it before CGO-disabled Linux amd64/arm64 Go cross-compilation, and stages platform-agent skills. Runtime UI serving is embedded-only: if embedded `dist/index.html` is absent, the backend stays API-only.
 
 PM2 startup runs the same all-in-one local backend shape on port 4501.
 PM2 remains repo-scoped, but `ecosystem.config.js` sets the backend process working directory to `apps/signal-foundry`.
@@ -76,7 +76,7 @@ Durable jobs workflow:
 ## Lint / test
 
 - **This module:** `make lint`, `make test` from `apps/signal-foundry` (uses repo-root pinned `golangci-lint` from `bin/` unless `CI=true`).
-- **Release build:** `make dist/bin` from `apps/signal-foundry` produces `dist/bin/signal-foundry` with embedded UI assets when generated `embeddedui/dist/index.html` is present.
+- **Release build:** `make -C build dist` from the repository root produces `build/dist/linux/{amd64,arm64}/signal-foundry` with embedded UI assets and stages `build/dist/platform-agents/skills`.
 - **Whole repo:** from the repository root, `make lint` and `make test` include this module via `$(MAKE) -C apps/signal-foundry …`.
 
 ## Module Rules and Conventions
