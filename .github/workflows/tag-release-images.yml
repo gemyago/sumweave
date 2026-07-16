@@ -1,7 +1,7 @@
 # Adapted from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6.
 name: Tag Release Image
 
-on:
+"on":
   release:
     types: [published]
 
@@ -14,12 +14,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
-        with: {ref: ${{ github.event.release.tag_name }}}
+        with:
+          ref: ${{ github.event.release.tag_name }}
       - name: Install Crane
         run: make -C build install-crane
       - name: Login Crane to GHCR
         run: echo "$GITHUB_TOKEN" | build/bin/crane auth login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-        env: {GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Retag immutable commit image
         run: |
           tags="$(build/scripts/resolve-docker-tags.sh --stable-branches main --git-ref "refs/tags/${RELEASE_TAG}" --commit-sha "$GITHUB_SHA")"

@@ -1,7 +1,7 @@
 # Adapted from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6.
 name: Publish Docker Image
 
-on:
+"on":
   push:
     branches: [main]
   workflow_dispatch:
@@ -42,7 +42,8 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Login to GHCR
         run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-        env: {GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Package and publish prepared artifacts
         run: make -C build docker/remote-image
         env:
