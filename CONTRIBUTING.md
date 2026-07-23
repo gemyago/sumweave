@@ -76,22 +76,16 @@ go get -u ./... && go mod tidy
 
 ## Run locally
 
+The normal local workflow uses PM2 from the repository root. First migrate the
+backend database, then create the PM2 process definitions:
+
 ```bash
-# Start backend in a separate terminal
-# Install deps as per above instructions for go modules
+# Run the migration from the backend module.
 cd apps/signal-foundry
 go run ./cmd/signal-foundry db-migrate --env local
-go run ./cmd/signal-foundry start --env local
 
-# Start frontend in a separate terminal
-cd apps/signal-ui
-npm i
-npm run dev
-
-# Start everything in one terminal
-nx run-many -t dev
-
-# Or manage both long-running processes via PM2 from the repo root
+# Return to the repository root and start the API and Vite development server.
+cd ../..
 npm run pm2:start
 ```
 
@@ -115,6 +109,24 @@ npm run pm2:restart:ui
 npm run pm2:stop
 npm run pm2:delete
 ```
+
+Use `npm run pm2:logs` to inspect process output. If the backend ecosystem
+command or arguments change, recreate it rather than restarting it:
+
+```bash
+pm2 delete signal-foundry-api
+pm2 start ecosystem.config.js
+```
+
+For the optional HTTPS variant of this PM2 workflow, see
+[Local HTTPS](./docs/local-https.md).
+
+### Direct-start diagnostics only
+
+Use direct commands only to isolate a local startup problem; they are not the
+normal development workflow. From separate terminals, run the backend from
+`apps/signal-foundry` with `go run ./cmd/signal-foundry start-all --env local`
+and the UI from `apps/signal-ui` with `npm run dev`.
 
 If the data screen still shows a browse-first availability `404` after a PM2 restart, check `npm run pm2:status`: the UI proxies `/api/v1/*` to port `4501`, and a stale non-PM2 `signal-foundry start` process on that port can keep PM2's backend stopped. The PM2 API entry now attempts to replace a stale `signal-foundry start` listener automatically on startup.
 

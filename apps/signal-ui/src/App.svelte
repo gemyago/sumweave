@@ -14,6 +14,7 @@
   import Finance from './pages/Finance.svelte'
   import FinanceTenants from './pages/FinanceTenants.svelte'
   import FinanceAccounts from './pages/FinanceAccounts.svelte'
+  import FinanceAccountEditor from './pages/FinanceAccountEditor.svelte'
   import FinanceAccountDetail from './pages/FinanceAccountDetail.svelte'
   import FinanceTransactions from './pages/FinanceTransactions.svelte'
   import FinanceTransactionEditor from './pages/FinanceTransactionEditor.svelte'
@@ -58,6 +59,10 @@
     }),
     '/jobs': wrap({
       component: Jobs,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/accounts/new': wrap({
+      component: FinanceAccountEditor,
       conditions: [() => authStore.isAuthenticated],
     }),
     '/finance/accounts/:accountId': wrap({

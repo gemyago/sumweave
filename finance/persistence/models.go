@@ -292,9 +292,9 @@ func (balanceSnapshotModel) TableName() string { return "finance_balance_snapsho
 
 type rawPayloadModel struct {
 	ID               string    `gorm:"column:id;size:255;not null;primaryKey"`
-	ConnectionID     string    `gorm:"column:connection_id;size:255;not null;index:idx_finance_raw_payloads_connection_id,priority:1"`
-	Scope            string    `gorm:"column:scope;size:64;not null"`
-	ProviderObjectID string    `gorm:"column:provider_object_id;size:255;not null;default:''"`
+	ConnectionID     string    `gorm:"column:connection_id;size:255;not null;index:idx_finance_raw_payloads_connection_id,priority:1;index:idx_finance_raw_payloads_identity,unique,priority:1"`
+	Scope            string    `gorm:"column:scope;size:64;not null;index:idx_finance_raw_payloads_identity,unique,priority:2"`
+	ProviderObjectID string    `gorm:"column:provider_object_id;size:255;not null;default:'';index:idx_finance_raw_payloads_identity,unique,priority:3"`
 	PayloadJSON      string    `gorm:"column:payload_json;type:text;not null"`
 	CapturedAt       time.Time `gorm:"column:captured_at;not null;index:idx_finance_raw_payloads_connection_id,priority:2"`
 }
@@ -303,13 +303,13 @@ func (rawPayloadModel) TableName() string { return "finance_raw_payloads" }
 
 type providerEvidenceModel struct {
 	ID                   string    `gorm:"column:id;size:255;not null;primaryKey"`
-	TenantID             string    `gorm:"column:tenant_id;size:255;not null;index:idx_finance_provider_evidence_account_order,priority:1;index:idx_finance_provider_evidence_transaction_order,priority:1"`
-	ConnectionID         string    `gorm:"column:connection_id;size:255;not null"`
-	FinanceAccountID     string    `gorm:"column:finance_account_id;size:255;not null;default:'';index:idx_finance_provider_evidence_account_order,priority:3"`
-	FinanceTransactionID string    `gorm:"column:finance_transaction_id;size:255;not null;default:'';index:idx_finance_provider_evidence_transaction_order,priority:3"`
-	Subject              string    `gorm:"column:subject;size:64;not null;default:'';index:idx_finance_provider_evidence_account_order,priority:2;index:idx_finance_provider_evidence_transaction_order,priority:2"`
-	Scope                string    `gorm:"column:scope;size:64;not null"`
-	ProviderObjectID     string    `gorm:"column:provider_object_id;size:255;not null;default:''"`
+	TenantID             string    `gorm:"column:tenant_id;size:255;not null;index:idx_finance_provider_evidence_account_order,priority:1;index:idx_finance_provider_evidence_transaction_order,priority:1;index:idx_finance_provider_evidence_identity,unique,priority:1"`
+	ConnectionID         string    `gorm:"column:connection_id;size:255;not null;index:idx_finance_provider_evidence_identity,unique,priority:2"`
+	FinanceAccountID     string    `gorm:"column:finance_account_id;size:255;not null;default:'';index:idx_finance_provider_evidence_account_order,priority:3;index:idx_finance_provider_evidence_identity,unique,priority:4"`
+	FinanceTransactionID string    `gorm:"column:finance_transaction_id;size:255;not null;default:'';index:idx_finance_provider_evidence_transaction_order,priority:3;index:idx_finance_provider_evidence_identity,unique,priority:5"`
+	Subject              string    `gorm:"column:subject;size:64;not null;default:'';index:idx_finance_provider_evidence_account_order,priority:2;index:idx_finance_provider_evidence_transaction_order,priority:2;index:idx_finance_provider_evidence_identity,unique,priority:3"`
+	Scope                string    `gorm:"column:scope;size:64;not null;index:idx_finance_provider_evidence_identity,unique,priority:6"`
+	ProviderObjectID     string    `gorm:"column:provider_object_id;size:255;not null;default:'';index:idx_finance_provider_evidence_identity,unique,priority:7"`
 	PayloadJSON          string    `gorm:"column:payload_json;type:text;not null"`
 	CapturedAt           time.Time `gorm:"column:captured_at;not null;index:idx_finance_provider_evidence_account_order,priority:3;index:idx_finance_provider_evidence_transaction_order,priority:3"`
 }

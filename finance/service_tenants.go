@@ -102,30 +102,32 @@ func (s *TenantService) CreateTenant(
 	if _, saveMembershipErr := s.store.SaveTenantMembership(ctx, membership); saveMembershipErr != nil {
 		return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveMembershipErr)
 	}
-	for _, seed := range defaultTenantCategorySeeds() {
-		_, saveCategoryErr := s.store.SaveCategory(ctx, domain.Category{
-			ID:            s.newID(),
-			TenantID:      tenant.ID,
-			Name:          seed.Name,
-			Kind:          seed.Kind,
-			SeededDefault: true,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		})
-		if saveCategoryErr != nil {
-			return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveCategoryErr)
+	if params.SeedDefaults {
+		for _, seed := range defaultTenantCategorySeeds() {
+			_, saveCategoryErr := s.store.SaveCategory(ctx, domain.Category{
+				ID:            s.newID(),
+				TenantID:      tenant.ID,
+				Name:          seed.Name,
+				Kind:          seed.Kind,
+				SeededDefault: true,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			})
+			if saveCategoryErr != nil {
+				return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveCategoryErr)
+			}
 		}
-	}
-	for _, seed := range defaultTenantTags() {
-		_, saveTagErr := s.store.SaveTag(ctx, domain.Tag{
-			ID:        s.newID(),
-			TenantID:  tenant.ID,
-			Name:      seed,
-			CreatedAt: now,
-			UpdatedAt: now,
-		})
-		if saveTagErr != nil {
-			return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveTagErr)
+		for _, seed := range defaultTenantTags() {
+			_, saveTagErr := s.store.SaveTag(ctx, domain.Tag{
+				ID:        s.newID(),
+				TenantID:  tenant.ID,
+				Name:      seed,
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+			if saveTagErr != nil {
+				return domain.Tenant{}, fmt.Errorf("create tenant: %w", saveTagErr)
+			}
 		}
 	}
 	return tenant, nil

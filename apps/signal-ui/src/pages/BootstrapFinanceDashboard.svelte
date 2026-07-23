@@ -4,6 +4,7 @@
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
     createSignalFinanceApiForAuth,
+    type FinanceAccount,
     type FinanceBankConnection,
     type FinanceDashboard,
     type FinanceTransaction,
@@ -48,6 +49,7 @@
   let loadingDashboard = $state(false)
   let error = $state<string | null>(null)
   let dashboard = $state<FinanceDashboard | null>(null)
+  let historyAccounts = $state<FinanceAccount[]>([])
   let recentTransactions = $state<FinanceTransaction[]>([])
   let recentConnections = $state<FinanceBankConnection[]>([])
   let dashboardPreset = $state('current_month')
@@ -252,7 +254,8 @@
   })
 
   const visibleRecentTransactions = $derived.by(() => recentTransactions.slice(0, TRANSACTION_SECTION_LIMIT))
-  const accountNameById = $derived(new Map((dashboard?.accountBalances ?? []).map((account) => [account.accountId, account.accountName])))
+  const accountNameById = $derived(new Map(historyAccounts.map((account) => [account.id, account.name])))
+  const hiddenAccountIds = $derived(new Set(historyAccounts.filter((account) => account.hiddenAt).map((account) => account.id)))
 
   const cashFlowHasActivity = $derived.by(() =>
     dashboard
@@ -270,8 +273,23 @@
   )
 
   const currentFxRates = $derived.by(() => dashboard?.currentFxRates ?? [])
+  const fxCoverage = $derived.by(() => dashboard?.fxCoverage ?? [])
   const staleFxRates = $derived.by(() => currentFxRates.filter((rate) => rate.stale))
+  const missingFxAffectedValueCount = $derived.by(() =>
+    fxCoverage.reduce((total, coverage) => total + coverage.affectedTransactionCount + coverage.affectedAccountCount, 0),
+  )
+  const hasFxCoverageDetails = $derived(currentFxRates.length > 0 || fxCoverage.length > 0)
   const isHistoricalPeriod = $derived.by(() => dashboard?.period.preset !== 'current_month')
+
+  function fxCoveragePairList() {
+    return fxCoverage.map((coverage) => `${coverage.baseCurrency} → ${coverage.quoteCurrency}`).join(', ')
+  }
+
+  function fxCoverageSummary() {
+    const pairCount = fxCoverage.length
+    const affectedValues = missingFxAffectedValueCount
+    return `FX coverage missing for ${pairCount} pair${pairCount === 1 ? '' : 's'} (${fxCoveragePairList()}), affecting ${affectedValues} value${affectedValues === 1 ? '' : 's'}.`
+  }
 
   const attentionItems = $derived.by<AttentionItem[]>(() => {
     if (!dashboard) return []
@@ -291,12 +309,12 @@
       })
     }
 
-    if (activeDashboard.missingFx.length > 0) {
+    if (fxCoverage.length > 0) {
       items.push({
         key: 'missing-fx',
         title: 'Missing FX coverage',
-        detail: `${activeDashboard.missingFx.length} value${activeDashboard.missingFx.length === 1 ? '' : 's'} cannot be converted with a current FX rate.`,
-        value: `${activeDashboard.missingFx.length} gap${activeDashboard.missingFx.length === 1 ? '' : 's'}`,
+        detail: fxCoverageSummary(),
+        value: `${fxCoverage.length} pair${fxCoverage.length === 1 ? '' : 's'}`,
         tone: 'warning',
         href: '/admin/finance/fx',
         hrefLabel: 'Review in admin FX diagnostics',
@@ -321,7 +339,7 @@
     activeDashboard.alerts.forEach((alert) => {
       const normalizedCode = alert.code.toLowerCase()
 
-      if (activeDashboard.missingFx.length > 0 && normalizedCode.includes('fx')) return
+      if (fxCoverage.length > 0 && normalizedCode.includes('fx')) return
       if (failedSyncConnections.length > 0 && (normalizedCode.includes('connection') || normalizedCode.includes('sync'))) {
         return
       }
@@ -381,6 +399,7 @@
   async function loadDashboard(overrides: { preset?: string; startDate?: Date; endDate?: Date } = {}) {
     if (!financeShell.selectedTenantId) {
       dashboard = null
+      historyAccounts = []
       recentTransactions = []
       recentConnections = []
       return
@@ -390,18 +409,20 @@
     error = null
 
     try {
-      const [loadedDashboard, loadedTransactions, loadedConnections] = await Promise.all([
+      const [loadedDashboard, loadedAccounts, loadedTransactions, loadedConnections] = await Promise.all([
         financeApi.getDashboard({
           tenantId: financeShell.selectedTenantId,
           preset: overrides.preset ?? dashboardPreset,
           startDate: overrides.preset && overrides.preset !== 'custom' ? undefined : overrides.startDate ?? customStartDate,
           endDate: overrides.preset && overrides.preset !== 'custom' ? undefined : overrides.endDate ?? customEndDate,
         }),
+        financeApi.listAccounts({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
         financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, includeHidden: true, limit: TRANSACTION_SECTION_LIMIT }),
         financeApi.listConnections({ tenantId: financeShell.selectedTenantId }),
       ])
 
       dashboard = loadedDashboard
+      historyAccounts = loadedAccounts
       recentTransactions = [...loadedTransactions]
         .sort((left, right) => right.effectiveAt.getTime() - left.effectiveAt.getTime())
         .slice(0, TRANSACTION_SECTION_LIMIT)
@@ -415,6 +436,7 @@
       customEndDate = loadedDashboard.period.endDate
     } catch (loadError) {
       recentTransactions = []
+      historyAccounts = []
       recentConnections = []
       error = loadError instanceof Error ? loadError.message : 'Failed to load dashboard'
     } finally {
@@ -638,25 +660,6 @@
                 {/if}
               </div>
 
-              <div class="border rounded-3 p-3 bg-body-tertiary">
-                <div class="d-flex flex-column flex-md-row justify-content-between gap-2">
-                  <div>
-                    <p class="text-uppercase text-body-secondary fw-semibold small mb-1">Current FX valuation</p>
-                    <p class="small text-body-secondary mb-0">Latest successful rates revalue display-currency totals after refresh; native totals below remain separate corroboration.</p>
-                  </div>
-                  <span class="badge text-bg-secondary align-self-md-start">{currentFxRates.length} current rate{currentFxRates.length === 1 ? '' : 's'}</span>
-                </div>
-                {#if currentFxRates.length > 0}
-                  <div class="small text-body-secondary mt-2 d-grid gap-1">
-                    {#each currentFxRates as rate (`${rate.provider}-${rate.baseCurrency}-${rate.quoteCurrency}`)}
-                      <div><strong>{rate.baseCurrency} → {rate.quoteCurrency}</strong> · {rate.provider} · effective {formatFinanceDateTime(rate.effectiveAt)} · refreshed {formatFinanceDateTime(rate.lastSuccessfulRefreshAt)}{rate.stale ? ' · stale' : ''}</div>
-                    {/each}
-                  </div>
-                {:else}
-                  <p class="small text-body-secondary mt-2 mb-0">No current FX rates are available for this dashboard.</p>
-                {/if}
-              </div>
-
               <div class="row g-3" aria-label="Balance summary">
                 <div class="col-12 col-md-4">
                   <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
@@ -690,7 +693,7 @@
               {#if !dashboard.settled.complete}
                 <div class="alert alert-warning mb-0" role="alert">
                   <strong>Income and expense totals are incomplete.</strong>
-                   {dashboard.missingFx.length} value{dashboard.missingFx.length === 1 ? '' : 's'} were excluded because current FX rates are missing. Display totals are partial; native totals remain separate below.
+                  {fxCoverageSummary()} Display totals are partial; native totals remain separate below.
                   <a class="alert-link" href="/admin/finance/fx" use:link>Open FX diagnostics</a>.
                 </div>
               {/if}
@@ -712,6 +715,33 @@
                     {/each}
                   </div>
                 </div>
+              {/if}
+
+              {#if hasFxCoverageDetails}
+                <details class="border rounded p-3">
+                  <summary class="fw-semibold">FX coverage</summary>
+                  <div class="small text-body-secondary mt-3 d-grid gap-2">
+                    {#if fxCoverage.length > 0}
+                      <div class="d-grid gap-1">
+                        <strong class="text-body">Missing pairs</strong>
+                        {#each fxCoverage as coverage (`${coverage.provider}-${coverage.baseCurrency}-${coverage.quoteCurrency}`)}
+                          <div>
+                            {coverage.baseCurrency} → {coverage.quoteCurrency} · {coverage.provider} · {coverage.affectedTransactionCount} transaction value{coverage.affectedTransactionCount === 1 ? '' : 's'} · {coverage.affectedAccountCount} account value{coverage.affectedAccountCount === 1 ? '' : 's'}
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if currentFxRates.length > 0}
+                      <div class="d-grid gap-1">
+                        <strong class="text-body">Current rates</strong>
+                        {#each currentFxRates as rate (`${rate.provider}-${rate.baseCurrency}-${rate.quoteCurrency}`)}
+                          <div>{rate.baseCurrency} → {rate.quoteCurrency} · {rate.provider} · effective {formatFinanceDateTime(rate.effectiveAt)} · refreshed {formatFinanceDateTime(rate.lastSuccessfulRefreshAt)}{rate.stale ? ' · stale' : ''}</div>
+                        {/each}
+                      </div>
+                    {/if}
+                    <a href="/admin/finance/fx" use:link>Refresh required rates</a>
+                  </div>
+                </details>
               {/if}
             </div>
           </div>
@@ -903,6 +933,7 @@
                   tenantId={financeShell.selectedTenantId}
                   transactions={visibleRecentTransactions}
                   accountNameById={accountNameById}
+                  {hiddenAccountIds}
                   ariaLabel="Recent transactions"
                   onTransactionUpdated={applyTransactionUpdate}
                 />

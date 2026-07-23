@@ -13,9 +13,7 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-// FinanceFxSyncRequest - Refreshes current FX valuations; transaction dates are not used.
-type FinanceFxSyncRequest struct { 
+// FinanceFxRefreshRequest - Refreshes currently required FX rates discovered from active tenants.
+type FinanceFxRefreshRequest struct { 
 	Provider string `json:"provider,omitempty"`
-	BaseCurrencies []string `json:"baseCurrencies"`
-	QuoteCurrency string `json:"quoteCurrency"`
 }

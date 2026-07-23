@@ -45,6 +45,7 @@ func TestService(t *testing.T) {
 			ActorUserID:     actorUserID,
 			Name:            fmt.Sprintf("tenant-%s", fake.Company().Name()),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		return tenant
@@ -62,6 +63,7 @@ func TestService(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            fmt.Sprintf("tenant-%s", fake.Company().Name()),
 			DisplayCurrency: "PLN",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "PLN", tenant.DisplayCurrency)
@@ -154,9 +156,21 @@ func TestService(t *testing.T) {
 			TenantID:    tenant.ID,
 			CategoryID:  category.ID,
 			Name:        fmt.Sprintf("category-updated-%s", fake.Lorem().Word()),
+			Kind:        domain.CategoryKindIncome,
 		})
 		require.NoError(t, err)
-		assert.Equal(t, category.ID, updatedCategory.ID)
+		expectedCategory := category
+		expectedCategory.Name = updatedCategory.Name
+		expectedCategory.Kind = domain.CategoryKindIncome
+		expectedCategory.UpdatedAt = updatedCategory.UpdatedAt
+		assert.Equal(t, expectedCategory, updatedCategory)
+
+		categories, err = service.ListCategories(t.Context(), ListCategoriesParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		assert.Contains(t, categories, expectedCategory)
 
 		tag, err := service.CreateTag(t.Context(), CreateTagParams{
 			ActorUserID: ownerUserID,
@@ -281,6 +295,7 @@ func TestService(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "eur",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "EUR", tenant.DisplayCurrency)
@@ -338,6 +353,7 @@ func TestService(t *testing.T) {
 			ActorUserID:     invalidCreateUserID,
 			Name:            "tenant-invalid-" + fake.Company().Name(),
 			DisplayCurrency: "btc",
+			SeedDefaults:    true,
 		})
 		require.ErrorIs(t, err, ErrInvalidTenantDisplayCurrency)
 
@@ -813,6 +829,7 @@ func TestService(t *testing.T) {
 				ActorUserID:     ownerUserID,
 				Name:            fmt.Sprintf("tenant-%s", fake.Company().Name()),
 				DisplayCurrency: "USD",
+				SeedDefaults:    true,
 			})
 			require.NoError(t, err)
 
@@ -1239,7 +1256,7 @@ func TestService(t *testing.T) {
 			}),
 		)
 
-		_, err := service.CreateTenant(t.Context(), CreateTenantParams{})
+		_, err := service.CreateTenant(t.Context(), CreateTenantParams{SeedDefaults: false})
 		require.Error(t, err)
 
 		ownerUserID := fmt.Sprintf("user-owner-%s", fake.Lorem().Word())
@@ -1247,6 +1264,7 @@ func TestService(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            fmt.Sprintf("tenant-%s", fake.Company().Name()),
 			DisplayCurrency: "eur",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "tenant-id", tenant.ID)
@@ -1293,6 +1311,7 @@ func TestService(t *testing.T) {
 			TenantID:    tenant.ID,
 			CategoryID:  fmt.Sprintf("missing-category-%s", fake.Lorem().Word()),
 			Name:        fmt.Sprintf("name-%s", fake.Lorem().Word()),
+			Kind:        domain.CategoryKindExpense,
 		})
 		require.ErrorIs(t, err, ErrCategoryNotFound)
 
@@ -1332,7 +1351,7 @@ func TestService(t *testing.T) {
 
 		_, err := NewService(stubStore{
 			saveTenantFn: func(context.Context, domain.Tenant) (domain.Tenant, error) { return domain.Tenant{}, sentinel },
-		}).CreateTenant(t.Context(), CreateTenantParams{ActorUserID: "user-1", Name: "tenant", DisplayCurrency: "USD"})
+		}).CreateTenant(t.Context(), CreateTenantParams{ActorUserID: "user-1", Name: "tenant", DisplayCurrency: "USD", SeedDefaults: true})
 		require.ErrorIs(t, err, sentinel)
 
 		categoryID := "category-1"
@@ -1341,7 +1360,7 @@ func TestService(t *testing.T) {
 			saveTenantMembershipFn: func(context.Context, domain.TenantMembership) (domain.TenantMembership, error) {
 				return domain.TenantMembership{}, sentinel
 			},
-		}).CreateTenant(t.Context(), CreateTenantParams{ActorUserID: "user-1", Name: "tenant", DisplayCurrency: "USD"})
+		}).CreateTenant(t.Context(), CreateTenantParams{ActorUserID: "user-1", Name: "tenant", DisplayCurrency: "USD", SeedDefaults: true})
 		require.ErrorIs(t, err, sentinel)
 
 		_, err = NewService(stubStore{
@@ -1352,7 +1371,7 @@ func TestService(t *testing.T) {
 			saveCategoryFn: func(context.Context, domain.Category) (domain.Category, error) {
 				return domain.Category{}, sentinel
 			},
-		}).CreateTenant(t.Context(), CreateTenantParams{ActorUserID: "user-1", Name: "tenant", DisplayCurrency: "USD"})
+		}).CreateTenant(t.Context(), CreateTenantParams{ActorUserID: "user-1", Name: "tenant", DisplayCurrency: "USD", SeedDefaults: true})
 		require.ErrorIs(t, err, sentinel)
 
 		_, err = NewService(stubStore{
@@ -1463,7 +1482,7 @@ func TestService(t *testing.T) {
 			isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
 			getCategoryFn:    func(context.Context, string) (*domain.Category, error) { return &baseCategory, nil },
 			saveCategoryFn:   func(context.Context, domain.Category) (domain.Category, error) { return domain.Category{}, sentinel },
-		}).UpdateCategory(t.Context(), UpdateCategoryParams{ActorUserID: "user-1", TenantID: "tenant-1", CategoryID: "category-1", Name: "food"})
+		}).UpdateCategory(t.Context(), UpdateCategoryParams{ActorUserID: "user-1", TenantID: "tenant-1", CategoryID: "category-1", Name: "food", Kind: domain.CategoryKindExpense})
 		require.ErrorIs(t, err, sentinel)
 
 		err = NewService(stubStore{

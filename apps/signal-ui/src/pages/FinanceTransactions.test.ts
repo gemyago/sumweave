@@ -70,13 +70,29 @@ describe('Finance transactions page', () => {
   it('renders the shared transaction list and full-editor navigation link', async () => {
     render(FinanceTransactions)
     expect(await screen.findByText('Refund')).toBeInTheDocument()
-    expect(screen.getByLabelText('Transactions ledger')).toBeInTheDocument()
+    expect(screen.getByLabelText('Transactions ledger')).toHaveClass('finance-transaction-list')
     expect(screen.getByRole('link', { name: 'Create transaction' })).toHaveAttribute('href', '#/finance/transactions/new')
     expect(screen.getByRole('link', { name: 'Open full transaction details' })).toHaveAttribute('href', '#/finance/transactions/tx-1')
     expect(screen.queryByLabelText('Selected transaction details')).not.toBeInTheDocument()
     expect(screen.getAllByText('pending').length).toBeGreaterThan(0)
     expect(screen.getByText('hidden')).toBeInTheDocument()
     expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
+  })
+
+  it('keeps hidden-account names and badges in transaction history and filters', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.listAccounts.mockResolvedValueOnce([
+      { id: 'account-hidden', tenantId: 'tenant-1', name: 'Old checking', currency: 'USD', kind: 'linked', provider: 'bank', providerAccountId: '', hiddenAt: now, createdAt: now, updatedAt: now },
+    ])
+    mocks.listTransactions.mockResolvedValueOnce([
+      { id: 'tx-hidden-account', tenantId: 'tenant-1', accountId: 'account-hidden', source: 'provider', status: 'booked', kind: 'expense', amountMinor: -100, currency: 'USD', description: 'Historic charge', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, createdAt: now, updatedAt: now },
+    ])
+    render(FinanceTransactions)
+
+    expect(await screen.findByText('Old checking')).toBeInTheDocument()
+    expect(screen.getByText('Hidden account')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Old checking (Hidden)' })).toBeInTheDocument()
+    expect(mocks.listAccounts).toHaveBeenCalledWith({ tenantId: 'tenant-1', includeHidden: true })
   })
 
   it('marks repeated inline icon actions for the shared mobile touch-target treatment', async () => {
@@ -93,7 +109,7 @@ describe('Finance transactions page', () => {
     expect(screen.getByRole('button', { name: 'Cancel description edit' })).toHaveClass('finance-transaction-list-action')
   })
 
-  it('keeps active category and tag editors beside their actions', async () => {
+  it('uses equal responsive grid cells while keeping active category and tag editors beside their actions', async () => {
     const user = userEvent.setup()
     render(FinanceTransactions)
     await screen.findByText('Refund')
@@ -101,6 +117,8 @@ describe('Finance transactions page', () => {
     await user.click(screen.getByRole('button', { name: 'Edit category' }))
     const category = screen.getByLabelText('Category')
     const categoryRow = category.closest('.finance-transaction-list-editor-row')
+    const categoryCell = category.closest('.col-12.col-md-6')
+    expect(categoryCell?.parentElement).toHaveClass('row', 'mx-0')
     expect(categoryRow).toHaveClass('flex-nowrap')
     expect(categoryRow).toContainElement(screen.getByRole('button', { name: 'Save category' }))
     expect(categoryRow).toContainElement(screen.getByRole('button', { name: 'Cancel category edit' }))
@@ -110,6 +128,9 @@ describe('Finance transactions page', () => {
     const tags = screen.getByRole('group', { name: 'Tags' })
     const tagsRow = tags.closest('.finance-transaction-list-editor-row')
     const tagChoices = tags.querySelector('.finance-transaction-list-tag-choices')
+    const tagsCell = tags.closest('.col-12.col-md-6')
+    expect(tagsCell?.parentElement).toHaveClass('row', 'mx-0')
+    expect(tagsCell).toHaveClass('col-12', 'col-md-6')
     expect(tagsRow).toHaveClass('flex-nowrap')
     expect(tagsRow).toContainElement(screen.getByRole('button', { name: 'Save tags' }))
     expect(tagsRow).toContainElement(screen.getByRole('button', { name: 'Cancel tags edit' }))

@@ -41,11 +41,11 @@ func NewFinanceDashboardResponseValidator() FieldValidator[*FinanceDashboardResp
 		),
 		NewFinanceDashboardAlertValidator(),
 	)
-	validateMissingFx := NewArrayValidator[*FinanceDashboardMissingFx](
-		NewSimpleFieldValidator[[]*FinanceDashboardMissingFx](
+	validateFxCoverage := NewArrayValidator[*FinanceDashboardFxCoverage](
+		NewSimpleFieldValidator[[]*FinanceDashboardFxCoverage](
 			EnsureArrayFieldRequired,
 		),
-		NewFinanceDashboardMissingFxValidator(),
+		NewFinanceDashboardFxCoverageValidator(),
 	)
 	validateCurrentFxRates := NewArrayValidator[*FinanceDashboardCurrentFxRate](
 		NewSimpleFieldValidator[[]*FinanceDashboardCurrentFxRate](
@@ -67,7 +67,7 @@ func NewFinanceDashboardResponseValidator() FieldValidator[*FinanceDashboardResp
 		validateCategoryBreakdowns(bindingCtx.Fork("categoryBreakdowns"), value.CategoryBreakdowns)
 		validateAccountBalances(bindingCtx.Fork("accountBalances"), value.AccountBalances)
 		validateAlerts(bindingCtx.Fork("alerts"), value.Alerts)
-		validateMissingFx(bindingCtx.Fork("missingFx"), value.MissingFx)
+		validateFxCoverage(bindingCtx.Fork("fxCoverage"), value.FxCoverage)
 		validateCurrentFxRates(bindingCtx.Fork("currentFxRates"), value.CurrentFxRates)
 		validateNativeSettledTotals(bindingCtx.Fork("nativeSettledTotals"), value.NativeSettledTotals)
 	}

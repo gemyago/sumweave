@@ -33,6 +33,7 @@ func TestFocusedPublicServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -67,6 +68,7 @@ func TestFocusedPublicServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -101,6 +103,7 @@ func TestFocusedPublicServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -142,6 +145,7 @@ func TestFocusedPublicServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "PLN",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -194,8 +198,8 @@ func TestFocusedPublicServices(t *testing.T) {
 			RateDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
 			Rate:          4.1,
 		}})
-		enqueuer := &capturedFXSyncJobEnqueuer{}
-		scheduleWriter := &capturedFXSyncScheduleWriter{}
+		enqueuer := &capturedFXRefreshJobEnqueuer{}
+		scheduleWriter := &capturedFXRefreshScheduleWriter{}
 		service := NewFXService(
 			store,
 			WithFXServiceProviders(provider),
@@ -204,28 +208,20 @@ func TestFocusedPublicServices(t *testing.T) {
 			WithFXServiceScheduleWriter(scheduleWriter),
 		)
 
-		_, err := service.SyncFXRates(t.Context(), SyncFXRatesParams{
-			BaseCurrencies: []string{"USD"},
-			QuoteCurrency:  "PLN",
-			StartDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-			EndDate:        time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-		})
+		err := store.SaveCurrentFXRates(t.Context(), []domain.FXRate{{
+			Provider: provider.Name(), BaseCurrency: "USD", QuoteCurrency: "PLN",
+			EffectiveAt: time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC), Rate: 4.1,
+		}})
 		require.NoError(t, err)
 
-		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{
+		_, err = service.TriggerFXRefresh(t.Context(), TriggerFXRefreshParams{
 			RequestedByUserID: "admin-" + fake.UUID().V4(),
 			Source:            FXSyncRequesterSourceOperator,
-			BaseCurrencies:    []string{"USD"},
-			QuoteCurrency:     "PLN",
-			StartDate:         time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-			EndDate:           time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
 		})
 		require.NoError(t, err)
 
-		_, err = service.EnsureFXSyncSchedule(t.Context(), EnsureFXSyncScheduleParams{
+		_, err = service.EnsureFXRefreshSchedule(t.Context(), EnsureFXRefreshScheduleParams{
 			ScheduleID:      "schedule-" + fake.UUID().V4(),
-			BaseCurrencies:  []string{"USD"},
-			QuoteCurrency:   "PLN",
 			Interval:        time.Hour,
 			RequestedByUser: "system",
 		})
@@ -255,6 +251,7 @@ func TestFocusedPublicServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -324,6 +321,7 @@ func TestFocusedPublicServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 

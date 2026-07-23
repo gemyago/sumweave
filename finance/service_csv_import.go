@@ -300,6 +300,9 @@ func validateCatalogRow(
 	row parsedCSVImportRow,
 ) string {
 	if account := accountByName(accounts, row.Account); account != nil {
+		if account.HiddenAt != nil {
+			return fmt.Sprintf("account %q is hidden", row.Account)
+		}
 		if account.Currency != row.Currency {
 			return fmt.Sprintf("Account %q currency is %s, not %s", row.Account, account.Currency, row.Currency)
 		}

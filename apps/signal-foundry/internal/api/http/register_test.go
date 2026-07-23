@@ -504,6 +504,20 @@ func TestSetupV1Routes(t *testing.T) {
 			rootHandler.ServeHTTP(w, req)
 			require.NotEqual(t, http.StatusNotFound, w.Code)
 		})
+
+		t.Run("generated finance account and catalog PATCH routes are registered", func(t *testing.T) {
+			for _, target := range []string{
+				"/api/v1/finance/tenants/tenant-a/accounts/account-a",
+				"/api/v1/finance/tenants/tenant-a/categories/category-a",
+				"/api/v1/finance/tenants/tenant-a/tags/tag-a",
+			} {
+				req := httptest.NewRequest(http.MethodPatch, target, strings.NewReader(`{"name":"renamed"}`))
+				req.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				rootHandler.ServeHTTP(w, req)
+				require.NotEqual(t, http.StatusNotFound, w.Code)
+			}
+		})
 	})
 
 	t.Run("synthetic link-state routes are registered on the app router", func(t *testing.T) {
@@ -513,6 +527,7 @@ func TestSetupV1Routes(t *testing.T) {
 			ActorUserID:     userID,
 			Name:            "tenant-" + fake.UUID().V4(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 

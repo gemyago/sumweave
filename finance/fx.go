@@ -21,7 +21,6 @@ const (
 	FXProviderFrankfurter    = "frankfurter"
 	FXProviderNBP            = "nbp"
 	FXProviderECB            = "ecb"
-	FXSyncJobType            = "finance.fx_rates_sync"
 	FXRefreshJobType         = "finance.fx_rates_refresh"
 	FXDailyRefreshScheduleID = "finance.fx_rates_daily_refresh"
 
@@ -272,26 +271,27 @@ func (p *FrankfurterFXProvider) FetchHistoricalRates(
 	return rates, err
 }
 
-type FXSyncJobEnqueuer interface {
-	EnqueueFXSync(ctx context.Context, request FXSyncJobRequest) (FXSyncJobRef, error)
+type FXRefreshJobEnqueuer interface {
+	EnqueueFXRefresh(ctx context.Context, request FXRefreshJobRequest) (FXRefreshJobRef, error)
 }
 
-type FXSyncScheduleWriter interface {
-	UpsertFXSyncSchedule(ctx context.Context, schedule FXSyncSchedule) error
+type FXRefreshScheduleWriter interface {
+	UpsertFXRefreshSchedule(ctx context.Context, schedule FXRefreshSchedule) error
 }
 
-type FXSyncJobRequest struct {
+type FXRefreshJobRequest struct {
 	JobType   string
 	Requester FXSyncRequester
-	Input     SyncFXRatesParams
+	Input     RefreshFXRatesParams
 }
 
-type FXSyncJobRef struct {
-	ID      string
-	JobType string
+type FXRefreshJobRef struct {
+	ID       string
+	JobType  string
+	Provider string
 }
 
-type FXSyncSchedule struct {
+type FXRefreshSchedule struct {
 	ScheduleID string
 	JobType    string
 	Requester  FXSyncRequester
@@ -305,36 +305,22 @@ type FXSyncRequester struct {
 	Source string
 }
 
-type SyncFXRatesParams struct {
-	Provider       string
-	BaseCurrencies []string
-	QuoteCurrency  string
-	StartDate      time.Time
-	EndDate        time.Time
-}
-
 type RefreshFXRatesParams struct{ Provider string }
 
-type SyncFXRatesResult struct {
+type RefreshFXRatesResult struct {
 	Provider      string
 	ImportedCount int
 }
 
-type TriggerFXSyncParams struct {
+type TriggerFXRefreshParams struct {
 	RequestedByUserID string
 	Source            string
 	Provider          string
-	BaseCurrencies    []string
-	QuoteCurrency     string
-	StartDate         time.Time
-	EndDate           time.Time
 }
 
-type EnsureFXSyncScheduleParams struct {
+type EnsureFXRefreshScheduleParams struct {
 	ScheduleID      string
 	Provider        string
-	BaseCurrencies  []string
-	QuoteCurrency   string
 	Interval        time.Duration
 	RequestedByUser string
 }

@@ -27,6 +27,10 @@
   let error = $state<string | null>(null)
   let account = $state<FinanceAccount | null>(null)
   let transactions = $state<FinanceTransaction[]>([])
+  let renaming = $state(false)
+  let nameDraft = $state('')
+  let mutationBusy = $state(false)
+  let hideConfirmationOpen = $state(false)
   let transactionOffset = $state(0)
   let loadingTransactions = $state(false)
   let reactiveReady = $state(false)
@@ -70,8 +74,8 @@
 
     loadingTransactions = true
     try {
-      const [accounts, tx] = await Promise.all([
-        financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
+      const [loadedAccount, tx] = await Promise.all([
+        financeApi.getAccount({ tenantId: financeShell.selectedTenantId, accountId: params.accountId }),
         financeApi.listTransactions({
           tenantId: financeShell.selectedTenantId,
           accountId: params.accountId,
@@ -80,7 +84,8 @@
         }),
       ])
 
-      account = accounts.find((item) => item.id === params.accountId) ?? null
+      account = loadedAccount
+      nameDraft = loadedAccount.name
       transactions = tx
       return true
     } catch (loadError) {
@@ -109,6 +114,51 @@
 
   function applyTransactionUpdate(updated: FinanceTransaction) {
     transactions = transactions.map((item) => item.id === updated.id ? updated : item)
+  }
+
+  async function renameAccount(event: SubmitEvent) {
+    event.preventDefault()
+    if (!account || !financeShell.selectedTenantId) return
+    mutationBusy = true
+    error = null
+    try {
+      await financeApi.renameAccount({ tenantId: financeShell.selectedTenantId, accountId: account.id, name: nameDraft })
+      await loadAccountDetail()
+      renaming = false
+    } catch (renameError) {
+      error = renameError instanceof Error ? renameError.message : 'Failed to rename account'
+    } finally {
+      mutationBusy = false
+    }
+  }
+
+  async function hideAccount() {
+    if (!account || !financeShell.selectedTenantId) return
+    mutationBusy = true
+    error = null
+    try {
+      await financeApi.hideAccount({ tenantId: financeShell.selectedTenantId, accountId: account.id })
+      await loadAccountDetail()
+      hideConfirmationOpen = false
+    } catch (hideError) {
+      error = hideError instanceof Error ? hideError.message : 'Failed to hide account'
+    } finally {
+      mutationBusy = false
+    }
+  }
+
+  async function restoreAccount() {
+    if (!account || !financeShell.selectedTenantId) return
+    mutationBusy = true
+    error = null
+    try {
+      await financeApi.restoreAccount({ tenantId: financeShell.selectedTenantId, accountId: account.id })
+      await loadAccountDetail()
+    } catch (restoreError) {
+      error = restoreError instanceof Error ? restoreError.message : 'Failed to restore account'
+    } finally {
+      mutationBusy = false
+    }
   }
 
   $effect(() => {
@@ -185,23 +235,60 @@
         <section class="card shadow-sm">
           <div class="card-body p-4 d-grid gap-3">
             <div class="d-flex flex-column gap-2">
-              <div>
-                <h2 class="h4 mb-1">{account.name}</h2>
-                <div class="d-flex flex-wrap gap-2">
+                <div>
+                  {#if renaming}
+                    <form class="d-grid gap-2" onsubmit={renameAccount}>
+                      <label class="form-label mb-0" for="finance-account-rename">Account name</label>
+                      <div class="d-flex flex-wrap gap-2">
+                        <input id="finance-account-rename" class="form-control form-control-sm" bind:value={nameDraft} disabled={mutationBusy} required />
+                        <button class="btn btn-outline-success btn-sm" type="submit" disabled={mutationBusy}>{mutationBusy ? 'Saving…' : 'Save'}</button>
+                        <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => { renaming = false; nameDraft = account?.name ?? '' }} disabled={mutationBusy}>Cancel</button>
+                      </div>
+                    </form>
+                  {:else}
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                      <h2 class="h4 mb-0">{account.name}</h2>
+                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => renaming = true} disabled={mutationBusy}>Edit</button>
+                    </div>
+                  {/if}
+                  <div class="d-flex flex-wrap gap-2">
                   <span class="badge text-bg-secondary">{account.kind}</span>
                   <span class="badge text-bg-light border text-body">{account.currency}</span>
-                  <span class="badge text-bg-light border text-body">Provider {account.provider || 'manual'}</span>
-                </div>
-              </div>
+                   <span class="badge text-bg-light border text-body">Provider {account.provider || 'manual'}</span>
+                   {#if account.hiddenAt}<span class="badge text-bg-warning">Hidden historical source</span>{/if}
+                 </div>
+               </div>
 
               <p class="small text-body-secondary mb-0">
                 Created {formatFinanceDateTime(account.createdAt)} · Updated {formatFinanceDateTime(account.updatedAt)}
               </p>
-              <div class="d-flex flex-wrap gap-2">
+               <div class="d-flex flex-wrap gap-2">
                 <span class="badge text-bg-light border text-body">Booked balance {formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</span>
                 <span class="badge text-bg-light border text-body">Pending balance {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</span>
-              </div>
-              <FinanceProviderEvidence tenantId={financeShell.selectedTenantId} entityId={account.id} entityLabel="account" scope="account" />
+               </div>
+               {#if account.hiddenAt}
+                 <div class="alert alert-warning mb-0" role="status">
+                   <strong>Hidden account.</strong> Removed from current dashboard reporting and new transactions. History and provider sync stay available.
+                 </div>
+               {/if}
+                <div class="d-flex flex-wrap gap-2">
+                  {#if account.hiddenAt}
+                   <button class="btn btn-outline-success btn-sm" type="button" onclick={() => void restoreAccount()} disabled={mutationBusy}>{mutationBusy ? 'Restoring…' : 'Restore account'}</button>
+                 {:else}
+                   <button class="btn btn-outline-danger btn-sm" type="button" onclick={() => hideConfirmationOpen = true} disabled={mutationBusy}>Hide account</button>
+                 {/if}
+               </div>
+               {#if hideConfirmationOpen}
+                 <div class="alert alert-warning mb-0 d-grid gap-2" aria-label="Confirm hide account">
+                   <strong>Hide {account.name}?</strong>
+                   <span>It will be removed from current dashboard reporting and new transaction choices. Its history and provider sync will continue.</span>
+                   <div class="d-flex flex-wrap gap-2">
+                     <button class="btn btn-danger btn-sm" type="button" onclick={() => void hideAccount()} disabled={mutationBusy}>{mutationBusy ? 'Hiding…' : 'Confirm hide'}</button>
+                     <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => hideConfirmationOpen = false} disabled={mutationBusy}>Cancel</button>
+                   </div>
+                 </div>
+               {/if}
+               <FinanceProviderEvidence tenantId={financeShell.selectedTenantId} entityId={account.id} entityLabel="account" scope="account" />
             </div>
           </div>
         </section>
@@ -225,7 +312,8 @@
                 <FinanceTransactionList
                   tenantId={financeShell.selectedTenantId}
                   transactions={transactions}
-                  accountNameById={new Map(account ? [[account.id, account.name]] : [])}
+                   accountNameById={new Map(account ? [[account.id, account.name]] : [])}
+                   hiddenAccountIds={new Set(account?.hiddenAt ? [account.id] : [])}
                   ariaLabel="Recent transactions"
                   onTransactionUpdated={applyTransactionUpdate}
                 />

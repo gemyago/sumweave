@@ -3,7 +3,6 @@ package finance
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/domain"
 	"github.com/gemyago/signal-foundry/finance/persistence"
-	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,14 +59,9 @@ func TestReportingAndFXInternals(t *testing.T) {
 			WithFXProviders(provider),
 			WithDefaultFXProvider(provider.Name()),
 		)
-		_, err = service.SyncFXRates(t.Context(), SyncFXRatesParams{
-			BaseCurrencies: []string{"USD"}, QuoteCurrency: "PLN", EndDate: validDate,
-		})
-		require.NoError(t, err)
-
-		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{})
+		_, err = service.TriggerFXRefresh(t.Context(), TriggerFXRefreshParams{})
 		require.Error(t, err)
-		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{})
+		_, err = service.TriggerFXRefresh(t.Context(), TriggerFXRefreshParams{})
 		require.Error(t, err)
 
 		_, validationErr := validateProviderFXRates("provider", "USD", "PLN", []domain.FXRate{{
@@ -99,7 +92,6 @@ func TestReportingAndFXInternals(t *testing.T) {
 	})
 
 	t.Run("covers fx provider helpers and service error paths", func(t *testing.T) {
-		fake := faker.New()
 		sentinel := errors.New("sentinel")
 
 		staticProvider := NewStaticFXProvider("static", []domain.FXRate{
@@ -145,25 +137,10 @@ func TestReportingAndFXInternals(t *testing.T) {
 		require.ErrorIs(t, err, ErrFXProviderNotImplemented)
 
 		service := NewService(stubStore{})
-		_, err = service.TriggerFXSync(t.Context(), TriggerFXSyncParams{})
+		_, err = service.TriggerFXRefresh(t.Context(), TriggerFXRefreshParams{})
 		require.Error(t, err)
-		_, err = service.EnsureFXSyncSchedule(t.Context(), EnsureFXSyncScheduleParams{})
+		_, err = service.EnsureFXRefreshSchedule(t.Context(), EnsureFXRefreshScheduleParams{})
 		require.Error(t, err)
-
-		service = NewService(
-			stubStore{
-				saveCurrentFXRatesFn: func(_ context.Context, _ []domain.FXRate) error { return sentinel },
-			},
-			WithFXProviders(staticProvider),
-			WithDefaultFXProvider(staticProvider.Name()),
-		)
-		_, err = service.SyncFXRates(t.Context(), SyncFXRatesParams{
-			BaseCurrencies: []string{"USD"},
-			QuoteCurrency:  "PLN",
-			StartDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-			EndDate:        time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-		})
-		require.ErrorIs(t, err, sentinel)
 
 		service = NewService(stubStore{listCurrentFXRatesFn: func(
 			_ context.Context,
@@ -174,23 +151,55 @@ func TestReportingAndFXInternals(t *testing.T) {
 		_, err = service.GetFXAdminDiagnostics(t.Context(), FXAdminDiagnosticsParams{})
 		require.ErrorIs(t, err, sentinel)
 
-		service = NewService(
-			stubStore{},
-			WithFXProviders(staticProvider),
-			WithDefaultFXProvider(staticProvider.Name()),
-		)
-		_, err = service.SyncFXRates(t.Context(), SyncFXRatesParams{
-			Provider:  fmt.Sprintf("missing-%s", fake.Lorem().Word()),
-			StartDate: time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-			EndDate:   time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-		})
-		require.Error(t, err)
-
 		assert.Equal(
 			t,
 			[]string{"USD", "PLN"},
 			canonicalizeCurrencies([]string{"usd", "PLN", "usd"}),
 		)
+	})
+
+	t.Run("groups missing valuations by provider and currency pair", func(t *testing.T) {
+		missingUSDTransaction := DashboardMissingFXDiagnostic{
+			Source:        DashboardMissingFXSourceTransaction,
+			Provider:      "provider-a",
+			BaseCurrency:  "USD",
+			QuoteCurrency: "PLN",
+		}
+		missingUSDBalance := DashboardMissingFXDiagnostic{
+			Source:        DashboardMissingFXSourceBalance,
+			Provider:      "provider-a",
+			BaseCurrency:  "USD",
+			QuoteCurrency: "PLN",
+		}
+		missingEURTransaction := DashboardMissingFXDiagnostic{
+			Source:        DashboardMissingFXSourceTransaction,
+			Provider:      "provider-a",
+			BaseCurrency:  "EUR",
+			QuoteCurrency: "PLN",
+		}
+		coverage := buildDashboardFXCoverage([]DashboardMissingFXDiagnostic{
+			missingUSDTransaction,
+			missingUSDTransaction,
+			missingUSDTransaction,
+			missingUSDBalance,
+			missingUSDBalance,
+			missingEURTransaction,
+		})
+		assert.Equal(t, []DashboardFXCoverage{
+			{
+				Provider:                 "provider-a",
+				BaseCurrency:             "EUR",
+				QuoteCurrency:            "PLN",
+				AffectedTransactionCount: 1,
+			},
+			{
+				Provider:                 "provider-a",
+				BaseCurrency:             "USD",
+				QuoteCurrency:            "PLN",
+				AffectedTransactionCount: 3,
+				AffectedAccountCount:     2,
+			},
+		}, coverage)
 	})
 
 	t.Run("covers frankfurter latest-rate and error responses", func(t *testing.T) {
@@ -514,7 +523,7 @@ func TestReportingAndFXInternals(t *testing.T) {
 			2,
 		)
 		assert.Empty(t, categoryBreakdowns)
-		alerts := buildDashboardAlerts([]DashboardMissingFXDiagnostic{{}}, 2)
+		alerts := buildDashboardAlerts([]DashboardFXCoverage{{}}, 2)
 		require.Len(t, alerts, 2)
 
 		settled := &DashboardMoneySummary{Complete: true}

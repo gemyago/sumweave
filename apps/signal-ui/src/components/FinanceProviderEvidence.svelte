@@ -59,10 +59,10 @@
 </script>
 
 <details class="border rounded p-3" ontoggle={(event) => (event.currentTarget.open ? void loadMetadata() : undefined)}>
-  <summary class="fw-semibold">Provider evidence</summary>
+  <summary class="fw-semibold">Current provider evidence</summary>
   <div class="d-grid gap-3 mt-3">
     <p class="small text-body-secondary mb-0">
-      Metadata loads only when opened. Revealed content is sanitized provider evidence, not raw provider payload data.
+      Metadata loads only when opened. Each row is the latest sanitized observation for a current provider object, not raw provider payload data.
     </p>
 
     {#if error}
@@ -70,27 +70,27 @@
     {/if}
 
     {#if loadingMetadata}
-      <div class="text-body-secondary" role="status">Loading provider evidence metadata…</div>
+      <div class="text-body-secondary" role="status">Loading current provider evidence…</div>
     {:else if metadata?.length === 0}
-      <div class="text-body-secondary" role="status">No provider evidence is available for this {entityLabel}.</div>
+      <div class="text-body-secondary" role="status">No current provider evidence is available for this {entityLabel}.</div>
     {:else if metadata}
       <div class="list-group">
         {#each metadata as item (item.id)}
           <div class="list-group-item d-grid gap-2">
             <div class="d-flex flex-column flex-md-row justify-content-between gap-2">
               <div>
-                <strong>{item.scope} evidence</strong>
-                <div class="small text-body-secondary">Provider object {item.providerObjectId} · captured {formatFinanceDateTime(item.capturedAt)}</div>
+                <strong>Current {item.scope} evidence</strong>
+                <div class="small text-body-secondary">Provider object {item.providerObjectId} · latest captured {formatFinanceDateTime(item.capturedAt)}</div>
               </div>
               <button class="btn btn-outline-secondary btn-sm align-self-start" type="button" onclick={() => void revealEvidence(item.id)} disabled={revealingEvidenceId !== null}>
-                {revealingEvidenceId === item.id ? 'Revealing…' : 'Reveal sanitized details'}
+                {revealingEvidenceId === item.id ? 'Revealing…' : 'Reveal current sanitized details'}
               </button>
             </div>
 
             {#if revealedEvidence?.id === item.id}
               <div class="alert alert-secondary mb-0">
-                <strong>Sanitized provider evidence</strong>
-                <div class="small mt-1">Sensitive credential-like fields are removed. This is not the raw provider payload.</div>
+                <strong>Current sanitized provider evidence</strong>
+                <div class="small mt-1">Sensitive credential-like fields are removed. This is the latest observation for this provider object, not the raw provider payload.</div>
                 <pre class="mb-0 mt-2 text-wrap">{JSON.stringify(revealedEvidence.payload ?? null, null, 2)}</pre>
               </div>
             {/if}

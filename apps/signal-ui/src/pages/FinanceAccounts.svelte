@@ -3,7 +3,7 @@
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { createSignalFinanceApiForAuth, type FinanceAccount } from '../lib/finance/api'
-  import { formatFinanceDateTime, formatFinanceMoney } from '../lib/finance/format'
+  import { formatFinanceMoney } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
@@ -14,9 +14,6 @@
   let error = $state<string | null>(null)
   let accounts = $state<FinanceAccount[]>([])
   let includeHidden = $state(false)
-  let accountName = $state('')
-  let accountCurrency = $state('USD')
-  let accountKind = $state('manual')
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
 
@@ -50,25 +47,6 @@
     accounts = await financeApi.listAccounts({ tenantId: financeShell.selectedTenantId, includeHidden })
   }
 
-  async function createAccount(event: SubmitEvent) {
-    event.preventDefault()
-    if (!financeShell.selectedTenantId) return
-    error = null
-
-    try {
-      await financeApi.createAccount({
-        tenantId: financeShell.selectedTenantId,
-        name: accountName,
-        currency: accountCurrency,
-        kind: accountKind,
-      })
-      accountName = ''
-      await loadAccounts()
-    } catch (createError) {
-      error = createError instanceof Error ? createError.message : 'Failed to create account'
-    }
-  }
-
   $effect(() => {
     if (financeShell.loading || !reactiveReady) return
     void financeShell.selectedTenantId
@@ -86,16 +64,15 @@
     <header class="card border-0 shadow-sm">
       <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
         <div>
-          <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Accounts</p>
+          <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Accounts workspace</p>
           <h1 id="finance-accounts-heading" class="h3 mb-2">Finance accounts</h1>
-          <p class="text-body-secondary mb-0">
-            Create accounts, review balance sources, and open dedicated account detail routes.
-          </p>
+          <p class="text-body-secondary mb-0">Browse account balances and open a focused account detail when you need to manage one.</p>
         </div>
 
-        <a class="btn btn-outline-secondary align-self-start align-self-lg-center" href="/finance/tenants" use:link>
-          Manage tenants
-        </a>
+        <div class="d-flex flex-wrap gap-2">
+          <a class="btn btn-outline-secondary" href="/finance/tenants" use:link>Manage tenants</a>
+          <a class="btn btn-primary" href="/finance/accounts/new" use:link>Create account</a>
+        </div>
       </div>
     </header>
 
@@ -108,144 +85,65 @@
     {:else}
       <section class="card shadow-sm">
         <div class="card-body p-4 d-grid gap-3">
-          <div class="row g-3 align-items-end">
-            {#if !financeShell.embedded}
-              <div class="col-12 col-lg-4">
-                <label class="form-label" for="finance-accounts-tenant">Tenant</label>
-                <select
-                  id="finance-accounts-tenant"
-                  class="form-select"
-                  value={financeShell.selectedTenantId}
-                  onchange={(event) =>
-                    financeShell.selectTenant((event.currentTarget as HTMLSelectElement).value)}
-                  aria-label="Tenant"
-                >
-                  <option value="">Select tenant</option>
-                  {#each financeShell.tenants as tenant (tenant.id)}
-                    <option value={tenant.id}>{tenant.name}</option>
-                  {/each}
-                </select>
-              </div>
-            {/if}
-
-            <div class="col-12 col-lg-4">
-              <div class="form-check form-switch pt-lg-4">
+          <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-center">
+            <div>
+              <h2 class="h5 mb-1">Browse accounts</h2>
+              <p class="text-body-secondary mb-0">Hidden accounts stay available here for management and historical review.</p>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-3">
+              <div class="form-check form-switch">
                 <input id="finance-accounts-hidden" class="form-check-input" type="checkbox" bind:checked={includeHidden} />
                 <label class="form-check-label" for="finance-accounts-hidden">Include hidden</label>
               </div>
-            </div>
-
-            <div class="col-12 col-lg-4">
-              <p class="small text-body-secondary mb-0">
-                Toggle hidden accounts without leaving the account-management route.
-              </p>
+              <span class="badge text-bg-secondary">{accounts.length} account{accounts.length === 1 ? '' : 's'}</span>
             </div>
           </div>
+
+          {#if financeShell.needsTenantSelection}
+            <div class="alert alert-warning mb-0" role="status">Select an active tenant to continue on this finance route.</div>
+          {:else if !financeShell.selectedTenantId}
+            <div class="alert alert-light border mb-0" role="status">Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before managing accounts.</div>
+          {:else if accounts.length === 0}
+            <div class="alert alert-light border mb-0" role="status">No accounts yet. <a href="/finance/accounts/new" use:link>Create an account</a> to start recording transactions.</div>
+          {:else}
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0" aria-label="Accounts">
+                <thead>
+                  <tr>
+                    <th scope="col">Account</th>
+                    <th scope="col" class="d-none d-md-table-cell">Type</th>
+                    <th scope="col" class="d-none d-lg-table-cell">Booked</th>
+                    <th scope="col" class="d-none d-lg-table-cell">Pending</th>
+                    <th scope="col"><span class="visually-hidden">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each accounts as account (account.id)}
+                    <tr>
+                      <td>
+                        <div class="fw-semibold">{account.name}</div>
+                        <div class="d-flex flex-wrap gap-2 mt-1 small text-body-secondary">
+                          <span>{account.currency}</span>
+                          <span class="d-md-none">{account.kind}</span>
+                          {#if account.hiddenAt}<span class="badge text-bg-warning">Hidden</span>{/if}
+                        </div>
+                        <div class="d-lg-none small text-body-secondary mt-1">
+                          Booked {formatFinanceMoney(account.bookedBalanceMinor, account.currency)} · Pending {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}
+                        </div>
+                      </td>
+                      <td class="d-none d-md-table-cell"><span class="badge text-bg-secondary">{account.kind}</span></td>
+                      <td class="d-none d-lg-table-cell">{formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</td>
+                      <td class="d-none d-lg-table-cell">{formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</td>
+                      <td class="text-end"><a class="btn btn-outline-secondary btn-sm" href={`/finance/accounts/${encodeURIComponent(account.id)}`} use:link>Open details</a></td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            <p class="small text-body-secondary mb-0">Balances are current account balances. Updated account data is available on the detail route.</p>
+          {/if}
         </div>
       </section>
-
-      {#if financeShell.needsTenantSelection}
-        <div class="alert alert-warning mb-0" role="status">Select an active tenant to continue on this finance route.</div>
-      {:else if !financeShell.selectedTenantId}
-        <div class="alert alert-light border mb-0" role="status">
-          Create or join a tenant from <a href="/finance/tenants" use:link>Finance tenants</a> before managing accounts.
-        </div>
-      {/if}
-
-      <div class="row g-4">
-        <div class="col-12 col-xl-4">
-          <form class="card shadow-sm h-100" onsubmit={createAccount}>
-            <div class="card-body p-4 d-grid gap-3">
-              <div>
-                <h2 class="h5 mb-1">Create account</h2>
-                <p class="text-body-secondary mb-0">Set the basic reporting fields before transactions or sync activity begin.</p>
-              </div>
-
-              <div>
-                <label class="form-label" for="finance-account-name">Name</label>
-                <input id="finance-account-name" class="form-control" bind:value={accountName} aria-label="Account name" required />
-              </div>
-
-              <div>
-                <label class="form-label" for="finance-account-currency">Currency</label>
-                <input id="finance-account-currency" class="form-control" bind:value={accountCurrency} aria-label="Account currency" required />
-              </div>
-
-              <div>
-                <label class="form-label" for="finance-account-kind">Kind</label>
-                <select id="finance-account-kind" class="form-select" bind:value={accountKind} aria-label="Account kind">
-                  <option value="manual">manual</option>
-                  <option value="linked">linked</option>
-                  <option value="imported">imported</option>
-                  <option value="reconciliation">reconciliation</option>
-                </select>
-              </div>
-
-              <div>
-                <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId}>
-                  Create account
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-
-        <div class="col-12 col-xl-8">
-          <section class="card shadow-sm h-100">
-            <div class="card-body p-4 d-grid gap-3">
-              <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
-                <div>
-                  <h2 class="h5 mb-1">Account list</h2>
-                  <p class="text-body-secondary mb-0">Review current account sources and jump into account detail routes.</p>
-                </div>
-
-                <span class="badge text-bg-secondary align-self-start align-self-md-center">
-                  {accounts.length} account{accounts.length === 1 ? '' : 's'}
-                </span>
-              </div>
-
-              {#if !financeShell.selectedTenantId}
-                <div class="alert alert-light border mb-0" role="status">No accounts yet.</div>
-              {:else if accounts.length === 0}
-                <div class="alert alert-light border mb-0" role="status">No accounts yet.</div>
-              {:else}
-                <div class="list-group">
-                  {#each accounts as account (account.id)}
-                    <article class="list-group-item d-grid gap-2">
-                      <div class="d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-start">
-                        <div class="d-grid gap-2">
-                          <div>
-                            <h3 class="h6 mb-1">{account.name}</h3>
-                            <div class="d-flex flex-wrap gap-2">
-                              <span class="badge text-bg-secondary">{account.kind}</span>
-                              <span class="badge text-bg-light border text-body">{account.currency}</span>
-                              {#if account.hiddenAt}
-                                <span class="badge text-bg-warning">Hidden</span>
-                              {/if}
-                            </div>
-                          </div>
-
-                          <p class="small text-body-secondary mb-0">
-                            Provider {account.provider || 'manual'} · Updated {formatFinanceDateTime(account.updatedAt)}
-                          </p>
-                          <div class="d-flex flex-wrap gap-2 small">
-                            <span>Booked balance {formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</span>
-                            <span>Pending balance {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</span>
-                          </div>
-                        </div>
-
-                        <a class="btn btn-outline-secondary btn-sm align-self-start" href={`/finance/accounts/${encodeURIComponent(account.id)}`} use:link>
-                          Open account detail
-                        </a>
-                      </div>
-                    </article>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </section>
-        </div>
-      </div>
     {/if}
   </div>
 </section>

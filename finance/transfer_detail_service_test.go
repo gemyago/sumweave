@@ -60,8 +60,10 @@ func TestTransferDetailService(t *testing.T) {
 		fake := faker.New()
 		service, transactions, tenantID, userID, now := makeService(t, fake)
 		source := makeTransaction(fake, tenantID, now)
+		sameAccountCandidate := makeTransaction(fake, tenantID, now.Add(90*time.Minute))
+		sameAccountCandidate.AccountID = source.AccountID
 		candidate := makeTransaction(fake, tenantID, now.Add(time.Hour))
-		for _, transaction := range []domain.Transaction{source, candidate} {
+		for _, transaction := range []domain.Transaction{source, sameAccountCandidate, candidate} {
 			_, err := transactions.SaveTransaction(t.Context(), transaction)
 			require.NoError(t, err)
 		}

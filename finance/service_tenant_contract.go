@@ -29,6 +29,7 @@ type CreateTenantParams struct {
 	ActorUserID     string
 	Name            string
 	DisplayCurrency string
+	SeedDefaults    bool
 }
 
 type UpdateTenantParams struct {

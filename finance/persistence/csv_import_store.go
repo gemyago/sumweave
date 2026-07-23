@@ -211,6 +211,11 @@ func resolveImportAccount(
 		}
 		return account, nil
 	}
+	if account.HiddenAt != nil {
+		return accountModel{}, csvImportRowRejectionError{reason: fmt.Sprintf(
+			"account %q is hidden", row.AccountName,
+		)}
+	}
 	if account.Currency != row.Currency {
 		return accountModel{}, csvImportRowRejectionError{reason: fmt.Sprintf(
 			"account %q currency is %s, not %s", row.AccountName, account.Currency, row.Currency,

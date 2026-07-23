@@ -19,29 +19,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type capturedFXSyncJobEnqueuer struct {
-	request *FXSyncJobRequest
-	jobRef  FXSyncJobRef
+type capturedFXRefreshJobEnqueuer struct {
+	request *FXRefreshJobRequest
+	jobRef  FXRefreshJobRef
 }
 
-func (e *capturedFXSyncJobEnqueuer) EnqueueFXSync(
+func (e *capturedFXRefreshJobEnqueuer) EnqueueFXRefresh(
 	_ context.Context,
-	request FXSyncJobRequest,
-) (FXSyncJobRef, error) {
+	request FXRefreshJobRequest,
+) (FXRefreshJobRef, error) {
 	e.request = &request
 	if e.jobRef.JobType == "" {
-		e.jobRef = FXSyncJobRef{ID: "job-id", JobType: request.JobType}
+		e.jobRef = FXRefreshJobRef{ID: "job-id", JobType: request.JobType}
 	}
 	return e.jobRef, nil
 }
 
-type capturedFXSyncScheduleWriter struct {
-	schedule FXSyncSchedule
+type capturedFXRefreshScheduleWriter struct {
+	schedule FXRefreshSchedule
 }
 
-func (s *capturedFXSyncScheduleWriter) UpsertFXSyncSchedule(
+func (s *capturedFXRefreshScheduleWriter) UpsertFXRefreshSchedule(
 	_ context.Context,
-	schedule FXSyncSchedule,
+	schedule FXRefreshSchedule,
 ) error {
 	s.schedule = schedule
 	return nil
@@ -76,6 +76,7 @@ func TestReportingAndFX(t *testing.T) {
 				ActorUserID:     ownerUserID,
 				Name:            fmt.Sprintf("tenant-%s", fake.Company().Name()),
 				DisplayCurrency: "PLN",
+				SeedDefaults:    true,
 			})
 			require.NoError(t, err)
 
@@ -385,7 +386,7 @@ func TestReportingAndFX(t *testing.T) {
 				[]string{"missing_fx_rates", "pending_transactions"},
 				[]string{dashboard.Alerts[0].Code, dashboard.Alerts[1].Code},
 			)
-			assert.Equal(t, 3, dashboard.Alerts[0].Count)
+			assert.Equal(t, 2, dashboard.Alerts[0].Count)
 			require.Len(t, dashboard.MissingFX, 3)
 			assert.ElementsMatch(t, []DashboardMissingFXDiagnostic{
 				{
@@ -416,6 +417,16 @@ func TestReportingAndFX(t *testing.T) {
 					Provider:      FXProviderFrankfurter,
 				},
 			}, dashboard.MissingFX)
+			assert.ElementsMatch(t, []DashboardFXCoverage{
+				{
+					Provider: FXProviderFrankfurter, BaseCurrency: "EUR", QuoteCurrency: "PLN",
+					AffectedTransactionCount: 1, AffectedAccountCount: 1,
+				},
+				{
+					Provider: FXProviderFrankfurter, BaseCurrency: "GBP", QuoteCurrency: "PLN",
+					AffectedAccountCount: 1,
+				},
+			}, dashboard.FXCoverage)
 
 			assert.ElementsMatch(t, []DashboardCurrencyTotal{
 				{Currency: "USD", IncomeMinor: 100_00, ExpenseMinor: 30_00, NetMinor: 70_00},
@@ -515,11 +526,11 @@ func TestReportingAndFX(t *testing.T) {
 					Rate:          4.12,
 				}},
 			)
-			enqueuer := &capturedFXSyncJobEnqueuer{jobRef: FXSyncJobRef{
+			enqueuer := &capturedFXRefreshJobEnqueuer{jobRef: FXRefreshJobRef{
 				ID:      fmt.Sprintf("job-%s", fake.Lorem().Word()),
-				JobType: FXSyncJobType,
+				JobType: FXRefreshJobType,
 			}}
-			scheduler := &capturedFXSyncScheduleWriter{}
+			scheduler := &capturedFXRefreshScheduleWriter{}
 			service := NewService(
 				store,
 				WithNow(func() time.Time { return now }),
@@ -529,16 +540,11 @@ func TestReportingAndFX(t *testing.T) {
 				WithFXScheduleWriter(scheduler),
 			)
 
-			syncResult, err := service.SyncFXRates(t.Context(), SyncFXRatesParams{
-				Provider:       provider.Name(),
-				BaseCurrencies: []string{"USD"},
-				QuoteCurrency:  "PLN",
-				StartDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-				EndDate:        time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
-			})
+			err := store.SaveCurrentFXRates(t.Context(), []domain.FXRate{{
+				Provider: provider.Name(), BaseCurrency: "USD", QuoteCurrency: "PLN",
+				EffectiveAt: now, LastSuccessfulRefreshAt: now, Rate: 4.12,
+			}})
 			require.NoError(t, err)
-			assert.Equal(t, provider.Name(), syncResult.Provider)
-			assert.Equal(t, 1, syncResult.ImportedCount)
 
 			storedRates, err := store.ListFXRates(t.Context(), persistence.ListFXRatesParams{
 				Provider:      provider.Name(),
@@ -549,26 +555,21 @@ func TestReportingAndFX(t *testing.T) {
 			require.Len(t, storedRates, 1)
 			assert.InDelta(t, 4.12, storedRates[0].Rate, 0.00001)
 
-			jobRef, err := service.TriggerFXSync(t.Context(), TriggerFXSyncParams{
+			jobRef, err := service.TriggerFXRefresh(t.Context(), TriggerFXRefreshParams{
 				RequestedByUserID: fmt.Sprintf("admin-%s", fake.Lorem().Word()),
 				Source:            FXSyncRequesterSourceOperator,
 				Provider:          provider.Name(),
-				BaseCurrencies:    []string{"USD", "EUR"},
-				QuoteCurrency:     "PLN",
-				StartDate:         time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
-				EndDate:           time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
 			})
 			require.NoError(t, err)
-			assert.Equal(t, FXSyncJobType, jobRef.JobType)
+			assert.Equal(t, FXRefreshJobType, jobRef.JobType)
+			assert.Equal(t, provider.Name(), jobRef.Provider)
 			require.NotNil(t, enqueuer.request)
-			assert.Equal(t, FXSyncJobType, enqueuer.request.JobType)
+			assert.Equal(t, FXRefreshJobType, enqueuer.request.JobType)
 			assert.Equal(t, provider.Name(), enqueuer.request.Input.Provider)
 
-			schedule, err := service.EnsureFXSyncSchedule(t.Context(), EnsureFXSyncScheduleParams{
+			schedule, err := service.EnsureFXRefreshSchedule(t.Context(), EnsureFXRefreshScheduleParams{
 				ScheduleID:      fmt.Sprintf("fx-daily-%s", fake.Lorem().Word()),
 				Provider:        provider.Name(),
-				BaseCurrencies:  []string{"USD", "EUR"},
-				QuoteCurrency:   "PLN",
 				Interval:        24 * time.Hour,
 				RequestedByUser: "system",
 			})
@@ -659,7 +660,7 @@ func TestReportingAndFX(t *testing.T) {
 
 			result, err := service.RefreshRequiredFXRates(t.Context(), RefreshFXRatesParams{})
 			require.NoError(t, err)
-			assert.Equal(t, SyncFXRatesResult{Provider: providerName, ImportedCount: 2}, result)
+			assert.Equal(t, RefreshFXRatesResult{Provider: providerName, ImportedCount: 2}, result)
 			rates, err := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
 				Provider: providerName,
 			})
@@ -791,7 +792,7 @@ func TestReportingAndFX(t *testing.T) {
 			)
 			result, err := service.RefreshRequiredFXRates(t.Context(), RefreshFXRatesParams{})
 			require.NoError(t, err)
-			assert.Equal(t, SyncFXRatesResult{Provider: providerName}, result)
+			assert.Equal(t, RefreshFXRatesResult{Provider: providerName}, result)
 		})
 	})
 
@@ -803,11 +804,17 @@ func TestReportingAndFX(t *testing.T) {
 		firstOwnerID := "owner-first-" + fake.UUID().V4()
 		secondOwnerID := "owner-second-" + fake.UUID().V4()
 		firstTenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
-			ActorUserID: firstOwnerID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "PLN",
+			ActorUserID:     firstOwnerID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "PLN",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		secondTenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
-			ActorUserID: secondOwnerID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "PLN",
+			ActorUserID:     secondOwnerID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "PLN",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		_, err = service.CreateAccount(t.Context(), CreateAccountParams{

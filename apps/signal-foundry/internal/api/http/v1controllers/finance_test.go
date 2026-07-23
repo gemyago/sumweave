@@ -56,31 +56,39 @@ func TestFinanceController(t *testing.T) {
 		}
 	}
 
+	type controllerOption func(*FinanceControllerDeps)
+	withTransferDetails := func(service transferDetailService) controllerOption {
+		return func(deps *FinanceControllerDeps) { deps.TransferDetailService = service }
+	}
+	withUserDirectory := func(directory userDirectory) controllerOption {
+		return func(deps *FinanceControllerDeps) { deps.UserDirectory = directory }
+	}
+
 	newHandler := func(
 		service financeService,
 		bankConnections bankConnectionService,
 		auth middleware.AuthMiddleware,
-		transferDetails ...transferDetailService,
+		options ...controllerOption,
 	) http.Handler {
-		var transferDetail transferDetailService
-		if len(transferDetails) > 0 {
-			transferDetail = transferDetails[0]
+		deps := FinanceControllerDeps{
+			TenantService:             service,
+			UserDirectory:             newMockuserDirectory(t),
+			CatalogService:            service,
+			LedgerService:             service,
+			BankSyncService:           service,
+			ReportingService:          service,
+			FXService:                 service,
+			ProviderEvidenceService:   service,
+			CSVImportService:          service,
+			BankConnectionService:     bankConnections,
+			SyntheticLinkStateService: nil,
+			AuthMiddleware:            auth,
+		}
+		for _, option := range options {
+			option(&deps)
 		}
 		ctrl := NewFinanceController(
-			FinanceControllerDeps{
-				TenantService:             service,
-				CatalogService:            service,
-				LedgerService:             service,
-				TransferDetailService:     transferDetail,
-				BankSyncService:           service,
-				ReportingService:          service,
-				FXService:                 service,
-				ProviderEvidenceService:   service,
-				CSVImportService:          service,
-				BankConnectionService:     bankConnections,
-				SyntheticLinkStateService: nil,
-				AuthMiddleware:            auth,
-			},
+			deps,
 		)
 		return server.NewTestRootHandler().RegisterFinanceRoutes(ctrl)
 	}
@@ -147,10 +155,15 @@ func TestFinanceController(t *testing.T) {
 			{name: "list accounts", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/accounts?includeHidden=true"},
 			{name: "create account", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/accounts", body: `{"name":"Checking","currency":"USD","kind":"manual"}`},
 			{name: "get account", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/accounts/account-a"},
+			{name: "rename account", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/accounts/account-a", body: `{"name":"Checking updated"}`},
+			{name: "hide account", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/accounts/account-a/hide"},
+			{name: "restore account", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/accounts/account-a/unhide"},
 			{name: "list categories", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/categories?includeHidden=true"},
 			{name: "create category", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/categories", body: `{"name":"Groceries","kind":"expense"}`},
+			{name: "update category", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/categories/category-a", body: `{"name":"Groceries updated","kind":"income"}`},
 			{name: "list tags", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/tags?includeHidden=true"},
 			{name: "create tag", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/tags", body: `{"name":"Household"}`},
+			{name: "rename tag", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/tags/tag-a", body: `{"name":"Household updated"}`},
 			{name: "list transactions", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/transactions?accountId=account-a&source=manual&status=booked&includeHidden=true&limit=20"},
 			{name: "create transaction", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/transactions", body: `{"accountId":"account-a","source":"manual","status":"booked","kind":"regular","amountMinor":-2500,"currency":"USD","description":"Coffee","effectiveAt":"2026-06-20T14:00:00Z"}`},
 			{name: "get transaction", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/transactions/transaction-a"},
@@ -306,7 +319,12 @@ func TestFinanceController(t *testing.T) {
 				return candidate, nil
 			},
 		).Once()
-		handler := newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID), transferDetails)
+		handler := newHandler(
+			service,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withTransferDetails(transferDetails),
+		)
 		path := "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID
 
 		candidates := httptest.NewRecorder()
@@ -345,7 +363,12 @@ func TestFinanceController(t *testing.T) {
 			GetTransferPartner(mock.Anything, mock.Anything).
 			Return(domain.Transaction{}, financepkg.ErrInvalidTransferPartner).
 			Once()
-		errorHandler := newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID), errorDetails)
+		errorHandler := newHandler(
+			service,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withTransferDetails(errorDetails),
+		)
 		for _, tc := range []struct {
 			target string
 			status int
@@ -424,10 +447,13 @@ func TestFinanceController(t *testing.T) {
 		inviteID := "invite-" + fake.UUID().V4()
 		inviteCode := "code-" + fake.UUID().V4()
 		service := newMockfinanceService(t)
+		directory := newMockuserDirectory(t)
+		username := "user-" + fake.Internet().User()
 		handler := newHandler(
 			service,
 			newMockbankConnectionService(t),
 			makeAuthMiddleware(userID),
+			withUserDirectory(directory),
 		)
 
 		tenants := []domain.TenantMembershipView{{
@@ -450,6 +476,7 @@ func TestFinanceController(t *testing.T) {
 			func(_ context.Context, params financepkg.CreateTenantParams) (domain.Tenant, error) {
 				require.Equal(t, userID, params.ActorUserID)
 				require.Equal(t, "USD", params.DisplayCurrency)
+				require.True(t, params.SeedDefaults)
 				return domain.Tenant{
 					ID:              tenantID,
 					Name:            params.Name,
@@ -500,6 +527,7 @@ func TestFinanceController(t *testing.T) {
 			domain.TenantMembership{TenantID: tenantID, UserID: userID, JoinedAt: now},
 			nil,
 		)
+		directory.EXPECT().LookupUsername(mock.Anything, userID).Return(username, true, nil).Twice()
 
 		listResp := httptest.NewRecorder()
 		handler.ServeHTTP(listResp, newRequest(http.MethodGet, "/api/v1/finance/tenants", "", true))
@@ -514,12 +542,24 @@ func TestFinanceController(t *testing.T) {
 			newRequest(
 				http.MethodPost,
 				"/api/v1/finance/tenants",
-				`{"name":"Household","displayCurrency":"USD"}`,
+				`{"name":"Household","displayCurrency":"USD","seedDefaults":true}`,
 				true,
 			),
 		)
 		require.Equal(t, http.StatusOK, createResp.Code)
 		assert.Equal(t, tenantID, decode(t, createResp)["id"])
+
+		missingChoiceResp := httptest.NewRecorder()
+		handler.ServeHTTP(
+			missingChoiceResp,
+			newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants",
+				`{"name":"Household","displayCurrency":"USD"}`,
+				true,
+			),
+		)
+		assert.Equal(t, http.StatusBadRequest, missingChoiceResp.Code)
 
 		getResp := httptest.NewRecorder()
 		handler.ServeHTTP(
@@ -540,7 +580,9 @@ func TestFinanceController(t *testing.T) {
 			),
 		)
 		require.Equal(t, http.StatusOK, membersResp.Code)
-		assert.Len(t, decode(t, membersResp)["items"].([]any), 1)
+		membersPayload := decode(t, membersResp)["items"].([]any)
+		require.Len(t, membersPayload, 1)
+		assert.Equal(t, username, membersPayload[0].(map[string]any)["username"])
 
 		invitesResp := httptest.NewRecorder()
 		handler.ServeHTTP(
@@ -576,6 +618,31 @@ func TestFinanceController(t *testing.T) {
 		assert.Equal(t, tenantID, decode(t, acceptResp)["tenantId"])
 	})
 
+	t.Run("tenant members retain user ID when auth user is missing", func(t *testing.T) {
+		userID := fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		service := newMockfinanceService(t)
+		directory := newMockuserDirectory(t)
+		service.EXPECT().ListTenantMembers(
+			mock.Anything,
+			financepkg.ListTenantMembersParams{ActorUserID: userID, TenantID: tenantID},
+		).Return([]domain.TenantMember{{TenantID: tenantID, UserID: userID, JoinedAt: time.Now()}}, nil)
+		directory.EXPECT().LookupUsername(mock.Anything, userID).Return("", false, nil)
+
+		resp := httptest.NewRecorder()
+		newHandler(
+			service,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withUserDirectory(directory),
+		).ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/finance/tenants/"+tenantID+"/members", "", true))
+
+		require.Equal(t, http.StatusOK, resp.Code)
+		item := decode(t, resp)["items"].([]any)[0].(map[string]any)
+		assert.Equal(t, userID, item["userId"])
+		assert.NotContains(t, item, "username")
+	})
+
 	t.Run("tenant management routes create list and archive active tenants", func(t *testing.T) {
 		userID := fake.UUID().V4()
 		now := time.Date(2026, time.July, 3, 12, 0, 0, 0, time.UTC)
@@ -608,6 +675,7 @@ func TestFinanceController(t *testing.T) {
 				require.Equal(t, userID, params.ActorUserID)
 				require.Equal(t, tenantName, params.Name)
 				require.Equal(t, "USD", params.DisplayCurrency)
+				require.False(t, params.SeedDefaults)
 				return activeViews[0].Tenant, nil
 			},
 		).Once()
@@ -627,7 +695,7 @@ func TestFinanceController(t *testing.T) {
 			newRequest(
 				http.MethodPost,
 				"/api/v1/finance/tenants",
-				`{"name":"`+tenantName+`","displayCurrency":"USD"}`,
+				`{"name":"`+tenantName+`","displayCurrency":"USD","seedDefaults":false}`,
 				true,
 			),
 		)
@@ -1282,12 +1350,13 @@ func TestFinanceController(t *testing.T) {
 				GetFXAdminDiagnostics(mock.Anything, financepkg.FXAdminDiagnosticsParams{}).
 				Return(financepkg.FXAdminDiagnostics{DefaultProvider: "nbp", StoredRatesCount: 3, Providers: []financepkg.FXAdminProviderDiagnostics{{Name: "nbp", Default: true, Ready: true}}}, nil)
 			service.EXPECT().
-				TriggerFXSync(mock.Anything, mock.Anything).
-				RunAndReturn(func(_ context.Context, params financepkg.TriggerFXSyncParams) (financepkg.FXSyncJobRef, error) {
+				TriggerFXRefresh(mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, params financepkg.TriggerFXRefreshParams) (financepkg.FXRefreshJobRef, error) {
 					require.Equal(t, userID, params.RequestedByUserID)
-					return financepkg.FXSyncJobRef{
-						ID:      "job-fx-1",
-						JobType: financepkg.FXSyncJobType,
+					return financepkg.FXRefreshJobRef{
+						ID:       "job-fx-1",
+						JobType:  financepkg.FXRefreshJobType,
+						Provider: "nbp",
 					}, nil
 				})
 			service.EXPECT().
@@ -1453,7 +1522,7 @@ func TestFinanceController(t *testing.T) {
 				{
 					method: http.MethodPost,
 					target: "/api/v1/finance/fx/sync",
-					body:   `{"provider":"nbp","baseCurrencies":["EUR"],"quoteCurrency":"USD","startDate":"2026-06-01T00:00:00Z","endDate":"2026-06-21T00:00:00Z"}`,
+					body:   `{"provider":"nbp"}`,
 					field:  "jobId",
 					want:   "job-fx-1",
 					status: http.StatusOK,
@@ -1521,6 +1590,32 @@ func TestFinanceController(t *testing.T) {
 				}
 				assert.Equal(t, tc.want, payload[tc.field])
 			}
+
+			t.Run("FX refresh ignores obsolete pair input", func(t *testing.T) {
+				refreshService := newMockfinanceService(t)
+				refreshService.EXPECT().
+					TriggerFXRefresh(mock.Anything, financepkg.TriggerFXRefreshParams{
+						RequestedByUserID: userID,
+						Source:            financepkg.FXSyncRequesterSourceOperator,
+						Provider:          "nbp",
+					}).
+					Return(financepkg.FXRefreshJobRef{
+						ID: "job-" + fake.UUID().V4(), JobType: financepkg.FXRefreshJobType, Provider: "nbp",
+					}, nil)
+				refreshHandler := newHandler(
+					refreshService,
+					newMockbankConnectionService(t),
+					makeAuthMiddleware(userID),
+				)
+				resp := httptest.NewRecorder()
+				refreshHandler.ServeHTTP(resp, newRequest(
+					http.MethodPost,
+					"/api/v1/finance/fx/sync",
+					`{"provider":"nbp","baseCurrencies":["EUR"],"quoteCurrency":"USD"}`,
+					true,
+				))
+				require.Equal(t, http.StatusOK, resp.Code)
+			})
 
 			t.Run("CSV confirm uses the fixed transaction contract without mapping", func(t *testing.T) {
 				confirmationService := newMockfinanceService(t)
@@ -1725,6 +1820,7 @@ func TestFinanceController(t *testing.T) {
 				ActorUserID:     userID,
 				Name:            "tenant-" + fake.UUID().V4(),
 				DisplayCurrency: "USD",
+				SeedDefaults:    true,
 			})
 			require.NoError(t, err)
 
@@ -1924,9 +2020,8 @@ func TestFinanceController(t *testing.T) {
 				AccountID: accountID, AccountName: "account-" + fake.Lorem().Word(), Currency: "USD",
 				DisplayPendingMinor: &zero, MissingFX: false,
 			}},
-			MissingFX: []financepkg.DashboardMissingFXDiagnostic{{
-				Source: financepkg.DashboardMissingFXSourceBalance, AccountID: accountID,
-				BaseCurrency: "EUR", QuoteCurrency: "USD", RateDate: date, Provider: "frankfurter",
+			FXCoverage: []financepkg.DashboardFXCoverage{{
+				BaseCurrency: "EUR", QuoteCurrency: "USD", Provider: "frankfurter", AffectedAccountCount: 1,
 			}},
 		}, nil)
 		handler := newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID))
@@ -1948,11 +2043,9 @@ func TestFinanceController(t *testing.T) {
 		assert.Nil(t, balance["displayBookedMinor"])
 		assert.Zero(t, balance["displayPendingMinor"])
 		assert.Equal(t, false, balance["missingFx"])
-		missing := payload["missingFx"].([]any)[0].(map[string]any)
-		assert.Contains(t, missing, "transactionId")
-		assert.Nil(t, missing["transactionId"])
-		assert.Equal(t, accountID, missing["accountId"])
-		assert.Equal(t, "2026-03-29T13:47:11.000000123+14:00", missing["rateDate"])
+		coverage := payload["fxCoverage"].([]any)[0].(map[string]any)
+		assert.Equal(t, "EUR", coverage["baseCurrency"])
+		assert.InDelta(t, 1, coverage["affectedAccountCount"], 0)
 	})
 
 	t.Run("registered dashboard route accepts next month preset", func(t *testing.T) {
@@ -2756,14 +2849,9 @@ func TestFinanceController(t *testing.T) {
 				Alerts: []financepkg.DashboardAlert{
 					{Code: "missing-fx", Severity: "warning", Count: 1},
 				},
-				MissingFX: []financepkg.DashboardMissingFXDiagnostic{
+				FXCoverage: []financepkg.DashboardFXCoverage{
 					{
-						Source:        financepkg.DashboardMissingFXSourceTransaction,
-						TransactionID: "tx-1",
-						BaseCurrency:  "EUR",
-						QuoteCurrency: "USD",
-						RateDate:      now,
-						Provider:      "nbp",
+						BaseCurrency: "EUR", QuoteCurrency: "USD", Provider: "nbp",
 					},
 				},
 				NativeSettledTotals: []financepkg.DashboardCurrencyTotal{
@@ -2776,11 +2864,11 @@ func TestFinanceController(t *testing.T) {
 				mappedDashboard.Period.Preset,
 			)
 			assert.Equal(t, now, mappedDashboard.Period.StartDate)
-			assert.Equal(t, now, mappedDashboard.MissingFx[0].RateDate)
+			assert.Equal(t, "nbp", mappedDashboard.FxCoverage[0].Provider)
 			require.Len(t, mappedDashboard.CategoryBreakdowns, 1)
 			require.Len(t, mappedDashboard.AccountBalances, 1)
 			require.Len(t, mappedDashboard.Alerts, 1)
-			require.Len(t, mappedDashboard.MissingFx, 1)
+			require.Len(t, mappedDashboard.FxCoverage, 1)
 			require.Len(t, mappedDashboard.NativeSettledTotals, 1)
 
 			mappedAccount, err := mapAccount(domain.Account{
@@ -3055,6 +3143,141 @@ func TestFinanceController(t *testing.T) {
 			),
 		)
 		require.Equal(t, http.StatusBadRequest, missingTagIDsResp.Code)
+	})
+
+	t.Run("account lifecycle and catalog update routes use narrow mutations", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		accountID := "account-" + fake.UUID().V4()
+		categoryID := "category-" + fake.UUID().V4()
+		tagID := "tag-" + fake.UUID().V4()
+		accountName := "account-" + fake.Lorem().Word()
+		categoryName := "category-" + fake.Lorem().Word()
+		categoryKind := domain.CategoryKindIncome
+		tagName := "tag-" + fake.Lorem().Word()
+
+		mutationService := newMockfinanceService(t)
+		mutationService.EXPECT().UpdateAccount(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, params financepkg.UpdateAccountParams) (domain.Account, error) {
+				assert.Equal(t, financepkg.UpdateAccountParams{
+					ActorUserID: userID, TenantID: tenantID, AccountID: accountID, Name: accountName,
+				}, params)
+				return domain.Account{}, nil
+			},
+		).Once()
+		mutationService.EXPECT().HideAccount(mock.Anything, financepkg.HideAccountParams{
+			ActorUserID: userID, TenantID: tenantID, AccountID: accountID,
+		}).Return(nil).Once()
+		mutationService.EXPECT().UnhideAccount(mock.Anything, financepkg.UnhideAccountParams{
+			ActorUserID: userID, TenantID: tenantID, AccountID: accountID,
+		}).Return(nil).Once()
+		mutationService.EXPECT().UpdateCategory(mock.Anything, financepkg.UpdateCategoryParams{
+			ActorUserID: userID, TenantID: tenantID, CategoryID: categoryID, Name: categoryName, Kind: categoryKind,
+		}).Return(domain.Category{}, nil).Once()
+		mutationService.EXPECT().UpdateTag(mock.Anything, financepkg.UpdateTagParams{
+			ActorUserID: userID, TenantID: tenantID, TagID: tagID, Name: tagName,
+		}).Return(domain.Tag{}, nil).Once()
+
+		handler := newHandler(mutationService, newMockbankConnectionService(t), makeAuthMiddleware(userID))
+		for _, tc := range []struct {
+			method string
+			target string
+			body   string
+		}{
+			{http.MethodPatch, "/api/v1/finance/tenants/" + tenantID + "/accounts/" + accountID, `{"name":"` + accountName + `"}`},
+			{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/accounts/" + accountID + "/hide", ""},
+			{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/accounts/" + accountID + "/unhide", ""},
+			{http.MethodPatch, "/api/v1/finance/tenants/" + tenantID + "/categories/" + categoryID, `{"name":"` + categoryName + `","kind":"income"}`},
+			{http.MethodPatch, "/api/v1/finance/tenants/" + tenantID + "/tags/" + tagID, `{"name":"` + tagName + `"}`},
+		} {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, newRequest(tc.method, tc.target, tc.body, true))
+			require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+			assert.Empty(t, response.Body.String())
+		}
+
+		t.Run("missing rename name is rejected by the registered validator", func(t *testing.T) {
+			response := httptest.NewRecorder()
+			newHandler(newMockfinanceService(t), newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+				response,
+				newRequest(http.MethodPatch, "/api/v1/finance/tenants/"+tenantID+"/accounts/"+accountID, `{}`, true),
+			)
+			require.Equal(t, http.StatusBadRequest, response.Code)
+		})
+
+		t.Run("invalid category kind is rejected by the registered validator", func(t *testing.T) {
+			response := httptest.NewRecorder()
+			newHandler(newMockfinanceService(t), newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+				response,
+				newRequest(
+					http.MethodPatch,
+					"/api/v1/finance/tenants/"+tenantID+"/categories/"+categoryID,
+					`{"name":"name","kind":"transfer"}`,
+					true,
+				),
+			)
+			require.Equal(t, http.StatusBadRequest, response.Code)
+		})
+
+		t.Run("foreign catalog resources return safe not found responses", func(t *testing.T) {
+			for _, tc := range []struct {
+				name    string
+				method  string
+				target  string
+				body    string
+				prepare func(*mockfinanceService)
+			}{
+				{
+					name: "account", method: http.MethodPatch,
+					target: "/api/v1/finance/tenants/" + tenantID + "/accounts/foreign-" + fake.UUID().V4(), body: `{"name":"name"}`,
+					prepare: func(service *mockfinanceService) {
+						service.EXPECT().UpdateAccount(mock.Anything, mock.Anything).Return(domain.Account{}, financepkg.ErrAccountNotFound).Once()
+					},
+				},
+				{
+					name: "category", method: http.MethodPatch,
+					target: "/api/v1/finance/tenants/" + tenantID + "/categories/foreign-" + fake.UUID().V4(), body: `{"name":"name","kind":"expense"}`,
+					prepare: func(service *mockfinanceService) {
+						service.EXPECT().UpdateCategory(mock.Anything, mock.Anything).Return(domain.Category{}, financepkg.ErrCategoryNotFound).Once()
+					},
+				},
+				{
+					name: "tag", method: http.MethodPatch,
+					target: "/api/v1/finance/tenants/" + tenantID + "/tags/foreign-" + fake.UUID().V4(), body: `{"name":"name"}`,
+					prepare: func(service *mockfinanceService) {
+						service.EXPECT().UpdateTag(mock.Anything, mock.Anything).Return(domain.Tag{}, financepkg.ErrTagNotFound).Once()
+					},
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					service := newMockfinanceService(t)
+					tc.prepare(service)
+					response := httptest.NewRecorder()
+					newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+						response,
+						newRequest(tc.method, tc.target, tc.body, true),
+					)
+					require.Equal(t, http.StatusNotFound, response.Code)
+				})
+			}
+		})
+
+		t.Run("hidden accounts cannot receive direct transactions", func(t *testing.T) {
+			service := newMockfinanceService(t)
+			service.EXPECT().RecordTransaction(mock.Anything, mock.Anything).
+				Return(domain.Transaction{}, financepkg.ErrHiddenAccount).Once()
+			response := httptest.NewRecorder()
+			newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+				response,
+				newRequest(
+					http.MethodPost,
+					"/api/v1/finance/tenants/"+tenantID+"/transactions",
+					`{"accountId":"`+accountID+`","source":"manual","status":"booked","kind":"regular","amountMinor":-1,"currency":"USD","description":"hidden account","effectiveAt":"2026-07-17T12:00:00+02:00"}`,
+					true,
+				),
+			)
+			require.Equal(t, http.StatusConflict, response.Code)
+		})
 	})
 
 	t.Run("account-only imports use a separately scoped route contract", func(t *testing.T) {

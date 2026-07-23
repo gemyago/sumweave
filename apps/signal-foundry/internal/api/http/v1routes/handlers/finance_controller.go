@@ -239,6 +239,15 @@ type FinanceController interface {
 		*FinanceTransaction,
 	]) http.Handler
 
+	// POST /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/hide
+	//
+	// Request type: HideFinanceAccountParams,
+	//
+	// Response type: none
+	HideFinanceAccount(NoResponseHandlerBuilder[
+		*HideFinanceAccountParams,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/connections/link-token
 	//
 	// Request type: LinkFinanceConnectionTokenParams,
@@ -439,12 +448,21 @@ type FinanceController interface {
 
 	// POST /api/v1/finance/fx/sync
 	//
-	// Request type: TriggerFinanceFxSyncParams,
+	// Request type: TriggerFinanceFxRefreshParams,
 	//
 	// Response type: FinanceFxSyncResponse
-	TriggerFinanceFxSync(HandlerBuilder[
-		*TriggerFinanceFxSyncParams,
+	TriggerFinanceFxRefresh(HandlerBuilder[
+		*TriggerFinanceFxRefreshParams,
 		*FinanceFxSyncResponse,
+	]) http.Handler
+
+	// POST /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/unhide
+	//
+	// Request type: UnhideFinanceAccountParams,
+	//
+	// Response type: none
+	UnhideFinanceAccount(NoResponseHandlerBuilder[
+		*UnhideFinanceAccountParams,
 	]) http.Handler
 
 	// DELETE /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
@@ -454,6 +472,33 @@ type FinanceController interface {
 	// Response type: none
 	UnlinkFinanceTransferPair(NoResponseHandlerBuilder[
 		*UnlinkFinanceTransferPairParams,
+	]) http.Handler
+
+	// PATCH /api/v1/finance/tenants/{tenantId}/accounts/{accountId}
+	//
+	// Request type: UpdateFinanceAccountParams,
+	//
+	// Response type: none
+	UpdateFinanceAccount(NoResponseHandlerBuilder[
+		*UpdateFinanceAccountParams,
+	]) http.Handler
+
+	// PATCH /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+	//
+	// Request type: UpdateFinanceCategoryParams,
+	//
+	// Response type: none
+	UpdateFinanceCategory(NoResponseHandlerBuilder[
+		*UpdateFinanceCategoryParams,
+	]) http.Handler
+
+	// PATCH /api/v1/finance/tenants/{tenantId}/tags/{tagId}
+	//
+	// Request type: UpdateFinanceTagParams,
+	//
+	// Response type: none
+	UpdateFinanceTag(NoResponseHandlerBuilder[
+		*UpdateFinanceTagParams,
 	]) http.Handler
 
 	// PATCH /api/v1/finance/tenants/{tenantId}
@@ -524,6 +569,8 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner
 // 
+// - POST /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/hide
+// 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/link-token
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
@@ -566,7 +613,15 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/fx/sync
 // 
+// - POST /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/unhide
+// 
 // - DELETE /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
+// 
+// - PATCH /api/v1/finance/tenants/{tenantId}/accounts/{accountId}
+// 
+// - PATCH /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+// 
+// - PATCH /api/v1/finance/tenants/{tenantId}/tags/{tagId}
 // 
 // - PATCH /api/v1/finance/tenants/{tenantId}
 // 
@@ -598,6 +653,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}", controller.GetFinanceTransaction(builder.GetFinanceTransaction))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}", controller.GetFinanceTransactionProviderEvidence(builder.GetFinanceTransactionProviderEvidence))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner", controller.GetFinanceTransferPartner(builder.GetFinanceTransferPartner))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/hide", controller.HideFinanceAccount(builder.HideFinanceAccount))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-token", controller.LinkFinanceConnectionToken(builder.LinkFinanceConnectionToken))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/transactions/transfer-links", controller.LinkFinanceTransferPair(builder.LinkFinanceTransferPair))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence", controller.ListFinanceAccountProviderEvidence(builder.ListFinanceAccountProviderEvidence))
@@ -618,8 +674,12 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("PUT", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}", controller.PutFinanceSyntheticLinkState(builder.PutFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/start", controller.StartFinanceConnectionRedirectLink(builder.StartFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync", controller.TriggerFinanceConnectionSync(builder.TriggerFinanceConnectionSync))
-	rootHandler.router.HandleRoute("POST", "/api/v1/finance/fx/sync", controller.TriggerFinanceFxSync(builder.TriggerFinanceFxSync))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/fx/sync", controller.TriggerFinanceFxRefresh(builder.TriggerFinanceFxRefresh))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/unhide", controller.UnhideFinanceAccount(builder.UnhideFinanceAccount))
 	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/transactions/transfer-links", controller.UnlinkFinanceTransferPair(builder.UnlinkFinanceTransferPair))
+	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.UpdateFinanceAccount(builder.UpdateFinanceAccount))
+	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/categories/{categoryId}", controller.UpdateFinanceCategory(builder.UpdateFinanceCategory))
+	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/tags/{tagId}", controller.UpdateFinanceTag(builder.UpdateFinanceTag))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}", controller.UpdateFinanceTenant(builder.UpdateFinanceTenant))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}", controller.UpdateFinanceTransaction(builder.UpdateFinanceTransaction))
 	return rootHandler

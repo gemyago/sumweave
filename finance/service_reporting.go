@@ -100,14 +100,16 @@ func (s *ReportingService) GetDashboard(ctx context.Context, params DashboardPar
 	accountBalances, balanceMissing := s.buildDashboardAccountBalances(data)
 	missing := append([]DashboardMissingFXDiagnostic{}, computation.missing...)
 	missing = append(missing, balanceMissing...)
+	coverage := buildDashboardFXCoverage(missing)
 	return Dashboard{
 		Period:              data.period,
 		Settled:             computation.settled,
 		Pending:             computation.pending,
 		CategoryBreakdowns:  computation.categoryBreakdowns,
 		AccountBalances:     accountBalances,
-		Alerts:              buildDashboardAlerts(missing, computation.pending.TransactionCount),
+		Alerts:              buildDashboardAlerts(coverage, computation.pending.TransactionCount),
 		MissingFX:           missing,
+		FXCoverage:          coverage,
 		CurrentFXRates:      dashboardFXRates(data.rateLookup, s.now()),
 		NativeSettledTotals: computation.nativeSettledTotals,
 	}, nil
@@ -149,6 +151,7 @@ func (s *ReportingService) loadDashboardData(
 	if err != nil {
 		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)
 	}
+	transactions = transactionsForAccounts(transactions, accounts)
 	balanceItems, err := s.balanceStore.ListAccountBalances(ctx, persistence.ListAccountBalancesParams{
 		TenantID:              tenant.ID,
 		AccountIDs:            accountIDs(accounts),

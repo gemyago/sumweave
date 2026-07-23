@@ -185,6 +185,19 @@ describe('Finance transaction editor page', () => {
     expect(screen.queryByLabelText('Transfer group')).not.toBeInTheDocument()
   })
 
+  it('does not offer hidden accounts when recording a new transaction', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.listAccounts.mockResolvedValueOnce([
+      { id: 'account-active', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now },
+      { id: 'account-hidden', tenantId: 'tenant-1', name: 'Old checking', currency: 'USD', kind: 'linked', provider: 'bank', providerAccountId: '', hiddenAt: now, createdAt: now, updatedAt: now },
+    ])
+    render(FinanceTransactionEditor, { params: {} })
+
+    expect(await screen.findByRole('option', { name: 'Checking' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Old checking/ })).not.toBeInTheDocument()
+    expect(mocks.listAccounts).toHaveBeenCalledWith({ tenantId: 'tenant-1', includeHidden: true })
+  })
+
   it('renders persisted regular as a valid transaction kind option', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getTransaction.mockResolvedValueOnce({
@@ -196,7 +209,7 @@ describe('Finance transaction editor page', () => {
     expect(await screen.findByLabelText('Transaction kind')).toHaveValue('regular')
   })
 
-  it('lazily loads all-account candidates, disables ineligible rows, and resets paging when applying the range', async () => {
+  it('uses other-account candidates, defensively disables stale ineligible rows without eligibility copy, and resets paging when applying the range', async () => {
     const user = userEvent.setup()
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getTransaction.mockResolvedValueOnce({
@@ -213,8 +226,9 @@ describe('Finance transaction editor page', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Link transfer' }))
     await waitFor(() => expect(mocks.listTransferCandidates).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-1', transactionId: 'tx-out', limit: 20, offset: 0 })))
-    expect(screen.getByText(/Choose a transaction from a different account\./)).toBeInTheDocument()
+    expect(screen.getByText('Candidates are from other visible accounts. The effective-before boundary is exclusive.')).toBeInTheDocument()
     expect(screen.getByLabelText('Select Candidate 0')).toBeDisabled()
+    expect(screen.queryByText(/Eligibility:/)).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Transfer candidate pages: next page' }))
     await waitFor(() => expect(mocks.listTransferCandidates).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 20 })))
     await user.click(screen.getByRole('button', { name: 'Apply' }))
@@ -409,24 +423,27 @@ describe('Finance transaction editor page', () => {
     expect(mocks.createTransaction).not.toHaveBeenCalled()
   })
 
-  it('loads provider evidence metadata only after the detail disclosure opens and content only after reveal', async () => {
+  it('loads current evidence for distinct provider objects only after the disclosure opens and content only after reveal', async () => {
     const user = userEvent.setup()
     mocks.listTransactionProviderEvidence.mockResolvedValueOnce([
       { id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: new Date('2026-06-20T12:00:00Z') },
+      { id: 'evidence-2', scope: 'transaction', providerObjectId: 'provider-fee', capturedAt: new Date('2026-06-20T12:01:00Z') },
     ])
     mocks.getTransactionProviderEvidence.mockResolvedValueOnce({
       id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: new Date('2026-06-20T12:00:00Z'), payload: { amount: 'sanitized' },
     })
     render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
 
-    expect(await screen.findByText('Provider evidence')).toBeInTheDocument()
+    expect(await screen.findByText('Current provider evidence')).toBeInTheDocument()
     expect(mocks.listTransactionProviderEvidence).not.toHaveBeenCalled()
-    await user.click(screen.getByText('Provider evidence'))
+    await user.click(screen.getByText('Current provider evidence'))
     await waitFor(() => expect(mocks.listTransactionProviderEvidence).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-1' }))
     expect(mocks.getTransactionProviderEvidence).not.toHaveBeenCalled()
-    await user.click(await screen.findByRole('button', { name: 'Reveal sanitized details' }))
+    expect(screen.getByText('Provider object provider-tx', { exact: false })).toBeInTheDocument()
+    expect(screen.getByText('Provider object provider-fee', { exact: false })).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'Reveal current sanitized details' })[0])
     await waitFor(() => expect(mocks.getTransactionProviderEvidence).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-1', evidenceId: 'evidence-1' }))
-    expect(screen.getByText('Sanitized provider evidence')).toBeInTheDocument()
+    expect(screen.getByText('Current sanitized provider evidence')).toBeInTheDocument()
     expect(screen.getByText(/not the raw provider payload/i)).toBeInTheDocument()
   })
 

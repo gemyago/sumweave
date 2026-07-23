@@ -27,8 +27,8 @@ type FXService struct {
 	now               func() time.Time
 	fxProviders       map[string]FXRatesProvider
 	defaultFXProvider string
-	fxJobEnqueuer     FXSyncJobEnqueuer
-	fxScheduleWriter  FXSyncScheduleWriter
+	fxJobEnqueuer     FXRefreshJobEnqueuer
+	fxScheduleWriter  FXRefreshScheduleWriter
 	requiredPairs     requiredFXPairLister
 }
 
@@ -61,13 +61,13 @@ func WithFXServiceDefaultProvider(name string) FXServiceOption {
 	}
 }
 
-func WithFXServiceJobEnqueuer(enqueuer FXSyncJobEnqueuer) FXServiceOption {
+func WithFXServiceJobEnqueuer(enqueuer FXRefreshJobEnqueuer) FXServiceOption {
 	return func(service *FXService) {
 		service.fxJobEnqueuer = enqueuer
 	}
 }
 
-func WithFXServiceScheduleWriter(writer FXSyncScheduleWriter) FXServiceOption {
+func WithFXServiceScheduleWriter(writer FXRefreshScheduleWriter) FXServiceOption {
 	return func(service *FXService) {
 		service.fxScheduleWriter = writer
 	}
@@ -90,52 +90,20 @@ func NewFXService(store fxServiceStore, opts ...FXServiceOption) *FXService {
 	return service
 }
 
-func (s *FXService) SyncFXRates(
-	ctx context.Context,
-	params SyncFXRatesParams,
-) (SyncFXRatesResult, error) {
-	providerName, err := s.resolveFXProviderName(params.Provider)
-	if err != nil {
-		return SyncFXRatesResult{}, err
-	}
-	provider := s.fxProviders[providerName]
-	refreshAt := s.now()
-	items := make([]domain.FXRate, 0)
-	for _, baseCurrency := range canonicalizeCurrencies(params.BaseCurrencies) {
-		rates, fetchErr := provider.FetchLatestRates(ctx, FXProviderQuery{
-			BaseCurrency:    baseCurrency,
-			QuoteCurrencies: []string{strings.ToUpper(strings.TrimSpace(params.QuoteCurrency))},
-		})
-		if fetchErr != nil {
-			return SyncFXRatesResult{}, fmt.Errorf("sync fx rates: %w", fetchErr)
-		}
-		rate, validationErr := validateProviderFXRates(providerName, baseCurrency, params.QuoteCurrency, rates)
-		if validationErr != nil {
-			return SyncFXRatesResult{}, fmt.Errorf("sync fx rates: %w", validationErr)
-		}
-		rate.LastSuccessfulRefreshAt = refreshAt
-		items = append(items, rate)
-	}
-	if saveErr := s.store.SaveCurrentFXRates(ctx, items); saveErr != nil {
-		return SyncFXRatesResult{}, fmt.Errorf("sync fx rates: %w", saveErr)
-	}
-	return SyncFXRatesResult{Provider: providerName, ImportedCount: len(items)}, nil
-}
-
 func (s *FXService) RefreshRequiredFXRates(
 	ctx context.Context,
 	params RefreshFXRatesParams,
-) (SyncFXRatesResult, error) {
+) (RefreshFXRatesResult, error) {
 	if s.requiredPairs == nil {
-		return SyncFXRatesResult{}, errors.New("required fx pair lister is required")
+		return RefreshFXRatesResult{}, errors.New("required fx pair lister is required")
 	}
 	providerName, err := s.resolveFXProviderName(params.Provider)
 	if err != nil {
-		return SyncFXRatesResult{}, err
+		return RefreshFXRatesResult{}, err
 	}
 	pairs, err := s.requiredPairs.ListRequiredFXPairs(ctx)
 	if err != nil {
-		return SyncFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", err)
+		return RefreshFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", err)
 	}
 	items := make([]domain.FXRate, 0, len(pairs))
 	refreshAt := s.now()
@@ -145,47 +113,44 @@ func (s *FXService) RefreshRequiredFXRates(
 			BaseCurrency: pair.BaseCurrency, QuoteCurrencies: []string{pair.QuoteCurrency},
 		})
 		if fetchErr != nil {
-			return SyncFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", fetchErr)
+			return RefreshFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", fetchErr)
 		}
 		rate, validationErr := validateProviderFXRates(providerName, pair.BaseCurrency, pair.QuoteCurrency, rates)
 		if validationErr != nil {
-			return SyncFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", validationErr)
+			return RefreshFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", validationErr)
 		}
 		rate.LastSuccessfulRefreshAt = refreshAt
 		items = append(items, rate)
 	}
 	if saveErr := s.store.SaveCurrentFXRates(ctx, items); saveErr != nil {
-		return SyncFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", saveErr)
+		return RefreshFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", saveErr)
 	}
-	return SyncFXRatesResult{Provider: providerName, ImportedCount: len(items)}, nil
+	return RefreshFXRatesResult{Provider: providerName, ImportedCount: len(items)}, nil
 }
 
-func (s *FXService) TriggerFXSync(
+func (s *FXService) TriggerFXRefresh(
 	ctx context.Context,
-	params TriggerFXSyncParams,
-) (FXSyncJobRef, error) {
+	params TriggerFXRefreshParams,
+) (FXRefreshJobRef, error) {
 	if s.fxJobEnqueuer == nil {
-		return FXSyncJobRef{}, errors.New("fx job enqueuer is required")
+		return FXRefreshJobRef{}, errors.New("fx refresh job enqueuer is required")
 	}
 	providerName, err := s.resolveFXProviderName(params.Provider)
 	if err != nil {
-		return FXSyncJobRef{}, err
+		return FXRefreshJobRef{}, err
 	}
-	jobRef, err := s.fxJobEnqueuer.EnqueueFXSync(ctx, FXSyncJobRequest{
-		JobType: FXSyncJobType,
+	jobRef, err := s.fxJobEnqueuer.EnqueueFXRefresh(ctx, FXRefreshJobRequest{
+		JobType: FXRefreshJobType,
 		Requester: FXSyncRequester{
 			UserID: strings.TrimSpace(params.RequestedByUserID),
 			Source: strings.TrimSpace(params.Source),
 		},
-		Input: SyncFXRatesParams{
-			Provider:       providerName,
-			BaseCurrencies: canonicalizeCurrencies(params.BaseCurrencies),
-			QuoteCurrency:  strings.ToUpper(strings.TrimSpace(params.QuoteCurrency)),
-		},
+		Input: RefreshFXRatesParams{Provider: providerName},
 	})
 	if err != nil {
-		return FXSyncJobRef{}, fmt.Errorf("trigger fx sync: %w", err)
+		return FXRefreshJobRef{}, fmt.Errorf("trigger required fx refresh: %w", err)
 	}
+	jobRef.Provider = providerName
 	return jobRef, nil
 }
 
@@ -222,18 +187,18 @@ func validateProviderFXRates(
 	return rate, nil
 }
 
-func (s *FXService) EnsureFXSyncSchedule(
+func (s *FXService) EnsureFXRefreshSchedule(
 	ctx context.Context,
-	params EnsureFXSyncScheduleParams,
-) (FXSyncSchedule, error) {
+	params EnsureFXRefreshScheduleParams,
+) (FXRefreshSchedule, error) {
 	if s.fxScheduleWriter == nil {
-		return FXSyncSchedule{}, errors.New("fx schedule writer is required")
+		return FXRefreshSchedule{}, errors.New("fx refresh schedule writer is required")
 	}
 	providerName, err := s.resolveFXProviderName(params.Provider)
 	if err != nil {
-		return FXSyncSchedule{}, err
+		return FXRefreshSchedule{}, err
 	}
-	schedule := FXSyncSchedule{
+	schedule := FXRefreshSchedule{
 		ScheduleID: strings.TrimSpace(params.ScheduleID),
 		JobType:    FXRefreshJobType,
 		Requester: FXSyncRequester{
@@ -244,8 +209,8 @@ func (s *FXService) EnsureFXSyncSchedule(
 		Input:    RefreshFXRatesParams{Provider: providerName},
 		Enabled:  true,
 	}
-	if upsertErr := s.fxScheduleWriter.UpsertFXSyncSchedule(ctx, schedule); upsertErr != nil {
-		return FXSyncSchedule{}, fmt.Errorf("ensure fx sync schedule: %w", upsertErr)
+	if upsertErr := s.fxScheduleWriter.UpsertFXRefreshSchedule(ctx, schedule); upsertErr != nil {
+		return FXRefreshSchedule{}, fmt.Errorf("ensure fx refresh schedule: %w", upsertErr)
 	}
 	return schedule, nil
 }

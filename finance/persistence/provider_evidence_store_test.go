@@ -95,7 +95,8 @@ func TestProviderEvidenceStore(t *testing.T) {
 			ID: "evidence-account-" + fake.UUID().V4(), TenantID: tenantID,
 			ConnectionID: "connection-" + fake.UUID().V4(), FinanceAccountID: accountID,
 			Subject: domain.ProviderEvidenceSubjectAccount, Scope: domain.RawPayloadScopeAccount,
-			PayloadJSON: []byte(`{"account":"observed"}`), CapturedAt: now,
+			ProviderObjectID: "provider-account-" + fake.UUID().V4(),
+			PayloadJSON:      []byte(`{"account":"observed"}`), CapturedAt: now,
 		}
 		transactionEvidence := domain.ProviderEvidence{
 			ID:                   "evidence-transaction-" + fake.UUID().V4(),
@@ -150,5 +151,67 @@ func TestProviderEvidenceStore(t *testing.T) {
 		otherTenantItems, err := evidenceStore.ListAccountProviderEvidence(t.Context(), otherTenantID, otherAccountID)
 		require.NoError(t, err)
 		assert.Empty(t, otherTenantItems)
+	})
+
+	t.Run("keeps one latest sanitized observation per logical provider object", func(t *testing.T) {
+		database := openTestDatabase(t)
+		store := NewProviderEvidenceStore(database)
+		tenantID := "tenant-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		accountID := "account-" + fake.UUID().V4()
+		firstCapturedAt := time.Date(2026, time.July, 16, 10, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		secondCapturedAt := firstCapturedAt.Add(time.Minute)
+		first := domain.ProviderEvidence{
+			ID:               "evidence-first-" + fake.UUID().V4(),
+			TenantID:         tenantID,
+			ConnectionID:     connectionID,
+			FinanceAccountID: accountID,
+			Subject:          domain.ProviderEvidenceSubjectAccount,
+			Scope:            domain.RawPayloadScopeAccount,
+			ProviderObjectID: "provider-object-" + fake.UUID().V4(),
+			PayloadJSON:      []byte(`{"value":"first","accessToken":"not-stored"}`),
+			CapturedAt:       firstCapturedAt,
+		}
+		firstSaved, err := store.SaveProviderEvidence(t.Context(), first)
+		require.NoError(t, err)
+		updated := first
+		updated.ID = "evidence-retry-" + fake.UUID().V4()
+		updated.PayloadJSON = []byte(`{"value":"latest","refreshToken":"not-stored"}`)
+		updated.CapturedAt = secondCapturedAt
+		updatedSaved, err := store.SaveProviderEvidence(t.Context(), updated)
+		require.NoError(t, err)
+		assert.Equal(t, firstSaved.ID, updatedSaved.ID)
+		assert.JSONEq(t, `{"value":"latest"}`, string(updatedSaved.PayloadJSON))
+		assert.Equal(t, secondCapturedAt.Format(time.RFC3339Nano), updatedSaved.CapturedAt.Format(time.RFC3339Nano))
+
+		otherObject := updated
+		otherObject.ID = "evidence-other-object-" + fake.UUID().V4()
+		otherObject.ProviderObjectID = "provider-object-other-" + fake.UUID().V4()
+		otherObject.PayloadJSON = []byte(`{"value":"other"}`)
+		otherObject.CapturedAt = secondCapturedAt.Add(time.Minute)
+		otherSaved, err := store.SaveProviderEvidence(t.Context(), otherObject)
+		require.NoError(t, err)
+		assert.NotEqual(t, firstSaved.ID, otherSaved.ID)
+
+		stale := updated
+		stale.ID = "evidence-stale-" + fake.UUID().V4()
+		stale.PayloadJSON = []byte(`{"value":"stale"}`)
+		stale.CapturedAt = firstCapturedAt
+		staleSaved, err := store.SaveProviderEvidence(t.Context(), stale)
+		require.NoError(t, err)
+		assert.Equal(t, firstSaved.ID, staleSaved.ID)
+		assert.JSONEq(t, `{"value":"latest"}`, string(staleSaved.PayloadJSON))
+
+		items, err := store.list(
+			t.Context(),
+			"finance_account_id = ? AND subject = ?",
+			accountID,
+			tenantID,
+			domain.ProviderEvidenceSubjectAccount,
+		)
+		require.NoError(t, err)
+		require.Len(t, items, 2)
+		assert.Equal(t, otherSaved.ID, items[0].ID)
+		assert.Equal(t, firstSaved.ID, items[1].ID)
 	})
 }

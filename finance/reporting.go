@@ -43,6 +43,7 @@ type Dashboard struct {
 	AccountBalances     []DashboardAccountBalance
 	Alerts              []DashboardAlert
 	MissingFX           []DashboardMissingFXDiagnostic
+	FXCoverage          []DashboardFXCoverage
 	CurrentFXRates      []DashboardFXRate
 	NativeSettledTotals []DashboardCurrencyTotal
 }
@@ -112,6 +113,15 @@ type DashboardMissingFXDiagnostic struct {
 	Provider      string
 }
 
+// DashboardFXCoverage groups unavailable valuations by the rate that would convert them.
+type DashboardFXCoverage struct {
+	Provider                 string
+	BaseCurrency             string
+	QuoteCurrency            string
+	AffectedTransactionCount int
+	AffectedAccountCount     int
+}
+
 type DashboardFXRate struct {
 	Provider                string
 	BaseCurrency            string
@@ -168,14 +178,14 @@ func ValidateDashboardParams(params DashboardParams) error {
 }
 
 func buildDashboardAlerts(
-	missing []DashboardMissingFXDiagnostic,
+	coverage []DashboardFXCoverage,
 	pendingCount int,
 ) []DashboardAlert {
 	alerts := make([]DashboardAlert, 0, dashboardAlertsCapacity)
-	if len(missing) > 0 {
+	if len(coverage) > 0 {
 		alerts = append(
 			alerts,
-			DashboardAlert{Code: "missing_fx_rates", Severity: "warning", Count: len(missing)},
+			DashboardAlert{Code: "missing_fx_rates", Severity: "warning", Count: len(coverage)},
 		)
 	}
 	if pendingCount > 0 {
@@ -185,6 +195,42 @@ func buildDashboardAlerts(
 		)
 	}
 	return alerts
+}
+
+func buildDashboardFXCoverage(missing []DashboardMissingFXDiagnostic) []DashboardFXCoverage {
+	coverageByPair := make(map[string]*DashboardFXCoverage)
+	for _, item := range missing {
+		key := item.Provider + "|" + item.BaseCurrency + "|" + item.QuoteCurrency
+		coverage := coverageByPair[key]
+		if coverage == nil {
+			coverage = &DashboardFXCoverage{
+				Provider:      item.Provider,
+				BaseCurrency:  item.BaseCurrency,
+				QuoteCurrency: item.QuoteCurrency,
+			}
+			coverageByPair[key] = coverage
+		}
+		switch item.Source {
+		case DashboardMissingFXSourceTransaction:
+			coverage.AffectedTransactionCount++
+		case DashboardMissingFXSourceBalance:
+			coverage.AffectedAccountCount++
+		}
+	}
+	coverage := make([]DashboardFXCoverage, 0, len(coverageByPair))
+	for _, item := range coverageByPair {
+		coverage = append(coverage, *item)
+	}
+	sort.Slice(coverage, func(i int, j int) bool {
+		if coverage[i].Provider != coverage[j].Provider {
+			return coverage[i].Provider < coverage[j].Provider
+		}
+		if coverage[i].BaseCurrency != coverage[j].BaseCurrency {
+			return coverage[i].BaseCurrency < coverage[j].BaseCurrency
+		}
+		return coverage[i].QuoteCurrency < coverage[j].QuoteCurrency
+	})
+	return coverage
 }
 
 func addDashboardCategoryContribution(

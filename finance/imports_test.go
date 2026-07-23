@@ -54,6 +54,7 @@ func TestCSVImport(t *testing.T) {
 			ActorUserID:     actorUserID,
 			Name:            "tenant-" + faker.New().Company().Name(),
 			DisplayCurrency: tenantDisplayCurrencyUSD,
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		return tenant

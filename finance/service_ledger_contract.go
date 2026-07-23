@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrTransactionNotFound = errors.New("transaction not found")
+	ErrHiddenAccount       = errors.New("account is hidden")
 	ErrDuplicateTagID      = errors.New("duplicate tag id")
 	ErrTagNotAssignable    = errors.New("tag is not assignable")
 	ErrInvalidTransferPair = errors.New("invalid transfer pair")

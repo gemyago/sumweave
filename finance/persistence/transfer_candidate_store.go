@@ -52,6 +52,7 @@ func (s *TransferCandidateStore) ListCandidates(
 	ctx context.Context,
 	tenantID string,
 	sourceTransactionID string,
+	sourceAccountID string,
 	effectiveFrom time.Time,
 	effectiveBefore time.Time,
 	limit int64,
@@ -61,6 +62,7 @@ func (s *TransferCandidateStore) ListCandidates(
 	query := s.db.WithContext(ctx).
 		Where("tenant_id = ?", strings.TrimSpace(tenantID)).
 		Where("id <> ?", strings.TrimSpace(sourceTransactionID)).
+		Where("account_id <> ?", strings.TrimSpace(sourceAccountID)).
 		Where("hidden_at IS NULL").
 		Where(instantRangePredicate(s.db, "effective_at"), effectiveFrom, effectiveBefore).
 		Order("effective_at DESC, created_at DESC, id DESC").

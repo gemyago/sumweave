@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { link } from 'svelte-spa-router'
   import AdminSubnav from '../components/AdminSubnav.svelte'
+  import JobStatus from '../components/JobStatus.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { createSignalFinanceApiForAuth, type FinanceFXDiagnostics } from '../lib/finance/api'
 
@@ -11,8 +11,6 @@
   let error = $state<string | null>(null)
   let diagnostics = $state<FinanceFXDiagnostics | null>(null)
   let provider = $state('')
-  let baseCurrencies = $state('USD,EUR')
-  let quoteCurrency = $state('PLN')
   let lastJobId = $state('')
 
   onMount(() => { void loadDiagnostics() })
@@ -34,9 +32,7 @@
     error = null
     try {
       const result = await financeApi.triggerFXSync({
-        provider,
-        baseCurrencies: baseCurrencies.split(',').map((item) => item.trim()).filter(Boolean),
-        quoteCurrency,
+        ...(provider ? { provider } : {}),
       })
       lastJobId = result.jobId
     } catch (triggerError) {
@@ -48,7 +44,7 @@
 <section class="container py-4" aria-labelledby="admin-fx-heading">
   <header class="mb-4">
     <h1 id="admin-fx-heading" class="h3">Admin finance FX</h1>
-    <p class="text-body-secondary mb-0">Sanitized diagnostics and manual current-rate refresh.</p>
+    <p class="text-body-secondary mb-0">Sanitized diagnostics and required-rate refresh.</p>
   </header>
   <AdminSubnav current="/admin/finance/fx" />
   {#if error}<div class="alert alert-danger mt-3" role="alert">{error}</div>{/if}
@@ -75,15 +71,25 @@
       <div class="col-12 col-lg-7">
         <form class="card" onsubmit={triggerSync}>
           <div class="card-body">
-            <h2 class="h5">Refresh current FX rates</h2>
-            <p class="text-body-secondary">Fetches only the latest rates. Transaction dates and historical ranges are not used.</p>
+            <h2 class="h5">Refresh required rates</h2>
+            <p class="text-body-secondary">Discovers active-tenant account and transaction currency pairs when the job runs, then fetches only the latest required rates.</p>
             <div class="row g-3">
-              <div class="col-12 col-md-4"><label class="form-label" for="fx-provider">Provider</label><input id="fx-provider" class="form-control" bind:value={provider} aria-label="FX provider" /></div>
-              <div class="col-12 col-md-4"><label class="form-label" for="fx-base-currencies">Base currencies</label><input id="fx-base-currencies" class="form-control" bind:value={baseCurrencies} aria-label="Base currencies" /></div>
-              <div class="col-12 col-md-4"><label class="form-label" for="fx-quote-currency">Quote currency</label><input id="fx-quote-currency" class="form-control" bind:value={quoteCurrency} aria-label="Quote currency" required /></div>
-              <div class="col-12"><button class="btn btn-primary" type="submit">Refresh current FX rates</button></div>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="fx-provider">Provider</label>
+                <select id="fx-provider" class="form-select" bind:value={provider} aria-label="FX provider">
+                  <option value="">Configured default ({diagnostics.defaultProvider || 'none'})</option>
+                  {#each diagnostics.providers as providerState (providerState.name)}
+                    <option value={providerState.name}>{providerState.name}{providerState.ready ? '' : ' (not ready)'}</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="col-12"><button class="btn btn-primary" type="submit">Refresh required rates</button></div>
             </div>
-            {#if lastJobId}<p class="text-body-secondary small mt-3 mb-0">Latest refresh job {lastJobId} · <a href={`/admin/jobs/${encodeURIComponent(lastJobId)}`} use:link>open admin job detail</a></p>{/if}
+            {#if lastJobId}
+              <div class="mt-3">
+                <JobStatus jobId={lastJobId} openHref={`/admin/jobs/${encodeURIComponent(lastJobId)}`} label="FX refresh" />
+              </div>
+            {/if}
           </div>
         </form>
       </div>

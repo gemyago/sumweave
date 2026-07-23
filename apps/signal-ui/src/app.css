@@ -158,7 +158,9 @@ html:not([data-theme]) {
   }
 }
 
-/* Finance inline editors need shrinkable fields beside fixed action groups. */
+/* Finance list containment and inline editors need shrinkable fields beside fixed action groups. */
+.finance-transaction-list,
+.finance-transaction-list .min-w-0,
 .finance-transaction-list-editor-row,
 .finance-transaction-list-editor,
 .finance-transaction-list-tag-choices {

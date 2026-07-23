@@ -22,6 +22,7 @@ func TestBankSyncServiceListBankConnectionSyncedAccounts(t *testing.T) {
 			ActorUserID:     ownerID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		now := time.Date(2026, time.July, 15, 10, 0, 0, 0, time.FixedZone("", 2*60*60))
@@ -77,7 +78,7 @@ func TestBankSyncServiceListBankConnectionSyncedAccounts(t *testing.T) {
 		fake := faker.New()
 		store, service, tenant, ownerID, connection := makeFixture(t)
 		otherTenant, err := NewService(store).CreateTenant(t.Context(), CreateTenantParams{
-			ActorUserID: ownerID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "USD",
+			ActorUserID: ownerID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "USD", SeedDefaults: true,
 		})
 		require.NoError(t, err)
 		for _, params := range []ListBankConnectionSyncedAccountsParams{
@@ -104,5 +105,48 @@ func TestBankSyncServiceListBankConnectionSyncedAccounts(t *testing.T) {
 		})
 		require.ErrorIs(t, err, storeErr)
 		require.ErrorContains(t, err, "list bank connection synced accounts")
+	})
+
+	t.Run("refreshes a hidden linked account without restoring it", func(t *testing.T) {
+		fake := faker.New()
+		store, service, tenant, _, connection := makeFixture(t)
+		now := time.Date(2026, time.July, 16, 10, 0, 0, 0, time.Local)
+		hiddenAt := now.Add(-time.Hour)
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		account, err := store.SaveAccount(t.Context(), domain.Account{
+			ID:        "account-" + fake.UUID().V4(),
+			TenantID:  tenant.ID,
+			Name:      "previous-" + fake.Lorem().Word(),
+			Currency:  "USD",
+			Kind:      domain.AccountKindLinked,
+			HiddenAt:  &hiddenAt,
+			CreatedAt: now.Add(-2 * time.Hour),
+			UpdatedAt: now.Add(-2 * time.Hour),
+			LinkedAccount: &domain.LinkedAccount{
+				Provider: connection.Provider, ProviderAccountID: providerAccountID,
+			},
+		})
+		require.NoError(t, err)
+		existingProviderAccount := &domain.ConnectionProviderAccount{
+			FinanceAccountID: account.ID,
+			Name:             account.Name,
+			Currency:         account.Currency,
+		}
+
+		refreshed, err := service.findOrCreateFinanceAccountForProviderAccount(
+			t.Context(),
+			connection,
+			ProviderNormalizedAccount{
+				ProviderAccountID: providerAccountID,
+				Name:              "current-" + fake.Lorem().Word(),
+				Currency:          "EUR",
+			},
+			existingProviderAccount,
+			now,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, account.ID, refreshed.ID)
+		assert.NotNil(t, refreshed.HiddenAt)
+		assert.Equal(t, "EUR", refreshed.Currency)
 	})
 }

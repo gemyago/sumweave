@@ -16,6 +16,7 @@ import (
 type ledgerServiceStore interface {
 	IsTenantMember(ctx context.Context, tenantID string, userID string) (bool, error)
 	GetAccount(ctx context.Context, accountID string) (*domain.Account, error)
+	ListAccounts(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Account, error)
 	GetCategory(ctx context.Context, categoryID string) (*domain.Category, error)
 	GetTag(ctx context.Context, tagID string) (*domain.Tag, error)
 	SaveTransaction(ctx context.Context, transaction domain.Transaction) (domain.Transaction, error)
@@ -205,6 +206,9 @@ func (s *LedgerService) RecordTransaction(
 	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
 	if err != nil {
 		return domain.Transaction{}, err
+	}
+	if account.HiddenAt != nil {
+		return domain.Transaction{}, ErrHiddenAccount
 	}
 	var categoryID *string
 	if trimmedCategoryID := strings.TrimSpace(params.CategoryID); trimmedCategoryID != "" {
@@ -504,7 +508,25 @@ func (s *LedgerService) SummarizeTransactions(
 	if err != nil {
 		return domain.TransactionSummary{}, fmt.Errorf("summarize transactions: %w", err)
 	}
-	return summarizeBookedTransactions(items), nil
+	accounts, err := s.store.ListAccounts(ctx, strings.TrimSpace(params.TenantID), false)
+	if err != nil {
+		return domain.TransactionSummary{}, fmt.Errorf("list active accounts for transaction summary: %w", err)
+	}
+	return summarizeBookedTransactions(transactionsForAccounts(items, accounts)), nil
+}
+
+func transactionsForAccounts(items []domain.Transaction, accounts []domain.Account) []domain.Transaction {
+	activeAccountIDs := make(map[string]struct{}, len(accounts))
+	for _, account := range accounts {
+		activeAccountIDs[account.ID] = struct{}{}
+	}
+	filtered := make([]domain.Transaction, 0, len(items))
+	for _, item := range items {
+		if _, active := activeAccountIDs[item.AccountID]; active {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 func summarizeBookedTransactions(items []domain.Transaction) domain.TransactionSummary {

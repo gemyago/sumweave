@@ -13,7 +13,7 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-// TriggerFinanceFxSyncParams - Parameters for the triggerFinanceFxSync operation.
-type TriggerFinanceFxSyncParams struct { 
-	Payload *FinanceFxSyncRequest `json:"payload"`
+// TriggerFinanceFxRefreshParams - Parameters for the triggerFinanceFxRefresh operation.
+type TriggerFinanceFxRefreshParams struct { 
+	Payload *FinanceFxRefreshRequest `json:"payload"`
 }

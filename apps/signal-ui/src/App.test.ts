@@ -54,6 +54,10 @@ const financeApiMocks = vi.hoisted(() => ({
   createTenantInvite: vi.fn(),
   acceptTenantInvite: vi.fn(),
   createAccount: vi.fn(),
+  getAccount: vi.fn(),
+  renameAccount: vi.fn(),
+  hideAccount: vi.fn(),
+  restoreAccount: vi.fn(),
   createCategory: vi.fn(),
   createTag: vi.fn(),
   createTransaction: vi.fn(),
@@ -184,7 +188,7 @@ describe('App shell', () => {
       categoryBreakdowns: [],
       accountBalances: [],
       alerts: [],
-      missingFx: [],
+      fxCoverage: [],
       nativeSettledTotals: [],
     })
     financeApiMocks.getFXDiagnostics.mockResolvedValue({
@@ -224,6 +228,10 @@ describe('App shell', () => {
     financeApiMocks.createTenantInvite.mockResolvedValue(undefined)
     financeApiMocks.acceptTenantInvite.mockResolvedValue(undefined)
     financeApiMocks.createAccount.mockResolvedValue(undefined)
+    financeApiMocks.getAccount.mockResolvedValue(undefined)
+    financeApiMocks.renameAccount.mockResolvedValue(undefined)
+    financeApiMocks.hideAccount.mockResolvedValue(undefined)
+    financeApiMocks.restoreAccount.mockResolvedValue(undefined)
     financeApiMocks.createCategory.mockResolvedValue(undefined)
     financeApiMocks.createTag.mockResolvedValue(undefined)
     financeApiMocks.createTransaction.mockResolvedValue(undefined)
@@ -234,7 +242,7 @@ describe('App shell', () => {
     financeApiMocks.saveSyntheticLinkState.mockResolvedValue({ provider: 'synthetic', state: 'state-1', configuredAccounts: [], canFinish: false })
     financeApiMocks.deleteConnection.mockResolvedValue(undefined)
     financeApiMocks.triggerConnectionSync.mockResolvedValue({ jobId: 'job-1', jobType: 'finance.bank_connection_sync' })
-    financeApiMocks.triggerFXSync.mockResolvedValue({ jobId: 'job-2', jobType: 'finance.fx_rates_sync', provider: 'frankfurter' })
+    financeApiMocks.triggerFXSync.mockResolvedValue({ jobId: 'job-2', jobType: 'finance.fx_rates_refresh', provider: 'frankfurter' })
     financeApiMocks.previewCSVImport.mockResolvedValue(undefined)
     financeApiMocks.confirmCSVImport.mockResolvedValue(undefined)
     financeApiMocks.getCSVImportAudit.mockResolvedValue(undefined)
@@ -366,7 +374,8 @@ describe('App shell', () => {
     const cases = [
       ['#/finance', 'Finance dashboard'],
       ['#/finance/tenants', 'Finance tenants'],
-      ['#/finance/accounts', 'Finance accounts'],
+       ['#/finance/accounts', 'Finance accounts'],
+       ['#/finance/accounts/new', 'Create account'],
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/connections', 'Finance connections'],
       ['#/finance/connections/synthetic?state=state-1', 'Synthetic setup'],
@@ -427,7 +436,8 @@ describe('App shell', () => {
 
     const cases = [
       ['#/finance', 'Finance dashboard'],
-      ['#/finance/accounts', 'Finance accounts'],
+       ['#/finance/accounts', 'Finance accounts'],
+       ['#/finance/accounts/new', 'Create account'],
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/transactions', 'Finance transactions'],
       ['#/finance/transactions/new', 'Record transaction'],
@@ -452,7 +462,8 @@ describe('App shell', () => {
     const now = new Date('2026-06-20T12:00:00Z')
     const cases = [
       ['#/finance', 'Finance dashboard'],
-      ['#/finance/accounts', 'Finance accounts'],
+       ['#/finance/accounts', 'Finance accounts'],
+       ['#/finance/accounts/new', 'Create account'],
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/transactions', 'Finance transactions'],
       ['#/finance/transactions/new', 'Record transaction'],

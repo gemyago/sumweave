@@ -8,6 +8,7 @@ import (
 
 	"github.com/gemyago/signal-foundry/finance/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrProviderEvidenceNotFound = errors.New("provider evidence not found")
@@ -51,10 +52,58 @@ func (s *ProviderEvidenceStore) SaveProviderEvidence(
 	}
 	evidence.PayloadJSON = sanitizedPayload
 	model := newProviderEvidenceModel(evidence)
-	if createErr := s.db.WithContext(ctx).Table(model.TableName()).Create(&model).Error; createErr != nil {
+	if createErr := s.db.WithContext(ctx).Table(model.TableName()).Clauses(clause.OnConflict{
+		Columns: providerEvidenceIdentityColumns(),
+		DoUpdates: clause.Assignments(map[string]any{
+			"payload_json": model.PayloadJSON,
+			"captured_at":  model.CapturedAt,
+		}),
+		Where: latestProviderObservationClause(),
+	}).Create(&model).Error; createErr != nil {
 		return domain.ProviderEvidence{}, fmt.Errorf("save provider evidence: %w", createErr)
 	}
-	return providerEvidenceFromModel(model), nil
+	var persisted providerEvidenceModel
+	if getErr := s.db.WithContext(ctx).Table(model.TableName()).
+		Where(providerEvidenceIdentityPredicate(), providerEvidenceIdentityValues(model)...).
+		First(&persisted).Error; getErr != nil {
+		return domain.ProviderEvidence{}, fmt.Errorf("read saved provider evidence: %w", getErr)
+	}
+	return providerEvidenceFromModel(persisted), nil
+}
+
+func providerEvidenceIdentityColumns() []clause.Column {
+	return []clause.Column{
+		{Name: "tenant_id"},
+		{Name: "connection_id"},
+		{Name: "subject"},
+		{Name: "finance_account_id"},
+		{Name: "finance_transaction_id"},
+		{Name: "scope"},
+		{Name: "provider_object_id"},
+	}
+}
+
+func providerEvidenceIdentityPredicate() string {
+	return "tenant_id = ? AND connection_id = ? AND subject = ? AND finance_account_id = ? " +
+		"AND finance_transaction_id = ? AND scope = ? AND provider_object_id = ?"
+}
+
+func providerEvidenceIdentityValues(model providerEvidenceModel) []any {
+	return []any{
+		model.TenantID,
+		model.ConnectionID,
+		model.Subject,
+		model.FinanceAccountID,
+		model.FinanceTransactionID,
+		model.Scope,
+		model.ProviderObjectID,
+	}
+}
+
+func latestProviderObservationClause() clause.Where {
+	return clause.Where{Exprs: []clause.Expression{
+		clause.Expr{SQL: "excluded.captured_at >= captured_at"},
+	}}
 }
 
 func (s *ProviderEvidenceStore) DeleteProviderEvidenceByConnection(

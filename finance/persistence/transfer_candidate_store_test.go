@@ -28,7 +28,7 @@ func TestTransferCandidateStore(t *testing.T) {
 		}
 	}
 
-	t.Run("lists the visible half-open tenant page across accounts in stable order", func(t *testing.T) {
+	t.Run("filters source-account rows before paging the visible half-open tenant page", func(t *testing.T) {
 		fake := faker.New()
 		database := openTestDatabase(t)
 		transactions := NewTransactionTagStore(database)
@@ -39,6 +39,7 @@ func TestTransferCandidateStore(t *testing.T) {
 		before := from.Add(48 * time.Hour)
 
 		source := makeTransaction(fake, tenantID, "account-source-"+fake.UUID().V4(), from.Add(4*time.Hour), from)
+		sameAccountNewest := makeTransaction(fake, tenantID, source.AccountID, from.Add(36*time.Hour), from)
 		newest := makeTransaction(
 			fake,
 			tenantID,
@@ -72,17 +73,17 @@ func TestTransferCandidateStore(t *testing.T) {
 			from.Add(12*time.Hour),
 			from,
 		)
-		for _, transaction := range []domain.Transaction{source, newest, sameEffectiveOlder, sameEffectiveNewer, atFrom, hidden, atBefore, foreign} {
+		for _, transaction := range []domain.Transaction{source, sameAccountNewest, newest, sameEffectiveOlder, sameEffectiveNewer, atFrom, hidden, atBefore, foreign} {
 			_, err := transactions.SaveTransaction(t.Context(), transaction)
 			require.NoError(t, err)
 		}
 
-		page, err := store.ListCandidates(t.Context(), tenantID, source.ID, from, before, 3, 0)
+		page, err := store.ListCandidates(t.Context(), tenantID, source.ID, source.AccountID, from, before, 3, 0)
 		require.NoError(t, err)
 		assert.Equal(t, []string{newest.ID, sameEffectiveNewer.ID, sameEffectiveOlder.ID}, transactionIDs(page))
 		assert.Equal(t, newest.AccountID, page[0].AccountID)
 
-		secondPage, err := store.ListCandidates(t.Context(), tenantID, source.ID, from, before, 3, 3)
+		secondPage, err := store.ListCandidates(t.Context(), tenantID, source.ID, source.AccountID, from, before, 3, 3)
 		require.NoError(t, err)
 		assert.Equal(t, []string{atFrom.ID}, transactionIDs(secondPage))
 	})
@@ -137,6 +138,7 @@ func TestTransferCandidateStore(t *testing.T) {
 			t.Context(),
 			"tenant-"+fake.UUID().V4(),
 			"transaction-"+fake.UUID().V4(),
+			"account-"+fake.UUID().V4(),
 			time.Now(),
 			time.Now().Add(time.Hour),
 			1,

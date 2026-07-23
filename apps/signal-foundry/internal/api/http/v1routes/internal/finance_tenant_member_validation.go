@@ -17,6 +17,8 @@ func NewFinanceTenantMemberValidator() FieldValidator[*FinanceTenantMember] {
 	validateUserID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
+	validateUsername := NewSimpleFieldValidator[*string](
+	)
 	validateJoinedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
@@ -24,6 +26,7 @@ func NewFinanceTenantMemberValidator() FieldValidator[*FinanceTenantMember] {
 	return func(bindingCtx *BindingContext, value *FinanceTenantMember) {
 		validateTenantID(bindingCtx.Fork("tenantId"), value.TenantID)
 		validateUserID(bindingCtx.Fork("userId"), value.UserID)
+		validateUsername(bindingCtx.Fork("username"), value.Username)
 		validateJoinedAt(bindingCtx.Fork("joinedAt"), value.JoinedAt)
 	}
 }

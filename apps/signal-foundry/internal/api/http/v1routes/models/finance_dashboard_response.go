@@ -21,7 +21,7 @@ type FinanceDashboardResponse struct {
 	CategoryBreakdowns []*FinanceDashboardCategoryBreakdown `json:"categoryBreakdowns"`
 	AccountBalances []*FinanceDashboardAccountBalance `json:"accountBalances"`
 	Alerts []*FinanceDashboardAlert `json:"alerts"`
-	MissingFx []*FinanceDashboardMissingFx `json:"missingFx"`
+	FxCoverage []*FinanceDashboardFxCoverage `json:"fxCoverage"`
 	// Latest successful provider rates used to value every selected period.
 	CurrentFxRates []*FinanceDashboardCurrentFxRate `json:"currentFxRates"`
 	NativeSettledTotals []*FinanceDashboardCurrencyTotal `json:"nativeSettledTotals"`

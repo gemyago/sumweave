@@ -15,9 +15,13 @@ const mocks = vi.hoisted(() => ({
   saveSyntheticLinkState: vi.fn(),
   deleteConnection: vi.fn(),
   triggerConnectionSync: vi.fn(),
+  getJob: vi.fn(),
 }))
 vi.mock('../lib/finance/api', async (importOriginal) => ({ ...(await importOriginal<typeof import('../lib/finance/api')>()), createSignalFinanceApiForAuth: vi.fn(() => ({ ...mocks })) }))
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
+vi.mock('../lib/jobs/api', () => ({
+  createSignalJobsApiForAuth: vi.fn(() => ({ getJob: mocks.getJob })),
+}))
 
 function createTenantFixture() {
   const now = new Date('2026-06-20T12:00:00Z')
@@ -77,6 +81,7 @@ describe('Finance connections page', () => {
     mocks.saveSyntheticLinkState.mockResolvedValue({ provider: 'synthetic', state: 'state-1', configuredAccounts: [], canFinish: false })
     mocks.deleteConnection.mockResolvedValue(undefined)
     mocks.triggerConnectionSync.mockResolvedValue({ jobId: 'job-2', jobType: 'finance.bank_connection_sync' })
+    mocks.getJob.mockResolvedValue({ id: 'job-2', status: 'queued', jobType: 'finance.bank_connection_sync' })
   })
 
   it('renders connection cards with schedule and job links', async () => {
@@ -160,13 +165,14 @@ describe('Finance connections page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Failed to link monobank connection')
   })
 
-  it('shows the latest triggered finance job link', async () => {
+  it('shows the triggered job status on its connection card', async () => {
     const user = userEvent.setup()
     renderPage()
 
     await user.click(await screen.findByRole('button', { name: 'Sync now' }))
     await waitFor(() => expect(mocks.triggerConnectionSync).toHaveBeenCalled())
-    expect(await screen.findByRole('link', { name: 'Open latest finance job' })).toHaveAttribute('href', '#/finance/jobs/job-2')
+    expect(await screen.findByRole('link', { name: 'Open job' })).toHaveAttribute('href', '#/finance/jobs/job-2')
+    expect(screen.getByText('Queued — waiting for a worker.')).toBeInTheDocument()
   })
 
   it('deletes a linked connection after confirmation', async () => {

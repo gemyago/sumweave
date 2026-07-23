@@ -109,7 +109,7 @@ func TestCSVImportJobEnqueuer(t *testing.T) {
 	assert.Equal(t, request.ImportID, input.ImportID)
 }
 
-func TestFXSyncJobHandler(t *testing.T) {
+func TestFXRefreshJobHandler(t *testing.T) {
 	fake := faker.New()
 	financeDSN := fmt.Sprintf("file:finance-fx-%s?mode=memory&cache=shared", fake.UUID().V4())
 	financeSQLDB, err := sqlconn.Open(financeDSN)
@@ -123,6 +123,7 @@ func TestFXSyncJobHandler(t *testing.T) {
 	rateDate := time.Date(2026, time.June, 9, 0, 0, 0, 0, time.UTC)
 	fxService := financepkg.NewFXService(
 		financeStore,
+		financepkg.WithFXServiceRequiredPairs(persistence.NewFXPairDiscoveryStore(financeDatabase)),
 		financepkg.WithFXServiceProviders(financepkg.NewStaticFXProvider(
 			financepkg.FXProviderFrankfurter,
 			[]domain.FXRate{{
@@ -143,18 +144,16 @@ func TestFXSyncJobHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, jobsStore.AutoMigrate())
 	registry := jobspkg.NewRegistry()
-	require.NoError(t, registerFXSyncJobHandler(registry, fxService))
+	require.NoError(t, registerFXRefreshJobHandler(registry, fxService))
 	jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
 		Store: jobsStore, IDGenerator: ident.NewMockGenerator(), Publisher: publisherStub{}, Registry: registry,
 	})
 	require.NoError(t, err)
-	enqueuer := fxSyncJobEnqueuer{jobs: jobsService}
-	jobRef, err := enqueuer.EnqueueFXSync(t.Context(), financepkg.FXSyncJobRequest{
-		JobType:   financepkg.FXSyncJobType,
+	enqueuer := fxRefreshJobEnqueuer{jobs: jobsService}
+	jobRef, err := enqueuer.EnqueueFXRefresh(t.Context(), financepkg.FXRefreshJobRequest{
+		JobType:   financepkg.FXRefreshJobType,
 		Requester: financepkg.FXSyncRequester{Source: financepkg.FXSyncRequesterSourceSystem},
-		Input: financepkg.SyncFXRatesParams{
-			BaseCurrencies: []string{"EUR"}, QuoteCurrency: "PLN", StartDate: rateDate, EndDate: rateDate,
-		},
+		Input:     financepkg.RefreshFXRatesParams{},
 	})
 	require.NoError(t, err)
 	worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
@@ -166,12 +165,9 @@ func TestFXSyncJobHandler(t *testing.T) {
 	job, err := jobsStore.Get(t.Context(), jobRef.ID)
 	require.NoError(t, err)
 	assert.Equal(t, jobspkg.JobStatusSucceeded, job.Status)
-	storedRates, err := financeStore.ListFXRates(t.Context(), persistence.ListFXRatesParams{
-		Provider: financepkg.FXProviderFrankfurter, BaseCurrency: "EUR", QuoteCurrency: "PLN",
-	})
+	storedRates, err := financeStore.ListFXRates(t.Context(), persistence.ListFXRatesParams{})
 	require.NoError(t, err)
-	require.Len(t, storedRates, 1)
-	assert.InDelta(t, 4.25, storedRates[0].Rate, 0.00001)
+	assert.Empty(t, storedRates)
 }
 
 //nolint:cyclop,gocyclo // Keeps closely related DI integration scenarios together.
@@ -456,6 +452,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			ActorUserID:     "user-owner",
 			Name:            "tenant-finance",
 			DisplayCurrency: "PLN",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -635,6 +632,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			ActorUserID:     "user-owner",
 			Name:            "tenant-signed-enable-banking",
 			DisplayCurrency: "PLN",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -767,6 +765,7 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			ActorUserID:     "user-owner",
 			Name:            "tenant-fallback",
 			DisplayCurrency: "UAH",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 

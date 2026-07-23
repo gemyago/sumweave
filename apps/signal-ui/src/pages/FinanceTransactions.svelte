@@ -37,6 +37,7 @@
     ),
   )
   const accountNameById = $derived.by(() => new Map(accounts.map((account) => [account.id, account.name])))
+  const hiddenAccountIds = $derived.by(() => new Set(accounts.filter((account) => account.hiddenAt).map((account) => account.id)))
   const visiblePendingCount = $derived(visibleTransactions.filter((item) => item.status === 'pending').length)
   const visibleHiddenCount = $derived(visibleTransactions.filter((item) => item.hiddenAt !== null).length)
   const activeFilterCount = $derived([accountFilter, statusFilter, sourceFilter].filter(Boolean).length)
@@ -82,7 +83,7 @@
 
     try {
       const [loadedAccounts, loadedTransactions] = await Promise.all([
-        financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
+        financeApi.listAccounts({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
         financeApi.listTransactions({
           tenantId: financeShell.selectedTenantId,
           accountId: accountFilter,
@@ -242,7 +243,7 @@
               <select id="finance-transactions-account-filter" class="form-select" bind:value={accountFilter} onchange={reloadFirstPage} aria-label="Account filter">
                 <option value="">Any account</option>
                 {#each accounts as account (account.id)}
-                  <option value={account.id}>{account.name}</option>
+                  <option value={account.id}>{account.name}{account.hiddenAt ? ' (Hidden)' : ''}</option>
                 {/each}
               </select>
             </div>
@@ -292,6 +293,7 @@
               tenantId={financeShell.selectedTenantId}
               transactions={visibleTransactions}
               accountNameById={accountNameById}
+              {hiddenAccountIds}
               ariaLabel="Transactions ledger"
               onTransactionUpdated={applyTransactionUpdate}
             />

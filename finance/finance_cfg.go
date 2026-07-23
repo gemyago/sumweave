@@ -39,8 +39,8 @@ type Config struct {
 	ConnectionSecretCipher connectionSecretCipher
 	FXProviders            []FXRatesProvider
 	DefaultFXProvider      string
-	FXJobEnqueuer          FXSyncJobEnqueuer
-	FXScheduleWriter       FXSyncScheduleWriter
+	FXJobEnqueuer          FXRefreshJobEnqueuer
+	FXScheduleWriter       FXRefreshScheduleWriter
 	CSVImportJobEnqueuer   CSVImportJobEnqueuer
 	BankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
 	BankSyncScheduleWriter BankConnectionSyncScheduleWriter

@@ -16,4 +16,6 @@ var _ = fmt.Sprint
 type FinanceTenantCreateRequest struct { 
 	Name string `json:"name"`
 	DisplayCurrency FinanceTenantDisplayCurrency `json:"displayCurrency"`
+	// Whether to add starter categories and tags to the tenant.
+	SeedDefaults *bool `json:"seedDefaults"`
 }

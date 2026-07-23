@@ -22,7 +22,7 @@ func TestFocusedCoreServices(t *testing.T) {
 		return NewService(store)
 	}
 
-	t.Run("tenant service seeds default categories for new tenants", func(t *testing.T) {
+	t.Run("tenant service creates starter categories and tags only when requested", func(t *testing.T) {
 		service := makeService(t)
 		fake := faker.New()
 		ownerUserID := "owner-" + fake.UUID().V4()
@@ -31,6 +31,7 @@ func TestFocusedCoreServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "usd",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -45,6 +46,12 @@ func TestFocusedCoreServices(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Len(t, categories, len(defaultTenantCategorySeeds()))
+		tags, err := service.catalog.ListTags(t.Context(), ListTagsParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		assert.Len(t, tags, len(defaultTenantTags()))
 
 		invite, err := service.CreateTenantInvite(t.Context(), CreateTenantInviteParams{
 			ActorUserID: ownerUserID,
@@ -62,6 +69,33 @@ func TestFocusedCoreServices(t *testing.T) {
 		assert.Equal(t, invite.ID, invites[0].ID)
 	})
 
+	t.Run("tenant service creates no starter catalog when not requested", func(t *testing.T) {
+		service := makeService(t)
+		fake := faker.New()
+		ownerUserID := "owner-" + fake.UUID().V4()
+
+		tenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     ownerUserID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+			SeedDefaults:    false,
+		})
+		require.NoError(t, err)
+
+		categories, err := service.ListCategories(t.Context(), ListCategoriesParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		assert.Empty(t, categories)
+		tags, err := service.ListTags(t.Context(), ListTagsParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		assert.Empty(t, tags)
+	})
+
 	t.Run("tenant service seeds approved default categories and tags as tenant-local copies", func(t *testing.T) {
 		service := makeService(t)
 		fake := faker.New()
@@ -71,12 +105,14 @@ func TestFocusedCoreServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-a-" + fake.Company().Name(),
 			DisplayCurrency: "usd",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		secondTenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-b-" + fake.Company().Name(),
 			DisplayCurrency: "usd",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -182,6 +218,7 @@ func TestFocusedCoreServices(t *testing.T) {
 			TenantID:    firstTenant.ID,
 			CategoryID:  firstCategoryIDsByName["Groceries"],
 			Name:        "Groceries Renamed",
+			Kind:        domain.CategoryKindExpense,
 		})
 		require.NoError(t, err)
 		_, err = service.UpdateTag(t.Context(), UpdateTagParams{
@@ -214,6 +251,7 @@ func TestFocusedCoreServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -238,6 +276,7 @@ func TestFocusedCoreServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "EUR",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -278,6 +317,7 @@ func TestFocusedCoreServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -348,6 +388,7 @@ func TestFocusedCoreServices(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 

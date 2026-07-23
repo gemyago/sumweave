@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceAccounts from './FinanceAccounts.svelte'
 
-const mocks = vi.hoisted(() => ({ listTenants: vi.fn(), listAccounts: vi.fn(), createAccount: vi.fn() }))
+const mocks = vi.hoisted(() => ({ listTenants: vi.fn(), listAccounts: vi.fn() }))
 vi.mock('../lib/finance/api', async (importOriginal) => ({ ...(await importOriginal<typeof import('../lib/finance/api')>()), createSignalFinanceApiForAuth: vi.fn(() => ({ ...mocks })) }))
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
 
@@ -13,41 +13,38 @@ describe('Finance accounts page', () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTenants.mockResolvedValue([{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now }])
     mocks.listAccounts.mockResolvedValue([{ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', bookedBalanceMinor: 0, pendingBalanceMinor: -125, provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now }])
-    mocks.createAccount.mockResolvedValue({})
   })
 
-  it('renders account cards and detail links', async () => {
+  it('renders a compact account browse table and detail links', async () => {
     render(FinanceAccounts)
     expect(await screen.findByText('Checking')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open account detail' })).toHaveAttribute('href', '#/finance/accounts/account-1')
+    expect(screen.getByRole('link', { name: 'Open details' })).toHaveAttribute('href', '#/finance/accounts/account-1')
   })
 
   it('renders booked and pending balances without treating zero as absent', async () => {
     render(FinanceAccounts)
 
-    expect(await screen.findByText('Booked balance 0.00 USD')).toBeInTheDocument()
-    expect(screen.getByText('Pending balance -1.25 USD')).toBeInTheDocument()
+    expect(await screen.findByText(/Booked 0\.00 USD/)).toBeInTheDocument()
+    expect(screen.getByText(/Pending -1\.25 USD/)).toBeInTheDocument()
   })
 
-  it('submits the create-account form', async () => {
-    const user = userEvent.setup()
+  it('keeps account creation on its dedicated route', async () => {
     render(FinanceAccounts)
 
-    await user.type(await screen.findByLabelText('Account name'), 'Savings')
-    await user.click(screen.getByRole('button', { name: 'Create account' }))
-    await waitFor(() => expect(mocks.createAccount).toHaveBeenCalled())
+    expect(await screen.findByRole('link', { name: 'Create account' })).toHaveAttribute('href', '#/finance/accounts/new')
+    expect(screen.queryByLabelText('Account name')).not.toBeInTheDocument()
   })
 
   it('renders the empty state when no accounts exist', async () => {
     mocks.listAccounts.mockResolvedValueOnce([])
     render(FinanceAccounts)
-    expect(await screen.findByText('No accounts yet.')).toBeInTheDocument()
+    expect(await screen.findByText(/No accounts yet\./)).toBeInTheDocument()
   })
 
-  it('renders a no-tenant state and keeps create disabled', async () => {
+  it('renders a no-tenant state and keeps the dedicated create link available', async () => {
     mocks.listTenants.mockResolvedValueOnce([])
     render(FinanceAccounts)
-    expect(await screen.findByRole('button', { name: 'Create account' })).toBeDisabled()
+    expect(await screen.findByRole('link', { name: 'Create account' })).toHaveAttribute('href', '#/finance/accounts/new')
   })
 
   it('reloads accounts when include-hidden is toggled', async () => {
@@ -58,36 +55,6 @@ describe('Finance accounts page', () => {
     await waitFor(() => expect(mocks.listAccounts).toHaveBeenLastCalledWith({ tenantId: 'tenant-1', includeHidden: true }))
   })
 
-  it('reloads accounts when the selected tenant changes', async () => {
-    const now = new Date('2026-06-20T12:00:00Z')
-    mocks.listTenants.mockResolvedValueOnce([
-      { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
-      { id: 'tenant-2', name: 'Travel', displayCurrency: 'EUR', joinedAt: now, createdAt: now, updatedAt: now },
-    ])
-    const user = userEvent.setup()
-    render(FinanceAccounts)
-
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Tenant' }), 'tenant-2')
-    await waitFor(() => expect(mocks.listAccounts).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', includeHidden: false }))
-  })
-
-  it('returns to the no-tenant state when the standalone tenant selection is cleared', async () => {
-    const now = new Date('2026-06-20T12:00:00Z')
-    mocks.listTenants.mockResolvedValueOnce([
-      { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
-      { id: 'tenant-2', name: 'Travel', displayCurrency: 'EUR', joinedAt: now, createdAt: now, updatedAt: now },
-    ])
-    const user = userEvent.setup()
-    render(FinanceAccounts)
-
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Tenant' }), 'tenant-2')
-    await waitFor(() => expect(mocks.listAccounts).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', includeHidden: false }))
-
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), '')
-
-    expect(await screen.findByRole('button', { name: 'Create account' })).toBeDisabled()
-    expect(screen.getByText('No accounts yet.')).toBeInTheDocument()
-  })
 
   it('renders an error state when account loading fails', async () => {
     mocks.listTenants.mockRejectedValueOnce(new Error('accounts exploded'))

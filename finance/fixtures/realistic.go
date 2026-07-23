@@ -44,7 +44,7 @@ type financeScenarioService interface {
 		context.Context,
 		financepkg.UpsertBankConnectionScheduleParams,
 	) (domain.BankConnectionSchedule, error)
-	SyncFXRates(context.Context, financepkg.SyncFXRatesParams) (financepkg.SyncFXRatesResult, error)
+	RefreshRequiredFXRates(context.Context, financepkg.RefreshFXRatesParams) (financepkg.RefreshFXRatesResult, error)
 }
 
 const (
@@ -133,6 +133,7 @@ func GenerateRealisticScenario(
 					ActorUserID:     ownerUserID,
 					Name:            "Fixture Tenant",
 					DisplayCurrency: fixtureCurrencyUSD,
+					SeedDefaults:    true,
 				})
 				if err != nil {
 					return err
@@ -518,17 +519,11 @@ func GenerateRealisticScenario(
 				); scheduleErr != nil {
 					return scheduleErr
 				}
-				if _, syncErr := service.SyncFXRates(
+				if _, refreshErr := service.RefreshRequiredFXRates(
 					ctx,
-					financepkg.SyncFXRatesParams{
-						Provider:       fixtureFXProvider,
-						BaseCurrencies: []string{fixtureCurrencyEUR},
-						QuoteCurrency:  fixtureCurrencyUSD,
-						StartDate:      startDate,
-						EndDate:        endDate,
-					},
-				); syncErr != nil {
-					return syncErr
+					financepkg.RefreshFXRatesParams{Provider: fixtureFXProvider},
+				); refreshErr != nil {
+					return refreshErr
 				}
 
 				return handle.RecordScenario(

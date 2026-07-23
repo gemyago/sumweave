@@ -73,7 +73,8 @@ PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from
 
 **PM2 usage notes**
 - From `apps/signal-foundry`, run `go run ./cmd/signal-foundry db-migrate --env local` before starting or restarting backend PM2 processes that rely on persisted tables.
-- Standard local backend workflow from `apps/signal-foundry` is `db-migrate` followed by `go run ./cmd/signal-foundry start-all --env local`.
+- Standard local workflow is `db-migrate` from `apps/signal-foundry`, then `pm2 start ecosystem.config.js` from the repository root.
+- Use direct `go run ./cmd/signal-foundry start-all --env local` only to diagnose a local startup problem.
 - PM2 is invoked from the repository root, but its backend process uses `apps/signal-foundry` as its working directory.
 - Run `pm2 start ecosystem.config.js` to create the PM2 apps from the current ecosystem file.
 - If the ecosystem command/args changed or you need a guaranteed fresh backend shape, recreate the app with `pm2 delete signal-foundry-api && pm2 start ecosystem.config.js`; PM2 can otherwise keep an older command definition.

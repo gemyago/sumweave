@@ -374,11 +374,11 @@ func (s financeFixturesScenarioService) UpsertBankConnectionSchedule(
 	return s.bankSyncService.UpsertBankConnectionSchedule(ctx, params)
 }
 
-func (s financeFixturesScenarioService) SyncFXRates(
+func (s financeFixturesScenarioService) RefreshRequiredFXRates(
 	ctx context.Context,
-	params financepkg.SyncFXRatesParams,
-) (financepkg.SyncFXRatesResult, error) {
-	return s.fxService.SyncFXRates(ctx, params)
+	params financepkg.RefreshFXRatesParams,
+) (financepkg.RefreshFXRatesResult, error) {
+	return s.fxService.RefreshRequiredFXRates(ctx, params)
 }
 
 func newFinanceFixturesMonobankServer() *httptest.Server {

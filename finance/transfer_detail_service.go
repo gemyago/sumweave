@@ -22,7 +22,16 @@ var (
 type transferDetailStore interface {
 	accessGuardStore
 	GetTransaction(context.Context, string) (*domain.Transaction, error)
-	ListCandidates(context.Context, string, string, time.Time, time.Time, int64, int64) ([]domain.Transaction, error)
+	ListCandidates(
+		context.Context,
+		string,
+		string,
+		string,
+		time.Time,
+		time.Time,
+		int64,
+		int64,
+	) ([]domain.Transaction, error)
 	ListTransferGroupTransactions(context.Context, string, string) ([]domain.Transaction, error)
 }
 
@@ -51,6 +60,7 @@ func (s *TransferDetailService) ListTransferCandidates(
 		ctx,
 		source.TenantID,
 		source.ID,
+		source.AccountID,
 		params.EffectiveFrom,
 		params.EffectiveBefore,
 		params.Limit,

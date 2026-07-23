@@ -6,6 +6,7 @@ import AdminFinanceFX from './AdminFinanceFX.svelte'
 const mocks = vi.hoisted(() => ({
   getFXDiagnostics: vi.fn(),
   triggerFXSync: vi.fn(),
+  getJob: vi.fn(),
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => {
@@ -17,13 +18,18 @@ vi.mock('../lib/finance/api', async (importOriginal) => {
 })
 
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
+vi.mock('../lib/jobs/api', () => ({
+  createSignalJobsApiForAuth: vi.fn(() => ({ getJob: mocks.getJob })),
+}))
 
 describe('Admin finance FX page', () => {
   beforeEach(() => {
     mocks.getFXDiagnostics.mockReset()
     mocks.triggerFXSync.mockReset()
+    mocks.getJob.mockReset()
     mocks.getFXDiagnostics.mockResolvedValue({ defaultProvider: 'frankfurter', storedRatesCount: 14, providers: [{ name: 'frankfurter', default: true, ready: true }] })
-    mocks.triggerFXSync.mockResolvedValue({ jobId: 'job-22', jobType: 'finance.fx_rates_sync', provider: 'frankfurter' })
+    mocks.triggerFXSync.mockResolvedValue({ jobId: 'job-22', jobType: 'finance.fx_rates_refresh', provider: 'frankfurter' })
+    mocks.getJob.mockResolvedValue({ id: 'job-22', status: 'queued', jobType: 'finance.fx_rates_refresh' })
   })
 
   it('shows diagnostics and can trigger a latest-rate refresh job', async () => {
@@ -31,17 +37,21 @@ describe('Admin finance FX page', () => {
     render(AdminFinanceFX)
 
     expect(await screen.findByText(/current rates 14/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Refresh current FX rates' }))
+    await user.click(screen.getByRole('button', { name: 'Refresh required rates' }))
     await waitFor(() => expect(mocks.triggerFXSync).toHaveBeenCalled())
     const request = mocks.triggerFXSync.mock.calls[0][0]
-    expect(request).toEqual({ provider: '', baseCurrencies: ['USD', 'EUR'], quoteCurrency: 'PLN' })
-    expect(await screen.findByRole('link', { name: 'open admin job detail' })).toHaveAttribute('href', '#/admin/jobs/job-22')
+    expect(request).toEqual({})
+    expect(await screen.findByRole('link', { name: 'Open job' })).toHaveAttribute('href', '#/admin/jobs/job-22')
+    expect(screen.queryByLabelText('Base currencies')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Quote currency')).not.toBeInTheDocument()
   })
 
-  it('uses current-rate terminology and has no historical date-range controls', async () => {
+  it('explains dynamic required-rate discovery and has no pair or historical range controls', async () => {
     render(AdminFinanceFX)
 
-    expect(await screen.findByText('Fetches only the latest rates. Transaction dates and historical ranges are not used.')).toBeInTheDocument()
+    expect(await screen.findByText(/Discovers active-tenant account and transaction currency pairs/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Base currencies')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Quote currency')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('FX start date')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('FX end date')).not.toBeInTheDocument()
   })

@@ -7,6 +7,7 @@
     type FinanceBankConnection,
     type FinanceConnectionSyncedAccount,
   } from '../lib/finance/api'
+  import JobStatus from '../components/JobStatus.svelte'
   import { formatFinanceDateTime } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
 
@@ -21,7 +22,7 @@
   let error = $state<string | null>(null)
   let connections = $state<FinanceBankConnection[]>([])
   let token = $state('')
-  let lastJobId = $state('')
+  let jobIdsByConnection = $state<Record<string, string>>({})
   let finishingRedirect = false
   let deletingConnectionId = $state('')
   let confirmDeleteConnectionId = $state('')
@@ -173,7 +174,7 @@
         connectionId,
         reason: 'operator_ui',
       })
-      lastJobId = job.jobId
+      jobIdsByConnection = { ...jobIdsByConnection, [connectionId]: job.jobId }
       const remainingAccounts = { ...syncedAccountsByConnection }
       delete remainingAccounts[connectionId]
       syncedAccountsByConnection = remainingAccounts
@@ -293,11 +294,6 @@
             </p>
           </div>
 
-          {#if lastJobId}
-            <a class="btn btn-outline-secondary align-self-start align-self-lg-center" href={`/finance/jobs/${encodeURIComponent(lastJobId)}`} use:link>
-              Open latest finance job
-            </a>
-          {/if}
         </div>
       </div>
     </header>
@@ -507,6 +503,14 @@
                       <div>
                         <a href={`/finance/jobs/${encodeURIComponent(connection.lastSyncJobId)}`} use:link>Open last sync job</a>
                       </div>
+                    {/if}
+
+                    {#if jobIdsByConnection[connection.id]}
+                      <JobStatus
+                        jobId={jobIdsByConnection[connection.id]}
+                        openHref={`/finance/jobs/${encodeURIComponent(jobIdsByConnection[connection.id])}`}
+                        label="Sync"
+                      />
                     {/if}
 
                     <details class="border rounded p-3" ontoggle={(event) => handleSyncedAccountsToggle(connection.id, event)}>

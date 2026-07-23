@@ -80,6 +80,10 @@ func Setup(
 
 		// auth
 		auth.Register(container),
+		di.ProvideAll(
+			container,
+			di.ProvideImplementation[*auth.AuthService, app.AuthUserLookup],
+		),
 
 		// infrastructure
 		infrastructure.Register(rootCtx, container),

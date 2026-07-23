@@ -27,8 +27,8 @@ func TestFinanceComposition(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		now := time.Date(2026, time.July, 3, 12, 0, 0, 0, time.UTC)
-		fxEnqueuer := &capturedFXSyncJobEnqueuer{}
-		fxWriter := &capturedFXSyncScheduleWriter{}
+		fxEnqueuer := &capturedFXRefreshJobEnqueuer{}
+		fxWriter := &capturedFXRefreshScheduleWriter{}
 		csvEnqueuer := &recordingCSVJobEnqueuer{}
 		bankEnqueuer := &capturedBankSyncJobEnqueuer{}
 		bankWriter := &capturedBankSyncScheduleWriter{}

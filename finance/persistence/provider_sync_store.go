@@ -391,11 +391,38 @@ func (s *Store) SaveRawPayload(
 	ctx context.Context,
 	payload domain.RawPayload,
 ) (domain.RawPayload, error) {
-	model := newRawPayloadModel(payload)
-	if err := s.db.WithContext(ctx).Table(model.TableName()).Create(&model).Error; err != nil {
-		return domain.RawPayload{}, fmt.Errorf("save raw payload: %w", err)
+	sanitizedPayload, sanitizeErr := domain.SanitizeProviderEvidenceJSON(payload.PayloadJSON)
+	if sanitizeErr != nil {
+		return domain.RawPayload{}, fmt.Errorf("sanitize raw payload: %w", sanitizeErr)
 	}
-	return rawPayloadFromModel(model), nil
+	payload.PayloadJSON = sanitizedPayload
+	model := newRawPayloadModel(payload)
+	if saveErr := s.db.WithContext(ctx).Table(model.TableName()).Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "connection_id"},
+			{Name: "scope"},
+			{Name: "provider_object_id"},
+		},
+		DoUpdates: clause.Assignments(map[string]any{
+			"payload_json": model.PayloadJSON,
+			"captured_at":  model.CapturedAt,
+		}),
+		Where: latestProviderObservationClause(),
+	}).Create(&model).Error; saveErr != nil {
+		return domain.RawPayload{}, fmt.Errorf("save raw payload: %w", saveErr)
+	}
+	var persisted rawPayloadModel
+	if readErr := s.db.WithContext(ctx).Table(model.TableName()).
+		Where(
+			"connection_id = ? AND scope = ? AND provider_object_id = ?",
+			model.ConnectionID,
+			model.Scope,
+			model.ProviderObjectID,
+		).
+		First(&persisted).Error; readErr != nil {
+		return domain.RawPayload{}, fmt.Errorf("read saved raw payload: %w", readErr)
+	}
+	return rawPayloadFromModel(persisted), nil
 }
 
 func (s *Store) ListRawPayloads(

@@ -14,6 +14,7 @@ func Register(container *dig.Container) error {
 	return di.ProvideAll(container,
 		di.ProvideValue(&HealthController{}),
 		di.ProvideImplementation[*auth.AuthService, AuthenticatingService],
+		di.ProvideImplementation[*app.UserDirectory, userDirectory],
 		di.ProvideImplementation[*app.StrategyWorkspaceService, strategyWorkspaceService],
 		di.ProvideImplementation[*app.EvaluationWorkspaceService, evaluationWorkspaceService],
 		di.ProvideImplementation[*jobspkg.Service, jobsService],

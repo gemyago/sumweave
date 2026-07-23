@@ -93,8 +93,8 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 		CSVImportJobEnqueuer:   csvImportJobEnqueuer{jobs: deps.Jobs},
 		BankSyncJobEnqueuer:    bankConnectionSyncJobEnqueuer{jobs: deps.Jobs},
 		BankSyncScheduleWriter: bankConnectionSyncScheduleWriter{store: deps.JobsStore},
-		FXJobEnqueuer:          fxSyncJobEnqueuer{jobs: deps.Jobs},
-		FXScheduleWriter:       fxSyncScheduleWriter{store: deps.JobsStore},
+		FXJobEnqueuer:          fxRefreshJobEnqueuer{jobs: deps.Jobs},
+		FXScheduleWriter:       fxRefreshScheduleWriter{store: deps.JobsStore},
 		Monobank: financepkg.MonobankConfig{
 			BaseURL: resolveMonobankBaseURL(deps.MonoURL),
 		},
@@ -103,11 +103,11 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 	if err != nil {
 		return nil, err
 	}
-	fxScheduleParams := financepkg.EnsureFXSyncScheduleParams{
+	fxScheduleParams := financepkg.EnsureFXRefreshScheduleParams{
 		ScheduleID: financepkg.FXDailyRefreshScheduleID,
 		Interval:   24 * time.Hour,
 	}
-	if _, err = financeModule.FXService.EnsureFXSyncSchedule(context.Background(), fxScheduleParams); err != nil {
+	if _, err = financeModule.FXService.EnsureFXRefreshSchedule(context.Background(), fxScheduleParams); err != nil {
 		return nil, fmt.Errorf("ensure daily fx refresh schedule: %w", err)
 	}
 	registerErr := registerFinanceJobHandlers(
@@ -252,7 +252,6 @@ func registerFinanceJobHandlers(
 			csvImportService,
 		),
 		registerBankSyncJobHandler(registry, bankSyncService),
-		registerFXSyncJobHandler(registry, fxService),
 		registerFXRefreshJobHandler(registry, fxService),
 	)
 }
@@ -264,10 +263,10 @@ func registerFXRefreshJobHandler(registry *jobspkg.Registry, service *financepkg
 	return registerFinanceJobHandler(registry, jobspkg.JobType(financepkg.FXRefreshJobType), func() error {
 		return jobspkg.RegisterTypedHandler(
 			registry,
-			jobspkg.TypedHandlerSpec[financepkg.RefreshFXRatesParams, financepkg.SyncFXRatesResult, struct{}]{
+			jobspkg.TypedHandlerSpec[financepkg.RefreshFXRatesParams, financepkg.RefreshFXRatesResult, struct{}]{
 				JobType:       jobspkg.JobType(financepkg.FXRefreshJobType),
 				SupportsRetry: true,
-				Run: func(ctx context.Context, input financepkg.RefreshFXRatesParams, _ func(struct{}) error) (financepkg.SyncFXRatesResult, error) {
+				Run: func(ctx context.Context, input financepkg.RefreshFXRatesParams, _ func(struct{}) error) (financepkg.RefreshFXRatesResult, error) {
 					return service.RefreshRequiredFXRates(ctx, input)
 				},
 			},
@@ -360,27 +359,6 @@ func makeRunBankConnectionSyncParams(
 	}
 }
 
-func registerFXSyncJobHandler(
-	registry *jobspkg.Registry,
-	service *financepkg.FXService,
-) error {
-	if service == nil {
-		return nil
-	}
-	return registerFinanceJobHandler(registry, jobspkg.JobType(financepkg.FXSyncJobType), func() error {
-		return jobspkg.RegisterTypedHandler(
-			registry,
-			jobspkg.TypedHandlerSpec[financepkg.SyncFXRatesParams, financepkg.SyncFXRatesResult, struct{}]{
-				JobType:       jobspkg.JobType(financepkg.FXSyncJobType),
-				SupportsRetry: true,
-				Run: func(ctx context.Context, input financepkg.SyncFXRatesParams, _ func(struct{}) error) (financepkg.SyncFXRatesResult, error) {
-					return service.SyncFXRates(ctx, input)
-				},
-			},
-		)
-	})
-}
-
 func registerFinanceJobHandler(
 	registry *jobspkg.Registry,
 	jobType jobspkg.JobType,
@@ -440,9 +418,9 @@ func (e bankConnectionSyncJobEnqueuer) EnqueueBankConnectionSync(
 	return financepkg.BankConnectionSyncJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
 }
 
-type fxSyncJobEnqueuer struct{ jobs *jobspkg.Service }
+type fxRefreshJobEnqueuer struct{ jobs *jobspkg.Service }
 
-type fxSyncScheduleWriter struct{ store *jobspkg.Store }
+type fxRefreshScheduleWriter struct{ store *jobspkg.Store }
 
 type bankConnectionSyncScheduleWriter struct{ store *jobspkg.Store }
 
@@ -482,10 +460,10 @@ func (w bankConnectionSyncScheduleWriter) UpsertBankConnectionSyncSchedule(
 	})
 }
 
-func (e fxSyncJobEnqueuer) EnqueueFXSync(
+func (e fxRefreshJobEnqueuer) EnqueueFXRefresh(
 	ctx context.Context,
-	request financepkg.FXSyncJobRequest,
-) (financepkg.FXSyncJobRef, error) {
+	request financepkg.FXRefreshJobRequest,
+) (financepkg.FXRefreshJobRef, error) {
 	job, err := e.jobs.Enqueue(ctx, jobspkg.EnqueueParams{
 		JobType: jobspkg.JobType(request.JobType),
 		Requester: jobspkg.Requester{
@@ -495,14 +473,14 @@ func (e fxSyncJobEnqueuer) EnqueueFXSync(
 		Input: request.Input,
 	})
 	if err != nil {
-		return financepkg.FXSyncJobRef{}, err
+		return financepkg.FXRefreshJobRef{}, err
 	}
-	return financepkg.FXSyncJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
+	return financepkg.FXRefreshJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
 }
 
-func (w fxSyncScheduleWriter) UpsertFXSyncSchedule(
+func (w fxRefreshScheduleWriter) UpsertFXRefreshSchedule(
 	ctx context.Context,
-	schedule financepkg.FXSyncSchedule,
+	schedule financepkg.FXRefreshSchedule,
 ) error {
 	if w.store == nil {
 		return nil

@@ -23,5 +23,6 @@ func Register(container *dig.Container) error {
 		newEvaluationSnapshotService,
 		newDurableBacktestFlow,
 		NewEvaluationWorkspaceService,
+		NewUserDirectory,
 	)
 }

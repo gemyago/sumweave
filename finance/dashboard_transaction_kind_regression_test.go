@@ -28,6 +28,7 @@ func TestDashboardTransactionKindRegression(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		account, err := service.CreateAccount(t.Context(), CreateAccountParams{

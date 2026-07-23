@@ -6,6 +6,7 @@ import Finance from './Finance.svelte'
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
   getDashboard: vi.fn(),
+  listAccounts: vi.fn(),
   listTransactions: vi.fn(),
   listConnections: vi.fn(),
 }))
@@ -17,6 +18,7 @@ vi.mock('../lib/finance/api', async (importOriginal) => {
     createSignalFinanceApiForAuth: vi.fn(() => ({
       listTenants: mocks.listTenants,
       getDashboard: mocks.getDashboard,
+      listAccounts: mocks.listAccounts,
       listTransactions: mocks.listTransactions,
       listConnections: mocks.listConnections,
     })),
@@ -31,6 +33,7 @@ describe('Finance dashboard page', () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTenants.mockReset()
     mocks.getDashboard.mockReset()
+    mocks.listAccounts.mockReset()
     mocks.listTransactions.mockReset()
     mocks.listConnections.mockReset()
     mocks.listTenants.mockResolvedValue([
@@ -43,9 +46,12 @@ describe('Finance dashboard page', () => {
       categoryBreakdowns: [{ categoryId: 'cat-1', categoryName: 'Groceries', kind: 'expense', incomeMinor: 0, expenseMinor: 1000, transactionCount: 1 }],
       accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 50000, nativePendingMinor: 5000, displayBookedMinor: 50000, displayPendingMinor: 5000, missingFx: false }],
       alerts: [{ code: 'stale_connection', severity: 'warning', count: 1 }],
-      missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: new Date(2026, 5, 20), provider: 'frankfurter' }],
+      fxCoverage: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 1, affectedAccountCount: 0 }],
       nativeSettledTotals: [],
     })
+    mocks.listAccounts.mockResolvedValue([
+      { id: 'acc-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', bookedBalanceMinor: 50000, pendingBalanceMinor: 5000, hiddenAt: null, createdAt: now, updatedAt: now },
+    ])
     mocks.listTransactions.mockResolvedValue([
       {
         id: 'tx-1',
@@ -115,16 +121,34 @@ describe('Finance dashboard page', () => {
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026')).toBeInTheDocument()
   })
 
+  it('keeps hidden-account history named and labeled without restoring it to current balances', async () => {
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.listAccounts.mockResolvedValueOnce([
+      { id: 'acc-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', bookedBalanceMinor: 50000, pendingBalanceMinor: 5000, hiddenAt: null, createdAt: now, updatedAt: now },
+      { id: 'acc-hidden', tenantId: 'tenant-1', name: 'Old checking', currency: 'USD', kind: 'linked', bookedBalanceMinor: 10000, pendingBalanceMinor: 0, hiddenAt: now, createdAt: now, updatedAt: now },
+    ])
+    mocks.listTransactions.mockResolvedValueOnce([{
+      id: 'tx-hidden', tenantId: 'tenant-1', accountId: 'acc-hidden', source: 'provider', status: 'booked', kind: 'expense', amountMinor: -1200, currency: 'USD', description: 'Historical purchase', effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, createdAt: now, updatedAt: now,
+    }])
+
+    render(Finance)
+
+    expect(await screen.findByText('Old checking')).toBeInTheDocument()
+    expect(screen.getByText('Hidden account')).toBeInTheDocument()
+    expect(mocks.listAccounts).toHaveBeenCalledWith({ tenantId: 'tenant-1', includeHidden: true })
+    expect(screen.queryByText('Unknown account')).not.toBeInTheDocument()
+  })
+
   it('renders compact needs-attention items for pending, missing FX, failed sync, and failed import signals', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
-    mocks.getDashboard.mockResolvedValueOnce({
+    mocks.getDashboard.mockResolvedValue({
       period: { preset: 'current_month', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
       settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 3, complete: true },
       categoryBreakdowns: [{ categoryId: 'cat-1', categoryName: 'Groceries', kind: 'expense', incomeMinor: 0, expenseMinor: 1000, transactionCount: 1 }],
       accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 50000, nativePendingMinor: 5000, displayBookedMinor: 50000, displayPendingMinor: 5000, missingFx: false }],
       alerts: [{ code: 'failed_import', severity: 'error', count: 2 }],
-      missingFx: [{ source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'USD', rateDate: '2026-06-20', provider: 'frankfurter' }],
+      fxCoverage: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 1, affectedAccountCount: 0 }],
       nativeSettledTotals: [],
     })
     mocks.listConnections.mockResolvedValueOnce([
@@ -165,9 +189,9 @@ describe('Finance dashboard page', () => {
       settled: { displayCurrency: 'PLN', incomeMinor: 100, expenseMinor: 200, netMinor: -100, transactionCount: 2, complete: false },
       pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       categoryBreakdowns: [], accountBalances: [], alerts: [],
-      missingFx: [
-        { source: 'provider', transactionId: 'tx-1', accountId: 'acc-1', baseCurrency: 'EUR', quoteCurrency: 'PLN', rateDate: new Date(2026, 5, 20), provider: 'frankfurter' },
-        { source: 'provider', transactionId: 'tx-2', accountId: 'acc-1', baseCurrency: 'USD', quoteCurrency: 'PLN', rateDate: new Date(2026, 5, 20), provider: 'frankfurter' },
+      fxCoverage: [
+        { provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'PLN', affectedTransactionCount: 2, affectedAccountCount: 1 },
+        { provider: 'frankfurter', baseCurrency: 'USD', quoteCurrency: 'PLN', affectedTransactionCount: 1, affectedAccountCount: 0 },
       ],
       nativeSettledTotals: [],
     })
@@ -176,7 +200,9 @@ describe('Finance dashboard page', () => {
 
     const warning = (await screen.findByText('Income and expense totals are incomplete.')).parentElement!
     expect(warning).toHaveTextContent('Income and expense totals are incomplete.')
-    expect(warning).toHaveTextContent('2 values were excluded')
+    expect(warning).toHaveTextContent('FX coverage missing for 2 pairs (EUR → PLN, USD → PLN), affecting 4 values.')
+    expect(screen.getByText('EUR → PLN · frankfurter · 2 transaction values · 1 account value')).toBeInTheDocument()
+    expect(screen.getByText('USD → PLN · frankfurter · 1 transaction value · 0 account values')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open FX diagnostics' })).toHaveAttribute('href', '#/admin/finance/fx')
     expect(screen.getByText('Income').compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -218,7 +244,7 @@ describe('Finance dashboard page', () => {
         categoryBreakdowns: [],
         accountBalances: [],
         alerts: [],
-        missingFx: [],
+        fxCoverage: [],
         nativeSettledTotals: [],
       })
       .mockResolvedValueOnce({
@@ -234,7 +260,7 @@ describe('Finance dashboard page', () => {
         categoryBreakdowns: [],
         accountBalances: [],
         alerts: [],
-        missingFx: [],
+        fxCoverage: [],
         nativeSettledTotals: [],
       })
       .mockResolvedValueOnce({
@@ -250,7 +276,7 @@ describe('Finance dashboard page', () => {
         categoryBreakdowns: [],
         accountBalances: [],
         alerts: [],
-        missingFx: [],
+        fxCoverage: [],
         nativeSettledTotals: [],
       })
 
@@ -300,7 +326,7 @@ describe('Finance dashboard page', () => {
       period: { preset: 'custom', startDate, endDate, previous: { startDate, endDate }, next: { startDate, endDate } },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
-      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], nativeSettledTotals: [],
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
     }
     mocks.getDashboard.mockResolvedValueOnce(dashboard).mockResolvedValueOnce(dashboard)
 
@@ -329,7 +355,7 @@ describe('Finance dashboard page', () => {
       },
       settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 830000, netMinor: -830000, transactionCount: 1, complete: true },
       pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
-      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], nativeSettledTotals: [{ currency: 'PLN', incomeMinor: 0, expenseMinor: 830000, netMinor: -830000 }],
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [{ currency: 'PLN', incomeMinor: 0, expenseMinor: 830000, netMinor: -830000 }],
     }
     mocks.getDashboard.mockResolvedValue(initialDashboard)
 
@@ -358,7 +384,7 @@ describe('Finance dashboard page', () => {
       categoryBreakdowns: [],
       accountBalances: [],
       alerts: [],
-      missingFx: [],
+      fxCoverage: [],
       nativeSettledTotals: [],
     })
     mocks.listTransactions.mockResolvedValueOnce([])
@@ -383,7 +409,7 @@ describe('Finance dashboard page', () => {
       categoryBreakdowns: [{ categoryId: 'cat-income', categoryName: 'Salary', kind: 'income', incomeMinor: 220000, expenseMinor: 0, transactionCount: 1 }],
       accountBalances: [],
       alerts: [{ code: 'failed_import', severity: 'error', count: 2 }],
-      missingFx: [],
+      fxCoverage: [],
       nativeSettledTotals: [
         { currency: 'USD', incomeMinor: 220000, expenseMinor: 60000, netMinor: 160000 },
         { currency: 'EUR', incomeMinor: 8000, expenseMinor: 2000, netMinor: 6000 },
@@ -435,7 +461,7 @@ describe('Finance dashboard page', () => {
         { code: 'background_note', severity: 'info', count: 1 },
         { code: 'settled_ok', severity: 'success', count: 1 },
       ],
-      missingFx: [],
+      fxCoverage: [],
       nativeSettledTotals: [],
     })
     mocks.listTransactions.mockResolvedValueOnce([
@@ -515,7 +541,7 @@ describe('Finance dashboard page', () => {
         { accountId: 'pln', accountName: 'PLN', currency: 'PLN', nativeBookedMinor: 10000, nativePendingMinor: 0, displayBookedMinor: 10000, displayPendingMinor: 0, missingFx: false },
         { accountId: 'eur', accountName: 'EUR', currency: 'EUR', nativeBookedMinor: 20000, nativePendingMinor: 0, displayBookedMinor: null, displayPendingMinor: null, missingFx: true },
       ],
-      alerts: [], missingFx: [{ source: 'account', transactionId: null, accountId: 'eur', baseCurrency: 'EUR', quoteCurrency: 'PLN', rateDate: new Date(), provider: 'frankfurter' }], currentFxRates: [], nativeSettledTotals: [],
+      alerts: [], fxCoverage: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'PLN', affectedTransactionCount: 0, affectedAccountCount: 2 }], currentFxRates: [], nativeSettledTotals: [],
     })
 
     render(Finance)
@@ -530,17 +556,18 @@ describe('Finance dashboard page', () => {
     mocks.getDashboard.mockResolvedValueOnce({
       period: { preset: 'custom', startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31), previous: { startDate: new Date(), endDate: new Date() }, next: { startDate: new Date(), endDate: new Date() } },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
-      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], currentFxRates: [], nativeSettledTotals: [],
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], currentFxRates: [], nativeSettledTotals: [],
     })
     render(Finance)
     expect(await screen.findByText('Past activity is valued using today’s latest FX rates, not an end-of-period rate.')).toBeInTheDocument()
   })
 
   it('shows fresh rate metadata and a prominent stale-rate warning', async () => {
-    mocks.getDashboard.mockResolvedValueOnce({
+    const user = userEvent.setup()
+    mocks.getDashboard.mockResolvedValue({
       period: { preset: 'current_month', startDate: new Date(), endDate: new Date(), previous: { startDate: new Date(), endDate: new Date() }, next: { startDate: new Date(), endDate: new Date() } },
       settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true }, pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
-      categoryBreakdowns: [], accountBalances: [], alerts: [], missingFx: [], nativeSettledTotals: [],
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
       currentFxRates: [
         { provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'PLN', effectiveAt: new Date('2026-06-19T00:00:00Z'), lastSuccessfulRefreshAt: new Date('2026-06-20T12:00:00Z'), stale: false },
         { provider: 'frankfurter', baseCurrency: 'USD', quoteCurrency: 'PLN', effectiveAt: new Date('2026-06-18T00:00:00Z'), lastSuccessfulRefreshAt: new Date('2026-06-18T12:00:00Z'), stale: true },
@@ -548,8 +575,11 @@ describe('Finance dashboard page', () => {
     })
     render(Finance)
     expect(await screen.findByText('Current FX valuation may be stale.')).toBeInTheDocument()
-    expect(screen.getByText('EUR → PLN')).toBeInTheDocument()
+    expect(screen.getByText('FX coverage')).toBeInTheDocument()
+    await user.click(screen.getByText('FX coverage'))
+    expect(screen.getByText(/EUR → PLN · frankfurter · effective/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Refresh current rates' })).toHaveAttribute('href', '#/admin/finance/fx')
+    expect(screen.queryByText('Current FX valuation')).not.toBeInTheDocument()
   })
 
   it('caps account, category, and recent transaction sections to keep the dashboard scannable', async () => {
@@ -573,7 +603,7 @@ describe('Finance dashboard page', () => {
         { accountId: 'acc-5', accountName: 'Account 5', currency: 'USD', nativeBookedMinor: 5000, nativePendingMinor: 0, displayBookedMinor: 5000, displayPendingMinor: 0, missingFx: false },
       ],
       alerts: [],
-      missingFx: [],
+      fxCoverage: [],
       nativeSettledTotals: [],
     })
     mocks.listTransactions.mockResolvedValueOnce([

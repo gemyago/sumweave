@@ -44,13 +44,22 @@ type tenantService interface {
 	) (domain.TenantMembership, error)
 }
 
+type userDirectory interface {
+	LookupUsername(context.Context, string) (string, bool, error)
+}
+
 type catalogService interface {
 	CreateAccount(context.Context, financepkg.CreateAccountParams) (domain.Account, error)
+	UpdateAccount(context.Context, financepkg.UpdateAccountParams) (domain.Account, error)
+	HideAccount(context.Context, financepkg.HideAccountParams) error
+	UnhideAccount(context.Context, financepkg.UnhideAccountParams) error
 	GetAccount(context.Context, financepkg.GetAccountParams) (domain.Account, error)
 	ListAccounts(context.Context, financepkg.ListAccountsParams) ([]domain.Account, error)
 	CreateCategory(context.Context, financepkg.CreateCategoryParams) (domain.Category, error)
+	UpdateCategory(context.Context, financepkg.UpdateCategoryParams) (domain.Category, error)
 	ListCategories(context.Context, financepkg.ListCategoriesParams) ([]domain.Category, error)
 	CreateTag(context.Context, financepkg.CreateTagParams) (domain.Tag, error)
+	UpdateTag(context.Context, financepkg.UpdateTagParams) (domain.Tag, error)
 	ListTags(context.Context, financepkg.ListTagsParams) ([]domain.Tag, error)
 }
 
@@ -105,7 +114,7 @@ type fxService interface {
 		context.Context,
 		financepkg.FXAdminDiagnosticsParams,
 	) (financepkg.FXAdminDiagnostics, error)
-	TriggerFXSync(context.Context, financepkg.TriggerFXSyncParams) (financepkg.FXSyncJobRef, error)
+	TriggerFXRefresh(context.Context, financepkg.TriggerFXRefreshParams) (financepkg.FXRefreshJobRef, error)
 }
 
 type providerEvidenceService interface {
@@ -187,6 +196,7 @@ type FinanceControllerDeps struct {
 	dig.In
 
 	TenantService                tenantService
+	UserDirectory                userDirectory
 	CatalogService               catalogService
 	LedgerService                ledgerService
 	TransferDetailService        transferDetailService
@@ -229,11 +239,15 @@ func (c *FinanceController) AcceptFinanceTenantInvite(
 			return nil, err
 		}
 
-		return &models.FinanceTenantMember{
+		mapped, err := c.mapTenantMember(ctx, domain.TenantMember{
 			TenantID: membership.TenantID,
 			UserID:   membership.UserID,
 			JoinedAt: membership.JoinedAt,
-		}, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &mapped, nil
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -343,6 +357,62 @@ func (c *FinanceController) CreateFinanceAccount(
 	return c.deps.AuthMiddleware(inner)
 }
 
+func (c *FinanceController) UpdateFinanceAccount(
+	builder handlers.NoResponseHandlerBuilder[*models.UpdateFinanceAccountParams],
+) http.Handler {
+	inner := builder.HandleWith(func(ctx context.Context, params *models.UpdateFinanceAccountParams) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = c.deps.CatalogService.UpdateAccount(ctx, financepkg.UpdateAccountParams{
+			ActorUserID: userID,
+			TenantID:    params.TenantID,
+			AccountID:   params.AccountID,
+			Name:        params.Payload.Name,
+		})
+		return mapCatalogError(err)
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) HideFinanceAccount(
+	builder handlers.NoResponseHandlerBuilder[*models.HideFinanceAccountParams],
+) http.Handler {
+	inner := builder.HandleWith(func(ctx context.Context, params *models.HideFinanceAccountParams) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		return mapCatalogError(c.deps.CatalogService.HideAccount(ctx, financepkg.HideAccountParams{
+			ActorUserID: userID,
+			TenantID:    params.TenantID,
+			AccountID:   params.AccountID,
+		}))
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) UnhideFinanceAccount(
+	builder handlers.NoResponseHandlerBuilder[*models.UnhideFinanceAccountParams],
+) http.Handler {
+	inner := builder.HandleWith(func(ctx context.Context, params *models.UnhideFinanceAccountParams) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		return mapCatalogError(c.deps.CatalogService.UnhideAccount(ctx, financepkg.UnhideAccountParams{
+			ActorUserID: userID,
+			TenantID:    params.TenantID,
+			AccountID:   params.AccountID,
+		}))
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
 func (c *FinanceController) CreateFinanceCategory(
 	builder handlers.HandlerBuilder[*models.CreateFinanceCategoryParams, *models.FinanceCategory],
 ) http.Handler {
@@ -370,6 +440,27 @@ func (c *FinanceController) CreateFinanceCategory(
 
 		mapped := mapCategory(item)
 		return &mapped, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) UpdateFinanceCategory(
+	builder handlers.NoResponseHandlerBuilder[*models.UpdateFinanceCategoryParams],
+) http.Handler {
+	inner := builder.HandleWith(func(ctx context.Context, params *models.UpdateFinanceCategoryParams) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = c.deps.CatalogService.UpdateCategory(ctx, financepkg.UpdateCategoryParams{
+			ActorUserID: userID,
+			TenantID:    params.TenantID,
+			CategoryID:  params.CategoryID,
+			Name:        params.Payload.Name,
+			Kind:        domain.CategoryKind(params.Payload.Kind),
+		})
+		return mapCatalogError(err)
 	})
 
 	return c.deps.AuthMiddleware(inner)
@@ -406,6 +497,26 @@ func (c *FinanceController) CreateFinanceTag(
 	return c.deps.AuthMiddleware(inner)
 }
 
+func (c *FinanceController) UpdateFinanceTag(
+	builder handlers.NoResponseHandlerBuilder[*models.UpdateFinanceTagParams],
+) http.Handler {
+	inner := builder.HandleWith(func(ctx context.Context, params *models.UpdateFinanceTagParams) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = c.deps.CatalogService.UpdateTag(ctx, financepkg.UpdateTagParams{
+			ActorUserID: userID,
+			TenantID:    params.TenantID,
+			TagID:       params.TagID,
+			Name:        params.Payload.Name,
+		})
+		return mapCatalogError(err)
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
 func (c *FinanceController) CreateFinanceTenant(
 	builder handlers.HandlerBuilder[*models.CreateFinanceTenantParams, *models.FinanceTenantSummary],
 ) http.Handler {
@@ -417,6 +528,9 @@ func (c *FinanceController) CreateFinanceTenant(
 		if err != nil {
 			return nil, err
 		}
+		if params.Payload.SeedDefaults == nil {
+			return nil, app.NewErrInvalidInput("seedDefaults", "choice is required")
+		}
 
 		tenant, err := c.deps.TenantService.CreateTenant(
 			ctx,
@@ -424,6 +538,7 @@ func (c *FinanceController) CreateFinanceTenant(
 				ActorUserID:     userID,
 				Name:            params.Payload.Name,
 				DisplayCurrency: string(params.Payload.DisplayCurrency),
+				SeedDefaults:    *params.Payload.SeedDefaults,
 			},
 		)
 		if err != nil {
@@ -567,7 +682,7 @@ func (c *FinanceController) CreateFinanceTransaction(
 			},
 		)
 		if err != nil {
-			return nil, mapTransactionTagError(err)
+			return nil, mapCatalogError(mapTransactionTagError(err))
 		}
 
 		mapped := mapTransaction(item)
@@ -1536,10 +1651,9 @@ func (c *FinanceController) ListFinanceTenantMembers(
 			Items: make([]*models.FinanceTenantMember, 0, len(items)),
 		}
 		for _, item := range items {
-			mapped := models.FinanceTenantMember{
-				TenantID: item.TenantID,
-				UserID:   item.UserID,
-				JoinedAt: item.JoinedAt,
+			mapped, mapErr := c.mapTenantMember(ctx, item)
+			if mapErr != nil {
+				return nil, mapErr
 			}
 			response.Items = append(response.Items, &mapped)
 		}
@@ -1548,6 +1662,25 @@ func (c *FinanceController) ListFinanceTenantMembers(
 	})
 
 	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) mapTenantMember(
+	ctx context.Context,
+	member domain.TenantMember,
+) (models.FinanceTenantMember, error) {
+	mapped := models.FinanceTenantMember{
+		TenantID: member.TenantID,
+		UserID:   member.UserID,
+		JoinedAt: member.JoinedAt,
+	}
+	username, found, err := c.deps.UserDirectory.LookupUsername(ctx, member.UserID)
+	if err != nil {
+		return models.FinanceTenantMember{}, fmt.Errorf("lookup finance member username: %w", err)
+	}
+	if found {
+		mapped.Username = &username
+	}
+	return mapped, nil
 }
 
 func (c *FinanceController) ListFinanceTenants(
@@ -1814,25 +1947,23 @@ func (c *FinanceController) TriggerFinanceConnectionSync(
 	return c.deps.AuthMiddleware(inner)
 }
 
-func (c *FinanceController) TriggerFinanceFxSync(
-	builder handlers.HandlerBuilder[*models.TriggerFinanceFxSyncParams, *models.FinanceFxSyncResponse],
+func (c *FinanceController) TriggerFinanceFxRefresh(
+	builder handlers.HandlerBuilder[*models.TriggerFinanceFxRefreshParams, *models.FinanceFxSyncResponse],
 ) http.Handler {
 	inner := builder.HandleWith(func(
 		ctx context.Context,
-		params *models.TriggerFinanceFxSyncParams,
+		params *models.TriggerFinanceFxRefreshParams,
 	) (*models.FinanceFxSyncResponse, error) {
 		userID, err := operatorUserIDFromContext(ctx)
 		if err != nil {
 			return nil, err
 		}
-		jobRef, err := c.deps.FXService.TriggerFXSync(
+		jobRef, err := c.deps.FXService.TriggerFXRefresh(
 			ctx,
-			financepkg.TriggerFXSyncParams{
+			financepkg.TriggerFXRefreshParams{
 				RequestedByUserID: userID,
 				Source:            "operator",
 				Provider:          params.Payload.Provider,
-				BaseCurrencies:    params.Payload.BaseCurrencies,
-				QuoteCurrency:     params.Payload.QuoteCurrency,
 			},
 		)
 		if err != nil {
@@ -1842,7 +1973,7 @@ func (c *FinanceController) TriggerFinanceFxSync(
 		return &models.FinanceFxSyncResponse{
 			JobID:    jobRef.ID,
 			JobType:  jobRef.JobType,
-			Provider: params.Payload.Provider,
+			Provider: jobRef.Provider,
 		}, nil
 	})
 
@@ -1871,6 +2002,25 @@ func mapTransactionTagError(err error) error {
 		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("tagIds", err.Error()), err)
 	}
 	return err
+}
+
+func mapCatalogError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, financepkg.ErrTenantAccessDenied):
+		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+	case errors.Is(err, financepkg.ErrAccountNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("account", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrCategoryNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("category", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrTagNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("tag", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrHiddenAccount):
+		return fmt.Errorf("%w: %w", app.NewErrConflict("account", "account is hidden"), err)
+	default:
+		return err
+	}
 }
 
 func mapTransferPairError(err error) error {
@@ -2254,8 +2404,8 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 			0,
 			len(item.AccountBalances),
 		),
-		Alerts:    make([]*models.FinanceDashboardAlert, 0, len(item.Alerts)),
-		MissingFx: make([]*models.FinanceDashboardMissingFx, 0, len(item.MissingFX)),
+		Alerts:     make([]*models.FinanceDashboardAlert, 0, len(item.Alerts)),
+		FxCoverage: make([]*models.FinanceDashboardFxCoverage, 0, len(item.FXCoverage)),
 		CurrentFxRates: make(
 			[]*models.FinanceDashboardCurrentFxRate,
 			0,
@@ -2299,17 +2449,15 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 		}
 		response.Alerts = append(response.Alerts, &mapped)
 	}
-	for _, missing := range item.MissingFX {
-		mapped := models.FinanceDashboardMissingFx{
-			Source:        string(missing.Source),
-			TransactionID: stringPointerOrNil(missing.TransactionID),
-			AccountID:     stringPointerOrNil(missing.AccountID),
-			BaseCurrency:  missing.BaseCurrency,
-			QuoteCurrency: missing.QuoteCurrency,
-			RateDate:      missing.RateDate,
-			Provider:      missing.Provider,
+	for _, coverage := range item.FXCoverage {
+		mapped := models.FinanceDashboardFxCoverage{
+			Provider:                 coverage.Provider,
+			BaseCurrency:             coverage.BaseCurrency,
+			QuoteCurrency:            coverage.QuoteCurrency,
+			AffectedTransactionCount: int64(coverage.AffectedTransactionCount),
+			AffectedAccountCount:     int64(coverage.AffectedAccountCount),
 		}
-		response.MissingFx = append(response.MissingFx, &mapped)
+		response.FxCoverage = append(response.FxCoverage, &mapped)
 	}
 	for _, rate := range item.CurrentFXRates {
 		mapped := models.FinanceDashboardCurrentFxRate{
@@ -2332,13 +2480,6 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 		response.NativeSettledTotals = append(response.NativeSettledTotals, &mapped)
 	}
 	return response
-}
-
-func stringPointerOrNil(value string) *string {
-	if value == "" {
-		return nil
-	}
-	return &value
 }
 
 func mapCSVPreview(

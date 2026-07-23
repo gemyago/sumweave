@@ -16,5 +16,6 @@ var _ = fmt.Sprint
 type FinanceTenantMember struct { 
 	TenantID string `json:"tenantId"`
 	UserID string `json:"userId"`
+	Username *string `json:"username,omitempty"`
 	JoinedAt time.Time `json:"joinedAt"`
 }

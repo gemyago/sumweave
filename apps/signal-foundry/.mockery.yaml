@@ -29,3 +29,7 @@ packages:
       financeService:
       transferDetailService:
       jobsService:
+      userDirectory:
+  github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app:
+    interfaces:
+      AuthUserLookup:

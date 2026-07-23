@@ -51,11 +51,11 @@ Key rules:
 
 Invoke repo-scoped PM2 commands from the repo root:
 
-`pm2 start signal-foundry-api` (PM2 process name is `signal-foundry-api`).
+`pm2 start ecosystem.config.js` creates the API and UI development processes.
 
 Before starting or restarting backend processes that rely on persisted tables, change to `apps/signal-foundry` and run `go run ./cmd/signal-foundry db-migrate --env local`.
 
-Standard local backend workflow uses `apps/signal-foundry` as the working directory: run `go run ./cmd/signal-foundry db-migrate --env local` and then `go run ./cmd/signal-foundry start-all --env local`. Local filesystem paths are app-root-relative; arbitrary working directories are unsupported.
+The standard local workflow migrates from `apps/signal-foundry`, then returns to the repository root to run `pm2 start ecosystem.config.js`. Use direct `go run ./cmd/signal-foundry start-all --env local` only to diagnose a local startup problem. Local filesystem paths are app-root-relative; arbitrary working directories are unsupported.
 
 For the optional HTTPS backend and Vite development workflow, follow [../../docs/local-https.md](../../docs/local-https.md). It uses ignored local certificate files and `APP_HTTPSERVER_TLS_CERTFILE` / `APP_HTTPSERVER_TLS_KEYFILE`.
 

@@ -17,9 +17,12 @@ func NewFinanceTenantCreateRequestValidator() FieldValidator[*FinanceTenantCreat
 	validateDisplayCurrency := NewSimpleFieldValidator[FinanceTenantDisplayCurrency](
 		EnsureNonDefault[FinanceTenantDisplayCurrency],
 	)
+	validateSeedDefaults := NewSimpleFieldValidator[*bool](
+	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceTenantCreateRequest) {
 		validateName(bindingCtx.Fork("name"), value.Name)
 		validateDisplayCurrency(bindingCtx.Fork("displayCurrency"), value.DisplayCurrency)
+		validateSeedDefaults(bindingCtx.Fork("seedDefaults"), value.SeedDefaults)
 	}
 }

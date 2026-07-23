@@ -81,8 +81,8 @@ func TestProviderSyncStore(t *testing.T) {
 		require.Equal(t, later.Format(time.RFC3339Nano), snapshots[0].CapturedAt.Format(time.RFC3339Nano))
 
 		for _, payload := range []domain.RawPayload{
-			{ID: "payload-later-" + fake.UUID().V4(), ConnectionID: connectionID, Scope: domain.RawPayloadScopeTransaction, PayloadJSON: []byte(`{}`), CapturedAt: later},
-			{ID: "payload-earlier-" + fake.UUID().V4(), ConnectionID: connectionID, Scope: domain.RawPayloadScopeTransaction, PayloadJSON: []byte(`{}`), CapturedAt: earlier},
+			{ID: "payload-later-" + fake.UUID().V4(), ConnectionID: connectionID, Scope: domain.RawPayloadScopeTransaction, ProviderObjectID: "payload-later-" + fake.UUID().V4(), PayloadJSON: []byte(`{}`), CapturedAt: later},
+			{ID: "payload-earlier-" + fake.UUID().V4(), ConnectionID: connectionID, Scope: domain.RawPayloadScopeTransaction, ProviderObjectID: "payload-earlier-" + fake.UUID().V4(), PayloadJSON: []byte(`{}`), CapturedAt: earlier},
 		} {
 			_, err = store.SaveRawPayload(t.Context(), payload)
 			require.NoError(t, err)
@@ -90,6 +90,18 @@ func TestProviderSyncStore(t *testing.T) {
 		payloads, err := store.ListRawPayloads(t.Context(), connectionID)
 		require.NoError(t, err)
 		require.Equal(t, earlier.Format(time.RFC3339Nano), payloads[0].CapturedAt.Format(time.RFC3339Nano))
+
+		current := payloads[0]
+		current.ID = "payload-current-" + fake.UUID().V4()
+		current.PayloadJSON = []byte(`{"value":"current","clientSecret":"not-stored"}`)
+		current.CapturedAt = later.Add(time.Minute)
+		updatedPayload, err := store.SaveRawPayload(t.Context(), current)
+		require.NoError(t, err)
+		assert.Equal(t, payloads[0].ID, updatedPayload.ID)
+		assert.JSONEq(t, `{"value":"current"}`, string(updatedPayload.PayloadJSON))
+		payloads, err = store.ListRawPayloads(t.Context(), connectionID)
+		require.NoError(t, err)
+		require.Len(t, payloads, 2)
 
 		fingerprint := "fingerprint-" + fake.UUID().V4()
 		earlierMatch := domain.ProviderTransactionMatch{

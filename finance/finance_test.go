@@ -41,6 +41,7 @@ func TestFinance(t *testing.T) {
 			ActorUserID:     actorUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "UAH",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 

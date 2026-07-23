@@ -215,6 +215,19 @@ func (s *CatalogService) HideAccount(ctx context.Context, params HideAccountPara
 	return nil
 }
 
+func (s *CatalogService) UnhideAccount(ctx context.Context, params UnhideAccountParams) error {
+	account, err := s.requireTenantAccount(ctx, params.TenantID, params.ActorUserID, params.AccountID)
+	if err != nil {
+		return err
+	}
+	account.HiddenAt = nil
+	account.UpdatedAt = s.now()
+	if _, err = s.store.SaveAccount(ctx, account); err != nil {
+		return fmt.Errorf("unhide account: %w", err)
+	}
+	return nil
+}
+
 func (s *CatalogService) AttachLinkedAccount(
 	ctx context.Context,
 	params AttachLinkedAccountParams,
@@ -310,6 +323,7 @@ func (s *CatalogService) UpdateCategory(
 		return domain.Category{}, err
 	}
 	category.Name = strings.TrimSpace(params.Name)
+	category.Kind = params.Kind
 	category.UpdatedAt = s.now()
 	saved, err := s.store.SaveCategory(ctx, category)
 	if err != nil {

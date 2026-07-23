@@ -33,6 +33,12 @@ type HideAccountParams struct {
 	AccountID   string
 }
 
+type UnhideAccountParams struct {
+	ActorUserID string
+	TenantID    string
+	AccountID   string
+}
+
 type AttachLinkedAccountParams struct {
 	ActorUserID       string
 	TenantID          string
@@ -65,6 +71,7 @@ type UpdateCategoryParams struct {
 	TenantID    string
 	CategoryID  string
 	Name        string
+	Kind        domain.CategoryKind
 }
 
 type HideCategoryParams struct {

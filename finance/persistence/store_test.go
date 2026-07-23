@@ -1319,6 +1319,13 @@ func TestStore(t *testing.T) {
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
+		secondActiveTenant := domain.Tenant{
+			ID:              "tenant-second-active-" + fake.UUID().V4(),
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "PLN",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
 		archivedTenant := domain.Tenant{
 			ID:              "tenant-archived-" + fake.UUID().V4(),
 			Name:            "tenant-" + fake.Company().Name(),
@@ -1334,6 +1341,10 @@ func TestStore(t *testing.T) {
 		}())
 		require.NoError(t, func() error {
 			_, err := store.SaveTenant(t.Context(), archivedTenant)
+			return err
+		}())
+		require.NoError(t, func() error {
+			_, err := store.SaveTenant(t.Context(), secondActiveTenant)
 			return err
 		}())
 		saveAccount := func(tenantID string, currency string) string {
@@ -1354,6 +1365,7 @@ func TestStore(t *testing.T) {
 		accountID := saveAccount(activeTenant.ID, "EUR")
 		_ = saveAccount(activeTenant.ID, "PLN")
 		_ = saveAccount(archivedTenant.ID, "USD")
+		_ = saveAccount(secondActiveTenant.ID, "USD")
 		saveTransaction := func(currency string) {
 			t.Helper()
 			_, err := store.SaveTransaction(t.Context(), domain.Transaction{
@@ -1381,6 +1393,7 @@ func TestStore(t *testing.T) {
 		assert.Equal(t, []RequiredFXPair{
 			{BaseCurrency: "EUR", QuoteCurrency: "PLN"},
 			{BaseCurrency: "GBP", QuoteCurrency: "PLN"},
+			{BaseCurrency: "USD", QuoteCurrency: "PLN"},
 		}, pairs)
 
 		activeTenant.DisplayCurrency = "EUR"
@@ -1392,6 +1405,7 @@ func TestStore(t *testing.T) {
 		assert.Equal(t, []RequiredFXPair{
 			{BaseCurrency: "GBP", QuoteCurrency: "EUR"},
 			{BaseCurrency: "PLN", QuoteCurrency: "EUR"},
+			{BaseCurrency: "USD", QuoteCurrency: "PLN"},
 		}, pairs)
 	})
 }

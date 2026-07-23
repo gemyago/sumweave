@@ -445,6 +445,7 @@ func TestProviderSyncInternals(t *testing.T) {
 				ActorUserID:     ownerUserID,
 				Name:            "tenant-" + fake.Company().Name(),
 				DisplayCurrency: "USD",
+				SeedDefaults:    true,
 			},
 		)
 		require.NoError(t, err)
@@ -724,6 +725,7 @@ func TestProviderSyncInternals(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -1281,6 +1283,7 @@ func TestProviderSyncInternals(t *testing.T) {
 				ActorUserID:     ownerUserID,
 				Name:            "tenant-" + fake.Company().Name(),
 				DisplayCurrency: "USD",
+				SeedDefaults:    true,
 			},
 		)
 		require.NoError(t, err)

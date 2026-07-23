@@ -37,6 +37,7 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			ActorUserID:     userID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		return tenant

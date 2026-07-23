@@ -35,8 +35,8 @@ type Service struct {
 	bankSync               *BankSyncService
 	fxProviders            map[string]FXRatesProvider
 	defaultFXProvider      string
-	fxJobEnqueuer          FXSyncJobEnqueuer
-	fxScheduleWriter       FXSyncScheduleWriter
+	fxJobEnqueuer          FXRefreshJobEnqueuer
+	fxScheduleWriter       FXRefreshScheduleWriter
 	connectionSecretCipher connectionSecretCipher
 	bankProviders          map[string]BankConnectionProvider
 	bankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
@@ -76,11 +76,11 @@ func WithDefaultFXProvider(name string) ServiceOption {
 	}
 }
 
-func WithFXJobEnqueuer(enqueuer FXSyncJobEnqueuer) ServiceOption {
+func WithFXJobEnqueuer(enqueuer FXRefreshJobEnqueuer) ServiceOption {
 	return func(service *Service) { service.fxJobEnqueuer = enqueuer }
 }
 
-func WithFXScheduleWriter(writer FXSyncScheduleWriter) ServiceOption {
+func WithFXScheduleWriter(writer FXRefreshScheduleWriter) ServiceOption {
 	return func(service *Service) { service.fxScheduleWriter = writer }
 }
 
@@ -440,25 +440,18 @@ func (s *Service) loadDashboardData(
 	return s.reporting.loadDashboardData(ctx, tenantID, params)
 }
 
-func (s *Service) SyncFXRates(
+func (s *Service) TriggerFXRefresh(
 	ctx context.Context,
-	params SyncFXRatesParams,
-) (SyncFXRatesResult, error) {
-	return s.fx.SyncFXRates(ctx, params)
+	params TriggerFXRefreshParams,
+) (FXRefreshJobRef, error) {
+	return s.fx.TriggerFXRefresh(ctx, params)
 }
 
-func (s *Service) TriggerFXSync(
+func (s *Service) EnsureFXRefreshSchedule(
 	ctx context.Context,
-	params TriggerFXSyncParams,
-) (FXSyncJobRef, error) {
-	return s.fx.TriggerFXSync(ctx, params)
-}
-
-func (s *Service) EnsureFXSyncSchedule(
-	ctx context.Context,
-	params EnsureFXSyncScheduleParams,
-) (FXSyncSchedule, error) {
-	return s.fx.EnsureFXSyncSchedule(ctx, params)
+	params EnsureFXRefreshScheduleParams,
+) (FXRefreshSchedule, error) {
+	return s.fx.EnsureFXRefreshSchedule(ctx, params)
 }
 
 func (s *Service) GetFXAdminDiagnostics(

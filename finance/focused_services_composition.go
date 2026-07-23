@@ -25,8 +25,8 @@ type focusedServicesConfig struct {
 	newID                  func() string
 	fxProviders            []FXRatesProvider
 	defaultFXProvider      string
-	fxJobEnqueuer          FXSyncJobEnqueuer
-	fxScheduleWriter       FXSyncScheduleWriter
+	fxJobEnqueuer          FXRefreshJobEnqueuer
+	fxScheduleWriter       FXRefreshScheduleWriter
 	csvImportJobEnqueuer   CSVImportJobEnqueuer
 	connectionSecretCipher connectionSecretCipher
 	bankProviders          []BankConnectionProvider

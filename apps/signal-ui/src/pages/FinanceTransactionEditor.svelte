@@ -61,6 +61,7 @@
   const hasMatchedTransfer = $derived(transaction ? isMatchedTransfer(transaction) : false)
   const hasPreviousCandidatePage = $derived(candidateOffset > 0)
   const hasNextCandidatePage = $derived(candidates.length === candidatePageSize)
+  const selectableAccounts = $derived(accounts.filter((account) => !account.hiddenAt))
   const candidatePageNumber = $derived(Math.floor(candidateOffset / candidatePageSize) + 1)
   const selectedCandidate = $derived(candidates.find((item) => item.id === selectedCandidateId) ?? null)
   const selectedCandidateIssue = $derived(transaction && selectedCandidate
@@ -138,7 +139,7 @@
     closeCandidateWorkflow()
     unlinkConfirmationOpen = false
     ;[accounts, categories, tags] = await Promise.all([
-      financeApi.listAccounts({ tenantId: financeShell.selectedTenantId }),
+      financeApi.listAccounts({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
       financeApi.listCategories({ tenantId: financeShell.selectedTenantId }),
       financeApi.listTags({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
     ])
@@ -146,9 +147,9 @@
     if (isCreateMode) {
       transaction = null
       form = makeBlankForm()
-      if (accounts.length > 0) {
-        form.accountId = accounts[0].id
-        form.currency = accounts[0].currency
+        if (selectableAccounts.length > 0) {
+          form.accountId = selectableAccounts[0].id
+          form.currency = selectableAccounts[0].currency
       }
       return
     }
@@ -486,7 +487,7 @@
         <div class="card-body p-4 d-grid gap-4">
           <h2 class="h5 mb-0">Details</h2>
           <div class="row g-3">
-            <div class="col-12 col-md-6"><label class="form-label" for="finance-transaction-account">Account</label><select id="finance-transaction-account" class="form-select" bind:value={form.accountId} onchange={syncCurrencyWithAccount} aria-label="Transaction account" disabled={!isCreateMode} required><option value="">Select account</option>{#each accounts as account (account.id)}<option value={account.id}>{account.name}</option>{/each}</select></div>
+            <div class="col-12 col-md-6"><label class="form-label" for="finance-transaction-account">Account</label><select id="finance-transaction-account" class="form-select" bind:value={form.accountId} onchange={syncCurrencyWithAccount} aria-label="Transaction account" disabled={!isCreateMode} required><option value="">Select account</option>{#each isCreateMode ? selectableAccounts : accounts as account (account.id)}<option value={account.id}>{account.name}{account.hiddenAt ? ' (Hidden)' : ''}</option>{/each}</select>{#if isCreateMode && selectableAccounts.length === 0}<div class="form-text">No active accounts are available. Restore an account or create one before recording a transaction.</div>{/if}</div>
             <div class="col-12 col-md-6"><label class="form-label" for="finance-transaction-category">Category</label><select id="finance-transaction-category" class="form-select" bind:value={form.categoryId} aria-label="Transaction category"><option value="">No category</option>{#each categories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}</select></div>
             <fieldset class="col-12"><legend class="form-label mb-2">Tags</legend>{#if tags.length === 0}<p class="form-text mb-0">No tenant tags are available.</p>{:else}<div class="d-flex flex-wrap gap-3" aria-label="Transaction tags">{#each tags as tag (tag.id)}<div class="form-check"><input id={`finance-transaction-tag-${tag.id}`} class="form-check-input" type="checkbox" value={tag.id} bind:group={form.tagIds} disabled={Boolean(tag.hiddenAt) && !form.tagIds.includes(tag.id)} /><label class="form-check-label" for={`finance-transaction-tag-${tag.id}`}>{tag.name}{tag.hiddenAt ? ' (hidden)' : ''}</label></div>{/each}</div>{/if}</fieldset>
             <div class="col-12 col-md-4"><label class="form-label" for="finance-transaction-kind">Kind</label><select id="finance-transaction-kind" class="form-select" bind:value={form.kind} aria-label="Transaction kind" disabled={!isCreateMode}><option value="expense">expense</option><option value="income">income</option><option value="regular">regular</option><option value="refund">refund</option><option value="transfer">transfer</option><option value="reconciliation">reconciliation</option></select></div>
@@ -579,7 +580,7 @@
                 <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
                   <div>
                     <h3 class="h6 mb-1">Transfer candidates</h3>
-                    <p class="small text-body-secondary mb-0">Candidates include all visible accounts. The effective-before boundary is exclusive.</p>
+                    <p class="small text-body-secondary mb-0">Candidates are from other visible accounts. The effective-before boundary is exclusive.</p>
                   </div>
                   <button class="btn btn-outline-secondary btn-sm align-self-start" type="button" onclick={closeCandidateWorkflow}>Close candidates</button>
                 </div>
@@ -623,7 +624,7 @@
                             <tr>
                             <td><input class="form-check-input" type="radio" name="transfer-candidate" value={candidate.id} checked={selectedCandidateId === candidate.id} onchange={() => selectedCandidateId = candidate.id} disabled={Boolean(issue)} aria-label={`Select ${candidate.description || candidate.kind}`} /></td>
                             <td class="d-none d-md-table-cell">{accountName(candidate.accountId)}</td>
-                            <td><div>{candidate.description || candidate.kind}</div><small class="d-md-none text-body-secondary d-block">{candidate.kind} · {accountName(candidate.accountId)} · {formatFinanceDateTime(candidate.effectiveAt)} · {formatFinanceMoney(candidate.amountMinor, candidate.currency)}</small>{#if issue}<small class="text-danger d-block">Eligibility: {issue}</small>{/if}</td>
+                            <td><div>{candidate.description || candidate.kind}</div><small class="d-md-none text-body-secondary d-block">{candidate.kind} · {accountName(candidate.accountId)} · {formatFinanceDateTime(candidate.effectiveAt)} · {formatFinanceMoney(candidate.amountMinor, candidate.currency)}</small></td>
                             <td class="d-none d-md-table-cell">{candidate.kind}</td>
                             <td class="d-none d-md-table-cell">{formatFinanceDateTime(candidate.effectiveAt)}</td>
                             <td class="d-none d-md-table-cell">{formatFinanceMoney(candidate.amountMinor, candidate.currency)}</td>

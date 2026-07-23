@@ -21,12 +21,14 @@
     tenantId,
     transactions,
     accountNameById = new Map<string, string>(),
+    hiddenAccountIds = new Set<string>(),
     ariaLabel = 'Transactions',
     onTransactionUpdated,
   }: {
     tenantId: string
     transactions: FinanceTransaction[]
     accountNameById?: Map<string, string>
+    hiddenAccountIds?: Set<string>
     ariaLabel?: string
     onTransactionUpdated: (transaction: FinanceTransaction) => void
   } = $props()
@@ -165,7 +167,7 @@
   }
 </script>
 
-<div class="list-group" aria-label={ariaLabel} aria-busy={saving}>
+<div class="list-group finance-transaction-list" aria-label={ariaLabel} aria-busy={saving}>
   {#each transactions as item (item.id)}
     <article class="list-group-item p-2 p-sm-3">
       <div class="d-flex justify-content-between gap-3 align-items-start">
@@ -174,6 +176,7 @@
             <strong>{formatFinanceMoney(item.amountMinor, item.currency)}</strong>
             <span class="small text-body-secondary">{formatFinanceDateTime(item.effectiveAt)}</span>
             <span class="small text-body-secondary">{accountNameById.get(item.accountId) ?? 'Unknown account'}</span>
+            {#if hiddenAccountIds.has(item.accountId)}<span class="badge text-bg-warning">Hidden account</span>{/if}
             {#if item.status !== 'booked'}<span class={`badge ${statusClass(item)}`}>{item.status}</span>{/if}
             {#if item.kind !== 'regular' && item.kind !== 'transfer'}<span class="badge text-bg-secondary">{item.kind}</span>{/if}
             {#if item.hiddenAt}<span class="badge text-bg-secondary">hidden</span>{/if}
@@ -200,9 +203,9 @@
         <a class="btn btn-outline-primary btn-sm finance-transaction-list-action" href={`/finance/transactions/${encodeURIComponent(item.id)}`} use:link aria-label="Open full transaction details" title="Open full transaction details"><FilePenLine size={16} /></a>
       </div>
 
-      <div class="d-flex flex-column flex-md-row gap-2 mt-2">
-        <div class="d-flex flex-grow-1 gap-2 align-items-start">
-          <div class="flex-grow-1 min-w-0 d-grid gap-2">
+      <div class="row g-2 mx-0 mt-2">
+        <div class="col-12 col-md-6">
+          <div class="min-w-0 d-grid gap-2">
             {#if editing?.transactionId === item.id && editing.field === 'category'}
               <div class="finance-transaction-list-editor-row d-flex flex-nowrap gap-2 align-items-center">
                 <label class="visually-hidden" for={`transaction-category-${item.id}`}>Category</label>
@@ -231,8 +234,8 @@
           </div>
         </div>
 
-        <div class="d-flex flex-grow-1 gap-2 align-items-start">
-          <div class="flex-grow-1 min-w-0 d-grid gap-2">
+        <div class="col-12 col-md-6">
+          <div class="min-w-0 d-grid gap-2">
             {#if editing?.transactionId === item.id && editing.field === 'tags'}
               <div class="finance-transaction-list-editor-row d-flex flex-nowrap gap-2 align-items-start">
                 <fieldset class="finance-transaction-list-editor flex-grow-1 mb-0" disabled={saving}>

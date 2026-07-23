@@ -34,6 +34,7 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 				ActorUserID:     makeUserID(),
 				Name:            "tenant-" + fake.Company().Name(),
 				DisplayCurrency: "usd",
+				SeedDefaults:    true,
 			},
 			UpdateTenantParams{
 				ActorUserID:     makeUserID(),
@@ -64,6 +65,7 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 				Name:        "account-" + fake.Lorem().Word(),
 			},
 			HideAccountParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
+			UnhideAccountParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
 			AttachLinkedAccountParams{
 				ActorUserID:       makeUserID(),
 				TenantID:          makeTenantID(),
@@ -84,6 +86,7 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 				TenantID:    makeTenantID(),
 				CategoryID:  makeCategoryID(),
 				Name:        "category-" + fake.Lorem().Word(),
+				Kind:        domain.CategoryKindExpense,
 			},
 			HideCategoryParams{
 				ActorUserID: makeUserID(),
@@ -152,19 +155,20 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 			GetAccountBalanceParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
 		}
 
-		require.Len(t, params, 29)
+		require.Len(t, params, 30)
 		assert.Len(t, []error{
 			ErrTenantAccessDenied,
 			ErrInviteNotFound,
 			ErrInviteAccepted,
 			ErrInvalidTenantDisplayCurrency,
 			ErrAccountNotFound,
+			ErrHiddenAccount,
 			ErrCategoryNotFound,
 			ErrTagNotFound,
 			ErrTransactionNotFound,
 			ErrCSVImportAlreadyConfirmed,
 			ErrCSVImportAlreadyCompleted,
-		}, 10)
+		}, 11)
 	})
 
 	t.Run("internal tenant seed and transfer helpers keep behavior", func(t *testing.T) {

@@ -13,12 +13,10 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-type FinanceDashboardMissingFx struct { 
-	Source string `json:"source"`
-	TransactionID *string `json:"transactionId"`
-	AccountID *string `json:"accountId"`
+type FinanceDashboardFxCoverage struct { 
+	Provider string `json:"provider"`
 	BaseCurrency string `json:"baseCurrency"`
 	QuoteCurrency string `json:"quoteCurrency"`
-	RateDate time.Time `json:"rateDate"`
-	Provider string `json:"provider"`
+	AffectedTransactionCount int64 `json:"affectedTransactionCount"`
+	AffectedAccountCount int64 `json:"affectedAccountCount"`
 }

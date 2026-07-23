@@ -161,6 +161,7 @@ func TestFinanceProviderSync(t *testing.T) {
 			ActorUserID:     actorUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "PLN",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		return tenant

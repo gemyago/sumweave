@@ -173,11 +173,11 @@ func (s *realisticScenarioFinanceAdapter) ListBankConnections(
 	return s.bankSync.ListBankConnections(ctx, params)
 }
 
-func (s *realisticScenarioFinanceAdapter) SyncFXRates(
+func (s *realisticScenarioFinanceAdapter) RefreshRequiredFXRates(
 	ctx context.Context,
-	params financepkg.SyncFXRatesParams,
-) (financepkg.SyncFXRatesResult, error) {
-	return s.fx.SyncFXRates(ctx, params)
+	params financepkg.RefreshFXRatesParams,
+) (financepkg.RefreshFXRatesResult, error) {
+	return s.fx.RefreshRequiredFXRates(ctx, params)
 }
 
 func (s *realisticScenarioFinanceAdapter) GetDashboard(
@@ -246,7 +246,7 @@ type scenarioServiceSpy struct {
 	linkTransfersCalls           int
 	linkTokenConnectionCalls     int
 	upsertScheduleCalls          int
-	syncFXRatesCalls             int
+	refreshFXRatesCalls          int
 	createAccountFailAt          int
 	recordTransactionFailAt      int
 	createTenantErr              error
@@ -261,7 +261,7 @@ type scenarioServiceSpy struct {
 	linkTransfersErr             error
 	linkTokenErr                 error
 	upsertScheduleErr            error
-	syncFXErr                    error
+	refreshFXErr                 error
 	createdTenantID              string
 	inviteCode                   string
 	checkingAccountID            string
@@ -273,7 +273,7 @@ type scenarioServiceSpy struct {
 	previewCSVImportCSV          string
 	recordedEffectiveAts         []time.Time
 	providerOriginalEffectiveAts []time.Time
-	syncFXRatesParams            []financepkg.SyncFXRatesParams
+	refreshFXRatesParams         []financepkg.RefreshFXRatesParams
 	categories                   []domain.Category
 	tags                         []domain.Tag
 }
@@ -452,16 +452,16 @@ func (s *scenarioServiceSpy) UpsertBankConnectionSchedule(
 	return domain.BankConnectionSchedule{}, nil
 }
 
-func (s *scenarioServiceSpy) SyncFXRates(
+func (s *scenarioServiceSpy) RefreshRequiredFXRates(
 	_ context.Context,
-	params financepkg.SyncFXRatesParams,
-) (financepkg.SyncFXRatesResult, error) {
-	s.syncFXRatesCalls++
-	s.syncFXRatesParams = append(s.syncFXRatesParams, params)
-	if s.syncFXErr != nil {
-		return financepkg.SyncFXRatesResult{}, s.syncFXErr
+	params financepkg.RefreshFXRatesParams,
+) (financepkg.RefreshFXRatesResult, error) {
+	s.refreshFXRatesCalls++
+	s.refreshFXRatesParams = append(s.refreshFXRatesParams, params)
+	if s.refreshFXErr != nil {
+		return financepkg.RefreshFXRatesResult{}, s.refreshFXErr
 	}
-	return financepkg.SyncFXRatesResult{}, nil
+	return financepkg.RefreshFXRatesResult{}, nil
 }
 
 func TestRealisticScenario(t *testing.T) {
@@ -521,7 +521,7 @@ func TestRealisticScenario(t *testing.T) {
 		second := runScenario()
 		require.NotEmpty(t, first.recordedEffectiveAts)
 		require.NotEmpty(t, first.providerOriginalEffectiveAts)
-		require.Len(t, first.syncFXRatesParams, 1)
+		require.Len(t, first.refreshFXRatesParams, 1)
 		for _, effectiveAt := range append(
 			append([]time.Time{}, first.recordedEffectiveAts...),
 			first.providerOriginalEffectiveAts...,
@@ -532,15 +532,14 @@ func TestRealisticScenario(t *testing.T) {
 			assert.Equal(t, anchor.Second(), effectiveAt.Second())
 			assert.Equal(t, anchor.Nanosecond(), effectiveAt.Nanosecond())
 		}
-		assert.Equal(t, wantStart, first.syncFXRatesParams[0].StartDate)
-		assert.Equal(t, anchor, first.syncFXRatesParams[0].EndDate)
+		assert.Equal(t, financepkg.FXProviderFrankfurter, first.refreshFXRatesParams[0].Provider)
 		assert.Equal(t, first.recordedEffectiveAts, second.recordedEffectiveAts)
 		assert.Equal(
 			t,
 			first.providerOriginalEffectiveAts,
 			second.providerOriginalEffectiveAts,
 		)
-		assert.Equal(t, first.syncFXRatesParams, second.syncFXRatesParams)
+		assert.Equal(t, first.refreshFXRatesParams, second.refreshFXRatesParams)
 	})
 
 	t.Run("static FX rates preserve the supplied anchor timestamp", func(t *testing.T) {
@@ -569,20 +568,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, anchor),
 		)
 		store := persistence.NewStore(openTestDatabase(t))
-		fxService := financepkg.NewFXService(
-			store,
-			financepkg.WithFXServiceProviders(financepkg.NewStaticFXProvider(
-				financepkg.FXProviderFrankfurter,
-				rates,
-			)),
-		)
-		_, err := fxService.SyncFXRates(t.Context(), financepkg.SyncFXRatesParams{
-			Provider:       financepkg.FXProviderFrankfurter,
-			BaseCurrencies: []string{"EUR"},
-			QuoteCurrency:  "USD",
-			StartDate:      rates[0].RateDate,
-			EndDate:        anchor,
-		})
+		err := store.SaveCurrentFXRates(t.Context(), rates)
 		require.NoError(t, err)
 		storedRates, err := store.ListFXRates(t.Context(), persistence.ListFXRatesParams{})
 		require.NoError(t, err)
@@ -633,7 +619,7 @@ func TestRealisticScenario(t *testing.T) {
 		assert.Equal(t, 12, spy.linkTransfersCalls)
 		assert.Equal(t, 1, spy.linkTokenConnectionCalls)
 		assert.Equal(t, 1, spy.upsertScheduleCalls)
-		assert.Equal(t, 1, spy.syncFXRatesCalls)
+		assert.Equal(t, 1, spy.refreshFXRatesCalls)
 		assert.Contains(t, spy.previewCSVImportCSV, ",Travel,")
 	})
 
@@ -661,7 +647,7 @@ func TestRealisticScenario(t *testing.T) {
 		require.ErrorIs(t, err, wantErr)
 		assert.Equal(t, 1, spy.linkTokenConnectionCalls)
 		assert.Zero(t, spy.upsertScheduleCalls)
-		assert.Zero(t, spy.syncFXRatesCalls)
+		assert.Zero(t, spy.refreshFXRatesCalls)
 	})
 
 	t.Run("returns early service errors from earlier scenario steps", func(t *testing.T) {
@@ -770,9 +756,9 @@ func TestRealisticScenario(t *testing.T) {
 		)
 		require.ErrorIs(t, err, listTagsErr)
 
-		syncFXErr := errors.New("fx sync failed")
+		refreshFXErr := errors.New("fx refresh failed")
 		spy := makeSpy(fake)
-		spy.syncFXErr = syncFXErr
+		spy.refreshFXErr = refreshFXErr
 		_, err = fixtures.GenerateRealisticScenario(
 			t.Context(),
 			bootstrap,
@@ -783,8 +769,8 @@ func TestRealisticScenario(t *testing.T) {
 				Scenario: "realistic",
 			},
 		)
-		require.ErrorIs(t, err, syncFXErr)
-		assert.Equal(t, 1, spy.syncFXRatesCalls)
+		require.ErrorIs(t, err, refreshFXErr)
+		assert.Equal(t, 1, spy.refreshFXRatesCalls)
 	})
 
 	t.Run("returns targeted branch errors across seeded scenario phases", func(t *testing.T) {
@@ -1012,6 +998,7 @@ func TestRealisticScenario(t *testing.T) {
 			financepkg.FXProviderFrankfurter,
 			fixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, now),
 		)),
+		financepkg.WithFXServiceRequiredPairs(persistence.NewFXPairDiscoveryStore(database)),
 	)
 	reportingService := financepkg.NewReportingService(
 		store,

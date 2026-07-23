@@ -17,36 +17,60 @@ mkcert -cert-file .local-https/localhost.pem -key-file .local-https/localhost-ke
 
 `.local-https/` is ignored by Git. Keep its key private.
 
-## Start the backend
+## Configure local TLS paths
 
-Run this from `apps/signal-foundry` after the usual migration command:
+Create or update the ignored root `.envrc.local` with paths that are valid from
+both PM2 application working directories:
 
-```bash
-go run ./cmd/signal-foundry db-migrate --env local
-APP_HTTPSERVER_TLS_CERTFILE=../../.local-https/localhost.pem APP_HTTPSERVER_TLS_KEYFILE=../../.local-https/localhost-key.pem go run ./cmd/signal-foundry start-all --env local
+```dotenv
+export APP_HTTPSERVER_TLS_CERTFILE=../../.local-https/localhost.pem
+export APP_HTTPSERVER_TLS_KEYFILE=../../.local-https/localhost-key.pem
 ```
 
-The backend now listens at `https://localhost:4501`. Both TLS variables are
-required; leaving both unset retains the normal HTTP workflow.
+The backend automatically consumes these values. Vite uses them as its
+certificate-path fallback, but Vite HTTPS remains separately opt-in below.
 
-## Start the UI
+## Start with PM2
 
-Create `apps/signal-ui/.env.local` with:
+Run the database migration from `apps/signal-foundry`, then return to the
+repository root to create or start the PM2 applications:
+
+```bash
+cd apps/signal-foundry
+go run ./cmd/signal-foundry db-migrate --env local
+cd ../..
+```
+
+Set Vite's explicit HTTPS enablement in `apps/signal-ui/.env.local`:
 
 ```dotenv
 VITE_LOCAL_HTTPS=true
-VITE_LOCAL_HTTPS_CERT_FILE=../../.local-https/localhost.pem
-VITE_LOCAL_HTTPS_KEY_FILE=../../.local-https/localhost-key.pem
 VITE_AGENT_API_BASE_URL=/api/v1/runtime/
 ```
 
-Then run this from `apps/signal-ui`:
+`VITE_LOCAL_HTTPS` intentionally does not infer HTTPS from the backend TLS
+paths. Add the optional `VITE_LOCAL_HTTPS_CERT_FILE` and
+`VITE_LOCAL_HTTPS_KEY_FILE` values only when Vite needs paths different from
+the shared `APP_` values.
+
+From the repository root, start both processes:
 
 ```bash
-npm run dev -- --host localhost --port 5173
+npm run pm2:start
 ```
 
 Open `https://localhost:5173`. Vite serves HTTPS and proxies `/api/v1` to the
 HTTPS backend, so auth, runtime, finance, and other same-origin API calls stay
 on HTTPS without CORS configuration. Vite accepts the locally generated
 certificate when proxying this development-only connection.
+
+Use `npm run pm2:status` and `npm run pm2:logs` to inspect the processes. If
+the backend ecosystem command or arguments change, recreate it with
+`pm2 delete signal-foundry-api && pm2 start ecosystem.config.js`.
+
+## Direct-start diagnostics only
+
+Direct startup is only for isolating a local problem, not normal development.
+With the same environment loaded, run `go run ./cmd/signal-foundry start-all
+--env local` from `apps/signal-foundry` and `npm run dev -- --host localhost
+--port 5173` from `apps/signal-ui` in separate terminals.

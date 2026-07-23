@@ -102,6 +102,7 @@ func TestSyntheticLinkStateService(t *testing.T) {
 			ActorUserID:     actorUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 
@@ -184,6 +185,7 @@ func TestSyntheticLinkStateService(t *testing.T) {
 			ActorUserID:     ownerUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		_, err = store.SaveTenantMembership(t.Context(), domain.TenantMembership{
@@ -250,6 +252,7 @@ func TestSyntheticLinkStateService(t *testing.T) {
 			ActorUserID:     actorUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 

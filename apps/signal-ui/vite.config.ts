@@ -14,10 +14,12 @@ const API_DEV_PROXY_PREFIX = '/api/v1'
 export default defineConfig(({ mode }) => {
   const env = loadViteEnv(mode, process.cwd(), '')
   const localHTTPS = env.VITE_LOCAL_HTTPS === 'true'
-  const certificateFile = env.VITE_LOCAL_HTTPS_CERT_FILE
-  const keyFile = env.VITE_LOCAL_HTTPS_KEY_FILE
+  const certificateFile = env.VITE_LOCAL_HTTPS_CERT_FILE ?? env.APP_HTTPSERVER_TLS_CERTFILE
+  const keyFile = env.VITE_LOCAL_HTTPS_KEY_FILE ?? env.APP_HTTPSERVER_TLS_KEYFILE
   if (localHTTPS && (!certificateFile || !keyFile)) {
-    throw new Error('VITE_LOCAL_HTTPS requires VITE_LOCAL_HTTPS_CERT_FILE and VITE_LOCAL_HTTPS_KEY_FILE')
+    throw new Error(
+      'VITE_LOCAL_HTTPS requires VITE_LOCAL_HTTPS_CERT_FILE and VITE_LOCAL_HTTPS_KEY_FILE, or APP_HTTPSERVER_TLS_CERTFILE and APP_HTTPSERVER_TLS_KEYFILE',
+    )
   }
 
   return {

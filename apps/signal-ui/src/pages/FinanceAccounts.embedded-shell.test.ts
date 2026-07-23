@@ -9,7 +9,6 @@ type MockTenantSummary = {
 
 const mocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
-  createAccount: vi.fn(),
   shellState: {
     embedded: true,
     loading: false,
@@ -28,7 +27,6 @@ vi.mock('../lib/finance/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/finance/api')>()),
   createSignalFinanceApiForAuth: vi.fn(() => ({
     listAccounts: mocks.listAccounts,
-    createAccount: mocks.createAccount,
   })),
 }))
 
@@ -53,10 +51,10 @@ describe('Finance accounts page inside the embedded shell', () => {
 
     render(FinanceAccounts)
 
-    await screen.findByRole('button', { name: 'Create account' })
+    await screen.findByRole('link', { name: 'Create account' })
     expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Create account' })).toBeDisabled()
+    expect(screen.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '#/finance/accounts/new')
   })
 
   it('shows account content without repeating tenant chrome once the shell has resolved a tenant', async () => {
@@ -88,6 +86,6 @@ describe('Finance accounts page inside the embedded shell', () => {
     expect(screen.queryByText('Tenant workspace')).not.toBeInTheDocument()
     expect(screen.getByText('Checking')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'Tenant' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Create account' })).toBeEnabled()
+    expect(screen.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '#/finance/accounts/new')
   })
 })

@@ -28,6 +28,7 @@ func TestLedgerServiceTransactionTagAssignments(t *testing.T) {
 			ActorUserID:     actorUserID,
 			Name:            "tenant-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		account, err := catalogService.CreateAccount(t.Context(), CreateAccountParams{
@@ -55,6 +56,7 @@ func TestLedgerServiceTransactionTagAssignments(t *testing.T) {
 			ActorUserID:     actorUserID,
 			Name:            "foreign-" + fake.Company().Name(),
 			DisplayCurrency: "USD",
+			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
 		foreignTag := createTag(t, foreignTenant.ID)

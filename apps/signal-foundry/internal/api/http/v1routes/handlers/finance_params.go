@@ -807,6 +807,42 @@ func newParamsParserFinanceGetFinanceTransferPartner(rootHandler *RootHandler) p
 	}
 }
 
+type paramsParserFinanceHideFinanceAccount struct {
+	bindTenantID requestParamBinder[string, string]
+	bindAccountID requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceHideFinanceAccount) parse(router httpRouter, req *http.Request) (*HideFinanceAccountParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &HideFinanceAccountParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindAccountID(pathParamsCtx.Fork("accountId"), readPathValue("accountId", router, req), &reqParams.AccountID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceHideFinanceAccount(rootHandler *RootHandler) paramsParser[*HideFinanceAccountParams] {
+	return &paramsParserFinanceHideFinanceAccount{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindAccountID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
 type paramsParserFinanceLinkFinanceConnectionToken struct {
 	bindTenantID requestParamBinder[string, string]
 	bindPayload requestParamBinder[*http.Request, *FinanceConnectionLinkTokenRequest]
@@ -1581,26 +1617,62 @@ func newParamsParserFinanceTriggerFinanceConnectionSync(rootHandler *RootHandler
 	}
 }
 
-type paramsParserFinanceTriggerFinanceFxSync struct {
-	bindPayload requestParamBinder[*http.Request, *FinanceFxSyncRequest]
+type paramsParserFinanceTriggerFinanceFxRefresh struct {
+	bindPayload requestParamBinder[*http.Request, *FinanceFxRefreshRequest]
 }
 
-func (p *paramsParserFinanceTriggerFinanceFxSync) parse(router httpRouter, req *http.Request) (*TriggerFinanceFxSyncParams, error) {
+func (p *paramsParserFinanceTriggerFinanceFxRefresh) parse(router httpRouter, req *http.Request) (*TriggerFinanceFxRefreshParams, error) {
 	bindingCtx := BindingContext{}
-	reqParams := &TriggerFinanceFxSyncParams{}
+	reqParams := &TriggerFinanceFxRefreshParams{}
 	// body params
 	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
 	return reqParams, bindingCtx.AggregatedError()
 }
 
-func newParamsParserFinanceTriggerFinanceFxSync(rootHandler *RootHandler) paramsParser[*TriggerFinanceFxSyncParams] {
-	return &paramsParserFinanceTriggerFinanceFxSync{
-		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceFxSyncRequest]{
+func newParamsParserFinanceTriggerFinanceFxRefresh(rootHandler *RootHandler) paramsParser[*TriggerFinanceFxRefreshParams] {
+	return &paramsParserFinanceTriggerFinanceFxRefresh{
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceFxRefreshRequest]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
-				parseJSONPayload[*FinanceFxSyncRequest],
+				parseJSONPayload[*FinanceFxRefreshRequest],
 			),
-			validateValue: NewFinanceFxSyncRequestValidator(),
+			validateValue: NewFinanceFxRefreshRequestValidator(),
+		}),
+	}
+}
+
+type paramsParserFinanceUnhideFinanceAccount struct {
+	bindTenantID requestParamBinder[string, string]
+	bindAccountID requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceUnhideFinanceAccount) parse(router httpRouter, req *http.Request) (*UnhideFinanceAccountParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &UnhideFinanceAccountParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindAccountID(pathParamsCtx.Fork("accountId"), readPathValue("accountId", router, req), &reqParams.AccountID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceUnhideFinanceAccount(rootHandler *RootHandler) paramsParser[*UnhideFinanceAccountParams] {
+	return &paramsParserFinanceUnhideFinanceAccount{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindAccountID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
 		}),
 	}
 }
@@ -1637,6 +1709,144 @@ func newParamsParserFinanceUnlinkFinanceTransferPair(rootHandler *RootHandler) p
 				parseJSONPayload[*FinanceTransferPairRequest],
 			),
 			validateValue: NewFinanceTransferPairRequestValidator(),
+		}),
+	}
+}
+
+type paramsParserFinanceUpdateFinanceAccount struct {
+	bindTenantID requestParamBinder[string, string]
+	bindAccountID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceRenameRequest]
+}
+
+func (p *paramsParserFinanceUpdateFinanceAccount) parse(router httpRouter, req *http.Request) (*UpdateFinanceAccountParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &UpdateFinanceAccountParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindAccountID(pathParamsCtx.Fork("accountId"), readPathValue("accountId", router, req), &reqParams.AccountID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceUpdateFinanceAccount(rootHandler *RootHandler) paramsParser[*UpdateFinanceAccountParams] {
+	return &paramsParserFinanceUpdateFinanceAccount{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindAccountID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceRenameRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceRenameRequest],
+			),
+			validateValue: NewFinanceRenameRequestValidator(),
+		}),
+	}
+}
+
+type paramsParserFinanceUpdateFinanceCategory struct {
+	bindTenantID requestParamBinder[string, string]
+	bindCategoryID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceCategoryUpdateRequest]
+}
+
+func (p *paramsParserFinanceUpdateFinanceCategory) parse(router httpRouter, req *http.Request) (*UpdateFinanceCategoryParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &UpdateFinanceCategoryParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindCategoryID(pathParamsCtx.Fork("categoryId"), readPathValue("categoryId", router, req), &reqParams.CategoryID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceUpdateFinanceCategory(rootHandler *RootHandler) paramsParser[*UpdateFinanceCategoryParams] {
+	return &paramsParserFinanceUpdateFinanceCategory{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindCategoryID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceCategoryUpdateRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceCategoryUpdateRequest],
+			),
+			validateValue: NewFinanceCategoryUpdateRequestValidator(),
+		}),
+	}
+}
+
+type paramsParserFinanceUpdateFinanceTag struct {
+	bindTenantID requestParamBinder[string, string]
+	bindTagID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceRenameRequest]
+}
+
+func (p *paramsParserFinanceUpdateFinanceTag) parse(router httpRouter, req *http.Request) (*UpdateFinanceTagParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &UpdateFinanceTagParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindTagID(pathParamsCtx.Fork("tagId"), readPathValue("tagId", router, req), &reqParams.TagID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceUpdateFinanceTag(rootHandler *RootHandler) paramsParser[*UpdateFinanceTagParams] {
+	return &paramsParserFinanceUpdateFinanceTag{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindTagID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceRenameRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceRenameRequest],
+			),
+			validateValue: NewFinanceRenameRequestValidator(),
 		}),
 	}
 }
@@ -2000,6 +2210,18 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*GetFinanceTransferPartnerParams, *FinanceTransaction],
 	]
 
+	// POST /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/hide
+	//
+	// Request type: HideFinanceAccountParams,
+	//
+	// Response type: none
+	HideFinanceAccount genericHandlerBuilder[
+		*HideFinanceAccountParams,
+		void,
+		handlerActionFuncNoResponse[*HideFinanceAccountParams, void],
+		httpHandlerActionFuncNoResponse[*HideFinanceAccountParams, void],
+	]
+
 	// POST /api/v1/finance/tenants/{tenantId}/connections/link-token
 	//
 	// Request type: LinkFinanceConnectionTokenParams,
@@ -2242,14 +2464,26 @@ type financeControllerBuilder struct {
 
 	// POST /api/v1/finance/fx/sync
 	//
-	// Request type: TriggerFinanceFxSyncParams,
+	// Request type: TriggerFinanceFxRefreshParams,
 	//
 	// Response type: FinanceFxSyncResponse
-	TriggerFinanceFxSync genericHandlerBuilder[
-		*TriggerFinanceFxSyncParams,
+	TriggerFinanceFxRefresh genericHandlerBuilder[
+		*TriggerFinanceFxRefreshParams,
 		*FinanceFxSyncResponse,
-		handlerActionFunc[*TriggerFinanceFxSyncParams, *FinanceFxSyncResponse],
-		httpHandlerActionFunc[*TriggerFinanceFxSyncParams, *FinanceFxSyncResponse],
+		handlerActionFunc[*TriggerFinanceFxRefreshParams, *FinanceFxSyncResponse],
+		httpHandlerActionFunc[*TriggerFinanceFxRefreshParams, *FinanceFxSyncResponse],
+	]
+
+	// POST /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/unhide
+	//
+	// Request type: UnhideFinanceAccountParams,
+	//
+	// Response type: none
+	UnhideFinanceAccount genericHandlerBuilder[
+		*UnhideFinanceAccountParams,
+		void,
+		handlerActionFuncNoResponse[*UnhideFinanceAccountParams, void],
+		httpHandlerActionFuncNoResponse[*UnhideFinanceAccountParams, void],
 	]
 
 	// DELETE /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
@@ -2262,6 +2496,42 @@ type financeControllerBuilder struct {
 		void,
 		handlerActionFuncNoResponse[*UnlinkFinanceTransferPairParams, void],
 		httpHandlerActionFuncNoResponse[*UnlinkFinanceTransferPairParams, void],
+	]
+
+	// PATCH /api/v1/finance/tenants/{tenantId}/accounts/{accountId}
+	//
+	// Request type: UpdateFinanceAccountParams,
+	//
+	// Response type: none
+	UpdateFinanceAccount genericHandlerBuilder[
+		*UpdateFinanceAccountParams,
+		void,
+		handlerActionFuncNoResponse[*UpdateFinanceAccountParams, void],
+		httpHandlerActionFuncNoResponse[*UpdateFinanceAccountParams, void],
+	]
+
+	// PATCH /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+	//
+	// Request type: UpdateFinanceCategoryParams,
+	//
+	// Response type: none
+	UpdateFinanceCategory genericHandlerBuilder[
+		*UpdateFinanceCategoryParams,
+		void,
+		handlerActionFuncNoResponse[*UpdateFinanceCategoryParams, void],
+		httpHandlerActionFuncNoResponse[*UpdateFinanceCategoryParams, void],
+	]
+
+	// PATCH /api/v1/finance/tenants/{tenantId}/tags/{tagId}
+	//
+	// Request type: UpdateFinanceTagParams,
+	//
+	// Response type: none
+	UpdateFinanceTag genericHandlerBuilder[
+		*UpdateFinanceTagParams,
+		void,
+		handlerActionFuncNoResponse[*UpdateFinanceTagParams, void],
+		httpHandlerActionFuncNoResponse[*UpdateFinanceTagParams, void],
 	]
 
 	// PATCH /api/v1/finance/tenants/{tenantId}
@@ -2753,6 +3023,27 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
+		// POST /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/hide
+		HideFinanceAccount: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*HideFinanceAccountParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*HideFinanceAccountParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*HideFinanceAccountParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceHideFinanceAccount(app),
+			},
+		),
+
 		// POST /api/v1/finance/tenants/{tenantId}/connections/link-token
 		LinkFinanceConnectionToken: newGenericHandlerBuilder(
 			app,
@@ -3155,22 +3446,43 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 		),
 
 		// POST /api/v1/finance/fx/sync
-		TriggerFinanceFxSync: newGenericHandlerBuilder(
+		TriggerFinanceFxRefresh: newGenericHandlerBuilder(
 			app,
 			newHandlerAdapter[
-				*TriggerFinanceFxSyncParams,
+				*TriggerFinanceFxRefreshParams,
 				*FinanceFxSyncResponse,
 			](),
 			newHTTPHandlerAdapter[
-				*TriggerFinanceFxSyncParams,
+				*TriggerFinanceFxRefreshParams,
 				*FinanceFxSyncResponse,
 			](),
 			makeActionBuilderParams[
-				*TriggerFinanceFxSyncParams,
+				*TriggerFinanceFxRefreshParams,
 				*FinanceFxSyncResponse,
 			]{
 				defaultStatus: 200,
-				paramsParser:  newParamsParserFinanceTriggerFinanceFxSync(app),
+				paramsParser:  newParamsParserFinanceTriggerFinanceFxRefresh(app),
+			},
+		),
+
+		// POST /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/unhide
+		UnhideFinanceAccount: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*UnhideFinanceAccountParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*UnhideFinanceAccountParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*UnhideFinanceAccountParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceUnhideFinanceAccount(app),
 			},
 		),
 
@@ -3192,6 +3504,69 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 				defaultStatus: 204,
 				voidResult:    true,
 				paramsParser:  newParamsParserFinanceUnlinkFinanceTransferPair(app),
+			},
+		),
+
+		// PATCH /api/v1/finance/tenants/{tenantId}/accounts/{accountId}
+		UpdateFinanceAccount: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*UpdateFinanceAccountParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*UpdateFinanceAccountParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*UpdateFinanceAccountParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceUpdateFinanceAccount(app),
+			},
+		),
+
+		// PATCH /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+		UpdateFinanceCategory: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*UpdateFinanceCategoryParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*UpdateFinanceCategoryParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*UpdateFinanceCategoryParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceUpdateFinanceCategory(app),
+			},
+		),
+
+		// PATCH /api/v1/finance/tenants/{tenantId}/tags/{tagId}
+		UpdateFinanceTag: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*UpdateFinanceTagParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*UpdateFinanceTagParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*UpdateFinanceTagParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceUpdateFinanceTag(app),
 			},
 		),
 

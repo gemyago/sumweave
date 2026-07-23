@@ -117,8 +117,9 @@ func TestProviderEvidenceService(t *testing.T) {
 			PayloadJSON: []byte("not-json"), CapturedAt: data.now,
 		})
 		require.Error(t, err)
-		_, err = data.evidence.SaveProviderEvidence(t.Context(), accountEvidence)
-		require.Error(t, err)
+		repeatedEvidence, err := data.evidence.SaveProviderEvidence(t.Context(), accountEvidence)
+		require.NoError(t, err)
+		assert.Equal(t, accountEvidence.ID, repeatedEvidence.ID)
 		_, err = data.evidence.SaveProviderEvidence(t.Context(), domain.ProviderEvidence{
 			ID: "other-evidence-" + fake.UUID().V4(), TenantID: data.tenant.ID,
 			ConnectionID: data.connection.ID, FinanceAccountID: data.otherAccount.ID,
@@ -309,6 +310,89 @@ func TestProviderEvidenceService(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.Empty(t, accountEvidence)
+	})
+
+	t.Run("keeps evidence and raw payload storage bounded across repeated sync observations", func(t *testing.T) {
+		data := makeFixture(t)
+		syncService := NewBankSyncService(
+			data.store,
+			WithBankSyncServiceNow(func() time.Time { return data.now }),
+			WithBankSyncServiceIDGenerator(func() string { return "id-" + fake.UUID().V4() }),
+			WithBankSyncServiceEvidenceWriter(data.evidence),
+		)
+		observation := ProviderNormalizedTransaction{
+			ProviderAccountID:     data.providerAccount.ProviderAccountID,
+			ProviderTransactionID: "provider-transaction-" + fake.UUID().V4(),
+			Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+			Status:                domain.TransactionStatusBooked,
+			AmountMinor:           -321,
+			Currency:              "PLN",
+			Description:           "transaction-" + fake.Lorem().Word(),
+			EffectiveAt:           data.now,
+			RawPayloadJSON:        []byte(`{"value":"first","accessToken":"not-stored"}`),
+		}
+		_, _, err := syncService.applyProviderTransactions(
+			t.Context(),
+			data.connection,
+			map[string]domain.ConnectionProviderAccount{
+				data.providerAccount.ProviderAccountID: data.providerAccount,
+			},
+			[]ProviderNormalizedTransaction{observation},
+			data.now,
+		)
+		require.NoError(t, err)
+		transactions, err := data.store.ListTransactions(
+			t.Context(),
+			data.tenant.ID,
+			data.account.ID,
+			"",
+			"",
+			false,
+		)
+		require.NoError(t, err)
+		require.Len(t, transactions, 2)
+		transactionID := transactions[0].ID
+		if transactionID == data.transaction.ID {
+			transactionID = transactions[1].ID
+		}
+		firstEvidence, err := data.service.ListTransactionProviderEvidence(
+			t.Context(),
+			ListTransactionProviderEvidenceParams{
+				ActorUserID:   data.ownerUserID,
+				TenantID:      data.tenant.ID,
+				TransactionID: transactionID,
+			},
+		)
+		require.NoError(t, err)
+		require.Len(t, firstEvidence, 1)
+
+		observation.RawPayloadJSON = []byte(`{"value":"latest","refreshToken":"not-stored"}`)
+		_, _, err = syncService.applyProviderTransactions(
+			t.Context(),
+			data.connection,
+			map[string]domain.ConnectionProviderAccount{
+				data.providerAccount.ProviderAccountID: data.providerAccount,
+			},
+			[]ProviderNormalizedTransaction{observation},
+			data.now.Add(time.Minute),
+		)
+		require.NoError(t, err)
+		currentEvidence, err := data.service.ListTransactionProviderEvidence(
+			t.Context(),
+			ListTransactionProviderEvidenceParams{
+				ActorUserID:   data.ownerUserID,
+				TenantID:      data.tenant.ID,
+				TransactionID: transactionID,
+			},
+		)
+		require.NoError(t, err)
+		require.Len(t, currentEvidence, 1)
+		assert.Equal(t, firstEvidence[0].ID, currentEvidence[0].ID)
+		assert.JSONEq(t, `{"value":"latest"}`, string(currentEvidence[0].PayloadJSON))
+		rawPayloads, err := data.store.ListRawPayloads(t.Context(), data.connection.ID)
+		require.NoError(t, err)
+		require.Len(t, rawPayloads, 1)
+		assert.JSONEq(t, `{"value":"latest"}`, string(rawPayloads[0].PayloadJSON))
 	})
 
 	t.Run("maps dependency and malformed payload failures without exposing evidence", func(t *testing.T) {
