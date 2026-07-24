@@ -5,6 +5,12 @@ template-data:
   unroll-variadic: true
 
 packages:
+  net/http:
+    interfaces:
+      RoundTripper:
+        config:
+          dir: internal/infrastructure/httpclient/
+          pkgname: httpclient
   log/slog:
     interfaces:
       Handler:

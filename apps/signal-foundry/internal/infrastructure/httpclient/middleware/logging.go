@@ -9,6 +9,7 @@ import (
 
 const (
 	logHeaderSetCookie = "set-cookie"
+	logHeaderXToken    = "x-token"
 	logRedactedValue   = "[REDACTED]"
 )
 
@@ -37,6 +38,7 @@ func NewLoggingMiddleware(transport http.RoundTripper, deps LoggingMiddlewareDep
 			"cookie":           {},
 			logHeaderSetCookie: {},
 			"x-auth-token":     {},
+			logHeaderXToken:    {},
 			"x-csrf-token":     {},
 			"x-xsrf-token":     {},
 		},

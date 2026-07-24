@@ -12,7 +12,8 @@ import (
 )
 
 type MonobankConfig struct {
-	BaseURL string
+	BaseURL    string
+	HTTPClient *http.Client
 }
 
 type EnableBankingASPSP struct {

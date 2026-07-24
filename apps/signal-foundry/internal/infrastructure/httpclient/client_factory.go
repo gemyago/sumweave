@@ -15,17 +15,19 @@ const (
 	// defaultClientTimeout is the default timeout for HTTP clients.
 	defaultClientTimeout = 30 * time.Second
 
-	defaultMaxIdleConns          = 100
-	defaultIdleConnTimeout       = 90 * time.Second
-	defaultTLSHandshakeTimeout   = 10 * time.Second
-	defaultExpectContinueTimeout = 1 * time.Second
+	defaultMaxIdleConns            = 100
+	defaultIdleConnTimeout         = 90 * time.Second
+	defaultTLSHandshakeTimeout     = 10 * time.Second
+	defaultExpectContinueTimeout   = 1 * time.Second
+	defaultRetryAfterFallbackDelay = 500 * time.Millisecond
 )
 
 // ClientFactoryDeps contains dependencies for the client factory.
 type ClientFactoryDeps struct {
 	dig.In
 
-	RootLogger *slog.Logger
+	RootLogger              *slog.Logger
+	RetryAfterFallbackDelay time.Duration `name:"config.httpClient.retryAfterFallbackDelay"`
 
 	OtelHTTPTransportFactory telemetry.OtelHTTPTransportFactory
 }
@@ -35,9 +37,10 @@ type ClientOption func(*clientConfig)
 
 // clientConfig holds internal configuration for HTTP client creation.
 type clientConfig struct {
-	timeout         time.Duration
-	authTokenSource oauth2.TokenSource
-	enableLogging   bool
+	timeout                 time.Duration
+	authTokenSource         oauth2.TokenSource
+	enableLogging           bool
+	retryAfterFallbackDelay time.Duration
 }
 
 // WithTimeout sets the HTTP client timeout.
@@ -62,10 +65,18 @@ func WithLogging(enabled bool) ClientOption {
 	}
 }
 
+// WithRetryAfterFallbackDelay sets the fallback delay for HTTP 429 responses.
+func WithRetryAfterFallbackDelay(delay time.Duration) ClientOption {
+	return func(c *clientConfig) {
+		c.retryAfterFallbackDelay = delay
+	}
+}
+
 // ClientFactory is responsible for creating configured HTTP clients with middleware.
 type ClientFactory struct {
 	logger                   *slog.Logger
 	otelHTTPTransportFactory telemetry.OtelHTTPTransportFactory
+	retryAfterFallbackDelay  time.Duration
 }
 
 // NewClientFactory creates a new client factory.
@@ -76,19 +87,24 @@ func NewClientFactory(deps ClientFactoryDeps) *ClientFactory {
 			return next
 		}
 	}
+	fallbackDelay := deps.RetryAfterFallbackDelay
+	if fallbackDelay <= 0 {
+		fallbackDelay = defaultRetryAfterFallbackDelay
+	}
 	return &ClientFactory{
 		logger:                   deps.RootLogger.WithGroup("http-client-factory"),
 		otelHTTPTransportFactory: otelHTTPFactory,
+		retryAfterFallbackDelay:  fallbackDelay,
 	}
 }
 
 // CreateClient creates a new HTTP client with the specified options.
-// Middleware is applied in the order: Correlation -> Logging -> Auth -> Otel -> BaseTransport
-// This ensures correlation ID is set first, then logging captures the full request lifecycle, auth adds headers, and otel traces.
+// Middleware executes in this order: RetryAfter -> Otel -> Correlation -> Auth -> Logging -> BaseTransport.
 func (f *ClientFactory) CreateClient(options ...ClientOption) *http.Client {
 	config := &clientConfig{
-		timeout:       defaultClientTimeout,
-		enableLogging: true, // Default: enabled
+		timeout:                 defaultClientTimeout,
+		enableLogging:           true, // Default: enabled
+		retryAfterFallbackDelay: f.retryAfterFallbackDelay,
 	}
 
 	for _, option := range options {
@@ -127,6 +143,11 @@ func (f *ClientFactory) CreateClient(options ...ClientOption) *http.Client {
 	// Enabling/disabling it is controlled globally (in config)
 	// Add option if you need per client control
 	transport = f.otelHTTPTransportFactory(transport)
+
+	if config.retryAfterFallbackDelay <= 0 {
+		config.retryAfterFallbackDelay = defaultRetryAfterFallbackDelay
+	}
+	transport = middleware.NewRetryAfterMiddleware(transport, config.retryAfterFallbackDelay)
 
 	return &http.Client{
 		Transport: transport,

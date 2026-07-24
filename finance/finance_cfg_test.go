@@ -12,6 +12,7 @@ import (
 	"github.com/gemyago/signal-foundry/finance/domain"
 	"github.com/google/uuid"
 	"github.com/jaswdr/faker/v2"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,6 +52,16 @@ func TestConfig(t *testing.T) {
 
 	t.Run("accepts complete config", func(t *testing.T) {
 		require.NoError(t, makeConfig(t).validate())
+	})
+
+	t.Run("uses the injected Monobank client when provided", func(t *testing.T) {
+		generalClient := &http.Client{}
+		monobankClient := &http.Client{}
+		assert.Same(t, monobankClient, monobankHTTPClient(&Config{
+			HTTPClient: generalClient,
+			Monobank:   MonobankConfig{HTTPClient: monobankClient},
+		}))
+		assert.Same(t, generalClient, monobankHTTPClient(&Config{HTTPClient: generalClient}))
 	})
 
 	t.Run("rejects missing root dependencies", func(t *testing.T) {

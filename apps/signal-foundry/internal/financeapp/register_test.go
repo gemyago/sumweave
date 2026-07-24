@@ -63,6 +63,30 @@ func TestNewFinanceStoreFromDI(t *testing.T) {
 	require.ErrorContains(t, err, "no such table")
 }
 
+func TestNewMonobankHTTPClient(t *testing.T) {
+	makeFactory := func() *apphttpclient.ClientFactory {
+		return apphttpclient.NewClientFactory(apphttpclient.ClientFactoryDeps{
+			RootLogger: slog.New(slog.DiscardHandler),
+		})
+	}
+
+	t.Run("uses a fallback-aware timeout budget", func(t *testing.T) {
+		fallbackDelay := 61 * time.Second
+
+		client, err := newMonobankHTTPClient(makeFactory(), fallbackDelay)
+
+		require.NoError(t, err)
+		assert.Equal(t, fallbackDelay+2*30*time.Second+time.Second, client.Timeout)
+	})
+
+	t.Run("rejects non-positive fallback delays", func(t *testing.T) {
+		client, err := newMonobankHTTPClient(makeFactory(), 0)
+
+		require.ErrorContains(t, err, "fallback delay must be positive")
+		assert.Nil(t, client)
+	})
+}
+
 func TestCSVImportJobEnqueuer(t *testing.T) {
 	fake := faker.New()
 	dsn := fmt.Sprintf("file:finance-csv-import-jobs-%s?mode=memory&cache=shared", fake.UUID().V4())
@@ -281,21 +305,22 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		registry := jobspkg.NewRegistry()
 		jobsService, jobsStore := makeJobsService(t, registry, makeSQLiteMemoryDSN("jobs-fx-refresh"))
 		deps := financeServiceDeps{
-			Database:             database,
-			Store:                financeStore,
-			Jobs:                 jobsService,
-			JobsStore:            jobsStore,
-			Registry:             registry,
-			RootLogger:           slog.New(slog.DiscardHandler),
-			HTTPClientFactory:    makeHTTPClientFactory(t, nil),
-			JWT:                  "jwt-key-for-fx-refresh-tests",
-			EnableURL:            "https://" + faker.New().Internet().Domain(),
-			EnableAppID:          "app-" + faker.New().UUID().V4(),
-			EnablePrivateKeyPath: makePrivateKeyPath(t),
-			EnableASPSPName:      "ASPSP-" + faker.New().Company().Name(),
-			EnableCountry:        "PL",
-			EnablePSUType:        "personal",
-			EnableValidDays:      90,
+			Database:                    database,
+			Store:                       financeStore,
+			Jobs:                        jobsService,
+			JobsStore:                   jobsStore,
+			Registry:                    registry,
+			RootLogger:                  slog.New(slog.DiscardHandler),
+			HTTPClientFactory:           makeHTTPClientFactory(t, nil),
+			JWT:                         "jwt-key-for-fx-refresh-tests",
+			MonoRetryAfterFallbackDelay: 61 * time.Second,
+			EnableURL:                   "https://" + faker.New().Internet().Domain(),
+			EnableAppID:                 "app-" + faker.New().UUID().V4(),
+			EnablePrivateKeyPath:        makePrivateKeyPath(t),
+			EnableASPSPName:             "ASPSP-" + faker.New().Company().Name(),
+			EnableCountry:               "PL",
+			EnablePSUType:               "personal",
+			EnableValidDays:             90,
 		}
 		_, err := newFinanceModuleFromDI(deps)
 		require.NoError(t, err)
@@ -433,15 +458,16 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 			HTTPClientFactory: makeHTTPClientFactory(t, func(request *http.Request) {
 				request.Header.Set("X-App-Client", expectedClientHeader)
 			}),
-			JWT:                  "jwt-key-for-finance-tests",
-			MonoURL:              monoServer.URL,
-			EnableURL:            enableServer.URL,
-			EnableAppID:          "app-123",
-			EnablePrivateKeyPath: enablePrivateKeyPath,
-			EnableASPSPName:      "PKO Bank Polski",
-			EnableCountry:        "PL",
-			EnablePSUType:        "personal",
-			EnableValidDays:      90,
+			JWT:                         "jwt-key-for-finance-tests",
+			MonoURL:                     monoServer.URL,
+			MonoRetryAfterFallbackDelay: 61 * time.Second,
+			EnableURL:                   enableServer.URL,
+			EnableAppID:                 "app-123",
+			EnablePrivateKeyPath:        enablePrivateKeyPath,
+			EnableASPSPName:             "PKO Bank Polski",
+			EnableCountry:               "PL",
+			EnablePSUType:               "personal",
+			EnableValidDays:             90,
 		})
 		require.NoError(t, err)
 		bankConnections := financeModule.BankConnectionService
@@ -607,21 +633,22 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		)
 
 		financeModule, err := newFinanceModuleFromDI(financeServiceDeps{
-			Database:             database,
-			Store:                financeStore,
-			Jobs:                 jobsService,
-			JobsStore:            jobsStore,
-			Registry:             registry,
-			RootLogger:           nil,
-			HTTPClientFactory:    makeHTTPClientFactory(t, nil),
-			JWT:                  "jwt-key-for-finance-tests",
-			EnableURL:            server.URL,
-			EnableAppID:          "app-123",
-			EnablePrivateKeyPath: privateKeyPath,
-			EnableASPSPName:      "PKO Bank Polski",
-			EnableCountry:        "PL",
-			EnablePSUType:        "personal",
-			EnableValidDays:      90,
+			Database:                    database,
+			Store:                       financeStore,
+			Jobs:                        jobsService,
+			JobsStore:                   jobsStore,
+			Registry:                    registry,
+			RootLogger:                  nil,
+			HTTPClientFactory:           makeHTTPClientFactory(t, nil),
+			JWT:                         "jwt-key-for-finance-tests",
+			MonoRetryAfterFallbackDelay: 61 * time.Second,
+			EnableURL:                   server.URL,
+			EnableAppID:                 "app-123",
+			EnablePrivateKeyPath:        privateKeyPath,
+			EnableASPSPName:             "PKO Bank Polski",
+			EnableCountry:               "PL",
+			EnablePSUType:               "personal",
+			EnableValidDays:             90,
 		})
 		require.NoError(t, err)
 		bankConnections := financeModule.BankConnectionService
@@ -718,7 +745,10 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 				func() *jobspkg.Registry { return registry },
 				func() *apphttpclient.ClientFactory { return makeHTTPClientFactory(t, nil) },
 				di.ProvideValue(monoServer.URL, dig.Name("config.finance.providers.monobank.baseURL")),
-				di.ProvideValue(time.Duration(0), dig.Name("config.finance.providers.monobank.sleepBetweenRequests")),
+				di.ProvideValue(
+					61*time.Second,
+					dig.Name("config.finance.providers.monobank.retryAfterFallbackDelay"),
+				),
 				di.ProvideValue(
 					"https://api.enablebanking.com",
 					dig.Name("config.finance.providers.enableBanking.baseURL"),
@@ -799,15 +829,16 @@ func TestNewFinanceServiceFromDI(t *testing.T) {
 		financeStore := persistence.NewStore(database)
 
 		_, err := newFinanceModuleFromDI(financeServiceDeps{
-			Database:          database,
-			Store:             financeStore,
-			HTTPClientFactory: makeHTTPClientFactory(t, nil),
-			JWT:               "jwt-key-for-finance-tests",
-			EnableURL:         "https://api.enablebanking.com",
-			EnableASPSPName:   "Mock ASPSP",
-			EnableCountry:     "PL",
-			EnablePSUType:     "personal",
-			EnableValidDays:   90,
+			Database:                    database,
+			Store:                       financeStore,
+			HTTPClientFactory:           makeHTTPClientFactory(t, nil),
+			JWT:                         "jwt-key-for-finance-tests",
+			MonoRetryAfterFallbackDelay: 61 * time.Second,
+			EnableURL:                   "https://api.enablebanking.com",
+			EnableASPSPName:             "Mock ASPSP",
+			EnableCountry:               "PL",
+			EnablePSUType:               "personal",
+			EnableValidDays:             90,
 		})
 		require.ErrorContains(t, err, "validate enable banking config: app ID is required")
 	})

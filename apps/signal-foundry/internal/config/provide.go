@@ -136,10 +136,11 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "jobs.historicalBackfill.maxPageSize").asInt(),
 
 		// finance providers config
+		provideConfigValue(cfg, "httpClient.retryAfterFallbackDelay").asDuration(),
 		provideConfigValue(cfg, "finance.fixtures.database.dsn").asString(),
 		provideConfigValue(cfg, "finance.fixtures.database.jobsTablePrefix").asString(),
 		provideConfigValue(cfg, "finance.providers.monobank.baseURL").asString(),
-		provideConfigValue(cfg, "finance.providers.monobank.sleepBetweenRequests").asDuration(),
+		provideConfigValue(cfg, "finance.providers.monobank.retryAfterFallbackDelay").asDuration(),
 		provideConfigValue(cfg, "finance.providers.enableBanking.baseURL").asString(),
 		provideConfigValue(cfg, "finance.providers.enableBanking.callbackBaseURL").asString(),
 		provideConfigValue(cfg, "finance.providers.enableBanking.appID").asString(),

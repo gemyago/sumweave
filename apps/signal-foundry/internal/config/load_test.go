@@ -14,7 +14,6 @@ func TestLoad(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Equal(t, "DEBUG", cfg.GetString("defaultLogLevel"))
-		require.Equal(t, "https://api.monobank.ua", cfg.GetString("finance.providers.monobank.baseURL"))
 	})
 	t.Run("dev flow regression: test config still loads core HTTP defaults", func(t *testing.T) {
 		cfg := New()

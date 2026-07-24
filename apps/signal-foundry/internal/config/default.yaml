@@ -28,6 +28,9 @@ httpServer:
   writeTimeout: 300s
   accessLogsLevel: ""
 
+httpClient:
+  retryAfterFallbackDelay: 500ms
+
 openTelemetry:
   # Enable or disable OpenTelemetry integration in one place
   enabled: false
@@ -129,7 +132,7 @@ finance:
   providers:
     monobank:
       baseURL: "https://api.monobank.ua"
-      sleepBetweenRequests: 0s
+      retryAfterFallbackDelay: 61s
     enableBanking:
       # Enable Banking sandbox apps use the same API host; sandbox/live is selected by the app registration.
       baseURL: "https://api.enablebanking.com"

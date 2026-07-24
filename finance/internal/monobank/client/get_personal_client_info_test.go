@@ -124,7 +124,6 @@ func TestClient_GetPersonalClientInfo(t *testing.T) {
 		require.ErrorContains(t, err, "status 500")
 		assert.NotContains(t, err.Error(), token)
 	})
-
 	t.Run("request build error", func(t *testing.T) {
 		client := NewClient(Args{BaseURL: ":bad"})
 

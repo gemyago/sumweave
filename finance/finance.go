@@ -3,6 +3,7 @@ package finance
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/gemyago/signal-foundry/finance/credentials"
@@ -99,7 +100,7 @@ func newConnectors(
 		),
 		internalmonobank.NewConnector(internalmonobank.Args{
 			BaseURL:    cfg.Monobank.BaseURL,
-			HTTPClient: cfg.HTTPClient,
+			HTTPClient: monobankHTTPClient(cfg),
 			Logger:     cfg.Logger,
 		}, internalmonobank.WithSecretTokenResolver(func(
 			_ context.Context,
@@ -122,6 +123,13 @@ func newConnectors(
 		Now:            cfg.Now,
 	}))
 	return connectors
+}
+
+func monobankHTTPClient(cfg *Config) *http.Client {
+	if cfg.Monobank.HTTPClient != nil {
+		return cfg.Monobank.HTTPClient
+	}
+	return cfg.HTTPClient
 }
 
 func newProviderProfileRegistry(cfg *Config) *internalproviders.StaticProviderProfileRegistry {

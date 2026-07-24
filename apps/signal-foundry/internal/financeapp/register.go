@@ -46,23 +46,23 @@ type databaseDeps struct {
 type financeServiceDeps struct {
 	dig.In
 
-	Database             *persistence.Database
-	Store                *persistence.Store
-	Jobs                 *jobspkg.Service
-	JobsStore            *jobspkg.Store
-	Registry             *jobspkg.Registry
-	HTTPClientFactory    *apphttpclient.ClientFactory
-	RootLogger           *slog.Logger
-	JWT                  string        `name:"auth.jwtKey" optional:"true"`
-	MonoURL              string        `name:"config.finance.providers.monobank.baseURL" optional:"true"`
-	MonoSleep            time.Duration `name:"config.finance.providers.monobank.sleepBetweenRequests" optional:"true"`
-	EnableURL            string        `name:"config.finance.providers.enableBanking.baseURL" optional:"true"`
-	EnableAppID          string        `name:"config.finance.providers.enableBanking.appID" optional:"true"`
-	EnablePrivateKeyPath string        `name:"config.finance.providers.enableBanking.privateKeyPath" optional:"true"`
-	EnableASPSPName      string        `name:"config.finance.providers.enableBanking.aspspName" optional:"true"`
-	EnableCountry        string        `name:"config.finance.providers.enableBanking.country" optional:"true"`
-	EnablePSUType        string        `name:"config.finance.providers.enableBanking.psuType" optional:"true"`
-	EnableValidDays      int           `name:"config.finance.providers.enableBanking.validDays" optional:"true"`
+	Database                    *persistence.Database
+	Store                       *persistence.Store
+	Jobs                        *jobspkg.Service
+	JobsStore                   *jobspkg.Store
+	Registry                    *jobspkg.Registry
+	HTTPClientFactory           *apphttpclient.ClientFactory
+	RootLogger                  *slog.Logger
+	JWT                         string        `name:"auth.jwtKey" optional:"true"`
+	MonoURL                     string        `name:"config.finance.providers.monobank.baseURL" optional:"true"`
+	MonoRetryAfterFallbackDelay time.Duration `name:"config.finance.providers.monobank.retryAfterFallbackDelay" optional:"true"`
+	EnableURL                   string        `name:"config.finance.providers.enableBanking.baseURL" optional:"true"`
+	EnableAppID                 string        `name:"config.finance.providers.enableBanking.appID" optional:"true"`
+	EnablePrivateKeyPath        string        `name:"config.finance.providers.enableBanking.privateKeyPath" optional:"true"`
+	EnableASPSPName             string        `name:"config.finance.providers.enableBanking.aspspName" optional:"true"`
+	EnableCountry               string        `name:"config.finance.providers.enableBanking.country" optional:"true"`
+	EnablePSUType               string        `name:"config.finance.providers.enableBanking.psuType" optional:"true"`
+	EnableValidDays             int           `name:"config.finance.providers.enableBanking.validDays" optional:"true"`
 }
 
 func newDatabase(deps databaseDeps) (*persistence.Database, error) {
@@ -83,6 +83,10 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 	if err != nil {
 		return nil, err
 	}
+	monobankHTTPClient, err := newMonobankHTTPClient(deps.HTTPClientFactory, deps.MonoRetryAfterFallbackDelay)
+	if err != nil {
+		return nil, err
+	}
 	financeModule, err := financepkg.New(&financepkg.Config{
 		Database:               deps.Database,
 		Logger:                 resolveFinanceLogger(deps.RootLogger),
@@ -96,7 +100,8 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 		FXJobEnqueuer:          fxRefreshJobEnqueuer{jobs: deps.Jobs},
 		FXScheduleWriter:       fxRefreshScheduleWriter{store: deps.JobsStore},
 		Monobank: financepkg.MonobankConfig{
-			BaseURL: resolveMonobankBaseURL(deps.MonoURL),
+			BaseURL:    resolveMonobankBaseURL(deps.MonoURL),
+			HTTPClient: monobankHTTPClient,
 		},
 		EnableBanking: buildEnableBankingConfig(deps),
 	})
@@ -127,6 +132,20 @@ func newFinanceHTTPClient(factory *apphttpclient.ClientFactory) (*http.Client, e
 		return nil, errors.New("finance HTTP client factory is required")
 	}
 	return factory.CreateClient(), nil
+}
+
+func newMonobankHTTPClient(factory *apphttpclient.ClientFactory, fallbackDelay time.Duration) (*http.Client, error) {
+	if factory == nil {
+		return nil, errors.New("finance HTTP client factory is required")
+	}
+	if fallbackDelay <= 0 {
+		return nil, errors.New("monobank Retry-After fallback delay must be positive")
+	}
+	timeout := fallbackDelay + 2*30*time.Second + time.Second
+	return factory.CreateClient(
+		apphttpclient.WithRetryAfterFallbackDelay(fallbackDelay),
+		apphttpclient.WithTimeout(timeout),
+	), nil
 }
 
 func newTenantServiceFromDI(module *financepkg.Finance) *financepkg.TenantService {

@@ -242,6 +242,7 @@ func TestLoggingMiddleware(t *testing.T) {
 				"Cookie",
 				"Set-Cookie",
 				"X-Auth-Token",
+				"X-Token",
 				"X-CSRF-Token",
 				"X-XSRF-Token",
 			} {

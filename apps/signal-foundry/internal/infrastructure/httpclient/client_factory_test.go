@@ -1,7 +1,9 @@
 package httpclient
 
 import (
+	"bytes"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/telemetry"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/oauth2"
 )
@@ -24,6 +27,16 @@ func TestClientFactory(t *testing.T) {
 			},
 		}
 	}
+
+	t.Run("uses configured and default Retry-After fallback delays", func(t *testing.T) {
+		defaultFactory := NewClientFactory(makeMockDeps())
+		configuredDeps := makeMockDeps()
+		configuredDeps.RetryAfterFallbackDelay = 3 * time.Second
+		configuredFactory := NewClientFactory(configuredDeps)
+
+		assert.Equal(t, defaultRetryAfterFallbackDelay, defaultFactory.retryAfterFallbackDelay)
+		assert.Equal(t, 3*time.Second, configuredFactory.retryAfterFallbackDelay)
+	})
 
 	t.Run("should create HTTP client with all middleware enabled", func(t *testing.T) {
 		// Arrange
@@ -131,5 +144,42 @@ func TestClientFactory(t *testing.T) {
 
 		// Should use custom timeout
 		assert.Equal(t, 45*time.Second, client.Timeout)
+	})
+
+	t.Run("replays with an explicit fallback and records both attempts", func(t *testing.T) {
+		var logBuffer bytes.Buffer
+		telemetryAttempts := 0
+		factory := NewClientFactory(ClientFactoryDeps{
+			RootLogger: slog.New(slog.NewJSONHandler(&logBuffer, &slog.HandlerOptions{Level: slog.LevelDebug})),
+			OtelHTTPTransportFactory: func(next http.RoundTripper) http.RoundTripper {
+				transport := NewMockRoundTripper(t)
+				transport.EXPECT().
+					RoundTrip(mock.Anything).
+					RunAndReturn(func(request *http.Request) (*http.Response, error) {
+						telemetryAttempts++
+						return next.RoundTrip(request)
+					})
+				return transport
+			},
+		})
+		attempts := 0
+		testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			attempts++
+			if attempts == 1 {
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer testServer.Close()
+
+		response, err := factory.CreateClient(WithRetryAfterFallbackDelay(time.Millisecond)).Get(testServer.URL)
+
+		require.NoError(t, err)
+		defer response.Body.Close()
+		assert.Equal(t, http.StatusOK, response.StatusCode)
+		assert.Equal(t, 2, attempts)
+		assert.Equal(t, 2, telemetryAttempts)
+		assert.Equal(t, 2, bytes.Count(logBuffer.Bytes(), []byte("OUTBOUND_REQUEST_COMPLETED")))
 	})
 }
