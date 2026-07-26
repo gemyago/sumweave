@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -408,20 +410,10 @@
   })
 </script>
 
-<section class="container-fluid px-0" aria-labelledby="finance-transaction-editor-heading">
+<DocumentTitle title={documentTitle(params.transactionId ? 'Transaction' : 'Record transaction', 'Transactions')} />
+
+<section class="container-fluid px-0" aria-label="Transaction editor">
   <div class="d-grid gap-4">
-    <header class="card border-0 shadow-sm">
-      <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
-        <div>
-          <h1 id="finance-transaction-editor-heading" class="h3 mb-0">{#if isCreateMode}Record transaction{:else}Transaction{/if}</h1>
-        </div>
-
-        <a class="btn btn-outline-secondary align-self-start align-self-lg-center" href="/finance/transactions" use:link>
-          Back to transactions
-        </a>
-      </div>
-    </header>
-
     {#if error}
       <div class="alert alert-danger mb-0" role="alert">{error}</div>
     {/if}
@@ -485,7 +477,7 @@
 
       <form class="card shadow-sm" onsubmit={saveTransaction} oninput={clearSaveFeedback} onchange={clearSaveFeedback}>
         <div class="card-body p-4 d-grid gap-4">
-          <h2 class="h5 mb-0">Details</h2>
+          <h1 class="h5 mb-0">Details</h1>
           <div class="row g-3">
             <div class="col-12 col-md-6"><label class="form-label" for="finance-transaction-account">Account</label><select id="finance-transaction-account" class="form-select" bind:value={form.accountId} onchange={syncCurrencyWithAccount} aria-label="Transaction account" disabled={!isCreateMode} required><option value="">Select account</option>{#each isCreateMode ? selectableAccounts : accounts as account (account.id)}<option value={account.id}>{account.name}{account.hiddenAt ? ' (Hidden)' : ''}</option>{/each}</select>{#if isCreateMode && selectableAccounts.length === 0}<div class="form-text">No active accounts are available. Restore an account or create one before recording a transaction.</div>{/if}</div>
             <div class="col-12 col-md-6"><label class="form-label" for="finance-transaction-category">Category</label><select id="finance-transaction-category" class="form-select" bind:value={form.categoryId} aria-label="Transaction category"><option value="">No category</option>{#each categories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}</select></div>

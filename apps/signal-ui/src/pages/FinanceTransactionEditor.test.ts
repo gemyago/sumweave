@@ -130,8 +130,10 @@ describe('Finance transaction editor page', () => {
     const focus = vi.spyOn(HTMLElement.prototype, 'focus')
     render(FinanceTransactionEditor, { params: {} })
 
-    expect(await screen.findByRole('heading', { name: 'Record transaction' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Details' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Record transaction' })).not.toBeInTheDocument()
     expect(screen.queryByText('Transaction editor')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Back to transactions' })).not.toBeInTheDocument()
     expect(mocks.getTransaction).not.toHaveBeenCalled()
     await screen.findByLabelText('Amount')
 
@@ -173,7 +175,7 @@ describe('Finance transaction editor page', () => {
     const user = userEvent.setup()
     render(FinanceTransactionEditor, { params: {} })
 
-    await screen.findByRole('heading', { name: 'Record transaction' })
+    await screen.findByRole('heading', { name: 'Details' })
     await screen.findByLabelText('Transaction account')
     await user.selectOptions(screen.getByLabelText('Transaction account'), 'account-2')
     await user.selectOptions(screen.getByLabelText('Transaction status'), 'pending')
@@ -355,7 +357,8 @@ describe('Finance transaction editor page', () => {
     const user = userEvent.setup()
     render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
 
-    expect(await screen.findByRole('heading', { name: 'Transaction' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Details' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Transaction' })).not.toBeInTheDocument()
     await waitFor(() =>
       expect(mocks.getTransaction).toHaveBeenCalledWith({
         tenantId: 'tenant-1',
@@ -510,7 +513,7 @@ describe('Finance transaction editor page', () => {
 
     render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
 
-    await screen.findByRole('heading', { name: 'Transaction' })
+    await screen.findByRole('heading', { name: 'Details' })
     await screen.findByRole('button', { name: 'Save transaction' })
     await user.click(screen.getByRole('button', { name: 'Save transaction' }))
 

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { createSignalFinanceApiForAuth, FinanceApiError, type FinanceCSVImportAudit, type FinanceCSVImportPreview, type FinanceCSVRejectedRow } from '../lib/finance/api'
@@ -257,6 +259,8 @@
     return `Row ${issue.rowNumber}${issue.field ? ` · ${issue.field}` : ''}: ${issue.reason}`
   }
 </script>
+
+<DocumentTitle title={documentTitle('Imports', 'Finance')} />
 
 <section class="container-fluid px-0" aria-labelledby="finance-imports-heading">
   <div class="d-grid gap-4">

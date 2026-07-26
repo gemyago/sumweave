@@ -19,6 +19,9 @@ Browser SPA for Signal Foundry under `apps/signal-ui`: static **`dist/`** from V
 - **`src/main.ts`** — bootstraps the app.
 - **`src/App.svelte`** — shell + **`Router`** and route map.
 - **`src/pages/`** — route-level views (for example login, chat, and provider management).
+- **Document titles** — route pages render `DocumentTitle` (which owns `<svelte:head>`)
+  with `documentTitle()`;
+  current page comes first, then its section, then `Signal Foundry`.
 - **`src/components/`** — shared UI (e.g. nav with `use:link`).
 - **`src/lib/`** — shared helpers / constants (grow as needed).
 - **`public/`** — static assets copied into `dist/` as-is.

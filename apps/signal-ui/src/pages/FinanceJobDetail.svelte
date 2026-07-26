@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { formatFinanceDateTime } from '../lib/finance/format'
@@ -137,6 +139,8 @@
     void loadDetail(params.jobId)
   })
 </script>
+
+<DocumentTitle title={documentTitle('Job detail', 'Finance')} />
 
 <section class="container-fluid px-0" aria-labelledby="finance-job-detail-heading">
   <div class="d-grid gap-4">

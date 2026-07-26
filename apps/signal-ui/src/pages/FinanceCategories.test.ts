@@ -83,6 +83,18 @@ describe('Finance categories page', () => {
     expect(mocks.renameTag).not.toHaveBeenCalled()
   })
 
+  it('uses icon-only edit buttons with accessible item-specific names', async () => {
+    render(FinanceCategories)
+
+    const categoryEdit = await screen.findByRole('button', { name: 'Edit Groceries' })
+    const tagEdit = screen.getByRole('button', { name: 'Edit Budget' })
+
+    expect(categoryEdit).toHaveAttribute('title', 'Edit Groceries')
+    expect(tagEdit).toHaveAttribute('title', 'Edit Budget')
+    expect(categoryEdit).toHaveTextContent('')
+    expect(tagEdit).toHaveTextContent('')
+  })
+
   it('saves an inline tag edit without opening the category form', async () => {
     const user = userEvent.setup()
     render(FinanceCategories)

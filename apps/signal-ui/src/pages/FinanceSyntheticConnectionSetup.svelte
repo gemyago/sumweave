@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link, replace } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -234,6 +236,8 @@
     void loadSyntheticLinkState()
   })
 </script>
+
+<DocumentTitle title={documentTitle('Synthetic setup', 'Connections & sync')} />
 
 <section class="container-fluid px-0" aria-labelledby="finance-synthetic-setup-heading">
   <div class="d-grid gap-4">

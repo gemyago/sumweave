@@ -41,7 +41,8 @@
   ]
 
   function normalizePath(path: string): string {
-    return path.split('?')[0]
+    const pathname = path.split('?')[0].replace(/\/+$/, '')
+    return pathname || '/'
   }
 
   const currentPathname = $derived(normalizePath(currentPath))
@@ -54,7 +55,10 @@
     let activeHref = ''
 
     for (const item of navLinks) {
-      if (currentPathname === item.href || currentPathname.startsWith(`${item.href}/`)) {
+      if (
+        currentPathname === item.href ||
+        (item.href !== '/finance' && currentPathname.startsWith(`${item.href}/`))
+      ) {
         if (item.href.length > activeHref.length) {
           activeHref = item.href
         }
@@ -70,6 +74,45 @@
     }
 
     return navLinks.find((item) => item.href === activeNavHref)?.label ?? 'Workspace'
+  })
+
+  const breadcrumbItems = $derived.by(() => {
+    const items = [{ label: 'Finance', href: '/finance' }]
+
+    if (currentPathname === '/finance') {
+      return [...items, { label: 'Dashboard', href: '' }].map((item, index, allItems) => ({
+        ...item,
+        current: index === allItems.length - 1,
+      }))
+    }
+
+    if (!activeNavHref) {
+      const fallbackLabel = currentPathname.startsWith('/finance/jobs/') ? 'Jobs' : 'Workspace'
+      return [...items, { label: fallbackLabel, href: '' }].map((item, index, allItems) => ({
+        ...item,
+        current: index === allItems.length - 1,
+      }))
+    }
+
+    items.push({ label: currentSectionLabel, href: activeNavHref })
+    const isSectionPage = currentPathname === activeNavHref
+
+    if (isSectionPage) {
+      return items.map((item, index) => ({ ...item, current: index === items.length - 1 }))
+    }
+
+    const detailLabel = currentPathname.endsWith('/new')
+      ? `Record ${currentSectionLabel.slice(0, -1).toLowerCase()}`
+      : currentSectionLabel === 'Accounts'
+        ? 'Account detail'
+        : currentSectionLabel === 'Transactions'
+          ? 'Transaction'
+          : currentSectionLabel
+
+    return [...items, { label: detailLabel, href: '' }].map((item, index, allItems) => ({
+      ...item,
+      current: index === allItems.length - 1,
+    }))
   })
 
   onMount(() => {
@@ -122,10 +165,19 @@
     <section class="col-12 col-lg-8 col-xl-9 col-xxl-10">
       <header class="border-bottom bg-body" aria-label="Finance utilities">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 p-2 p-lg-4">
-          <div class="d-none d-sm-block">
-            <p class="mb-1 text-uppercase small text-body-secondary fw-semibold">Finance</p>
-            <p class="mb-0 fw-semibold">Finance / {currentSectionLabel}</p>
-          </div>
+          <nav class="finance-shell-breadcrumb-nav d-none d-sm-block" aria-label="Breadcrumb">
+            <ol class="finance-shell-breadcrumb breadcrumb mb-0">
+              {#each breadcrumbItems as item (item.href || item.label)}
+                <li class="breadcrumb-item d-none d-sm-block" class:active={item.current} aria-current={item.current ? 'page' : undefined}>
+                  {#if item.current}
+                    {item.label}
+                  {:else}
+                    <a href={item.href} use:link>{item.label}</a>
+                  {/if}
+                </li>
+              {/each}
+            </ol>
+          </nav>
 
           <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
             {#if showsTenantControl}

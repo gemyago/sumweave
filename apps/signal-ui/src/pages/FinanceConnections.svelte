@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -280,6 +282,8 @@
     void finishRedirectIfReturned()
   })
 </script>
+
+<DocumentTitle title={documentTitle('Connections & sync', 'Finance')} />
 
 <section class="container-fluid px-0" aria-labelledby="finance-connections-heading">
   <div class="d-grid gap-4">

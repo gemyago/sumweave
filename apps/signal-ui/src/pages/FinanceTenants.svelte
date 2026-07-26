@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -235,6 +237,8 @@
   })
 
 </script>
+
+<DocumentTitle title={documentTitle('Tenants', 'Finance')} />
 
 <section class="container-fluid px-0" aria-labelledby="finance-tenants-heading">
   <div class="d-grid gap-4">

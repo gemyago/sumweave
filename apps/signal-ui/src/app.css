@@ -158,6 +158,13 @@ html:not([data-theme]) {
   }
 }
 
+@media (max-width: 575.98px) {
+  /* A11y: hide the Bootstrap-generated breadcrumb separator on mobile-hidden breadcrumbs. */
+  .finance-shell-breadcrumb {
+    --bs-breadcrumb-divider: '';
+  }
+}
+
 /* Finance list containment and inline editors need shrinkable fields beside fixed action groups. */
 .finance-transaction-list,
 .finance-transaction-list .min-w-0,

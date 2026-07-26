@@ -25,6 +25,15 @@ describe('Finance account detail page', () => {
     render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
     expect((await screen.findAllByRole('heading', { name: 'Checking' })).length).toBeGreaterThan(0)
     expect(screen.getByText('Groceries')).toBeInTheDocument()
+    expect(document.title).toBe('Checking · Accounts · Signal Foundry')
+    expect(screen.queryByRole('link', { name: 'Accounts' })).not.toBeInTheDocument()
+  })
+
+  it('uses the generic detail title while the account is loading', () => {
+    mocks.getAccount.mockReturnValue(new Promise(() => {}))
+    render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
+
+    expect(document.title).toBe('Account detail · Accounts · Signal Foundry')
   })
 
   it('renders booked and pending balances in the account summary', async () => {
@@ -179,7 +188,7 @@ describe('Finance account detail page', () => {
     const user = userEvent.setup()
     render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
 
-    await user.click(await screen.findByRole('button', { name: 'Edit' }))
+    await user.click(await screen.findByRole('button', { name: 'Edit account name' }))
     expect(screen.queryByRole('heading', { name: 'Checking' })).not.toBeInTheDocument()
     await user.clear(screen.getByLabelText('Account name'))
     await user.type(screen.getByLabelText('Account name'), 'Everyday checking')

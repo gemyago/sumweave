@@ -189,6 +189,7 @@
     if (typeof document === 'undefined') return
     document.body.classList.toggle('chat-route-fullheight', isChatRoute)
   })
+
 </script>
 
 {#if authStore.restoring}

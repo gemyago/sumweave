@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { createSignalFinanceApiForAuth, type FinanceAccount } from '../lib/finance/api'
@@ -58,6 +60,8 @@
     void loadAccounts()
   })
 </script>
+
+<DocumentTitle title={documentTitle('Accounts', 'Finance')} />
 
 <section class="container-fluid px-0" aria-labelledby="finance-accounts-heading">
   <div class="d-grid gap-4">

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { createSignalFinanceApiForAuth } from '../lib/finance/api'
@@ -51,6 +53,8 @@
     }
   }
 </script>
+
+<DocumentTitle title={documentTitle('New account', 'Accounts')} />
 
 <section class="container-fluid px-0" aria-labelledby="finance-account-editor-heading">
   <div class="d-grid gap-4">

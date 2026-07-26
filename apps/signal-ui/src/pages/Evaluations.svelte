@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import DateRangePicker from '../components/DateRangePicker.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
@@ -195,6 +197,8 @@
     return value === undefined ? '—' : String(value)
   }
 </script>
+
+<DocumentTitle title={documentTitle(params.strategyId ? 'Run evaluation' : 'Evaluations', params.strategyId ? 'Evaluations' : undefined)} />
 
 <section class="page" aria-labelledby="evaluations-heading">
   <header class="page-header">

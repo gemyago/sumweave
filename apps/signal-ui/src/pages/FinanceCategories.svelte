@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
+  import Pencil from '@lucide/svelte/icons/pencil'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
     createSignalFinanceApiForAuth,
@@ -182,6 +185,8 @@
   })
 </script>
 
+<DocumentTitle title={documentTitle('Categories', 'Finance')} />
+
 <section class="container-fluid px-0" aria-labelledby="finance-categories-heading">
   <div class="d-grid gap-4">
     <header class="card border-0 shadow-sm">
@@ -295,7 +300,7 @@
                         <span class="badge text-bg-secondary">{category.kind}</span>
                         {#if category.seededDefault}<span class="badge text-bg-light border">Starter default</span>{/if}
                       </div>
-                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => startCategoryEdit(category)}>Edit {category.name}</button>
+                      <button class="btn btn-outline-secondary btn-sm align-self-end align-self-sm-auto" type="button" onclick={() => startCategoryEdit(category)} aria-label={`Edit ${category.name}`} title={`Edit ${category.name}`}><Pencil size={14} /></button>
                     </div>
                   {/if}
                 </article>
@@ -348,7 +353,7 @@
                   {:else}
                     <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
                       <strong>{tag.name}</strong>
-                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => startTagEdit(tag)}>Edit {tag.name}</button>
+                      <button class="btn btn-outline-secondary btn-sm align-self-end align-self-sm-auto" type="button" onclick={() => startTagEdit(tag)} aria-label={`Edit ${tag.name}`} title={`Edit ${tag.name}`}><Pencil size={14} /></button>
                     </div>
                   {/if}
                 </article>

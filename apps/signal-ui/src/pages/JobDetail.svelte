@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -22,6 +24,7 @@
     secondaryBackHref = '/data',
     secondaryBackLabel = 'Back to data',
     formatDateValue = formatLocalDateTime,
+    pageDocumentTitle = documentTitle('Job detail', 'Jobs'),
   } = $props<{
     params?: { jobId?: string }
     heading?: string
@@ -31,6 +34,7 @@
     secondaryBackHref?: string
     secondaryBackLabel?: string
     formatDateValue?: (value: Date | null | undefined) => string
+    pageDocumentTitle?: string
   }>()
 
   let loading = $state(true)
@@ -116,6 +120,8 @@
     return isHistoricalDataBackfillJob(item) && item.result !== undefined
   }
 </script>
+
+<DocumentTitle title={pageDocumentTitle} />
 
 <section class="page" aria-labelledby="job-detail-heading">
   <header class="page-header">

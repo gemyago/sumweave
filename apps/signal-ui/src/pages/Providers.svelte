@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { createSignalAgentApi } from '../lib/agentapi/client'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import type { ProviderResponse, CreateProviderRequest, UpdateProviderRequest, ModelConfig } from '../lib/agentapi/types'
@@ -159,6 +161,8 @@
     }
   }
 </script>
+
+<DocumentTitle title={documentTitle('Providers')} />
 
 <section class="page" aria-labelledby="providers-heading">
   <header class="page-header">

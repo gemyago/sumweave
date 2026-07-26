@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link, push } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { formatCompactIdentifier } from '../lib/compact-identifier'
@@ -251,6 +253,8 @@
     return result?.errors ?? []
   }
 </script>
+
+<DocumentTitle title={documentTitle(params.strategyId ? 'Strategy' : 'Strategies')} />
 
 {#if hasSelectedRoute}
   <section class="page" aria-labelledby="strategy-detail-heading">

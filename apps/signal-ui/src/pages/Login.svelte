@@ -1,8 +1,12 @@
 <script lang="ts">
   import { createLoginFormState } from '../lib/auth/login-form.svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
 
   const form = createLoginFormState()
 </script>
+
+<DocumentTitle title={documentTitle('Sign in')} />
 
 <section class="container py-5" aria-labelledby="login-heading">
   <div class="row justify-content-center">

@@ -338,6 +338,28 @@ describe('App shell', () => {
     expect(await screen.findByRole('heading', { name: 'Admin' })).toBeInTheDocument()
   })
 
+  it('updates titles from the mounted page for route variants', async () => {
+    render(App)
+
+    const cases = [
+      ['#/finance/transactions/new', 'Record transaction · Transactions · Signal Foundry'],
+      ['#/finance/transactions/tx-1', 'Transaction · Transactions · Signal Foundry'],
+      ['#/strategies', 'Strategies · Signal Foundry'],
+      ['#/strategies/strategy-1/v1', 'Strategy · Signal Foundry'],
+      ['#/evaluations', 'Evaluations · Signal Foundry'],
+      ['#/evaluations/run/strategy-1/v1', 'Run evaluation · Evaluations · Signal Foundry'],
+      ['#/jobs', 'Jobs · Signal Foundry'],
+      ['#/admin/jobs', 'Jobs · Admin · Signal Foundry'],
+      ['#/jobs/job-1', 'Job detail · Jobs · Signal Foundry'],
+      ['#/admin/jobs/job-1', 'Job detail · Admin · Signal Foundry'],
+    ] as const
+
+    for (const [hash, title] of cases) {
+      navigateHash(hash)
+      await waitFor(() => expect(document.title).toBe(title))
+    }
+  })
+
   it('does not register the retired v2 login route', async () => {
     mocks.isAuthenticated = false
     window.location.hash = '#/v2/login'
@@ -380,8 +402,8 @@ describe('App shell', () => {
       ['#/finance/connections', 'Finance connections'],
       ['#/finance/connections/synthetic?state=state-1', 'Synthetic setup'],
       ['#/finance/transactions', 'Finance transactions'],
-      ['#/finance/transactions/new', 'Record transaction'],
-      ['#/finance/transactions/tx-1', 'Transaction'],
+      ['#/finance/transactions/new', 'Details'],
+      ['#/finance/transactions/tx-1', 'Details'],
       ['#/finance/categories', 'Finance categories'],
       ['#/finance/imports', 'Finance imports'],
       ['#/finance/jobs/job-1', 'Finance job detail'],
@@ -440,8 +462,8 @@ describe('App shell', () => {
        ['#/finance/accounts/new', 'Create account'],
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/transactions', 'Finance transactions'],
-      ['#/finance/transactions/new', 'Record transaction'],
-      ['#/finance/transactions/tx-1', 'Transaction'],
+      ['#/finance/transactions/new', 'Details'],
+      ['#/finance/transactions/tx-1', 'Details'],
       ['#/finance/categories', 'Finance categories'],
       ['#/finance/connections', 'Finance connections'],
       ['#/finance/imports', 'Finance imports'],
@@ -466,8 +488,8 @@ describe('App shell', () => {
        ['#/finance/accounts/new', 'Create account'],
       ['#/finance/accounts/account-1', 'Finance account detail'],
       ['#/finance/transactions', 'Finance transactions'],
-      ['#/finance/transactions/new', 'Record transaction'],
-      ['#/finance/transactions/tx-1', 'Transaction'],
+      ['#/finance/transactions/new', 'Details'],
+      ['#/finance/transactions/tx-1', 'Details'],
       ['#/finance/categories', 'Finance categories'],
       ['#/finance/connections', 'Finance connections'],
       ['#/finance/connections/synthetic?state=state-1', 'Synthetic setup'],
@@ -540,7 +562,7 @@ describe('App shell', () => {
     render(App)
     navigateHash('#/finance/transactions/tx-1')
 
-    expect(await screen.findByRole('heading', { name: 'Transaction' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Details' })).toBeInTheDocument()
     expect(screen.queryByText('Select an active tenant to continue on this finance route.')).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Active tenant' })).toHaveValue('tenant-2')
   })
@@ -550,12 +572,12 @@ describe('App shell', () => {
 
     navigateHash('#/finance/transactions/new')
     expect(
-      await screen.findByRole('heading', { name: 'Record transaction' }),
+      await screen.findByRole('heading', { name: 'Details' }),
     ).toBeInTheDocument()
 
     navigateHash('#/finance/transactions/tx-1')
     expect(
-      await screen.findByRole('heading', { name: 'Transaction' }),
+      await screen.findByRole('heading', { name: 'Details' }),
     ).toBeInTheDocument()
   })
 

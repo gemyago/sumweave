@@ -6,6 +6,7 @@
     type FinanceProviderEvidenceMetadata,
   } from '../lib/finance/api'
   import { formatFinanceDateTime } from '../lib/finance/format'
+  import Database from '@lucide/svelte/icons/database'
 
   let {
     tenantId,
@@ -26,6 +27,7 @@
   let error = $state<string | null>(null)
   let revealedEvidence = $state<FinanceProviderEvidence | null>(null)
   let revealingEvidenceId = $state<string | null>(null)
+  let evidenceExpanded = $state(false)
 
   async function loadMetadata() {
     if (metadata || loadingMetadata) return
@@ -58,8 +60,17 @@
   }
 </script>
 
-<details class="border rounded p-3" ontoggle={(event) => (event.currentTarget.open ? void loadMetadata() : undefined)}>
-  <summary class="fw-semibold">Current provider evidence</summary>
+<details
+  class={`border rounded p-1 ${evidenceExpanded ? 'd-block w-100' : 'd-inline-block align-self-start'}`}
+  ontoggle={(event) => {
+    evidenceExpanded = event.currentTarget.open
+    if (event.currentTarget.open) void loadMetadata()
+  }}
+>
+  <summary class="d-inline-flex align-items-center gap-2 fw-semibold p-3 px-md-2 py-md-2" aria-label="Current provider evidence" title="Current provider evidence">
+    <Database size={16} aria-hidden="true" />
+    <span class="visually-hidden">Current provider evidence</span>
+  </summary>
   <div class="d-grid gap-3 mt-3">
     <p class="small text-body-secondary mb-0">
       Metadata loads only when opened. Each row is the latest sanitized observation for a current provider object, not raw provider payload data.

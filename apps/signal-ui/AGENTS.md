@@ -77,6 +77,9 @@ Module-specific rules. Project-level rules in root [AGENTS.md](../../AGENTS.md) 
 
 The rules are:
 - Update module rules when user corrects AI behavior.
+- Route pages own their document titles; do not centrally map paths in App.
+- Finance detail breadcrumbs link to section parents and use active non-links.
+- Do not add header-only cards when Finance breadcrumbs already locate a detail route.
 - Follow [DESIGN.md](./DESIGN.md) for all UI styling changes.
 - For canonical `#/login` and tenant-facing `#/finance*`, prefer vanilla Bootstrap classes and native HTML/Svelte markup over custom CSS.
 - Treat Bootstrap Finance/login as canonical; do not restore `restructure-finance-ui-shell` custom-shell styling as the default direction.

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, untrack, tick } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { replace, push, link } from 'svelte-spa-router'
   import { createSignalAgentApi } from '../lib/agentapi/client'
   import { authStore } from '../lib/auth/auth-store.svelte'
@@ -508,6 +510,8 @@
     void commitSend()
   }
 </script>
+
+<DocumentTitle title={documentTitle('Chat')} />
 
 <section class="page chat-page" aria-labelledby="chat-heading">
   <div

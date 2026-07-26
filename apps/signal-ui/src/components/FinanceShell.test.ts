@@ -128,7 +128,31 @@ describe('FinanceShell', () => {
         'text-nowrap',
       )
     }
-    expect(screen.getByText('Finance / Dashboard').parentElement).toHaveClass('d-none', 'd-sm-block')
+    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(breadcrumb).toHaveClass('d-none', 'd-sm-block')
+    expect(screen.getByRole('link', { name: 'Finance' })).toHaveAttribute('href', '#/finance')
+    expect(breadcrumb.querySelector('[aria-current="page"]')).toHaveTextContent('Dashboard')
+    const breadcrumbItems = breadcrumb.querySelectorAll('li')
+    expect(breadcrumbItems).toHaveLength(2)
+    for (const item of breadcrumbItems) {
+      expect(item).toHaveClass('d-none', 'd-sm-block')
+    }
+  })
+
+  it('adds breadcrumb a11y hooks for shared-style targeting', () => {
+    const { container } = render(FinanceShell, {
+      currentPath: '/finance',
+    })
+
+    expect(FinanceShellSource).toContain('finance-shell-breadcrumb-nav')
+    expect(FinanceShellSource).toContain('finance-shell-breadcrumb')
+
+    const breadcrumbNav = container.querySelector('nav.finance-shell-breadcrumb-nav')
+    const breadcrumb = container.querySelector('ol.finance-shell-breadcrumb')
+    expect(breadcrumbNav).toBeTruthy()
+    expect(breadcrumb).toBeTruthy()
+    expect(breadcrumbNav).toHaveClass('d-none', 'd-sm-block')
+    expect(breadcrumb).toHaveClass('breadcrumb', 'mb-0')
   })
 
   it('hides the shared tenant selector on the tenants route', () => {
@@ -145,7 +169,7 @@ describe('FinanceShell', () => {
     })
 
     expect(screen.queryByRole('link', { current: 'page' })).not.toBeInTheDocument()
-    expect(screen.getByText('Finance / Workspace')).toBeInTheDocument()
+    expect(screen.getByText('Workspace')).toHaveAttribute('aria-current', 'page')
   })
 
   it('keeps parent destinations active for nested finance detail and synthetic routes', () => {
@@ -162,6 +186,24 @@ describe('FinanceShell', () => {
 
     rerender({ currentPath: '/finance/transactions/new' })
     expect(screen.getByRole('link', { name: 'Transactions', current: 'page' })).toBeInTheDocument()
+  })
+
+  it('uses linked section parents and non-link current crumbs for detail routes', () => {
+    const { rerender } = render(FinanceShell, {
+      currentPath: '/finance/accounts/account-1',
+    })
+
+    let breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(breadcrumb.querySelectorAll('.breadcrumb-item')).toHaveLength(3)
+    expect(screen.getAllByRole('link', { name: 'Accounts' }).at(-1)).toHaveAttribute('href', '#/finance/accounts')
+    expect(breadcrumb.querySelector('[aria-current="page"]')).toHaveTextContent('Account detail')
+    expect(breadcrumb.querySelector('[aria-current="page"]')?.querySelector('a')).toBeNull()
+
+    rerender({ currentPath: '/finance/transactions/tx-1' })
+    breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(screen.getAllByRole('link', { name: 'Transactions' }).at(-1)).toHaveAttribute('href', '#/finance/transactions')
+    expect(breadcrumb.querySelector('[aria-current="page"]')).toHaveTextContent('Transaction')
+    expect(breadcrumb.querySelector('[aria-current="page"]')?.querySelector('a')).toBeNull()
   })
 
   it('shows the shell-level tenant chooser only for multi-tenant tenant-scoped routes', () => {

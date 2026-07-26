@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import AdminSubnav from '../components/AdminSubnav.svelte'
   import JobStatus from '../components/JobStatus.svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
@@ -40,6 +42,8 @@
     }
   }
 </script>
+
+<DocumentTitle title={documentTitle('FX diagnostics', 'Admin')} />
 
 <section class="container py-4" aria-labelledby="admin-fx-heading">
   <header class="mb-4">

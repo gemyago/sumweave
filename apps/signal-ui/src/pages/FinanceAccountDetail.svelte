@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
+  import Pencil from '@lucide/svelte/icons/pencil'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
     createSignalFinanceApiForAuth,
@@ -176,24 +179,13 @@
   })
 </script>
 
+<DocumentTitle title={documentTitle(account?.name ?? 'Account detail', 'Accounts')} />
+
 <section class="container-fluid px-0" aria-labelledby="finance-account-detail-heading">
   <div class="d-grid gap-4">
-    <header class="card border-0 shadow-sm">
-      <div class="card-body p-4 p-xl-5 d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
-        <div>
-          <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Account detail</p>
-          <h1 id="finance-account-detail-heading" class="h3 mb-2">Finance account detail</h1>
-          <p class="text-body-secondary mb-0">
-            Review one account, its reporting context, and recent transactions without using a split-pane workspace.
-          </p>
-        </div>
-
-        <div class="d-flex flex-wrap gap-2">
-          <a class="btn btn-outline-secondary btn-sm" href="/finance/accounts" use:link>Back to accounts</a>
-          <a class="btn btn-outline-secondary btn-sm" href="/finance/transactions" use:link>Open transactions</a>
-        </div>
-      </div>
-    </header>
+    {#if !account}
+      <h1 id="finance-account-detail-heading" class="visually-hidden">Finance account detail</h1>
+    {/if}
 
     {#if error}
       <div class="alert alert-danger mb-0" role="alert">{error}</div>
@@ -234,9 +226,10 @@
       <div class="d-grid gap-4">
         <section class="card shadow-sm">
           <div class="card-body p-4 d-grid gap-3">
-            <div class="d-flex flex-column gap-2">
-                <div>
-                  {#if renaming}
+            <div class="d-grid gap-3">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-3">
+                  <div>
+                   {#if renaming}
                     <form class="d-grid gap-2" onsubmit={renameAccount}>
                       <label class="form-label mb-0" for="finance-account-rename">Account name</label>
                       <div class="d-flex flex-wrap gap-2">
@@ -247,25 +240,26 @@
                     </form>
                   {:else}
                     <div class="d-flex flex-wrap align-items-center gap-2">
-                      <h2 class="h4 mb-0">{account.name}</h2>
-                      <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => renaming = true} disabled={mutationBusy}>Edit</button>
+                      <h1 id="finance-account-detail-heading" class="h3 mb-0">{account.name}</h1>
+                       <button class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center justify-content-center py-3 px-3 py-md-2 px-md-2" type="button" onclick={() => renaming = true} disabled={mutationBusy} aria-label="Edit account name" title="Edit account name"><Pencil size={16} /></button>
                     </div>
                   {/if}
+                  </div>
                   <div class="d-flex flex-wrap gap-2">
-                  <span class="badge text-bg-secondary">{account.kind}</span>
-                  <span class="badge text-bg-light border text-body">{account.currency}</span>
-                   <span class="badge text-bg-light border text-body">Provider {account.provider || 'manual'}</span>
-                   {#if account.hiddenAt}<span class="badge text-bg-warning">Hidden historical source</span>{/if}
-                 </div>
-               </div>
+                    <span class="badge text-bg-secondary">{account.kind}</span>
+                    <span class="badge text-bg-light border text-body">{account.currency}</span>
+                    <span class="badge text-bg-light border text-body">Provider {account.provider || 'manual'}</span>
+                    {#if account.hiddenAt}<span class="badge text-bg-warning">Hidden historical source</span>{/if}
+                  </div>
+                </div>
 
-              <p class="small text-body-secondary mb-0">
-                Created {formatFinanceDateTime(account.createdAt)} · Updated {formatFinanceDateTime(account.updatedAt)}
-              </p>
-               <div class="d-flex flex-wrap gap-2">
-                <span class="badge text-bg-light border text-body">Booked balance {formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</span>
-                <span class="badge text-bg-light border text-body">Pending balance {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</span>
-               </div>
+                <p class="small text-body-secondary mb-0">
+                  Created {formatFinanceDateTime(account.createdAt)} · Updated {formatFinanceDateTime(account.updatedAt)}
+                </p>
+                <div class="d-flex flex-wrap gap-2">
+                  <span class="badge text-bg-light border text-body">Booked balance {formatFinanceMoney(account.bookedBalanceMinor, account.currency)}</span>
+                  <span class="badge text-bg-light border text-body">Pending balance {formatFinanceMoney(account.pendingBalanceMinor, account.currency)}</span>
+                </div>
                {#if account.hiddenAt}
                  <div class="alert alert-warning mb-0" role="status">
                    <strong>Hidden account.</strong> Removed from current dashboard reporting and new transactions. History and provider sync stay available.

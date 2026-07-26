@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import DataCandlestickChart from '../components/DataCandlestickChart.svelte'
   import DateRangePicker from '../components/DateRangePicker.svelte'
@@ -604,6 +606,8 @@
     return assetClassValue
   }
 </script>
+
+<DocumentTitle title={documentTitle('Historical data')} />
 
 <section class="page" aria-labelledby="data-heading">
   <header class="page-header">

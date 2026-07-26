@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import { formatCompactIdentifier } from '../lib/compact-identifier'
@@ -13,7 +15,8 @@
   let {
     heading = 'Jobs',
     description = 'Review durable historical ingestion jobs, filter the queue, and open detail on a separate route.',
-  } = $props<{ heading?: string; description?: string }>()
+    pageDocumentTitle = documentTitle('Jobs'),
+  } = $props<{ heading?: string; description?: string; pageDocumentTitle?: string }>()
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
 
@@ -86,6 +89,8 @@
     return `${item.input.venue} / ${item.input.symbol} / ${item.input.assetClass} / ${item.input.timeframe}`
   }
 </script>
+
+<DocumentTitle title={pageDocumentTitle} />
 
 <section class="page" aria-labelledby="jobs-heading">
   <header class="page-header">

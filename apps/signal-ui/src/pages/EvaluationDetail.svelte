@@ -1,5 +1,7 @@
 <script lang="ts">
   import { authStore } from '../lib/auth/auth-store.svelte'
+  import { documentTitle } from '../lib/document-title'
+  import DocumentTitle from '../components/DocumentTitle.svelte'
   import { formatCompactIdentifier } from '../lib/compact-identifier'
   import {
     createSignalStrategyWorkspaceApiForAuth,
@@ -70,6 +72,8 @@
   }
 
 </script>
+
+<DocumentTitle title={documentTitle('Evaluation')} />
 
 <section class="page" aria-labelledby="evaluation-detail-heading">
   <header class="page-header">
