@@ -6,40 +6,51 @@ manager:
   description: General purpose orchestrator agent for coordinating tasks and workflows.
   model: gpt-5.6-sol
   opencode_model: openai/gpt-5.6-sol
-  reasoning_effort: high
+  reasoning_effort: medium
   delegation_policy:
-    - Choose the lowest-tier agent whose description clearly covers the task.
-    - Prefer P3 for ordinary engineering work instead of escalating by default.
-    - Importance alone does not justify P4 or P5; complexity, ambiguity, context, and risk do.
-    - Use P5 only when its description fits and P4 is likely insufficient.
+    - Choose the agent profile by the kind of reasoning that dominates the task, then choose medium or high effort within that profile family.
+    - Route by agent name, description, and expected behavior; never route by the configured model or provider.
+    - Use P2 for explicit bounded execution; use P2 High when that work needs more context or several precise steps.
+    - Use P3 for convergent software engineering; use P3 High for difficult debugging, coupled components, correctness-sensitive work, or rigorous review.
+    - Use P4 for synthesis, visual or product judgment, design exploration, and choosing among plausible approaches; use P4 High for major architecture, system-wide direction, or exceptional ambiguity.
+    - Do not move to a different model family merely because a task is harder; prefer the high-effort profile in the appropriate family.
+    - Assign temporary roles in each invocation instead of treating profiles as permanent job roles.
+    - For independent verification, use a fresh P3 High invocation with an explicit read-only review assignment.
+    - Require independent verification for security, concurrency, migrations, data integrity, public contracts, high blast radius, and P4 High work.
 sub-agents:
-  p2-fast:
-    sub_agent_name: crew-p2-fast
-    description: Fast focused P2 software engineer for narrow, well-specified work with limited context, such as targeted code edits, small fixes, focused tests, lint failures, commits, status checks, and precise information collection. Prefer when speed matters and the expected output is explicit. Avoid broad investigation, browser or e2e work, architecture, and ambiguous multi-module tasks.
-    model: gpt-5.3-codex-spark
-    opencode_model: openai/gpt-5.3-codex-spark
-    reasoning_effort: high
-  p2-general:
-    sub_agent_name: crew-p2-general
-    description: General P2 software engineer for small bounded work that needs more context or judgment than P2 Fast, including focused investigation, small bug fixes, housekeeping, simple coding or test changes, and concise summaries. Give clear scope and expected results. Use P3 for ordinary feature or refactor work.
+  p2:
+    sub_agent_name: crew-p2
+    description: Execution profile for narrow, well-specified work whose target, implementation path, and verification method are explicit. Use for targeted edits, small fixes, focused tests, status checks, and precise information collection.
     model: gpt-5.6-luna
-    opencode_model: openai/gpt-5.6-luna # luna doesn't work yet in opencode
+    opencode_model: openai/gpt-5.6-luna
+    reasoning_effort: medium
+  p2-high:
+    sub_agent_name: crew-p2-high
+    description: High-effort execution profile for bounded, well-specified work that remains explicit but requires more context, several precise steps, or more careful verification than P2. Avoid ambiguous investigation, architecture, and cross-system design.
+    model: gpt-5.6-luna
+    opencode_model: openai/gpt-5.6-luna
     reasoning_effort: high
-  p3-buddy:
-    sub_agent_name: crew-p3-buddy
-    description: Default engineer for most ordinary, well-scoped product work, including feature slices, bug fixes, refactors, tests, and investigations with moderate context. Prefer P3 over P4 or P5 when the goal is clear and risk is normal, even when the task is important.
+  p3:
+    sub_agent_name: crew-p3
+    description: Engineering profile for normal implementation in a substantially understood problem space, including features, bug fixes, refactors, tests, endpoints, persistence, and precise UI implementation from an established design.
     model: gpt-5.6-terra
     opencode_model: openai/gpt-5.6-terra
     reasoning_effort: medium
-  p4-buddy:
-    sub_agent_name: crew-p4-buddy
-    description: Senior engineer for genuinely complex or ambiguous work, including unclear failures, cross-module investigation, difficult debugging, higher-risk implementation, complex planning or research, and review requiring broad context. Use when P3 is likely insufficient, not merely because correctness matters.
+  p3-high:
+    sub_agent_name: crew-p3-high
+    description: High-effort engineering profile for difficult debugging, unfamiliar code, coupled components, correctness-sensitive implementation, broad technical context, and rigorous independent review. The invocation defines whether to investigate, implement, or review.
     model: gpt-5.6-terra
     opencode_model: openai/gpt-5.6-terra
     reasoning_effort: high
-  p5-buddy:
-    sub_agent_name: crew-p5-buddy
-    description: Principal engineer reserved for architecture, ambiguous product or technical direction, deep system-wide root-cause analysis, major design decisions, and exceptional high-risk work where P4 is likely insufficient. Do not use for routine planning, research, implementation, or review.
+  p4:
+    sub_agent_name: crew-p4
+    description: Synthesis profile for visual or product judgment, interaction and layout composition, design exploration, ambiguous requirements, and choosing among plausible approaches. Use P3 when the design is already substantially known.
+    model: gpt-5.6-sol
+    opencode_model: openai/gpt-5.6-sol
+    reasoning_effort: medium
+  p4-high:
+    sub_agent_name: crew-p4-high
+    description: High-effort synthesis profile for major architecture, system-wide direction, competing product or technical approaches, complex decomposition, and exceptional ambiguity where choosing what should be built is the primary challenge.
     model: gpt-5.6-sol
     opencode_model: openai/gpt-5.6-sol
     reasoning_effort: high
