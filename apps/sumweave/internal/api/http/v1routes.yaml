@@ -1,0 +1,2380 @@
+openapi: 3.0.3
+info:
+  title: Sumweave API
+  description: |
+    HTTP API for Sumweave application.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      operationId: healthCheck
+      tags:
+        - health
+      responses:
+        '200':
+            description: Request succeeded
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/HealthResponsePayload"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/login:
+    post:
+      summary: Log in with username and password
+      operationId: authLogin
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginRequest"
+      responses:
+        '200':
+          description: Tokens and user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh access token using refresh token
+      operationId: authRefresh
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRefreshRequest"
+      responses:
+        '200':
+          description: New tokens and user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/me:
+    get:
+      summary: Current authenticated user
+      operationId: authMe
+      tags:
+        - auth
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInfo"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/jobs:
+    get:
+      summary: List durable registered jobs
+      operationId: listJobs
+      tags:
+        - jobs
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: array
+            items:
+              type: string
+        - in: query
+          name: jobType
+          schema:
+            type: array
+            items:
+              type: string
+        - in: query
+          name: source
+          schema:
+            type: array
+            items:
+              type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            format: int64
+            default: 25
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Durable jobs page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/jobs/{jobId}:
+    get:
+      summary: Get one durable registered job
+      operationId: getJob
+      tags:
+        - jobs
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Durable registered job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobDetailResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants:
+    get:
+      summary: List finance tenants
+      operationId: listFinanceTenants
+      tags: [finance]
+      responses:
+        '200':
+          description: Finance tenants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTenantListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Create finance tenant
+      operationId: createFinanceTenant
+      tags: [finance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTenantCreateRequest"
+      responses:
+        '200':
+          description: Created finance tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTenantSummary"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}:
+    get:
+      summary: Select finance tenant
+      operationId: getFinanceTenant
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Selected finance tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTenantSummary"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      summary: Update finance tenant
+      operationId: updateFinanceTenant
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTenantUpdateRequest"
+      responses:
+        '204':
+          description: Updated finance tenant
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/archive:
+    post:
+      summary: Archive finance tenant
+      operationId: archiveFinanceTenant
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Archived finance tenant
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/members:
+    get:
+      summary: List finance tenant members
+      operationId: listFinanceTenantMembers
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Finance tenant members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTenantMembersResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/invites:
+    get:
+      summary: List finance tenant invites
+      operationId: listFinanceTenantInvites
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Finance tenant invites
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTenantInvitesResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Create finance tenant invite
+      operationId: createFinanceTenantInvite
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTenantInviteCreateRequest"
+      responses:
+        '200':
+          description: Created finance tenant invite
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTenantInvite"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/invites/accept:
+    post:
+      summary: Accept finance tenant invite
+      operationId: acceptFinanceTenantInvite
+      tags: [finance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceAcceptInviteRequest"
+      responses:
+        '200':
+          description: Accepted finance tenant membership
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTenantMember"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts:
+    get:
+      summary: List finance accounts
+      operationId: listFinanceAccounts
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: includeHidden
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Finance accounts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Create finance account
+      operationId: createFinanceAccount
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceAccountCreateRequest"
+      responses:
+        '200':
+          description: Created finance account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccount"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}:
+    get:
+      summary: Get finance account detail
+      operationId: getFinanceAccount
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Finance account detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccount"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+                schema:
+                  $ref: "#/components/schemas/Error"
+    patch:
+      summary: Rename finance account
+      operationId: updateFinanceAccount
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceRenameRequest"
+      responses:
+        '204':
+          description: Renamed finance account
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence:
+    get:
+      summary: List current finance account provider evidence metadata
+      operationId: listFinanceAccountProviderEvidence
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current provider evidence metadata for a finance account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProviderEvidenceListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/hide:
+    post:
+      summary: Hide finance account
+      operationId: hideFinanceAccount
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Hidden finance account
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/unhide:
+    post:
+      summary: Restore finance account
+      operationId: unhideFinanceAccount
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Restored finance account
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}:
+    get:
+      summary: Get sanitized finance account provider evidence
+      operationId: getFinanceAccountProviderEvidence
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: accountId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: evidenceId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sanitized provider evidence for a finance account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProviderEvidence"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/categories:
+    get:
+      summary: List finance categories
+      operationId: listFinanceCategories
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: includeHidden
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Finance categories
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCategoriesResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Create finance category
+      operationId: createFinanceCategory
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceCategoryCreateRequest"
+      responses:
+        '200':
+          description: Created finance category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCategory"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/categories/{categoryId}:
+    patch:
+      summary: Update finance category
+      operationId: updateFinanceCategory
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: categoryId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceCategoryUpdateRequest"
+      responses:
+        '204':
+          description: Updated finance category
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/tags:
+    get:
+      summary: List finance tags
+      operationId: listFinanceTags
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: includeHidden
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Finance tags
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTagsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Create finance tag
+      operationId: createFinanceTag
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTagCreateRequest"
+      responses:
+        '200':
+          description: Created finance tag
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTag"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/tags/{tagId}:
+    patch:
+      summary: Rename finance tag
+      operationId: updateFinanceTag
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tagId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceRenameRequest"
+      responses:
+        '204':
+          description: Renamed finance tag
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions:
+    get:
+      summary: List finance transactions
+      operationId: listFinanceTransactions
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: accountId
+          schema: { type: string }
+        - in: query
+          name: source
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: includeHidden
+          schema: { type: boolean }
+        - in: query
+          name: limit
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        '200':
+          description: Finance transactions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTransactionsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      summary: Create finance transaction
+      operationId: createFinanceTransaction
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTransactionCreateRequest"
+      responses:
+        '200':
+          description: Created finance transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTransaction"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}:
+    parameters:
+      - in: path
+        name: tenantId
+        required: true
+        schema: { type: string }
+      - in: path
+        name: transactionId
+        required: true
+        schema: { type: string }
+    get:
+      summary: Get finance transaction detail
+      operationId: getFinanceTransaction
+      tags: [finance]
+      responses:
+        '200':
+          description: Finance transaction detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTransaction"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+                schema:
+                  $ref: "#/components/schemas/Error"
+    patch:
+      summary: Update finance transaction
+      operationId: updateFinanceTransaction
+      tags: [finance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTransactionUpdateRequest"
+      responses:
+        '200':
+          description: Updated finance transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTransaction"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                  $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-candidates:
+    get:
+      summary: List visible in-range finance transfer candidates
+      operationId: listFinanceTransferCandidates
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: effectiveFrom
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: effectiveBefore
+          required: true
+          schema: { type: string, format: date-time }
+        - in: query
+          name: limit
+          required: true
+          schema: { type: integer, format: int64, minimum: 1, maximum: 200 }
+        - in: query
+          name: offset
+          schema: { type: integer, format: int64, minimum: 0 }
+      responses:
+        '200':
+          description: Visible finance transfer candidates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTransactionsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner:
+    get:
+      summary: Get the exact matched finance transfer partner
+      operationId: getFinanceTransferPartner
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Matched finance transfer partner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTransaction"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/transfer-links:
+    post:
+      summary: Link two booked finance transactions as one transfer
+      operationId: linkFinanceTransferPair
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTransferPairRequest"
+      responses:
+        '204':
+          description: Finance transfer pair linked
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      summary: Unlink one finance transfer pair and restore regular transactions
+      operationId: unlinkFinanceTransferPair
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceTransferPairRequest"
+      responses:
+        '204':
+          description: Finance transfer pair unlinked
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence:
+    get:
+      summary: List current finance transaction provider evidence metadata
+      operationId: listFinanceTransactionProviderEvidence
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current provider evidence metadata for a finance transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProviderEvidenceListResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}:
+    get:
+      summary: Get sanitized finance transaction provider evidence
+      operationId: getFinanceTransactionProviderEvidence
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: transactionId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: evidenceId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sanitized provider evidence for a finance transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProviderEvidence"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections:
+    get:
+      summary: List finance bank connections
+      operationId: listFinanceConnections
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Finance bank connections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceConnectionsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts:
+    get:
+      summary: List resolved synced accounts for a finance bank connection
+      operationId: listFinanceConnectionSyncedAccounts
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: connectionId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Resolved synced accounts for a finance bank connection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceConnectionSyncedAccountsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/link-token:
+    post:
+      summary: Link token-based finance bank connection
+      operationId: linkFinanceConnectionToken
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceConnectionLinkTokenRequest"
+      responses:
+        '200':
+          description: Linked finance bank connection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBankConnection"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/link-redirect/start:
+    post:
+      summary: Start redirect-based finance bank connection link
+      operationId: startFinanceConnectionRedirectLink
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceConnectionLinkRedirectStartRequest"
+      responses:
+        '200':
+          description: Started redirect finance bank connection link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceConnectionLinkRedirectStartResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/link-redirect/finish:
+    post:
+      summary: Finish redirect-based finance bank connection link
+      operationId: finishFinanceConnectionRedirectLink
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceConnectionLinkRedirectFinishRequest"
+      responses:
+        '200':
+          description: Linked finance bank connection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBankConnection"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}:
+    get:
+      summary: Get pending synthetic finance link-state configuration
+      operationId: getFinanceSyntheticLinkState
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pending synthetic finance link-state configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceSyntheticLinkStateResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      summary: Save pending synthetic finance link-state configuration
+      operationId: putFinanceSyntheticLinkState
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: state
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceSyntheticLinkStateUpdateRequest"
+      responses:
+        '200':
+          description: Saved pending synthetic finance link-state configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceSyntheticLinkStateResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/{connectionId}:
+    delete:
+      summary: Delete finance bank connection
+      operationId: deleteFinanceConnection
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: connectionId
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Finance bank connection deleted
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync:
+    post:
+      summary: Trigger finance bank connection sync job
+      operationId: triggerFinanceConnectionSync
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: connectionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceConnectionSyncRequest"
+      responses:
+        '200':
+          description: Triggered finance sync job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFxSyncResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/dashboard:
+    get:
+      summary: Read finance dashboard
+      operationId: getFinanceDashboard
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: preset
+          schema:
+            type: string
+            enum: [current_month, previous_month, next_month, last_3_months, last_6_months, this_year, previous_year, custom]
+        - in: query
+          name: startDate
+          schema: { type: string }
+        - in: query
+          name: endDate
+          schema: { type: string }
+      responses:
+        '200':
+          description: Finance dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceDashboardResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/fx/diagnostics:
+    get:
+      summary: Read finance FX diagnostics
+      operationId: getFinanceFxDiagnostics
+      tags: [finance]
+      responses:
+        '200':
+          description: Finance FX diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFxDiagnosticsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/fx/sync:
+    post:
+      summary: Refresh required finance FX rates
+      operationId: triggerFinanceFxRefresh
+      tags: [finance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+                $ref: "#/components/schemas/FinanceFxRefreshRequest"
+      responses:
+        '200':
+          description: Triggered required finance FX refresh job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFxSyncResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/imports/preview:
+    post:
+      summary: Preview fixed Finance transaction CSV import
+      operationId: previewFinanceCsvImport
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceCsvImportPreviewRequest"
+      responses:
+        '200':
+          description: Finance CSV import preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCsvImportPreviewResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm:
+    post:
+      summary: Confirm fixed Finance transaction CSV import
+      operationId: confirmFinanceCsvImport
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: importId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Confirmed finance CSV import
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCsvImportConfirmResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/imports:
+    get:
+      summary: List recent fixed Finance transaction CSV import audits
+      operationId: listRecentFinanceCsvImportAudits
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Recent Finance CSV import audits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCsvImportAuditsResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/imports/{importId}:
+    get:
+      summary: Read fixed Finance transaction CSV import audit
+      operationId: getFinanceCsvImportAudit
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: importId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Finance CSV import audit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCsvImportAuditResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/account-imports/preview:
+    post:
+      summary: Preview account-only Finance CSV import
+      operationId: previewFinanceAccountCsvImport
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceCsvImportPreviewRequest"
+      responses:
+        '200':
+          description: Account-only Finance CSV import preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountCsvImportPreviewResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/account-imports/{importId}/confirm:
+    post:
+      summary: Confirm account-only Finance CSV import
+      operationId: confirmFinanceAccountCsvImport
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: importId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Confirmed account-only Finance CSV import
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCsvImportConfirmResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/account-imports/{importId}:
+    get:
+      summary: Read account-only Finance CSV import audit
+      operationId: getFinanceAccountCsvImportAudit
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: importId
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Account-only Finance CSV import audit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCsvImportAuditResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  schemas:
+    HealthResponsePayload:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - OK
+    AuthLoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    AuthRefreshRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+    UserInfo:
+      type: object
+      required:
+        - id
+        - username
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+    AuthSessionResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - user
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserInfo"
+    JobRequester:
+      type: object
+      required:
+        - userId
+        - source
+        - agentSessionId
+        - agentRunId
+      properties:
+        userId:
+          type: string
+        source:
+          type: string
+        agentSessionId:
+          type: string
+        agentRunId:
+          type: string
+    JobError:
+      type: object
+      required:
+        - code
+        - summary
+        - details
+      properties:
+        code:
+          type: string
+        summary:
+          type: string
+        details:
+          type: string
+    JobSummary:
+      type: object
+      required:
+        - id
+        - jobType
+        - status
+        - requester
+        - createdAt
+        - updatedAt
+        - attemptCount
+      properties:
+        id:
+          type: string
+        jobType:
+          type: string
+        status:
+          type: string
+        requester:
+          $ref: "#/components/schemas/JobRequester"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        attemptCount:
+          type: integer
+          format: int64
+        error:
+          $ref: "#/components/schemas/JobError"
+    JobDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/JobSummary"
+        - type: object
+          required:
+            - workerId
+          properties:
+            workerId:
+              type: string
+            lastAttemptAt:
+              type: string
+              format: date-time
+              nullable: true
+    JobListResponse:
+      type: object
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/JobSummary"
+        nextCursor:
+          type: string
+    FinanceTenantCreateRequest:
+      type: object
+      required: [name, displayCurrency, seedDefaults]
+      properties:
+        name: { type: string }
+        displayCurrency: { $ref: "#/components/schemas/FinanceTenantDisplayCurrency" }
+        seedDefaults:
+          type: boolean
+          nullable: true
+          description: Whether to add starter categories and tags to the tenant.
+    FinanceTenantUpdateRequest:
+      type: object
+      required: [name, displayCurrency]
+      properties:
+        name: { type: string }
+        displayCurrency: { $ref: "#/components/schemas/FinanceTenantDisplayCurrency" }
+    FinanceTenantDisplayCurrency:
+      type: string
+      enum: [USD, EUR, PLN, UAH]
+    FinanceTenantSummary:
+      type: object
+      required: [id, name, displayCurrency, joinedAt, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        displayCurrency: { type: string }
+        archivedAt: { type: string, format: date-time, nullable: true }
+        joinedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceTenantListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceTenantSummary" }
+    FinanceTenantMember:
+      type: object
+      required: [tenantId, userId, joinedAt]
+      properties:
+        tenantId: { type: string }
+        userId: { type: string }
+        username: { type: string, nullable: true }
+        joinedAt: { type: string, format: date-time }
+    FinanceTenantMembersResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceTenantMember" }
+    FinanceTenantInviteCreateRequest:
+      type: object
+      required: [recipient]
+      properties:
+        recipient: { type: string }
+    FinanceTenantInvite:
+      type: object
+      required: [id, tenantId, code, recipient, createdByUserId, createdAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        code: { type: string }
+        recipient: { type: string }
+        createdByUserId: { type: string }
+        acceptedByUserId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        acceptedAt: { type: string, format: date-time, nullable: true }
+    FinanceTenantInvitesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceTenantInvite" }
+    FinanceAcceptInviteRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    FinanceAccountCreateRequest:
+      type: object
+      required: [name, currency, kind]
+      properties:
+        name: { type: string }
+        currency: { type: string }
+        kind: { type: string }
+    FinanceRenameRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    FinanceCategoryUpdateRequest:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [expense, income] }
+    FinanceAccount:
+      type: object
+      required: [id, tenantId, name, currency, kind, bookedBalanceMinor, pendingBalanceMinor, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        name: { type: string }
+        currency: { type: string }
+        kind: { type: string }
+        bookedBalanceMinor: { type: integer, format: int64 }
+        pendingBalanceMinor: { type: integer, format: int64 }
+        provider: { type: string }
+        providerAccountId: { type: string }
+        hiddenAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceAccountsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceAccount" }
+    FinanceProviderEvidenceMetadata:
+      type: object
+      required: [id, scope, providerObjectId, capturedAt]
+      properties:
+        id: { type: string }
+        scope: { type: string }
+        providerObjectId: { type: string }
+        capturedAt: { type: string, format: date-time }
+    FinanceProviderEvidenceListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceProviderEvidenceMetadata" }
+    FinanceProviderEvidence:
+      allOf:
+        - $ref: "#/components/schemas/FinanceProviderEvidenceMetadata"
+        - type: object
+          properties:
+            payload:
+              type: object
+              additionalProperties: true
+    FinanceCategoryCreateRequest:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string }
+        kind: { type: string }
+    FinanceCategory:
+      type: object
+      required: [id, tenantId, name, kind, seededDefault, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        seededDefault: { type: boolean }
+        hiddenAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceCategoriesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceCategory" }
+    FinanceTagCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    FinanceTag:
+      type: object
+      required: [id, tenantId, name, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        name: { type: string }
+        hiddenAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceTagsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceTag" }
+    FinanceTransactionCreateRequest:
+      type: object
+      required: [accountId, source, status, kind, amountMinor, currency, description, effectiveAt]
+      properties:
+        accountId: { type: string }
+        source: { type: string }
+        status: { type: string }
+        kind: { type: string }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string }
+        description: { type: string }
+        effectiveAt: { type: string, format: date-time }
+        categoryId: { type: string }
+        tagIds:
+          type: array
+          items: { type: string }
+        transferGroupId: { type: string }
+    FinanceTransaction:
+      type: object
+      required: [id, tenantId, accountId, source, status, kind, amountMinor, currency, description, effectiveAt, tagIds, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        accountId: { type: string }
+        source: { type: string }
+        status: { type: string }
+        kind: { type: string }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string }
+        description: { type: string }
+        effectiveAt: { type: string, format: date-time }
+        categoryId: { type: string, nullable: true }
+        tagIds:
+          type: array
+          items: { type: string }
+        transferGroupId: { type: string, nullable: true }
+        transferMatchedAt: { type: string, format: date-time, nullable: true }
+        hiddenAt: { type: string, format: date-time, nullable: true }
+        providerOriginal: { $ref: "#/components/schemas/FinanceTransactionProviderOriginal" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceTransactionsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceTransaction" }
+    FinanceTransactionUpdateRequest:
+      type: object
+      required: [description, amountMinor]
+      properties:
+        description: { type: string }
+        amountMinor: { type: integer, format: int64 }
+        effectiveAt: { type: string, format: date-time, nullable: true }
+        categoryId: { type: string }
+        clearCategory: { type: boolean }
+        tagIds:
+          type: array
+          items: { type: string }
+    FinanceTransferPairRequest:
+      type: object
+      required: [firstTransactionId, secondTransactionId]
+      properties:
+        firstTransactionId: { type: string }
+        secondTransactionId: { type: string }
+    FinanceTransactionProviderOriginal:
+      type: object
+      required: [amountMinor, currency, description]
+      properties:
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string }
+        description: { type: string }
+        effectiveAt: { type: string, format: date-time, nullable: true }
+    FinanceConnectionLinkTokenRequest:
+      type: object
+      required: [provider, token]
+      properties:
+        provider: { $ref: "#/components/schemas/FinanceBankLinkTokenProvider" }
+        token: { type: string }
+    FinanceBankLinkTokenProvider:
+      type: string
+      enum: [monobank]
+    FinanceConnectionLinkRedirectStartRequest:
+      type: object
+      required: [provider, callbackUrl]
+      properties:
+        provider: { $ref: "#/components/schemas/FinanceBankLinkRedirectProvider" }
+        callbackUrl: { type: string }
+    FinanceConnectionLinkRedirectStartResponse:
+      type: object
+      required: [provider, authorizationUrl, state]
+      properties:
+        provider: { $ref: "#/components/schemas/FinanceBankLinkRedirectProvider" }
+        authorizationUrl: { type: string }
+        state: { type: string }
+    FinanceConnectionLinkRedirectFinishRequest:
+      type: object
+      required: [provider, state]
+      properties:
+        provider: { $ref: "#/components/schemas/FinanceBankLinkRedirectProvider" }
+        code: { type: string }
+        state: { type: string }
+    FinanceBankLinkRedirectProvider:
+      type: string
+      enum: [pko, synthetic]
+    FinanceSyntheticLinkStateConfiguredAccountRequest:
+      type: object
+      required: [name, currency]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        currency: { type: string }
+    FinanceSyntheticLinkStateUpdateRequest:
+      type: object
+      required: [configuredAccounts]
+      properties:
+        configuredAccounts:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceSyntheticLinkStateConfiguredAccountRequest" }
+    FinanceSyntheticLinkStateConfiguredAccountResponse:
+      type: object
+      required: [key, name, currency]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        currency: { type: string }
+    FinanceSyntheticLinkStateResponse:
+      type: object
+      required: [provider, state, configuredAccounts, canFinish]
+      properties:
+        provider: { type: string }
+        state: { type: string }
+        configuredAccounts:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceSyntheticLinkStateConfiguredAccountResponse" }
+        canFinish: { type: boolean }
+    FinanceConnectionSyncRequest:
+      type: object
+      properties:
+        reason: { type: string }
+        windowStart: { type: string, format: date-time, nullable: true }
+        windowEnd: { type: string, format: date-time, nullable: true }
+    FinanceBankConnection:
+      type: object
+      required: [id, tenantId, provider, displayName, providerReference, externalId, state, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        provider: { type: string }
+        displayName: { type: string }
+        providerReference: { type: string }
+        externalId: { type: string }
+        state: { type: string }
+        lastSyncJobId: { type: string }
+        lastSyncStartedAt: { type: string, format: date-time, nullable: true }
+        lastSuccessfulSyncAt: { type: string, format: date-time, nullable: true }
+        lastSyncError: { type: string }
+        schedule: { $ref: "#/components/schemas/FinanceBankConnectionSchedule" }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceBankConnectionSchedule:
+      type: object
+      required: [connectionId, intervalSeconds, enabled, createdAt, updatedAt]
+      properties:
+        connectionId: { type: string }
+        intervalSeconds: { type: integer, format: int64 }
+        nextRunAt: { type: string, format: date-time, nullable: true }
+        lastScheduledAt: { type: string, format: date-time, nullable: true }
+        lastStartedAt: { type: string, format: date-time, nullable: true }
+        lastCompletedAt: { type: string, format: date-time, nullable: true }
+        lastJobId: { type: string }
+        enabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceConnectionsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceBankConnection" }
+    FinanceConnectionSyncedAccount:
+      type: object
+      required: [financeAccountId, name, currency]
+      properties:
+        financeAccountId: { type: string }
+        name: { type: string }
+        currency: { type: string }
+        lastSuccessfulSyncAt: { type: string, format: date-time, nullable: true }
+    FinanceConnectionSyncedAccountsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceConnectionSyncedAccount" }
+    FinanceDashboardResponse:
+      type: object
+      description: Aggregated finance dashboard response.
+      additionalProperties: false
+      required: [period, settled, pending, categoryBreakdowns, accountBalances, alerts, fxCoverage, currentFxRates, nativeSettledTotals]
+      properties:
+        period: { $ref: "#/components/schemas/FinanceDashboardPeriod" }
+        settled: { $ref: "#/components/schemas/FinanceDashboardMoneySummary" }
+        pending: { $ref: "#/components/schemas/FinanceDashboardMoneySummary" }
+        categoryBreakdowns:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardCategoryBreakdown" }
+        accountBalances:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardAccountBalance" }
+        alerts:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardAlert" }
+        fxCoverage:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardFxCoverage" }
+        currentFxRates:
+          type: array
+          description: Latest successful provider rates used to value every selected period.
+          items: { $ref: "#/components/schemas/FinanceDashboardCurrentFxRate" }
+        nativeSettledTotals:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceDashboardCurrencyTotal" }
+    FinanceDashboardPeriod:
+      type: object
+      additionalProperties: false
+      required: [preset, startDate, endDate, previous, next]
+      properties:
+        preset: { type: string }
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+        previous: { $ref: "#/components/schemas/FinanceDashboardPeriodWindow" }
+        next: { $ref: "#/components/schemas/FinanceDashboardPeriodWindow" }
+    FinanceDashboardPeriodWindow:
+      type: object
+      additionalProperties: false
+      required: [startDate, endDate]
+      properties:
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+    FinanceDashboardMoneySummary:
+      type: object
+      additionalProperties: false
+      required: [displayCurrency, incomeMinor, expenseMinor, netMinor, transactionCount, complete]
+      properties:
+        displayCurrency: { type: string }
+        incomeMinor: { type: integer, format: int64 }
+        expenseMinor: { type: integer, format: int64 }
+        netMinor: { type: integer, format: int64 }
+        transactionCount: { type: integer, format: int64 }
+        complete: { type: boolean }
+    FinanceDashboardCategoryBreakdown:
+      type: object
+      additionalProperties: false
+      required: [categoryId, categoryName, kind, incomeMinor, expenseMinor, transactionCount]
+      properties:
+        categoryId: { type: string }
+        categoryName: { type: string }
+        kind: { type: string }
+        incomeMinor: { type: integer, format: int64 }
+        expenseMinor: { type: integer, format: int64 }
+        transactionCount: { type: integer, format: int64 }
+    FinanceDashboardAccountBalance:
+      type: object
+      additionalProperties: false
+      required: [accountId, accountName, currency, nativeBookedMinor, nativePendingMinor, displayBookedMinor, displayPendingMinor, missingFx]
+      properties:
+        accountId: { type: string }
+        accountName: { type: string }
+        currency: { type: string }
+        nativeBookedMinor: { type: integer, format: int64 }
+        nativePendingMinor: { type: integer, format: int64 }
+        displayBookedMinor: { type: integer, format: int64, nullable: true }
+        displayPendingMinor: { type: integer, format: int64, nullable: true }
+        missingFx: { type: boolean }
+    FinanceDashboardAlert:
+      type: object
+      additionalProperties: false
+      required: [code, severity, count]
+      properties:
+        code: { type: string }
+        severity: { type: string }
+        count: { type: integer, format: int64 }
+    FinanceDashboardFxCoverage:
+      type: object
+      additionalProperties: false
+      required: [provider, baseCurrency, quoteCurrency, affectedTransactionCount, affectedAccountCount]
+      properties:
+        provider: { type: string }
+        baseCurrency: { type: string }
+        quoteCurrency: { type: string }
+        affectedTransactionCount: { type: integer, format: int64, minimum: 0 }
+        affectedAccountCount: { type: integer, format: int64, minimum: 0 }
+    FinanceDashboardCurrentFxRate:
+      type: object
+      additionalProperties: false
+      required: [provider, baseCurrency, quoteCurrency, effectiveAt, lastSuccessfulRefreshAt, stale]
+      properties:
+        provider: { type: string }
+        baseCurrency: { type: string }
+        quoteCurrency: { type: string }
+        effectiveAt: { type: string, format: date-time }
+        lastSuccessfulRefreshAt: { type: string, format: date-time }
+        stale: { type: boolean }
+    FinanceDashboardCurrencyTotal:
+      type: object
+      additionalProperties: false
+      required: [currency, incomeMinor, expenseMinor, netMinor]
+      properties:
+        currency: { type: string }
+        incomeMinor: { type: integer, format: int64 }
+        expenseMinor: { type: integer, format: int64 }
+        netMinor: { type: integer, format: int64 }
+    FinanceFxProviderDiagnostic:
+      type: object
+      required: [name, default, ready]
+      properties:
+        name: { type: string }
+        default: { type: boolean }
+        ready: { type: boolean }
+    FinanceFxDiagnosticsResponse:
+      type: object
+      required: [defaultProvider, providers, storedRatesCount]
+      properties:
+        defaultProvider: { type: string }
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/FinanceFxProviderDiagnostic"
+        storedRatesCount: { type: integer, format: int64 }
+    FinanceFxRefreshRequest:
+      type: object
+      additionalProperties: false
+      description: Refreshes currently required FX rates discovered from active tenants.
+      properties:
+        provider: { type: string }
+    FinanceFxSyncResponse:
+      type: object
+      required: [jobId, jobType]
+      properties:
+        jobId: { type: string }
+        jobType: { type: string }
+        provider: { type: string }
+    FinanceCsvImportPreviewRequest:
+      type: object
+      required: [fileName, csv]
+      properties:
+        fileName: { type: string }
+        csv: { type: string, maxLength: 67108864 }
+        selectedAccountNames:
+          type: array
+          items: { type: string }
+    FinanceCsvImportPreviewResponse:
+      type: object
+      required: [importId, importableCount, headers, duplicateRows, rejectedRows, wouldCreateAccounts, wouldCreateCategories, wouldCreateTags, accountOptions]
+      properties:
+        importId: { type: string }
+        importableCount: { type: integer, format: int64, minimum: 0 }
+        headers:
+          type: array
+          items: { type: string }
+        duplicateRows:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceCsvImportRowDiagnostic' }
+        rejectedRows:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceCsvImportRowDiagnostic' }
+        wouldCreateAccounts:
+          type: array
+          items: { type: string }
+        wouldCreateCategories:
+          type: array
+          items: { type: string }
+        wouldCreateTags:
+          type: array
+          items: { type: string }
+        accountOptions:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceCsvImportAccountOption' }
+    FinanceCsvImportAccountOption:
+      type: object
+      required: [name, sourceRowCount, selected]
+      properties:
+        name: { type: string }
+        sourceRowCount: { type: integer, format: int64, minimum: 1 }
+        selected: { type: boolean }
+    FinanceCsvImportConfirmResponse:
+      type: object
+      required: [importId, jobId, jobType]
+      properties:
+        importId: { type: string }
+        jobId: { type: string }
+        jobType: { type: string }
+    FinanceCsvImportAuditResponse:
+      type: object
+      required: [importId, tenantId, status, jobId, confirmedByUserId, importedCount, rejectedRows, rowOutcomes, createdAt]
+      properties:
+        importId: { type: string }
+        tenantId: { type: string }
+        status: { type: string }
+        jobId: { type: string }
+        confirmedByUserId: { type: string }
+        importedCount: { type: integer, format: int64 }
+        rejectedRows:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceCsvImportRowDiagnostic' }
+        rowOutcomes:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceCsvImportRowOutcome' }
+        createdAt: { type: string, format: date-time }
+        confirmedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+    FinanceCsvImportAuditsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceCsvImportAuditResponse' }
+    FinanceCsvImportRowDiagnostic:
+      type: object
+      required: [rowNumber, reason]
+      properties:
+        rowNumber: { type: integer, format: int64 }
+        field: { type: string }
+        reason: { type: string }
+    FinanceCsvImportRowOutcome:
+      type: object
+      required: [rowNumber, status, reason, createdAt, updatedAt]
+      properties:
+        rowNumber: { type: integer, format: int64 }
+        transactionId: { type: string }
+        status: { type: string }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceAccountCsvImportPreviewResponse:
+      type: object
+      required: [importId, headers, rejectedRows, wouldCreateAccounts]
+      properties:
+        importId: { type: string }
+        headers:
+          type: array
+          items: { type: string }
+        rejectedRows:
+          type: array
+          items: { $ref: '#/components/schemas/FinanceCsvImportRowDiagnostic' }
+        wouldCreateAccounts:
+          type: array
+          items: { type: string }
+    Error:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          format: string
+        message:
+          type: string
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

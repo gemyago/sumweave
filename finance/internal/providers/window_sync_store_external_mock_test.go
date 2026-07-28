@@ -8,8 +8,8 @@ package providers_test
 import (
 	"context"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
-	"github.com/gemyago/signal-foundry/finance/internal/providers"
+	"github.com/gemyago/sumweave/finance/domain"
+	"github.com/gemyago/sumweave/finance/internal/providers"
 	mock "github.com/stretchr/testify/mock"
 )
 

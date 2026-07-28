@@ -9,7 +9,7 @@ package agentapi
 import (
 	"context"
 
-	"github.com/gemyago/signal-foundry/runtime/internal"
+	"github.com/gemyago/sumweave/runtime/internal"
 	mock "github.com/stretchr/testify/mock"
 )
 

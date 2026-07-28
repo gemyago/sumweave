@@ -4,10 +4,10 @@
 TBD - created by archiving change add-finance-management-slice. Update Purpose after archive.
 ## Requirements
 ### Requirement: Finance Fixture Generation CLI
-The backend application SHALL provide a finance fixture-generation command through the existing `signal-foundry` binary.
+The backend application SHALL provide a finance fixture-generation command through the existing `sumweave` binary.
 
 #### Scenario: Fixture generation is deterministic and service-backed
-- **WHEN** a developer runs `signal-foundry finance fixtures generate ...` with a seed and bounded date range
+- **WHEN** a developer runs `sumweave finance fixtures generate ...` with a seed and bounded date range
 - **THEN** the command MUST generate deterministic finance fixture data through finance application/domain services rather than direct table writes
 - **AND** the command MUST be suitable for local development, smoke testing, and automated finance e2e setup
 

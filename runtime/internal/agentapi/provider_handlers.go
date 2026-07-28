@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
+	lp "github.com/gemyago/sumweave/runtime/internal/llmproviders"
 )
 
 // ListModels implements [ServerInterface].

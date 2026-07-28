@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
+	"github.com/gemyago/sumweave/runtime/internal/gormsumweave"
 	"gorm.io/gorm"
 )
 
@@ -51,16 +51,16 @@ func NewDatabaseProvidersConfigService(
 	logger *slog.Logger,
 	tablePrefix string,
 ) (*DatabaseProvidersConfigService, error) {
-	cfg := gormsignalfoundry.NewGormConfigForSignalFoundryTables(gormsignalfoundry.GormSignalFoundryTablesOpts{
+	cfg := gormsumweave.NewGormConfigForSumweaveTables(gormsumweave.GormSumweaveTablesOpts{
 		TablePrefix:    tablePrefix,
 		TranslateError: true,
 		Logger:         logger,
 	})
-	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), cfg)
+	db, err := gorm.Open(gormsumweave.NewGormDialector(dsn), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	if err = gormsignalfoundry.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
+	if err = gormsumweave.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
 		return nil, err
 	}
 	return &DatabaseProvidersConfigService{

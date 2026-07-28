@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
+	"github.com/gemyago/sumweave/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 )
 

@@ -1,6 +1,6 @@
 package providers
 
-import "github.com/gemyago/signal-foundry/finance/domain"
+import "github.com/gemyago/sumweave/finance/domain"
 
 type SnapshotWindowPolicy interface {
 	Determine(requestedWindow domain.ProviderSyncWindow) (domain.ProviderSyncWindow, error)

@@ -1,4 +1,4 @@
-# Requirements: Signal Foundry
+# Requirements: Sumweave
 
 **Defined:** 2026-04-21
 **Core Value:** One person can define, launch, and evolve multiple kinds of agents from the same harness, including a coding agent backed by OpenCode, without rewriting the orchestration layer each time or guessing what the first external protocol actually supports.
@@ -13,7 +13,7 @@
 
 ### Coding Agents
 
-- [ ] **CODE-01**: User can configure an OpenCode-backed coding agent using only ACP capabilities Signal Foundry has validated through experiment.
+- [ ] **CODE-01**: User can configure an OpenCode-backed coding agent using only ACP capabilities Sumweave has validated through experiment.
 - [x] **CODE-02**: User can define a coding agent profile that targets OpenCode through ACP.
 - [x] **CODE-03**: User can launch the OpenCode-backed coding agent from the harness.
 - [x] **CODE-04**: User can choose the OpenCode coding agent for a run without redefining its configuration each time.

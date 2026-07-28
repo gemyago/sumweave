@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	iskills "github.com/gemyago/signal-foundry/tools/skills/internal/skills"
+	"github.com/gemyago/sumweave/runtime/agent"
+	iskills "github.com/gemyago/sumweave/tools/skills/internal/skills"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

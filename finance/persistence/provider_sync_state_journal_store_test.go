@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
-	"github.com/gemyago/signal-foundry/finance/internal/providers"
-	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
+	"github.com/gemyago/sumweave/finance/domain"
+	"github.com/gemyago/sumweave/finance/internal/providers"
+	"github.com/gemyago/sumweave/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

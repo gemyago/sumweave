@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"strconv"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/sumweave/finance/domain"
 )
 
 type Repository interface {

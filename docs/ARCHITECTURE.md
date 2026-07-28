@@ -1,6 +1,6 @@
 # Architecture
 
-Signal Foundry is a finance-only system. Its product domain is tenant-aware
+Sumweave is a finance-only system. Its product domain is tenant-aware
 financial management: members, accounts, categories and tags, ledger
 transactions and transfers, CSV imports, bank connections and sync, provider
 evidence, balances, reports, and FX.
@@ -9,9 +9,9 @@ evidence, balances, reports, and FX.
 
 - `finance/` owns finance domain services and persistence models and remains
   independent from `runtime/`.
-- `apps/signal-foundry/` composes finance, auth, durable jobs, dispatch, HTTP,
+- `apps/sumweave/` composes finance, auth, durable jobs, dispatch, HTTP,
   migrations, telemetry, and embedded UI delivery.
-- `apps/signal-ui/` is finance-first, with retained Admin, Chat, and Providers
+- `apps/sumweave-ui/` is finance-first, with retained Admin, Chat, and Providers
   surfaces.
 - `runtime/` is generic agent infrastructure only: sessions, profiles,
   providers, agent execution, and HTTP APIs.
@@ -27,7 +27,7 @@ agent, auth, dispatch, jobs, and finance schemas. `start-all` runs the API,
 worker, and scheduler together; split worker and scheduler commands remain for
 deployment.
 
-Run `signal-foundry db-migrate` before `signal-foundry start-all` locally.
+Run `sumweave db-migrate` before `sumweave start-all` locally.
 
 Release builds run on the host with `make -C build dist`; Docker packages the
 prepared binary and staged platform-agent root. The Helm chart deploys app,

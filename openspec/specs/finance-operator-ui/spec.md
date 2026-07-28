@@ -31,7 +31,7 @@ The Finance area SHALL expose the first end-user workflows required by the finan
 - **AND** account, category, and recent-transaction dashboard sections MUST cap visible rows and link to dedicated browse/detail routes for full lists
 - **AND** missing-FX, pending transaction, failed sync, or import follow-up signals MUST appear as secondary attention states rather than primary dashboard cards when present
 - **AND** the dashboard MUST use honest empty or reduced states when selected-tenant data is unavailable
-- **AND** the dashboard MUST use vanilla Bootstrap classes and native HTML or Svelte markup as the primary styling mechanism instead of the older Signal UI custom finance design-system classes
+- **AND** the dashboard MUST use vanilla Bootstrap classes and native HTML or Svelte markup as the primary styling mechanism instead of the older Sumweave UI custom finance design-system classes
 
 #### Scenario: Finance management routes use Bootstrap surfaces
 - **WHEN** a tenant member opens tenant management, accounts, account detail, categories, connections, synthetic setup, imports, or finance job detail under `#/finance*`

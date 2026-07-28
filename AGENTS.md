@@ -11,8 +11,8 @@ This repository was created from template and foundation code. Treat inherited t
 The intended product is a finance-only system with:
 - `finance/` as the finance domain module
 - `runtime/` as generic agent infrastructure
-- one Go API/jobs application (`apps/signal-foundry/`)
-- one UI (`apps/signal-ui/`)
+- one Go API/jobs application (`apps/sumweave/`)
+- one UI (`apps/sumweave-ui/`)
 
 Unless explicitly promoted by the user, everything outside that core package, Go app, and UI should be treated as template-origin reference code and not as a product requirement.
 
@@ -30,9 +30,9 @@ Unless explicitly promoted by the user, everything outside that core package, Go
 ├── runtime/                      # core runtime and related infrastructure (go)
 │   └── AGENTS.md
 ├── apps/
-│   ├── signal-ui/                 # Svelte/Vite SPA (js)
+│   ├── sumweave-ui/                 # Svelte/Vite SPA (js)
 │   │   └── AGENTS.md
-│   └── signal-foundry/                 # Bundled Signal Foundry backend (go)
+│   └── sumweave/                 # Bundled Sumweave backend (go)
 │       └── AGENTS.md
 ├── build/
 │   ├── AGENTS.md
@@ -73,12 +73,12 @@ Go and Node.js are managed by direnv (in .envrc) and nvm respectively. All depen
 PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from the repo root.
 
 **PM2 usage notes**
-- From `apps/signal-foundry`, run `go run ./cmd/signal-foundry db-migrate --env local` before starting or restarting backend PM2 processes that rely on persisted tables.
-- Standard local workflow is `db-migrate` from `apps/signal-foundry`, then `pm2 start ecosystem.config.js` from the repository root.
-- Use direct `go run ./cmd/signal-foundry start-all --env local` only to diagnose a local startup problem.
-- PM2 is invoked from the repository root, but its backend process uses `apps/signal-foundry` as its working directory.
+- From `apps/sumweave`, run `go run ./cmd/sumweave db-migrate --env local` before starting or restarting backend PM2 processes that rely on persisted tables.
+- Standard local workflow is `db-migrate` from `apps/sumweave`, then `pm2 start ecosystem.config.js` from the repository root.
+- Use direct `go run ./cmd/sumweave start-all --env local` only to diagnose a local startup problem.
+- PM2 is invoked from the repository root, but its backend process uses `apps/sumweave` as its working directory.
 - Run `pm2 start ecosystem.config.js` to create the PM2 apps from the current ecosystem file.
-- If the ecosystem command/args changed or you need a guaranteed fresh backend shape, recreate the app with `pm2 delete signal-foundry-api && pm2 start ecosystem.config.js`; PM2 can otherwise keep an older command definition.
+- If the ecosystem command/args changed or you need a guaranteed fresh backend shape, recreate the app with `pm2 delete sumweave-api && pm2 start ecosystem.config.js`; PM2 can otherwise keep an older command definition.
 - Run `pm2 status` to see the status of all processes
 - Run `pm2 start|stop|restart id|name` to control specific processes
 - Run `pm2 logs id|name` to see the logs of specific processes
@@ -88,9 +88,9 @@ For optional local HTTPS backend and Vite development, follow [docs/local-https.
 ## Nx (monorepo tasks)
 
 This monorepo is managed by Nx. Most typical tasks are:
-- Run tests of specific module: `npx nx test signal-foundry` (cached)
-- Run lint of specific module: `npx nx lint signal-foundry` (cached)
-- Run test of specific module without caching: `npx nx test signal-foundry --skipNxCache`
+- Run tests of specific module: `npx nx test sumweave` (cached)
+- Run lint of specific module: `npx nx lint sumweave` (cached)
+- Run test of specific module without caching: `npx nx test sumweave --skipNxCache`
 - Run lint of all affected modules without caching: `npx nx run-many -t lint --skipNxCache`
 
 To run all affected lint and tests, use `make affected-lint-test`
@@ -133,7 +133,7 @@ The rules are:
 - Natural-language approval completes OpenSpec review by default.
 - Seed/reseed requests default to the first `.local-users` entry.
 - Reseed means replace local seeded data, then reopen the live DB.
-- Launch local backend CLI commands from `apps/signal-foundry`.
+- Launch local backend CLI commands from `apps/sumweave`.
 - Avoid markdown tables, prefer lists or other formatting. Tables are hard to read by humans. Use tables only when user explicitly requests it.
 - Do not run `git diff --check` as a routine verification step.
 - Do not explicitly normalize dates or timestamps to UTC.
@@ -184,7 +184,7 @@ Harness agnostic repo-local skills live under `.agents/skills`. After creating a
 ## Platform Agent Skills
 
 Platform-internal skills live under `.platform-agents/skills`.
-The in-product Signal Foundry agent loads only this platform-agent root.
+The in-product Sumweave agent loads only this platform-agent root.
 
 The platform-agent skill root is currently empty and stageable. Add only
 finance-relevant skills when they are explicitly requested.

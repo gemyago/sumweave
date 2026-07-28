@@ -1,6 +1,6 @@
 # Workspacefs tools (`tools/workspacefs`)
 
-Go module that exposes a **scoped filesystem and shell-execution toolset** for the Signal Foundry agent runtime: file operations are confined with `os.Root` under each **configured workspace**. At registration, callers supply **workspace identifiers** mapped to host directory paths; models and JSON tools use **identifiers and relative paths only**—not absolute host directories as selectors.
+Go module that exposes a **scoped filesystem and shell-execution toolset** for the Sumweave agent runtime: file operations are confined with `os.Root` under each **configured workspace**. At registration, callers supply **workspace identifiers** mapped to host directory paths; models and JSON tools use **identifiers and relative paths only**—not absolute host directories as selectors.
 
 ## Template Origin And Boundary
 

@@ -28,7 +28,7 @@ Expected:
 - the app opens on `#/login`
 - if headed mode was used, the browser window is visible
 
-## 2. Sign in to Signal Foundry
+## 2. Sign in to Sumweave
 
 1. Sign in with the first local user from repo-root `.local-users` unless you intentionally prepared another user.
 2. Open `http://127.0.0.1:5173/#/finance/connections`.
@@ -88,13 +88,13 @@ Example booked debit transaction JSON:
     "amount": "12.34"
   },
   "creditor": {
-    "name": "Signal Foundry Merchant 1"
+    "name": "Sumweave Merchant 1"
   },
   "creditDebitIndicator": "DBIT",
   "status": "BOOK",
   "bookingDate": "2026-07-07",
   "valueDate": "2026-07-07",
-  "remittanceInformation": ["Signal Foundry test transaction 1"]
+  "remittanceInformation": ["Sumweave test transaction 1"]
 }
 ```
 
@@ -144,9 +144,9 @@ After a successful sync, inspect the tenant data in the app:
 
 Capture:
 
-- selected Signal Foundry tenant name
+- selected Sumweave tenant name
 - Enable Banking signed-in email
 - Mock ASPSP account names selected during authorization
 - returned connection provider reference
 - sync job id and status
-- any inline alert text shown by Signal Foundry or Enable Banking
+- any inline alert text shown by Sumweave or Enable Banking

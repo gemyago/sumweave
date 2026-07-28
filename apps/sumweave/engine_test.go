@@ -1,0 +1,55 @@
+//go:build !release
+
+package sumweave_test
+
+import (
+	"testing"
+
+	sumweave "github.com/gemyago/sumweave/apps/sumweave"
+	"github.com/gemyago/sumweave/apps/sumweave/internal"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/dig"
+)
+
+func TestEngine(t *testing.T) {
+	t.Run("GetToolsRegistry", func(t *testing.T) {
+		t.Run("returns non-nil registry from DI container", func(t *testing.T) {
+			engine, err := sumweave.NewEngine(sumweave.WithEngineEnv("test"))
+			require.NoError(t, err)
+			require.NotNil(t, engine)
+
+			reg, err := engine.GetToolsRegistry()
+			require.NoError(t, err)
+			assert.NotNil(t, reg)
+		})
+
+		t.Run("returns same registry instance on multiple calls", func(t *testing.T) {
+			engine, err := sumweave.NewEngine(sumweave.WithEngineEnv("test"))
+			require.NoError(t, err)
+			require.NotNil(t, engine)
+
+			reg1, err := engine.GetToolsRegistry()
+			require.NoError(t, err)
+
+			reg2, err := engine.GetToolsRegistry()
+			require.NoError(t, err)
+
+			assert.Same(t, reg1, reg2)
+		})
+	})
+
+	t.Run("HTTP route and controller composition", func(t *testing.T) {
+		container := dig.New()
+		engine, err := sumweave.NewEngine(
+			sumweave.WithEngineEnv("test"),
+			internal.WithEngineContainer(container),
+		)
+		require.NoError(t, err)
+
+		var migrator *internal.DatabaseMigrator
+		require.NoError(t, container.Invoke(func(resolved *internal.DatabaseMigrator) { migrator = resolved }))
+		require.NoError(t, migrator.Migrate(t.Context()))
+		require.NoError(t, engine.StartHTTPServer(t.Context(), sumweave.WithStartHTTPServerNoop(true)))
+	})
+}

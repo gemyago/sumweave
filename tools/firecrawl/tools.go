@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	ifc "github.com/gemyago/signal-foundry/tools/firecrawl/internal/firecrawl"
+	"github.com/gemyago/sumweave/runtime/agent"
+	ifc "github.com/gemyago/sumweave/tools/firecrawl/internal/firecrawl"
 )
 
 type registerToolsOpts struct {

@@ -10,7 +10,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/sumweave/finance/domain"
 	mock "github.com/stretchr/testify/mock"
 )
 

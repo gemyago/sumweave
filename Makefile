@@ -67,8 +67,8 @@ lint:
 	$(MAKE) -C tools/firecrawl lint
 	$(MAKE) -C runtime lint
 	$(MAKE) -C finance lint
-	$(MAKE) -C apps/signal-foundry lint
-	$(MAKE) -C apps/signal-ui lint
+	$(MAKE) -C apps/sumweave lint
+	$(MAKE) -C apps/sumweave-ui lint
 	$(MAKE) -C tools/workspacefs lint
 	$(MAKE) -C tools/skills lint
 
@@ -84,13 +84,13 @@ test: $(cover_dir)
 	$(MAKE) -C tools/workspacefs test
 	$(MAKE) -C runtime test
 	$(MAKE) -C finance test
-	$(MAKE) -C apps/signal-foundry test
-	$(MAKE) -C apps/signal-ui test
+	$(MAKE) -C apps/sumweave test
+	$(MAKE) -C apps/sumweave-ui test
 	cat tools/firecrawl/.cover/profile.out > $(cover_profile)
 	tail -n +2 tools/skills/.cover/profile.out >> $(cover_profile)
 	tail -n +2 tools/workspacefs/.cover/profile.out >> $(cover_profile)
 	tail -n +2 runtime/.cover/profile.out >> $(cover_profile)
 	tail -n +2 finance/.cover/profile.out >> $(cover_profile)
-	tail -n +2 apps/signal-foundry/.cover/profile.out >> $(cover_profile)
+	tail -n +2 apps/sumweave/.cover/profile.out >> $(cover_profile)
 	go tool cover -html=$(cover_profile) -o $(cover_dir)/coverage.html
 	$(go-test-coverage) --badge-file-name $(cover_dir)/coverage.svg --profile $(cover_profile)

@@ -1,4 +1,4 @@
-module github.com/gemyago/signal-foundry/tools/firecrawl
+module github.com/gemyago/sumweave/tools/firecrawl
 
 go 1.26
 
@@ -8,7 +8,7 @@ tool (
 )
 
 require (
-	github.com/gemyago/signal-foundry/runtime v0.0.0-20260331084441-8e244d4a9d9b
+	github.com/gemyago/sumweave/runtime v0.0.0-20260331084441-8e244d4a9d9b
 	github.com/jaswdr/faker/v2 v2.9.1
 	github.com/stretchr/testify v1.11.1
 )
@@ -108,4 +108,4 @@ require (
 	rsc.io/ordered v1.1.1 // indirect
 )
 
-replace github.com/gemyago/signal-foundry/runtime => ../../runtime
+replace github.com/gemyago/sumweave/runtime => ../../runtime

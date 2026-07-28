@@ -2,12 +2,12 @@
 
 ## Goal
 
-Keep durable Signal Foundry state in databases so production app, worker,
+Keep durable Sumweave state in databases so production app, worker,
 scheduler, and migration workloads do not require persistent filesystem
 volumes. Finance owns finance data; the retained agent runtime owns its own
 runtime state.
 
-Signal Foundry is early alpha. Local data may be dropped, recreated through
+Sumweave is early alpha. Local data may be dropped, recreated through
 normal schema setup, and reseeded. No backward-compatible file migration is
 required.
 
@@ -32,12 +32,12 @@ Configuration names are:
 
 - application DSN: `APP_APPLICATION_DATABASE_DSN`
 - agent runtime DSN: `APP_AGENTRUNTIME_DATABASE_DSN`
-- application table prefix: `signal_foundry_`
-- agent runtime table prefix: `signal_foundry_runtime_`
+- application table prefix: `sumweave_`
+- agent runtime table prefix: `sumweave_runtime_`
 
 SQLite is supported for local development and tests only. The local defaults
 are `data/application.db` and `data/agent-runtime.db` relative to
-`apps/signal-foundry`. Production configuration must receive PostgreSQL DSNs
+`apps/sumweave`. Production configuration must receive PostgreSQL DSNs
 through its environment or secret management; it must not inherit local SQLite
 paths.
 
@@ -85,7 +85,7 @@ runtime.
 
 ## Migration Integration
 
-Run `signal-foundry db-migrate` before starting processes that use persisted
+Run `sumweave db-migrate` before starting processes that use persisted
 tables. The command is idempotent and prepares the retained schemas in this
 order:
 

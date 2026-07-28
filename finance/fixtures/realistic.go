@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	financepkg "github.com/gemyago/signal-foundry/finance"
-	"github.com/gemyago/signal-foundry/finance/domain"
+	financepkg "github.com/gemyago/sumweave/finance"
+	"github.com/gemyago/sumweave/finance/domain"
 )
 
 type financeScenarioService interface {

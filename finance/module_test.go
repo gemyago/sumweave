@@ -20,7 +20,7 @@ func TestModuleBoundary(t *testing.T) {
 			if line == "" {
 				continue
 			}
-			require.NotContains(t, line, "github.com/gemyago/signal-foundry/runtime")
+			require.NotContains(t, line, "github.com/gemyago/sumweave/runtime")
 		}
 	})
 }

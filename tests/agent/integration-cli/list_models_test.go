@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
+	"github.com/gemyago/sumweave/runtime/agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

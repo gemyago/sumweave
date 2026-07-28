@@ -1,4 +1,4 @@
-# Copied from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6 and focused on Signal Foundry retention policy.
+# Copied from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6 and focused on Sumweave retention policy.
 import datetime
 import pathlib
 import sys

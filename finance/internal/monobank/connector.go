@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
-	monobankclient "github.com/gemyago/signal-foundry/finance/internal/monobank/client"
-	"github.com/gemyago/signal-foundry/finance/internal/providers"
+	"github.com/gemyago/sumweave/finance/domain"
+	monobankclient "github.com/gemyago/sumweave/finance/internal/monobank/client"
+	"github.com/gemyago/sumweave/finance/internal/providers"
 )
 
 const statementChunkRange = 31*24*time.Hour + time.Hour

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
-	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/gemyago/sumweave/finance/domain"
+	"github.com/gemyago/sumweave/finance/persistence"
 )
 
 type fxServiceStore interface {

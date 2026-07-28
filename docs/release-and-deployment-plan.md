@@ -9,7 +9,7 @@ the same image into separate production workloads with Helm and Argo CD.
 The implementation should start by copying the relevant files from
 `gemyago/golang-backend-boilerplate` at commit
 `798f0dc9fd753481d0d698d8232ea08df44185b6`, then minimally adapt them for
-Signal Foundry.
+Sumweave.
 
 ## Prerequisite
 
@@ -24,7 +24,7 @@ must wait until that prerequisite is complete.
 
 ## Release Artifact
 
-Signal Foundry has one release binary and one runtime image.
+Sumweave has one release binary and one runtime image.
 
 The frontend is built once and embedded into the Go binary before Go
 cross-compilation. The application config YAML, system prompt template, and
@@ -36,8 +36,8 @@ and copied into the runtime image.
 
 The host build must produce:
 
-- `linux/amd64/signal-foundry`
-- `linux/arm64/signal-foundry`
+- `linux/amd64/sumweave`
+- `linux/arm64/sumweave`
 - a staged copy of `.platform-agents/skills`
 
 Release builds must use `CGO_ENABLED=0` and the `release` build tag.
@@ -62,7 +62,7 @@ Copy and adapt these upstream areas:
 - `build/scripts/ghcr.py`
 - `build/scripts/tests/test_ghcr.py`
 
-Adapt upstream command discovery to one binary named `signal-foundry`. Do not
+Adapt upstream command discovery to one binary named `sumweave`. Do not
 restore the removed npm package distribution pipeline.
 
 Delete the remaining tracked `build/npm/.gitignore`; ignored local npm staging
@@ -72,7 +72,7 @@ outputs are obsolete and are not release inputs.
 
 Publish one image:
 
-`ghcr.io/gemyago/signal-foundry`
+`ghcr.io/gemyago/sumweave`
 
 Use a distroless static non-root runtime image. Docker must not compile the UI
 or Go code. It only copies the prepared binary for `TARGETOS/TARGETARCH` and the
@@ -84,7 +84,7 @@ The Dockerfile must:
 - copy the binary to a stable path on `PATH`
 - copy platform-agent skills to the path expected by application config
 - run as a non-root user
-- set only `ENTRYPOINT ["signal-foundry"]`
+- set only `ENTRYPOINT ["sumweave"]`
 - define no default `CMD`
 
 Running the image without arguments should therefore display Cobra help.
@@ -163,7 +163,7 @@ Prereleases receive only their full prerelease and `git-tag-*` tags. Release
 tagging should use Crane to retag the existing commit image remotely.
 
 Copy and adapt upstream's draft release preparation and published release image
-tagging workflows. Do not copy PR-image promotion because Signal Foundry
+tagging workflows. Do not copy PR-image promotion because Sumweave
 publishes directly after a push to `main`.
 
 ## GHCR Cleanup
@@ -172,7 +172,7 @@ Copy upstream's tested GHCR cleanup utility and pinned Python dependencies.
 Adapt it for:
 
 - namespace `users/gemyago`
-- package `signal-foundry`
+- package `sumweave`
 - seven-day retention for branch and commit-only images
 - permanent retention for stable and release tags
 
@@ -182,7 +182,7 @@ multi-platform manifests associated with retained tags.
 ## Helm Chart
 
 Copy the relevant upstream chart scaffold into
-`deploy/helm/signal-foundry`, including naming helpers, Service, HTTPRoute,
+`deploy/helm/sumweave`, including naming helpers, Service, HTTPRoute,
 ServiceAccount, chart test, pinned Helm tooling, and deployment documentation.
 
 Copy the upstream HPA pattern for the app Deployment only, disabled by default.
@@ -340,7 +340,7 @@ Update these documents with the implementation:
 
 - root `AGENTS.md`
 - `build/AGENTS.md`
-- `apps/signal-foundry/AGENTS.md`
+- `apps/sumweave/AGENTS.md`
 - new `deploy/AGENTS.md`
 - `docs/ARCHITECTURE.md`
 - build and deployment READMEs

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
+	"github.com/gemyago/sumweave/runtime/internal/gormsumweave"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	newStore := func(
 		t *testing.T,
-		opts gormsignalfoundry.GormSignalFoundryTablesOpts,
+		opts gormsumweave.GormSumweaveTablesOpts,
 	) *DatabaseSessionMetadataStore {
 		t.Helper()
 		store, err := NewDatabaseSessionMetadataStore(":memory:", opts)
@@ -34,7 +34,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Save creates new metadata entry", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 
 		app := fake.Lorem().Word() + fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -66,7 +66,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Save updates existing metadata entry (upsert)", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -107,7 +107,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List returns entries sorted by updatedAt desc", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -147,7 +147,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List paginates canonical updates deterministically", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
 		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
@@ -187,7 +187,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List returns empty slice when no sessions", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 
 		res, err := store.List(t.Context(), ListSessionMetadataParams{
 			AppName: fake.Lorem().Word(),
@@ -203,7 +203,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List with offset and limit returns correct slice and total", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -237,7 +237,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Delete removes entry", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -266,7 +266,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Delete of non-existent session does not error", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 
 		err := store.Delete(t.Context(), fake.Lorem().Word(), fake.UUID().V4(), fake.UUID().V4())
 		require.NoError(t, err)
@@ -289,7 +289,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 		storeA, err := NewDatabaseSessionMetadataStore(
 			":memory:",
-			gormsignalfoundry.GormSignalFoundryTablesOpts{TablePrefix: "a_"},
+			gormsumweave.GormSumweaveTablesOpts{TablePrefix: "a_"},
 		)
 		require.NoError(t, err)
 		require.NoError(t, storeA.AutoMigrate())
@@ -297,7 +297,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 		storeB, err := NewDatabaseSessionMetadataStore(
 			":memory:",
-			gormsignalfoundry.GormSignalFoundryTablesOpts{TablePrefix: "b_"},
+			gormsumweave.GormSumweaveTablesOpts{TablePrefix: "b_"},
 		)
 		require.NoError(t, err)
 		require.NoError(t, storeB.AutoMigrate())
@@ -314,7 +314,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Save returns context error when cancelled", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		now := randomTruncatedUTC(fake)
@@ -330,7 +330,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List returns context error when cancelled", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		_, err := store.List(ctx, ListSessionMetadataParams{
@@ -344,7 +344,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Delete returns context error when cancelled", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		err := store.Delete(ctx, fake.Lorem().Word(), fake.UUID().V4(), fake.UUID().V4())
@@ -353,13 +353,13 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("NewDatabaseSessionMetadataStore rejects empty dsn", func(t *testing.T) {
 		t.Parallel()
-		_, err := NewDatabaseSessionMetadataStore("", gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		_, err := NewDatabaseSessionMetadataStore("", gormsumweave.GormSumweaveTablesOpts{})
 		require.Error(t, err)
 	})
 
 	t.Run("Save validation errors", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 		uid := fake.UUID().V4()
 		app := fake.Lorem().Word()
 		now := randomTruncatedUTC(fake)
@@ -394,7 +394,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("List validation errors", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 		uid := fake.UUID().V4()
 		app := fake.Lorem().Word()
 
@@ -412,7 +412,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("Delete validation errors", func(t *testing.T) {
 		t.Parallel()
-		store := newStore(t, gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
 		uid := fake.UUID().V4()
 		app := fake.Lorem().Word()
 		sid := fake.UUID().V4()
@@ -427,7 +427,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("operations fail after underlying DB closed", func(t *testing.T) {
 		t.Parallel()
-		store, err := NewDatabaseSessionMetadataStore(":memory:", gormsignalfoundry.GormSignalFoundryTablesOpts{})
+		store, err := NewDatabaseSessionMetadataStore(":memory:", gormsumweave.GormSumweaveTablesOpts{})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
 		sqlDB, err := store.db.DB()

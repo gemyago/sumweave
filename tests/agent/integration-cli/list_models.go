@@ -8,7 +8,7 @@ import (
 	"io"
 	"slices"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
+	"github.com/gemyago/sumweave/runtime/agent"
 )
 
 func runListModels(ctx context.Context, lister agent.ModelsLister, w io.Writer) error {

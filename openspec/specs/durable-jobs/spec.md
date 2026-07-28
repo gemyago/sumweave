@@ -81,5 +81,5 @@ and schedule storage using the configured application database.
 
 #### Scenario: Commands rely on prepared schemas
 
-- **WHEN** the jobs worker or scheduler runs after `signal-foundry db-migrate`
+- **WHEN** the jobs worker or scheduler runs after `sumweave db-migrate`
 - **THEN** it MUST use the prepared schema and MUST NOT migrate it implicitly.

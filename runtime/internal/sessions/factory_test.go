@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/signal-foundry/runtime/internal/summarize"
+	"github.com/gemyago/sumweave/runtime/internal/summarize"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/adk/session"

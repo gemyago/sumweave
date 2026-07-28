@@ -1,0 +1,152 @@
+# Default configuration for the application, applies to all environments.
+
+defaultLogLevel: INFO
+
+# Base directory for agent storage and workspace tools, relative to the app root.
+dataDir: data
+
+pprofListener:
+  # Make sure your app is fully internal if enabling it in production
+  enabled: false
+  addr: "localhost:6060"
+
+# This should be aligned with actual runtime environment (e.g k8s or similar)
+gracefulShutdownTimeout: 10s
+
+httpServer:
+  host: "[::]"
+  port: 4501
+  tls:
+    # Leave both paths empty for HTTP. Set both to enable HTTPS.
+    # Relative paths are resolved from apps/sumweave.
+    certFile: ""
+    keyFile: ""
+  idleTimeout: 60s
+  readHeaderTimeout: 2s
+  readTimeout: 2s
+  # Align with LLM HTTP client timeout (internal/runtime.go llmClientTimeout); SSE agent runs need the full window.
+  writeTimeout: 300s
+  accessLogsLevel: ""
+
+httpClient:
+  retryAfterFallbackDelay: 500ms
+
+openTelemetry:
+  # Enable or disable OpenTelemetry integration in one place
+  enabled: false
+
+  # Enable or disable collection of golang runtime metrics (CPU, memory, GC, etc.)
+  # Uses https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/runtime
+  runtimeMetrics: true
+
+  # Traces configuration
+  traces:
+    enabled: false
+    endpoint: ""
+    urlPath: ""
+    protocol: http/protobuf
+    samplingRate: 1.0
+    auth:
+      token: ""
+      tokenType: ""
+  
+  # Metrics configuration
+  metrics:
+    enabled: false
+    endpoint: ""
+    urlPath: ""
+    protocol: http/protobuf
+    exportInterval: 30s
+    auth:
+      token: ""
+      tokenType: ""
+
+  # Logs configuration
+  logs:
+    enabled: false
+
+    # If true, logs will be sent to both default handler (e.g stdout) and OTEL handler
+    # If false, logs will be sent only to OTEL handler
+    defaultHandlerFanout: false
+    
+    endpoint: ""
+    urlPath: ""
+    protocol: http/protobuf
+    auth:
+      token: ""
+      tokenType: ""
+
+auth:
+  # Required JWT HMAC key. Production injects APP_AUTH_JWTSIGNINGKEY from a secret.
+  jwtSigningKey: ""
+  accessTokenTTL: 30m
+  refreshTokenTTL: 720h   # 30 days
+
+workspacefs:
+  platformAgentsPath: ../../.platform-agents
+  exec:
+    # Exec tools are disabled by default; set to true to enable shell execution tools.
+    enabled: false
+    # Maximum bytes captured per command output stream (0 uses safe built-in default).
+    maxOutputBytes: 0
+    # Per-command timeout for foreground execution (0 uses safe built-in default).
+    defaultTimeout: 0s
+    # Maximum number of concurrent background jobs (0 uses safe built-in default).
+    maxConcurrentJobs: 0
+
+agentRuntime:
+  # The application always uses database-backed agent runtime state.
+  storage:
+    type: database
+  database:
+    # Provided via env APP_AGENTRUNTIME_DATABASE_DSN
+    dsn: ""
+    # Table name prefix for agent runtime database tables (sessions, provider config, etc.).
+    # If underlying DB supports schemas, the prefix will serve as the schema name.
+    tablePrefix: "sumweave_runtime_"
+
+application:
+  database:
+    # Shared application database for finance, auth, jobs, and dispatch.
+    dsn: "data/application.db"
+    tablePrefix: "sumweave_"
+
+jobs:
+  scheduler:
+    loopInterval: 30s
+  worker:
+    enabled: true
+    pollInterval: 2s
+    maxAttempts: 3
+
+finance:
+  providers:
+    monobank:
+      baseURL: "https://api.monobank.ua"
+      retryAfterFallbackDelay: 61s
+    enableBanking:
+      # Enable Banking sandbox apps use the same API host; sandbox/live is selected by the app registration.
+      baseURL: "https://api.enablebanking.com"
+      # Origin used to build http://localhost:4501/enable-banking/callback for local redirect-link flows.
+      callbackBaseURL: "http://localhost:4501"
+      # Set via APP_FINANCE_PROVIDERS_ENABLEBANKING_APPID.
+      appID: ""
+      # Set via APP_FINANCE_PROVIDERS_ENABLEBANKING_PRIVATEKEYPATH.
+      privateKeyPath: ""
+      aspspName: "Mock ASPSP"
+      country: "PL"
+      psuType: "personal"
+      validDays: 90
+
+skills:
+  # Set to true to enable skill discovery and tool registration.
+  enabled: true
+  # Directories to scan for platform-agent skill subdirectories.
+  # Each skill subdirectory must contain a SKILL.md.
+  # Relative paths are resolved from the app process working directory.
+  paths:
+    - ../../.platform-agents/skills
+  # Maximum size in bytes of a single SKILL.md file (default 65536 = 64 KiB).
+  maxSkillBytes: 65536
+  # Maximum number of skills to load into the catalog.
+  maxCatalogEntries: 500

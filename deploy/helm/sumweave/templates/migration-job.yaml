@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sumweave.fullname" . }}-migrate
+  labels: {{- include "sumweave.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: {{ include "sumweave.serviceAccountName" . }}
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "sumweave.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: {{- toYaml .Values.migration.args | nindent 12 }}
+          {{- if or .Values.existingConfigMap .Values.existingSecret }}
+          envFrom: {{- include "sumweave.envFrom" . | nindent 12 }}
+          {{- end }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources: {{- toYaml .Values.migration.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}

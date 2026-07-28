@@ -1,6 +1,6 @@
 go 1.26.1
 
-use ./apps/signal-foundry
+use ./apps/sumweave
 
 use ./finance
 

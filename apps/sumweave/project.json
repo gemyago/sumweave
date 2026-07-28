@@ -1,0 +1,67 @@
+{
+  "name": "sumweave",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["install-deps"],
+      "inputs": ["default", "golangci"],
+      "options": {
+        "command": "make lint",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "make test",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "install-deps": {
+      "cache": true,
+      "options": {
+        "command": "go mod download",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "install-deps",
+        {
+          "projects": ["sumweave-ui"],
+          "target": "install-deps"
+        }
+      ],
+      "inputs": [
+        "default",
+        "{workspaceRoot}/apps/sumweave-ui/src/**/*",
+        "{workspaceRoot}/apps/sumweave-ui/public/**/*",
+        "{workspaceRoot}/apps/sumweave-ui/index.html",
+        "{workspaceRoot}/apps/sumweave-ui/package.json",
+        "{workspaceRoot}/apps/sumweave-ui/package-lock.json",
+        "{workspaceRoot}/apps/sumweave-ui/*.config.*",
+        "{workspaceRoot}/apps/sumweave-ui/tsconfig*.json",
+        "{workspaceRoot}/apps/sumweave-ui/vite.config.ts",
+        "{workspaceRoot}/apps/sumweave-ui/Makefile"
+      ],
+      "outputs": ["{workspaceRoot}/build/dist"],
+      "options": {
+        "command": "make -C build dist",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "cache": false,
+      "dependsOn": ["install-deps"],
+      "options": {
+        "command": "go run ./cmd/sumweave start --env local --json-logs | pino-pretty",
+        "cwd": "{projectRoot}"
+      }
+    }
+  }
+}

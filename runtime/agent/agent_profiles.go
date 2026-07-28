@@ -3,7 +3,7 @@ package agent
 import (
 	"log/slog"
 
-	ap "github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
+	ap "github.com/gemyago/sumweave/runtime/internal/agentprofiles"
 )
 
 // ErrAgentProfileNotFound is returned when a profile with the given name does not exist.

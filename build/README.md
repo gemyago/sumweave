@@ -3,7 +3,7 @@
 This directory was adopted from
 `gemyago/golang-backend-boilerplate` at
 `798f0dc9fd753481d0d698d8232ea08df44185b6` and minimally adapted for the
-single Signal Foundry binary.
+single Sumweave binary.
 
 ```sh
 make -C build test
@@ -17,7 +17,7 @@ arm64 binaries, and copies `.platform-agents/skills` to
 Dockerfile never compiles Go or JavaScript and has no default command, so an
 image run with no arguments displays Cobra help.
 
-The publication workflows push `ghcr.io/gemyago/signal-foundry`. `main` emits
+The publication workflows push `ghcr.io/gemyago/sumweave`. `main` emits
 `latest-main` and an immutable `git-commit-<sha7>` tag; trusted manual branch
 publication emits a sanitized branch tag plus that commit tag. Published stable
 SemVer releases remotely retag the commit image with `git-tag-*`, full version,

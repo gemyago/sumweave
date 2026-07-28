@@ -1,4 +1,4 @@
-# Contributing to Signal Foundry
+# Contributing to Sumweave
 
 ## Project Setup
 
@@ -39,10 +39,10 @@ npx nx run-many -t install-deps
 This project uses Nx, some quick cheat-sheet:
 ```bash
 # Run tests of specific module:
-npx nx test signal-foundry
+npx nx test sumweave
 
 # Run tests bypassing cache:
-npx nx test signal-foundry --skipNxCache
+npx nx test sumweave --skipNxCache
 
 # Run all tests
 npx nx run-many -t test
@@ -54,7 +54,7 @@ npx nx run-many -t lint
 npx nx affected --target=lint
 
 # To see all available tasks for a specific module, use:
-nx show project signal-foundry --json
+nx show project sumweave --json
 ```
 
 To run all affected lint and tests, use `make affected-lint-test`
@@ -81,15 +81,15 @@ backend database, then create the PM2 process definitions:
 
 ```bash
 # Run the migration from the backend module.
-cd apps/signal-foundry
-go run ./cmd/signal-foundry db-migrate --env local
+cd apps/sumweave
+go run ./cmd/sumweave db-migrate --env local
 
 # Return to the repository root and start the API and Vite development server.
 cd ../..
 npm run pm2:start
 ```
 
-Backend CLI paths are relative to `apps/signal-foundry`. Nx and PM2 set that
+Backend CLI paths are relative to `apps/sumweave`. Nx and PM2 set that
 working directory for the backend process; PM2 commands themselves remain
 repo-root commands because `PM2_HOME` is repo-scoped.
 
@@ -97,8 +97,8 @@ Frontend host/port: http://localhost:5173
 Backend host/port: http://localhost:4501
 
 PM2 process names:
-- `signal-foundry-api`
-- `signal-foundry-ui`
+- `sumweave-api`
+- `sumweave-ui`
 
 Useful PM2 commands from the repo root:
 ```bash
@@ -114,7 +114,7 @@ Use `npm run pm2:logs` to inspect process output. If the backend ecosystem
 command or arguments change, recreate it rather than restarting it:
 
 ```bash
-pm2 delete signal-foundry-api
+pm2 delete sumweave-api
 pm2 start ecosystem.config.js
 ```
 
@@ -125,10 +125,10 @@ For the optional HTTPS variant of this PM2 workflow, see
 
 Use direct commands only to isolate a local startup problem; they are not the
 normal development workflow. From separate terminals, run the backend from
-`apps/signal-foundry` with `go run ./cmd/signal-foundry start-all --env local`
-and the UI from `apps/signal-ui` with `npm run dev`.
+`apps/sumweave` with `go run ./cmd/sumweave start-all --env local`
+and the UI from `apps/sumweave-ui` with `npm run dev`.
 
-If the data screen still shows a browse-first availability `404` after a PM2 restart, check `npm run pm2:status`: the UI proxies `/api/v1/*` to port `4501`, and a stale non-PM2 `signal-foundry start` process on that port can keep PM2's backend stopped. The PM2 API entry now attempts to replace a stale `signal-foundry start` listener automatically on startup.
+If the data screen still shows a browse-first availability `404` after a PM2 restart, check `npm run pm2:status`: the UI proxies `/api/v1/*` to port `4501`, and a stale non-PM2 `sumweave start` process on that port can keep PM2's backend stopped. The PM2 API entry now attempts to replace a stale `sumweave start` listener automatically on startup.
 
 ### Combined local mode
 

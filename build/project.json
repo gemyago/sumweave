@@ -13,7 +13,7 @@
     },
     "build": {
       "executor": "nx:run-commands",
-      "dependsOn": [{"projects": ["signal-foundry", "signal-ui"], "target": "install-deps"}],
+      "dependsOn": [{"projects": ["sumweave", "sumweave-ui"], "target": "install-deps"}],
       "options": {"command": "make -C build dist"},
       "outputs": ["{projectRoot}/dist"]
     }

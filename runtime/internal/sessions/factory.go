@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
-	"github.com/gemyago/signal-foundry/runtime/internal/summarize"
+	"github.com/gemyago/sumweave/runtime/internal/gormsumweave"
+	"github.com/gemyago/sumweave/runtime/internal/summarize"
 )
 
 const (
@@ -45,7 +45,7 @@ func NewSessionsStorage(
 		err error
 	)
 	if deps.UseDatabaseStorage {
-		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsignalfoundry.GormSignalFoundryTablesOpts{
+		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsumweave.GormSumweaveTablesOpts{
 			TablePrefix: deps.DatabaseTablePrefix,
 			Logger:      deps.RootLogger,
 		})
@@ -66,7 +66,7 @@ func NewSessionsStorage(
 	case "", sessionStorageTypeMemory:
 		raw = NewMemorySessionsStorage()
 	case sessionStorageTypeDatabase:
-		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsignalfoundry.GormSignalFoundryTablesOpts{
+		raw, err = NewDatabaseSessionsStorage(deps.DatabaseDSN, gormsumweave.GormSumweaveTablesOpts{
 			TablePrefix: deps.DatabaseTablePrefix,
 			Logger:      deps.RootLogger,
 		})

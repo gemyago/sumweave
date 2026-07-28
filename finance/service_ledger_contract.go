@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/sumweave/finance/domain"
 )
 
 var (

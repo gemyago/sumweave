@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/sumweave/finance/domain"
 	"gorm.io/gorm"
 )
 

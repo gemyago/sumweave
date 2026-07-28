@@ -6,13 +6,13 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gemyago/signal-foundry/finance/credentials"
-	"github.com/gemyago/signal-foundry/finance/domain"
-	internalenablebanking "github.com/gemyago/signal-foundry/finance/internal/enablebanking"
-	internalmonobank "github.com/gemyago/signal-foundry/finance/internal/monobank"
-	internalproviders "github.com/gemyago/signal-foundry/finance/internal/providers"
-	internalsynthetic "github.com/gemyago/signal-foundry/finance/internal/synthetic"
-	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/gemyago/sumweave/finance/credentials"
+	"github.com/gemyago/sumweave/finance/domain"
+	internalenablebanking "github.com/gemyago/sumweave/finance/internal/enablebanking"
+	internalmonobank "github.com/gemyago/sumweave/finance/internal/monobank"
+	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
+	internalsynthetic "github.com/gemyago/sumweave/finance/internal/synthetic"
+	"github.com/gemyago/sumweave/finance/persistence"
 )
 
 type Finance struct {

@@ -88,7 +88,7 @@ These types live in the old provider implementation files under `finance/`, not 
 
 Why this exists:
 
-- `apps/signal-foundry` cannot import `finance/internal/...` because of Go `internal` boundaries.
+- `apps/sumweave` cannot import `finance/internal/...` because of Go `internal` boundaries.
 - The OpenSpec required package `finance` to provide public constructor inputs for wiring the real v2 connectors.
 - Instead of introducing dedicated v2-facing config DTOs, the implementation reused the existing public config structs that were already available in `finance`.
 

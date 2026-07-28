@@ -1,6 +1,6 @@
-# Signal Foundry
+# Sumweave
 
-Signal Foundry is an early-alpha financial management system. It provides
+Sumweave is an early-alpha financial management system. It provides
 tenant-aware accounts, categories, ledger transactions, CSV imports, bank
 connections, reporting, balances, and FX support. Generic agent infrastructure
 is retained for future financial workflows.

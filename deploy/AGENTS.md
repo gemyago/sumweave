@@ -2,7 +2,7 @@
 
 ## Scope
 
-`deploy/` contains the Signal Foundry Helm chart only. Live Argo CD Applications,
+`deploy/` contains the Sumweave Helm chart only. Live Argo CD Applications,
 cluster URLs, namespaces, gateways, and secrets belong in the deployment/config
 repository.
 
@@ -10,8 +10,8 @@ repository.
 
 - `make -C deploy tools` installs the pinned Helm binary.
 - `make -C deploy lint` lints the chart and renders default values.
-- Render production-like values before an install: `helm template signal-foundry
-  deploy/helm/signal-foundry -f deploy/helm/signal-foundry/values-production.example.yaml`.
+- Render production-like values before an install: `helm template sumweave
+  deploy/helm/sumweave -f deploy/helm/sumweave/values-production.example.yaml`.
 
 ## Rules
 

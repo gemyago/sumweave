@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/sumweave/finance/domain"
 )
 
 var ErrInvalidDashboardPeriod = errors.New("invalid dashboard period")

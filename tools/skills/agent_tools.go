@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	iskills "github.com/gemyago/signal-foundry/tools/skills/internal/skills"
+	"github.com/gemyago/sumweave/runtime/agent"
+	iskills "github.com/gemyago/sumweave/tools/skills/internal/skills"
 )
 
 func skillsAgentTools(cat *iskills.Catalog, _ *slog.Logger) []agent.DefinedTool {

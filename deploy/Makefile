@@ -15,11 +15,11 @@ $(helm):
 tools: $(helm)
 
 lint: $(helm)
-	$(helm) lint helm/signal-foundry
-	$(helm) template signal-foundry helm/signal-foundry >/dev/null
+	$(helm) lint helm/sumweave
+	$(helm) template sumweave helm/sumweave >/dev/null
 
 render-production: $(helm)
-	$(helm) template signal-foundry helm/signal-foundry -f helm/signal-foundry/values-production.example.yaml
+	$(helm) template sumweave helm/sumweave -f helm/sumweave/values-production.example.yaml
 
 clean:
 	rm -rf bin tmp

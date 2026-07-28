@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	ifs "github.com/gemyago/signal-foundry/tools/workspacefs/internal/workspacefs"
+	"github.com/gemyago/sumweave/runtime/agent"
+	ifs "github.com/gemyago/sumweave/tools/workspacefs/internal/workspacefs"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

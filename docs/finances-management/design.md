@@ -1,6 +1,6 @@
 # Finance Management
 
-The finance management slice extends Signal Foundry with personal finance
+The finance management slice extends Sumweave with personal finance
 tracking for one or more user-owned tenants. The initial proof of concept proved
 that we can fetch account and transaction data from Enable Banking / PKO and
 monobank. The next step is to turn that POC into a productized module that can
@@ -8,8 +8,8 @@ be implemented safely and evolved independently.
 
 Relevant POC notes:
 
-- [Enable Banking / PKO POC](../../apps/signal-foundry/doc/financial-poc/enable-banking-pko.md)
-- [monobank POC](../../apps/signal-foundry/doc/financial-poc/monobank.md)
+- [Enable Banking / PKO POC](../../apps/sumweave/doc/financial-poc/enable-banking-pko.md)
+- [monobank POC](../../apps/sumweave/doc/financial-poc/monobank.md)
 - [Frankfurter FX API](https://frankfurter.dev/)
 - [NBP Web API](https://api.nbp.pl/en.html)
 - [ECB reference rates](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html)
@@ -63,15 +63,15 @@ Create a new root Go module named `finance/`.
 
 `finance/` is independent from `runtime/`. It owns the finance domain, business
 services, connector interfaces, persistence models, migrations, and sync logic.
-The existing backend application in `apps/signal-foundry/` depends on both
+The existing backend application in `apps/sumweave/` depends on both
 `runtime/` and `finance/` and wires the finance HTTP API into the same process.
 
 Expected dependency direction:
 
 ```text
-apps/signal-foundry/ -> finance/
-apps/signal-foundry/ -> runtime/
-apps/signal-ui/      -> apps/signal-foundry/ HTTP API
+apps/sumweave/ -> finance/
+apps/sumweave/ -> runtime/
+apps/sumweave-ui/      -> apps/sumweave/ HTTP API
 finance/ must not import runtime/
 ```
 
@@ -82,7 +82,7 @@ product modules under a broader `domains/` folder, this module can move then.
 
 Finance needs background work, but jobs are a system-level concern rather than a
 finance-only concept. The repository has a durable jobs foundation under
-`apps/signal-foundry/internal/jobs`:
+`apps/sumweave/internal/jobs`:
 
 - persisted job records with status, input, result, errors, requester, attempts,
   worker ID, timestamps, and idempotency key
@@ -98,16 +98,16 @@ only safe metadata. Registered typed handlers dispatch finance work.
 
 Recommended system shape:
 
-- `apps/signal-foundry` owns the jobs runtime because it owns the process,
+- `apps/sumweave` owns the jobs runtime because it owns the process,
   configuration, HTTP API, lifecycle, and worker binary modes.
 - The API process enqueues jobs and exposes job status, but does not execute
   durable jobs inline.
 - Durable jobs execute in a separate worker process mode using the same Go
-  binary, for example a future `signal-foundry jobs worker` command.
+  binary, for example a future `sumweave jobs worker` command.
 - Local development may run API and worker under the same PM2 ecosystem, but
   production should run them as separate processes/pods.
 - Product modules expose services and, where useful, typed job input/result
-  contracts; `apps/signal-foundry` registers app-level job handlers that call
+  contracts; `apps/sumweave` registers app-level job handlers that call
   those product services. Product modules must not import the app jobs runtime.
 - The jobs table remains system-level, table-prefixed with the app's jobs prefix,
   not finance-prefixed.
@@ -152,7 +152,7 @@ Scheduling decisions:
 - FX-rate sync has a global schedule and can also be triggered manually from an
   admin/diagnostics UI.
 - In Kubernetes, use standard CronJobs for the scheduler tick, for example a
-  periodic `signal-foundry jobs enqueue-due` command.
+  periodic `sumweave jobs enqueue-due` command.
 - In local development, the same enqueue-due command can be run manually or by
   PM2 if recurring local sync is needed.
 - CSV imports are explicit user-triggered jobs after preview/confirmation.
@@ -163,13 +163,13 @@ early alpha, no compatibility layer is required for removed product workflows.
 
 ### Backend API
 
-Keep one API application for now: extend `apps/signal-foundry/` with finance API
+Keep one API application for now: extend `apps/sumweave/` with finance API
 routes. The finance route tree should be distinct from runtime routes, for
 example under `/api/v1/finance/...`.
 
 The backend app should remain a thin composition layer:
 
-- authentication and process-level middleware stay in `apps/signal-foundry/`
+- authentication and process-level middleware stay in `apps/sumweave/`
 - finance business rules stay in `finance/`
 - provider-specific HTTP details stay behind finance connector implementations
 - generated API glue can live in the backend app if that matches current app
@@ -177,7 +177,7 @@ The backend app should remain a thin composition layer:
 
 ### UI
 
-Reuse `apps/signal-ui/`, but create a clearly distinct finance area alongside
+Reuse `apps/sumweave-ui/`, but create a clearly distinct finance area alongside
 the retained generic agent and administration surfaces. The UI must support:
 
 - a top-level Finance navigation area with tenant-aware routes
@@ -288,7 +288,7 @@ development, manual UI testing, and automated smoke tests.
 
 Recommended command location:
 
-- command lives in `apps/signal-foundry/cmd/signal-foundry` because that is the
+- command lives in `apps/sumweave/cmd/sumweave` because that is the
   existing product binary and it can use the same config, auth, database, and DI
   wiring as the API
 - generation logic lives in `finance/` as a domain-level scenario generator
@@ -298,7 +298,7 @@ Recommended command location:
 Suggested command shape:
 
 ```text
-signal-foundry finance fixtures generate \
+sumweave finance fixtures generate \
   --tenant-name "Demo Household" \
   --from 2026-01-01 \
   --to 2026-03-31 \

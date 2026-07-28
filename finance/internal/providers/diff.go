@@ -3,7 +3,7 @@ package providers
 import (
 	"fmt"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/sumweave/finance/domain"
 )
 
 type ProviderTransactionActionType string

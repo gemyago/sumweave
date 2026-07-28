@@ -1,0 +1,13 @@
+# Adapted from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "sumweave.fullname" . }}-test-connection
+  annotations: {helm.sh/hook: test}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: wget
+      image: busybox:1.37
+      command: [wget]
+      args: [{{ printf "%s:%v/health" (include "sumweave.fullname" .) .Values.service.port | quote }}]

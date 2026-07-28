@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/sumweave/finance/domain"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

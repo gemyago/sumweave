@@ -2,7 +2,7 @@
 
 Follow preparation steps in [README.md](./README.md) first.
 
-This flow runs backend CLI commands from `apps/signal-foundry`. It uses a fresh isolated local DB so
+This flow runs backend CLI commands from `apps/sumweave`. It uses a fresh isolated local DB so
 `jobs worker --once` stays bounded. Keep the local Monobank mock running for the
 fixture, worker, and UI verification steps.
 
@@ -16,10 +16,10 @@ mkdir -p "$E2E_ROOT"
 export APP_DATADIR="$E2E_ROOT/data"
 export APP_APPLICATION_DATABASE_DSN="$E2E_ROOT/application.db"
 
-pm2 stop signal-foundry-api
-cd apps/signal-foundry
-go run ./cmd/signal-foundry db-migrate --env local
-go run ./cmd/signal-foundry start --env local >"$E2E_ROOT/api.log" 2>&1 &
+pm2 stop sumweave-api
+cd apps/sumweave
+go run ./cmd/sumweave db-migrate --env local
+go run ./cmd/sumweave start --env local >"$E2E_ROOT/api.log" 2>&1 &
 API_PID=$!
 until curl --fail --silent http://127.0.0.1:4501/health >/dev/null; do sleep 1; done
 ```
@@ -77,7 +77,7 @@ export APP_FINANCE_PROVIDERS_MONOBANK_BASEURL=http://127.0.0.1:4599
 ## 4. Generate fixtures and verify the pre-dispatch state
 
 ```bash
-go run ./cmd/signal-foundry finance fixtures generate --env local --seed 49 --owner-user-id "$OWNER_USER_ID" --member-user-id "$OWNER_USER_ID" >"$E2E_ROOT/fixtures.json"
+go run ./cmd/sumweave finance fixtures generate --env local --seed 49 --owner-user-id "$OWNER_USER_ID" --member-user-id "$OWNER_USER_ID" >"$E2E_ROOT/fixtures.json"
 TENANT_ID=$(curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" | python3 -c 'import json,sys; items=json.load(sys.stdin)["items"]; print(next(item["id"] for item in items if item["name"] == "Fixture Tenant"))')
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/connections" -H "Authorization: Bearer ${ACCESS_TOKEN}" >"$E2E_ROOT/connections-before.json"
 ```
@@ -92,9 +92,9 @@ Expected before dispatch:
 ## 5. Enqueue due work and run one bounded worker pass
 
 ```bash
-go run ./cmd/signal-foundry jobs enqueue-due --env local
+go run ./cmd/sumweave jobs enqueue-due --env local
 APP_FINANCE_PROVIDERS_MONOBANK_BASEURL=http://127.0.0.1:4599 \
-  go run ./cmd/signal-foundry jobs worker --once --env local
+  go run ./cmd/sumweave jobs worker --once --env local
 ```
 
 `--once` stays bounded here because the DB is fresh and isolated.
@@ -141,5 +141,5 @@ kill "$API_PID" "$MOCK_PID"
 wait "$API_PID" 2>/dev/null || true
 until ! lsof -ti tcp:4501 >/dev/null; do sleep 1; done
 cd "$REPO_ROOT"
-pm2 restart signal-foundry-api
+pm2 restart sumweave-api
 ```

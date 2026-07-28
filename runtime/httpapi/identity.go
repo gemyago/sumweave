@@ -3,7 +3,7 @@ package httpapi
 import (
 	"context"
 
-	"github.com/gemyago/signal-foundry/runtime/internal/callerid"
+	"github.com/gemyago/sumweave/runtime/internal/callerid"
 )
 
 // CallerIdentity represents the authenticated caller making a request.

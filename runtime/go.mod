@@ -1,4 +1,4 @@
-module github.com/gemyago/signal-foundry/runtime
+module github.com/gemyago/sumweave/runtime
 
 go 1.26
 

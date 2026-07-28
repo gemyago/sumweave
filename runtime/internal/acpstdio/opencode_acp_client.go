@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
+	"github.com/gemyago/sumweave/runtime/internal/agentprofiles"
 )
 
 const (

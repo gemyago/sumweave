@@ -1,0 +1,52 @@
+dir: '{{.InterfaceDirRelative}}'
+template: testify
+template-data:
+  mock-build-tags: '!release'
+  unroll-variadic: true
+
+packages:
+  net/http:
+    interfaces:
+      RoundTripper:
+        config:
+          dir: internal/infrastructure/httpclient/
+          pkgname: httpclient
+  log/slog:
+    interfaces:
+      Handler:
+        config:
+          dir: internal/telemetry/
+          pkgname: telemetry
+          filename: mock_slog_handler_test.go
+          structname: MockSlogHandler
+  github.com/gemyago/sumweave/apps/sumweave/internal/auth:
+    interfaces:
+      userStore:
+      jwtService:
+      refreshTokenStore:
+      passwordHasher:
+  github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware:
+    interfaces:
+      jwtValidator:
+  github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1controllers:
+    interfaces:
+      AuthenticatingService:
+      bankConnectionService:
+      financeService:
+      transferDetailService:
+      jobsService:
+      userDirectory:
+  github.com/gemyago/sumweave/apps/sumweave/internal/app:
+    interfaces:
+      AuthUserLookup:
+  github.com/gemyago/sumweave/apps/sumweave/internal/jobs:
+    interfaces:
+      dispatchPublisher:
+      workerStore:
+  github.com/gemyago/sumweave/apps/sumweave/cmd/sumweave:
+    interfaces:
+      databaseMigrationRunner:
+      jobsWorkerRunner:
+      jobsSchedulerRunner:
+      startAllHTTPServer:
+      startAllRunner:

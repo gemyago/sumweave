@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	genkit "github.com/firebase/genkit/go/genkit"
-	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
+	lp "github.com/gemyago/sumweave/runtime/internal/llmproviders"
 )
 
 // openTestLogFile will open a log file in a project root directory.
