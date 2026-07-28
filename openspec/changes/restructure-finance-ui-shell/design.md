@@ -54,7 +54,7 @@
 - No finance backend or OpenAPI expansion just to match unsupported reference widgets.
 - No design-system rewrite away from the current `DESIGN.md` foundations.
 - No unsupported `Rules`, `Settings`, notification, or help routes as placeholder links.
-- No non-finance shell rewrite for Chat, Data, Jobs, Providers, Strategies, Evaluations, or Admin.
+- No non-finance shell rewrite for retained Chat, Providers, or Admin surfaces.
 
 ## Decisions
 

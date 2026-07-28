@@ -38,7 +38,6 @@
 
   const MODEL_STORAGE_KEY = 'selectedModel'
   const PROFILE_STORAGE_KEY = 'selectedProfile'
-  const STRATEGY_ASSISTANT_PROFILE_NAME = 'strategy-assistant'
 
   let { params = {} } = $props<{ params?: { sessionId?: string | null } }>()
 
@@ -153,14 +152,7 @@
           return
         }
 
-        const recommended = res.profiles.find(
-          (profile) => profile.name === STRATEGY_ASSISTANT_PROFILE_NAME,
-        )
-        selectedProfileName = recommended?.name ?? ''
-        if (recommended) {
-          localStorage.setItem(PROFILE_STORAGE_KEY, recommended.name)
-          return
-        }
+        selectedProfileName = ''
         localStorage.removeItem(PROFILE_STORAGE_KEY)
       })
       .catch((err) => {
@@ -178,10 +170,6 @@
       cancelled = true
     }
   })
-
-  const selectedProfile = $derived.by(
-    () => availableProfiles.find((profile) => profile.name === selectedProfileName) ?? null,
-  )
 
   const canSendMessage = $derived.by(() => {
     if (modelsLoadStatus !== 'success' || availableModels.length === 0) {
@@ -612,12 +600,6 @@
 
       {#if profilesLoadStatus === 'error'}
         <p class="profile-banner muted" role="status">{profilesListErrorMessage ?? 'Execution profiles unavailable. Using direct model selection only.'}</p>
-      {:else if selectedProfile?.name === STRATEGY_ASSISTANT_PROFILE_NAME}
-        <p class="profile-banner" role="status">
-          <strong>{selectedProfile.displayName || 'Strategy assistant'}</strong> is active.
-          Follow the bounded loop: data discovery → validate/save → evaluate → evidence critique.
-          No live trading or readiness claims.
-        </p>
       {/if}
 
       <form class="composer" onsubmit={handleSubmit}>

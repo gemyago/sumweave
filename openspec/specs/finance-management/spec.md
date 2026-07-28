@@ -4,7 +4,7 @@
 TBD - created by archiving change add-finance-management-slice. Update Purpose after archive.
 ## Requirements
 ### Requirement: Finance Module Boundary And Persistence Ownership
-The system SHALL implement finance as a root `finance/` product module that remains architecturally independent from the trading runtime.
+The system SHALL implement finance as a root `finance/` product module that remains architecturally independent from the generic agent runtime.
 
 #### Scenario: App composes finance without reverse runtime imports
 - **WHEN** finance functionality is wired into the product
@@ -385,4 +385,3 @@ The finance module SHALL implement Enable Banking through schema-faithful typed 
 - **WHEN** an Enable Banking endpoint or response shape is not documented by the current official API reference and is not required for the supported PKO workflow
 - **THEN** the client MUST NOT keep or add that operation as part of the supported generated surface
 - **AND** finance code MUST fail through bounded unsupported-path errors rather than silently falling back to raw request construction
-

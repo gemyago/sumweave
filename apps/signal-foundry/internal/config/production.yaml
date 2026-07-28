@@ -21,9 +21,9 @@ agentRuntime:
     # Inject APP_AGENTRUNTIME_DATABASE_DSN.
     dsn: ""
 
-dataLayer:
+application:
   database:
-    # Inject APP_DATALAYER_DATABASE_DSN.
+    # Inject APP_APPLICATION_DATABASE_DSN.
     dsn: ""
 
 pprofListener:

@@ -105,12 +105,11 @@ agentRuntime:
     # If underlying DB supports schemas, the prefix will serve as the schema name.
     tablePrefix: "signal_foundry_runtime_"
 
-dataLayer:
+application:
   database:
-    # Dedicated database for canonical market/reference data persistence.
-    dsn: "data/data-layer.db"
-    # Table name prefix for data-layer tables so they can share a database safely.
-    tablePrefix: "signal_foundry_data_"
+    # Shared application database for finance, auth, jobs, and dispatch.
+    dsn: "data/application.db"
+    tablePrefix: "signal_foundry_"
 
 jobs:
   scheduler:
@@ -119,16 +118,8 @@ jobs:
     enabled: true
     pollInterval: 2s
     maxAttempts: 3
-    maxConcurrentHistoricalBackfills: 1
-  historicalBackfill:
-    maxIntervals: 10000
-    maxPageSize: 5000
 
 finance:
-  fixtures:
-    database:
-      dsn: "data/data-layer.db"
-      jobsTablePrefix: "signal_foundry_data_jobs_"
   providers:
     monobank:
       baseURL: "https://api.monobank.ua"

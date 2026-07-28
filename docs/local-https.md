@@ -68,6 +68,39 @@ Use `npm run pm2:status` and `npm run pm2:logs` to inspect the processes. If
 the backend ecosystem command or arguments change, recreate it with
 `pm2 delete signal-foundry-api && pm2 start ecosystem.config.js`.
 
+## Return to the standard local HTTP workflow
+
+HTTPS is opt-in. To return both PM2 services to the normal HTTP endpoints,
+remove the two `APP_HTTPSERVER_TLS_*` exports from the ignored root
+`.envrc.local` and remove `VITE_LOCAL_HTTPS` plus its optional certificate-path
+variables from the ignored `apps/signal-ui/.env.local`. Keep
+`VITE_AGENT_API_BASE_URL=/api/v1/runtime/` so Vite continues to proxy the
+same-origin API calls.
+
+Then migrate from the backend app root and recreate both PM2 applications from
+the repository root so neither process retains an old TLS environment:
+
+```bash
+cd apps/signal-foundry
+go run ./cmd/signal-foundry db-migrate --env local
+cd ../..
+pm2 delete signal-foundry-api
+pm2 delete signal-foundry-ui
+pm2 start ecosystem.config.js
+pm2 status
+```
+
+Verify the resulting HTTP services before opening the browser:
+
+```bash
+curl -i http://127.0.0.1:4501/health
+curl -I http://127.0.0.1:5173/
+```
+
+The expected endpoints are `http://127.0.0.1:4501` for the API and
+`http://127.0.0.1:5173` for Vite. Do not use this reset while an HTTPS-only
+local test is in progress.
+
 ## Direct-start diagnostics only
 
 Direct startup is only for isolating a local problem, not normal development.

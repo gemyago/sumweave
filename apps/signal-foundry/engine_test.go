@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	signalfoundry "github.com/gemyago/signal-foundry/apps/signal-foundry"
+	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/dig"
 )
 
 func TestEngine(t *testing.T) {
@@ -35,5 +37,19 @@ func TestEngine(t *testing.T) {
 
 			assert.Same(t, reg1, reg2)
 		})
+	})
+
+	t.Run("HTTP route and controller composition", func(t *testing.T) {
+		container := dig.New()
+		engine, err := signalfoundry.NewEngine(
+			signalfoundry.WithEngineEnv("test"),
+			internal.WithEngineContainer(container),
+		)
+		require.NoError(t, err)
+
+		var migrator *internal.DatabaseMigrator
+		require.NoError(t, container.Invoke(func(resolved *internal.DatabaseMigrator) { migrator = resolved }))
+		require.NoError(t, migrator.Migrate(t.Context()))
+		require.NoError(t, engine.StartHTTPServer(t.Context(), signalfoundry.WithStartHTTPServerNoop(true)))
 	})
 }

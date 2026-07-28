@@ -1,6 +1,7 @@
 # Finance Account Balances Manual E2E
 
 Follow preparation steps in [README.md](./README.md) and get the API token before starting.
+Run `mkdir -p tmp/manual-e2e` from the repository root before using the commands.
 
 This guide is API-only. Do not use the UI for this check.
 
@@ -9,7 +10,7 @@ This guide is API-only. Do not use the UI for this check.
 Use a unique tenant name on each run so the test data is easy to identify.
 
 ```bash
-RUN_TAG=$(date +%Y%m%d-%H%M%S) && TENANT_NAME="finance-balances-e2e-${RUN_TAG}" && CREATE_STATUS=$(curl -sS -o /tmp/finance-balances-tenant-create.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data "{\"name\":\"${TENANT_NAME}\",\"displayCurrency\":\"USD\"}") && test "$CREATE_STATUS" = "200" && TENANT_ID=$(python3 -c 'import json; print(json.load(open("/tmp/finance-balances-tenant-create.json"))["id"])') && printf 'tenantId=%s\n' "$TENANT_ID"
+RUN_TAG=$(date +%Y%m%d-%H%M%S) && TENANT_NAME="finance-balances-e2e-${RUN_TAG}" && CREATE_STATUS=$(curl -sS -o tmp/manual-e2e/finance-balances-tenant-create.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data "{\"name\":\"${TENANT_NAME}\",\"displayCurrency\":\"USD\",\"seedDefaults\":false}") && test "$CREATE_STATUS" = "200" && TENANT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-balances-tenant-create.json"))["id"])') && printf 'tenantId=%s\n' "$TENANT_ID"
 ```
 
 Expected:
@@ -22,7 +23,7 @@ Expected:
 Create checking, savings, and cash accounts:
 
 ```bash
-CHECKING_STATUS=$(curl -sS -o /tmp/finance-balances-account-checking.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Checking","kind":"manual","currency":"USD"}') && test "$CHECKING_STATUS" = "200" && CHECKING_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("/tmp/finance-balances-account-checking.json"))["id"])') && SAVINGS_STATUS=$(curl -sS -o /tmp/finance-balances-account-savings.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Savings","kind":"manual","currency":"USD"}') && test "$SAVINGS_STATUS" = "200" && SAVINGS_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("/tmp/finance-balances-account-savings.json"))["id"])') && CASH_STATUS=$(curl -sS -o /tmp/finance-balances-account-cash.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Cash","kind":"manual","currency":"USD"}') && test "$CASH_STATUS" = "200" && CASH_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("/tmp/finance-balances-account-cash.json"))["id"])') && printf 'checking=%s\nsavings=%s\ncash=%s\n' "$CHECKING_ACCOUNT_ID" "$SAVINGS_ACCOUNT_ID" "$CASH_ACCOUNT_ID"
+CHECKING_STATUS=$(curl -sS -o tmp/manual-e2e/finance-balances-account-checking.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Checking","kind":"manual","currency":"USD"}') && test "$CHECKING_STATUS" = "200" && CHECKING_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-balances-account-checking.json"))["id"])') && SAVINGS_STATUS=$(curl -sS -o tmp/manual-e2e/finance-balances-account-savings.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Savings","kind":"manual","currency":"USD"}') && test "$SAVINGS_STATUS" = "200" && SAVINGS_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-balances-account-savings.json"))["id"])') && CASH_STATUS=$(curl -sS -o tmp/manual-e2e/finance-balances-account-cash.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Cash","kind":"manual","currency":"USD"}') && test "$CASH_STATUS" = "200" && CASH_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-balances-account-cash.json"))["id"])') && printf 'checking=%s\nsavings=%s\ncash=%s\n' "$CHECKING_ACCOUNT_ID" "$SAVINGS_ACCOUNT_ID" "$CASH_ACCOUNT_ID"
 ```
 
 Expected:

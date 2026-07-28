@@ -111,6 +111,20 @@ describe('createAuthFetch', () => {
     expect(mockFetch).toHaveBeenCalledOnce()
   })
 
+  it('clears auth without refreshing when a 401 has no refresh token', async () => {
+    const store = makeStore(faker.string.alphanumeric(32))
+    const authFetch = createAuthFetch(store)
+    const mockFetch = vi.fn().mockResolvedValue(new Response('Unauthorized', { status: 401 }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    const res = await authFetch('/api/v1/runtime/test')
+
+    expect(res.status).toBe(401)
+    expect(store.accessToken).toBeNull()
+    expect(mockRefreshApi).not.toHaveBeenCalled()
+    expect(mockFetch).toHaveBeenCalledOnce()
+  })
+
   it('returns non-401 responses without refresh attempt', async () => {
     const token = faker.string.alphanumeric(32)
     const store = makeStore(token)

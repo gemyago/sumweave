@@ -13,7 +13,6 @@ import (
 	"time"
 
 	jobspkg "github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs"
-	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
 	financepkg "github.com/gemyago/signal-foundry/finance"
 	"github.com/gemyago/signal-foundry/finance/credentials"
 	"github.com/gemyago/signal-foundry/finance/domain"
@@ -51,8 +50,8 @@ type financeFixturesCommandDeps struct {
 }
 
 type financeFixturesRuntimeConfig struct {
-	DatabaseDSN     string
-	JobsTablePrefix string
+	Database        *persistence.Database
+	JobsStore       *jobspkg.Store
 	JWTSigningKey   string
 	MonobankBaseURL string
 }
@@ -144,31 +143,12 @@ func runFinanceFixturesGenerate(
 	runtimeConfig financeFixturesRuntimeConfig,
 	params financeFixturesGenerateParams,
 ) (financefixtures.Summary, error) {
-	dsn := strings.TrimSpace(runtimeConfig.DatabaseDSN)
-	sqlDB, err := sqlconn.Open(dsn)
-	if err != nil {
-		return financefixtures.Summary{}, err
-	}
-	defer func() { _ = sqlDB.Close() }()
-
-	database, err := persistence.NewDatabase(sqlDB, dsn)
-	if err != nil {
-		return financefixtures.Summary{}, err
-	}
-	migrateErr := persistence.NewMigrator(database).Migrate(ctx)
+	migrateErr := persistence.NewMigrator(runtimeConfig.Database).Migrate(ctx)
 	if migrateErr != nil {
 		return financefixtures.Summary{}, migrateErr
 	}
-	store := persistence.NewStore(database)
-	jobsStore, err := jobspkg.NewStore(
-		sqlDB,
-		runtimeConfig.DatabaseDSN,
-		jobspkg.StoreOpts{TablePrefix: strings.TrimSpace(runtimeConfig.JobsTablePrefix)},
-	)
-	if err != nil {
-		return financefixtures.Summary{}, err
-	}
-	if autoMigrateErr := jobsStore.AutoMigrate(); autoMigrateErr != nil {
+	store := persistence.NewStore(runtimeConfig.Database)
+	if autoMigrateErr := runtimeConfig.JobsStore.AutoMigrate(); autoMigrateErr != nil {
 		return financefixtures.Summary{}, autoMigrateErr
 	}
 	cipherKey := []byte("12345678901234567890123456789012")
@@ -205,8 +185,8 @@ func runFinanceFixturesGenerate(
 	monobankServer := newFinanceFixturesMonobankServer()
 	defer monobankServer.Close()
 	financeModule, err := newFinanceFixturesModule(
-		database,
-		jobsStore,
+		runtimeConfig.Database,
+		runtimeConfig.JobsStore,
 		params,
 		cipher,
 		monobankServer.Client(),
@@ -403,16 +383,16 @@ func resolveFinanceFixturesRuntimeConfig(
 	type configDeps struct {
 		dig.In
 
-		DatabaseDSN     string `name:"config.finance.fixtures.database.dsn"`
-		JobsTablePrefix string `name:"config.finance.fixtures.database.jobsTablePrefix"`
-		JWTKey          string `name:"auth.jwtKey"                                      optional:"true"`
-		MonoURL         string `name:"config.finance.providers.monobank.baseURL"        optional:"true"`
+		Database  *persistence.Database
+		JobsStore *jobspkg.Store
+		JWTKey    string `name:"auth.jwtKey"                               optional:"true"`
+		MonoURL   string `name:"config.finance.providers.monobank.baseURL" optional:"true"`
 	}
 	var runtimeConfig financeFixturesRuntimeConfig
 	if err := container.Invoke(func(deps configDeps) {
 		runtimeConfig = financeFixturesRuntimeConfig{
-			DatabaseDSN:     deps.DatabaseDSN,
-			JobsTablePrefix: deps.JobsTablePrefix,
+			Database:        deps.Database,
+			JobsStore:       deps.JobsStore,
 			JWTSigningKey:   deps.JWTKey,
 			MonobankBaseURL: deps.MonoURL,
 		}

@@ -15,6 +15,6 @@ var _ = fmt.Sprint
 
 type FinanceFxDiagnosticsResponse struct { 
 	DefaultProvider string `json:"defaultProvider"`
-	Providers []*FinanceFxDiagnosticsResponseProvidersInner `json:"providers"`
+	Providers []*FinanceFxProviderDiagnostic `json:"providers"`
 	StoredRatesCount int64 `json:"storedRatesCount"`
 }

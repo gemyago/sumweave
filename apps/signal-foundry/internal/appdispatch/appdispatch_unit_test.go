@@ -3,19 +3,19 @@ package appdispatch
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
+	gosqlite "github.com/glebarez/go-sqlite"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -218,65 +218,52 @@ func TestAppDispatchUnits(t *testing.T) {
 			require.ErrorContains(t, err, "migrate sqlite app dispatch transport")
 		})
 
-		t.Run("postgres migration uses explicit schema queries", func(t *testing.T) {
-			postgresDB, mock, err := sqlmock.New()
+		t.Run("postgres migration executes generated schema queries", func(t *testing.T) {
+			require.NoError(
+				t,
+				gosqlite.RegisterDeterministicScalarFunction(
+					"pg_advisory_xact_lock",
+					1,
+					func(*gosqlite.FunctionContext, []driver.Value) (driver.Value, error) { return int64(1), nil },
+				),
+			)
+			postgresDB, err := sqlconn.Open(makeSQLiteMemoryDSN("postgres-migrator"))
 			require.NoError(t, err)
-			queries, err := buildPostgresMigrationQueries(Config{TablePrefix: "signal_foundry_data_"})
-			require.NoError(t, err)
-			mock.ExpectBegin()
-			for _, query := range queries {
-				mock.ExpectExec(regexp.QuoteMeta(query.Query)).WillReturnResult(sqlmock.NewResult(0, 0))
-			}
-			mock.ExpectCommit()
-			mock.ExpectClose()
+			defer func() { require.NoError(t, postgresDB.Close()) }()
 
-			migrator, err := NewMigrator(Config{TablePrefix: "signal_foundry_data_"}, postgresDB)
+			migrator, err := NewMigrator(
+				Config{
+					DatabaseDSN: "postgres://signal-foundry:secret@example.invalid:5432/signal_foundry?sslmode=disable",
+					TablePrefix: "signal_foundry_data_",
+				},
+				postgresDB,
+			)
 			require.NoError(t, err)
 			require.NoError(t, migrator.migratePostgres(t.Context()))
-			require.NoError(t, postgresDB.Close())
-			require.NoError(t, mock.ExpectationsWereMet())
 		})
 
-		t.Run("postgres migration helper surfaces constructor, exec, and commit failures", func(t *testing.T) {
+		t.Run("postgres migration helper surfaces constructor and write failures", func(t *testing.T) {
 			err := migratePostgres(t.Context(), nil, Config{})
 			require.EqualError(t, err, "sql database is required")
 
-			cfg := Config{
-				DatabaseDSN: "postgres://signal-foundry:secret@example.invalid:5432/signal_foundry?sslmode=disable",
-				TablePrefix: "signal_foundry_data_",
-			}
-			queries, err := buildPostgresMigrationQueries(cfg)
+			path := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
+			writable, err := sqlconn.Open(path)
 			require.NoError(t, err)
-
-			execDB, execMock, err := sqlmock.New()
+			require.NoError(t, writable.Close())
+			readOnlyDB, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 			require.NoError(t, err)
-			execMock.ExpectBegin()
-			execMock.ExpectExec(regexp.QuoteMeta(queries[0].Query)).WillReturnError(errors.New("exec boom"))
-			execMock.ExpectRollback()
+			defer func() { require.NoError(t, readOnlyDB.Close()) }()
 			require.ErrorContains(
 				t,
-				migratePostgres(t.Context(), execDB, cfg),
+				migratePostgres(
+					t.Context(),
+					readOnlyDB,
+					Config{
+						DatabaseDSN: "postgres://signal-foundry:secret@example.invalid:5432/signal_foundry?sslmode=disable",
+					},
+				),
 				"exec postgres transport migration query",
 			)
-			execMock.ExpectClose()
-			require.NoError(t, execDB.Close())
-			require.NoError(t, execMock.ExpectationsWereMet())
-
-			commitDB, commitMock, err := sqlmock.New()
-			require.NoError(t, err)
-			commitMock.ExpectBegin()
-			for _, query := range queries {
-				commitMock.ExpectExec(regexp.QuoteMeta(query.Query)).WillReturnResult(sqlmock.NewResult(0, 0))
-			}
-			commitMock.ExpectCommit().WillReturnError(errors.New("commit boom"))
-			require.ErrorContains(
-				t,
-				migratePostgres(t.Context(), commitDB, cfg),
-				"commit postgres transport migration",
-			)
-			commitMock.ExpectClose()
-			require.NoError(t, commitDB.Close())
-			require.NoError(t, commitMock.ExpectationsWereMet())
 		})
 	})
 

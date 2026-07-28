@@ -65,7 +65,7 @@ type MockSlogHandler_Enabled_Call struct {
 // Enabled is a helper method to define mock.On call
 //   - context1 context.Context
 //   - level slog.Level
-func (_e *MockSlogHandler_Expecter) Enabled(context1 interface{}, level interface{}) *MockSlogHandler_Enabled_Call {
+func (_e *MockSlogHandler_Expecter) Enabled(context1 any, level any) *MockSlogHandler_Enabled_Call {
 	return &MockSlogHandler_Enabled_Call{Call: _e.mock.On("Enabled", context1, level)}
 }
 
@@ -122,7 +122,7 @@ type MockSlogHandler_Handle_Call struct {
 // Handle is a helper method to define mock.On call
 //   - context1 context.Context
 //   - record slog.Record
-func (_e *MockSlogHandler_Expecter) Handle(context1 interface{}, record interface{}) *MockSlogHandler_Handle_Call {
+func (_e *MockSlogHandler_Expecter) Handle(context1 any, record any) *MockSlogHandler_Handle_Call {
 	return &MockSlogHandler_Handle_Call{Call: _e.mock.On("Handle", context1, record)}
 }
 
@@ -180,7 +180,7 @@ type MockSlogHandler_WithAttrs_Call struct {
 
 // WithAttrs is a helper method to define mock.On call
 //   - attrs []slog.Attr
-func (_e *MockSlogHandler_Expecter) WithAttrs(attrs interface{}) *MockSlogHandler_WithAttrs_Call {
+func (_e *MockSlogHandler_Expecter) WithAttrs(attrs any) *MockSlogHandler_WithAttrs_Call {
 	return &MockSlogHandler_WithAttrs_Call{Call: _e.mock.On("WithAttrs", attrs)}
 }
 
@@ -233,7 +233,7 @@ type MockSlogHandler_WithGroup_Call struct {
 
 // WithGroup is a helper method to define mock.On call
 //   - name string
-func (_e *MockSlogHandler_Expecter) WithGroup(name interface{}) *MockSlogHandler_WithGroup_Call {
+func (_e *MockSlogHandler_Expecter) WithGroup(name any) *MockSlogHandler_WithGroup_Call {
 	return &MockSlogHandler_WithGroup_Call{Call: _e.mock.On("WithGroup", name)}
 }
 

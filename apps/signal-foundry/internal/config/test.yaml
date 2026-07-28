@@ -2,7 +2,7 @@ defaultLogLevel: DEBUG
 httpServer:
   host: localhost
 
-dataLayer:
+application:
   database:
     dsn: ":memory:"
 

@@ -14,11 +14,11 @@ func NewFinanceFxDiagnosticsResponseValidator() FieldValidator[*FinanceFxDiagnos
 	validateDefaultProvider := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateProviders := NewArrayValidator[*FinanceFxDiagnosticsResponseProvidersInner](
-		NewSimpleFieldValidator[[]*FinanceFxDiagnosticsResponseProvidersInner](
+	validateProviders := NewArrayValidator[*FinanceFxProviderDiagnostic](
+		NewSimpleFieldValidator[[]*FinanceFxProviderDiagnostic](
 			EnsureArrayFieldRequired,
 		),
-		NewFinanceFxDiagnosticsResponseProvidersInnerValidator(),
+		NewFinanceFxProviderDiagnosticValidator(),
 	)
 	validateStoredRatesCount := NewSimpleFieldValidator[int64](
 		EnsureNonDefault[int64],

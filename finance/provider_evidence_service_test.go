@@ -277,7 +277,7 @@ func TestProviderEvidenceService(t *testing.T) {
 			ID: "legacy-evidence-" + fake.UUID().V4(), TenantID: data.tenant.ID,
 			ConnectionID: data.connection.ID, FinanceAccountID: data.account.ID,
 			FinanceTransactionID: capturedTransactionID, Scope: domain.RawPayloadScopeTransaction,
-			PayloadJSON: []byte(`{"legacy":"retained"}`), CapturedAt: data.now,
+			PayloadJSON: []byte(`{"legacy":"saved"}`), CapturedAt: data.now,
 		}
 		_, err = data.evidence.SaveProviderEvidence(t.Context(), legacyEvidence)
 		require.NoError(t, err)

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { faker } from '@faker-js/faker'
 import { render, screen } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
@@ -19,6 +19,7 @@ function sessionFixture(overrides: Partial<SessionMetadata> & Pick<SessionMetada
 }
 
 describe('SessionList', () => {
+  afterEach(() => vi.useRealTimers())
   it('renders session entries with titles', () => {
     const titleA = faker.lorem.words(3)
     const titleB = faker.lorem.words(3)
@@ -73,5 +74,31 @@ describe('SessionList', () => {
 
     expect(screen.getByText('Updated time unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/NaN/)).not.toBeInTheDocument()
+  })
+
+  it('renders readable relative labels across retained session-history time ranges', () => {
+    vi.useFakeTimers()
+    const now = new Date('2026-07-27T12:00:00Z')
+    vi.setSystemTime(now)
+    const minutes = (count: number) => new Date(now.getTime() - count * 60_000)
+    const sessions = [
+      ['seconds', new Date(now.getTime() - 30_000)],
+      ['minutes', minutes(2)],
+      ['hours', minutes(120)],
+      ['days', minutes(48 * 60)],
+      ['weeks', minutes(14 * 24 * 60)],
+      ['months', minutes(90 * 24 * 60)],
+      ['years', minutes(400 * 24 * 60)],
+    ].map(([title, updatedAt]) => sessionFixture({ sessionId: String(title), title: String(title), updatedAt: updatedAt as Date }))
+
+    render(SessionList, { props: { sessions, activeSessionId: null, onNewChat: vi.fn() } })
+
+    expect(screen.getByText('30 seconds ago')).toBeInTheDocument()
+    expect(screen.getByText('2 minutes ago')).toBeInTheDocument()
+    expect(screen.getByText('2 hours ago')).toBeInTheDocument()
+    expect(screen.getByText('2 days ago')).toBeInTheDocument()
+    expect(screen.getByText('2 weeks ago')).toBeInTheDocument()
+    expect(screen.getByText('3 months ago')).toBeInTheDocument()
+    expect(screen.getByText('last year')).toBeInTheDocument()
   })
 })

@@ -5,9 +5,9 @@ defaultLogLevel: DEBUG
 # Local paths are relative to the apps/signal-foundry working directory.
 dataDir: data
 
-dataLayer:
+application:
   database:
-    dsn: data/data-layer.db
+    dsn: data/application.db
 
 agentRuntime:
   database:
@@ -15,11 +15,6 @@ agentRuntime:
 
 auth:
   jwtSigningKey: local-secret-key
-
-finance:
-  fixtures:
-    database:
-      dsn: data/data-layer.db
 
 workspacefs:
   platformAgentsPath: ../../.platform-agents

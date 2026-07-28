@@ -39,3 +39,14 @@ packages:
   github.com/gemyago/signal-foundry/apps/signal-foundry/internal/app:
     interfaces:
       AuthUserLookup:
+  github.com/gemyago/signal-foundry/apps/signal-foundry/internal/jobs:
+    interfaces:
+      dispatchPublisher:
+      workerStore:
+  github.com/gemyago/signal-foundry/apps/signal-foundry/cmd/signal-foundry:
+    interfaces:
+      databaseMigrationRunner:
+      jobsWorkerRunner:
+      jobsSchedulerRunner:
+      startAllHTTPServer:
+      startAllRunner:

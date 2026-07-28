@@ -12,7 +12,7 @@ Use this when you want to verify backend flows against local Postgres without ma
 
 - `db-migrate` uses a DDL-capable role.
 - backend runtime uses a DML/query role.
-- agent runtime, auth, data, and raw payload bodies use PostgreSQL.
+- agent runtime, application auth/jobs/dispatch, and finance storage use PostgreSQL.
 - synthetic-provider verification can then reuse the existing manual e2e guides.
 
 ## Local roles, passwords, and DSNs
@@ -41,8 +41,8 @@ export PG_VERIFY_RUNTIME_DSN='postgres://signal_foundry_runtime:signal_foundry_r
 Backend env mapping for this path:
 
 - `APP_DATADIR="$PG_VERIFY_APP_DATA_DIR"` is only an ephemeral workspace path.
-- `APP_DATALAYER_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN"` for `db-migrate`
-- `APP_DATALAYER_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN"` for runtime and user commands
+- `APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN"` for `db-migrate`
+- `APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN"` for runtime and user commands
 - `APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN"` for `db-migrate`
 - `APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN"` for runtime and user commands
 
@@ -65,7 +65,7 @@ Change to the backend app root once:
 ```bash
 cd apps/signal-foundry
 APP_DATADIR="$PG_VERIFY_APP_DATA_DIR" \
-APP_DATALAYER_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN" \
+APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN" \
 APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN" \
 go run ./cmd/signal-foundry db-migrate --env local
 ```
@@ -84,7 +84,7 @@ From `apps/signal-foundry`:
 
 ```bash
 APP_DATADIR="$PG_VERIFY_APP_DATA_DIR" \
-APP_DATALAYER_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
+APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
 APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
 go run ./cmd/signal-foundry start-all --env local
 ```
@@ -97,7 +97,7 @@ From `apps/signal-foundry`:
 
 ```bash
 APP_DATADIR="$PG_VERIFY_APP_DATA_DIR" \
-APP_DATALAYER_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
+APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
 APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
 go run ./cmd/signal-foundry --log-level WARN --env local user add \
   --username 'postgres-verify-e2e' \
@@ -130,7 +130,7 @@ docker compose -f ../../docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIF
 Notes:
 
 - Any non-SQLite DSN is treated as Postgres; use `postgres://...` and avoid `.db` or `.sqlite` in the DSN.
-- `dataLayer.database.tablePrefix` remains a table-name prefix. Keep the default `signal_foundry_data_` for this path.
+- `application.database.tablePrefix` remains a table-name prefix. Keep the default `signal_foundry_` for this path.
 - If runtime gets permission errors after a successful migration, fix grants/default privileges instead of switching the runtime to the migration role.
 
 ## Stop and clean up

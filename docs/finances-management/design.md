@@ -43,7 +43,7 @@ paths, or transition mechanisms unless the user explicitly asks for them.
 - Support CSV import for historical data from other systems.
 - Provide tenant dashboards with reporting-period controls, income vs expense
   summaries, and category breakdowns.
-- Keep this slice architecturally independent from the trading runtime.
+- Keep this slice architecturally independent from the generic agent runtime.
 
 ## Non-Goals For The First Implementation
 
@@ -75,14 +75,14 @@ apps/signal-ui/      -> apps/signal-foundry/ HTTP API
 finance/ must not import runtime/
 ```
 
-The finance module must not import trading runtime packages. If we later regroup
+The finance module must not import agent runtime packages. If we later regroup
 product modules under a broader `domains/` folder, this module can move then.
 
 ### System Jobs Architecture
 
 Finance needs background work, but jobs are a system-level concern rather than a
-finance-only concept. The repository already has a durable jobs foundation under
-`apps/signal-foundry/internal/jobs` for historical market-data backfills:
+finance-only concept. The repository has a durable jobs foundation under
+`apps/signal-foundry/internal/jobs`:
 
 - persisted job records with status, input, result, errors, requester, attempts,
   worker ID, timestamps, and idempotency key
@@ -92,12 +92,9 @@ finance-only concept. The repository already has a durable jobs foundation under
 - HTTP endpoints for create/list/get
 - app-level DI/configuration and shutdown integration
 
-That foundation should be promoted into a generic app-level jobs substrate before
-adding finance jobs. The current implementation is useful but still product
-specific: its `Job` model stores historical-backfill input/result shapes, and
-its worker directly knows the historical-backfill runner. The next version
-should keep the durable pattern while making job input/result payloads generic
-JSON and dispatching execution through registered typed handlers.
+The foundation is a generic app-level jobs substrate. Its `Job` model stores
+generic persisted payloads for handler execution, while HTTP responses expose
+only safe metadata. Registered typed handlers dispatch finance work.
 
 Recommended system shape:
 
@@ -116,7 +113,7 @@ Recommended system shape:
   not finance-prefixed.
 - Job types are namespaced by product, for example
   `finance.bank_connection_sync`, `finance.fx_rates_sync`,
-  `finance.csv_import`, and `data.historical_raw_candle_backfill`.
+  `finance.csv_import`.
 - The job store uses generic `input_json`, `result_json`, and optional
   `progress_json`, while typed handlers validate and decode their own payloads.
 - Job records include status, timestamps, worker ID, attempts, max attempts,
@@ -161,9 +158,8 @@ Scheduling decisions:
 - CSV imports are explicit user-triggered jobs after preview/confirmation.
 - Account imports are explicit user-triggered jobs after preview/confirmation.
 
-The first finance implementation should refactor the existing jobs package into
-the generic target shape directly. Because this is early alpha, no compatibility
-layer is needed for the current historical-backfill-only job schema.
+Finance job handlers use the generic jobs substrate directly. Because this is
+early alpha, no compatibility layer is required for removed product workflows.
 
 ### Backend API
 
@@ -181,8 +177,8 @@ The backend app should remain a thin composition layer:
 
 ### UI
 
-Reuse `apps/signal-ui/`, but create a clearly distinct finance area rather than
-mixing finance screens into trading/operator workflows. The UI must support:
+Reuse `apps/signal-ui/`, but create a clearly distinct finance area alongside
+the retained generic agent and administration surfaces. The UI must support:
 
 - a top-level Finance navigation area with tenant-aware routes
 - tenant selection, create, invite, and join flows
@@ -710,7 +706,7 @@ cover these areas:
 Recommended implementation order:
 
 1. Refactor the existing app jobs package into the generic durable jobs
-   substrate and migrate historical backfills to it.
+   substrate and register finance job handlers against it.
 2. Create `finance/` module skeleton, domain types, persistence setup, and
    migrations.
 3. Add finance fixture generator services and the app CLI command so UI/API

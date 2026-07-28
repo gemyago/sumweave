@@ -618,7 +618,7 @@ func TestFinanceController(t *testing.T) {
 		assert.Equal(t, tenantID, decode(t, acceptResp)["tenantId"])
 	})
 
-	t.Run("tenant members retain user ID when auth user is missing", func(t *testing.T) {
+	t.Run("tenant members keep user ID when auth user is missing", func(t *testing.T) {
 		userID := fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()
 		service := newMockfinanceService(t)
@@ -1168,7 +1168,7 @@ func TestFinanceController(t *testing.T) {
 			newRequest(
 				http.MethodPatch,
 				"/api/v1/finance/tenants/"+tenantID+"/transactions/"+transactionID,
-				`{"description":"Coffee retained","amountMinor":-3300,"effectiveAt":"2026-06-21T12:00:00Z","tagIds":[]}`,
+				`{"description":"Coffee purchase","amountMinor":-3300,"effectiveAt":"2026-06-21T12:00:00Z","tagIds":[]}`,
 				true,
 			),
 		)

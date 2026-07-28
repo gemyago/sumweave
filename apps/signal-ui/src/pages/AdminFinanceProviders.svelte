@@ -11,7 +11,7 @@
   const jobsApi = $derived.by(() => createSignalJobsApiForAuth({ baseUrl: appBaseUrl, authStore }))
   let loading = $state(true); let error = $state<string | null>(null); let providers = $state<{ name: string; default: boolean; ready: boolean }[]>([]); let jobs = $state<JobSummary[]>([])
   onMount(() => { void loadPage() })
-  async function loadPage() { loading = true; error = null; try { const [diagnostics, financeJobs] = await Promise.all([financeApi.getFXDiagnostics(), jobsApi.listJobs({ jobType: ['finance.bank_connection_sync', 'finance.fx_rates_sync', 'finance.csv_import', 'finance.account_import'], limit: 10 })]); providers = diagnostics.providers; jobs = financeJobs.items } catch (loadError) { error = loadError instanceof Error ? loadError.message : 'Failed to load provider diagnostics' } finally { loading = false } }
+  async function loadPage() { loading = true; error = null; try { const [diagnostics, financeJobs] = await Promise.all([financeApi.getFXDiagnostics(), jobsApi.listJobs({ jobType: ['finance.bank_connection_sync', 'finance.fx_rates_refresh', 'finance.csv_import', 'finance.account_import'], limit: 10 })]); providers = diagnostics.providers; jobs = financeJobs.items } catch (loadError) { error = loadError instanceof Error ? loadError.message : 'Failed to load provider diagnostics' } finally { loading = false } }
 </script>
 
 <DocumentTitle title={documentTitle('Provider diagnostics', 'Admin')} />

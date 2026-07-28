@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/DATA-DOG/go-sqlmock"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"github.com/stretchr/testify/require"
@@ -101,44 +99,25 @@ func TestApplySQLiteConnectionDefaults(t *testing.T) {
 	t.Run("surfaces WAL setup query errors for file-backed sqlite handles", func(t *testing.T) {
 		t.Parallel()
 
-		sqlDB, mock, err := sqlmock.New()
+		db, err := gorm.Open(NewGormDialector(":memory:"), &gorm.Config{})
 		require.NoError(t, err)
-
-		mock.ExpectQuery("PRAGMA journal_mode = WAL").WillReturnError(assertiveTestError("wal boom"))
-
-		db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
+		sqlDB, err := db.DB()
 		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
+
 		err = applySQLiteWAL(db, filepath.Join(t.TempDir(), "wal-error.sqlite"))
 		require.ErrorContains(t, err, "set sqlite journal mode")
-		mock.ExpectClose()
-		require.NoError(t, sqlDB.Close())
-		require.NoError(t, mock.ExpectationsWereMet())
 	})
 
 	t.Run("rejects unexpected WAL modes for file-backed sqlite handles", func(t *testing.T) {
 		t.Parallel()
 
-		sqlDB, mock, err := sqlmock.New()
+		db, err := gorm.Open(NewGormDialector(":memory:"), &gorm.Config{})
 		require.NoError(t, err)
-
-		mock.ExpectQuery("PRAGMA journal_mode = WAL").WillReturnRows(
-			sqlmock.NewRows([]string{"journal_mode"}).AddRow("delete"),
-		)
-
-		db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
+		sqlDB, err := db.DB()
 		require.NoError(t, err)
+		defer func() { require.NoError(t, sqlDB.Close()) }()
 		err = applySQLiteWAL(db, filepath.Join(t.TempDir(), "wal-mode.sqlite"))
-		require.EqualError(t, err, `set sqlite journal mode: unexpected mode "delete"`)
-		mock.ExpectClose()
-		require.NoError(t, sqlDB.Close())
-		require.NoError(t, mock.ExpectationsWereMet())
+		require.EqualError(t, err, `set sqlite journal mode: unexpected mode "memory"`)
 	})
 }
-
-func assertiveTestError(message string) error {
-	return &testError{message: message}
-}
-
-type testError struct{ message string }
-
-func (e *testError) Error() string { return e.message }

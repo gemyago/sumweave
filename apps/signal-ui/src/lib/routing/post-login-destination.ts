@@ -4,12 +4,8 @@ export const POST_LOGIN_DESTINATION_KEY = 'signal-ui-post-login-destination'
 
 const PROTECTED_ROUTE_PREFIXES = [
   '/chat',
-  '/data',
   '/providers',
-  '/jobs',
   '/finance',
-  '/strategies',
-  '/evaluations',
   '/admin',
 ]
 

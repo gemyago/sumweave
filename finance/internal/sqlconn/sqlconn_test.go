@@ -1,10 +1,10 @@
 package sqlconn
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -64,34 +64,26 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("sqlite defaults surface wal setup errors", func(t *testing.T) {
-		db, mock, err := sqlmock.New()
+		path := filepath.Join(t.TempDir(), "readonly.sqlite")
+		writable, err := sql.Open("sqlite", path)
 		require.NoError(t, err)
-		defer func() { _ = db.Close() }()
+		_, err = writable.ExecContext(t.Context(), "CREATE TABLE test_records (id INTEGER PRIMARY KEY)")
+		require.NoError(t, err)
+		require.NoError(t, writable.Close())
+		readOnly, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, readOnly.Close()) }()
 
-		mock.ExpectExec("PRAGMA busy_timeout = 5000").WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectQuery("PRAGMA journal_mode = WAL").WillReturnError(assertiveTestError{})
-
-		err = ApplySQLiteDefaults(db, filepath.Join(t.TempDir(), "wal.sqlite"))
+		err = ApplySQLiteDefaults(readOnly, path)
 		require.ErrorContains(t, err, "set sqlite journal mode")
-		require.NoError(t, mock.ExpectationsWereMet())
 	})
 
 	t.Run("sqlite defaults reject unexpected wal response", func(t *testing.T) {
-		db, mock, err := sqlmock.New()
+		db, err := Open(":memory:")
 		require.NoError(t, err)
-		defer func() { _ = db.Close() }()
-
-		mock.ExpectExec("PRAGMA busy_timeout = 5000").WillReturnResult(sqlmock.NewResult(0, 0))
-		mock.ExpectQuery("PRAGMA journal_mode = WAL").WillReturnRows(
-			sqlmock.NewRows([]string{"journal_mode"}).AddRow("delete"),
-		)
+		defer func() { require.NoError(t, db.Close()) }()
 
 		err = ApplySQLiteDefaults(db, filepath.Join(t.TempDir(), "wal.sqlite"))
-		require.EqualError(t, err, `set sqlite journal mode: unexpected mode "delete"`)
-		require.NoError(t, mock.ExpectationsWereMet())
+		require.EqualError(t, err, `set sqlite journal mode: unexpected mode "memory"`)
 	})
 }
-
-type assertiveTestError struct{}
-
-func (assertiveTestError) Error() string { return "boom" }

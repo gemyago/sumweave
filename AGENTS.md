@@ -8,9 +8,10 @@
 
 This repository was created from template and foundation code. Treat inherited template structure, copied boilerplate, and generic support modules as reference material unless this file or a module `AGENTS.md` explicitly says they are part of the intended product path.
 
-The intended long-term system shape is:
-- one core Go package/module (`runtime/` is the current foundation; naming may change)
-- one Go API/jobs application (`apps/signal-foundry/` is the current foundation; naming may change)
+The intended product is a finance-only system with:
+- `finance/` as the finance domain module
+- `runtime/` as generic agent infrastructure
+- one Go API/jobs application (`apps/signal-foundry/`)
 - one UI (`apps/signal-ui/`)
 
 Unless explicitly promoted by the user, everything outside that core package, Go app, and UI should be treated as template-origin reference code and not as a product requirement.
@@ -185,13 +186,8 @@ Harness agnostic repo-local skills live under `.agents/skills`. After creating a
 Platform-internal skills live under `.platform-agents/skills`.
 The in-product Signal Foundry agent loads only this platform-agent root.
 
-Current platform-agent skills:
-- `platform-info` — vendor/platform behavior, constraints, and bug-vs-vendor triage
-- `historical-data-jobs` — bounded historical backfill workflow for missing candles
-- `strategy-research-loop` — browse-first strategy research and evaluation loop
-- `strategy-dsl-v0` — persisted Strategy DSL v0 shape, rules, and crossover semantics
-- `strategy-iteration` — safe saved-strategy revision and re-evaluation
-- `backtest-critique` — evidence-first backtest review and failure analysis
+The platform-agent skill root is currently empty and stageable. Add only
+finance-relevant skills when they are explicitly requested.
 
 Generic repo-local skills may still live under `.agents/skills`, but they are not loaded
 by the in-product platform agent unless the app config is explicitly changed.

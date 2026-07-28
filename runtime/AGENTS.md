@@ -10,7 +10,7 @@ This module is part of the intended long-term product path. Treat `runtime/` as 
 
 Some structure here may have started from foundation work, but this module is not reference-only template code. It is allowed to evolve directly into product code.
 
-High-level target shape for this module is tracked in [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md): a small shared `domain` plus product slices such as `data`, `analytics`, `strategy`, `governor`, and `execution`, with thin cross-slice orchestration and isolated venue integration.
+High-level target shape for this module is tracked in [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md): generic agent execution, sessions, profiles, providers, and HTTP APIs only.
 
 Key architectural decisions:
 - ADK/genkit related components are ONLY used internally and NOT exposed via public contract.
@@ -73,7 +73,6 @@ The rules are:
 - OpenAPI JSON uses camelCase for property names or any other identifiers or keys; regenerate after spec edits.
 - Tests: Mock for [ProvidersConfigService](./agent/) is generated in [agent/mocks_providers_config.go](./agent/mocks_providers_config.go) (`//go:build !release`) so packages outside `agent` (e.g. `httpapi` tests) can use `agent.NewMockProvidersConfigService`; regenerate with `go run github.com/vektra/mockery/v3` from the `runtime/` module root.
 - Tests: Gorm models should always have explicit column names; we do not relay on gorm conventions.
-- Live-tagged venue smokes compile in regular checks via `make test-live-compile`; run them manually with `make test-live`.
 - Accept cross-replica active-run and SSE reconnect races for now.
 
 ## Task Completion Protocol

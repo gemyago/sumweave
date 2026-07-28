@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Browser SPA for Signal Foundry: client-side hash routing, static `dist/` build, consumes the runtime Agent API (including SSE streams).
+Finance-first browser SPA for Signal Foundry with retained generic agent Chat and Providers routes.
 
 ## Template Origin And Boundary
 

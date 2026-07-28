@@ -2,7 +2,7 @@
 
 This file describes the current backend foundation in this repository. For product direction and naming, use the repository-level [../../../docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) as the source of truth.
 
-HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a single **`signal-foundry`** binary built from `cmd/signal-foundry`. Local commands run with `apps/signal-foundry` as CWD (`go run ./cmd/signal-foundry db-migrate --env local`, `go run ./cmd/signal-foundry start-all --env local`, or `go run ./cmd/signal-foundry start --env local`). The app wires configuration, logging, OpenTelemetry, health, and mounts the **runtime** agent HTTP API. The long-term shape is a deployable backend that can serve or embed **`apps/signal-ui`** as one unit.
+HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a single **`signal-foundry`** binary built from `cmd/signal-foundry`. Local commands run with `apps/signal-foundry` as CWD (`go run ./cmd/signal-foundry db-migrate --env local`, `go run ./cmd/signal-foundry start-all --env local`, or `go run ./cmd/signal-foundry start --env local`). The app wires configuration, logging, OpenTelemetry, health, finance APIs, auth, durable jobs, and the generic **runtime** agent HTTP API. The long-term shape is a deployable backend that can serve or embed **`apps/signal-ui`** as one unit.
 
 ## Stack
 
@@ -16,7 +16,7 @@ HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a
 | Logging | **`log/slog`** — root logger options in `internal/telemetry`, optional JSON / file / OTEL bridge |
 | Observability | **OpenTelemetry** — traces/metrics/logs hooks in `internal/telemetry` (off by default in `default.yaml`) |
 | Generated REST (app-owned) | **apigen** — `//go:generate` on `internal/api/http/register.go` reads **`internal/api/http/v1routes.yaml`** |
-| Agent HTTP | **`runtime/httpapi`** — handler built in `internal/runtime.go`, mounted under **`/api/v1/runtime/`** |
+| Agent HTTP | **`runtime/httpapi`** — handler built in `internal/agent_runtime.go`, mounted under **`/api/v1/runtime/`** |
 
 ## Root package (engine.go)
 
@@ -30,12 +30,12 @@ HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a
 ## Layout (conceptual)
 
 - **`main.go`** / **`cli.go`** — Cobra commands, process lifecycle, **`internal.Setup`** before subcommands run.
-- **`db-migrate`** — explicit backend schema setup for data-layer, jobs, finance, strategy, evaluation, and database-backed agent runtime persistence; standard local backend workflow runs this before **`start-all`**.
+- **`db-migrate`** — explicit backend schema setup for the finance application database (auth, dispatch, jobs, and finance) and database-backed agent runtime persistence; standard local backend workflow runs this before **`start-all`**.
 - **`start-all`** — standard local backend workflow entrypoint; runs the HTTP server, durable jobs consumer, and non-overlapping scheduler loop in one process using the same components as the split commands.
 - **`start`** — API-only HTTP server mode for split or production-like environments.
 - **`signal-foundry jobs worker`** / **`signal-foundry jobs enqueue-due`** — dedicated split-environment consumer and one-shot scheduler commands.
-- **`internal/wireup.go`** — loads config, registers DI (ident, shutdown hooks, **`NewRuntime`**, config providers, telemetry, app, infrastructure).
-- **`internal/runtime.go`** — constructs **`agent.Runner`** (LLM provider, **`workspacefs`** tools, filesystem storage under configurable data dir, and a required persisted agent profile service for runner-owned profile execution) and exposes **`httpapi`** as **`HTTPHandler`**.
+- **`internal/wireup.go`** — loads config and registers DI for identity, shutdown hooks, agent runtime, configuration providers, telemetry, application services, and infrastructure.
+- **`internal/agent_runtime.go`** — constructs **`agent.Runner`** (LLM provider, **`workspacefs`** tools, filesystem storage under configurable data dir, and a required persisted agent profile service for runner-owned profile execution) and exposes **`httpapi`** as **`HTTPHandler`**.
 - **`internal/api/http/`** — HTTP composition: **`server/`** (router, HTTPServer, middleware chain), **`v1routes/`** (generated routes + handlers, e.g. health), **`v1controllers/`**, **`middleware/`**, plus embedded UI staging under **`embeddedui/`** (tracked placeholder + generated ignored `dist/`).
 - **`internal/config/`** — **`default.yaml`** plus per-env **`local.yaml`**, **`test.yaml`**, **`production.yaml`**; optional **`*-user.yaml`** overrides.
 - **`internal/telemetry/`** — slog, OTEL resource, HTTP middleware, pprof helper.
@@ -68,8 +68,8 @@ HTTP server and CLI entrypoint for Signal Foundry under `apps/signal-foundry`: a
 
 ## Technical notes (one-liners)
 
-- **Local persistence:** app-root launches use **`data`** for file-backed agent/auth state and **`data/data-layer.db`** for data, Finance, durable transport, and jobs. On disk these are under **`apps/signal-foundry/data`**.
-- **LLM HTTP client timeout** in **`internal/runtime.go`** should stay consistent with **`httpServer.writeTimeout`** for streaming runs.
+- **Local persistence:** app-root launches use **`data`** for filesystem-backed agent state and **`data/application.db`** as the finance application database for auth, finance, durable transport, and jobs. Agent runtime database persistence is configured separately. On disk these are under **`apps/signal-foundry/data`**.
+- **LLM HTTP client timeout** in **`internal/agent_runtime.go`** should stay consistent with **`httpServer.writeTimeout`** for streaming runs.
 - **Health** and **auth** routes use the generated v1 stack (**`RegisterHealthRoutes`**, **`RegisterAuthRoutes`**); **`GET /api/v1/auth/me`** is wrapped with **`AuthMiddleware`** in controller. **Agent** traffic is a separate subtree under **`/api/v1/runtime/`**.
 
 For the browser client stack and env (**`VITE_*`**), see **`apps/signal-ui/doc/architecture.md`**.

@@ -153,10 +153,7 @@ func (s *Store) Create(ctx context.Context, job Job) (Job, error) {
 }
 
 func (s *Store) createWithDB(ctx context.Context, db *gorm.DB, job Job) (Job, error) {
-	model, err := newJobModel(job)
-	if err != nil {
-		return Job{}, err
-	}
+	model := newJobModel(job)
 	createErr := db.WithContext(ctx).Table(s.tableName).Create(&model).Error
 	if createErr != nil {
 		return Job{}, fmt.Errorf("create job: %w", createErr)
@@ -169,10 +166,7 @@ func (s *Store) CreateIdempotent(ctx context.Context, job Job) (Job, bool, error
 }
 
 func (s *Store) createIdempotentWithDB(ctx context.Context, db *gorm.DB, job Job) (Job, bool, error) {
-	model, err := newJobModel(job)
-	if err != nil {
-		return Job{}, false, err
-	}
+	model := newJobModel(job)
 	if strings.TrimSpace(model.IdempotencyKey) == "" {
 		return Job{}, false, ErrNoIdempotency
 	}
@@ -613,23 +607,9 @@ func (s *Store) scheduleTableName() string {
 	return strings.TrimSuffix(s.tableName, "jobs") + "job_schedules"
 }
 
-func newJobModel(job Job) (jobModel, error) {
+func newJobModel(job Job) jobModel {
 	inputJSON := job.InputJSON
-	if len(inputJSON) == 0 && job.JobType == JobTypeHistoricalRawCandleBackfill {
-		marshaled, err := marshalHistoricalInput(job.Input)
-		if err != nil {
-			return jobModel{}, fmt.Errorf("marshal job input: %w", err)
-		}
-		inputJSON = marshaled
-	}
 	resultJSON := job.ResultJSON
-	if len(resultJSON) == 0 && job.Result != nil {
-		marshaled, err := json.Marshal(job.Result)
-		if err != nil {
-			return jobModel{}, fmt.Errorf("marshal job result: %w", err)
-		}
-		resultJSON = marshaled
-	}
 	model := jobModel{
 		ID:                 strings.TrimSpace(job.ID),
 		JobType:            string(job.JobType),
@@ -662,25 +642,10 @@ func newJobModel(job Job) (jobModel, error) {
 		model.ErrorSummary = truncateBounded(job.Error.Summary, maxErrorSummaryLength)
 		model.ErrorDetails = truncateBounded(job.Error.Details, maxErrorDetailsLength)
 	}
-	return model, nil
+	return model
 }
 
 func jobFromModel(model jobModel) (Job, error) {
-	var historicalInput HistoricalRawCandleBackfillInput
-	var historicalResult *HistoricalRawCandleBackfillResult
-	if JobType(model.JobType) == JobTypeHistoricalRawCandleBackfill && strings.TrimSpace(model.InputJSON) != "" {
-		if err := json.Unmarshal([]byte(model.InputJSON), &historicalInput); err != nil {
-			return Job{}, fmt.Errorf("unmarshal job input: %w", err)
-		}
-		historicalInput = canonicalizeHistoricalInput(historicalInput)
-	}
-	if JobType(model.JobType) == JobTypeHistoricalRawCandleBackfill && strings.TrimSpace(model.ResultJSON) != "" {
-		decoded := HistoricalRawCandleBackfillResult{}
-		if err := json.Unmarshal([]byte(model.ResultJSON), &decoded); err != nil {
-			return Job{}, fmt.Errorf("unmarshal job result: %w", err)
-		}
-		historicalResult = &decoded
-	}
 	var jobErr *JobError
 	if model.ErrorCode != "" || model.ErrorSummary != "" || model.ErrorDetails != "" {
 		jobErr = &JobError{
@@ -701,9 +666,7 @@ func jobFromModel(model jobModel) (Job, error) {
 		},
 		IdempotencyKey:     model.IdempotencyKey,
 		InputHash:          model.CanonicalInputHash,
-		Input:              historicalInput,
 		InputJSON:          json.RawMessage(model.InputJSON),
-		Result:             historicalResult,
 		ResultJSON:         json.RawMessage(model.ResultJSON),
 		ProgressJSON:       json.RawMessage(model.ProgressJSON),
 		Error:              jobErr,
@@ -721,15 +684,6 @@ func jobFromModel(model jobModel) (Job, error) {
 		ScheduledAt:        model.ScheduledAt,
 		ScheduledNextRunAt: model.ScheduledNextRunAt,
 	}, nil
-}
-
-func HashInput(input HistoricalRawCandleBackfillInput) (string, error) {
-	input.IngestionRunID = ""
-	payload, err := marshalHistoricalInput(input)
-	if err != nil {
-		return "", err
-	}
-	return hashBytes(payload), nil
 }
 
 func hashBytes(payload []byte) string {

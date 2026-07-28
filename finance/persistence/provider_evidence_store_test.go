@@ -119,7 +119,7 @@ func TestProviderEvidenceStore(t *testing.T) {
 			FinanceAccountID:     accountID,
 			FinanceTransactionID: transactionID,
 			Scope:                domain.RawPayloadScopeTransaction,
-			PayloadJSON:          []byte(`{"legacy":"retained"}`),
+			PayloadJSON:          []byte(`{"legacy":"saved"}`),
 			CapturedAt:           now,
 		}
 		otherTenantEvidence := domain.ProviderEvidence{

@@ -20,4 +20,20 @@ describe('ThemeSegmentedControl', () => {
 
     expect(screen.getByRole('radio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true')
   })
+
+  it('selects an explicit theme and wraps forward with ArrowRight', async () => {
+    const user = userEvent.setup()
+    render(ThemeSegmentedControl)
+
+    await user.click(screen.getByRole('radio', { name: 'Light' }))
+    expect(screen.getByRole('radio', { name: 'Light' })).toHaveAttribute('aria-checked', 'true')
+
+    screen.getByRole('radio', { name: 'Light' }).focus()
+    await user.keyboard('{ArrowRight}')
+    expect(screen.getByRole('radio', { name: 'Dark' })).toHaveFocus()
+    await user.keyboard('{ArrowRight}')
+    expect(screen.getByRole('radio', { name: 'Auto' })).toHaveFocus()
+    await user.keyboard('{Home}')
+    expect(screen.getByRole('radio', { name: 'Auto' })).toHaveFocus()
+  })
 })

@@ -79,7 +79,7 @@ type MockAuthenticatingService_CurrentUser_Call struct {
 // CurrentUser is a helper method to define mock.On call
 //   - ctx context.Context
 //   - userID string
-func (_e *MockAuthenticatingService_Expecter) CurrentUser(ctx interface{}, userID interface{}) *MockAuthenticatingService_CurrentUser_Call {
+func (_e *MockAuthenticatingService_Expecter) CurrentUser(ctx any, userID any) *MockAuthenticatingService_CurrentUser_Call {
 	return &MockAuthenticatingService_CurrentUser_Call{Call: _e.mock.On("CurrentUser", ctx, userID)}
 }
 
@@ -148,7 +148,7 @@ type MockAuthenticatingService_Login_Call struct {
 //   - ctx context.Context
 //   - username string
 //   - password string
-func (_e *MockAuthenticatingService_Expecter) Login(ctx interface{}, username interface{}, password interface{}) *MockAuthenticatingService_Login_Call {
+func (_e *MockAuthenticatingService_Expecter) Login(ctx any, username any, password any) *MockAuthenticatingService_Login_Call {
 	return &MockAuthenticatingService_Login_Call{Call: _e.mock.On("Login", ctx, username, password)}
 }
 
@@ -221,7 +221,7 @@ type MockAuthenticatingService_Refresh_Call struct {
 // Refresh is a helper method to define mock.On call
 //   - ctx context.Context
 //   - refreshToken string
-func (_e *MockAuthenticatingService_Expecter) Refresh(ctx interface{}, refreshToken interface{}) *MockAuthenticatingService_Refresh_Call {
+func (_e *MockAuthenticatingService_Expecter) Refresh(ctx any, refreshToken any) *MockAuthenticatingService_Refresh_Call {
 	return &MockAuthenticatingService_Refresh_Call{Call: _e.mock.On("Refresh", ctx, refreshToken)}
 }
 
@@ -320,7 +320,7 @@ type mockuserDirectory_LookupUsername_Call struct {
 // LookupUsername is a helper method to define mock.On call
 //   - context1 context.Context
 //   - s string
-func (_e *mockuserDirectory_Expecter) LookupUsername(context1 interface{}, s interface{}) *mockuserDirectory_LookupUsername_Call {
+func (_e *mockuserDirectory_Expecter) LookupUsername(context1 any, s any) *mockuserDirectory_LookupUsername_Call {
 	return &mockuserDirectory_LookupUsername_Call{Call: _e.mock.On("LookupUsername", context1, s)}
 }
 
@@ -413,7 +413,7 @@ type mocktransferDetailService_GetTransferPartner_Call struct {
 // GetTransferPartner is a helper method to define mock.On call
 //   - context1 context.Context
 //   - getTransferPartnerParams finance.GetTransferPartnerParams
-func (_e *mocktransferDetailService_Expecter) GetTransferPartner(context1 interface{}, getTransferPartnerParams interface{}) *mocktransferDetailService_GetTransferPartner_Call {
+func (_e *mocktransferDetailService_Expecter) GetTransferPartner(context1 any, getTransferPartnerParams any) *mocktransferDetailService_GetTransferPartner_Call {
 	return &mocktransferDetailService_GetTransferPartner_Call{Call: _e.mock.On("GetTransferPartner", context1, getTransferPartnerParams)}
 }
 
@@ -481,7 +481,7 @@ type mocktransferDetailService_ListTransferCandidates_Call struct {
 // ListTransferCandidates is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listTransferCandidatesParams finance.ListTransferCandidatesParams
-func (_e *mocktransferDetailService_Expecter) ListTransferCandidates(context1 interface{}, listTransferCandidatesParams interface{}) *mocktransferDetailService_ListTransferCandidates_Call {
+func (_e *mocktransferDetailService_Expecter) ListTransferCandidates(context1 any, listTransferCandidatesParams any) *mocktransferDetailService_ListTransferCandidates_Call {
 	return &mocktransferDetailService_ListTransferCandidates_Call{Call: _e.mock.On("ListTransferCandidates", context1, listTransferCandidatesParams)}
 }
 
@@ -574,7 +574,7 @@ type mockfinanceService_AcceptTenantInvite_Call struct {
 // AcceptTenantInvite is a helper method to define mock.On call
 //   - context1 context.Context
 //   - acceptTenantInviteParams finance.AcceptTenantInviteParams
-func (_e *mockfinanceService_Expecter) AcceptTenantInvite(context1 interface{}, acceptTenantInviteParams interface{}) *mockfinanceService_AcceptTenantInvite_Call {
+func (_e *mockfinanceService_Expecter) AcceptTenantInvite(context1 any, acceptTenantInviteParams any) *mockfinanceService_AcceptTenantInvite_Call {
 	return &mockfinanceService_AcceptTenantInvite_Call{Call: _e.mock.On("AcceptTenantInvite", context1, acceptTenantInviteParams)}
 }
 
@@ -640,7 +640,7 @@ type mockfinanceService_ArchiveTenant_Call struct {
 // ArchiveTenant is a helper method to define mock.On call
 //   - context1 context.Context
 //   - archiveTenantParams finance.ArchiveTenantParams
-func (_e *mockfinanceService_Expecter) ArchiveTenant(context1 interface{}, archiveTenantParams interface{}) *mockfinanceService_ArchiveTenant_Call {
+func (_e *mockfinanceService_Expecter) ArchiveTenant(context1 any, archiveTenantParams any) *mockfinanceService_ArchiveTenant_Call {
 	return &mockfinanceService_ArchiveTenant_Call{Call: _e.mock.On("ArchiveTenant", context1, archiveTenantParams)}
 }
 
@@ -706,7 +706,7 @@ type mockfinanceService_ConfirmCSVImport_Call struct {
 // ConfirmCSVImport is a helper method to define mock.On call
 //   - context1 context.Context
 //   - confirmCSVImportParams finance.ConfirmCSVImportParams
-func (_e *mockfinanceService_Expecter) ConfirmCSVImport(context1 interface{}, confirmCSVImportParams interface{}) *mockfinanceService_ConfirmCSVImport_Call {
+func (_e *mockfinanceService_Expecter) ConfirmCSVImport(context1 any, confirmCSVImportParams any) *mockfinanceService_ConfirmCSVImport_Call {
 	return &mockfinanceService_ConfirmCSVImport_Call{Call: _e.mock.On("ConfirmCSVImport", context1, confirmCSVImportParams)}
 }
 
@@ -772,7 +772,7 @@ type mockfinanceService_CreateAccount_Call struct {
 // CreateAccount is a helper method to define mock.On call
 //   - context1 context.Context
 //   - createAccountParams finance.CreateAccountParams
-func (_e *mockfinanceService_Expecter) CreateAccount(context1 interface{}, createAccountParams interface{}) *mockfinanceService_CreateAccount_Call {
+func (_e *mockfinanceService_Expecter) CreateAccount(context1 any, createAccountParams any) *mockfinanceService_CreateAccount_Call {
 	return &mockfinanceService_CreateAccount_Call{Call: _e.mock.On("CreateAccount", context1, createAccountParams)}
 }
 
@@ -838,7 +838,7 @@ type mockfinanceService_CreateCategory_Call struct {
 // CreateCategory is a helper method to define mock.On call
 //   - context1 context.Context
 //   - createCategoryParams finance.CreateCategoryParams
-func (_e *mockfinanceService_Expecter) CreateCategory(context1 interface{}, createCategoryParams interface{}) *mockfinanceService_CreateCategory_Call {
+func (_e *mockfinanceService_Expecter) CreateCategory(context1 any, createCategoryParams any) *mockfinanceService_CreateCategory_Call {
 	return &mockfinanceService_CreateCategory_Call{Call: _e.mock.On("CreateCategory", context1, createCategoryParams)}
 }
 
@@ -904,7 +904,7 @@ type mockfinanceService_CreateTag_Call struct {
 // CreateTag is a helper method to define mock.On call
 //   - context1 context.Context
 //   - createTagParams finance.CreateTagParams
-func (_e *mockfinanceService_Expecter) CreateTag(context1 interface{}, createTagParams interface{}) *mockfinanceService_CreateTag_Call {
+func (_e *mockfinanceService_Expecter) CreateTag(context1 any, createTagParams any) *mockfinanceService_CreateTag_Call {
 	return &mockfinanceService_CreateTag_Call{Call: _e.mock.On("CreateTag", context1, createTagParams)}
 }
 
@@ -970,7 +970,7 @@ type mockfinanceService_CreateTenant_Call struct {
 // CreateTenant is a helper method to define mock.On call
 //   - context1 context.Context
 //   - createTenantParams finance.CreateTenantParams
-func (_e *mockfinanceService_Expecter) CreateTenant(context1 interface{}, createTenantParams interface{}) *mockfinanceService_CreateTenant_Call {
+func (_e *mockfinanceService_Expecter) CreateTenant(context1 any, createTenantParams any) *mockfinanceService_CreateTenant_Call {
 	return &mockfinanceService_CreateTenant_Call{Call: _e.mock.On("CreateTenant", context1, createTenantParams)}
 }
 
@@ -1036,7 +1036,7 @@ type mockfinanceService_CreateTenantInvite_Call struct {
 // CreateTenantInvite is a helper method to define mock.On call
 //   - context1 context.Context
 //   - createTenantInviteParams finance.CreateTenantInviteParams
-func (_e *mockfinanceService_Expecter) CreateTenantInvite(context1 interface{}, createTenantInviteParams interface{}) *mockfinanceService_CreateTenantInvite_Call {
+func (_e *mockfinanceService_Expecter) CreateTenantInvite(context1 any, createTenantInviteParams any) *mockfinanceService_CreateTenantInvite_Call {
 	return &mockfinanceService_CreateTenantInvite_Call{Call: _e.mock.On("CreateTenantInvite", context1, createTenantInviteParams)}
 }
 
@@ -1093,7 +1093,7 @@ type mockfinanceService_DeleteBankConnection_Call struct {
 // DeleteBankConnection is a helper method to define mock.On call
 //   - context1 context.Context
 //   - deleteBankConnectionParams finance.DeleteBankConnectionParams
-func (_e *mockfinanceService_Expecter) DeleteBankConnection(context1 interface{}, deleteBankConnectionParams interface{}) *mockfinanceService_DeleteBankConnection_Call {
+func (_e *mockfinanceService_Expecter) DeleteBankConnection(context1 any, deleteBankConnectionParams any) *mockfinanceService_DeleteBankConnection_Call {
 	return &mockfinanceService_DeleteBankConnection_Call{Call: _e.mock.On("DeleteBankConnection", context1, deleteBankConnectionParams)}
 }
 
@@ -1159,7 +1159,7 @@ type mockfinanceService_GetAccount_Call struct {
 // GetAccount is a helper method to define mock.On call
 //   - context1 context.Context
 //   - getAccountParams finance.GetAccountParams
-func (_e *mockfinanceService_Expecter) GetAccount(context1 interface{}, getAccountParams interface{}) *mockfinanceService_GetAccount_Call {
+func (_e *mockfinanceService_Expecter) GetAccount(context1 any, getAccountParams any) *mockfinanceService_GetAccount_Call {
 	return &mockfinanceService_GetAccount_Call{Call: _e.mock.On("GetAccount", context1, getAccountParams)}
 }
 
@@ -1225,7 +1225,7 @@ type mockfinanceService_GetAccountProviderEvidence_Call struct {
 // GetAccountProviderEvidence is a helper method to define mock.On call
 //   - context1 context.Context
 //   - getAccountProviderEvidenceParams finance.GetAccountProviderEvidenceParams
-func (_e *mockfinanceService_Expecter) GetAccountProviderEvidence(context1 interface{}, getAccountProviderEvidenceParams interface{}) *mockfinanceService_GetAccountProviderEvidence_Call {
+func (_e *mockfinanceService_Expecter) GetAccountProviderEvidence(context1 any, getAccountProviderEvidenceParams any) *mockfinanceService_GetAccountProviderEvidence_Call {
 	return &mockfinanceService_GetAccountProviderEvidence_Call{Call: _e.mock.On("GetAccountProviderEvidence", context1, getAccountProviderEvidenceParams)}
 }
 
@@ -1291,7 +1291,7 @@ type mockfinanceService_GetCSVImportAudit_Call struct {
 // GetCSVImportAudit is a helper method to define mock.On call
 //   - context1 context.Context
 //   - getCSVImportAuditParams finance.GetCSVImportAuditParams
-func (_e *mockfinanceService_Expecter) GetCSVImportAudit(context1 interface{}, getCSVImportAuditParams interface{}) *mockfinanceService_GetCSVImportAudit_Call {
+func (_e *mockfinanceService_Expecter) GetCSVImportAudit(context1 any, getCSVImportAuditParams any) *mockfinanceService_GetCSVImportAudit_Call {
 	return &mockfinanceService_GetCSVImportAudit_Call{Call: _e.mock.On("GetCSVImportAudit", context1, getCSVImportAuditParams)}
 }
 
@@ -1357,7 +1357,7 @@ type mockfinanceService_GetDashboard_Call struct {
 // GetDashboard is a helper method to define mock.On call
 //   - context1 context.Context
 //   - dashboardParams finance.DashboardParams
-func (_e *mockfinanceService_Expecter) GetDashboard(context1 interface{}, dashboardParams interface{}) *mockfinanceService_GetDashboard_Call {
+func (_e *mockfinanceService_Expecter) GetDashboard(context1 any, dashboardParams any) *mockfinanceService_GetDashboard_Call {
 	return &mockfinanceService_GetDashboard_Call{Call: _e.mock.On("GetDashboard", context1, dashboardParams)}
 }
 
@@ -1423,7 +1423,7 @@ type mockfinanceService_GetFXAdminDiagnostics_Call struct {
 // GetFXAdminDiagnostics is a helper method to define mock.On call
 //   - context1 context.Context
 //   - fXAdminDiagnosticsParams finance.FXAdminDiagnosticsParams
-func (_e *mockfinanceService_Expecter) GetFXAdminDiagnostics(context1 interface{}, fXAdminDiagnosticsParams interface{}) *mockfinanceService_GetFXAdminDiagnostics_Call {
+func (_e *mockfinanceService_Expecter) GetFXAdminDiagnostics(context1 any, fXAdminDiagnosticsParams any) *mockfinanceService_GetFXAdminDiagnostics_Call {
 	return &mockfinanceService_GetFXAdminDiagnostics_Call{Call: _e.mock.On("GetFXAdminDiagnostics", context1, fXAdminDiagnosticsParams)}
 }
 
@@ -1489,7 +1489,7 @@ type mockfinanceService_GetTransaction_Call struct {
 // GetTransaction is a helper method to define mock.On call
 //   - context1 context.Context
 //   - getTransactionParams finance.GetTransactionParams
-func (_e *mockfinanceService_Expecter) GetTransaction(context1 interface{}, getTransactionParams interface{}) *mockfinanceService_GetTransaction_Call {
+func (_e *mockfinanceService_Expecter) GetTransaction(context1 any, getTransactionParams any) *mockfinanceService_GetTransaction_Call {
 	return &mockfinanceService_GetTransaction_Call{Call: _e.mock.On("GetTransaction", context1, getTransactionParams)}
 }
 
@@ -1555,7 +1555,7 @@ type mockfinanceService_GetTransactionProviderEvidence_Call struct {
 // GetTransactionProviderEvidence is a helper method to define mock.On call
 //   - context1 context.Context
 //   - getTransactionProviderEvidenceParams finance.GetTransactionProviderEvidenceParams
-func (_e *mockfinanceService_Expecter) GetTransactionProviderEvidence(context1 interface{}, getTransactionProviderEvidenceParams interface{}) *mockfinanceService_GetTransactionProviderEvidence_Call {
+func (_e *mockfinanceService_Expecter) GetTransactionProviderEvidence(context1 any, getTransactionProviderEvidenceParams any) *mockfinanceService_GetTransactionProviderEvidence_Call {
 	return &mockfinanceService_GetTransactionProviderEvidence_Call{Call: _e.mock.On("GetTransactionProviderEvidence", context1, getTransactionProviderEvidenceParams)}
 }
 
@@ -1612,7 +1612,7 @@ type mockfinanceService_HideAccount_Call struct {
 // HideAccount is a helper method to define mock.On call
 //   - context1 context.Context
 //   - hideAccountParams finance.HideAccountParams
-func (_e *mockfinanceService_Expecter) HideAccount(context1 interface{}, hideAccountParams interface{}) *mockfinanceService_HideAccount_Call {
+func (_e *mockfinanceService_Expecter) HideAccount(context1 any, hideAccountParams any) *mockfinanceService_HideAccount_Call {
 	return &mockfinanceService_HideAccount_Call{Call: _e.mock.On("HideAccount", context1, hideAccountParams)}
 }
 
@@ -1669,7 +1669,7 @@ type mockfinanceService_LinkTransfers_Call struct {
 // LinkTransfers is a helper method to define mock.On call
 //   - context1 context.Context
 //   - linkTransfersParams finance.LinkTransfersParams
-func (_e *mockfinanceService_Expecter) LinkTransfers(context1 interface{}, linkTransfersParams interface{}) *mockfinanceService_LinkTransfers_Call {
+func (_e *mockfinanceService_Expecter) LinkTransfers(context1 any, linkTransfersParams any) *mockfinanceService_LinkTransfers_Call {
 	return &mockfinanceService_LinkTransfers_Call{Call: _e.mock.On("LinkTransfers", context1, linkTransfersParams)}
 }
 
@@ -1737,7 +1737,7 @@ type mockfinanceService_ListAccountProviderEvidence_Call struct {
 // ListAccountProviderEvidence is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listAccountProviderEvidenceParams finance.ListAccountProviderEvidenceParams
-func (_e *mockfinanceService_Expecter) ListAccountProviderEvidence(context1 interface{}, listAccountProviderEvidenceParams interface{}) *mockfinanceService_ListAccountProviderEvidence_Call {
+func (_e *mockfinanceService_Expecter) ListAccountProviderEvidence(context1 any, listAccountProviderEvidenceParams any) *mockfinanceService_ListAccountProviderEvidence_Call {
 	return &mockfinanceService_ListAccountProviderEvidence_Call{Call: _e.mock.On("ListAccountProviderEvidence", context1, listAccountProviderEvidenceParams)}
 }
 
@@ -1805,7 +1805,7 @@ type mockfinanceService_ListAccounts_Call struct {
 // ListAccounts is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listAccountsParams finance.ListAccountsParams
-func (_e *mockfinanceService_Expecter) ListAccounts(context1 interface{}, listAccountsParams interface{}) *mockfinanceService_ListAccounts_Call {
+func (_e *mockfinanceService_Expecter) ListAccounts(context1 any, listAccountsParams any) *mockfinanceService_ListAccounts_Call {
 	return &mockfinanceService_ListAccounts_Call{Call: _e.mock.On("ListAccounts", context1, listAccountsParams)}
 }
 
@@ -1873,7 +1873,7 @@ type mockfinanceService_ListBankConnectionSyncedAccounts_Call struct {
 // ListBankConnectionSyncedAccounts is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listBankConnectionSyncedAccountsParams finance.ListBankConnectionSyncedAccountsParams
-func (_e *mockfinanceService_Expecter) ListBankConnectionSyncedAccounts(context1 interface{}, listBankConnectionSyncedAccountsParams interface{}) *mockfinanceService_ListBankConnectionSyncedAccounts_Call {
+func (_e *mockfinanceService_Expecter) ListBankConnectionSyncedAccounts(context1 any, listBankConnectionSyncedAccountsParams any) *mockfinanceService_ListBankConnectionSyncedAccounts_Call {
 	return &mockfinanceService_ListBankConnectionSyncedAccounts_Call{Call: _e.mock.On("ListBankConnectionSyncedAccounts", context1, listBankConnectionSyncedAccountsParams)}
 }
 
@@ -1941,7 +1941,7 @@ type mockfinanceService_ListBankConnections_Call struct {
 // ListBankConnections is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listBankConnectionsParams finance.ListBankConnectionsParams
-func (_e *mockfinanceService_Expecter) ListBankConnections(context1 interface{}, listBankConnectionsParams interface{}) *mockfinanceService_ListBankConnections_Call {
+func (_e *mockfinanceService_Expecter) ListBankConnections(context1 any, listBankConnectionsParams any) *mockfinanceService_ListBankConnections_Call {
 	return &mockfinanceService_ListBankConnections_Call{Call: _e.mock.On("ListBankConnections", context1, listBankConnectionsParams)}
 }
 
@@ -2009,7 +2009,7 @@ type mockfinanceService_ListCategories_Call struct {
 // ListCategories is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listCategoriesParams finance.ListCategoriesParams
-func (_e *mockfinanceService_Expecter) ListCategories(context1 interface{}, listCategoriesParams interface{}) *mockfinanceService_ListCategories_Call {
+func (_e *mockfinanceService_Expecter) ListCategories(context1 any, listCategoriesParams any) *mockfinanceService_ListCategories_Call {
 	return &mockfinanceService_ListCategories_Call{Call: _e.mock.On("ListCategories", context1, listCategoriesParams)}
 }
 
@@ -2077,7 +2077,7 @@ type mockfinanceService_ListRecentCSVImportAudits_Call struct {
 // ListRecentCSVImportAudits is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listRecentCSVImportAuditsParams finance.ListRecentCSVImportAuditsParams
-func (_e *mockfinanceService_Expecter) ListRecentCSVImportAudits(context1 interface{}, listRecentCSVImportAuditsParams interface{}) *mockfinanceService_ListRecentCSVImportAudits_Call {
+func (_e *mockfinanceService_Expecter) ListRecentCSVImportAudits(context1 any, listRecentCSVImportAuditsParams any) *mockfinanceService_ListRecentCSVImportAudits_Call {
 	return &mockfinanceService_ListRecentCSVImportAudits_Call{Call: _e.mock.On("ListRecentCSVImportAudits", context1, listRecentCSVImportAuditsParams)}
 }
 
@@ -2145,7 +2145,7 @@ type mockfinanceService_ListTags_Call struct {
 // ListTags is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listTagsParams finance.ListTagsParams
-func (_e *mockfinanceService_Expecter) ListTags(context1 interface{}, listTagsParams interface{}) *mockfinanceService_ListTags_Call {
+func (_e *mockfinanceService_Expecter) ListTags(context1 any, listTagsParams any) *mockfinanceService_ListTags_Call {
 	return &mockfinanceService_ListTags_Call{Call: _e.mock.On("ListTags", context1, listTagsParams)}
 }
 
@@ -2213,7 +2213,7 @@ type mockfinanceService_ListTenantInvites_Call struct {
 // ListTenantInvites is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listTenantInvitesParams finance.ListTenantInvitesParams
-func (_e *mockfinanceService_Expecter) ListTenantInvites(context1 interface{}, listTenantInvitesParams interface{}) *mockfinanceService_ListTenantInvites_Call {
+func (_e *mockfinanceService_Expecter) ListTenantInvites(context1 any, listTenantInvitesParams any) *mockfinanceService_ListTenantInvites_Call {
 	return &mockfinanceService_ListTenantInvites_Call{Call: _e.mock.On("ListTenantInvites", context1, listTenantInvitesParams)}
 }
 
@@ -2281,7 +2281,7 @@ type mockfinanceService_ListTenantMembers_Call struct {
 // ListTenantMembers is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listTenantMembersParams finance.ListTenantMembersParams
-func (_e *mockfinanceService_Expecter) ListTenantMembers(context1 interface{}, listTenantMembersParams interface{}) *mockfinanceService_ListTenantMembers_Call {
+func (_e *mockfinanceService_Expecter) ListTenantMembers(context1 any, listTenantMembersParams any) *mockfinanceService_ListTenantMembers_Call {
 	return &mockfinanceService_ListTenantMembers_Call{Call: _e.mock.On("ListTenantMembers", context1, listTenantMembersParams)}
 }
 
@@ -2349,7 +2349,7 @@ type mockfinanceService_ListTenantsForUser_Call struct {
 // ListTenantsForUser is a helper method to define mock.On call
 //   - context1 context.Context
 //   - s string
-func (_e *mockfinanceService_Expecter) ListTenantsForUser(context1 interface{}, s interface{}) *mockfinanceService_ListTenantsForUser_Call {
+func (_e *mockfinanceService_Expecter) ListTenantsForUser(context1 any, s any) *mockfinanceService_ListTenantsForUser_Call {
 	return &mockfinanceService_ListTenantsForUser_Call{Call: _e.mock.On("ListTenantsForUser", context1, s)}
 }
 
@@ -2417,7 +2417,7 @@ type mockfinanceService_ListTransactionProviderEvidence_Call struct {
 // ListTransactionProviderEvidence is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listTransactionProviderEvidenceParams finance.ListTransactionProviderEvidenceParams
-func (_e *mockfinanceService_Expecter) ListTransactionProviderEvidence(context1 interface{}, listTransactionProviderEvidenceParams interface{}) *mockfinanceService_ListTransactionProviderEvidence_Call {
+func (_e *mockfinanceService_Expecter) ListTransactionProviderEvidence(context1 any, listTransactionProviderEvidenceParams any) *mockfinanceService_ListTransactionProviderEvidence_Call {
 	return &mockfinanceService_ListTransactionProviderEvidence_Call{Call: _e.mock.On("ListTransactionProviderEvidence", context1, listTransactionProviderEvidenceParams)}
 }
 
@@ -2485,7 +2485,7 @@ type mockfinanceService_ListTransactions_Call struct {
 // ListTransactions is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listTransactionsParams finance.ListTransactionsParams
-func (_e *mockfinanceService_Expecter) ListTransactions(context1 interface{}, listTransactionsParams interface{}) *mockfinanceService_ListTransactions_Call {
+func (_e *mockfinanceService_Expecter) ListTransactions(context1 any, listTransactionsParams any) *mockfinanceService_ListTransactions_Call {
 	return &mockfinanceService_ListTransactions_Call{Call: _e.mock.On("ListTransactions", context1, listTransactionsParams)}
 }
 
@@ -2551,7 +2551,7 @@ type mockfinanceService_PreviewCSVImport_Call struct {
 // PreviewCSVImport is a helper method to define mock.On call
 //   - context1 context.Context
 //   - previewCSVImportParams finance.PreviewCSVImportParams
-func (_e *mockfinanceService_Expecter) PreviewCSVImport(context1 interface{}, previewCSVImportParams interface{}) *mockfinanceService_PreviewCSVImport_Call {
+func (_e *mockfinanceService_Expecter) PreviewCSVImport(context1 any, previewCSVImportParams any) *mockfinanceService_PreviewCSVImport_Call {
 	return &mockfinanceService_PreviewCSVImport_Call{Call: _e.mock.On("PreviewCSVImport", context1, previewCSVImportParams)}
 }
 
@@ -2617,7 +2617,7 @@ type mockfinanceService_RecordTransaction_Call struct {
 // RecordTransaction is a helper method to define mock.On call
 //   - context1 context.Context
 //   - recordTransactionParams finance.RecordTransactionParams
-func (_e *mockfinanceService_Expecter) RecordTransaction(context1 interface{}, recordTransactionParams interface{}) *mockfinanceService_RecordTransaction_Call {
+func (_e *mockfinanceService_Expecter) RecordTransaction(context1 any, recordTransactionParams any) *mockfinanceService_RecordTransaction_Call {
 	return &mockfinanceService_RecordTransaction_Call{Call: _e.mock.On("RecordTransaction", context1, recordTransactionParams)}
 }
 
@@ -2683,7 +2683,7 @@ type mockfinanceService_TriggerBankConnectionSync_Call struct {
 // TriggerBankConnectionSync is a helper method to define mock.On call
 //   - context1 context.Context
 //   - triggerBankConnectionSyncParams finance.TriggerBankConnectionSyncParams
-func (_e *mockfinanceService_Expecter) TriggerBankConnectionSync(context1 interface{}, triggerBankConnectionSyncParams interface{}) *mockfinanceService_TriggerBankConnectionSync_Call {
+func (_e *mockfinanceService_Expecter) TriggerBankConnectionSync(context1 any, triggerBankConnectionSyncParams any) *mockfinanceService_TriggerBankConnectionSync_Call {
 	return &mockfinanceService_TriggerBankConnectionSync_Call{Call: _e.mock.On("TriggerBankConnectionSync", context1, triggerBankConnectionSyncParams)}
 }
 
@@ -2749,7 +2749,7 @@ type mockfinanceService_TriggerFXRefresh_Call struct {
 // TriggerFXRefresh is a helper method to define mock.On call
 //   - context1 context.Context
 //   - triggerFXRefreshParams finance.TriggerFXRefreshParams
-func (_e *mockfinanceService_Expecter) TriggerFXRefresh(context1 interface{}, triggerFXRefreshParams interface{}) *mockfinanceService_TriggerFXRefresh_Call {
+func (_e *mockfinanceService_Expecter) TriggerFXRefresh(context1 any, triggerFXRefreshParams any) *mockfinanceService_TriggerFXRefresh_Call {
 	return &mockfinanceService_TriggerFXRefresh_Call{Call: _e.mock.On("TriggerFXRefresh", context1, triggerFXRefreshParams)}
 }
 
@@ -2806,7 +2806,7 @@ type mockfinanceService_UnhideAccount_Call struct {
 // UnhideAccount is a helper method to define mock.On call
 //   - context1 context.Context
 //   - unhideAccountParams finance.UnhideAccountParams
-func (_e *mockfinanceService_Expecter) UnhideAccount(context1 interface{}, unhideAccountParams interface{}) *mockfinanceService_UnhideAccount_Call {
+func (_e *mockfinanceService_Expecter) UnhideAccount(context1 any, unhideAccountParams any) *mockfinanceService_UnhideAccount_Call {
 	return &mockfinanceService_UnhideAccount_Call{Call: _e.mock.On("UnhideAccount", context1, unhideAccountParams)}
 }
 
@@ -2863,7 +2863,7 @@ type mockfinanceService_UnlinkTransfers_Call struct {
 // UnlinkTransfers is a helper method to define mock.On call
 //   - context1 context.Context
 //   - unlinkTransfersParams finance.UnlinkTransfersParams
-func (_e *mockfinanceService_Expecter) UnlinkTransfers(context1 interface{}, unlinkTransfersParams interface{}) *mockfinanceService_UnlinkTransfers_Call {
+func (_e *mockfinanceService_Expecter) UnlinkTransfers(context1 any, unlinkTransfersParams any) *mockfinanceService_UnlinkTransfers_Call {
 	return &mockfinanceService_UnlinkTransfers_Call{Call: _e.mock.On("UnlinkTransfers", context1, unlinkTransfersParams)}
 }
 
@@ -2929,7 +2929,7 @@ type mockfinanceService_UpdateAccount_Call struct {
 // UpdateAccount is a helper method to define mock.On call
 //   - context1 context.Context
 //   - updateAccountParams finance.UpdateAccountParams
-func (_e *mockfinanceService_Expecter) UpdateAccount(context1 interface{}, updateAccountParams interface{}) *mockfinanceService_UpdateAccount_Call {
+func (_e *mockfinanceService_Expecter) UpdateAccount(context1 any, updateAccountParams any) *mockfinanceService_UpdateAccount_Call {
 	return &mockfinanceService_UpdateAccount_Call{Call: _e.mock.On("UpdateAccount", context1, updateAccountParams)}
 }
 
@@ -2995,7 +2995,7 @@ type mockfinanceService_UpdateCategory_Call struct {
 // UpdateCategory is a helper method to define mock.On call
 //   - context1 context.Context
 //   - updateCategoryParams finance.UpdateCategoryParams
-func (_e *mockfinanceService_Expecter) UpdateCategory(context1 interface{}, updateCategoryParams interface{}) *mockfinanceService_UpdateCategory_Call {
+func (_e *mockfinanceService_Expecter) UpdateCategory(context1 any, updateCategoryParams any) *mockfinanceService_UpdateCategory_Call {
 	return &mockfinanceService_UpdateCategory_Call{Call: _e.mock.On("UpdateCategory", context1, updateCategoryParams)}
 }
 
@@ -3061,7 +3061,7 @@ type mockfinanceService_UpdateTag_Call struct {
 // UpdateTag is a helper method to define mock.On call
 //   - context1 context.Context
 //   - updateTagParams finance.UpdateTagParams
-func (_e *mockfinanceService_Expecter) UpdateTag(context1 interface{}, updateTagParams interface{}) *mockfinanceService_UpdateTag_Call {
+func (_e *mockfinanceService_Expecter) UpdateTag(context1 any, updateTagParams any) *mockfinanceService_UpdateTag_Call {
 	return &mockfinanceService_UpdateTag_Call{Call: _e.mock.On("UpdateTag", context1, updateTagParams)}
 }
 
@@ -3127,7 +3127,7 @@ type mockfinanceService_UpdateTenant_Call struct {
 // UpdateTenant is a helper method to define mock.On call
 //   - context1 context.Context
 //   - updateTenantParams finance.UpdateTenantParams
-func (_e *mockfinanceService_Expecter) UpdateTenant(context1 interface{}, updateTenantParams interface{}) *mockfinanceService_UpdateTenant_Call {
+func (_e *mockfinanceService_Expecter) UpdateTenant(context1 any, updateTenantParams any) *mockfinanceService_UpdateTenant_Call {
 	return &mockfinanceService_UpdateTenant_Call{Call: _e.mock.On("UpdateTenant", context1, updateTenantParams)}
 }
 
@@ -3193,7 +3193,7 @@ type mockfinanceService_UpdateTransaction_Call struct {
 // UpdateTransaction is a helper method to define mock.On call
 //   - context1 context.Context
 //   - updateTransactionParams finance.UpdateTransactionParams
-func (_e *mockfinanceService_Expecter) UpdateTransaction(context1 interface{}, updateTransactionParams interface{}) *mockfinanceService_UpdateTransaction_Call {
+func (_e *mockfinanceService_Expecter) UpdateTransaction(context1 any, updateTransactionParams any) *mockfinanceService_UpdateTransaction_Call {
 	return &mockfinanceService_UpdateTransaction_Call{Call: _e.mock.On("UpdateTransaction", context1, updateTransactionParams)}
 }
 
@@ -3286,7 +3286,7 @@ type mockbankConnectionService_FinishBankConnectionLink_Call struct {
 // FinishBankConnectionLink is a helper method to define mock.On call
 //   - context1 context.Context
 //   - finishBankConnectionLinkParams finance.FinishBankConnectionLinkParams
-func (_e *mockbankConnectionService_Expecter) FinishBankConnectionLink(context1 interface{}, finishBankConnectionLinkParams interface{}) *mockbankConnectionService_FinishBankConnectionLink_Call {
+func (_e *mockbankConnectionService_Expecter) FinishBankConnectionLink(context1 any, finishBankConnectionLinkParams any) *mockbankConnectionService_FinishBankConnectionLink_Call {
 	return &mockbankConnectionService_FinishBankConnectionLink_Call{Call: _e.mock.On("FinishBankConnectionLink", context1, finishBankConnectionLinkParams)}
 }
 
@@ -3352,7 +3352,7 @@ type mockbankConnectionService_LinkTokenBankConnection_Call struct {
 // LinkTokenBankConnection is a helper method to define mock.On call
 //   - context1 context.Context
 //   - linkTokenBankConnectionParams finance.LinkTokenBankConnectionParams
-func (_e *mockbankConnectionService_Expecter) LinkTokenBankConnection(context1 interface{}, linkTokenBankConnectionParams interface{}) *mockbankConnectionService_LinkTokenBankConnection_Call {
+func (_e *mockbankConnectionService_Expecter) LinkTokenBankConnection(context1 any, linkTokenBankConnectionParams any) *mockbankConnectionService_LinkTokenBankConnection_Call {
 	return &mockbankConnectionService_LinkTokenBankConnection_Call{Call: _e.mock.On("LinkTokenBankConnection", context1, linkTokenBankConnectionParams)}
 }
 
@@ -3418,7 +3418,7 @@ type mockbankConnectionService_StartBankConnectionLink_Call struct {
 // StartBankConnectionLink is a helper method to define mock.On call
 //   - context1 context.Context
 //   - startBankConnectionLinkParams finance.StartBankConnectionLinkParams
-func (_e *mockbankConnectionService_Expecter) StartBankConnectionLink(context1 interface{}, startBankConnectionLinkParams interface{}) *mockbankConnectionService_StartBankConnectionLink_Call {
+func (_e *mockbankConnectionService_Expecter) StartBankConnectionLink(context1 any, startBankConnectionLinkParams any) *mockbankConnectionService_StartBankConnectionLink_Call {
 	return &mockbankConnectionService_StartBankConnectionLink_Call{Call: _e.mock.On("StartBankConnectionLink", context1, startBankConnectionLinkParams)}
 }
 
@@ -3477,77 +3477,9 @@ func (_m *mockjobsService) EXPECT() *mockjobsService_Expecter {
 	return &mockjobsService_Expecter{mock: &_m.Mock}
 }
 
-// CreateHistoricalRawCandleBackfill provides a mock function for the type mockjobsService
-func (_mock *mockjobsService) CreateHistoricalRawCandleBackfill(ctx context.Context, params jobs.CreateHistoricalRawCandleBackfillParams) (*jobs.Job, error) {
-	ret := _mock.Called(ctx, params)
-
-	if len(ret) == 0 {
-		panic("no return value specified for CreateHistoricalRawCandleBackfill")
-	}
-
-	var r0 *jobs.Job
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, jobs.CreateHistoricalRawCandleBackfillParams) (*jobs.Job, error)); ok {
-		return returnFunc(ctx, params)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, jobs.CreateHistoricalRawCandleBackfillParams) *jobs.Job); ok {
-		r0 = returnFunc(ctx, params)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*jobs.Job)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, jobs.CreateHistoricalRawCandleBackfillParams) error); ok {
-		r1 = returnFunc(ctx, params)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// mockjobsService_CreateHistoricalRawCandleBackfill_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateHistoricalRawCandleBackfill'
-type mockjobsService_CreateHistoricalRawCandleBackfill_Call struct {
-	*mock.Call
-}
-
-// CreateHistoricalRawCandleBackfill is a helper method to define mock.On call
-//   - ctx context.Context
-//   - params jobs.CreateHistoricalRawCandleBackfillParams
-func (_e *mockjobsService_Expecter) CreateHistoricalRawCandleBackfill(ctx interface{}, params interface{}) *mockjobsService_CreateHistoricalRawCandleBackfill_Call {
-	return &mockjobsService_CreateHistoricalRawCandleBackfill_Call{Call: _e.mock.On("CreateHistoricalRawCandleBackfill", ctx, params)}
-}
-
-func (_c *mockjobsService_CreateHistoricalRawCandleBackfill_Call) Run(run func(ctx context.Context, params jobs.CreateHistoricalRawCandleBackfillParams)) *mockjobsService_CreateHistoricalRawCandleBackfill_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 jobs.CreateHistoricalRawCandleBackfillParams
-		if args[1] != nil {
-			arg1 = args[1].(jobs.CreateHistoricalRawCandleBackfillParams)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *mockjobsService_CreateHistoricalRawCandleBackfill_Call) Return(job *jobs.Job, err error) *mockjobsService_CreateHistoricalRawCandleBackfill_Call {
-	_c.Call.Return(job, err)
-	return _c
-}
-
-func (_c *mockjobsService_CreateHistoricalRawCandleBackfill_Call) RunAndReturn(run func(ctx context.Context, params jobs.CreateHistoricalRawCandleBackfillParams) (*jobs.Job, error)) *mockjobsService_CreateHistoricalRawCandleBackfill_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Get provides a mock function for the type mockjobsService
-func (_mock *mockjobsService) Get(ctx context.Context, jobID string) (*jobs.Job, error) {
-	ret := _mock.Called(ctx, jobID)
+func (_mock *mockjobsService) Get(context1 context.Context, s string) (*jobs.Job, error) {
+	ret := _mock.Called(context1, s)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Get")
@@ -3556,17 +3488,17 @@ func (_mock *mockjobsService) Get(ctx context.Context, jobID string) (*jobs.Job,
 	var r0 *jobs.Job
 	var r1 error
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*jobs.Job, error)); ok {
-		return returnFunc(ctx, jobID)
+		return returnFunc(context1, s)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *jobs.Job); ok {
-		r0 = returnFunc(ctx, jobID)
+		r0 = returnFunc(context1, s)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*jobs.Job)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, jobID)
+		r1 = returnFunc(context1, s)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3579,13 +3511,13 @@ type mockjobsService_Get_Call struct {
 }
 
 // Get is a helper method to define mock.On call
-//   - ctx context.Context
-//   - jobID string
-func (_e *mockjobsService_Expecter) Get(ctx interface{}, jobID interface{}) *mockjobsService_Get_Call {
-	return &mockjobsService_Get_Call{Call: _e.mock.On("Get", ctx, jobID)}
+//   - context1 context.Context
+//   - s string
+func (_e *mockjobsService_Expecter) Get(context1 any, s any) *mockjobsService_Get_Call {
+	return &mockjobsService_Get_Call{Call: _e.mock.On("Get", context1, s)}
 }
 
-func (_c *mockjobsService_Get_Call) Run(run func(ctx context.Context, jobID string)) *mockjobsService_Get_Call {
+func (_c *mockjobsService_Get_Call) Run(run func(context1 context.Context, s string)) *mockjobsService_Get_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -3608,14 +3540,14 @@ func (_c *mockjobsService_Get_Call) Return(job *jobs.Job, err error) *mockjobsSe
 	return _c
 }
 
-func (_c *mockjobsService_Get_Call) RunAndReturn(run func(ctx context.Context, jobID string) (*jobs.Job, error)) *mockjobsService_Get_Call {
+func (_c *mockjobsService_Get_Call) RunAndReturn(run func(context1 context.Context, s string) (*jobs.Job, error)) *mockjobsService_Get_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // List provides a mock function for the type mockjobsService
-func (_mock *mockjobsService) List(ctx context.Context, params jobs.ListParams) (jobs.ListResult, error) {
-	ret := _mock.Called(ctx, params)
+func (_mock *mockjobsService) List(context1 context.Context, listParams jobs.ListParams) (jobs.ListResult, error) {
+	ret := _mock.Called(context1, listParams)
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -3624,15 +3556,15 @@ func (_mock *mockjobsService) List(ctx context.Context, params jobs.ListParams) 
 	var r0 jobs.ListResult
 	var r1 error
 	if returnFunc, ok := ret.Get(0).(func(context.Context, jobs.ListParams) (jobs.ListResult, error)); ok {
-		return returnFunc(ctx, params)
+		return returnFunc(context1, listParams)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, jobs.ListParams) jobs.ListResult); ok {
-		r0 = returnFunc(ctx, params)
+		r0 = returnFunc(context1, listParams)
 	} else {
 		r0 = ret.Get(0).(jobs.ListResult)
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, jobs.ListParams) error); ok {
-		r1 = returnFunc(ctx, params)
+		r1 = returnFunc(context1, listParams)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3645,13 +3577,13 @@ type mockjobsService_List_Call struct {
 }
 
 // List is a helper method to define mock.On call
-//   - ctx context.Context
-//   - params jobs.ListParams
-func (_e *mockjobsService_Expecter) List(ctx interface{}, params interface{}) *mockjobsService_List_Call {
-	return &mockjobsService_List_Call{Call: _e.mock.On("List", ctx, params)}
+//   - context1 context.Context
+//   - listParams jobs.ListParams
+func (_e *mockjobsService_Expecter) List(context1 any, listParams any) *mockjobsService_List_Call {
+	return &mockjobsService_List_Call{Call: _e.mock.On("List", context1, listParams)}
 }
 
-func (_c *mockjobsService_List_Call) Run(run func(ctx context.Context, params jobs.ListParams)) *mockjobsService_List_Call {
+func (_c *mockjobsService_List_Call) Run(run func(context1 context.Context, listParams jobs.ListParams)) *mockjobsService_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -3674,7 +3606,7 @@ func (_c *mockjobsService_List_Call) Return(listResult jobs.ListResult, err erro
 	return _c
 }
 
-func (_c *mockjobsService_List_Call) RunAndReturn(run func(ctx context.Context, params jobs.ListParams) (jobs.ListResult, error)) *mockjobsService_List_Call {
+func (_c *mockjobsService_List_Call) RunAndReturn(run func(context1 context.Context, listParams jobs.ListParams) (jobs.ListResult, error)) *mockjobsService_List_Call {
 	_c.Call.Return(run)
 	return _c
 }

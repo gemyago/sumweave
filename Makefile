@@ -66,6 +66,7 @@ endif
 lint:
 	$(MAKE) -C tools/firecrawl lint
 	$(MAKE) -C runtime lint
+	$(MAKE) -C finance lint
 	$(MAKE) -C apps/signal-foundry lint
 	$(MAKE) -C apps/signal-ui lint
 	$(MAKE) -C tools/workspacefs lint
@@ -75,15 +76,6 @@ lint:
 clean-lint-cache:
 	rm -r -f .cache/golangci-lint
 
-.PHONY: test-live-compile
-test-live-compile:
-	$(MAKE) -C runtime test-live-compile
-
-.PHONY: test-live
-test-live:
-	$(MAKE) -C runtime test-live
-
-# We will need to rework coverage collection once we have more than one module.
 .PHONY: test
 test: $(cover_dir)
 	rm -r -f $(cover_dir)/*
@@ -91,12 +83,14 @@ test: $(cover_dir)
 	$(MAKE) -C tools/skills test
 	$(MAKE) -C tools/workspacefs test
 	$(MAKE) -C runtime test
+	$(MAKE) -C finance test
 	$(MAKE) -C apps/signal-foundry test
 	$(MAKE) -C apps/signal-ui test
 	cat tools/firecrawl/.cover/profile.out > $(cover_profile)
 	tail -n +2 tools/skills/.cover/profile.out >> $(cover_profile)
 	tail -n +2 tools/workspacefs/.cover/profile.out >> $(cover_profile)
 	tail -n +2 runtime/.cover/profile.out >> $(cover_profile)
+	tail -n +2 finance/.cover/profile.out >> $(cover_profile)
 	tail -n +2 apps/signal-foundry/.cover/profile.out >> $(cover_profile)
 	go tool cover -html=$(cover_profile) -o $(cover_dir)/coverage.html
 	$(go-test-coverage) --badge-file-name $(cover_dir)/coverage.svg --profile $(cover_profile)

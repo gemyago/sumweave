@@ -18,12 +18,10 @@ type JobSummary struct {
 	JobType string `json:"jobType"`
 	Status string `json:"status"`
 	Requester *JobRequester `json:"requester"`
-	Input *HistoricalDataBackfillJobInput `json:"input,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	StartedAt *time.Time `json:"startedAt,omitempty"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 	AttemptCount int64 `json:"attemptCount"`
-	Result *HistoricalDataBackfillJobResult `json:"result,omitempty"`
 	Error *JobError `json:"error,omitempty"`
 }

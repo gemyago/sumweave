@@ -11,6 +11,7 @@ import (
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/system/ident"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,6 +51,8 @@ func TestGenericSubstrate(t *testing.T) {
 		now := time.Now().UTC()
 		store := makeStore(t)
 		registry := NewRegistry()
+		publisher := newMockdispatchPublisher(t)
+		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		var runCalls atomic.Int64
 		require.NoError(t, RegisterTypedHandler(
 			registry,
@@ -68,7 +71,7 @@ func TestGenericSubstrate(t *testing.T) {
 		svc, err := NewService(ServiceDeps{
 			Store:       store,
 			IDGenerator: ident.NewMockGenerator(),
-			Publisher:   &publisherStub{},
+			Publisher:   publisher,
 			Clock:       func() time.Time { return now },
 			Registry:    registry,
 		})
@@ -87,7 +90,7 @@ func TestGenericSubstrate(t *testing.T) {
 			Registry: registry,
 			Clock:    func() time.Time { return now.Add(time.Minute) },
 			WorkerID: "worker-generic",
-			Config:   WorkerConfig{MaxConcurrentHistoricalBackfill: 2},
+			Config:   WorkerConfig{},
 		})
 		require.NoError(t, err)
 		require.NoError(t, worker.ProcessJob(t.Context(), job.ID))
@@ -110,6 +113,8 @@ func TestGenericSubstrate(t *testing.T) {
 		now := time.Now().UTC()
 		store := makeStore(t)
 		registry := NewRegistry()
+		publisher := newMockdispatchPublisher(t)
+		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
 		require.NoError(t, RegisterTypedHandler(
 			registry,
 			TypedHandlerSpec[financeInput, financeResult, financeProgress]{
@@ -122,20 +127,10 @@ func TestGenericSubstrate(t *testing.T) {
 				},
 			},
 		))
-		require.NoError(t, RegisterTypedHandler(
-			registry,
-			TypedHandlerSpec[HistoricalRawCandleBackfillInput, HistoricalRawCandleBackfillResult, struct{}]{
-				JobType:     JobTypeHistoricalRawCandleBackfill,
-				MaxAttempts: 2,
-				Run: func(context.Context, HistoricalRawCandleBackfillInput, func(struct{}) error) (HistoricalRawCandleBackfillResult, error) {
-					return HistoricalRawCandleBackfillResult{}, nil
-				},
-			},
-		))
 		svc, err := NewService(ServiceDeps{
 			Store:       store,
 			IDGenerator: ident.NewMockGenerator(),
-			Publisher:   &publisherStub{},
+			Publisher:   publisher,
 			Clock:       func() time.Time { return now },
 			Registry:    registry,
 		})
@@ -153,26 +148,14 @@ func TestGenericSubstrate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusQueued, retried.Status)
 		assert.NotEqual(t, job.ID, retried.ID)
-		historical, err := store.Create(t.Context(), Job{
-			ID:          fake.UUID().V4(),
-			JobType:     JobTypeHistoricalRawCandleBackfill,
-			Status:      JobStatusQueued,
-			Requester:   Requester{UserID: "u", Source: RequesterSourceOperator},
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			QueuedAt:    now,
-			MaxAttempts: 2,
-		})
-		require.NoError(t, err)
-		_, err = svc.Cancel(t.Context(), historical.ID)
-		require.Error(t, err)
 	})
 
 	t.Run("scheduler enqueues due windows once without replaying immediate work through polling", func(t *testing.T) {
 		now := time.Now().UTC()
 		store := makeStore(t)
 		registry := NewRegistry()
-		var historicalCalls atomic.Int64
+		publisher := newMockdispatchPublisher(t)
+		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		var financeCalls atomic.Int64
 		require.NoError(t, RegisterTypedHandler(
 			registry,
@@ -185,21 +168,10 @@ func TestGenericSubstrate(t *testing.T) {
 				},
 			},
 		))
-		require.NoError(t, RegisterTypedHandler(
-			registry,
-			TypedHandlerSpec[HistoricalRawCandleBackfillInput, HistoricalRawCandleBackfillResult, struct{}]{
-				JobType:     JobTypeHistoricalRawCandleBackfill,
-				MaxAttempts: 3,
-				Run: func(context.Context, HistoricalRawCandleBackfillInput, func(struct{}) error) (HistoricalRawCandleBackfillResult, error) {
-					historicalCalls.Add(1)
-					return HistoricalRawCandleBackfillResult{IngestionRunID: "run"}, nil
-				},
-			},
-		))
 		svc, err := NewService(ServiceDeps{
 			Store:       store,
 			IDGenerator: ident.NewMockGenerator(),
-			Publisher:   &publisherStub{},
+			Publisher:   publisher,
 			Clock:       func() time.Time { return now },
 			Registry:    registry,
 		})
@@ -214,21 +186,6 @@ func TestGenericSubstrate(t *testing.T) {
 			Enabled:   true,
 			InputJSON: mustMarshalJSON(t, financeInput{AccountID: "acct-scheduled"}),
 		}))
-		_, err = svc.Enqueue(t.Context(), EnqueueParams{
-			JobType:   JobTypeHistoricalRawCandleBackfill,
-			Requester: Requester{UserID: "user-" + fake.UUID().V4(), Source: RequesterSourceOperator},
-			Input: HistoricalRawCandleBackfillInput{
-				IngestionRunID: fake.UUID().V4(),
-				Venue:          "hyperliquid-perps",
-				Symbol:         "BTC",
-				AssetClass:     "future",
-				Timeframe:      "1m",
-				Start:          now.Add(-2 * time.Minute),
-				End:            now.Add(-time.Minute),
-				PageSize:       10,
-			},
-		})
-		require.NoError(t, err)
 		scheduler, err := NewScheduler(SchedulerDeps{
 			Store:   store,
 			Service: svc,
@@ -243,8 +200,7 @@ func TestGenericSubstrate(t *testing.T) {
 		assert.Equal(t, 0, count)
 		queued, err := store.List(t.Context(), ListParams{Statuses: []JobStatus{JobStatusQueued}, Limit: 10})
 		require.NoError(t, err)
-		require.Len(t, queued.Items, 2)
-		assert.EqualValues(t, 0, historicalCalls.Load())
+		require.Len(t, queued.Items, 1)
 		assert.EqualValues(t, 0, financeCalls.Load())
 	})
 }

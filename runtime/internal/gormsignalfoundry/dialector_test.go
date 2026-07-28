@@ -2,6 +2,7 @@ package gormsignalfoundry
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,6 +14,22 @@ func TestNewGormDialectorWithConn(t *testing.T) {
 	t.Run("falls back to dsn-based dialector when conn is nil", func(t *testing.T) {
 		dialector := NewGormDialectorWithConn(":memory:", nil)
 		require.NotNil(t, dialector.Dialector)
+	})
+
+	t.Run("uses provided sqlite connection", func(t *testing.T) {
+		baseDB, err := gorm.Open(NewGormDialector(":memory:"), &gorm.Config{})
+		require.NoError(t, err)
+
+		conn, err := baseDB.DB()
+		require.NoError(t, err)
+		defer func() { require.NoError(t, conn.Close()) }()
+
+		dialector := NewGormDialectorWithConn(":memory:", conn)
+		require.Equal(t, "sqlite", dialector.Name())
+
+		db, err := gorm.Open(dialector, &gorm.Config{DisableAutomaticPing: true, DryRun: true})
+		require.NoError(t, err)
+		require.Equal(t, "sqlite", db.Dialector.Name())
 	})
 
 	t.Run("uses provided postgres connection", func(t *testing.T) {
@@ -33,4 +50,11 @@ func TestNewGormDialectorWithConn(t *testing.T) {
 			Find(&[]struct{}{})
 		require.NoError(t, query.Error)
 	})
+}
+
+func TestDialectorTranslate(t *testing.T) {
+	dialector := NewGormDialector(":memory:")
+	err := errors.New("dialect error")
+
+	require.Same(t, err, dialector.Translate(err))
 }

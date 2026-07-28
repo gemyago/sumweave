@@ -9,19 +9,9 @@ import (
 )
 
 // Below is to workaround unused imports if that happens.
-type _ func() CreateHistoricalDataBackfillJobRequest
+type _ func() Error
 
 type JobsController interface {
-	// POST /api/v1/jobs/historical-data-backfills
-	//
-	// Request type: CreateHistoricalDataBackfillJobParams,
-	//
-	// Response type: JobDetailResponse
-	CreateHistoricalDataBackfillJob(HandlerBuilder[
-		*CreateHistoricalDataBackfillJobParams,
-		*JobDetailResponse,
-	]) http.Handler
-
 	// GET /api/v1/jobs/{jobId}
 	//
 	// Request type: GetJobParams,
@@ -45,8 +35,6 @@ type JobsController interface {
 
 // RegisterJobsRoutes will attach the following routes to the root handler:
 // 
-// - POST /api/v1/jobs/historical-data-backfills
-// 
 // - GET /api/v1/jobs/{jobId}
 // 
 // - GET /api/v1/jobs
@@ -54,7 +42,6 @@ type JobsController interface {
 // Routes will use provided controller to handle requests.
 func(rootHandler *RootHandler) RegisterJobsRoutes(controller JobsController) *RootHandler {
 	builder := newJobsControllerBuilder(rootHandler)
-	rootHandler.router.HandleRoute("POST", "/api/v1/jobs/historical-data-backfills", controller.CreateHistoricalDataBackfillJob(builder.CreateHistoricalDataBackfillJob))
 	rootHandler.router.HandleRoute("GET", "/api/v1/jobs/{jobId}", controller.GetJob(builder.GetJob))
 	rootHandler.router.HandleRoute("GET", "/api/v1/jobs", controller.ListJobs(builder.ListJobs))
 	return rootHandler

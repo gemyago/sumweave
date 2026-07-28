@@ -1,264 +1,142 @@
-# Database-Backed State Plan
+# Database-Backed Application State
 
 ## Goal
 
-Move the remaining durable application state from local files into database
-storage so production app, worker, scheduler, and migration pods require no
-persistent filesystem volumes.
+Keep durable Signal Foundry state in databases so production app, worker,
+scheduler, and migration workloads do not require persistent filesystem
+volumes. Finance owns finance data; the retained agent runtime owns its own
+runtime state.
 
-This work is separate from the
-[Release And Deployment Plan](./release-and-deployment-plan.md). It should be
-implemented and reviewed independently before production rollout.
+Signal Foundry is early alpha. Local data may be dropped, recreated through
+normal schema setup, and reseeded. No backward-compatible file migration is
+required.
 
-No backward-compatible file migration is required. Signal Foundry is early
-alpha; local data may be dropped, migrated through normal schema setup, and
-reseeded.
+## Database Ownership
 
-## Scope
+The application database is configured at `application.database` and is shared
+by the finance application and its supporting infrastructure:
 
-Move these remaining durable stores:
+- finance tenants, accounts, transactions, imports, connections, reporting,
+  and provider evidence
+- authentication users and refresh tokens
+- application dispatch transport
+- durable jobs and schedules
 
-- users
-- refresh tokens
-- raw venue payload bodies
-- application-selected agent runtime state
+The agent runtime database is configured separately at
+`agentRuntime.database` and stores retained generic agent state such as
+sessions, provider configuration, and agent profiles. Separate configuration
+keys and table prefixes make ownership explicit even when both databases use
+the same PostgreSQL server.
 
-Remove persisted JWT key generation. JWT signing material must come from an
-external secret in production.
+Configuration names are:
 
-SQLite remains the local-development database. PostgreSQL is required for
-production.
+- application DSN: `APP_APPLICATION_DATABASE_DSN`
+- agent runtime DSN: `APP_AGENTRUNTIME_DATABASE_DSN`
+- application table prefix: `signal_foundry_`
+- agent runtime table prefix: `signal_foundry_runtime_`
 
-## Authentication Storage
+SQLite is supported for local development and tests only. The local defaults
+are `data/application.db` and `data/agent-runtime.db` relative to
+`apps/signal-foundry`. Production configuration must receive PostgreSQL DSNs
+through its environment or secret management; it must not inherit local SQLite
+paths.
 
-Replace filesystem implementations in:
+## Authentication And Signing Keys
 
-- `apps/signal-foundry/internal/auth/user_store.go`
-- `apps/signal-foundry/internal/auth/refresh_store.go`
+Authentication persistence uses the application database. User records and
+refresh-token records are database-backed, with opaque refresh tokens stored
+only as hashes. Refresh-token rotation consumes a token atomically so a token
+can succeed only once under concurrent use.
 
-Use the existing data-layer SQL connection and DSN. Apply an auth-specific
-prefix after the configured data-layer prefix.
+JWT signing material is not persisted on the filesystem or generated per pod.
+Production injects `APP_AUTH_JWTSIGNINGKEY` from a secret. Local configuration
+may use an obvious placeholder such as `local-secret-key`; it is not a
+production credential. Missing signing material must fail startup clearly.
 
-### Users
+## Agent Runtime And Filesystem Boundaries
 
-Create a prefixed `auth_users` table with:
+The application always selects database-backed agent runtime persistence for
+sessions, provider configuration, and profiles. Agent workspace files and
+other temporary execution artifacts may use `dataDir` or an ephemeral path,
+but they are not durable application state and do not require a persistent
+volume.
 
-- `id` as the primary key
-- `username` as a required unique value
-- `password_hash` as required text
-- `created_at`
-- `updated_at`
+Platform-agent skills are read-only runtime assets packaged with the image.
+They are not database data. Workspace shell execution remains disabled by
+default and must use an ephemeral writable workspace when explicitly enabled.
 
-Use explicit GORM column names. Create users with one database insert and map a
-unique constraint failure to `ErrUsernameExists`; do not retain the current
-scan-before-create race.
+Optional file-based integrations, including application-terminated TLS,
+provider private keys, and file logging, require separate deployment decisions
+before they are enabled in a volume-free production workload. Prefer external
+secret values and stdout logging.
 
-Implement direct indexed reads for user ID and username. Keep deterministic
-listing order and update passwords with a conditional update that returns
-`ErrUserNotFound` when no row exists.
+## Finance Persistence
 
-### Refresh Tokens
+Finance persistence remains owned by the `finance/` module and is initialized
+as part of the application database migration. Finance provider credentials
+are encrypted with the configured system key. Provider evidence may be kept
+with finance records for sync idempotency, support, and debugging, but it
+remains owned by the finance application rather than by a separate subsystem.
 
-Create a prefixed `auth_refresh_tokens` table with:
-
-- SHA-256 token hash as the primary key
-- indexed user ID
-- indexed expiry timestamp
-- creation timestamp
-
-Never persist the opaque token.
-
-Replace separate validation and deletion during rotation with an atomic consume
-operation. Concurrent attempts to consume the same token must result in one
-success and `ErrInvalidRefreshToken` for all other attempts.
-
-Remove unused store operations rather than preserving filesystem-era API shape.
-Regenerate Mockery output after changing the consumer-defined auth interfaces.
-
-## JWT Signing Key
-
-Remove filesystem key persistence from `internal/auth/jwt.go` and its DI wiring.
-
-The effective JWT signing key must be supplied through configuration. Production
-will inject `APP_AUTH_JWTSIGNINGKEY` from a Kubernetes Secret. Missing required
-signing material must fail startup clearly rather than generating pod-local
-keys.
-
-Follow the established environment-specific config pattern. Commit an obvious
-non-secret local placeholder such as `local-secret-key` in `local.yaml`; nobody
-should treat or reuse it as real signing material. Test config should use its own
-obvious placeholder, while production continues to require secret injection.
-
-The same configured key remains available to finance connection-secret
-encryption through the existing named DI value.
-
-## Raw Payload Body Storage
-
-Replace `runtime/data/LocalRawPayloadBlobStore` with database-backed storage.
-
-Preserve `RawPayloadBlobStore` and the current opaque `payloadBodyRef` API
-contract. This avoids coupling the storage transition to an unrelated backend
-and UI contract change.
-
-Add a prefixed raw-payload-body table containing:
-
-- stable body reference as the primary key
-- payload ID or equivalent stable ownership identifier
-- SHA-256 body hash
-- body bytes using the database-native binary type
-- creation timestamp
-
-GORM should map `[]byte` to SQLite BLOB and PostgreSQL `bytea`; do not hardcode a
-dialect-specific blob type.
-
-Storage must remain immutable. Repeating a payload ID returns the already stored
-body reference and hash without replacing bytes. A conflicting body is detected
-through the existing hash validation behavior.
-
-Implement bounded body preview reads in the database store so metadata list and
-detail operations do not load more body data than required. Metadata list
-queries must not select body bytes.
-
-Register the database store as both lineage metadata storage and raw payload
-body storage. Delete the local blob implementation, path traversal code, file
-write code, and obsolete path configuration.
-
-## Agent Runtime Storage
-
-The Signal Foundry application should select database-backed agent runtime
-storage for sessions, provider config, and agent profiles.
-
-Keep generic runtime file-storage APIs only if they remain useful to external
-runtime embedders. The application deployment path must not select them.
-
-Use separate agent-runtime and data-layer DSNs and prefixes in configuration,
-even when both point to the same PostgreSQL database. This keeps ownership and
-table names explicit.
-
-Set local and test configurations to SQLite database DSNs. Production config
-must not silently inherit a SQLite path; it should fail until PostgreSQL DSNs
-are provided.
-
-## Remaining Filesystem Use
-
-After this transition, production durability must not depend on `dataDir`.
-
-Temporary agent workspace files may use an ephemeral path such as
-`/tmp/signal-foundry`. They are not durable state and do not require a
-persistent volume.
-
-Platform-agent skills remain read-only runtime assets packaged in the image.
-
-These optional features still require separate decisions before use in a
-volume-free production pod:
-
-- application-terminated TLS certificate and key files
-- file logging
-- Enable Banking private-key files
-- enabled workspace shell execution with writable workspace requirements
-
-The initial deployment should terminate TLS upstream, log to stdout, keep
-workspace execution disabled, and either leave file-based provider integrations
-disabled or change them to consume external secret values.
-
-## Configuration Changes
-
-Update application config and providers to:
-
-- remove the raw payload blob path
-- remove persisted JWT key fallback
-- require database-backed app storage in production
-- keep SQLite DSNs in `local.yaml` and test fixtures only
-- keep production DSNs empty until injected
-- keep table prefixes explicit and non-colliding
-
-Do not put secrets or production DSNs in tracked YAML.
+Finance persistence uses explicit table prefixes and domain models separate
+from persistence models. SQLite remains the local baseline; PostgreSQL is the
+production database. The finance module must not import the generic agent
+runtime.
 
 ## Migration Integration
 
-Extend `signal-foundry db-migrate` with an authentication migration step.
+Run `signal-foundry db-migrate` before starting processes that use persisted
+tables. The command is idempotent and prepares the retained schemas in this
+order:
 
-The expected ordering is:
+1. database-backed agent runtime schema
+2. application authentication schema
+3. application dispatch schema
+4. durable jobs and schedule schema
+5. finance schema
 
-1. Agent runtime schema.
-2. Data-layer schema, including raw payload bodies.
-3. Authentication schema.
-4. App dispatch transport.
-5. Durable jobs.
-6. Finance and remaining product schemas.
+Migration failures must identify the owning component. Migration tests remain
+shallow: one schema smoke path and migration-failure context are sufficient.
 
-Migrations must be idempotent and continue wrapping failures with the component
-name. Keep migration tests shallow: one schema smoke path and migration failure
-context are sufficient.
+No migration from abandoned local files or obsolete databases is required.
 
-No migration from existing JSON files or raw-payload directories is needed.
+## Worker And Scheduler Lifecycle
 
-## Worker Lifecycle
+Durable jobs use the application database. API, worker, and scheduler processes
+share the same configured application database while retaining separate
+process modes for deployment:
 
-Production worker termination is part of making database-backed durable jobs
-operational.
+- `start` serves the API without executing durable jobs inline
+- `jobs worker` consumes finance jobs
+- `jobs enqueue-due` enqueues due finance schedules
+- `start-all` combines the API, worker, and scheduler for local development
 
-Execute Cobra with a root context canceled by `SIGINT` and `SIGTERM`. The
-dedicated `jobs worker` command must pass that context to the consumer so
-Kubernetes shutdown can stop polling and active work rather than immediately
-terminating the process.
-
-This does not make multiple workers safe. Keep one worker replica until stale
-recovery, claims, worker identity, ownership checks, and duplicate delivery are
-designed for horizontal execution.
-
-## Tests
-
-Use SQLite-backed tests for ordinary persistence behavior and PostgreSQL smoke
-coverage for dialect integration.
-
-Authentication coverage must include:
-
-- unique usernames under concurrent creation
-- reads by ID and username
-- deterministic user listing
-- missing-user password updates
-- refresh token creation without storing raw tokens
-- expiry rejection
-- atomic consume-once behavior
-- concurrent consumption of one token
-
-Raw payload coverage must include:
-
-- exact body persistence and retrieval
-- stable reference and hash generation
-- immutable repeated storage
-- bounded previews
-- metadata queries that exclude body bytes
-- configured table prefixes
-- SQLite and PostgreSQL binary data behavior
-
-Migration coverage must confirm auth and raw payload tables are created and a
-second migration succeeds.
-
-Regenerate Mockery mocks rather than introducing handwritten test doubles.
+Worker shutdown must propagate `SIGINT` and `SIGTERM` through the root context
+so active polling stops cleanly. Keep one worker replica until job claims,
+leases, stale recovery, and duplicate execution are safe for horizontal
+scaling.
 
 ## Verification
 
-1. Run affected unit and integration tests.
-2. Run `db-migrate` against a fresh local SQLite database.
-3. Reseed the first `.local-users` entry and verify login and token rotation.
-4. Record and read a raw payload body through the lineage service.
+1. Run `db-migrate` against fresh local application and agent-runtime SQLite
+   databases.
+2. Reseed the first `.local-users` entry and verify login and token rotation.
+3. Start the API and worker with no persistent data directory.
+4. Verify finance data, finance provider evidence, agent sessions, provider
+   configuration, and profiles survive process replacement through database
+   reads.
 5. Repeat migration and smoke behavior against PostgreSQL.
-6. Start API and worker processes with no persistent data directory.
-7. Confirm all durable state survives process replacement through database reads.
-8. Run `make affected-lint-test`.
+6. Run `make affected-lint-test` for implementation changes.
 
 ## Completion Criteria
 
-This plan is complete when:
+This design is satisfied when:
 
-- users are database-backed
-- refresh tokens are database-backed and atomically consumed
-- raw payload bodies are database-backed
-- application agent runtime state is database-backed
+- finance, authentication, dispatch, jobs, and schedules use the application
+  database
+- retained agent runtime state uses its configured agent runtime database
 - JWT signing material is externally configured
-- `db-migrate` creates all required schemas
-- production pods require no persistent filesystem volume
+- `db-migrate` prepares all retained schemas
+- production workloads require no persistent filesystem volume
 - local development continues to work with SQLite
 - PostgreSQL smoke verification passes

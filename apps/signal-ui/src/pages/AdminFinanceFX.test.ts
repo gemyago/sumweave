@@ -67,4 +67,39 @@ describe('Admin finance FX page', () => {
     render(AdminFinanceFX)
     expect(await screen.findByText(/Default provider — · current rates 0/)).toBeInTheDocument()
   })
+
+  it('submits a selected finance provider and labels a provider that is not ready', async () => {
+    const user = userEvent.setup()
+    mocks.getFXDiagnostics.mockResolvedValueOnce({
+      defaultProvider: 'frankfurter', storedRatesCount: 1,
+      providers: [{ name: 'frankfurter', default: true, ready: true }, { name: 'backup', default: false, ready: false }],
+    })
+    render(AdminFinanceFX)
+
+    await user.selectOptions(await screen.findByLabelText('FX provider'), 'backup')
+    expect(screen.getByRole('option', { name: 'backup (not ready)' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Refresh required rates' }))
+    await waitFor(() => expect(mocks.triggerFXSync).toHaveBeenCalledWith({ provider: 'backup' }))
+  })
+
+  it('uses bounded errors for non-Error diagnostics and refresh failures', async () => {
+    mocks.getFXDiagnostics.mockRejectedValueOnce('unavailable')
+    const first = render(AdminFinanceFX)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load FX diagnostics')
+    first.unmount()
+
+    const user = userEvent.setup()
+    mocks.triggerFXSync.mockRejectedValueOnce('unavailable')
+    render(AdminFinanceFX)
+    await user.click(await screen.findByRole('button', { name: 'Refresh required rates' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to trigger current FX refresh')
+  })
+
+  it('retains an Error message when a refresh request fails', async () => {
+    const user = userEvent.setup()
+    mocks.triggerFXSync.mockRejectedValueOnce(new Error('refresh failed'))
+    render(AdminFinanceFX)
+    await user.click(await screen.findByRole('button', { name: 'Refresh required rates' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('refresh failed')
+  })
 })

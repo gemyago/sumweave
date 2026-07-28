@@ -6,9 +6,10 @@ CronJob, and a pre-install/pre-upgrade migration hook. It deliberately contains
 no live Argo CD `Application` or environment secrets.
 
 Production requires existing ConfigMap and Secret names containing `APP_*`
-entries. At minimum provide PostgreSQL DSNs for the data layer and agent runtime,
-non-colliding table prefixes, a JWT signing key, enabled provider credentials,
-and externally correct callback URLs. SQLite is local-development-only.
+entries. At minimum provide PostgreSQL DSNs for the finance application database
+and agent runtime, non-colliding table prefixes, a JWT signing key, enabled
+finance-provider credentials, and externally correct callback URLs. SQLite is
+local-development-only.
 
 The app Service exposes port 4501. `/health` is used for startup, liveness, and
 readiness; it currently proves process health, not database readiness.

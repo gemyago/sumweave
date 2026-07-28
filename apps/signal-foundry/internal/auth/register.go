@@ -16,8 +16,8 @@ type userStoreDIParams struct {
 	dig.In
 
 	SQLDB           *sql.DB
-	DatabaseDSN     string `name:"config.dataLayer.database.dsn"`
-	DataTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	DatabaseDSN     string `name:"config.application.database.dsn"`
+	DataTablePrefix string `name:"config.application.database.tablePrefix"`
 	IDGen           ident.Generator
 	Logger          *slog.Logger
 }
@@ -43,8 +43,8 @@ type refreshStoreDIParams struct {
 	dig.In
 
 	SQLDB           *sql.DB
-	DatabaseDSN     string `name:"config.dataLayer.database.dsn"`
-	DataTablePrefix string `name:"config.dataLayer.database.tablePrefix"`
+	DatabaseDSN     string `name:"config.application.database.dsn"`
+	DataTablePrefix string `name:"config.application.database.tablePrefix"`
 	Logger          *slog.Logger
 }
 

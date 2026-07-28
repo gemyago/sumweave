@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Distinct Protected Finance Area
-The operator UI SHALL provide a distinct protected Finance area rather than mixing finance workflows into trading/operator routes.
+The UI SHALL provide a distinct protected Finance area alongside retained generic agent and administration surfaces.
 
 #### Scenario: Finance navigation is tenant-aware and protected
 - **WHEN** an authenticated operator uses the application navigation
@@ -9,9 +9,9 @@ The operator UI SHALL provide a distinct protected Finance area rather than mixi
 - **AND** unauthenticated access to those routes MUST redirect through the existing protected-route behavior
 - **AND** all protected `#/finance*` routes, including account detail, transaction create/edit, finance job detail, and synthetic setup routes, MUST render inside a dedicated finance-first shell with shared finance chrome rather than repeating the current in-page finance sub-navigation card on each page
 
-#### Scenario: Finance routing stays distinct from trading routes
+#### Scenario: Finance navigation stays focused on finance destinations
 - **WHEN** finance screens are added to the SPA
-- **THEN** they MUST remain visually and navigationally distinct from Data, Strategies, Evaluations, Chat, and other trading/runtime workflows
+- **THEN** they MUST remain visually and navigationally distinct from retained Chat, Providers, and Admin workflows
 - **AND** the finance shell MUST expose only supported finance destinations for this slice, mapping the rail to real product routes such as dashboard, transactions, accounts, categories, connections and sync, imports, and tenants
 - **AND** unsupported reference items such as `Rules` or `Settings` MUST remain out of scope until backed by real product workflows
 

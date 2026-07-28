@@ -52,7 +52,7 @@ func TestMigrate(t *testing.T) {
 		require.NoError(t, NewMigrator(database).Migrate(t.Context()))
 	})
 
-	t.Run("retains the latest duplicate current observations before adding identity indexes", func(t *testing.T) {
+	t.Run("keeps the latest duplicate current observations before adding identity indexes", func(t *testing.T) {
 		fake := faker.New()
 		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "finance-migrate-legacy-"+fake.UUID().V4())
 		sqlDB, err := sqlconn.Open(dsn)

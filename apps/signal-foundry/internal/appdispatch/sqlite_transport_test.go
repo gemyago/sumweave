@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/ThreeDotsLabs/watermill"
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
 	"github.com/gemyago/signal-foundry/apps/signal-foundry/internal/sqlconn"
@@ -100,14 +99,14 @@ func TestSQLiteTransportUnits(t *testing.T) {
 		_, err = subscriber.Subscribe(t.Context(), DispatchTopicExecution)
 		require.EqualError(t, err, "sqlite subscriber is closed")
 
-		mockDB, mock, err := sqlmock.New()
+		missingSchemaCfg := makeConfig()
+		missingSchemaDB, err := sqlconn.Open(missingSchemaCfg.DatabaseDSN)
 		require.NoError(t, err)
-		subscriberRaw, err = newSQLiteTransportSubscriber(cfg, mockDB, watermill.NopLogger{})
+		t.Cleanup(func() { require.NoError(t, missingSchemaDB.Close()) })
+		subscriberRaw, err = newSQLiteTransportSubscriber(missingSchemaCfg, missingSchemaDB, watermill.NopLogger{})
 		require.NoError(t, err)
-		mock.ExpectExec("INSERT INTO").WillReturnError(errors.New("offset init boom"))
 		_, err = subscriberRaw.Subscribe(t.Context(), DispatchTopicExecution)
-		require.EqualError(t, err, "offset init boom")
-		require.NoError(t, mock.ExpectationsWereMet())
+		require.ErrorContains(t, err, "no such table")
 	})
 
 	t.Run("covers next batch and batch decode error branches", func(t *testing.T) {

@@ -10,7 +10,6 @@
     rememberCurrentPostLoginDestination,
   } from './lib/routing/post-login-destination'
   import Chat from './pages/Chat.svelte'
-  import Data from './pages/Data.svelte'
   import Finance from './pages/Finance.svelte'
   import FinanceTenants from './pages/FinanceTenants.svelte'
   import FinanceAccounts from './pages/FinanceAccounts.svelte'
@@ -23,19 +22,14 @@
   import FinanceSyntheticConnectionSetup from './pages/FinanceSyntheticConnectionSetup.svelte'
   import FinanceImports from './pages/FinanceImports.svelte'
   import FinanceJobDetail from './pages/FinanceJobDetail.svelte'
-  import EvaluationDetail from './pages/EvaluationDetail.svelte'
-  import Evaluations from './pages/Evaluations.svelte'
   import Login from './pages/Login.svelte'
   import Admin from './pages/Admin.svelte'
   import AdminJobs from './pages/AdminJobs.svelte'
   import AdminJobDetail from './pages/AdminJobDetail.svelte'
   import AdminFinanceFX from './pages/AdminFinanceFX.svelte'
   import AdminFinanceProviders from './pages/AdminFinanceProviders.svelte'
-  import JobDetail from './pages/JobDetail.svelte'
-  import Jobs from './pages/Jobs.svelte'
   import Providers from './pages/Providers.svelte'
   import RedirectToDefaultRoute from './pages/RedirectToDefaultRoute.svelte'
-  import Strategies from './pages/Strategies.svelte'
   import { authStore } from './lib/auth/auth-store.svelte'
 
   const routes = {
@@ -49,16 +43,8 @@
       component: Providers,
       conditions: [() => authStore.isAuthenticated],
     }),
-    '/jobs/:jobId': wrap({
-      component: JobDetail,
-      conditions: [() => authStore.isAuthenticated],
-    }),
     '/finance/jobs/:jobId': wrap({
       component: FinanceJobDetail,
-      conditions: [() => authStore.isAuthenticated],
-    }),
-    '/jobs': wrap({
-      component: Jobs,
       conditions: [() => authStore.isAuthenticated],
     }),
     '/finance/accounts/new': wrap({
@@ -129,30 +115,6 @@
       component: Admin,
       conditions: [() => authStore.isAuthenticated],
     }),
-    '/strategies/:strategyId/:version': wrap({
-      component: Strategies,
-      conditions: [() => authStore.isAuthenticated],
-    }),
-    '/strategies': wrap({
-      component: Strategies,
-      conditions: [() => authStore.isAuthenticated],
-    }),
-    '/evaluations/run/:strategyId/:version': wrap({
-      component: Evaluations,
-      conditions: [() => authStore.isAuthenticated],
-    }),
-    '/evaluations/:runId': wrap({
-      component: EvaluationDetail,
-      conditions: [() => authStore.isAuthenticated],
-    }),
-    '/evaluations': wrap({
-      component: Evaluations,
-      conditions: [() => authStore.isAuthenticated],
-    }),
-    '/data': wrap({
-      component: Data,
-      conditions: [() => authStore.isAuthenticated],
-    }),
   }
 
   function handleConditionsFailed() {
@@ -179,9 +141,7 @@
 
   const isWideWorkspaceRoute = $derived(
     typeof router.location === 'string' &&
-      (router.location.startsWith('/strategies') ||
-        router.location.startsWith('/evaluations') ||
-        router.location.startsWith('/finance') ||
+		(router.location.startsWith('/finance') ||
         router.location.startsWith('/admin')),
   )
 

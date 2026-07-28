@@ -87,6 +87,10 @@ func resolveJobsWorker(cmd *cobra.Command, container *dig.Container) (jobsWorker
 	); err != nil {
 		return nil, err
 	}
+	return resolveJobsWorkerAfterSetup(container)
+}
+
+func resolveJobsWorkerAfterSetup(container *dig.Container) (jobsWorkerRunner, error) { //nolint:ireturn
 	if err := primeFinanceJobs(container); err != nil {
 		return nil, err
 	}
@@ -105,6 +109,10 @@ func resolveJobsScheduler(cmd *cobra.Command, container *dig.Container) (jobsSch
 	); err != nil {
 		return nil, err
 	}
+	return resolveJobsSchedulerAfterSetup(container)
+}
+
+func resolveJobsSchedulerAfterSetup(container *dig.Container) (jobsSchedulerRunner, error) { //nolint:ireturn
 	if err := primeFinanceJobs(container); err != nil {
 		return nil, err
 	}

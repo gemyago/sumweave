@@ -109,6 +109,15 @@ describe('Chat', () => {
     expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument()
   })
 
+  it('keeps direct-model chat available when execution profile loading fails', async () => {
+    mocks.listAgentProfiles.mockRejectedValueOnce('profiles unavailable')
+    render(Chat, { props: { params: {} } })
+
+    expect(await screen.findByText('Failed to load execution profiles')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Model' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Execution profile' })).not.toBeInTheDocument()
+  })
+
   it('shows composer when sessionId is in the route', () => {
     render(Chat, { props: { params: { sessionId: faker.string.uuid() } } })
     expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument()
@@ -733,7 +742,7 @@ describe('Chat', () => {
         partial: false,
         content: {
           role: 'model',
-          parts: [{ text: '\n\n  ' }, { toolCall: { id: toolCallId, name: 'sf_data_list_candle_availability', args: {} } }],
+          parts: [{ text: '\n\n  ' }, { toolCall: { id: toolCallId, name: 'workspacefs_list_files', args: {} } }],
         },
       }),
       sseBlock('agent', {
@@ -757,7 +766,7 @@ describe('Chat', () => {
     const { container } = render(Chat, { props: { params: { sessionId } } })
 
     await waitFor(() => {
-      expect(screen.getByText('sf_data_list_candle_availability')).toBeInTheDocument()
+      expect(screen.getByText('workspacefs_list_files')).toBeInTheDocument()
     })
 
     const assistantBubbles = [...container.querySelectorAll('.bubble.assistant')]
@@ -767,30 +776,16 @@ describe('Chat', () => {
     expect(assistantBubbles).toEqual([])
   })
 
-  it('renders strategy and evaluation links from real backtest tool results', async () => {
+  it('renders a generic tool call from an agent run', async () => {
     const sessionId = faker.string.uuid()
     const toolCallId = faker.string.uuid()
-    const strategyId = faker.string.uuid()
-    const runId = faker.string.uuid()
+    const toolName = 'workspacefs_write_file'
     const sse = buildAgentRunWithToolCallSseStream({
       sessionId,
       toolCallId,
-      toolName: 'sf_evaluation_run_backtest',
-      toolArgs: {
-        strategyId,
-        strategyVersion: 'v1',
-        start: '2026-01-01T00:00:00Z',
-        end: '2026-01-02T00:00:00Z',
-        quantity: 1,
-      },
-      toolResponse: {
-        run: {
-          runId,
-          status: 'completed',
-          createdAt: '2026-01-02T00:00:00Z',
-          updatedAt: '2026-01-02T00:00:00Z',
-        },
-      },
+      toolName,
+      toolArgs: { path: '/workspace/notes.md', content: 'Finance notes' },
+      toolResponse: { success: true },
     })
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response(bytesStream(sse), {
@@ -802,17 +797,10 @@ describe('Chat', () => {
     render(Chat, { props: { params: {} } })
     const user = userEvent.setup()
     await waitForModelPickerReady()
-    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'run it')
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'save these notes')
     await user.click(screen.getByRole('button', { name: 'Send' }))
 
-    expect(await screen.findByRole('link', { name: /Strategy /i })).toHaveAttribute(
-      'href',
-      `#/strategies/${encodeURIComponent(strategyId)}/v1`,
-    )
-    expect(await screen.findByRole('link', { name: /Evaluation /i })).toHaveAttribute(
-      'href',
-      `#/evaluations/${encodeURIComponent(runId)}`,
-    )
+    expect(await screen.findByText(toolName)).toBeInTheDocument()
   })
 
   it('blocks send when no models and links to Providers', async () => {
@@ -935,48 +923,25 @@ describe('Chat', () => {
   })
 
   describe('execution profile picker', () => {
-    it('auto-selects the strategy assistant profile when available', async () => {
-      mocks.listAgentProfiles.mockResolvedValue({
-        profiles: [
-          makeAgentProfile({
-            name: 'strategy-assistant',
-            displayName: 'Strategy assistant',
-          }),
-        ],
-      })
-
-      render(Chat, { props: { params: {} } })
-
-      const select = await screen.findByRole('combobox', { name: 'Execution profile' })
-      expect(select).toHaveValue('strategy-assistant')
-      expect(screen.getByText(/data discovery → validate\/save → evaluate → evidence critique/i)).toBeInTheDocument()
-    })
-
-    it('submit sends the selected execution profile name in the request body', async () => {
-      mocks.listAgentProfiles.mockResolvedValue({
-        profiles: [makeAgentProfile({ name: 'strategy-assistant', displayName: 'Strategy assistant' })],
-      })
+    it('uses only an explicitly selected generic profile', async () => {
+      const profile = makeAgentProfile({ name: 'general-assistant', displayName: 'General assistant' })
+      mocks.listAgentProfiles.mockResolvedValue({ profiles: [profile] })
       const sessionId = faker.string.uuid()
       const sse = buildAgentRunSseSampleStream({ sessionId, partialText: 'a', fullText: 'ab' })
       const fetchMock = vi.mocked(globalThis.fetch).mockResolvedValue(
-        new Response(bytesStream(sse), {
-          status: 200,
-          headers: { 'Content-Type': 'text/event-stream' },
-        }),
+        new Response(bytesStream(sse), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
       )
 
       render(Chat, { props: { params: {} } })
       const user = userEvent.setup()
-
-      await screen.findByRole('combobox', { name: 'Execution profile' })
+      await user.selectOptions(await screen.findByRole('combobox', { name: 'Execution profile' }), profile.name)
       await waitForModelPickerReady()
       await user.type(screen.getByRole('textbox', { name: 'Message' }), 'hello')
       await user.click(screen.getByRole('button', { name: 'Send' }))
 
       await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-      const firstArg = fetchMock.mock.calls[0][0]
-      const sentBody = await (firstArg as Request).json()
-      expect(sentBody.profileName).toBe('strategy-assistant')
+      const sentBody = await (fetchMock.mock.calls[0][0] as Request).json()
+      expect(sentBody.profileName).toBe(profile.name)
     })
   })
 

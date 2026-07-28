@@ -2,7 +2,7 @@
 
 ## Status
 
-**Lean module.** This process currently exposes the HTTP server, config, logging, OpenTelemetry, health routes, and inherited runtime HTTP surface. Product direction is still governed by the repository-level [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
+**Finance application.** This process exposes finance APIs, auth, durable jobs, generic agent HTTP routes, and operational infrastructure. Product direction is governed by [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
 ## Template Origin And Boundary
 

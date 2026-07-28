@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gemyago/signal-foundry/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
@@ -62,12 +61,8 @@ func TestNewDatabase(t *testing.T) {
 	})
 
 	t.Run("builds postgres timestamp query chains", func(t *testing.T) {
-		sqlDB, mock, err := sqlmock.New()
-		require.NoError(t, err)
-		mock.ExpectClose()
-		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		db, err := gorm.Open(
-			postgres.New(postgres.Config{Conn: sqlDB}),
+			postgres.New(postgres.Config{DSN: "host=127.0.0.1 port=1 user=test dbname=test sslmode=disable"}),
 			&gorm.Config{DisableAutomaticPing: true, DryRun: true},
 		)
 		require.NoError(t, err)

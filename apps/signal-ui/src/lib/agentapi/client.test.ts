@@ -52,6 +52,16 @@ describe('createSignalAgentApi / streaming and providers (MSW)', () => {
     server.close()
   })
 
+  it('creates a direct-model client without an authorization header when no token is supplied', async () => {
+    const baseUrl = `http://127.0.0.1:${faker.internet.port()}`
+    server.use(http.get(`${baseUrl}/models`, ({ request }) => {
+      expect(request.headers.get('Authorization')).toBeNull()
+      return HttpResponse.json({ models: [] })
+    }))
+
+    await expect(createSignalAgentApi({ baseUrl }).listModels()).resolves.toEqual({ models: [] })
+  })
+
   describe('happy path', () => {
     it('startAgentRun: POSTs JSON with Authorization header, SSE body parses', async () => {
       const { sampleBody, sampleStream, sessionIdForStream } = makeAgentRunSampleFixture()

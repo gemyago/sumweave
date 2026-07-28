@@ -37,7 +37,7 @@ func (disabledFinanceCipher) OpenString(credentials.Envelope) (string, error) {
 type databaseDeps struct {
 	dig.In
 
-	DatabaseDSN string `name:"config.dataLayer.database.dsn"`
+	DatabaseDSN string `name:"config.application.database.dsn"`
 	RootLogger  *slog.Logger
 	SQLDB       *sql.DB
 }

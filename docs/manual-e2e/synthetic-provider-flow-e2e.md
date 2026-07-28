@@ -12,7 +12,7 @@ For the scheduled-sync lifecycle and worker assertions, see
 Use a unique tenant name on each run.
 
 ```bash
-RUN_TAG=$(date +%Y%m%d-%H%M%S) && TENANT_NAME="synthetic-provider-e2e-${RUN_TAG}" && CREATE_STATUS=$(curl -sS -o /tmp/synthetic-provider-tenant-create.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data "{\"name\":\"${TENANT_NAME}\",\"displayCurrency\":\"USD\"}") && test "$CREATE_STATUS" = "200" && TENANT_ID=$(python3 -c 'import json; print(json.load(open("/tmp/synthetic-provider-tenant-create.json"))["id"])') && printf 'tenantId=%s\n' "$TENANT_ID"
+RUN_TAG=$(date +%Y%m%d-%H%M%S) && TENANT_NAME="synthetic-provider-e2e-${RUN_TAG}" && CREATE_STATUS=$(curl -sS -o /tmp/synthetic-provider-tenant-create.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data "{\"name\":\"${TENANT_NAME}\",\"displayCurrency\":\"USD\",\"seedDefaults\":false}") && test "$CREATE_STATUS" = "200" && TENANT_ID=$(python3 -c 'import json; print(json.load(open("/tmp/synthetic-provider-tenant-create.json"))["id"])') && printf 'tenantId=%s\n' "$TENANT_ID"
 ```
 
 Expected:

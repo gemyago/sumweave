@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/jaswdr/faker/v2"
 	slogmulti "github.com/samber/slog-multi"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel/log/noop"
@@ -53,6 +55,16 @@ func TestDiagSlogHandler(t *testing.T) {
 
 			assert.Equal(t, mockResult, got.target)
 		})
+	})
+	t.Run("Enabled and WithGroup preserve handler behavior", func(t *testing.T) {
+		target := NewMockSlogHandler(t)
+		handler := diagLogHandler{target: target}
+		target.EXPECT().Enabled(mock.Anything, slog.LevelInfo).Return(true)
+		assert.True(t, handler.Enabled(t.Context(), slog.LevelInfo))
+		target.EXPECT().WithAttrs([]slog.Attr{slog.String("group", "finance")}).Return(target)
+		grouped, ok := handler.WithGroup("finance").(*diagLogHandler)
+		require.True(t, ok)
+		assert.Same(t, target, grouped.target)
 	})
 	t.Run("Handle", func(t *testing.T) {
 		t.Run("should delegate to target", func(t *testing.T) {
@@ -116,6 +128,14 @@ func TestDiagSlogHandler(t *testing.T) {
 			logger := NewRootLogger(NewRootLoggerOpts().WithOutput(&testOutput).WithOptionalOutputFile(""))
 			logger.InfoContext(t.Context(), fake.Lorem().Sentence(10))
 			assert.NotEmpty(t, testOutput.String())
+		})
+		t.Run("should write optional output files", func(t *testing.T) {
+			path := t.TempDir() + "/" + fake.UUID().V4()
+			logger := NewRootLogger(NewRootLoggerOpts().WithOptionalOutputFile(path))
+			logger.InfoContext(t.Context(), fake.Lorem().Sentence(3))
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.NotEmpty(t, content)
 		})
 	})
 }

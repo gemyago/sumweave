@@ -14,8 +14,7 @@ E2E_ROOT="$REPO_ROOT/tmp/timestamp-nullable-cleanup-052-e2e"
 rm -rf "$E2E_ROOT"
 mkdir -p "$E2E_ROOT"
 export APP_DATADIR="$E2E_ROOT/data"
-export APP_DATALAYER_DATABASE_DSN="$E2E_ROOT/data-layer.db"
-export APP_FINANCE_FIXTURES_DATABASE_DSN="$APP_DATALAYER_DATABASE_DSN"
+export APP_APPLICATION_DATABASE_DSN="$E2E_ROOT/application.db"
 
 pm2 stop signal-foundry-api
 cd apps/signal-foundry

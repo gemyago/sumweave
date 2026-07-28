@@ -25,10 +25,6 @@ func (p configValueProvider) asInt() di.ConstructorWithOpts {
 	return di.ProvideValue(p.cfg.GetInt(p.configPath), dig.Name(p.diPath))
 }
 
-func (p configValueProvider) asInt32() di.ConstructorWithOpts {
-	return di.ProvideValue(p.cfg.GetInt32(p.configPath), dig.Name(p.diPath))
-}
-
 func (p configValueProvider) asInt64() di.ConstructorWithOpts {
 	return di.ProvideValue(p.cfg.GetInt64(p.configPath), dig.Name(p.diPath))
 }
@@ -122,23 +118,18 @@ func Provide(container *dig.Container, cfg *viper.Viper) error {
 		provideConfigValue(cfg, "agentRuntime.database.dsn").asString(),
 		provideConfigValue(cfg, "agentRuntime.database.tablePrefix").asString(),
 
-		// data layer persistence config
-		provideConfigValue(cfg, "dataLayer.database.dsn").asString(),
-		provideConfigValue(cfg, "dataLayer.database.tablePrefix").asString(),
+		// application database config
+		provideConfigValue(cfg, "application.database.dsn").asString(),
+		provideConfigValue(cfg, "application.database.tablePrefix").asString(),
 
 		// jobs config
 		provideConfigValue(cfg, "jobs.scheduler.loopInterval").asDuration(),
 		provideConfigValue(cfg, "jobs.worker.enabled").asBool(),
 		provideConfigValue(cfg, "jobs.worker.pollInterval").asDuration(),
 		provideConfigValue(cfg, "jobs.worker.maxAttempts").asInt(),
-		provideConfigValue(cfg, "jobs.worker.maxConcurrentHistoricalBackfills").asInt(),
-		provideConfigValue(cfg, "jobs.historicalBackfill.maxIntervals").asInt(),
-		provideConfigValue(cfg, "jobs.historicalBackfill.maxPageSize").asInt(),
 
 		// finance providers config
 		provideConfigValue(cfg, "httpClient.retryAfterFallbackDelay").asDuration(),
-		provideConfigValue(cfg, "finance.fixtures.database.dsn").asString(),
-		provideConfigValue(cfg, "finance.fixtures.database.jobsTablePrefix").asString(),
 		provideConfigValue(cfg, "finance.providers.monobank.baseURL").asString(),
 		provideConfigValue(cfg, "finance.providers.monobank.retryAfterFallbackDelay").asDuration(),
 		provideConfigValue(cfg, "finance.providers.enableBanking.baseURL").asString(),

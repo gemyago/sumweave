@@ -234,7 +234,7 @@ func fixedCSVAccountName(record []string, indexes map[string]int) string {
 	return strings.TrimSpace(record[index])
 }
 
-// readBoundedCSVRecords validates records as they are read and does not retain
+// readBoundedCSVRecords validates records as they are read without storing
 // an additional copy of the full CSV before the caller processes each row.
 func readBoundedCSVRecords(source io.Reader, visit func([]string, int) error) error {
 	r := csv.NewReader(source)

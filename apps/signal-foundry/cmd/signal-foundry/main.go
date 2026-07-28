@@ -27,7 +27,6 @@ func setupCommands() *cobra.Command {
 				return resolveFinanceFixturesRuntimeConfig(cmd.Root(), container)
 			},
 		}),
-		newDataCmd(container, nil),
 		newFinancePOCCmd(financePOCCommandDeps{}),
 		newUserCmd(container),
 	)

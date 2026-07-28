@@ -4,7 +4,7 @@
 TBD - created by archiving change add-finance-management-slice. Update Purpose after archive.
 ## Requirements
 ### Requirement: Distinct Protected Finance Area
-The operator UI SHALL provide a distinct protected Finance area rather than mixing finance workflows into trading/operator routes.
+The UI SHALL provide a distinct protected Finance area alongside retained generic agent and administration surfaces.
 
 #### Scenario: Finance navigation is tenant-aware, protected, and Bootstrap-first
 - **WHEN** an authenticated operator uses the application navigation
@@ -13,12 +13,12 @@ The operator UI SHALL provide a distinct protected Finance area rather than mixi
 - **AND** all tenant-facing `#/finance*` routes MUST render inside the canonical Bootstrap Finance shell
 - **AND** those routes MUST use Bootstrap-first markup and states instead of the older custom finance chrome or a parallel pilot product surface
 
-#### Scenario: Finance routing stays distinct from trading routes
+#### Scenario: Finance navigation stays focused on finance destinations
 - **WHEN** finance screens are added to the SPA
-- **THEN** they MUST remain visually and navigationally distinct from Data, Strategies, Evaluations, Chat, and other trading/runtime workflows
+- **THEN** they MUST remain visually and navigationally distinct from retained Chat, Providers, and Admin workflows
 - **AND** the Bootstrap Finance shell MUST expose only supported Finance destinations for this slice, mapping navigation to real product routes such as dashboard, transactions, accounts, categories, connections and sync, imports, and tenants
 - **AND** unsupported reference items such as `Rules` or `Settings` MUST remain out of scope until backed by real product workflows
-- **AND** non-finance routes MUST remain on the existing stack unless a later change explicitly promotes them
+- **AND** retained non-finance routes MUST remain on the existing stack unless a later change explicitly promotes them
 
 ### Requirement: Finance Dashboard And Workspace Flows
 The Finance area SHALL expose the first end-user workflows required by the finance design.
@@ -109,4 +109,3 @@ The Finance tenants route SHALL let operators create and update tenants using pr
 - **WHEN** tenant update fails because validation, authentication, authorization, or network handling rejects the request
 - **THEN** the UI MUST keep the operator on `#/finance/tenants`
 - **AND** it MUST show a recoverable error state without losing the current selected tenant context
-

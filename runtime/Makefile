@@ -1,4 +1,4 @@
-.PHONY: lint test test-live-compile test-live
+.PHONY: lint test
 
 include ../build/make/golangci-lint.mk
 
@@ -22,12 +22,6 @@ $(cover_dir):
 
 go-test-coverage=go run github.com/vladopajic/go-test-coverage/v2
 
-test: test-live-compile $(cover_dir)
+test: $(cover_dir)
 	TZ=US/Alaska go test -timeout=${DEFAULT_TESTS_TIMEOUT} -shuffle=on -failfast -coverpkg=./internal/...,./httpapi/...,./agent/... -coverprofile=$(cover_profile) -covermode=atomic ./...
 	$(go-test-coverage) --config .testcoverage.yaml --profile $(cover_profile)
-
-test-live-compile:
-	go test -tags=live -run '^$$' ./venueedge/live
-
-test-live:
-	TZ=UTC go test -tags=live -count=1 -timeout=${LIVE_TESTS_TIMEOUT} ./venueedge/live

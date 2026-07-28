@@ -14,31 +14,7 @@ import (
 var _ = BindingContext{}
 var _ = http.MethodGet
 var _ = time.Time{}
-type _ func() CreateHistoricalDataBackfillJobRequest
-
-type paramsParserJobsCreateHistoricalDataBackfillJob struct {
-	bindPayload requestParamBinder[*http.Request, *CreateHistoricalDataBackfillJobRequest]
-}
-
-func (p *paramsParserJobsCreateHistoricalDataBackfillJob) parse(router httpRouter, req *http.Request) (*CreateHistoricalDataBackfillJobParams, error) {
-	bindingCtx := BindingContext{}
-	reqParams := &CreateHistoricalDataBackfillJobParams{}
-	// body params
-	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
-	return reqParams, bindingCtx.AggregatedError()
-}
-
-func newParamsParserJobsCreateHistoricalDataBackfillJob(rootHandler *RootHandler) paramsParser[*CreateHistoricalDataBackfillJobParams] {
-	return &paramsParserJobsCreateHistoricalDataBackfillJob{
-		bindPayload: newRequestParamBinder(binderParams[*http.Request, *CreateHistoricalDataBackfillJobRequest]{
-			required: true,
-			parseValue: parseSoloValueParamAsSoloValue(
-				parseJSONPayload[*CreateHistoricalDataBackfillJobRequest],
-			),
-			validateValue: NewCreateHistoricalDataBackfillJobRequestValidator(),
-		}),
-	}
-}
+type _ func() Error
 
 type paramsParserJobsGetJob struct {
 	bindJobID requestParamBinder[string, string]
@@ -148,18 +124,6 @@ func newParamsParserJobsListJobs(rootHandler *RootHandler) paramsParser[*ListJob
 }
 
 type jobsControllerBuilder struct {
-	// POST /api/v1/jobs/historical-data-backfills
-	//
-	// Request type: CreateHistoricalDataBackfillJobParams,
-	//
-	// Response type: JobDetailResponse
-	CreateHistoricalDataBackfillJob genericHandlerBuilder[
-		*CreateHistoricalDataBackfillJobParams,
-		*JobDetailResponse,
-		handlerActionFunc[*CreateHistoricalDataBackfillJobParams, *JobDetailResponse],
-		httpHandlerActionFunc[*CreateHistoricalDataBackfillJobParams, *JobDetailResponse],
-	]
-
 	// GET /api/v1/jobs/{jobId}
 	//
 	// Request type: GetJobParams,
@@ -187,26 +151,6 @@ type jobsControllerBuilder struct {
 
 func newJobsControllerBuilder(app *RootHandler) *jobsControllerBuilder {
 	return &jobsControllerBuilder{
-		// POST /api/v1/jobs/historical-data-backfills
-		CreateHistoricalDataBackfillJob: newGenericHandlerBuilder(
-			app,
-			newHandlerAdapter[
-				*CreateHistoricalDataBackfillJobParams,
-				*JobDetailResponse,
-			](),
-			newHTTPHandlerAdapter[
-				*CreateHistoricalDataBackfillJobParams,
-				*JobDetailResponse,
-			](),
-			makeActionBuilderParams[
-				*CreateHistoricalDataBackfillJobParams,
-				*JobDetailResponse,
-			]{
-				defaultStatus: 200,
-				paramsParser:  newParamsParserJobsCreateHistoricalDataBackfillJob(app),
-			},
-		),
-
 		// GET /api/v1/jobs/{jobId}
 		GetJob: newGenericHandlerBuilder(
 			app,

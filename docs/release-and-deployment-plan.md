@@ -14,8 +14,10 @@ Signal Foundry.
 ## Prerequisite
 
 Production workloads must not depend on persistent local files or volumes.
-Complete [Database-Backed State Plan](./database-backed-state-plan.md) before
-treating this deployment as production-ready.
+The [Database-Backed Application State](./database-backed-state-plan.md)
+design requires finance, authentication, dispatch, durable jobs, schedules,
+and retained agent runtime state to use their configured databases before this
+deployment is treated as production-ready.
 
 The release and Helm work may be developed in parallel, but production rollout
 must wait until that prerequisite is complete.
@@ -272,7 +274,7 @@ values.
 
 Production configuration must provide at least:
 
-- PostgreSQL data-layer DSN
+- PostgreSQL application database DSN
 - PostgreSQL agent-runtime DSN
 - non-colliding table prefixes
 - JWT signing key

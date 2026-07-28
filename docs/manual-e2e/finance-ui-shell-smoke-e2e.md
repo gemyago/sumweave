@@ -8,7 +8,7 @@ Use this guide after `adopt-finance-bootstrap-default`. It is the canonical smok
 
 - Treat `#/login` and tenant-facing `#/finance*` routes as the supported canonical Bootstrap surfaces.
 - Treat retired `#/v2/*` finance/login hashes as unsupported; this smoke run does not cover or preserve them.
-- Keep one quick non-finance regression pass in this run so Finance promotion does not silently spill into Chat, Data, Jobs, Providers, or other non-finance surfaces.
+- Keep one quick non-finance regression pass in this run so Finance promotion does not silently spill into Chat, Providers, Admin, or other retained non-finance surfaces.
 
 ## 1. Sign in and confirm default Finance landing
 
@@ -104,10 +104,10 @@ Expected:
 
 ## 6. Non-finance regression smoke
 
-1. Sign out if needed, then open a protected non-finance route such as `#/jobs`.
+1. Sign out if needed, then open a protected non-finance route such as `#/chat`.
 2. Confirm the app redirects to `#/login`.
 3. Sign in again and confirm the remembered protected destination wins over the default Finance landing.
-4. While authenticated on the non-finance route, open one or two other non-finance destinations such as `#/chat`, `#/data`, or `#/providers`.
+4. While authenticated on the non-finance route, open one or two other retained non-finance destinations such as `#/providers` or `#/admin`.
 5. Confirm those routes still use the existing generic app nav and non-finance styling stack.
 6. Use the Finance link from the generic nav and confirm the app switches back to the Finance shell at `#/finance`.
 

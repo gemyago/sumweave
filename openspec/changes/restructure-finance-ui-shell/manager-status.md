@@ -28,7 +28,6 @@
 
 - Scope: finance shell chrome, route chrome wiring, and shared tenant context foundation
 - Status: complete
-- Review file: `review-chunk-finance-shell-foundation.md`
 - Commit: not requested; changes remain uncommitted
 
 ## Open Decisions / Blockers

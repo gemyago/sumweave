@@ -26,6 +26,21 @@ import (
 
 func TestFinanceCommand(t *testing.T) {
 	fake := faker.New()
+	makeRuntimeConfig := func(t *testing.T, dsn string) financeFixturesRuntimeConfig {
+		t.Helper()
+		sqlDB, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		database, err := persistence.NewDatabase(sqlDB, dsn)
+		require.NoError(t, err)
+		jobsStore, err := jobspkg.NewStore(
+			sqlDB,
+			dsn,
+			jobspkg.StoreOpts{TablePrefix: "signal_foundry_jobs_"},
+		)
+		require.NoError(t, err)
+		return financeFixturesRuntimeConfig{Database: database, JobsStore: jobsStore}
+	}
 	makeRootCmd := func(t *testing.T, deps financeFixturesCommandDeps) (*cobra.Command, *bytes.Buffer) {
 		t.Helper()
 		rootCmd := newRootCmd()
@@ -49,12 +64,9 @@ func TestFinanceCommand(t *testing.T) {
 			Scenario:    "realistic",
 			ScenarioIDs: []string{"realistic-core"},
 		}
-		wantConfig := financeFixturesRuntimeConfig{
-			DatabaseDSN:     filepath.Join(t.TempDir(), fake.UUID().V4()+".db"),
-			JobsTablePrefix: "jobs_" + fake.UUID().V4(),
-			JWTSigningKey:   fake.UUID().V4(),
-			MonobankBaseURL: "https://" + fake.Internet().Domain(),
-		}
+		wantConfig := makeRuntimeConfig(t, filepath.Join(t.TempDir(), fake.UUID().V4()+".db"))
+		wantConfig.JWTSigningKey = fake.UUID().V4()
+		wantConfig.MonobankBaseURL = "https://" + fake.Internet().Domain()
 		rootCmd, stdout := makeRootCmd(t, financeFixturesCommandDeps{
 			ResolveRuntimeConfig: func(*cobra.Command) (financeFixturesRuntimeConfig, error) {
 				return wantConfig, nil
@@ -120,10 +132,7 @@ func TestFinanceCommand(t *testing.T) {
 		databasePath := filepath.Join(t.TempDir(), fake.UUID().V4()+".db")
 		rootCmd, stdout := makeRootCmd(t, financeFixturesCommandDeps{
 			ResolveRuntimeConfig: func(*cobra.Command) (financeFixturesRuntimeConfig, error) {
-				return financeFixturesRuntimeConfig{
-					DatabaseDSN:     databasePath,
-					JobsTablePrefix: "signal_foundry_data_jobs_",
-				}, nil
+				return makeRuntimeConfig(t, databasePath), nil
 			},
 			Now: func() time.Time { return time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC) },
 		})
@@ -143,8 +152,8 @@ func TestFinanceCommand(t *testing.T) {
 	})
 
 	t.Run("resolve finance fixtures runtime config uses app config wiring", func(t *testing.T) {
-		t.Setenv("APP_FINANCE_FIXTURES_DATABASE_DSN", filepath.Join(t.TempDir(), "fixtures.db"))
-		t.Setenv("APP_FINANCE_FIXTURES_DATABASE_JOBSTABLEPREFIX", "jobs_"+fake.UUID().V4())
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.db"))
+		t.Setenv("APP_APPLICATION_DATABASE_TABLEPREFIX", "application_"+fake.UUID().V4()+"_")
 		t.Setenv("APP_FINANCE_PROVIDERS_MONOBANK_BASEURL", "https://"+fake.Internet().Domain())
 		t.Setenv("APP_AUTH_JWTSIGNINGKEY", fake.UUID().V4())
 
@@ -153,12 +162,8 @@ func TestFinanceCommand(t *testing.T) {
 
 		runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd, dig.New())
 		require.NoError(t, err)
-		assert.Equal(t, os.Getenv("APP_FINANCE_FIXTURES_DATABASE_DSN"), runtimeConfig.DatabaseDSN)
-		assert.Equal(
-			t,
-			os.Getenv("APP_FINANCE_FIXTURES_DATABASE_JOBSTABLEPREFIX"),
-			runtimeConfig.JobsTablePrefix,
-		)
+		assert.NotNil(t, runtimeConfig.Database)
+		assert.NotNil(t, runtimeConfig.JobsStore)
 		assert.Equal(
 			t,
 			os.Getenv("APP_FINANCE_PROVIDERS_MONOBANK_BASEURL"),
@@ -176,12 +181,8 @@ func TestFinanceCommand(t *testing.T) {
 
 			runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd, dig.New())
 			require.NoError(t, err)
-			assert.Equal(
-				t,
-				filepath.Join("data", "data-layer.db"),
-				runtimeConfig.DatabaseDSN,
-			)
-			assert.Equal(t, "signal_foundry_data_jobs_", runtimeConfig.JobsTablePrefix)
+			assert.NotNil(t, runtimeConfig.Database)
+			assert.NotNil(t, runtimeConfig.JobsStore)
 			assert.NotEmpty(t, runtimeConfig.JWTSigningKey)
 		},
 	)
@@ -195,10 +196,7 @@ func TestFinanceCommand(t *testing.T) {
 	)
 
 	t.Run("run finance fixtures generate rejects unsupported scenarios", func(t *testing.T) {
-		runtimeConfig := financeFixturesRuntimeConfig{
-			DatabaseDSN:     filepath.Join(t.TempDir(), "fixtures.db"),
-			JobsTablePrefix: "signal_foundry_data_jobs_",
-		}
+		runtimeConfig := makeRuntimeConfig(t, filepath.Join(t.TempDir(), "fixtures.db"))
 		_, err := runFinanceFixturesGenerate(
 			t.Context(),
 			runtimeConfig,
@@ -213,10 +211,7 @@ func TestFinanceCommand(t *testing.T) {
 	})
 
 	t.Run("run finance fixtures generate bootstraps realistic scenario", func(t *testing.T) {
-		runtimeConfig := financeFixturesRuntimeConfig{
-			DatabaseDSN:     filepath.Join(t.TempDir(), "fixtures.db"),
-			JobsTablePrefix: "signal_foundry_data_jobs_",
-		}
+		runtimeConfig := makeRuntimeConfig(t, filepath.Join(t.TempDir(), "fixtures.db"))
 		now := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)
 		summary, err := runFinanceFixturesGenerate(
 			t.Context(),
@@ -236,13 +231,8 @@ func TestFinanceCommand(t *testing.T) {
 			ScenarioIDs: []string{"realistic-core"},
 		}, summary)
 
-		sqlDB, err := sqlconn.Open(runtimeConfig.DatabaseDSN)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, sqlDB.Close()) }()
-		database, err := persistence.NewDatabase(sqlDB, runtimeConfig.DatabaseDSN)
-		require.NoError(t, err)
-		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
-		store := persistence.NewStore(database)
+		require.NoError(t, persistence.NewMigrator(runtimeConfig.Database).Migrate(t.Context()))
+		store := persistence.NewStore(runtimeConfig.Database)
 		tenantService := financepkg.NewTenantService(
 			store,
 			financepkg.WithTenantServiceNow(func() time.Time { return now }),
@@ -275,10 +265,9 @@ func TestFinanceCommand(t *testing.T) {
 			writer.WriteHeader(http.StatusForbidden)
 		}))
 		defer liveServer.Close()
-		_, err := runFinanceFixturesGenerate(t.Context(), financeFixturesRuntimeConfig{
-			DatabaseDSN:     filepath.Join(t.TempDir(), "fixture-safe.sqlite"),
-			MonobankBaseURL: liveServer.URL,
-		}, financeFixturesGenerateParams{
+		runtimeConfig := makeRuntimeConfig(t, filepath.Join(t.TempDir(), "fixture-safe.sqlite"))
+		runtimeConfig.MonobankBaseURL = liveServer.URL
+		_, err := runFinanceFixturesGenerate(t.Context(), runtimeConfig, financeFixturesGenerateParams{
 			Seed: 7, Scenario: realisticScenarioName,
 			Now:         time.Date(2026, time.July, 10, 22, 0, 0, 0, time.FixedZone("fixture", 2*60*60)),
 			OwnerUserID: "owner-" + fake.UUID().V4(), MemberUserID: "member-" + fake.UUID().V4(),
@@ -328,14 +317,11 @@ func TestFinanceCommand(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 	})
 
-	t.Run("run finance fixtures generate writes to configured data-layer path", func(t *testing.T) {
+	t.Run("run finance fixtures generate writes to configured application database path", func(t *testing.T) {
 		workdir := t.TempDir()
 		t.Chdir(workdir)
 		require.NoError(t, os.Mkdir(filepath.Join(workdir, "data"), 0o755))
-		runtimeConfig := financeFixturesRuntimeConfig{
-			DatabaseDSN:     filepath.Join("data", "data-layer.db"),
-			JobsTablePrefix: "signal_foundry_data_jobs_",
-		}
+		runtimeConfig := makeRuntimeConfig(t, filepath.Join("data", "application.db"))
 
 		_, err := runFinanceFixturesGenerate(
 			t.Context(),
@@ -347,17 +333,14 @@ func TestFinanceCommand(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		_, statErr := os.Stat(filepath.Join(workdir, "data", "data-layer.db"))
+		_, statErr := os.Stat(filepath.Join(workdir, "data", "application.db"))
 		require.NoError(t, statErr)
 	})
 
 	t.Run(
 		"run finance fixtures generate rejects unsupported connection provider",
 		func(t *testing.T) {
-			runtimeConfig := financeFixturesRuntimeConfig{
-				DatabaseDSN:     filepath.Join(t.TempDir(), "fixtures.db"),
-				JobsTablePrefix: "signal_foundry_data_jobs_",
-			}
+			runtimeConfig := makeRuntimeConfig(t, filepath.Join(t.TempDir(), "fixtures.db"))
 			_, err := runFinanceFixturesGenerate(
 				t.Context(),
 				runtimeConfig,
@@ -372,18 +355,6 @@ func TestFinanceCommand(t *testing.T) {
 		},
 	)
 
-	t.Run("run finance fixtures generate surfaces store open errors", func(t *testing.T) {
-		_, err := runFinanceFixturesGenerate(t.Context(), financeFixturesRuntimeConfig{
-			DatabaseDSN:     filepath.Join(t.TempDir(), "missing", "fixtures.db"),
-			JobsTablePrefix: "signal_foundry_data_jobs_",
-		}, financeFixturesGenerateParams{
-			Seed:     9,
-			Scenario: realisticScenarioName,
-			Now:      time.Date(2026, time.June, 21, 12, 0, 0, 0, time.UTC),
-		})
-		require.Error(t, err)
-	})
-
 	t.Run("fixture schedule writer stores generic due schedule rows", func(t *testing.T) {
 		dsn := filepath.Join(t.TempDir(), "jobs.db")
 		sqlDB, err := sqlconn.Open(dsn)
@@ -392,7 +363,7 @@ func TestFinanceCommand(t *testing.T) {
 		store, err := jobspkg.NewStore(
 			sqlDB,
 			dsn,
-			jobspkg.StoreOpts{TablePrefix: "signal_foundry_data_jobs_"},
+			jobspkg.StoreOpts{TablePrefix: "signal_foundry_jobs_"},
 		)
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())

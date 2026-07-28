@@ -116,9 +116,6 @@ func (h *registeredTypedHandler[Input, Result, Progress]) dispatchKind() appdisp
 	if h.spec.DispatchKind != "" {
 		return h.spec.DispatchKind
 	}
-	if h.spec.JobType == JobTypeHistoricalRawCandleBackfill {
-		return DispatchKindHistoricalRawCandleBackfill
-	}
 	return appdispatch.ExecutionKind(h.spec.JobType)
 }
 

@@ -118,5 +118,18 @@ func TestUserStore(t *testing.T) {
 		_, err = store.GetByUsername(t.Context(), fake.Internet().User())
 		require.Error(t, err)
 		require.Error(t, store.UpdatePassword(t.Context(), fake.UUID().V4(), fake.Lorem().Text(60)))
+		_, err = store.List(t.Context())
+		require.Error(t, err)
+		require.Error(t, store.AutoMigrate())
+	})
+
+	t.Run("validates connection settings before opening auth persistence", func(t *testing.T) {
+		db, err := sqlconn.Open(":memory:")
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		_, err = openAuthDatabase(db, ":memory:", "invalid-prefix-")
+		require.Error(t, err)
+		require.Error(t, validateTablePrefix("invalid-prefix-"))
+		require.NoError(t, validateTablePrefix("auth_users_"))
 	})
 }

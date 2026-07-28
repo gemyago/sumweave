@@ -24,10 +24,6 @@ func NewJobSummaryValidator() FieldValidator[*JobSummary] {
 		ObjectFieldValidatorParams{Required: true, Nullable: false},
 		NewJobRequesterValidator(),
 	)
-	validateInput := NewObjectFieldValidator(
-		ObjectFieldValidatorParams{Required: false, Nullable: false},
-		NewHistoricalDataBackfillJobInputValidator(),
-	)
 	validateCreatedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
@@ -41,10 +37,6 @@ func NewJobSummaryValidator() FieldValidator[*JobSummary] {
 	validateAttemptCount := NewSimpleFieldValidator[int64](
 		EnsureNonDefault[int64],
 	)
-	validateResult := NewObjectFieldValidator(
-		ObjectFieldValidatorParams{Required: false, Nullable: false},
-		NewHistoricalDataBackfillJobResultValidator(),
-	)
 	validateError := NewObjectFieldValidator(
 		ObjectFieldValidatorParams{Required: false, Nullable: false},
 		NewJobErrorValidator(),
@@ -55,13 +47,11 @@ func NewJobSummaryValidator() FieldValidator[*JobSummary] {
 		validateJobType(bindingCtx.Fork("jobType"), value.JobType)
 		validateStatus(bindingCtx.Fork("status"), value.Status)
 		validateRequester(bindingCtx.Fork("requester"), value.Requester)
-		validateInput(bindingCtx.Fork("input"), value.Input)
 		validateCreatedAt(bindingCtx.Fork("createdAt"), value.CreatedAt)
 		validateUpdatedAt(bindingCtx.Fork("updatedAt"), value.UpdatedAt)
 		validateStartedAt(bindingCtx.Fork("startedAt"), value.StartedAt)
 		validateCompletedAt(bindingCtx.Fork("completedAt"), value.CompletedAt)
 		validateAttemptCount(bindingCtx.Fork("attemptCount"), value.AttemptCount)
-		validateResult(bindingCtx.Fork("result"), value.Result)
 		validateError(bindingCtx.Fork("error"), value.Error)
 	}
 }
