@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	signalfoundry "github.com/gemyago/signal-foundry/apps/signal-foundry"
+	sumweave "github.com/gemyago/sumweave/apps/sumweave"
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 )
@@ -16,16 +16,16 @@ type runCmdArgs struct {
 
 const runCommandName = "run"
 
-func buildEngine(rootArgsVals *rootArgs) (*signalfoundry.Engine, error) {
-	opts := []signalfoundry.EngineOpt{
-		signalfoundry.WithEngineLogsFormatJSON(rootArgsVals.jsonLogs),
-		signalfoundry.WithEngineLogsOutputFile(rootArgsVals.logsFile),
-		signalfoundry.WithEngineDefaultLogLevel(rootArgsVals.logLevel),
+func buildEngine(rootArgsVals *rootArgs) (*sumweave.Engine, error) {
+	opts := []sumweave.EngineOpt{
+		sumweave.WithEngineLogsFormatJSON(rootArgsVals.jsonLogs),
+		sumweave.WithEngineLogsOutputFile(rootArgsVals.logsFile),
+		sumweave.WithEngineDefaultLogLevel(rootArgsVals.logLevel),
 	}
 	if rootArgsVals.env != "" {
-		opts = append(opts, signalfoundry.WithEngineEnv(rootArgsVals.env))
+		opts = append(opts, sumweave.WithEngineEnv(rootArgsVals.env))
 	}
-	return signalfoundry.NewEngine(opts...)
+	return sumweave.NewEngine(opts...)
 }
 
 func buildListModelsFunc(rootArgsVals *rootArgs) func(cmd *cobra.Command, _ []string) error {

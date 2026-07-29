@@ -1,12 +1,12 @@
-module github.com/gemyago/signal-foundry/tests/agent/integration-cli
+module github.com/gemyago/sumweave/tests/agent/integration-cli
 
 go 1.26
 
 tool github.com/mitranim/gow
 
 require (
-	github.com/gemyago/signal-foundry/apps/signal-foundry v0.0.0-20260411074257-b5b84f975750
-	github.com/gemyago/signal-foundry/runtime v0.0.0-20260411074257-b5b84f975750
+	github.com/gemyago/sumweave/apps/sumweave v0.0.0-20260411074257-b5b84f975750
+	github.com/gemyago/sumweave/runtime v0.0.0-20260411074257-b5b84f975750
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/jaswdr/faker/v2 v2.9.1
 	github.com/samber/lo v1.53.0
@@ -30,8 +30,9 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/firebase/genkit/go v1.6.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/gemyago/signal-foundry/tools/skills v0.0.0-20260406074131-aa6097596cbc // indirect
-	github.com/gemyago/signal-foundry/tools/workspacefs v0.0.0-20260406074131-aa6097596cbc // indirect
+	github.com/gemyago/sumweave/finance v0.0.0 // indirect
+	github.com/gemyago/sumweave/tools/skills v0.0.0-20260406074131-aa6097596cbc // indirect
+	github.com/gemyago/sumweave/tools/workspacefs v0.0.0-20260406074131-aa6097596cbc // indirect
 	github.com/getkin/kin-openapi v0.134.0 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
 	github.com/glebarez/sqlite v1.11.0 // indirect
@@ -146,10 +147,12 @@ require (
 	rsc.io/ordered v1.1.1 // indirect
 )
 
-replace github.com/gemyago/signal-foundry/apps/signal-foundry => ../../../apps/signal-foundry
+replace github.com/gemyago/sumweave/apps/sumweave => ../../../apps/sumweave
 
-replace github.com/gemyago/signal-foundry/runtime => ../../../runtime
+replace github.com/gemyago/sumweave/runtime => ../../../runtime
 
-replace github.com/gemyago/signal-foundry/tools/skills => ../../../tools/skills
+replace github.com/gemyago/sumweave/tools/skills => ../../../tools/skills
 
-replace github.com/gemyago/signal-foundry/tools/workspacefs => ../../../tools/workspacefs
+replace github.com/gemyago/sumweave/tools/workspacefs => ../../../tools/workspacefs
+
+replace github.com/gemyago/sumweave/finance => ../../../finance

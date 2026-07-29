@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	rt "github.com/gemyago/sumweave/runtime/internal"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

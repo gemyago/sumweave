@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	rt "github.com/gemyago/signal-foundry/runtime/internal"
-	"github.com/gemyago/signal-foundry/runtime/internal/agentapi"
+	"github.com/gemyago/sumweave/runtime/agent"
+	rt "github.com/gemyago/sumweave/runtime/internal"
+	"github.com/gemyago/sumweave/runtime/internal/agentapi"
 )
 
 // HandlerArgs holds the required dependencies for NewHandler.
@@ -62,7 +62,7 @@ func NewHandler(args HandlerArgs, opts ...HandlerOpt) (http.Handler, error) {
 	})
 	server := agentapi.NewAgentAPIServer(agentapi.ServerParams{
 		Runner:                 agentRunner,
-		Logger:                 hOpts.Logger.WithGroup("signal-foundry.runtime.httpapi.handler"),
+		Logger:                 hOpts.Logger.WithGroup("sumweave.runtime.httpapi.handler"),
 		IDGen:                  agentapi.NewDefaultIDGen(),
 		RequestMapper:          agentapi.NewAgentAPIRequestMapper(),
 		SSEWriter:              agentapi.NewAgentAPISSEWriter(agentapi.NewAgentAPIStreamEventMapper()),

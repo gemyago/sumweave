@@ -32,16 +32,16 @@ certificate-path fallback, but Vite HTTPS remains separately opt-in below.
 
 ## Start with PM2
 
-Run the database migration from `apps/signal-foundry`, then return to the
+Run the database migration from `apps/sumweave`, then return to the
 repository root to create or start the PM2 applications:
 
 ```bash
-cd apps/signal-foundry
-go run ./cmd/signal-foundry db-migrate --env local
+cd apps/sumweave
+go run ./cmd/sumweave db-migrate --env local
 cd ../..
 ```
 
-Set Vite's explicit HTTPS enablement in `apps/signal-ui/.env.local`:
+Set Vite's explicit HTTPS enablement in `apps/sumweave-ui/.env.local`:
 
 ```dotenv
 VITE_LOCAL_HTTPS=true
@@ -66,14 +66,14 @@ certificate when proxying this development-only connection.
 
 Use `npm run pm2:status` and `npm run pm2:logs` to inspect the processes. If
 the backend ecosystem command or arguments change, recreate it with
-`pm2 delete signal-foundry-api && pm2 start ecosystem.config.js`.
+`pm2 delete sumweave-api && pm2 start ecosystem.config.js`.
 
 ## Return to the standard local HTTP workflow
 
 HTTPS is opt-in. To return both PM2 services to the normal HTTP endpoints,
 remove the two `APP_HTTPSERVER_TLS_*` exports from the ignored root
 `.envrc.local` and remove `VITE_LOCAL_HTTPS` plus its optional certificate-path
-variables from the ignored `apps/signal-ui/.env.local`. Keep
+variables from the ignored `apps/sumweave-ui/.env.local`. Keep
 `VITE_AGENT_API_BASE_URL=/api/v1/runtime/` so Vite continues to proxy the
 same-origin API calls.
 
@@ -81,11 +81,11 @@ Then migrate from the backend app root and recreate both PM2 applications from
 the repository root so neither process retains an old TLS environment:
 
 ```bash
-cd apps/signal-foundry
-go run ./cmd/signal-foundry db-migrate --env local
+cd apps/sumweave
+go run ./cmd/sumweave db-migrate --env local
 cd ../..
-pm2 delete signal-foundry-api
-pm2 delete signal-foundry-ui
+pm2 delete sumweave-api
+pm2 delete sumweave-ui
 pm2 start ecosystem.config.js
 pm2 status
 ```
@@ -104,6 +104,6 @@ local test is in progress.
 ## Direct-start diagnostics only
 
 Direct startup is only for isolating a local problem, not normal development.
-With the same environment loaded, run `go run ./cmd/signal-foundry start-all
---env local` from `apps/signal-foundry` and `npm run dev -- --host localhost
---port 5173` from `apps/signal-ui` in separate terminals.
+With the same environment loaded, run `go run ./cmd/sumweave start-all
+--env local` from `apps/sumweave` and `npm run dev -- --host localhost
+--port 5173` from `apps/sumweave-ui` in separate terminals.

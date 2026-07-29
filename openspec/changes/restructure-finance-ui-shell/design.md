@@ -25,7 +25,7 @@
   - filters are stacked above results
   - results are individual cards instead of a ledger workspace
   - there is no finance-specific shell, utility bar, summary-chip row, table layout, or contextual inspector
-- `apps/signal-ui/ui-wireframe.md` currently describes finance as subnav-first, stacked-summary-first, and generally separate-detail-route-first.
+- `apps/sumweave-ui/ui-wireframe.md` currently describes finance as subnav-first, stacked-summary-first, and generally separate-detail-route-first.
 
 ### Design tension to resolve
 
@@ -45,7 +45,7 @@
 - Restructure `#/finance` into a recognizable finance dashboard with the reference hierarchy.
 - Restructure `#/finance/transactions` into a browse-first ledger workspace with a responsive contextual inspector.
 - Preserve dedicated transaction create/edit routes for full-record editing.
-- Keep the existing Signal UI terminal/monospace design language and tokens.
+- Keep the existing Sumweave UI terminal/monospace design language and tokens.
 - Add a manual smoke guide for the future shell and bake the sub-agent run/report/fix/rerun loop into the plan.
 
 **Non-Goals:**
@@ -117,7 +117,7 @@
 
 7. Implementation planning must include docs and manual smoke iteration.
 
-    - `apps/signal-ui/ui-wireframe.md` must be updated alongside implementation because the current finance wireframe is no longer the intended route behavior.
+    - `apps/sumweave-ui/ui-wireframe.md` must be updated alongside implementation because the current finance wireframe is no longer the intended route behavior.
     - The manual smoke guide should act as the route-by-route finance-shell runbook after the change lands.
     - The smoke loop should be integrated into the shell, dashboard, and transactions implementation slices instead of treated as a detached final verification task.
     - A sub-agent should run the relevant guide sections during implementation, report route/screenshot/console/network evidence for failures, and rerun after fixes until each slice is clean.
@@ -141,7 +141,7 @@
 2. Centralize finance active-tenant chrome and route-preserving tenant resolution inside the shell.
 3. Replace the current finance dashboard layout with the new shell-aligned dashboard hierarchy, using existing endpoint data first.
 4. Replace the current transaction-card browse screen with a table-first ledger workspace and responsive inspector while keeping dedicated create/edit routes.
-5. Update `apps/signal-ui/ui-wireframe.md` so the documented finance shell, dashboard, and transactions flows match the implemented routes.
+5. Update `apps/sumweave-ui/ui-wireframe.md` so the documented finance shell, dashboard, and transactions flows match the implemented routes.
 6. Use the new manual smoke runbook inside the shell, dashboard, and transactions implementation slices so sub-agent browser verification reports findings, targeted fixes land, and the same guide sections rerun until clean.
 
 Because the project is early alpha, this plan does not preserve the old finance subnav experience for backward compatibility.

@@ -28,7 +28,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm ci --prefix apps/signal-ui
+      - run: npm ci --prefix apps/sumweave-ui
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.work

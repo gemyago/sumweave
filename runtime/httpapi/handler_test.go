@@ -5,9 +5,9 @@ package httpapi
 import (
 	"testing"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	"github.com/gemyago/signal-foundry/runtime/internal"
-	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
+	"github.com/gemyago/sumweave/runtime/agent"
+	"github.com/gemyago/sumweave/runtime/internal"
+	lp "github.com/gemyago/sumweave/runtime/internal/llmproviders"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

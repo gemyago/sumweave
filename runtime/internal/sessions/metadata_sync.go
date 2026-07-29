@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/signal-foundry/runtime/internal/summarize"
+	"github.com/gemyago/sumweave/runtime/internal/summarize"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 )

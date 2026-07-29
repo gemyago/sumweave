@@ -73,7 +73,7 @@ type AgentProfile struct {
 	// ToolRefs lists tool references available to this profile.
 	ToolRefs []string
 
-	// ExecutionSettings stores Signal Foundry-owned runtime settings.
+	// ExecutionSettings stores Sumweave-owned runtime settings.
 	ExecutionSettings ExecutionSettings
 
 	// CreatedAt is when the profile was first persisted.

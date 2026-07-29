@@ -1,6 +1,6 @@
 # Deployment
 
-The chart at `deploy/helm/signal-foundry` deploys one immutable Signal Foundry
+The chart at `deploy/helm/sumweave` deploys one immutable Sumweave
 image as an HTTP app Deployment, a singleton worker Deployment, a scheduler
 CronJob, and a pre-install/pre-upgrade migration hook. It deliberately contains
 no live Argo CD `Application` or environment secrets.
@@ -18,7 +18,7 @@ readiness; it currently proves process health, not database readiness.
 make -C deploy tools
 make -C deploy lint
 make -C deploy render-production
-helm upgrade signal-foundry deploy/helm/signal-foundry --install --namespace signal-foundry --create-namespace --dry-run
+helm upgrade sumweave deploy/helm/sumweave --install --namespace sumweave --create-namespace --dry-run
 ```
 
 Set `image.digest` or a `git-commit-*` tag in the deployment/config repository.

@@ -1,6 +1,6 @@
 # Skills tools (`tools/skills`)
 
-Go module that exposes a **skill discovery and activation toolset** for the Signal Foundry agent runtime. Skills are discovered from configured directories containing `SKILL.md` files; agents receive compact metadata at startup and load full skill instructions on demand via tool calls.
+Go module that exposes a **skill discovery and activation toolset** for the Sumweave agent runtime. Skills are discovered from configured directories containing `SKILL.md` files; agents receive compact metadata at startup and load full skill instructions on demand via tool calls.
 
 ## Template Origin And Boundary
 

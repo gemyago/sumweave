@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gemyago/signal-foundry/runtime/internal/gormsignalfoundry"
+	"github.com/gemyago/sumweave/runtime/internal/gormsumweave"
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/session/database"
 	"gorm.io/gorm"
@@ -33,7 +33,7 @@ func sessionMetadataFromModel(m sessionMetadataModel) SessionMetadata {
 }
 
 // DatabaseSessionMetadataStore persists session metadata in a relational database via GORM.
-// Table names use the same prefix as other Signal Foundry-managed tables (see [gormsignalfoundry.GormSignalFoundryTablesOpts]).
+// Table names use the same prefix as other Sumweave-managed tables (see [gormsumweave.GormSumweaveTablesOpts]).
 type DatabaseSessionMetadataStore struct {
 	db *gorm.DB
 }
@@ -46,18 +46,18 @@ var _ AutoMigratable = (*DatabaseSessionMetadataStore)(nil)
 // [NewDatabaseSessionsStorage] and provider config DB services.
 func NewDatabaseSessionMetadataStore(
 	dsn string,
-	opts gormsignalfoundry.GormSignalFoundryTablesOpts,
+	opts gormsumweave.GormSumweaveTablesOpts,
 ) (*DatabaseSessionMetadataStore, error) {
 	if dsn == "" {
 		return nil, errors.New("dsn is required")
 	}
 	opts.TranslateError = true
-	gormCfg := gormsignalfoundry.NewGormConfigForSignalFoundryTables(opts)
-	db, err := gorm.Open(gormsignalfoundry.NewGormDialector(dsn), gormCfg)
+	gormCfg := gormsumweave.NewGormConfigForSumweaveTables(opts)
+	db, err := gorm.Open(gormsumweave.NewGormDialector(dsn), gormCfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	if err = gormsignalfoundry.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
+	if err = gormsumweave.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
 		return nil, err
 	}
 	return &DatabaseSessionMetadataStore{db: db}, nil
@@ -147,15 +147,15 @@ type DatabaseSessionsStorage struct {
 // NewDatabaseSessionsStorage returns concrete *DatabaseSessionsStorage.
 func NewDatabaseSessionsStorage(
 	dsn string,
-	opts gormsignalfoundry.GormSignalFoundryTablesOpts,
+	opts gormsumweave.GormSumweaveTablesOpts,
 ) (*DatabaseSessionsStorage, error) {
 	if dsn == "" {
 		return nil, errors.New("dsn is required")
 	}
 	// database.NewSessionService returns [session.Service] only (no concrete type from ADK).
 	svc, err := database.NewSessionService(
-		gormsignalfoundry.NewGormDialector(dsn),
-		gormsignalfoundry.NewGormConfigForSignalFoundryTables(opts),
+		gormsumweave.NewGormDialector(dsn),
+		gormsumweave.NewGormConfigForSumweaveTables(opts),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create ADK session service: %w", err)

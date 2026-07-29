@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
+	lp "github.com/gemyago/sumweave/runtime/internal/llmproviders"
 )
 
 func TestModelsLocator(t *testing.T) {

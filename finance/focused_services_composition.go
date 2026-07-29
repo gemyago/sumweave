@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	internalproviders "github.com/gemyago/signal-foundry/finance/internal/providers"
-	"github.com/gemyago/signal-foundry/finance/persistence"
+	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
+	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
 )
 

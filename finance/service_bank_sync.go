@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
-	internalproviders "github.com/gemyago/signal-foundry/finance/internal/providers"
-	"github.com/gemyago/signal-foundry/finance/persistence"
+	"github.com/gemyago/sumweave/finance/domain"
+	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
+	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
 )
 

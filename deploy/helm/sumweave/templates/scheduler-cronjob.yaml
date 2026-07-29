@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "sumweave.fullname" . }}-scheduler
+  labels: {{- include "sumweave.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.scheduler.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ .Values.scheduler.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.scheduler.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.scheduler.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          automountServiceAccountToken: false
+          serviceAccountName: {{ include "sumweave.serviceAccountName" . }}
+          restartPolicy: OnFailure
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext: {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: scheduler
+              image: {{ include "sumweave.image" . | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: {{- toYaml .Values.scheduler.args | nindent 16 }}
+              {{- if or .Values.existingConfigMap .Values.existingSecret }}
+              envFrom: {{- include "sumweave.envFrom" . | nindent 16 }}
+              {{- end }}
+              securityContext: {{- toYaml .Values.securityContext | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              resources: {{- toYaml .Values.scheduler.resources | nindent 16 }}
+          volumes:
+            - name: tmp
+              emptyDir: {}

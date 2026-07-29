@@ -37,7 +37,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("opens postgres handles without sqlite defaults", func(t *testing.T) {
-		db, err := Open("postgres://signal-foundry:secret@example.invalid:5432/signal_foundry?sslmode=disable")
+		db, err := Open("postgres://sumweave:secret@example.invalid:5432/sumweave?sslmode=disable")
 		require.NoError(t, err)
 		require.NoError(t, db.Close())
 	})

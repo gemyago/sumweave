@@ -1,6 +1,6 @@
 package finance
 
-import "github.com/gemyago/signal-foundry/finance/domain"
+import "github.com/gemyago/sumweave/finance/domain"
 
 type ProviderLinkStart struct {
 	State             string

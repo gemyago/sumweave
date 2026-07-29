@@ -7,11 +7,11 @@ import (
 	"log/slog"
 
 	"github.com/firebase/genkit/go/genkit"
-	"github.com/gemyago/signal-foundry/runtime/internal"
-	"github.com/gemyago/signal-foundry/runtime/internal/acpstdio"
-	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
-	"github.com/gemyago/signal-foundry/runtime/internal/sessions"
-	"github.com/gemyago/signal-foundry/runtime/internal/summarize"
+	"github.com/gemyago/sumweave/runtime/internal"
+	"github.com/gemyago/sumweave/runtime/internal/acpstdio"
+	lp "github.com/gemyago/sumweave/runtime/internal/llmproviders"
+	"github.com/gemyago/sumweave/runtime/internal/sessions"
+	"github.com/gemyago/sumweave/runtime/internal/summarize"
 	"google.golang.org/adk/agent/llmagent"
 )
 
@@ -221,8 +221,8 @@ func NewRunner(args RunnerArgs, opts ...RunnerOpt) (*Runner, error) {
 }
 
 const (
-	defaultRunnerAppName   = "signal-foundry-runtime"
-	defaultRunnerAgentName = "signal-foundry"
+	defaultRunnerAppName   = "sumweave-runtime"
+	defaultRunnerAgentName = "sumweave"
 )
 
 // AutoMigrate runs schema migrations for database-backed session storage when configured.

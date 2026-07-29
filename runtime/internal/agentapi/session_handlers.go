@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	"github.com/gemyago/signal-foundry/runtime/internal/callerid"
+	"github.com/gemyago/sumweave/runtime/agent"
+	"github.com/gemyago/sumweave/runtime/internal/callerid"
 )
 
 // ListSessions implements [ServerInterface].

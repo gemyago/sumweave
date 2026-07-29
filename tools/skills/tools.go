@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	iskills "github.com/gemyago/signal-foundry/tools/skills/internal/skills"
+	"github.com/gemyago/sumweave/runtime/agent"
+	iskills "github.com/gemyago/sumweave/tools/skills/internal/skills"
 )
 
 // ExpectedToolCount is the number of skill tools registered by Skills.RegisterTools.

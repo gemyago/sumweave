@@ -24,6 +24,6 @@
 
 ## Impact
 
-- Affected implementation areas: `apps/signal-ui`, `apps/signal-ui/ui-wireframe.md`, finance UI tests, `docs/manual-e2e/`, and the `finance-operator-ui` OpenSpec artifacts.
+- Affected implementation areas: `apps/sumweave-ui`, `apps/sumweave-ui/ui-wireframe.md`, finance UI tests, `docs/manual-e2e/`, and the `finance-operator-ui` OpenSpec artifacts.
 - Planned implementation should derive dashboard and transactions behavior from existing finance endpoints first; this change does not propose new Go or API scope.
 - Finance routes will see meaningful layout churn, but non-finance routes remain out of scope.

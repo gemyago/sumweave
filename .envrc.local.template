@@ -3,7 +3,7 @@
 
 # Required for app-driven Enable Banking redirect/link flows.
 # export APP_FINANCE_PROVIDERS_ENABLEBANKING_APPID="..."
-# export APP_FINANCE_PROVIDERS_ENABLEBANKING_PRIVATEKEYPATH="$PWD/apps/signal-foundry/tmp/enable-banking.pem"
+# export APP_FINANCE_PROVIDERS_ENABLEBANKING_PRIVATEKEYPATH="$PWD/apps/sumweave/tmp/enable-banking.pem"
 
 # Shared Enable Banking sandbox apps often expose only a subset of banks.
 # If PKO start fails with "Wrong ASPSP name provided", discover an available

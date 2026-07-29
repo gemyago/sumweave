@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/credentials"
-	"github.com/gemyago/signal-foundry/finance/domain"
+	"github.com/gemyago/sumweave/finance/credentials"
+	"github.com/gemyago/sumweave/finance/domain"
 )
 
 const (

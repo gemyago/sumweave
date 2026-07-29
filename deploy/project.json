@@ -1,5 +1,5 @@
 {
-  "name": "signal-foundry-deploy",
+  "name": "sumweave-deploy",
   "$schema": "../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
   "targets": {

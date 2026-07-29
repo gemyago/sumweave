@@ -5,8 +5,8 @@ FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE}
 ARG TARGETOS
 ARG TARGETARCH
 
-COPY build/dist/${TARGETOS}/${TARGETARCH}/signal-foundry /usr/local/bin/signal-foundry
+COPY build/dist/${TARGETOS}/${TARGETARCH}/sumweave /usr/local/bin/sumweave
 COPY build/dist/platform-agents/skills /app/.platform-agents/skills
 
 USER nonroot:nonroot
-ENTRYPOINT ["signal-foundry"]
+ENTRYPOINT ["sumweave"]

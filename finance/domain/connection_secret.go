@@ -3,7 +3,7 @@ package domain
 import (
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/credentials"
+	"github.com/gemyago/sumweave/finance/credentials"
 )
 
 type ConnectionSecret struct {

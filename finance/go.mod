@@ -1,4 +1,4 @@
-module github.com/gemyago/signal-foundry/finance
+module github.com/gemyago/sumweave/finance
 
 go 1.26
 

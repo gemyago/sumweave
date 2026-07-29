@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sumweave.fullname" . }}-app
+  labels: {{- include "sumweave.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.app.autoscaling.enabled }}
+  replicas: {{ .Values.app.replicaCount }}
+  {{- end }}
+  strategy: {type: RollingUpdate}
+  selector:
+    matchLabels: {{- include "sumweave.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      {{- with .Values.app.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels: {{- include "sumweave.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+        {{- with .Values.app.podLabels }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: {{ include "sumweave.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: app
+          image: {{ include "sumweave.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: {{- toYaml .Values.app.args | nindent 12 }}
+          {{- if or .Values.existingConfigMap .Values.existingSecret }}
+          envFrom: {{- include "sumweave.envFrom" . | nindent 12 }}
+          {{- end }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          ports: [{name: http, containerPort: {{ .Values.service.port }}, protocol: TCP}]
+          startupProbe: {{- toYaml .Values.app.startupProbe | nindent 12 }}
+          livenessProbe: {{- toYaml .Values.app.livenessProbe | nindent 12 }}
+          readinessProbe: {{- toYaml .Values.app.readinessProbe | nindent 12 }}
+          resources: {{- toYaml .Values.app.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}

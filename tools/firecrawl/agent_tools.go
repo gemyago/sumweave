@@ -1,8 +1,8 @@
 package firecrawl
 
 import (
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	ifc "github.com/gemyago/signal-foundry/tools/firecrawl/internal/firecrawl"
+	"github.com/gemyago/sumweave/runtime/agent"
+	ifc "github.com/gemyago/sumweave/tools/firecrawl/internal/firecrawl"
 )
 
 func firecrawlAgentTools(client *ifc.Client) []agent.DefinedTool {

@@ -478,11 +478,11 @@ linters:
           - gocognit
           - mnd
           - ireturn
-      # apps/signal-foundry: copied golang-backend-boilerplate subtrees (plan §4.1); match upstream lint profile until product-specific cleanup.
-      - path: '^apps/signal-foundry/'
+      # apps/sumweave: copied golang-backend-boilerplate subtrees (plan §4.1); match upstream lint profile until product-specific cleanup.
+      - path: '^apps/sumweave/'
         linters: [mnd, modernize]
       # Local runtime module via go.work; replace is required for `go mod tidy` (published module layout differs).
-      - path: '^apps/signal-foundry/go\.mod$'
+      - path: '^apps/sumweave/go\.mod$'
         linters: [gomoddirectives]
       - path: '^tests/agent/integration-cli/go\.mod$'
         linters: [gomoddirectives]
@@ -492,17 +492,17 @@ linters:
         linters: [gomoddirectives]
       - path: '^tools/workspacefs/go\.mod$'
         linters: [gomoddirectives]
-      - path: '^apps/signal-foundry/internal/api/http/register\.go$'
+      - path: '^apps/sumweave/internal/api/http/register\.go$'
         linters: [revive]
-      - path: '^apps/signal-foundry/internal/infrastructure/database_testing\.go$'
+      - path: '^apps/sumweave/internal/infrastructure/database_testing\.go$'
         linters: [gosec]
-      - path: '^apps/signal-foundry/internal/infrastructure/httpclient/send_request\.go$'
+      - path: '^apps/sumweave/internal/infrastructure/httpclient/send_request\.go$'
         linters: [gosec]
-      - path: '^apps/signal-foundry/internal/telemetry/otel_logger\.go$'
+      - path: '^apps/sumweave/internal/telemetry/otel_logger\.go$'
         linters: [gosec]
-      - path: '^apps/signal-foundry/internal/telemetry/otel_meter\.go$'
+      - path: '^apps/sumweave/internal/telemetry/otel_meter\.go$'
         linters: [gosec]
-      - path: '^apps/signal-foundry/internal/telemetry/otel_tracer\.go$'
+      - path: '^apps/sumweave/internal/telemetry/otel_tracer\.go$'
         linters: [gosec]
-      - path: '^apps/signal-foundry/internal/telemetry/pprof\.go$'
+      - path: '^apps/sumweave/internal/telemetry/pprof\.go$'
         linters: [gosec]

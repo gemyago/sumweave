@@ -6,7 +6,7 @@
 ## 2. Finance Dashboard Composition
 
 - [ ] 2.1 Recompose `#/finance` into the planned finance-dashboard hierarchy, and must follow TDD flow by first adding failing page or component tests proving the route shows the finance dashboard header, reporting-range controls, route actions, KPI cards, cash-flow visual region, account summary, category or spending summary, recent transactions, sync activity, alerts or insights, and missing-FX diagnostics inside the new shell with correct loading, empty, and error states before implementing the dashboard layout and dashboard portion of the manual smoke run/report/fix/rerun loop.
-- [ ] 2.2 Keep dashboard data usage derived from existing endpoints and document the new shell behavior, and must follow TDD flow by first adding failing client or page tests proving the dashboard composes its data from existing finance dashboard, accounts, transactions, and connections sources rather than new API contracts, then update `apps/signal-ui/ui-wireframe.md` alongside the implementation so the documented finance shell and dashboard states stay aligned with the tested behavior.
+- [ ] 2.2 Keep dashboard data usage derived from existing endpoints and document the new shell behavior, and must follow TDD flow by first adding failing client or page tests proving the dashboard composes its data from existing finance dashboard, accounts, transactions, and connections sources rather than new API contracts, then update `apps/sumweave-ui/ui-wireframe.md` alongside the implementation so the documented finance shell and dashboard states stay aligned with the tested behavior.
 
 ## 3. Transactions Browse Workspace
 

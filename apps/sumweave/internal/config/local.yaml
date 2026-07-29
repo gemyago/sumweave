@@ -1,0 +1,24 @@
+# Create a local-user.yaml file to override settings for your local environment
+
+defaultLogLevel: DEBUG
+
+# Local paths are relative to the apps/sumweave working directory.
+dataDir: data
+
+application:
+  database:
+    dsn: data/application.db
+
+agentRuntime:
+  database:
+    dsn: data/agent-runtime.db
+
+auth:
+  jwtSigningKey: local-secret-key
+
+workspacefs:
+  platformAgentsPath: ../../.platform-agents
+
+skills:
+  paths:
+    - ../../.platform-agents/skills

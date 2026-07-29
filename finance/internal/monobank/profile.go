@@ -1,8 +1,8 @@
 package monobank
 
 import (
-	"github.com/gemyago/signal-foundry/finance/domain"
-	"github.com/gemyago/signal-foundry/finance/internal/providers"
+	"github.com/gemyago/sumweave/finance/domain"
+	"github.com/gemyago/sumweave/finance/internal/providers"
 )
 
 func Profile() providers.ProviderProfile {

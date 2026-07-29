@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
-	ap "github.com/gemyago/signal-foundry/runtime/internal/agentprofiles"
-	lp "github.com/gemyago/signal-foundry/runtime/internal/llmproviders"
+	"github.com/gemyago/sumweave/runtime/agent"
+	ap "github.com/gemyago/sumweave/runtime/internal/agentprofiles"
+	lp "github.com/gemyago/sumweave/runtime/internal/llmproviders"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

@@ -1,6 +1,6 @@
 # Implementation Status
 
-Signal Foundry contains an implemented finance foundation: tenancy, catalog,
+Sumweave contains an implemented finance foundation: tenancy, catalog,
 ledger, transfers, imports, bank connections, provider evidence, reporting,
 balances, FX, and finance durable jobs. The Go app supplies auth, migrations,
 dispatch, jobs, admin diagnostics, and HTTP delivery. The UI supplies finance,

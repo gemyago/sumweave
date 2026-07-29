@@ -1,4 +1,4 @@
-module github.com/gemyago/signal-foundry/tools/skills
+module github.com/gemyago/sumweave/tools/skills
 
 go 1.26
 
@@ -8,7 +8,7 @@ tool (
 )
 
 require (
-	github.com/gemyago/signal-foundry/runtime v0.0.0-20260331222213-0b60421e3a76
+	github.com/gemyago/sumweave/runtime v0.0.0-20260331222213-0b60421e3a76
 	github.com/jaswdr/faker/v2 v2.9.1
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1
@@ -108,4 +108,4 @@ require (
 	rsc.io/ordered v1.1.1 // indirect
 )
 
-replace github.com/gemyago/signal-foundry/runtime => ../../runtime
+replace github.com/gemyago/sumweave/runtime => ../../runtime

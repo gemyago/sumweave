@@ -1,9 +1,9 @@
 package agentapi
 
-import rt "github.com/gemyago/signal-foundry/runtime/internal"
+import rt "github.com/gemyago/sumweave/runtime/internal"
 
 // Matches [agent.defaultRunnerAppName] — listing uses the same app scope as runs.
-const listSessionsAppName = "signal-foundry-runtime"
+const listSessionsAppName = "sumweave-runtime"
 
 func mapListedSessionMetadata(m rt.SessionMetadata) SessionMetadata {
 	title := m.Title

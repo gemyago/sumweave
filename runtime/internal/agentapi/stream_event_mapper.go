@@ -5,7 +5,7 @@ import (
 	"maps"
 	"strings"
 
-	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	rt "github.com/gemyago/sumweave/runtime/internal"
 )
 
 const agentStreamEventName = "agent"

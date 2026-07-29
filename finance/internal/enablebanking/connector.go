@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/signal-foundry/finance/domain"
-	enablebankingclient "github.com/gemyago/signal-foundry/finance/internal/enablebanking/client"
-	"github.com/gemyago/signal-foundry/finance/internal/providers"
+	"github.com/gemyago/sumweave/finance/domain"
+	enablebankingclient "github.com/gemyago/sumweave/finance/internal/enablebanking/client"
+	"github.com/gemyago/sumweave/finance/internal/providers"
 )
 
 const (

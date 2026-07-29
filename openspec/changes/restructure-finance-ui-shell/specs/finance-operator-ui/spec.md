@@ -26,7 +26,7 @@ The Finance area SHALL expose the first end-user workflows required by the finan
 - **WHEN** an authenticated tenant member opens `#/finance`
 - **THEN** the UI MUST show a finance-dashboard hierarchy with a page header, reporting-period controls, visible range context, route actions, KPI cards, charts or summary visuals, exact-value supporting tables or lists, sync or import alerts, and missing-FX diagnostics for the selected tenant
 - **AND** the dashboard layout MUST include account, category or spending, recent transaction, and sync-activity sections, using honest empty or reduced states when the selected tenant has no data for a section
-- **AND** the dashboard MUST adopt the reference information architecture while preserving the existing Signal UI terminal-native design tokens and styling foundations unless a separate design-system rewrite is explicitly accepted
+- **AND** the dashboard MUST adopt the reference information architecture while preserving the existing Sumweave UI terminal-native design tokens and styling foundations unless a separate design-system rewrite is explicitly accepted
 
 #### Scenario: Accounts and transactions use focused detail flows
 - **WHEN** a tenant member manages accounts or transactions

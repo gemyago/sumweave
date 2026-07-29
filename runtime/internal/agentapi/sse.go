@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
-	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	rt "github.com/gemyago/sumweave/runtime/internal"
 )
 
 const streamErrorEventName = "error"

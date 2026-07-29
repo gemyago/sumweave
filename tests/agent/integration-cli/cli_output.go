@@ -6,7 +6,7 @@ import (
 	"io"
 	"iter"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
+	"github.com/gemyago/sumweave/runtime/agent"
 )
 
 // streamTextResult is implemented by *agent.RunResult for CLI streaming.

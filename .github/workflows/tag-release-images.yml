@@ -25,6 +25,6 @@ jobs:
       - name: Retag immutable commit image
         run: |
           tags="$(build/scripts/resolve-docker-tags.sh --stable-branches main --git-ref "refs/tags/${RELEASE_TAG}" --commit-sha "$GITHUB_SHA")"
-          bash build/scripts/tag-remote-images.sh --source-commit-sha "$GITHUB_SHA" --target-tags "$tags" --image ghcr.io/gemyago/signal-foundry
+          bash build/scripts/tag-remote-images.sh --source-commit-sha "$GITHUB_SHA" --target-tags "$tags" --image ghcr.io/gemyago/sumweave
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}

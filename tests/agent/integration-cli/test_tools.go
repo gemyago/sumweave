@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 
-	"github.com/gemyago/signal-foundry/runtime/agent"
+	"github.com/gemyago/sumweave/runtime/agent"
 )
 
 // toolsRegistrar is satisfied by *agent.ToolsRegistry.

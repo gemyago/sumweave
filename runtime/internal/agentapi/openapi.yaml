@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Signal Foundry agent runtime API
+  title: Sumweave agent runtime API
   description: |
     HTTP API for agent runs backed by the ADK `AgentRunner` / `Run` flow in this module.
     The runner uses `StreamingModeSSE`; HTTP responses use **Server-Sent Events** (`text/event-stream`).

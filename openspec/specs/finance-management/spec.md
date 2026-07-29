@@ -8,7 +8,7 @@ The system SHALL implement finance as a root `finance/` product module that rema
 
 #### Scenario: App composes finance without reverse runtime imports
 - **WHEN** finance functionality is wired into the product
-- **THEN** `apps/signal-foundry/` MUST compose both `runtime/` and `finance/`
+- **THEN** `apps/sumweave/` MUST compose both `runtime/` and `finance/`
 - **AND** `finance/` MUST NOT import `runtime/`
 - **AND** finance business rules MUST live in `finance/` while auth, process lifecycle, generic jobs runtime, and HTTP route glue remain app-owned
 
@@ -159,12 +159,12 @@ The backend application SHALL expose finance APIs through the existing app under
 The backend application SHALL include finance-owned persistence schema initialization in the explicit backend database migration command.
 
 #### Scenario: Migration creates finance-owned tables
-- **WHEN** a user runs `signal-foundry db-migrate` with valid backend database configuration
+- **WHEN** a user runs `sumweave db-migrate` with valid backend database configuration
 - **THEN** the command MUST run the finance persistence migration for finance-owned tables before finance API, import, reporting, sync, or finance durable job flows rely on those tables
 - **AND** finance-owned tables MUST keep finance persistence ownership, explicit column names, UTC-first timestamps, and compatibility with SQLite local development and PostgreSQL-oriented production use
 
 #### Scenario: Finance startup relies on prepared schema in standard setup
-- **WHEN** the documented standard setup has run `signal-foundry db-migrate`
+- **WHEN** the documented standard setup has run `sumweave db-migrate`
 - **THEN** finance service registration and finance job handler registration MUST rely on the prepared finance schema
 - **AND** they MUST NOT create or update finance tables implicitly during startup
 
@@ -323,7 +323,7 @@ The finance module SHALL expose protected bank-linking workflows through a focus
 
 #### Scenario: Internal provider coordination stays behind finance package boundary
 - **WHEN** the backend application composes finance bank-linking dependencies
-- **THEN** `apps/signal-foundry` MUST depend on public package `finance` service construction rather than importing `finance/internal/providers`, `finance/internal/monobank`, or `finance/internal/enablebanking`
+- **THEN** `apps/sumweave` MUST depend on public package `finance` service construction rather than importing `finance/internal/providers`, `finance/internal/monobank`, or `finance/internal/enablebanking`
 - **AND** real v2 connector and provider-profile wiring MUST remain owned inside the finance module
 
 ### Requirement: Finance Public Services Are Focused

@@ -1,11 +1,11 @@
-# Roadmap: Signal Foundry
+# Roadmap: Sumweave
 
 **Based on:** `.planning/PROJECT.md` and `.planning/REQUIREMENTS.md`
 **Primary constraint:** solo-first, OpenCode first, ACP discovery before abstraction freeze, terminology still provisional.
 
 ## Phase 1: ACP Discovery And Capability Map
 
-**Goal:** Experiment with ACP through OpenCode and capture the validated ACP subset Signal Foundry should design around.
+**Goal:** Experiment with ACP through OpenCode and capture the validated ACP subset Sumweave should design around.
 
 **Why this phase exists:** the current plan knows the first backend and protocol, but not yet enough about their real constraints to lock in the higher-level model safely.
 
@@ -13,7 +13,7 @@
 - CODE-01
 
 **Success criteria:**
-- Signal Foundry has a written capability map for the subset of ACP exercised through OpenCode. ✓
+- Sumweave has a written capability map for the subset of ACP exercised through OpenCode. ✓
 - The project has at least one experiment that proves the basic lifecycle needed for the first integration. ✓
 - Unsupported or unclear ACP behaviors are documented as explicit non-goals for the first slice. ✓
 - The planning docs are updated to reflect what the experiment changed about the intended abstraction. ✓

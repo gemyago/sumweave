@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	rt "github.com/gemyago/signal-foundry/runtime/internal"
+	rt "github.com/gemyago/sumweave/runtime/internal"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 )

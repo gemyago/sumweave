@@ -6,7 +6,7 @@ include build.cfg
 comma := ,
 dist_platforms := $(patsubst %,dist/%,$(subst $(comma), ,$(platforms)))
 build_root := $(CURDIR)
-ui_embed_dist_dir := $(abspath ../apps/signal-foundry/internal/api/http/embeddedui/dist)
+ui_embed_dist_dir := $(abspath ../apps/sumweave/internal/api/http/embeddedui/dist)
 skills_dist_dir := $(build_root)/dist/platform-agents/skills
 crane_version := $(shell cat .crane-version)
 host_os := $(shell uname -s)
@@ -14,7 +14,7 @@ host_arch := $(shell uname -m | sed -e 's/x86_64/x86_64/' -e 's/aarch64/arm64/')
 crane := $(build_root)/bin/crane
 
 ui:
-	$(MAKE) -C ../apps/signal-ui build-embed-dist EMBED_OUT_DIR="$(ui_embed_dist_dir)"
+	$(MAKE) -C ../apps/sumweave-ui build-embed-dist EMBED_OUT_DIR="$(ui_embed_dist_dir)"
 	test -f "$(ui_embed_dist_dir)/index.html"
 
 skills:
@@ -26,7 +26,7 @@ dist/%: ui skills
 	$(eval GOOS := $(word 1,$(subst /, ,$*)))
 	$(eval GOARCH := $(word 2,$(subst /, ,$*)))
 	mkdir -p "$(build_root)/dist/$(GOOS)/$(GOARCH)"
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -C ../apps/signal-foundry -tags=release -o "$(build_root)/dist/$(GOOS)/$(GOARCH)/signal-foundry" ./cmd/signal-foundry
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -C ../apps/sumweave -tags=release -o "$(build_root)/dist/$(GOOS)/$(GOARCH)/sumweave" ./cmd/sumweave
 
 dist: $(dist_platforms)
 	@printf '%s\n' "Prepared release artifacts in $(build_root)/dist"
@@ -40,11 +40,11 @@ install-crane: $(crane)
 
 docker/.labels:
 	mkdir -p docker
-	printf '%s\n' "org.opencontainers.image.source=\"https://github.com/gemyago/signal-foundry\"" > $@
+	printf '%s\n' "org.opencontainers.image.source=\"https://github.com/gemyago/sumweave\"" > $@
 	printf '%s\n' "org.opencontainers.image.revision=\"$${GIT_COMMIT_SHA:-$$(git rev-parse --short HEAD)}\"" >> $@
 
 docker/local-image: dist docker/.labels
-	docker buildx build --load --platform linux/$$(go env GOARCH) --build-arg RUNTIME_IMAGE="$(docker_runtime_image)" --tag "$(docker_local_registry)/signal-foundry:local" -f docker/Dockerfile ..
+	docker buildx build --load --platform linux/$$(go env GOARCH) --build-arg RUNTIME_IMAGE="$(docker_runtime_image)" --tag "$(docker_local_registry)/sumweave:local" -f docker/Dockerfile ..
 
 docker/remote-image: dist docker/.labels
 	@test -n "$$GIT_REF" && test -n "$$GIT_COMMIT_SHA"

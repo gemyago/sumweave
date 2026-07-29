@@ -21,7 +21,7 @@ Optional local verification helpers:
 
 Commands assume the repo shell environment is loaded first. In a human shell,
 run `direnv allow` once at the repo root. Run npm, Playwright, and PM2 commands
-from the repo root; run backend CLI commands from `apps/signal-foundry`.
+from the repo root; run backend CLI commands from `apps/sumweave`.
 
 1. Run `npm i` at the repo root.
 2. Verify local CLI: `npx playwright-cli --version`.
@@ -29,44 +29,44 @@ from the repo root; run backend CLI commands from `apps/signal-foundry`.
    - remove `APP_HTTPSERVER_TLS_CERTFILE` and `APP_HTTPSERVER_TLS_KEYFILE`
      from ignored root `.envrc.local`
    - remove `VITE_LOCAL_HTTPS` and its certificate-path variables from ignored
-     `apps/signal-ui/.env.local`; retain `VITE_AGENT_API_BASE_URL=/api/v1/runtime/`
+     `apps/sumweave-ui/.env.local`; retain `VITE_AGENT_API_BASE_URL=/api/v1/runtime/`
    - see [local HTTPS](../local-https.md#return-to-the-standard-local-http-workflow)
      for the full switch-back procedure
 4. Prepare backend tables before starting or restarting backend processes:
-    - `cd apps/signal-foundry`
-    - `go run ./cmd/signal-foundry db-migrate --env local`
+    - `cd apps/sumweave`
+    - `go run ./cmd/sumweave db-migrate --env local`
     - `cd ../..`
 5. From the repo root, recreate both PM2 services when switching protocols or
    when a fresh ecosystem shape is required:
    - `pm2 status`
-   - `pm2 delete signal-foundry-api`
-   - `pm2 delete signal-foundry-ui`
+   - `pm2 delete sumweave-api`
+   - `pm2 delete sumweave-ui`
    - `pm2 start ecosystem.config.js`
    - `pm2 status`
 6. Verify both HTTP services before the browser run:
    - `curl -i http://127.0.0.1:4501/health`
    - `curl -I http://127.0.0.1:5173/`
-7. If backend startup reports `bind: address already in use`, stop the stray process already listening on `127.0.0.1:4501` before retrying. A common cause is an older direct `go run ./cmd/signal-foundry start ...` process launched from the app root.
+7. If backend startup reports `bind: address already in use`, stop the stray process already listening on `127.0.0.1:4501` before retrying. A common cause is an older direct `go run ./cmd/sumweave start ...` process launched from the app root.
 
 **Note**: Always use repo scoped data/users and other dirs as if you just started all services using documented pm2 instruction. Do not try to use other dirs (like system temp or similar). If some data feels incorrect or missing - it's dev env, not production so you can drop local sqlite DB and recreate it using standard approach.
 
 ## Local e2e user
 
-If needed, create the backend user from `apps/signal-foundry` so it uses the same local data dir as the PM2 API process. If you don't need a fresh user, just reuse the existing one if it exists.
+If needed, create the backend user from `apps/sumweave` so it uses the same local data dir as the PM2 API process. If you don't need a fresh user, just reuse the existing one if it exists.
 
 This is usually one-time setup only. Reuse the same user across runs unless the test specifically needs a fresh identity.
 
 If you do need a fresh user, use a truly unique username such as `e2e-manual-<yyyymmdd>-<suffix>`:
 
 ```bash
-cd apps/signal-foundry
-go run ./cmd/signal-foundry --log-level WARN --env local user add --username 'e2e-manual-<yyyymmdd>-<suffix>' --password '<password>'
+cd apps/sumweave
+go run ./cmd/sumweave --log-level WARN --env local user add --username 'e2e-manual-<yyyymmdd>-<suffix>' --password '<password>'
 ```
 
 Deleting repo-root `.local-users` does not remove the backend user from local app data. If that username already exists, the add command will fail with `username already exists`. In that case, rotate the password instead:
 
 ```bash
-go run ./cmd/signal-foundry --log-level WARN --env local user change-password --username 'e2e-manual-<yyyymmdd>-<suffix>' --password '<password>'
+go run ./cmd/sumweave --log-level WARN --env local user change-password --username 'e2e-manual-<yyyymmdd>-<suffix>' --password '<password>'
 ```
 
 Return to the repo root before continuing with PM2, UI, or `.local-users`

@@ -5,12 +5,12 @@ template-data:
   unroll-variadic: true
 
 packages:
-  github.com/gemyago/signal-foundry/finance:
+  github.com/gemyago/sumweave/finance:
     interfaces:
       accessGuardStore:
       FXRatesProvider:
       providerEvidenceServiceStore:
-  github.com/gemyago/signal-foundry/finance/internal/providers:
+  github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:
       ConnectionStore:

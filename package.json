@@ -1,12 +1,12 @@
 {
-  "name": "signal-foundry-workspace",
+  "name": "sumweave-workspace",
   "version": "0.0.0",
   "description": "This is a stealth project, does nothing for now",
   "license": "MIT",
   "author": "https://github.com/gemyago",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gemyago/signal-foundry.git"
+    "url": "https://github.com/gemyago/sumweave.git"
   },
   "scripts": {
     "pm2:start": "pm2 start ecosystem.config.js",
@@ -15,12 +15,12 @@
     "pm2:delete": "pm2 delete ecosystem.config.js",
     "pm2:status": "pm2 status",
     "pm2:logs": "pm2 logs",
-    "pm2:start:api": "pm2 start ecosystem.config.js --only signal-foundry-api",
-    "pm2:start:ui": "pm2 start ecosystem.config.js --only signal-foundry-ui",
-    "pm2:stop:api": "pm2 stop signal-foundry-api",
-    "pm2:stop:ui": "pm2 stop signal-foundry-ui",
-    "pm2:restart:api": "pm2 restart signal-foundry-api",
-    "pm2:restart:ui": "pm2 restart signal-foundry-ui"
+    "pm2:start:api": "pm2 start ecosystem.config.js --only sumweave-api",
+    "pm2:start:ui": "pm2 start ecosystem.config.js --only sumweave-ui",
+    "pm2:stop:api": "pm2 stop sumweave-api",
+    "pm2:stop:ui": "pm2 stop sumweave-ui",
+    "pm2:restart:api": "pm2 restart sumweave-api",
+    "pm2:restart:ui": "pm2 restart sumweave-ui"
   },
   "devDependencies": {
     "@fission-ai/openspec": "^1.4.1",
