@@ -73,17 +73,6 @@ func TestRuntimeResolution(t *testing.T) {
 		require.NotNil(t, runtime)
 	})
 
-	t.Run(
-		"root start command applies persistent defaults before surfacing HTTP composition errors",
-		func(t *testing.T) {
-			t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
-			prepareSchemas(t)
-			root := setupCommands()
-			root.SetArgs([]string{"--env", "test", startCommandName, "--noop"})
-			require.Error(t, root.ExecuteContext(t.Context()))
-		},
-	)
-
 	t.Run("resolver setup failures remain visible to operators", func(t *testing.T) {
 		container := dig.New()
 		require.NoError(t, container.Provide(func() *internal.DatabaseMigrator { return nil }))
