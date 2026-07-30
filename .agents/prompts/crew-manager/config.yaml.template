@@ -10,6 +10,7 @@ manager:
   opencode_model: openai/gpt-5.6-sol
   reasoning_effort: medium
   delegation_policy:
+    - Choose an agent based on the work to be done, not the size or complexity of prior work.
     - Choose the agent profile by the kind of reasoning that dominates the task, then choose medium or high effort within that profile family.
     - Route by agent name, description, and expected behavior; never route by the configured model or provider.
     - Use P2 for explicit bounded execution; use P2 High when that work needs more context or several precise steps.
