@@ -54,7 +54,7 @@ func newJobsWorkerCmdWithResolver(resolver jobsWorkerResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   jobsWorkerCommandName,
 		Short: "Run durable jobs worker mode",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
 			worker, err := resolver(cmd)
 			if err != nil {
 				return err
@@ -82,7 +82,7 @@ func newJobsEnqueueDueCmdWithResolver(resolver jobsSchedulerResolver) *cobra.Com
 	return &cobra.Command{
 		Use:   enqueueDueCommandName,
 		Short: "Enqueue due durable jobs from the schedule registry",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
 			scheduler, err := resolver(cmd)
 			if err != nil {
 				return err
