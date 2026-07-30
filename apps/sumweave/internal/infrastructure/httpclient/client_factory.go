@@ -7,7 +7,6 @@ import (
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/infrastructure/httpclient/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
-	"go.uber.org/dig"
 	"golang.org/x/oauth2"
 )
 
@@ -24,10 +23,8 @@ const (
 
 // ClientFactoryDeps contains dependencies for the client factory.
 type ClientFactoryDeps struct {
-	dig.In
-
 	RootLogger              *slog.Logger
-	RetryAfterFallbackDelay time.Duration `name:"config.httpClient.retryAfterFallbackDelay"`
+	RetryAfterFallbackDelay time.Duration
 
 	OtelHTTPTransportFactory telemetry.OtelHTTPTransportFactory
 }

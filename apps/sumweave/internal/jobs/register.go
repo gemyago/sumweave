@@ -1,122 +1,74 @@
 package jobs
 
 import (
-	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/di"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/system/startupmode"
-	"go.uber.org/dig"
 )
 
-type storeDeps struct {
-	dig.In
+// Module groups the durable jobs capabilities assembled for an explicit
+// wireup root.
+type Module struct {
+	Store     *Store
+	Service   *Service
+	Worker    *Worker
+	Scheduler *Scheduler
+	Registry  *Registry
+}
 
-	DatabaseDSN         string `name:"config.application.database.dsn"`
-	DatabaseTablePrefix string `name:"config.application.database.tablePrefix"`
+// ModuleDeps contains the component-native collaborators and settings for the
+// durable jobs module.
+type ModuleDeps struct {
 	SQLDB               *sql.DB
-}
-type serviceDeps struct {
-	dig.In
-
-	Store       *Store
-	Publisher   *appdispatch.Publisher
-	IDGenerator ident.Generator
-	Registry    *Registry
-}
-type workerDeps struct {
-	dig.In
-
-	Store        *Store
-	Registry     *Registry
-	Logger       *slog.Logger
-	Enabled      bool          `name:"config.jobs.worker.enabled"`
-	PollInterval time.Duration `name:"config.jobs.worker.pollInterval"`
-	MaxAttempts  int           `name:"config.jobs.worker.maxAttempts"`
-	DatabaseDSN  string        `name:"config.application.database.dsn"`
-	TablePrefix  string        `name:"config.application.database.tablePrefix"`
-	SQLDB        *sql.DB
-}
-type startupDeps struct {
-	dig.In
-
-	Worker        *Worker
-	Scheduler     *Scheduler
-	ShutdownHooks *lifecycle.ShutdownHooks
-	Enabled       bool                             `name:"config.jobs.worker.enabled"`
-	AutoStart     *startupmode.JobsWorkerAutoStart `name:"internal.jobs.worker.autoStart" optional:"true"`
+	DatabaseDSN         string
+	DatabaseTablePrefix string
+	Logger              *slog.Logger
+	WorkerConfig        WorkerConfig
+	IDGenerator         ident.Generator
 }
 
-func newStoreFromDI(deps storeDeps) (*Store, error) {
-	return NewStore(deps.SQLDB, deps.DatabaseDSN, StoreOpts{TablePrefix: deps.DatabaseTablePrefix + "jobs_"})
-}
-func newPublisherFromDI(deps storeDeps, logger *slog.Logger) (*appdispatch.Publisher, error) {
-	return appdispatch.NewPublisher(
+// NewModule eagerly constructs durable jobs without starting a worker or
+// scheduler loop. Commands own those loops after finance registration finishes.
+func NewModule(deps ModuleDeps) (*Module, error) {
+	store, err := NewStore(deps.SQLDB, deps.DatabaseDSN, StoreOpts{TablePrefix: deps.DatabaseTablePrefix + "jobs_"})
+	if err != nil { // coverage-ignore // NewStore owns this error behavior.
+		return nil, fmt.Errorf("create jobs store: %w", err)
+	}
+	publisher, err := appdispatch.NewPublisher(
 		appdispatch.Config{DatabaseDSN: deps.DatabaseDSN, TablePrefix: deps.DatabaseTablePrefix},
 		deps.SQLDB,
-		logger,
+		deps.Logger,
 	)
-}
-func newRegistryFromDI() *Registry { return NewRegistry() }
-func newWorkerFromDI(deps workerDeps) (*Worker, error) {
-	return NewWorker(
-		WorkerDeps{
-			Store:    deps.Store,
-			Registry: deps.Registry,
-			Logger:   deps.Logger,
-			Config: WorkerConfig{
-				Enabled:      deps.Enabled,
-				PollInterval: deps.PollInterval,
-				MaxAttempts:  deps.MaxAttempts,
-			},
-			DispatchDB:     deps.SQLDB,
-			DispatchConfig: DispatchConfig{DatabaseDSN: deps.DatabaseDSN, TablePrefix: deps.TablePrefix},
-		},
-	)
-}
-func newServiceFromDI(deps serviceDeps, _ *Worker) (*Service, error) {
-	return NewService(
-		ServiceDeps{
-			Store:       deps.Store,
-			IDGenerator: deps.IDGenerator,
-			Publisher:   deps.Publisher,
-			Registry:    deps.Registry,
-		},
-	)
-}
-func newSchedulerFromDI(store *Store, service *Service) (*Scheduler, error) {
-	return NewScheduler(SchedulerDeps{Store: store, Service: service})
-}
-func startWorker(ctx context.Context, deps startupDeps) error {
-	autoStart := true
-	if deps.AutoStart != nil {
-		autoStart = deps.AutoStart.Enabled
+	if err != nil { // coverage-ignore // Publisher owns this error behavior.
+		return nil, fmt.Errorf("create jobs dispatch publisher: %w", err)
 	}
-	if !deps.Enabled || !autoStart {
-		return nil
+	registry := NewRegistry()
+	worker, err := NewWorker(WorkerDeps{
+		Store:          store,
+		Registry:       registry,
+		Logger:         deps.Logger,
+		Config:         deps.WorkerConfig,
+		DispatchDB:     deps.SQLDB,
+		DispatchConfig: DispatchConfig{DatabaseDSN: deps.DatabaseDSN, TablePrefix: deps.DatabaseTablePrefix},
+	})
+	if err != nil { // coverage-ignore // Worker owns this error behavior.
+		return nil, fmt.Errorf("create jobs worker: %w", err)
 	}
-	if err := deps.Worker.Start(ctx); err != nil {
-		return err
+	service, err := NewService(ServiceDeps{
+		Store:       store,
+		IDGenerator: deps.IDGenerator,
+		Publisher:   publisher,
+		Registry:    registry,
+	})
+	if err != nil { // coverage-ignore // Service owns this error behavior.
+		return nil, fmt.Errorf("create jobs service: %w", err)
 	}
-	deps.ShutdownHooks.Register("jobs-worker", deps.Worker.Stop)
-	return nil
-}
-func Register(ctx context.Context, container *dig.Container) error {
-	if err := di.ProvideAll(
-		container,
-		newStoreFromDI,
-		newPublisherFromDI,
-		newRegistryFromDI,
-		newWorkerFromDI,
-		newServiceFromDI,
-		newSchedulerFromDI,
-	); err != nil {
-		return err
+	scheduler, err := NewScheduler(SchedulerDeps{Store: store, Service: service})
+	if err != nil { // coverage-ignore // Scheduler owns this error behavior.
+		return nil, fmt.Errorf("create jobs scheduler: %w", err)
 	}
-	return container.Invoke(func(deps startupDeps) error { return startWorker(ctx, deps) })
+	return &Module{Store: store, Service: service, Worker: worker, Scheduler: scheduler, Registry: registry}, nil
 }

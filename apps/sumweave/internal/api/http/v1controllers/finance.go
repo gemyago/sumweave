@@ -18,7 +18,6 @@ import (
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/runtime/httpapi"
-	"go.uber.org/dig"
 )
 
 type tenantService interface {
@@ -193,8 +192,6 @@ type syntheticLinkStateService interface {
 }
 
 type FinanceControllerDeps struct {
-	dig.In
-
 	TenantService                tenantService
 	UserDirectory                userDirectory
 	CatalogService               catalogService
@@ -208,7 +205,7 @@ type FinanceControllerDeps struct {
 	BankConnectionService        bankConnectionService
 	SyntheticLinkStateService    syntheticLinkStateService
 	AuthMiddleware               middleware.AuthMiddleware
-	EnableBankingCallbackBaseURL string `name:"config.finance.providers.enableBanking.callbackBaseURL" optional:"true"`
+	EnableBankingCallbackBaseURL string
 }
 
 type FinanceController struct{ deps FinanceControllerDeps }

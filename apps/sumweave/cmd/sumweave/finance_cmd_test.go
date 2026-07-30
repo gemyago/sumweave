@@ -21,7 +21,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/dig"
 )
 
 func TestFinanceCommand(t *testing.T) {
@@ -160,8 +159,9 @@ func TestFinanceCommand(t *testing.T) {
 		rootCmd := newRootCmd()
 		require.NoError(t, rootCmd.PersistentFlags().Set("env", "test"))
 
-		runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd, dig.New())
+		runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd)
 		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, runtimeConfig)) })
 		assert.NotNil(t, runtimeConfig.Database)
 		assert.NotNil(t, runtimeConfig.JobsStore)
 		assert.Equal(
@@ -179,8 +179,9 @@ func TestFinanceCommand(t *testing.T) {
 			rootCmd := newRootCmd()
 			require.NoError(t, rootCmd.PersistentFlags().Set("env", "test"))
 
-			runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd, dig.New())
+			runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd)
 			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, runtimeConfig)) })
 			assert.NotNil(t, runtimeConfig.Database)
 			assert.NotNil(t, runtimeConfig.JobsStore)
 			assert.NotEmpty(t, runtimeConfig.JWTSigningKey)
@@ -190,7 +191,7 @@ func TestFinanceCommand(t *testing.T) {
 	t.Run(
 		"resolve finance fixtures runtime config surfaces engine bootstrap errors",
 		func(t *testing.T) {
-			_, err := resolveFinanceFixturesRuntimeConfig(&cobra.Command{}, dig.New())
+			_, err := resolveFinanceFixturesRuntimeConfig(&cobra.Command{})
 			require.Error(t, err)
 		},
 	)

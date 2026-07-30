@@ -82,7 +82,7 @@ func TestFinalDatabaseMigratorCoverage(t *testing.T) {
 			SQLDB: db, DatabaseDSN: dsn, Logger: slog.Default(),
 		})
 		require.NoError(t, err)
-		return newDatabaseMigrator(DatabaseMigrationDeps{
+		return NewDatabaseMigrator(DatabaseMigrationDeps{
 			RootLogger:                     slog.Default(),
 			AgentRuntimeStorageType:        "file",
 			ApplicationDatabaseDSN:         dsn,

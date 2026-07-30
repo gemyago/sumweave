@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/wireup"
 	"github.com/spf13/cobra"
-	"go.uber.org/dig"
 )
 
 type userAddParams struct {
@@ -24,24 +25,26 @@ type userChangePasswordParams struct {
 const userCommandName = "user"
 
 type userAddCmdDeps struct {
-	dig.In
-
 	Store  *auth.UserStore
 	Hasher *auth.Argon2idHasher
 }
 
 type userListCmdDeps struct {
-	dig.In
-
 	Store *auth.UserStore
 }
 
 type userChangePasswordCmdDeps struct {
-	dig.In
-
 	Store  *auth.UserStore
 	Hasher *auth.Argon2idHasher
 }
+
+type userCommandRuntime struct {
+	store  *auth.UserStore
+	hasher *auth.Argon2idHasher
+	close  func() error
+}
+
+type userCommandResolver func(*cobra.Command) (userCommandRuntime, error)
 
 func runUserAdd(
 	ctx context.Context,
@@ -104,19 +107,24 @@ func runUserChangePassword(
 	return err
 }
 
-func newUserAddCmd(container *dig.Container) *cobra.Command { // coverage-ignore
+func newUserAddCmd(resolver userCommandResolver) *cobra.Command { // coverage-ignore
 	var params userAddParams
 
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Add a new user",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if _, err := newEngineFromRoot(cmd.Root(), container); err != nil {
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
+			runtime, err := resolver(cmd)
+			if err != nil {
 				return err
 			}
-			return container.Invoke(func(deps userAddCmdDeps) error {
-				return runUserAdd(cmd.Context(), deps, params, cmd.OutOrStdout())
-			})
+			defer func() { err = closeUserCommandRuntime(err, runtime) }()
+			return runUserAdd(
+				cmd.Context(),
+				userAddCmdDeps{Store: runtime.store, Hasher: runtime.hasher},
+				params,
+				cmd.OutOrStdout(),
+			)
 		},
 	}
 	cmd.Flags().StringVar(&params.Username, "username", "", "Username for the new user")
@@ -126,35 +134,40 @@ func newUserAddCmd(container *dig.Container) *cobra.Command { // coverage-ignore
 	return cmd
 }
 
-func newUserListCmd(container *dig.Container) *cobra.Command { // coverage-ignore
+func newUserListCmd(resolver userCommandResolver) *cobra.Command { // coverage-ignore
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all users",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if _, err := newEngineFromRoot(cmd.Root(), container); err != nil {
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
+			runtime, err := resolver(cmd)
+			if err != nil {
 				return err
 			}
-			return container.Invoke(func(deps userListCmdDeps) error {
-				return runUserList(cmd.Context(), deps, cmd.OutOrStdout())
-			})
+			defer func() { err = closeUserCommandRuntime(err, runtime) }()
+			return runUserList(cmd.Context(), userListCmdDeps{Store: runtime.store}, cmd.OutOrStdout())
 		},
 	}
 	return cmd
 }
 
-func newUserChangePasswordCmd(container *dig.Container) *cobra.Command { // coverage-ignore
+func newUserChangePasswordCmd(resolver userCommandResolver) *cobra.Command { // coverage-ignore
 	var params userChangePasswordParams
 
 	cmd := &cobra.Command{
 		Use:   "change-password",
 		Short: "Change a user's password",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if _, err := newEngineFromRoot(cmd.Root(), container); err != nil {
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
+			runtime, err := resolver(cmd)
+			if err != nil {
 				return err
 			}
-			return container.Invoke(func(deps userChangePasswordCmdDeps) error {
-				return runUserChangePassword(cmd.Context(), deps, params, cmd.OutOrStdout())
-			})
+			defer func() { err = closeUserCommandRuntime(err, runtime) }()
+			return runUserChangePassword(
+				cmd.Context(),
+				userChangePasswordCmdDeps{Store: runtime.store, Hasher: runtime.hasher},
+				params,
+				cmd.OutOrStdout(),
+			)
 		},
 	}
 	cmd.Flags().StringVar(&params.Username, "username", "", "Username of the user")
@@ -164,15 +177,41 @@ func newUserChangePasswordCmd(container *dig.Container) *cobra.Command { // cove
 	return cmd
 }
 
-func newUserCmd(container *dig.Container) *cobra.Command { // coverage-ignore
+func newUserCmd() *cobra.Command { // coverage-ignore
+	return newUserCmdWithResolver(resolveUserCommandRuntime)
+}
+
+func newUserCmdWithResolver(resolver userCommandResolver) *cobra.Command { // coverage-ignore
 	cmd := &cobra.Command{
 		Use:   userCommandName,
 		Short: "Manage users",
 	}
 	cmd.AddCommand(
-		newUserAddCmd(container),
-		newUserListCmd(container),
-		newUserChangePasswordCmd(container),
+		newUserAddCmd(resolver),
+		newUserListCmd(resolver),
+		newUserChangePasswordCmd(resolver),
 	)
 	return cmd
+}
+
+func resolveUserCommandRuntime(cmd *cobra.Command) (userCommandRuntime, error) { // coverage-ignore
+	environment, err := commandEnvironmentFromRoot(cmd.Root())
+	if err != nil {
+		return userCommandRuntime{}, err
+	}
+	root, err := wireup.BuildUsers(wireup.UsersOptions{Environment: environment})
+	if err != nil {
+		return userCommandRuntime{}, fmt.Errorf("build users root: %w", err)
+	}
+	return userCommandRuntime{store: root.Store, hasher: root.Hasher, close: root.Close}, nil
+}
+
+func closeUserCommandRuntime(commandErr error, runtime userCommandRuntime) error { // coverage-ignore
+	if runtime.close == nil {
+		return commandErr
+	}
+	if closeErr := runtime.close(); closeErr != nil {
+		return errors.Join(commandErr, fmt.Errorf("close users root: %w", closeErr))
+	}
+	return commandErr
 }

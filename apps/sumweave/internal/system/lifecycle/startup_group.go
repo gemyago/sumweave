@@ -8,12 +8,9 @@ import (
 	"os/signal"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
-	"go.uber.org/dig"
 )
 
 type StartupGroupFactory struct {
-	dig.In
-
 	ShutdownHooks *ShutdownHooks
 	RootLogger    *slog.Logger
 }
@@ -60,7 +57,7 @@ func (g *StartupGroup) Start(ctx context.Context) error {
 
 	shutdown := func() error {
 		watchForceSignal(ctx, shutdownSignals)
-		return g.shutdownHooks.PerformShutdown(ctx)
+		return g.shutdownHooks.PerformShutdown(context.WithoutCancel(ctx))
 	}
 
 	signalCtx, cancel := signal.NotifyContext(ctx, shutdownSignals...)

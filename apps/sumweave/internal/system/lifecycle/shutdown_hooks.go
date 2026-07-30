@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
-	"go.uber.org/dig"
 )
 
 type shutdownHook struct {
@@ -23,18 +22,18 @@ type shutdownHook struct {
 }
 
 type ShutdownHooksDeps struct {
-	dig.In
-
 	RootLogger *slog.Logger
 
 	// config
-	GracefulShutdownTimeout time.Duration `name:"config.gracefulShutdownTimeout"`
+	GracefulShutdownTimeout time.Duration
 }
 
 type ShutdownHooks struct {
-	logger *slog.Logger
-	hooks  []shutdownHook
-	deps   ShutdownHooksDeps
+	logger       *slog.Logger
+	hooks        []shutdownHook
+	deps         ShutdownHooksDeps
+	shutdownOnce sync.Once
+	shutdownErr  error
 }
 
 // NewShutdownHooks creates a new instance of Hooks.
@@ -67,6 +66,13 @@ func (h *ShutdownHooks) RegisterNoCtx(name string, shutdown func() error) {
 }
 
 func (h *ShutdownHooks) PerformShutdown(ctx context.Context) error {
+	h.shutdownOnce.Do(func() {
+		h.shutdownErr = h.performShutdown(ctx)
+	})
+	return h.shutdownErr
+}
+
+func (h *ShutdownHooks) performShutdown(ctx context.Context) error {
 	ts := time.Now()
 	defer func() {
 		h.logger.InfoContext(ctx, "Application stopped",

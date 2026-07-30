@@ -7,14 +7,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/dig"
 )
 
 type OtelHTTPMiddleware func(http.Handler) http.Handler
 
 type OtelMiddlewareFactoryDeps struct {
-	dig.In
-
 	metric.MeterProvider
 	trace.TracerProvider
 	propagation.TextMapPropagator

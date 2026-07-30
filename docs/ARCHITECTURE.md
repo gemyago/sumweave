@@ -11,6 +11,9 @@ evidence, balances, reports, and FX.
   independent from `runtime/`.
 - `apps/sumweave/` composes finance, auth, durable jobs, dispatch, HTTP,
   migrations, telemetry, and embedded UI delivery.
+- Its application config is app-internal at `internal/config`; `internal/wireup`
+  owns explicit command roots. Command and Engine entrypoints pass typed startup
+  options, while components receive native values or constructed collaborators.
 - `apps/sumweave-ui/` is finance-first, with retained Admin, Chat, and Providers
   surfaces.
 - `runtime/` is generic agent infrastructure only: sessions, profiles,

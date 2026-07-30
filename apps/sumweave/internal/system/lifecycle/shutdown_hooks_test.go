@@ -168,5 +168,16 @@ func TestShutdownHooks(t *testing.T) {
 			require.ErrorIs(t, err, err1)
 			require.ErrorIs(t, err, err2)
 		})
+
+		t.Run("runs registered hooks only once", func(t *testing.T) {
+			registry := NewShutdownHooks(makeMockDeps())
+			hook := &mockShutdownHook{name: fake.Lorem().Word()}
+			hook.On("shutdown", mock.AnythingOfType("*context.timerCtx")).Return(nil).Once()
+			registry.Register(hook.name, hook.shutdown)
+
+			require.NoError(t, registry.PerformShutdown(t.Context()))
+			require.NoError(t, registry.PerformShutdown(t.Context()))
+			hook.AssertExpectations(t)
+		})
 	})
 }

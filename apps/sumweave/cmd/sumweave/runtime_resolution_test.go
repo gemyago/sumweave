@@ -4,90 +4,82 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/dig"
 )
 
 func TestRuntimeResolution(t *testing.T) {
+	t.Chdir("../..")
 	makeRoot := func(t *testing.T, command *cobra.Command) *cobra.Command {
 		t.Helper()
 		root := newRootCmd()
+		root.SetContext(t.Context())
 		root.AddCommand(command)
 		require.NoError(t, root.PersistentFlags().Set("env", "test"))
 		return root
 	}
 	prepareSchemas := func(t *testing.T) {
 		t.Helper()
-		container := dig.New()
-		command := newDatabaseMigrateCmd(container)
+		command := newDatabaseMigrateCmd()
 		root := makeRoot(t, command)
-		migrator, err := resolveDatabaseMigrator(root, container)
+		migrator, err := resolveDatabaseMigrator(root)
 		require.NoError(t, err)
 		require.NoError(t, migrator.Migrate(t.Context()))
 	}
 
 	t.Run("database migration resolves the explicit migrator", func(t *testing.T) {
-		container := dig.New()
-		command := newDatabaseMigrateCmd(container)
+		command := newDatabaseMigrateCmd()
 		root := makeRoot(t, command)
-		resolved, err := resolveDatabaseMigrator(command, container)
+		resolved, err := resolveDatabaseMigrator(command)
 		require.NoError(t, err)
 		require.NotNil(t, resolved)
+		require.NoError(t, resolved.Migrate(t.Context()))
 		require.Same(t, root, command.Root())
 	})
 
 	t.Run("jobs split mode resolves worker and scheduler after finance job registration", func(t *testing.T) {
 		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
 		prepareSchemas(t)
-		container := dig.New()
-		jobsCommand := newJobsCmd(container)
+		jobsCommand := newJobsCmd()
 		root := makeRoot(t, jobsCommand)
 		workerCommand, _, err := jobsCommand.Find([]string{jobsWorkerCommandName})
 		require.NoError(t, err)
-		worker, err := resolveJobsWorker(workerCommand, container)
+		worker, err := resolveJobsWorker(workerCommand)
 		require.NoError(t, err)
 		require.NotNil(t, worker)
+		require.NoError(t, worker.Close(t.Context()))
 		require.Same(t, root, workerCommand.Root())
 
-		container = dig.New()
-		jobsCommand = newJobsCmd(container)
+		jobsCommand = newJobsCmd()
 		root = makeRoot(t, jobsCommand)
 		schedulerCommand, _, err := jobsCommand.Find([]string{enqueueDueCommandName})
 		require.NoError(t, err)
-		scheduler, err := resolveJobsScheduler(schedulerCommand, container)
+		scheduler, err := resolveJobsScheduler(schedulerCommand)
 		require.NoError(t, err)
 		require.NotNil(t, scheduler)
+		require.NoError(t, scheduler.Close(t.Context()))
 		require.Same(t, root, schedulerCommand.Root())
 	})
 
-	t.Run("start all resolves the local component composition", func(t *testing.T) {
+	t.Run("start all noop resolves, validates, and closes local component wireup", func(t *testing.T) {
 		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
 		prepareSchemas(t)
-		container := dig.New()
-		command := newStartAllCmd(container)
+		command := newStartAllCmd()
 		makeRoot(t, command)
-		runtime, err := resolveStartAllRuntime(command, container, startServerParams{noop: true})
+		runtime, err := resolveStartAllRuntime(command, startServerParams{noop: true})
 		require.NoError(t, err)
 		require.NotNil(t, runtime)
+		require.NoError(t, runtime.Run(t.Context()))
 	})
 
-	t.Run("resolver setup failures remain visible to operators", func(t *testing.T) {
-		container := dig.New()
-		require.NoError(t, container.Provide(func() *internal.DatabaseMigrator { return nil }))
-		command := newDatabaseMigrateCmd(container)
-		makeRoot(t, command)
-		_, err := resolveDatabaseMigrator(command, container)
-		require.Error(t, err)
-
-		container = dig.New()
-		require.NoError(t, container.Provide(func() *internal.DatabaseMigrator { return nil }))
-		jobsCommand := newJobsCmd(container)
+	t.Run("split jobs resolution surfaces typed root validation failures", func(t *testing.T) {
+		jobsCommand := newJobsCmd()
 		makeRoot(t, jobsCommand)
 		workerCommand, _, findErr := jobsCommand.Find([]string{jobsWorkerCommandName})
 		require.NoError(t, findErr)
-		_, err = resolveJobsWorker(workerCommand, container)
+		_, err := resolveJobsWorker(workerCommand)
+		require.Error(t, err)
+		_, err = resolveJobsScheduler(&cobra.Command{})
 		require.Error(t, err)
 	})
 }

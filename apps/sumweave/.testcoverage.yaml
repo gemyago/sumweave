@@ -31,8 +31,6 @@ exclude:
     - internal/telemetry/otel_logger.go
     - internal/telemetry/otel_meter.go
     - internal/telemetry/otel_tracer.go
-    - register.go # Dependency injection setup
-    - internal/wireup.go # Root [internal.Setup] orchestration (Load error branch rarely exercised)
     - cmd/sumweave/engine_cmd.go # Cobra persistent flag glue to [sumweave.NewEngine]
     - internal/runtime.go # Agent runtime wiring (LLM + HTTP handler construction)
     - internal/api/http/v1routes/.* # Generated code

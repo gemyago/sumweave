@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/dig"
 )
 
 const (
@@ -22,10 +21,8 @@ const (
 
 // OTELConfig holds the dependencies for creating a OTELConfig.
 type OTELConfig struct {
-	dig.In
-
-	Enabled        bool `name:"config.openTelemetry.enabled"`
-	RuntimeMetrics bool `name:"config.openTelemetry.runtimeMetrics"`
+	Enabled        bool
+	RuntimeMetrics bool
 }
 
 func NewTextMapPropagator() propagation.TextMapPropagator { //nolint:ireturn
@@ -48,8 +45,6 @@ func detectEndpointSecurity(endpoint string) (string, bool) {
 }
 
 type SetupDeps struct {
-	dig.In
-
 	OTELConfig
 	OTELMetricsConfig
 	OTELTracesConfig
@@ -62,6 +57,10 @@ type SetupDeps struct {
 
 	RootLogger     *slog.Logger
 	RootLoggerOpts *RootLoggerOpts
+
+	// ShutdownHooksRegistered lets explicit roots register providers as each is
+	// constructed, so partial construction failures use the same lifecycle owner.
+	ShutdownHooksRegistered bool
 }
 
 func OTELSetup(deps SetupDeps) error { // coverage-ignore -- Hard to test and this is mostly wireup code
@@ -87,14 +86,16 @@ func OTELSetup(deps SetupDeps) error { // coverage-ignore -- Hard to test and th
 		otelLogger.Error(cause, "OTEL error")
 	}))
 
-	if deps.OTELTracesConfig.Enabled {
-		registerShutdownHook(deps.RootLogger, deps.ShutdownHooks, "otel-tracer", deps.TracerProvider)
-	}
-	if deps.OTELMetricsConfig.Enabled {
-		registerShutdownHook(deps.RootLogger, deps.ShutdownHooks, "otel-meter", deps.MeterProvider)
-	}
-	if deps.OTELLogsConfig.Enabled {
-		registerShutdownHook(deps.RootLogger, deps.ShutdownHooks, "otel-logger", deps.LoggerProvider)
+	if !deps.ShutdownHooksRegistered {
+		if deps.OTELTracesConfig.Enabled {
+			RegisterShutdownHook(deps.RootLogger, deps.ShutdownHooks, "otel-tracer", deps.TracerProvider)
+		}
+		if deps.OTELMetricsConfig.Enabled {
+			RegisterShutdownHook(deps.RootLogger, deps.ShutdownHooks, "otel-meter", deps.MeterProvider)
+		}
+		if deps.OTELLogsConfig.Enabled {
+			RegisterShutdownHook(deps.RootLogger, deps.ShutdownHooks, "otel-logger", deps.LoggerProvider)
+		}
 	}
 
 	if !deps.OTELConfig.RuntimeMetrics {

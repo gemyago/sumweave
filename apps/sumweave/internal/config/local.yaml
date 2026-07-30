@@ -16,6 +16,14 @@ agentRuntime:
 auth:
   jwtSigningKey: local-secret-key
 
+finance:
+  providers:
+    enableBanking:
+      # Local-only dummy app ID for startup validation; it cannot access a live provider.
+      appID: local-dummy-enable-banking-app-id
+      # Committed fake key fixture only; replace in local-user.yaml for live banking.
+      privateKeyPath: data/test-enable-banking-private-key.pem
+
 workspacefs:
   platformAgentsPath: ../../.platform-agents
 

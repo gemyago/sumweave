@@ -4,16 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
-
-	"go.uber.org/dig"
 )
 
 type PProfListenerDeps struct {
-	dig.In
-
 	// Config
-	Enabled bool   `name:"config.pprofListener.enabled"`
-	Addr    string `name:"config.pprofListener.addr"`
+	Enabled bool
+	Addr    string
 }
 
 // StartPProfListener starts pprof listener in a separate goroutine.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/wireup"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
@@ -20,7 +22,6 @@ import (
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"go.uber.org/dig"
 )
 
 type financeFixturesGenerateParams struct {
@@ -54,6 +55,7 @@ type financeFixturesRuntimeConfig struct {
 	JobsStore       *jobspkg.Store
 	JWTSigningKey   string
 	MonobankBaseURL string
+	close           func() error
 }
 
 func newFinanceCmd(deps financeFixturesCommandDeps) *cobra.Command {
@@ -79,7 +81,7 @@ func newFinanceFixturesGenerateCmd(
 	cmd := &cobra.Command{
 		Use:   financeGenerateCommandName,
 		Short: "Generate realistic finance fixtures",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
 			now := time.Now()
 			if deps.Now != nil {
 				now = deps.Now()
@@ -87,16 +89,17 @@ func newFinanceFixturesGenerateCmd(
 			resolveRuntimeConfig := deps.ResolveRuntimeConfig
 			runtimeConfig := financeFixturesRuntimeConfig{}
 			if resolveRuntimeConfig != nil {
-				var err error
-				runtimeConfig, err = resolveRuntimeConfig(cmd)
-				if err != nil {
-					return err
+				resolvedRuntimeConfig, resolveErr := resolveRuntimeConfig(cmd)
+				if resolveErr != nil {
+					return resolveErr
 				}
+				runtimeConfig = resolvedRuntimeConfig
 			}
 			generate := deps.Generate
 			if generate == nil {
 				generate = runFinanceFixturesGenerate
 			}
+			defer func() { err = closeFinanceFixturesRuntimeConfig(err, runtimeConfig) }()
 			summary, err := generate(
 				cmd.Context(),
 				runtimeConfig,
@@ -373,33 +376,34 @@ func newFinanceFixturesMonobankServer() *httptest.Server {
 	}))
 }
 
-func resolveFinanceFixturesRuntimeConfig(
-	root *cobra.Command,
-	container *dig.Container,
-) (financeFixturesRuntimeConfig, error) {
-	if _, err := newEngineFromRoot(root, container); err != nil {
+func resolveFinanceFixturesRuntimeConfig(root *cobra.Command) (financeFixturesRuntimeConfig, error) {
+	environment, err := commandEnvironmentFromRoot(root)
+	if err != nil {
 		return financeFixturesRuntimeConfig{}, err
 	}
-	type configDeps struct {
-		dig.In
+	fixturesRoot, err := wireup.BuildFinanceFixtures(wireup.FinanceFixturesOptions{
+		Environment: environment,
+	})
+	if err != nil {
+		return financeFixturesRuntimeConfig{}, fmt.Errorf("build finance fixtures root: %w", err)
+	}
+	return financeFixturesRuntimeConfig{
+		Database:        fixturesRoot.Database,
+		JobsStore:       fixturesRoot.JobsStore,
+		JWTSigningKey:   fixturesRoot.JWTSigningKey,
+		MonobankBaseURL: fixturesRoot.MonobankBaseURL,
+		close:           fixturesRoot.Close,
+	}, nil
+}
 
-		Database  *persistence.Database
-		JobsStore *jobspkg.Store
-		JWTKey    string `name:"auth.jwtKey"                               optional:"true"`
-		MonoURL   string `name:"config.finance.providers.monobank.baseURL" optional:"true"`
+func closeFinanceFixturesRuntimeConfig(commandErr error, runtimeConfig financeFixturesRuntimeConfig) error {
+	if runtimeConfig.close == nil {
+		return commandErr
 	}
-	var runtimeConfig financeFixturesRuntimeConfig
-	if err := container.Invoke(func(deps configDeps) {
-		runtimeConfig = financeFixturesRuntimeConfig{
-			Database:        deps.Database,
-			JobsStore:       deps.JobsStore,
-			JWTSigningKey:   deps.JWTKey,
-			MonobankBaseURL: deps.MonoURL,
-		}
-	}); err != nil {
-		return financeFixturesRuntimeConfig{}, fmt.Errorf("resolve finance fixtures config: %w", err)
+	if closeErr := runtimeConfig.close(); closeErr != nil {
+		return errors.Join(commandErr, fmt.Errorf("close finance fixtures root: %w", closeErr))
 	}
-	return runtimeConfig, nil
+	return commandErr
 }
 
 type fixturesScheduleWriter struct{ store *jobspkg.Store }

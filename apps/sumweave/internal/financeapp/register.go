@@ -12,15 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/di"
 	apphttpclient "github.com/gemyago/sumweave/apps/sumweave/internal/infrastructure/httpclient"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/credentials"
-	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
-	"go.uber.org/dig"
 	"gorm.io/gorm"
 )
 
@@ -34,56 +31,44 @@ func (disabledFinanceCipher) OpenString(credentials.Envelope) (string, error) {
 	return "", errors.New("finance connection secret cipher is not configured")
 }
 
-type databaseDeps struct {
-	dig.In
-
-	DatabaseDSN string `name:"config.application.database.dsn"`
-	RootLogger  *slog.Logger
-	SQLDB       *sql.DB
+// ModuleDeps contains the native finance settings and constructed
+// collaborators needed by the finance application adapter.
+type ModuleDeps struct {
+	Database                        *persistence.Database
+	Jobs                            *jobspkg.Service
+	JobsStore                       *jobspkg.Store
+	Registry                        *jobspkg.Registry
+	HTTPClientFactory               *apphttpclient.ClientFactory
+	RootLogger                      *slog.Logger
+	JWTSigningKey                   string
+	MonobankBaseURL                 string
+	MonobankRetryAfterFallbackDelay time.Duration
+	EnableBanking                   financepkg.EnableBankingConfig
 }
 
-//nolint:golines // dig tags stay clearer inline on the dependency struct.
-type financeServiceDeps struct {
-	dig.In
-
-	Database                    *persistence.Database
-	Store                       *persistence.Store
-	Jobs                        *jobspkg.Service
-	JobsStore                   *jobspkg.Store
-	Registry                    *jobspkg.Registry
-	HTTPClientFactory           *apphttpclient.ClientFactory
-	RootLogger                  *slog.Logger
-	JWT                         string        `name:"auth.jwtKey" optional:"true"`
-	MonoURL                     string        `name:"config.finance.providers.monobank.baseURL" optional:"true"`
-	MonoRetryAfterFallbackDelay time.Duration `name:"config.finance.providers.monobank.retryAfterFallbackDelay" optional:"true"`
-	EnableURL                   string        `name:"config.finance.providers.enableBanking.baseURL" optional:"true"`
-	EnableAppID                 string        `name:"config.finance.providers.enableBanking.appID" optional:"true"`
-	EnablePrivateKeyPath        string        `name:"config.finance.providers.enableBanking.privateKeyPath" optional:"true"`
-	EnableASPSPName             string        `name:"config.finance.providers.enableBanking.aspspName" optional:"true"`
-	EnableCountry               string        `name:"config.finance.providers.enableBanking.country" optional:"true"`
-	EnablePSUType               string        `name:"config.finance.providers.enableBanking.psuType" optional:"true"`
-	EnableValidDays             int           `name:"config.finance.providers.enableBanking.validDays" optional:"true"`
-}
-
-func newDatabase(deps databaseDeps) (*persistence.Database, error) {
-	// TODO: We should make the DSN finance module specific
-	database, err := persistence.NewDatabase(deps.SQLDB, deps.DatabaseDSN, persistence.WithLogger(deps.RootLogger))
-	if err != nil {
+// NewDatabase opens the finance persistence adapter over the application SQL
+// database. The application currently shares this database with jobs.
+func NewDatabase(sqlDB *sql.DB, databaseDSN string, logger *slog.Logger) (*persistence.Database, error) {
+	// TODO: We should make the DSN finance module specific.
+	database, err := persistence.NewDatabase(sqlDB, databaseDSN, persistence.WithLogger(logger))
+	if err != nil { // coverage-ignore // Persistence construction errors are covered by its package.
 		return nil, fmt.Errorf("open finance database: %w", err)
 	}
 	return database, nil
 }
 
-func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error) {
-	cipher, err := makeFinanceCipher(deps.JWT)
-	if err != nil {
+// NewModule constructs finance and completes its durable schedule and handler
+// registration. It does not start worker or scheduler loops.
+func NewModule(deps ModuleDeps) (*financepkg.Finance, error) {
+	cipher, err := makeFinanceCipher(deps.JWTSigningKey)
+	if err != nil { // coverage-ignore // AES-GCM construction has no controllable failure after SHA-256 sizing.
 		return nil, err
 	}
 	httpClient, err := newFinanceHTTPClient(deps.HTTPClientFactory)
 	if err != nil {
 		return nil, err
 	}
-	monobankHTTPClient, err := newMonobankHTTPClient(deps.HTTPClientFactory, deps.MonoRetryAfterFallbackDelay)
+	monobankHTTPClient, err := newMonobankHTTPClient(deps.HTTPClientFactory, deps.MonobankRetryAfterFallbackDelay)
 	if err != nil {
 		return nil, err
 	}
@@ -100,10 +85,10 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 		FXJobEnqueuer:          fxRefreshJobEnqueuer{jobs: deps.Jobs},
 		FXScheduleWriter:       fxRefreshScheduleWriter{store: deps.JobsStore},
 		Monobank: financepkg.MonobankConfig{
-			BaseURL:    resolveMonobankBaseURL(deps.MonoURL),
+			BaseURL:    resolveMonobankBaseURL(deps.MonobankBaseURL),
 			HTTPClient: monobankHTTPClient,
 		},
-		EnableBanking: buildEnableBankingConfig(deps),
+		EnableBanking: deps.EnableBanking,
 	})
 	if err != nil {
 		return nil, err
@@ -121,7 +106,7 @@ func newFinanceModuleFromDI(deps financeServiceDeps) (*financepkg.Finance, error
 		financeModule.CSVImportService,
 		financeModule.BankSyncService,
 	)
-	if registerErr != nil {
+	if registerErr != nil { // coverage-ignore // Registry behavior is exercised through the jobs roots.
 		return nil, registerErr
 	}
 	return financeModule, nil
@@ -146,65 +131,6 @@ func newMonobankHTTPClient(factory *apphttpclient.ClientFactory, fallbackDelay t
 		apphttpclient.WithRetryAfterFallbackDelay(fallbackDelay),
 		apphttpclient.WithTimeout(timeout),
 	), nil
-}
-
-func newTenantServiceFromDI(module *financepkg.Finance) *financepkg.TenantService {
-	return module.TenantService
-}
-
-func newCatalogServiceFromDI(module *financepkg.Finance) *financepkg.CatalogService {
-	return module.CatalogService
-}
-
-func newLedgerServiceFromDI(module *financepkg.Finance) *financepkg.LedgerService {
-	return module.LedgerService
-}
-
-func newTransferDetailServiceFromDI(module *financepkg.Finance) *financepkg.TransferDetailService {
-	return module.TransferDetailService
-}
-
-func newReportingServiceFromDI(module *financepkg.Finance) *financepkg.ReportingService {
-	return module.ReportingService
-}
-
-func newFXServiceFromDI(module *financepkg.Finance) *financepkg.FXService {
-	return module.FXService
-}
-
-func newProviderEvidenceServiceFromDI(module *financepkg.Finance) *financepkg.ProviderEvidenceService {
-	return module.ProviderEvidenceService
-}
-
-func newCSVImportServiceFromDI(module *financepkg.Finance) *financepkg.CSVImportService {
-	return module.CSVImportService
-}
-
-func newBankConnectionServiceFromDI(module *financepkg.Finance) *financepkg.BankConnectionService {
-	return module.BankConnectionService
-}
-
-func newSyntheticLinkStateServiceFromDI(module *financepkg.Finance) *financepkg.SyntheticLinkStateService {
-	return module.SyntheticLinkStateService
-}
-
-func newBankSyncServiceFromDI(module *financepkg.Finance) *financepkg.BankSyncService {
-	return module.BankSyncService
-}
-
-func buildEnableBankingConfig(deps financeServiceDeps) financepkg.EnableBankingConfig {
-	return financepkg.EnableBankingConfig{
-		BaseURL:        strings.TrimSpace(deps.EnableURL),
-		AppID:          strings.TrimSpace(deps.EnableAppID),
-		PrivateKeyPath: strings.TrimSpace(deps.EnablePrivateKeyPath),
-		ASPSPs: []financepkg.EnableBankingASPSP{{
-			ProviderID: domain.ProviderIDPKO,
-			Name:       strings.TrimSpace(deps.EnableASPSPName),
-			Country:    strings.TrimSpace(deps.EnableCountry),
-			PSUType:    strings.TrimSpace(deps.EnablePSUType),
-			ValidDays:  deps.EnableValidDays,
-		}},
-	}
 }
 
 func resolveFinanceLogger(logger *slog.Logger) *slog.Logger {
@@ -233,7 +159,7 @@ func makeFinanceCipher(jwtKey string) (
 	}
 	sum := sha256.Sum256([]byte(trimmed))
 	cipher, err := credentials.NewAESGCMCipher(sum[:], "sumweave-finance")
-	if err != nil {
+	if err != nil { // coverage-ignore // AES-GCM construction has no controllable failure after SHA-256 sizing.
 		return nil, fmt.Errorf("create finance cipher: %w", err)
 	}
 	return cipher, nil
@@ -406,7 +332,7 @@ func (e csvImportJobEnqueuer) EnqueueCSVImport(
 		Input:          csvImportJobInput{ImportID: strings.TrimSpace(request.ImportID)},
 		IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
 	})
-	if err != nil {
+	if err != nil { // coverage-ignore // Jobs service owns enqueue error behavior.
 		return financepkg.CSVImportJobRef{}, err
 	}
 	return financepkg.CSVImportJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
@@ -431,7 +357,7 @@ func (e bankConnectionSyncJobEnqueuer) EnqueueBankConnectionSync(
 			WindowEnd:    request.Input.WindowEnd,
 		},
 	})
-	if err != nil {
+	if err != nil { // coverage-ignore // Jobs service owns enqueue error behavior.
 		return financepkg.BankConnectionSyncJobRef{}, err
 	}
 	return financepkg.BankConnectionSyncJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
@@ -454,7 +380,7 @@ func (w bankConnectionSyncScheduleWriter) UpsertBankConnectionSyncSchedule(
 		ConnectionID: strings.TrimSpace(schedule.ConnectionID),
 		Reason:       financepkg.BankConnectionSyncReasonScheduled,
 	})
-	if err != nil {
+	if err != nil { // coverage-ignore // JSON encoding of this concrete struct cannot fail.
 		return fmt.Errorf("encode bank connection sync schedule: %w", err)
 	}
 	var nextRunAt *time.Time
@@ -491,7 +417,7 @@ func (e fxRefreshJobEnqueuer) EnqueueFXRefresh(
 		},
 		Input: request.Input,
 	})
-	if err != nil {
+	if err != nil { // coverage-ignore // Jobs service owns enqueue error behavior.
 		return financepkg.FXRefreshJobRef{}, err
 	}
 	return financepkg.FXRefreshJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
@@ -505,7 +431,7 @@ func (w fxRefreshScheduleWriter) UpsertFXRefreshSchedule(
 		return nil
 	}
 	inputJSON, err := json.Marshal(schedule.Input)
-	if err != nil {
+	if err != nil { // coverage-ignore // JSON encoding of the finance input is covered by its model tests.
 		return fmt.Errorf("encode fx refresh schedule: %w", err)
 	}
 	var nextRunAt *time.Time
@@ -531,24 +457,4 @@ func (w fxRefreshScheduleWriter) UpsertFXRefreshSchedule(
 		NextRunAt: nextRunAt,
 		Enabled:   schedule.Enabled,
 	})
-}
-
-func Register(container *dig.Container) error {
-	return di.ProvideAll(
-		container,
-		newDatabase,
-		persistence.NewStore,
-		newFinanceModuleFromDI,
-		newTenantServiceFromDI,
-		newCatalogServiceFromDI,
-		newLedgerServiceFromDI,
-		newTransferDetailServiceFromDI,
-		newReportingServiceFromDI,
-		newFXServiceFromDI,
-		newProviderEvidenceServiceFromDI,
-		newCSVImportServiceFromDI,
-		newBankConnectionServiceFromDI,
-		newSyntheticLinkStateServiceFromDI,
-		newBankSyncServiceFromDI,
-	)
 }
