@@ -1,12 +1,14 @@
-image:
-  tag: git-commit-abcdef0
+# Lock specific image tag
+# image:
+#   tag: git-commit-abcdef0
+
 # These are illustrative, consumer-owned, namespace-local resources. The chart
 # does not create or validate them, and this example contains no secret values.
-envFrom:
-  - configMapRef:
-      name: example-sumweave-runtime-config
-  - secretRef:
-      name: example-sumweave-runtime-settings
+envFrom: []
+  # - configMapRef:
+  #     name: example-sumweave-runtime-config
+  # - secretRef:
+  #     name: example-sumweave-runtime-settings
 # Kubelet expands $(VARIABLE) only from earlier entries in this ordered list.
 # It does not URL-encode interpolated values. For arbitrary passwords, use a
 # consumer-managed Secret key containing a complete, safely encoded DSN instead.
@@ -14,19 +16,24 @@ env:
   - name: DB_USERNAME
     valueFrom:
       secretKeyRef:
-        name: example-sumweave-runtime-database-identity
+        name: sumweave-db-secret
         key: username
   - name: DB_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: example-sumweave-runtime-database-identity
+        name: sumweave-db-secret
         key: password
+  - name: DB_HOST
+    valueFrom:
+      secretKeyRef:
+        name: sumweave-db-secret
+        key: host
   - name: APP_APPLICATION_DATABASE_DSN
-    value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@runtime-postgresql.example.invalid:5432/sumweave?sslmode=require
+    value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
   - name: APP_AGENTRUNTIME_DATABASE_DSN
-    value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@runtime-postgresql.example.invalid:5432/sumweave_runtime?sslmode=require
+    value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
 imagePullSecrets:
-  - name: example-ghcr-registry
+  - name: docker-registry-secret
 app:
   replicaCount: 2
   resources:
@@ -42,30 +49,35 @@ migration:
     requests: {cpu: 50m, memory: 128Mi}
   # Migrations must use a distinct DDL-capable database identity. Do not reuse
   # runtime credentials, even when the databases are hosted by the same service.
-  envFrom:
-    - configMapRef:
-        name: example-sumweave-migration-config
-    - secretRef:
-        name: example-sumweave-migration-settings
+  # envFrom:
+  #   - configMapRef:
+  #       name: example-sumweave-migration-config
+  #   - secretRef:
+  #       name: example-sumweave-migration-settings
   # Kubelet interpolation is ordered and performs no URL encoding; use a
   # complete consumer-managed Secret DSN for arbitrary passwords.
   env:
     - name: DB_USERNAME
       valueFrom:
         secretKeyRef:
-          name: example-sumweave-migration-database-identity
+          name: sumweave-ops-db-secret
           key: username
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
-          name: example-sumweave-migration-database-identity
+          name: sumweave-ops-db-secret
           key: password
+    - name: DB_HOST
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-ops-db-secret
+          key: host
     - name: APP_APPLICATION_DATABASE_DSN
-      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@migration-postgresql.example.invalid:5432/sumweave?sslmode=require
+      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
     - name: APP_AGENTRUNTIME_DATABASE_DSN
-      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@migration-postgresql.example.invalid:5432/sumweave_runtime?sslmode=require
+      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
 httpRoute:
-  enabled: true
+  enabled: false
   gatewayName: example-public-gateway
   namespace: example-gateway-system
   sectionName: https
