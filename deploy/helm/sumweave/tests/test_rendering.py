@@ -71,6 +71,15 @@ def test_omitted_defaults():
     forbid(rendered, "stringData:\n")
 
 
+def test_migration_uses_default_service_account_without_token():
+    rendered = render()
+    migration = document(rendered, "Job", "migrate")
+
+    require(migration, "automountServiceAccountToken: false")
+    forbid(migration, "serviceAccountName:")
+    require(migration, 'helm.sh/hook-weight: "-10"')
+
+
 def test_scope_propagation_and_native_fields():
     rendered = render_with(
         """\
@@ -173,27 +182,20 @@ migration:
 def test_production_example():
     rendered = render(PRODUCTION_VALUES)
     for item in runtime_containers(rendered):
-        require(item, "example-sumweave-runtime-config")
-        require(item, "example-sumweave-runtime-settings")
-        require(item, "example-sumweave-runtime-database-identity")
-        require(item, "value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@runtime-postgresql.example.invalid")
-        forbid(item, "example-sumweave-migration-config")
-        forbid(item, "example-sumweave-migration-settings")
-        forbid(item, "example-sumweave-migration-database-identity")
+        require(item, "name: sumweave-db-secret")
+        require(item, "value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require")
+        forbid(item, "name: sumweave-ops-db-secret")
     migrate = container(rendered, "Job", "migrate", "migrate")
-    require(migrate, "example-sumweave-migration-config")
-    require(migrate, "example-sumweave-migration-settings")
-    require(migrate, "example-sumweave-migration-database-identity")
-    require(migrate, "value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@migration-postgresql.example.invalid")
-    forbid(migrate, "example-sumweave-runtime-config")
-    forbid(migrate, "example-sumweave-runtime-settings")
-    forbid(migrate, "example-sumweave-runtime-database-identity")
+    require(migrate, "name: sumweave-ops-db-secret")
+    require(migrate, "value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require")
+    forbid(migrate, "name: sumweave-db-secret")
     forbid(rendered, "kind: Secret\n")
     forbid(rendered, "stringData:\n")
 
 
 def main():
     test_omitted_defaults()
+    test_migration_uses_default_service_account_without_token()
     test_scope_propagation_and_native_fields()
     test_scopes_do_not_inherit_when_only_one_is_set()
     test_production_example()

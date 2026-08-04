@@ -12,7 +12,6 @@ spec:
   template:
     spec:
       automountServiceAccountToken: false
-      serviceAccountName: {{ include "sumweave.serviceAccountName" . }}
       restartPolicy: OnFailure
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
