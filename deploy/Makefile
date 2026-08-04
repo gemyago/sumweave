@@ -4,7 +4,7 @@ arch := $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/arm64/arm64/' -e 's/aa
 helm_version := $(shell cat .helm-version)
 helm := $(CURDIR)/bin/helm
 
-.PHONY: tools lint render-production clean
+.PHONY: tools lint render-production test clean
 
 $(helm):
 	mkdir -p bin tmp
@@ -20,6 +20,9 @@ lint: $(helm)
 
 render-production: $(helm)
 	$(helm) template sumweave helm/sumweave -f helm/sumweave/values-production.example.yaml
+
+test: $(helm)
+	python3 helm/sumweave/tests/test_rendering.py $(helm) helm/sumweave
 
 clean:
 	rm -rf bin tmp

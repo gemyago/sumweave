@@ -25,8 +25,11 @@ spec:
               image: {{ include "sumweave.image" . | quote }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               args: {{- toYaml .Values.scheduler.args | nindent 16 }}
-              {{- if or .Values.existingConfigMap .Values.existingSecret }}
-              envFrom: {{- include "sumweave.envFrom" . | nindent 16 }}
+              {{- with .Values.env }}
+              env: {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.envFrom }}
+              envFrom: {{- toYaml . | nindent 16 }}
               {{- end }}
               securityContext: {{- toYaml .Values.securityContext | nindent 16 }}
               volumeMounts:

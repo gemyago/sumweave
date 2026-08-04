@@ -14,8 +14,9 @@ serviceAccount:
   annotations: {}
   automount: false
 
-existingConfigMap: ""
-existingSecret: ""
+# Applied only to the app, worker, and scheduler containers.
+env: []
+envFrom: []
 
 podSecurityContext:
   runAsNonRoot: true
@@ -64,6 +65,9 @@ migration:
   backoffLimit: 1
   resources: {}
   args: [--env, production, --json-logs, db-migrate]
+  # Applied only to the migration Job container.
+  env: []
+  envFrom: []
 
 service:
   type: ClusterIP

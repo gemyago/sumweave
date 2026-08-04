@@ -1,9 +1,32 @@
 image:
   tag: git-commit-abcdef0
-existingConfigMap: sumweave-production
-existingSecret: sumweave-production
+# These are illustrative, consumer-owned, namespace-local resources. The chart
+# does not create or validate them, and this example contains no secret values.
+envFrom:
+  - configMapRef:
+      name: example-sumweave-runtime-config
+  - secretRef:
+      name: example-sumweave-runtime-settings
+# Kubelet expands $(VARIABLE) only from earlier entries in this ordered list.
+# It does not URL-encode interpolated values. For arbitrary passwords, use a
+# consumer-managed Secret key containing a complete, safely encoded DSN instead.
+env:
+  - name: DB_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: example-sumweave-runtime-database-identity
+        key: username
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: example-sumweave-runtime-database-identity
+        key: password
+  - name: APP_APPLICATION_DATABASE_DSN
+    value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@runtime-postgresql.example.invalid:5432/sumweave?sslmode=require
+  - name: APP_AGENTRUNTIME_DATABASE_DSN
+    value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@runtime-postgresql.example.invalid:5432/sumweave_runtime?sslmode=require
 imagePullSecrets:
-  - name: ghcr-registry
+  - name: example-ghcr-registry
 app:
   replicaCount: 2
   resources:
@@ -17,10 +40,34 @@ scheduler:
 migration:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
+  # Migrations must use a distinct DDL-capable database identity. Do not reuse
+  # runtime credentials, even when the databases are hosted by the same service.
+  envFrom:
+    - configMapRef:
+        name: example-sumweave-migration-config
+    - secretRef:
+        name: example-sumweave-migration-settings
+  # Kubelet interpolation is ordered and performs no URL encoding; use a
+  # complete consumer-managed Secret DSN for arbitrary passwords.
+  env:
+    - name: DB_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: example-sumweave-migration-database-identity
+          key: username
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: example-sumweave-migration-database-identity
+          key: password
+    - name: APP_APPLICATION_DATABASE_DSN
+      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@migration-postgresql.example.invalid:5432/sumweave?sslmode=require
+    - name: APP_AGENTRUNTIME_DATABASE_DSN
+      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@migration-postgresql.example.invalid:5432/sumweave_runtime?sslmode=require
 httpRoute:
   enabled: true
-  gatewayName: public
-  namespace: gateway-system
+  gatewayName: example-public-gateway
+  namespace: example-gateway-system
   sectionName: https
   hostnames: [sumweave.example.com]
   rules:
