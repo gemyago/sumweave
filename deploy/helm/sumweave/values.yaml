@@ -31,7 +31,8 @@ securityContext:
 
 app:
   replicaCount: 1
-  resources: {}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
   podAnnotations: {}
   podLabels: {}
   args: [--env, production, --json-logs, start]
@@ -50,7 +51,8 @@ app:
     targetCPUUtilizationPercentage: 80
 
 worker:
-  resources: {}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
   args: [--env, production, --json-logs, jobs, worker]
 
 scheduler:
@@ -58,12 +60,14 @@ scheduler:
   startingDeadlineSeconds: 30
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  resources: {}
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
   args: [--env, production, --json-logs, jobs, enqueue-due]
 
 migration:
   backoffLimit: 1
-  resources: {}
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
   args: [--env, production, --json-logs, db-migrate]
   # Applied only to the migration Job container.
   env: []
