@@ -79,11 +79,17 @@ migration:
     - name: APP_AGENTRUNTIME_DATABASE_DSN
       value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
 httpRoute:
-  enabled: false
-  gatewayName: example-public-gateway
-  namespace: example-gateway-system
-  sectionName: https
-  hostnames: [sumweave.example.com]
-  rules:
-    - matches:
-        - path: {type: PathPrefix, value: /}
+  enabled: true
+  spec:
+    parentRefs:
+      - name: oke-gateway
+        namespace: oke-gw
+        sectionName: https
+    hostnames: []
+    rules:
+      - matches:
+          - path: {type: PathPrefix, value: /}
+        backendRefs:
+          # Service name is release-chart (e.g. sumweave-sumweave); override via fullnameOverride.
+          - name: sumweave-sumweave
+            port: 4501

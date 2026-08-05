@@ -32,5 +32,6 @@ helm upgrade sumweave deploy/helm/sumweave --install --namespace sumweave --crea
 
 Set `image.digest` or a `git-commit-*` tag in the deployment/config repository.
 Private GHCR images require an `imagePullSecrets` entry. The optional HTTPRoute
-is disabled by default and is fully values-driven. Optional file-based TLS or
+is disabled by default; set `httpRoute.enabled` and provide a native
+`httpRoute.spec` matching your gateway. Optional file-based TLS or
 private-key integrations need separate secret-value support before enabling them.

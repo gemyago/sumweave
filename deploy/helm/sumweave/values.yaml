@@ -79,9 +79,6 @@ service:
 
 httpRoute:
   enabled: false
-  nameSuffix: route
-  gatewayName: ""
-  namespace: ""
-  sectionName: ""
-  hostnames: []
-  rules: []
+  # HTTPRoute spec (gateway.networking.k8s.io/v1). Consumer provides parentRefs,
+  # hostnames, rules, backendRefs, and any other fields their gateway supports.
+  spec: {}
