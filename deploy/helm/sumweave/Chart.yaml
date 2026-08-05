@@ -1,7 +1,7 @@
 # Adapted from gemyago/golang-backend-boilerplate@798f0dc9fd753481d0d698d8232ea08df44185b6.
 apiVersion: v2
 name: sumweave
-description: Sumweave API, worker, scheduler, and migration workloads
+description: Sumweave API, worker, scheduler, migration, and initial-user workloads
 type: application
 version: 0.1.0
 appVersion: "0.0.0"

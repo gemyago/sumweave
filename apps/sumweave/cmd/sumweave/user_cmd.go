@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -12,8 +13,9 @@ import (
 )
 
 type userAddParams struct {
-	Username string
-	Password string
+	Username    string
+	Password    string
+	IfNotExists bool
 }
 
 type userChangePasswordParams struct {
@@ -59,6 +61,10 @@ func runUserAdd(
 		PasswordHash: hash,
 	})
 	if err != nil {
+		if params.IfNotExists && errors.Is(err, auth.ErrUsernameExists) {
+			_, writeErr := fmt.Fprintf(out, "User already exists: username=%s\n", params.Username)
+			return writeErr
+		}
 		return fmt.Errorf("create user: %w", err)
 	}
 
@@ -121,6 +127,12 @@ func newUserAddCmd(container *dig.Container) *cobra.Command { // coverage-ignore
 	}
 	cmd.Flags().StringVar(&params.Username, "username", "", "Username for the new user")
 	cmd.Flags().StringVar(&params.Password, "password", "", "Password for the new user")
+	cmd.Flags().BoolVar(
+		&params.IfNotExists,
+		"if-not-exists",
+		false,
+		"Succeed without changing the password when the username already exists",
+	)
 	_ = cmd.MarkFlagRequired("username")
 	_ = cmd.MarkFlagRequired("password")
 	return cmd

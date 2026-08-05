@@ -1,0 +1,56 @@
+{{- if .Values.initialUser.enabled }}
+{{- $secretName := required "initialUser.secret.name is required when initialUser.enabled is true" .Values.initialUser.secret.name }}
+{{- $usernameKey := required "initialUser.secret.usernameKey is required when initialUser.enabled is true" .Values.initialUser.secret.usernameKey }}
+{{- $passwordKey := required "initialUser.secret.passwordKey is required when initialUser.enabled is true" .Values.initialUser.secret.passwordKey }}
+{{- $credentialEnv := list
+  (dict "name" "INITIAL_USER_USERNAME" "valueFrom" (dict "secretKeyRef" (dict "name" $secretName "key" $usernameKey)))
+  (dict "name" "INITIAL_USER_PASSWORD" "valueFrom" (dict "secretKeyRef" (dict "name" $secretName "key" $passwordKey)))
+}}
+{{- $jobEnv := concat (default (list) .Values.initialUser.env) $credentialEnv }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "sumweave.fullname" . }}-initial-user
+  labels: {{- include "sumweave.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.initialUser.backoffLimit }}
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: initial-user
+          image: {{ include "sumweave.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --env
+            - production
+            - --json-logs
+            - user
+            - add
+            - --if-not-exists
+            - --username
+            - $(INITIAL_USER_USERNAME)
+            - --password
+            - $(INITIAL_USER_PASSWORD)
+          env: {{- toYaml $jobEnv | nindent 12 }}
+          {{- with .Values.initialUser.envFrom }}
+          envFrom: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources: {{- toYaml .Values.initialUser.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

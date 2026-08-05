@@ -54,6 +54,21 @@ def render_with(content):
         return render(values.name)
 
 
+def render_failure(content):
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml") as values:
+        values.write(content)
+        values.flush()
+        result = subprocess.run(
+            [HELM, "template", "sumweave", CHART, "-f", values.name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    if result.returncode == 0:
+        raise AssertionError("expected helm template to fail")
+    return result.stderr
+
+
 def runtime_containers(rendered):
     return (
         container(rendered, "Deployment", "app", "app"),
@@ -67,6 +82,7 @@ def test_omitted_defaults():
     for item in (*runtime_containers(rendered), container(rendered, "Job", "migrate", "migrate")):
         forbid(item, "env:\n")
         forbid(item, "envFrom:\n")
+    forbid(rendered, "name: sumweave-sumweave-initial-user\n")
     forbid(rendered, "kind: Secret\n")
     forbid(rendered, "stringData:\n")
 
@@ -78,6 +94,61 @@ def test_migration_uses_default_service_account_without_token():
     require(migration, "automountServiceAccountToken: false")
     forbid(migration, "serviceAccountName:")
     require(migration, 'helm.sh/hook-weight: "-10"')
+
+
+def test_initial_user_uses_external_secret_after_migration():
+    rendered = render_with(
+        """\
+initialUser:
+  enabled: true
+  secret:
+    name: initial-user-secret
+    usernameKey: login
+    passwordKey: initial-password
+  env:
+    - name: INITIAL_USER_DB_HOST
+      value: database.example
+    - name: APP_APPLICATION_DATABASE_DSN
+      value: postgres://app@$(INITIAL_USER_DB_HOST)/sumweave
+  envFrom:
+    - secretRef:
+        name: initial-user-database-secret
+"""
+    )
+    job = document(rendered, "Job", "initial-user")
+    initial_user = container(rendered, "Job", "initial-user", "initial-user")
+
+    require(job, "automountServiceAccountToken: false")
+    forbid(job, "serviceAccountName:")
+    require(job, "helm.sh/hook: pre-install")
+    forbid(job, "helm.sh/hook: pre-install,pre-upgrade")
+    require(job, 'helm.sh/hook-weight: "-5"')
+    require(initial_user, "--if-not-exists")
+    require(initial_user, "$(INITIAL_USER_USERNAME)")
+    require(initial_user, "$(INITIAL_USER_PASSWORD)")
+    require(initial_user, "name: INITIAL_USER_USERNAME")
+    require(initial_user, "name: INITIAL_USER_PASSWORD")
+    require(initial_user, "name: initial-user-secret")
+    require(initial_user, "key: login")
+    require(initial_user, "key: initial-password")
+    require(initial_user, "name: INITIAL_USER_DB_HOST")
+    require(initial_user, "name: APP_APPLICATION_DATABASE_DSN")
+    require(initial_user, "name: initial-user-database-secret")
+    if initial_user.index("name: INITIAL_USER_DB_HOST") > initial_user.index(
+        "name: APP_APPLICATION_DATABASE_DSN"
+    ):
+        raise AssertionError("initial user env order was not preserved")
+    for item in (*runtime_containers(rendered), container(rendered, "Job", "migrate", "migrate")):
+        forbid(item, "initial-user-secret")
+        forbid(item, "INITIAL_USER_DB_HOST")
+        forbid(item, "initial-user-database-secret")
+    forbid(rendered, "kind: Secret\n")
+    forbid(rendered, "stringData:\n")
+
+
+def test_initial_user_requires_external_secret_name():
+    error = render_failure("initialUser:\n  enabled: true\n")
+    require(error, "initialUser.secret.name is required when initialUser.enabled is true")
 
 
 def test_scope_propagation_and_native_fields():
@@ -189,6 +260,11 @@ def test_production_example():
     require(migrate, "name: sumweave-ops-db-secret")
     require(migrate, "value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require")
     forbid(migrate, "name: sumweave-db-secret")
+    initial_user = container(rendered, "Job", "initial-user", "initial-user")
+    require(initial_user, "name: sumweave-initial-user")
+    require(initial_user, "name: sumweave-db-secret")
+    require(initial_user, "value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require")
+    forbid(initial_user, "name: sumweave-ops-db-secret")
     forbid(rendered, "kind: Secret\n")
     forbid(rendered, "stringData:\n")
 
@@ -196,6 +272,8 @@ def test_production_example():
 def main():
     test_omitted_defaults()
     test_migration_uses_default_service_account_without_token()
+    test_initial_user_uses_external_secret_after_migration()
+    test_initial_user_requires_external_secret_name()
     test_scope_propagation_and_native_fields()
     test_scopes_do_not_inherit_when_only_one_is_set()
     test_production_example()

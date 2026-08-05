@@ -78,6 +78,31 @@ migration:
       value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
     - name: APP_AGENTRUNTIME_DATABASE_DSN
       value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
+initialUser:
+  enabled: true
+  secret:
+    name: sumweave-initial-user
+    usernameKey: username
+    passwordKey: password
+  # Initial user creation performs DML only and uses the runtime database identity.
+  env:
+    - name: DB_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-db-secret
+          key: username
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-db-secret
+          key: password
+    - name: DB_HOST
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-db-secret
+          key: host
+    - name: APP_APPLICATION_DATABASE_DSN
+      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
 httpRoute:
   enabled: true
   spec:

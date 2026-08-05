@@ -68,6 +68,8 @@ If the PM2 command shape changed (for example from `start` to `start-all`) or yo
 
 Durable jobs workflow:
 - `sumweave db-migrate` is the standard schema setup path for local/dev and PM2-backed environments.
+- `sumweave user add --if-not-exists` supports retry-safe bootstrap hooks
+  without resetting an existing password.
 - `sumweave start-all` is the standard local backend mode; it runs the HTTP server, durable consumer, and scheduler loop together after schemas are prepared.
 - `sumweave start` starts only the API/server path; it must not execute durable jobs inline.
 - `sumweave jobs worker [--once]` is the dedicated split-mode consumer path for production-like or supervised environments. `--once` consumes until two poll intervals pass idle, so it can drain a reused DB backlog; use a reseeded or isolated local DB for a bounded E2E step.
