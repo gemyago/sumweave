@@ -88,8 +88,12 @@ httpRoute:
     hostnames: []
     rules:
       - matches:
+          - headers:
+              - name: host
+                type: RegularExpression
+                value: "^sumweave\\..*"
           - path: {type: PathPrefix, value: /}
         backendRefs:
           # Service name is release-chart (e.g. sumweave-sumweave); override via fullnameOverride.
           - name: sumweave-sumweave
-            port: 4501
+            port: 80
