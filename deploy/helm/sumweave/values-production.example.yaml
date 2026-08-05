@@ -1,14 +1,23 @@
 # Lock specific image tag
-# image:
-#   tag: git-commit-abcdef0
+image:
+  tag: git-commit-da05388
 
 # These are illustrative, consumer-owned, namespace-local resources. The chart
-# does not create or validate them, and this example contains no secret values.
-envFrom: []
-  # - configMapRef:
-  #     name: example-sumweave-runtime-config
-  # - secretRef:
-  #     name: example-sumweave-runtime-settings
+# does not create or validate them.
+envFrom:
+  # Include at least the following configs:
+  # * APP_FINANCE_PROVIDERS_ENABLEBANKING_APPID - EnableBanking app ID
+  # * APP_FINANCE_PROVIDERS_ENABLEBANKING_PRIVATEKEYPATH - EnableBanking private key path
+  # * APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME - Agent runtime database DSN
+  # * APP_FINANCE_PROVIDERS_ENABLEBANKING_CALLBACKBASEURL - EnableBanking callback base URL, must match public app host and configured callback in enable banking app.
+  - configMapRef:
+      name: sumweave-app-config
+  # 
+  # Include at least the following in the secret:
+  # * APP_AUTH_JWTSIGNINGKEY - JWT signing key for API authentication
+  - secretRef:
+      name: sumweave-app-secrets
+
 # Kubelet expands $(VARIABLE) only from earlier entries in this ordered list.
 # It does not URL-encode interpolated values. For arbitrary passwords, use a
 # consumer-managed Secret key containing a complete, safely encoded DSN instead.
@@ -47,15 +56,8 @@ scheduler:
 migration:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
-  # Migrations must use a distinct DDL-capable database identity. Do not reuse
-  # runtime credentials, even when the databases are hosted by the same service.
-  # envFrom:
-  #   - configMapRef:
-  #       name: example-sumweave-migration-config
-  #   - secretRef:
-  #       name: example-sumweave-migration-settings
-  # Kubelet interpolation is ordered and performs no URL encoding; use a
-  # complete consumer-managed Secret DSN for arbitrary passwords.
+  # Migrations must use a distinct DDL-capable database identity. Avoid using
+  # runtime credentials. Migration job does not need other app configs.
   env:
     - name: DB_USERNAME
       valueFrom:
