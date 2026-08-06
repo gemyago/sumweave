@@ -17,6 +17,8 @@ serviceAccount:
 # Applied only to the app, worker, and scheduler containers.
 env: []
 envFrom: []
+volumeMounts: []
+volumes: []
 
 podSecurityContext:
   runAsNonRoot: true

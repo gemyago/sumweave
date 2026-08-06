@@ -35,7 +35,13 @@ spec:
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
+                {{- with .Values.volumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
               resources: {{- toYaml .Values.scheduler.resources | nindent 16 }}
           volumes:
             - name: tmp
               emptyDir: {}
+            {{- with .Values.volumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}

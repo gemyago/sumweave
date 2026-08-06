@@ -41,6 +41,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports: [{name: http, containerPort: {{ .Values.service.port }}, protocol: TCP}]
           startupProbe: {{- toYaml .Values.app.startupProbe | nindent 12 }}
           livenessProbe: {{- toYaml .Values.app.livenessProbe | nindent 12 }}
@@ -49,3 +52,6 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
