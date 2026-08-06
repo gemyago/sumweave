@@ -399,13 +399,13 @@ func (s *Store) SaveRawPayload(
 	model := newRawPayloadModel(payload)
 	if saveErr := s.db.WithContext(ctx).Table(model.TableName()).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
-			{Name: "connection_id"},
-			{Name: "scope"},
-			{Name: "provider_object_id"},
+			{Name: columnConnectionID},
+			{Name: columnScope},
+			{Name: columnProviderObjectID},
 		},
 		DoUpdates: clause.Assignments(map[string]any{
-			"payload_json": model.PayloadJSON,
-			"captured_at":  model.CapturedAt,
+			columnPayloadJSON: model.PayloadJSON,
+			columnCapturedAt:  model.CapturedAt,
 		}),
 		Where: latestProviderObservationClause(),
 	}).Create(&model).Error; saveErr != nil {
