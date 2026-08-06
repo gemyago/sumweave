@@ -105,20 +105,19 @@ initialUser:
       value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
 httpRoute:
   enabled: true
+
+  # HTTPRoute spec to create a route to the sumweave service.
   spec:
     parentRefs:
-      - name: oke-gateway
-        namespace: oke-gw
+      - name: your-gateway-name
+        namespace: gateway-namespace
         sectionName: https
-    hostnames: []
+    hostnames:
+      - your-hostname.com
     rules:
       - matches:
-          - headers:
-              - name: host
-                type: RegularExpression
-                value: "^sumweave\\..*"
           - path: {type: PathPrefix, value: /}
         backendRefs:
           # Service name is release-chart (e.g. sumweave-sumweave); override via fullnameOverride.
           - name: sumweave-sumweave
-            port: 80
+            port: 4501
