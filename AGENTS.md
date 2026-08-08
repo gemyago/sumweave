@@ -136,6 +136,8 @@ The rules are:
 - Launch local backend CLI commands from `apps/sumweave`.
 - Avoid markdown tables, prefer lists or other formatting. Tables are hard to read by humans. Use tables only when user explicitly requests it.
 - Do not run `git diff --check` as a routine verification step.
+- Routine CI tests must not require PostgreSQL to be available.
+- Do not test generated ORM queries by matching SQL strings.
 - Do not explicitly normalize dates or timestamps to UTC.
 - Consider SQLite as local-dev only storage. Small issues and inconsistencies are tolerable.
 - Keep API responses single-purpose by default (e.g operating on a single entity); Composition must have a good justification.

@@ -22,11 +22,3 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "sumweave.image" -}}
 {{- if .Values.image.digest }}{{ printf "%s@%s" .Values.image.repository .Values.image.digest }}{{ else }}{{ printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}{{ end }}
 {{- end }}
-{{- define "sumweave.envFrom" -}}
-{{- if .Values.existingConfigMap }}
-- configMapRef: {name: {{ .Values.existingConfigMap }}}
-{{- end }}
-{{- if .Values.existingSecret }}
-- secretRef: {name: {{ .Values.existingSecret }}}
-{{- end }}
-{{- end }}

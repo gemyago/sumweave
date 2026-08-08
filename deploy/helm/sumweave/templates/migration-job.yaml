@@ -12,7 +12,6 @@ spec:
   template:
     spec:
       automountServiceAccountToken: false
-      serviceAccountName: {{ include "sumweave.serviceAccountName" . }}
       restartPolicy: OnFailure
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
@@ -23,8 +22,11 @@ spec:
           image: {{ include "sumweave.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: {{- toYaml .Values.migration.args | nindent 12 }}
-          {{- if or .Values.existingConfigMap .Values.existingSecret }}
-          envFrom: {{- include "sumweave.envFrom" . | nindent 12 }}
+          {{- with .Values.migration.env }}
+          env: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.migration.envFrom }}
+          envFrom: {{- toYaml . | nindent 12 }}
           {{- end }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:

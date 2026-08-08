@@ -10,6 +10,7 @@ repository.
 
 - `make -C deploy tools` installs the pinned Helm binary.
 - `make -C deploy lint` lints the chart and renders default values.
+- `make -C deploy test` runs chart rendering contract tests.
 - Render production-like values before an install: `helm template sumweave
   deploy/helm/sumweave -f deploy/helm/sumweave/values-production.example.yaml`.
 

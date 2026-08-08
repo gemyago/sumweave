@@ -9,7 +9,7 @@
     },
     "test": {
       "executor": "nx:run-commands",
-      "options": {"command": "make -C deploy lint render-production"}
+      "options": {"command": "make -C deploy lint render-production test"}
     }
   }
 }

@@ -2,21 +2,8 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: {{ include "sumweave.fullname" . }}-{{ .Values.httpRoute.nameSuffix }}
+  name: {{ include "sumweave.fullname" . }}-route
   labels: {{- include "sumweave.labels" . | nindent 4 }}
 spec:
-  parentRefs:
-    - name: {{ required "httpRoute.gatewayName is required" .Values.httpRoute.gatewayName }}
-      namespace: {{ required "httpRoute.namespace is required" .Values.httpRoute.namespace }}
-      {{- with .Values.httpRoute.sectionName }}
-      sectionName: {{ . }}
-      {{- end }}
-  hostnames: {{- toYaml .Values.httpRoute.hostnames | nindent 4 }}
-  rules:
-    {{- range .Values.httpRoute.rules }}
-    - {{- toYaml . | nindent 6 }}
-      backendRefs:
-        - name: {{ include "sumweave.fullname" $ }}
-          port: {{ $.Values.service.port }}
-    {{- end }}
+{{- toYaml (required "httpRoute.spec is required when httpRoute.enabled is true" .Values.httpRoute.spec) | nindent 2 }}
 {{- end }}

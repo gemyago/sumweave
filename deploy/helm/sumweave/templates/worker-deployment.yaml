@@ -25,14 +25,23 @@ spec:
           image: {{ include "sumweave.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: {{- toYaml .Values.worker.args | nindent 12 }}
-          {{- if or .Values.existingConfigMap .Values.existingSecret }}
-          envFrom: {{- include "sumweave.envFrom" . | nindent 12 }}
+          {{- with .Values.env }}
+          env: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom: {{- toYaml . | nindent 12 }}
           {{- end }}
           securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           resources: {{- toYaml .Values.worker.resources | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
