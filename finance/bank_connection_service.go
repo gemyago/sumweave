@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
@@ -15,8 +16,10 @@ import (
 type BankConnectionService struct {
 	access             *accessGuard
 	pendingStartLookup bankConnectionPendingStartLookup
+	connectionStore    bankConnectionMetadataStore
 	linkCoordinator    bankConnectionLinkCoordinator
 	logger             *slog.Logger
+	now                func() time.Time
 }
 
 type bankConnectionServiceArgs struct {
@@ -41,6 +44,16 @@ type bankConnectionPendingStartLookup interface {
 		providerID domain.ProviderID,
 		state string,
 	) (*domain.PendingBankConnectionLinkStart, error)
+}
+
+type bankConnectionMetadataStore interface {
+	UpdateBankConnectionDisplayName(
+		ctx context.Context,
+		tenantID string,
+		connectionID string,
+		displayName string,
+		updatedAt time.Time,
+	) error
 }
 
 type bankConnectionLinkCoordinator interface {
@@ -72,6 +85,7 @@ func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionSe
 		),
 		ConnectionStore:  linkPersistence,
 		RawPayloadWriter: linkPersistence,
+		Logger:           args.Logger,
 		Now:              args.Now,
 		NewID:            args.NewID,
 		PendingStartTTL:  pendingBankConnectionLinkStartTTL,
@@ -82,8 +96,10 @@ func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionSe
 	return &BankConnectionService{
 		access:             newAccessGuard(args.Store),
 		pendingStartLookup: linkPersistence,
+		connectionStore:    linkPersistence,
 		linkCoordinator:    coordinator,
 		logger:             args.Logger.With("component", "bankConnectionService"),
+		now:                args.Now,
 	}, nil
 }
 
@@ -94,6 +110,9 @@ func (s *BankConnectionService) LinkTokenBankConnection(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.BankConnection{}, err
 	}
+	s.logger.InfoContext(ctx, "bank connection link requested",
+		slog.String("operation", "token"), slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID), slog.String("provider", params.Provider))
 	connection, err := s.linkCoordinator.LinkToken(ctx, internalproviders.TokenLinkRequest{
 		TenantID:    params.TenantID,
 		ActorUserID: params.ActorUserID,
@@ -101,11 +120,22 @@ func (s *BankConnectionService) LinkTokenBankConnection(
 		Token:       params.Token,
 	})
 	if err != nil {
+		s.logger.WarnContext(ctx, "bank connection link failed",
+			slog.String("operation", "token"), slog.String("failureStage", "coordinator"),
+			slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
+			slog.String("provider", params.Provider), slog.Any("err", err))
 		if isBankProviderConfigurationError(err) {
-			return domain.BankConnection{}, fmt.Errorf("%w: %s", ErrBankProviderNotConfigured, params.Provider)
+			return domain.BankConnection{}, fmt.Errorf(
+				"%w: %s",
+				ErrBankProviderNotConfigured,
+				params.Provider,
+			)
 		}
 		return domain.BankConnection{}, fmt.Errorf("link token bank connection: %w", err)
 	}
+	s.logger.InfoContext(ctx, "bank connection token link completed",
+		slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
+		slog.String("provider", params.Provider), slog.String("connectionId", connection.ID))
 	return connection, nil
 }
 
@@ -117,28 +147,45 @@ func (s *BankConnectionService) StartBankConnectionLink(
 		return ProviderLinkStart{}, err
 	}
 
-	s.logger.InfoContext(
-		ctx,
-		"starting bank connection link",
-		slog.String("redirectURL", params.RedirectURL),
-		slog.String("tenantId", params.TenantID),
-		slog.String("actorUserId", params.ActorUserID),
-		slog.String("provider", params.Provider),
-	)
+	s.logger.InfoContext(ctx, "bank connection link requested",
+		slog.String("operation", "redirectStart"), slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID), slog.String("provider", params.Provider))
 
-	result, err := s.linkCoordinator.StartRedirectLink(ctx, internalproviders.RedirectLinkStartRequest{
-		TenantID:           params.TenantID,
-		ActorUserID:        params.ActorUserID,
-		ProviderID:         domain.ProviderID(params.Provider),
-		RedirectURL:        params.RedirectURL,
-		BrowserCallbackURL: params.BrowserCallbackURL,
-	})
+	result, err := s.linkCoordinator.StartRedirectLink(
+		ctx,
+		internalproviders.RedirectLinkStartRequest{
+			TenantID:           params.TenantID,
+			ActorUserID:        params.ActorUserID,
+			ProviderID:         domain.ProviderID(params.Provider),
+			RedirectURL:        params.RedirectURL,
+			BrowserCallbackURL: params.BrowserCallbackURL,
+		},
+	)
 	if err != nil {
+		s.logger.WarnContext(ctx, "bank connection link failed",
+			slog.String("operation", "redirectStart"), slog.String("failureStage", "coordinator"),
+			slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
+			slog.String("provider", params.Provider), slog.Any("err", err))
 		if isBankProviderConfigurationError(err) {
-			return ProviderLinkStart{}, fmt.Errorf("%w: %s", ErrBankProviderNotConfigured, params.Provider)
+			return ProviderLinkStart{}, fmt.Errorf(
+				"%w: %s",
+				ErrBankProviderNotConfigured,
+				params.Provider,
+			)
 		}
 		return ProviderLinkStart{}, fmt.Errorf("start bank connection link: %w", err)
 	}
+	s.logger.InfoContext(
+		ctx,
+		"bank connection redirect link started",
+		slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID),
+		slog.String(
+			"provider",
+			params.Provider,
+		),
+		slog.Int("rawPayloadCount", len(result.RawPayloads)),
+	)
 	return ProviderLinkStart{
 		State:            result.State,
 		AuthorizationURL: result.AuthorizationURL,
@@ -153,23 +200,66 @@ func (s *BankConnectionService) FinishBankConnectionLink(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.BankConnection{}, err
 	}
-	connection, err := s.linkCoordinator.FinishRedirectLink(ctx, internalproviders.RedirectLinkFinishRequest{
-		TenantID:    params.TenantID,
-		ActorUserID: params.ActorUserID,
-		ProviderID:  domain.ProviderID(params.Provider),
-		State:       params.State,
-		Code:        params.Code,
-	})
+	s.logger.InfoContext(ctx, "bank connection link requested",
+		slog.String("operation", "redirectFinish"), slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID), slog.String("provider", params.Provider))
+	connection, err := s.linkCoordinator.FinishRedirectLink(
+		ctx,
+		internalproviders.RedirectLinkFinishRequest{
+			TenantID:    params.TenantID,
+			ActorUserID: params.ActorUserID,
+			ProviderID:  domain.ProviderID(params.Provider),
+			State:       params.State,
+			Code:        params.Code,
+		},
+	)
 	if err != nil {
+		s.logger.WarnContext(ctx, "bank connection link failed",
+			slog.String("operation", "redirectFinish"), slog.String("failureStage", "coordinator"),
+			slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
+			slog.String("provider", params.Provider), slog.Any("err", err))
 		if errors.Is(err, internalproviders.ErrPendingStartNotFound) {
 			return domain.BankConnection{}, ErrPendingBankConnectionLinkStartNotFound
 		}
 		if isBankProviderConfigurationError(err) {
-			return domain.BankConnection{}, fmt.Errorf("%w: %s", ErrBankProviderNotConfigured, params.Provider)
+			return domain.BankConnection{}, fmt.Errorf(
+				"%w: %s",
+				ErrBankProviderNotConfigured,
+				params.Provider,
+			)
 		}
 		return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", err)
 	}
+	s.logger.InfoContext(ctx, "bank connection redirect link completed",
+		slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
+		slog.String("provider", params.Provider), slog.String("connectionId", connection.ID))
 	return connection, nil
+}
+
+func (s *BankConnectionService) UpdateBankConnection(
+	ctx context.Context,
+	params UpdateBankConnectionParams,
+) error {
+	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
+		return err
+	}
+	displayName := strings.TrimSpace(params.Name)
+	if displayName == "" {
+		return ErrBankConnectionNameRequired
+	}
+	if err := s.connectionStore.UpdateBankConnectionDisplayName(
+		ctx,
+		strings.TrimSpace(params.TenantID),
+		strings.TrimSpace(params.ConnectionID),
+		displayName,
+		s.now(),
+	); err != nil {
+		if errors.Is(err, persistence.ErrBankConnectionNotFound) {
+			return ErrBankConnectionNotFound
+		}
+		return fmt.Errorf("update bank connection display name: %w", err)
+	}
+	return nil
 }
 
 func (s *BankConnectionService) GetPendingBankConnectionLinkStartByState(

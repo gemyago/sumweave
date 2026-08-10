@@ -3450,6 +3450,63 @@ func (_c *mockbankConnectionService_StartBankConnectionLink_Call) RunAndReturn(r
 	return _c
 }
 
+// UpdateBankConnection provides a mock function for the type mockbankConnectionService
+func (_mock *mockbankConnectionService) UpdateBankConnection(context1 context.Context, updateBankConnectionParams finance.UpdateBankConnectionParams) error {
+	ret := _mock.Called(context1, updateBankConnectionParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UpdateBankConnection")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.UpdateBankConnectionParams) error); ok {
+		r0 = returnFunc(context1, updateBankConnectionParams)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// mockbankConnectionService_UpdateBankConnection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateBankConnection'
+type mockbankConnectionService_UpdateBankConnection_Call struct {
+	*mock.Call
+}
+
+// UpdateBankConnection is a helper method to define mock.On call
+//   - context1 context.Context
+//   - updateBankConnectionParams finance.UpdateBankConnectionParams
+func (_e *mockbankConnectionService_Expecter) UpdateBankConnection(context1 interface{}, updateBankConnectionParams interface{}) *mockbankConnectionService_UpdateBankConnection_Call {
+	return &mockbankConnectionService_UpdateBankConnection_Call{Call: _e.mock.On("UpdateBankConnection", context1, updateBankConnectionParams)}
+}
+
+func (_c *mockbankConnectionService_UpdateBankConnection_Call) Run(run func(context1 context.Context, updateBankConnectionParams finance.UpdateBankConnectionParams)) *mockbankConnectionService_UpdateBankConnection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.UpdateBankConnectionParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.UpdateBankConnectionParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockbankConnectionService_UpdateBankConnection_Call) Return(err error) *mockbankConnectionService_UpdateBankConnection_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *mockbankConnectionService_UpdateBankConnection_Call) RunAndReturn(run func(context1 context.Context, updateBankConnectionParams finance.UpdateBankConnectionParams) error) *mockbankConnectionService_UpdateBankConnection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // newMockjobsService creates a new instance of mockjobsService. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func newMockjobsService(t interface {

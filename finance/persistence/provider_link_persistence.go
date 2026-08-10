@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/internal/providers"
@@ -112,6 +113,34 @@ func (p *ProviderLinkPersistence) SaveBankConnection(
 	connection domain.BankConnection,
 ) (domain.BankConnection, error) {
 	return p.Store.SaveBankConnection(ctx, connection)
+}
+
+func (p *ProviderLinkPersistence) GetBankConnection(
+	ctx context.Context,
+	connectionID string,
+) (*domain.BankConnection, error) {
+	return p.Store.GetBankConnection(ctx, connectionID)
+}
+
+func (p *ProviderLinkPersistence) UpdateBankConnectionDisplayName(
+	ctx context.Context,
+	tenantID string,
+	connectionID string,
+	displayName string,
+	updatedAt time.Time,
+) error {
+	model := bankConnectionModel{}
+	result := p.Store.db.WithContext(ctx).
+		Table(model.TableName()).
+		Where("id = ? AND tenant_id = ?", strings.TrimSpace(connectionID), strings.TrimSpace(tenantID)).
+		Updates(map[string]any{"display_name": displayName, columnUpdatedAt: updatedAt})
+	if result.Error != nil {
+		return fmt.Errorf("update bank connection display name: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrBankConnectionNotFound
+	}
+	return nil
 }
 
 func (p *ProviderLinkPersistence) ListBankConnections(

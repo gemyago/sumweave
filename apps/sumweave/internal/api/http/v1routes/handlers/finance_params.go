@@ -1805,6 +1805,52 @@ func newParamsParserFinanceUpdateFinanceCategory(rootHandler *RootHandler) param
 	}
 }
 
+type paramsParserFinanceUpdateFinanceConnection struct {
+	bindTenantID requestParamBinder[string, string]
+	bindConnectionID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceRenameRequest]
+}
+
+func (p *paramsParserFinanceUpdateFinanceConnection) parse(router httpRouter, req *http.Request) (*UpdateFinanceConnectionParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &UpdateFinanceConnectionParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindConnectionID(pathParamsCtx.Fork("connectionId"), readPathValue("connectionId", router, req), &reqParams.ConnectionID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceUpdateFinanceConnection(rootHandler *RootHandler) paramsParser[*UpdateFinanceConnectionParams] {
+	return &paramsParserFinanceUpdateFinanceConnection{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindConnectionID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceRenameRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceRenameRequest],
+			),
+			validateValue: NewFinanceRenameRequestValidator(),
+		}),
+	}
+}
+
 type paramsParserFinanceUpdateFinanceTag struct {
 	bindTenantID requestParamBinder[string, string]
 	bindTagID requestParamBinder[string, string]
@@ -2520,6 +2566,18 @@ type financeControllerBuilder struct {
 		void,
 		handlerActionFuncNoResponse[*UpdateFinanceCategoryParams, void],
 		httpHandlerActionFuncNoResponse[*UpdateFinanceCategoryParams, void],
+	]
+
+	// PATCH /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
+	//
+	// Request type: UpdateFinanceConnectionParams,
+	//
+	// Response type: none
+	UpdateFinanceConnection genericHandlerBuilder[
+		*UpdateFinanceConnectionParams,
+		void,
+		handlerActionFuncNoResponse[*UpdateFinanceConnectionParams, void],
+		httpHandlerActionFuncNoResponse[*UpdateFinanceConnectionParams, void],
 	]
 
 	// PATCH /api/v1/finance/tenants/{tenantId}/tags/{tagId}
@@ -3546,6 +3604,27 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 				defaultStatus: 204,
 				voidResult:    true,
 				paramsParser:  newParamsParserFinanceUpdateFinanceCategory(app),
+			},
+		),
+
+		// PATCH /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
+		UpdateFinanceConnection: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*UpdateFinanceConnectionParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*UpdateFinanceConnectionParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*UpdateFinanceConnectionParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceUpdateFinanceConnection(app),
 			},
 		),
 

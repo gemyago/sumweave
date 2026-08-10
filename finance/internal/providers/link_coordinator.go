@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -90,6 +91,7 @@ type LinkCoordinatorArgs struct {
 	ConnectionSecretWriter  ConnectionSecretWriter
 	ConnectionStore         ConnectionStore
 	RawPayloadWriter        RawPayloadWriter
+	Logger                  *slog.Logger
 	Now                     func() time.Time
 	NewID                   func() string
 	PendingStartTTL         time.Duration
@@ -102,6 +104,7 @@ type LinkCoordinator struct {
 	connectionSecretWriter  ConnectionSecretWriter
 	connectionStore         ConnectionStore
 	rawPayloadWriter        RawPayloadWriter
+	logger                  *slog.Logger
 	now                     func() time.Time
 	newID                   func() string
 	pendingStartTTL         time.Duration
@@ -158,6 +161,9 @@ func NewLinkCoordinator(args LinkCoordinatorArgs) (*LinkCoordinator, error) {
 	if args.PendingStartTTL <= 0 {
 		args.PendingStartTTL = defaultPendingStartTTL
 	}
+	if args.Logger == nil {
+		args.Logger = slog.New(slog.DiscardHandler)
+	}
 	return &LinkCoordinator{
 		providerProfileRegistry: args.ProviderProfileRegistry,
 		connectorRegistry:       args.ConnectorRegistry,
@@ -165,22 +171,52 @@ func NewLinkCoordinator(args LinkCoordinatorArgs) (*LinkCoordinator, error) {
 		connectionSecretWriter:  args.ConnectionSecretWriter,
 		connectionStore:         args.ConnectionStore,
 		rawPayloadWriter:        args.RawPayloadWriter,
+		logger:                  args.Logger.With("component", "linkCoordinator"),
 		now:                     args.Now,
 		newID:                   args.NewID,
 		pendingStartTTL:         args.PendingStartTTL,
 	}, nil
 }
 
+//nolint:funlen // Ordered durable-link milestones remain together for traceable recovery.
 func (c *LinkCoordinator) StartRedirectLink(
 	ctx context.Context,
 	request RedirectLinkStartRequest,
 ) (StartLinkResult, error) {
 	profile, connector, err := c.resolveConnector(request.ProviderID)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectStart"),
+			slog.String("failureStage", "resolveConnector"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", ""),
+			slog.Any("err", err),
+		)
 		return StartLinkResult{}, err
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link connector resolved",
+		slog.String("operation", "redirectStart"),
+		slog.String("tenantId", request.TenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+	)
 	capabilities := connector.Capabilities()
 	if !capabilities.SupportsStartLink {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectStart"),
+			slog.String("failureStage", "capabilityCheck"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", ErrRedirectLinkUnsupported),
+		)
 		return StartLinkResult{}, ErrRedirectLinkUnsupported
 	}
 
@@ -190,15 +226,35 @@ func (c *LinkCoordinator) StartRedirectLink(
 		BrowserCallbackURL: strings.TrimSpace(request.BrowserCallbackURL),
 	})
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectStart"),
+			slog.String("failureStage", "connectorStart"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return StartLinkResult{}, fmt.Errorf("start redirect link: %w", err)
 	}
 	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectStart"),
+			slog.String("failureStage", "sanitizePayload"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return StartLinkResult{}, err
 	}
 
 	now := c.now()
-	_, err = c.pendingStartStore.SavePendingStart(ctx, domain.PendingBankConnectionLinkStart{
+	pendingStart := domain.PendingBankConnectionLinkStart{
 		ID:                c.newID(),
 		TenantID:          strings.TrimSpace(request.TenantID),
 		ActorUserID:       strings.TrimSpace(request.ActorUserID),
@@ -216,26 +272,86 @@ func (c *LinkCoordinator) StartRedirectLink(
 		ExpiresAt: now.Add(c.pendingStartTTL),
 		CreatedAt: now,
 		UpdatedAt: now,
-	})
+	}
+	_, err = c.pendingStartStore.SavePendingStart(ctx, pendingStart)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectStart"),
+			slog.String("failureStage", "savePendingStart"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return StartLinkResult{}, fmt.Errorf("save pending start: %w", err)
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link pending start saved",
+		slog.String("operation", "redirectStart"),
+		slog.String("tenantId", request.TenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+		slog.String("pendingStartId", pendingStart.ID),
+		slog.Int("rawPayloadCount", len(result.RawPayloads)),
+	)
 	return result, nil
 }
 
+//nolint:funlen // Ordered durable-link milestones remain together for traceable recovery.
 func (c *LinkCoordinator) FinishRedirectLink(
 	ctx context.Context,
 	request RedirectLinkFinishRequest,
 ) (domain.BankConnection, error) {
 	profile, connector, err := c.resolveConnector(request.ProviderID)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectFinish"),
+			slog.String("failureStage", "resolveConnector"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", ""),
+			slog.Any("err", err),
+		)
 		return domain.BankConnection{}, err
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link connector resolved",
+		slog.String("operation", "redirectFinish"),
+		slog.String("tenantId", request.TenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+	)
 	capabilities := connector.Capabilities()
 	if !capabilities.SupportsFinishLink {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectFinish"),
+			slog.String("failureStage", "capabilityCheck"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", ErrRedirectLinkUnsupported),
+		)
 		return domain.BankConnection{}, ErrRedirectLinkUnsupported
 	}
 	if capabilities.RequiresRedirectCode && strings.TrimSpace(request.Code) == "" {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectFinish"),
+			slog.String("failureStage", "validateCode"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", ErrRedirectCodeRequired),
+		)
 		return domain.BankConnection{}, ErrRedirectCodeRequired
 	}
 
@@ -249,11 +365,30 @@ func (c *LinkCoordinator) FinishRedirectLink(
 		ConsumedAt:  now,
 	})
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectFinish"),
+			slog.String("failureStage", "consumePendingStart"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		if errors.Is(err, ErrPendingStartNotFound) {
 			return domain.BankConnection{}, ErrPendingStartNotFound
 		}
 		return domain.BankConnection{}, fmt.Errorf("consume pending start: %w", err)
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link pending start consumed",
+		slog.String("operation", "redirectFinish"),
+		slog.String("tenantId", request.TenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+		slog.String("pendingStartId", pendingStart.ID),
+	)
 
 	result, err := connector.FinishLink(ctx, FinishLinkRequest{
 		Profile: profile,
@@ -266,10 +401,36 @@ func (c *LinkCoordinator) FinishRedirectLink(
 		},
 	})
 	if err != nil {
-		return domain.BankConnection{}, c.restorePendingStartOnError(ctx, request, profile, err, "finish redirect link")
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectFinish"),
+			slog.String("failureStage", "connectorFinish"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
+		return domain.BankConnection{}, c.restorePendingStartOnError(
+			ctx,
+			request,
+			profile,
+			err,
+			"finish redirect link",
+		)
 	}
 	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectFinish"),
+			slog.String("failureStage", "sanitizePayload"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return domain.BankConnection{}, c.restorePendingStartOnError(
 			ctx,
 			request,
@@ -279,9 +440,21 @@ func (c *LinkCoordinator) FinishRedirectLink(
 		)
 	}
 
-	connection, err := c.saveLinkedConnection(ctx, strings.TrimSpace(request.TenantID), profile, result)
+	connection, err := c.saveLinkedConnection(
+		ctx,
+		"redirectFinish",
+		strings.TrimSpace(request.TenantID),
+		profile,
+		result,
+	)
 	if err != nil {
-		return domain.BankConnection{}, c.restorePendingStartOnError(ctx, request, profile, err, "save bank connection")
+		return domain.BankConnection{}, c.restorePendingStartOnError(
+			ctx,
+			request,
+			profile,
+			err,
+			"save bank connection",
+		)
 	}
 	return connection, nil
 }
@@ -292,9 +465,37 @@ func (c *LinkCoordinator) LinkToken(
 ) (domain.BankConnection, error) {
 	profile, connector, err := c.resolveConnector(request.ProviderID)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "token"),
+			slog.String("failureStage", "resolveConnector"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", ""),
+			slog.Any("err", err),
+		)
 		return domain.BankConnection{}, err
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link connector resolved",
+		slog.String("operation", "token"),
+		slog.String("tenantId", request.TenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+	)
 	if !connector.Capabilities().SupportsTokenLink {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "token"),
+			slog.String("failureStage", "capabilityCheck"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", ErrTokenLinkUnsupported),
+		)
 		return domain.BankConnection{}, ErrTokenLinkUnsupported
 	}
 
@@ -303,14 +504,50 @@ func (c *LinkCoordinator) LinkToken(
 		Token:   strings.TrimSpace(request.Token),
 	})
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "token"),
+			slog.String("failureStage", "connectorToken"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return domain.BankConnection{}, fmt.Errorf("link token: %w", err)
 	}
 	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "token"),
+			slog.String("failureStage", "sanitizePayload"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return domain.BankConnection{}, err
 	}
-	connection, err := c.saveLinkedConnection(ctx, strings.TrimSpace(request.TenantID), profile, result)
+	connection, err := c.saveLinkedConnection(
+		ctx,
+		"token",
+		strings.TrimSpace(request.TenantID),
+		profile,
+		result,
+	)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "token"),
+			slog.String("failureStage", "saveConnection"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return domain.BankConnection{}, fmt.Errorf("save bank connection: %w", err)
 	}
 	return connection, nil
@@ -362,17 +599,40 @@ func (c *LinkCoordinator) restorePendingStartOnError(
 		RestoredAt:  c.now(),
 	})
 	if restoreErr != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", "redirectFinish"),
+			slog.String("failureStage", "restorePendingStart"),
+			slog.String("tenantId", request.TenantID),
+			slog.String("provider", string(request.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", restoreErr),
+		)
 		return fmt.Errorf(
 			"%s: %w",
 			operation,
-			errors.Join(linkErr, fmt.Errorf("restore pending bank connection link start: %w", restoreErr)),
+			errors.Join(
+				linkErr,
+				fmt.Errorf("restore pending bank connection link start: %w", restoreErr),
+			),
 		)
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link pending start restored",
+		slog.String("operation", "redirectFinish"),
+		slog.String("tenantId", request.TenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+	)
 	return fmt.Errorf("%s: %w", operation, linkErr)
 }
 
+//nolint:funlen // Ordered persistence milestones remain together for traceable recovery.
 func (c *LinkCoordinator) saveLinkedConnection(
 	ctx context.Context,
+	operation string,
 	tenantID string,
 	profile ProviderProfile,
 	result LinkResult,
@@ -384,8 +644,26 @@ func (c *LinkCoordinator) saveLinkedConnection(
 		strings.TrimSpace(result.Secret),
 	)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", operation),
+			slog.String("failureStage", "saveSecret"),
+			slog.String("tenantId", tenantID),
+			slog.String("provider", string(profile.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return domain.BankConnection{}, fmt.Errorf("save connection secret: %w", err)
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link secret saved",
+		slog.String("operation", "persist"),
+		slog.String("tenantId", tenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+	)
 
 	now := c.now()
 	connection := domain.BankConnection{
@@ -405,6 +683,16 @@ func (c *LinkCoordinator) saveLinkedConnection(
 	if profile.ProviderID == domain.ProviderIDPKO {
 		existingConnections, listErr := c.connectionStore.ListBankConnections(ctx, tenantID)
 		if listErr != nil {
+			c.logger.WarnContext(
+				ctx,
+				"bank link coordinator failed",
+				slog.String("operation", operation),
+				slog.String("failureStage", "pkoConnectionLookup"),
+				slog.String("tenantId", tenantID),
+				slog.String("provider", string(profile.ProviderID)),
+				slog.String("connectorId", string(profile.ConnectorID)),
+				slog.Any("err", listErr),
+			)
 			return domain.BankConnection{}, fmt.Errorf("list bank connections: %w", listErr)
 		}
 		for _, existingConnection := range existingConnections {
@@ -418,8 +706,27 @@ func (c *LinkCoordinator) saveLinkedConnection(
 
 	savedConnection, err := c.connectionStore.SaveBankConnection(ctx, connection)
 	if err != nil {
+		c.logger.WarnContext(
+			ctx,
+			"bank link coordinator failed",
+			slog.String("operation", operation),
+			slog.String("failureStage", "saveConnection"),
+			slog.String("tenantId", tenantID),
+			slog.String("provider", string(profile.ProviderID)),
+			slog.String("connectorId", string(profile.ConnectorID)),
+			slog.Any("err", err),
+		)
 		return domain.BankConnection{}, fmt.Errorf("save bank connection: %w", err)
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link connection saved",
+		slog.String("operation", "persist"),
+		slog.String("tenantId", tenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+		slog.String("connectionId", savedConnection.ID),
+	)
 	for _, payload := range result.RawPayloads {
 		capturedAt := payload.CapturedAt
 		if capturedAt.IsZero() {
@@ -434,8 +741,28 @@ func (c *LinkCoordinator) saveLinkedConnection(
 			CapturedAt:       capturedAt,
 		})
 		if savePayloadErr != nil {
+			c.logger.WarnContext(
+				ctx,
+				"bank link coordinator failed",
+				slog.String("operation", operation),
+				slog.String("failureStage", "saveRawPayload"),
+				slog.String("tenantId", tenantID),
+				slog.String("provider", string(profile.ProviderID)),
+				slog.String("connectorId", string(profile.ConnectorID)),
+				slog.Any("err", savePayloadErr),
+			)
 			return domain.BankConnection{}, fmt.Errorf("save raw payload: %w", savePayloadErr)
 		}
 	}
+	c.logger.InfoContext(
+		ctx,
+		"bank link raw payloads saved",
+		slog.String("operation", "persist"),
+		slog.String("tenantId", tenantID),
+		slog.String("provider", string(profile.ProviderID)),
+		slog.String("connectorId", string(profile.ConnectorID)),
+		slog.String("connectionId", savedConnection.ID),
+		slog.Int("rawPayloadCount", len(result.RawPayloads)),
+	)
 	return savedConnection, nil
 }

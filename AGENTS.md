@@ -158,13 +158,14 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 - unless explicitly documented, internal logic do not need to trim or otherwise normalize identifiers. Upper orchestration layer may chose to do it if needed.
 - system must have reasonable logging that allows to troubleshoot problems and understand the flow of the system.
 - when logging attributes, use camelCase for keys
+- avoid logging helpers, inline the logging statements instead
 - required component dependencies must be enforced in constructor, not in methods that use them
 
 ### Testing and mocking
 
 - Mockery is the default for dependency mocks in tests.
 - Hand-written stubs/fakes/spies are forbidden without user approval.
-- Avoid unit testing logger statements unless it's part of a business logic (which is rare).
+- Avoid unit testing logger statements unless it's part of a business logic (which is rare). Logs are not business logic.
 
 ## Manual E2E Testing
 

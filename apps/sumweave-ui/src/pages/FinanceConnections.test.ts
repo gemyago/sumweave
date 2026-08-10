@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getSyntheticLinkState: vi.fn(),
   saveSyntheticLinkState: vi.fn(),
   deleteConnection: vi.fn(),
+  renameConnection: vi.fn(),
   triggerConnectionSync: vi.fn(),
   getJob: vi.fn(),
 }))
@@ -80,6 +81,7 @@ describe('Finance connections page', () => {
     mocks.getSyntheticLinkState.mockResolvedValue({ provider: 'synthetic', state: 'state-1', configuredAccounts: [], canFinish: false })
     mocks.saveSyntheticLinkState.mockResolvedValue({ provider: 'synthetic', state: 'state-1', configuredAccounts: [], canFinish: false })
     mocks.deleteConnection.mockResolvedValue(undefined)
+    mocks.renameConnection.mockResolvedValue(undefined)
     mocks.triggerConnectionSync.mockResolvedValue({ jobId: 'job-2', jobType: 'finance.bank_connection_sync' })
     mocks.getJob.mockResolvedValue({ id: 'job-2', status: 'queued', jobType: 'finance.bank_connection_sync' })
   })
@@ -194,6 +196,69 @@ describe('Finance connections page', () => {
       expect(mocks.deleteConnection).toHaveBeenCalledWith({ tenantId: 'tenant-1', connectionId: 'connection-2' }),
     )
     await waitFor(() => expect(screen.getAllByText('PKO linked')).toHaveLength(1))
+  })
+
+  it('renames a connection inline and updates its card without reloading the list', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Rename connection Mono (Provider ref: ref)' }))
+    const name = screen.getByLabelText('Connection name')
+    await user.clear(name)
+    await user.type(name, 'Joint checking')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(mocks.renameConnection).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      connectionId: 'connection-1',
+      name: 'Joint checking',
+    }))
+    expect(screen.getByText('Joint checking')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Renamed connection to Joint checking.')
+    expect(screen.getByRole('button', { name: 'Rename connection Joint checking (Provider ref: ref)' })).toHaveFocus()
+    expect(mocks.listConnections).toHaveBeenCalledTimes(1)
+  })
+
+  it('focuses the connection name input when rename opens and restores Rename focus after cancel', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    const rename = await screen.findByRole('button', { name: 'Rename connection Mono (Provider ref: ref)' })
+    await user.click(rename)
+    expect(screen.getByLabelText('Connection name')).toHaveFocus()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.getByRole('button', { name: 'Rename connection Mono (Provider ref: ref)' })).toHaveFocus()
+  })
+
+  it('keeps the rename form and draft with a card-local input-associated error when saving fails', async () => {
+    const user = userEvent.setup()
+    mocks.renameConnection.mockRejectedValueOnce(new Error('Rename failed'))
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: 'Rename connection Mono (Provider ref: ref)' }))
+    const name = screen.getByLabelText('Connection name')
+    await user.clear(name)
+    await user.type(name, 'Joint checking')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    const renameError = await screen.findByRole('alert')
+    const nameInput = screen.getByLabelText('Connection name')
+    expect(renameError).toHaveTextContent('Rename failed')
+    expect(nameInput).toHaveValue('Joint checking')
+    expect(nameInput).toHaveAttribute('aria-describedby', 'finance-connection-rename-error-connection-1')
+    expect(nameInput).toHaveFocus()
+  })
+
+  it('gives duplicate connection names distinct Rename button names using their visible secondary identifiers', async () => {
+    mocks.listConnections.mockResolvedValueOnce([
+      createConnectionFixture({ id: 'connection-1', displayName: 'PKO linked', providerReference: 'pko-ref-1' }),
+      createConnectionFixture({ id: 'connection-2', displayName: 'PKO linked', providerReference: 'pko-ref-2', schedule: { ...createConnectionFixture().schedule!, connectionId: 'connection-2' } }),
+    ])
+    renderPage()
+
+    expect(await screen.findByRole('button', { name: 'Rename connection PKO linked (Provider ref: pko-ref-1)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rename connection PKO linked (Provider ref: pko-ref-2)' })).toBeInTheDocument()
   })
 
   it('keeps the connection when in-place delete confirmation is canceled', async () => {

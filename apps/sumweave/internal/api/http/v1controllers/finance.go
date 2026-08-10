@@ -167,6 +167,7 @@ type financeService interface {
 }
 
 type bankConnectionService interface {
+	UpdateBankConnection(context.Context, financepkg.UpdateBankConnectionParams) error
 	LinkTokenBankConnection(
 		context.Context,
 		financepkg.LinkTokenBankConnectionParams,
@@ -1563,6 +1564,25 @@ func (c *FinanceController) DeleteFinanceConnection(
 	return c.deps.AuthMiddleware(inner)
 }
 
+func (c *FinanceController) UpdateFinanceConnection(
+	builder handlers.NoResponseHandlerBuilder[*models.UpdateFinanceConnectionParams],
+) http.Handler {
+	inner := builder.HandleWith(func(ctx context.Context, params *models.UpdateFinanceConnectionParams) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		err = c.deps.BankConnectionService.UpdateBankConnection(ctx, financepkg.UpdateBankConnectionParams{
+			ActorUserID:  userID,
+			TenantID:     params.TenantID,
+			ConnectionID: params.ConnectionID,
+			Name:         params.Payload.Name,
+		})
+		return mapBankConnectionError(err, "rename finance connection failed")
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
 func (c *FinanceController) ListFinanceTags(
 	builder handlers.HandlerBuilder[*models.ListFinanceTagsParams, *models.FinanceTagsResponse],
 ) http.Handler {
@@ -2700,6 +2720,8 @@ func mapBankConnectionError(err error, fallback string) error {
 		)
 	case errors.Is(err, financepkg.ErrBankConnectionNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("bank connection", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrBankConnectionNameRequired):
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("name", "bank connection name is required"), err)
 	case errors.As(err, &providerResponseErr) && providerResponseErr.IsClientError():
 		return fmt.Errorf(
 			"%w: %w",

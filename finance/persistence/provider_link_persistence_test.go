@@ -203,6 +203,95 @@ func TestProviderLinkPersistence(t *testing.T) {
 		assert.Equal(t, payload.ID, savedPayload.ID)
 	})
 
+	t.Run("renames only connection metadata without replacing concurrent fields", func(t *testing.T) {
+		fake := faker.New()
+		store := NewStore(openTestDatabase(t))
+		persistence := NewProviderLinkPersistence(store)
+		createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		tenantID := "tenant-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		original := domain.BankConnection{
+			ID:                connectionID,
+			TenantID:          tenantID,
+			Provider:          string(domain.ProviderIDPKO),
+			ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+			DisplayName:       "Original " + fake.Company().Name(),
+			ProviderReference: "reference-original-" + fake.UUID().V4(),
+			ExternalID:        "external-original-" + fake.UUID().V4(),
+			SecretID:          "secret-original-" + fake.UUID().V4(),
+			State:             domain.BankConnectionStateActive,
+			LastSyncJobID:     "job-original-" + fake.UUID().V4(),
+			LastSyncError:     "sync-original-" + fake.UUID().V4(),
+			CreatedAt:         createdAt,
+			UpdatedAt:         createdAt,
+		}
+		_, err := persistence.SaveBankConnection(t.Context(), original)
+		require.NoError(t, err)
+
+		reauthAt := createdAt.Add(time.Hour)
+		lastSyncStartedAt := createdAt.Add(2 * time.Hour)
+		lastSuccessfulSyncAt := createdAt.Add(3 * time.Hour)
+		concurrent := original
+		concurrent.ProviderReference = "reference-concurrent-" + fake.UUID().V4()
+		concurrent.ExternalID = "external-concurrent-" + fake.UUID().V4()
+		concurrent.SecretID = "secret-concurrent-" + fake.UUID().V4()
+		concurrent.State = domain.BankConnectionStateReauthRequired
+		concurrent.Reauth = &domain.ConnectionReauthMetadata{
+			RequiredAt: &reauthAt,
+			Reason:     "reason-" + fake.Lorem().Word(),
+		}
+		concurrent.LastSyncJobID = "job-concurrent-" + fake.UUID().V4()
+		concurrent.LastSyncStartedAt = &lastSyncStartedAt
+		concurrent.LastSuccessfulSyncAt = &lastSuccessfulSyncAt
+		concurrent.LastSyncError = "sync-concurrent-" + fake.UUID().V4()
+		concurrent.UpdatedAt = createdAt.Add(4 * time.Hour)
+		_, err = persistence.SaveBankConnection(t.Context(), concurrent)
+		require.NoError(t, err)
+
+		renamedAt := createdAt.Add(5 * time.Hour)
+		renamedDisplayName := "Renamed " + fake.Company().Name()
+		require.NoError(t, persistence.UpdateBankConnectionDisplayName(
+			t.Context(), tenantID, connectionID, renamedDisplayName, renamedAt,
+		))
+		got, err := persistence.GetBankConnection(t.Context(), connectionID)
+		require.NoError(t, err)
+		expected := concurrent
+		expected.DisplayName = renamedDisplayName
+		expected.UpdatedAt = renamedAt
+		gotMetadata := *got
+		expectedMetadata := expected
+		gotMetadata.CreatedAt = time.Time{}
+		gotMetadata.UpdatedAt = time.Time{}
+		gotMetadata.LastSyncStartedAt = nil
+		gotMetadata.LastSuccessfulSyncAt = nil
+		expectedMetadata.CreatedAt = time.Time{}
+		expectedMetadata.UpdatedAt = time.Time{}
+		expectedMetadata.LastSyncStartedAt = nil
+		expectedMetadata.LastSuccessfulSyncAt = nil
+		require.NotNil(t, gotMetadata.Reauth)
+		require.NotNil(t, expectedMetadata.Reauth)
+		gotReauth := *gotMetadata.Reauth
+		gotReauth.RequiredAt = nil
+		gotMetadata.Reauth = &gotReauth
+		expectedReauth := *expectedMetadata.Reauth
+		expectedReauth.RequiredAt = nil
+		expectedMetadata.Reauth = &expectedReauth
+		assert.Equal(t, expectedMetadata, gotMetadata)
+		assert.True(t, expected.CreatedAt.Equal(got.CreatedAt))
+		assert.True(t, expected.UpdatedAt.Equal(got.UpdatedAt))
+		require.NotNil(t, got.LastSyncStartedAt)
+		require.NotNil(t, got.LastSuccessfulSyncAt)
+		assert.True(t, expected.LastSyncStartedAt.Equal(*got.LastSyncStartedAt))
+		assert.True(t, expected.LastSuccessfulSyncAt.Equal(*got.LastSuccessfulSyncAt))
+		require.NotNil(t, got.Reauth.RequiredAt)
+		assert.True(t, expected.Reauth.RequiredAt.Equal(*got.Reauth.RequiredAt))
+
+		err = persistence.UpdateBankConnectionDisplayName(
+			t.Context(), "tenant-foreign-"+fake.UUID().V4(), connectionID, renamedDisplayName, renamedAt,
+		)
+		require.ErrorIs(t, err, ErrBankConnectionNotFound)
+	})
+
 	t.Run("returns persistence errors when tables are unavailable", func(t *testing.T) {
 		fake := faker.New()
 		database := openTestDatabase(t)

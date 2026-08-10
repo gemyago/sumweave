@@ -16,6 +16,14 @@ agentRuntime:
 auth:
   jwtSigningKey: local-secret-key
 
+finance:
+  providers:
+    enableBanking:
+      # Dummy app ID and private key for local development.
+      # Create local-user.yaml to override
+      appID: "local-dummy-app-id"
+      privateKeyPath: "internal/config/local-dummy-private-key.pem"
+
 workspacefs:
   platformAgentsPath: ../../.platform-agents
 

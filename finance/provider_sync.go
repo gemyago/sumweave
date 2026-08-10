@@ -24,6 +24,7 @@ const (
 
 var (
 	ErrBankConnectionNotFound                 = errors.New("bank connection not found")
+	ErrBankConnectionNameRequired             = errors.New("bank connection name is required")
 	ErrPendingBankConnectionLinkStartNotFound = errors.New("pending bank connection link start not found")
 	ErrBankProviderNotConfigured              = errors.New("bank provider not configured")
 	ErrUnsupportedBankProvider                = errors.New("unsupported bank provider")

@@ -175,6 +175,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "list connections", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/connections"},
 			{name: "list connection synced accounts", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a/accounts"},
 			{name: "delete connection", method: http.MethodDelete, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a"},
+			{name: "rename connection", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a", body: `{"name":"Connection updated"}`},
 			{name: "link connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-token", body: `{"provider":"monobank","token":"token-1"}`},
 			{name: "start redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/start", body: `{"provider":"pko","callbackUrl":"https://app.example.test/#/finance/connections"}`},
 			{name: "finish redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/finish", body: `{"provider":"pko","state":"state-1","code":"code-1"}`},
@@ -1243,6 +1244,11 @@ func TestFinanceController(t *testing.T) {
 					},
 				}}, nil)
 			bankConnections.EXPECT().
+				UpdateBankConnection(mock.Anything, financepkg.UpdateBankConnectionParams{
+					ActorUserID: userID, TenantID: tenantID, ConnectionID: connectionID, Name: "Renamed connection",
+				}).
+				Return(nil)
+			bankConnections.EXPECT().
 				LinkTokenBankConnection(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.LinkTokenBankConnectionParams) (domain.BankConnection, error) {
 					require.Equal(t, userID, params.ActorUserID)
@@ -1471,6 +1477,12 @@ func TestFinanceController(t *testing.T) {
 				{
 					method: http.MethodDelete,
 					target: "/api/v1/finance/tenants/" + tenantID + "/connections/" + connectionID,
+					status: http.StatusNoContent,
+				},
+				{
+					method: http.MethodPatch,
+					target: "/api/v1/finance/tenants/" + tenantID + "/connections/" + connectionID,
+					body:   `{"name":"Renamed connection"}`,
 					status: http.StatusNoContent,
 				},
 				{
@@ -1728,6 +1740,46 @@ func TestFinanceController(t *testing.T) {
 			})
 		},
 	)
+
+	t.Run("registered connection rename route maps access not found and invalid names", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		target := "/api/v1/finance/tenants/" + tenantID + "/connections/" + connectionID
+
+		for _, tc := range []struct {
+			name   string
+			err    error
+			status int
+		}{
+			{name: "tenant access denied", err: financepkg.ErrTenantAccessDenied, status: http.StatusUnauthorized},
+			{name: "connection not found", err: financepkg.ErrBankConnectionNotFound, status: http.StatusNotFound},
+			{name: "blank name", err: financepkg.ErrBankConnectionNameRequired, status: http.StatusBadRequest},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				name := "Renamed " + fake.Lorem().Word()
+				bankConnections := newMockbankConnectionService(t)
+				bankConnections.EXPECT().UpdateBankConnection(
+					mock.Anything,
+					financepkg.UpdateBankConnectionParams{
+						ActorUserID:  userID,
+						TenantID:     tenantID,
+						ConnectionID: connectionID,
+						Name:         name,
+					},
+				).Return(tc.err).Once()
+
+				resp := httptest.NewRecorder()
+				newHandler(
+					newMockfinanceService(t),
+					bankConnections,
+					makeAuthMiddleware(userID),
+				).ServeHTTP(resp, newRequest(http.MethodPatch, target, `{"name":`+fmt.Sprintf("%q", name)+`}`, true))
+				require.Equal(t, tc.status, resp.Code)
+				assert.Empty(t, resp.Body.String())
+			})
+		}
+	})
 
 	t.Run(
 		"synthetic link-state endpoints round trip stable account keys with auth and tenant isolation",

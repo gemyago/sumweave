@@ -215,6 +215,22 @@ describe('finance api', () => {
     ])
   })
 
+  it('renames a connection with its tenant-scoped endpoint', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return { ok: true, status: 204, statusText: 'No Content', json: async () => undefined } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await api.renameConnection({ tenantId: 'tenant 1', connectionId: 'connection 1', name: 'Joint checking' })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].init?.method).toBe('PATCH')
+    expect(new URL(String(calls[0].input)).pathname).toBe('/api/v1/finance/tenants/tenant%201/connections/connection%201')
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ name: 'Joint checking' })
+  })
+
   it('rejects malformed or missing required dashboard timestamps and nested fields', async () => {
     const dashboard = {
       period: { preset: 'current_month', startDate: '2026-03-29T00:00:00+14:00', endDate: '2026-03-31', previous: { startDate: '2026-02-01', endDate: '2026-02-28' }, next: { startDate: '2026-04-01', endDate: '2026-04-30' } },

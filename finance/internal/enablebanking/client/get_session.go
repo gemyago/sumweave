@@ -29,9 +29,6 @@ func (c *Client) GetSession(ctx context.Context, params GetSessionParams) (*Sess
 		response.SessionID = strings.TrimSpace(params.SessionID)
 	}
 	response.AccountsData = normalizeAccounts(response.AccountsData)
-	c.logger.DebugContext(ctx, "fetched enable banking session",
-		slog.String("sessionId", params.SessionID),
-		slog.Any("session", response),
-	)
+	c.logger.DebugContext(ctx, "fetched enable banking session", slog.Int("accountCount", len(response.AccountsData)))
 	return normalizeSessionResponse(response), nil
 }

@@ -392,6 +392,7 @@ export interface SignalFinanceApi {
   getTransferPartner(params: { tenantId: string; transactionId: string }): Promise<FinanceTransaction>
   listConnections(params: { tenantId: string }): Promise<FinanceBankConnection[]>
   listConnectionSyncedAccounts(params: { tenantId: string; connectionId: string }): Promise<FinanceConnectionSyncedAccount[]>
+  renameConnection(params: { tenantId: string; connectionId: string; name: string }): Promise<void>
   linkTokenConnection(params: { tenantId: string; provider: string; token: string }): Promise<FinanceBankConnection>
   startRedirectConnection(params: { tenantId: string; provider: string; callbackUrl: string }): Promise<FinanceConnectionRedirectStart>
   finishRedirectConnection(params: { tenantId: string; provider: string; code?: string; state: string }): Promise<FinanceBankConnection>
@@ -740,6 +741,13 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}/accounts`,
       })
       return requireItems<RawConnectionSyncedAccount>(json, 'finance.connectionSyncedAccounts.items').map(mapConnectionSyncedAccount)
+    },
+    async renameConnection({ tenantId, connectionId, name }) {
+      await request<void>({
+        method: 'PATCH',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}`,
+        body: { name },
+      })
     },
     async linkTokenConnection({ tenantId, provider, token }) {
       return mapConnection(
