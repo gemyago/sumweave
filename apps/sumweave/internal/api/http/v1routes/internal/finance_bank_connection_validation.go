@@ -26,9 +26,6 @@ func NewFinanceBankConnectionValidator() FieldValidator[*FinanceBankConnection] 
 	validateProviderReference := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateExternalID := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
-	)
 	validateState := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
@@ -57,7 +54,6 @@ func NewFinanceBankConnectionValidator() FieldValidator[*FinanceBankConnection] 
 		validateProvider(bindingCtx.Fork("provider"), value.Provider)
 		validateDisplayName(bindingCtx.Fork("displayName"), value.DisplayName)
 		validateProviderReference(bindingCtx.Fork("providerReference"), value.ProviderReference)
-		validateExternalID(bindingCtx.Fork("externalId"), value.ExternalID)
 		validateState(bindingCtx.Fork("state"), value.State)
 		validateLastSyncJobID(bindingCtx.Fork("lastSyncJobId"), value.LastSyncJobID)
 		validateLastSyncStartedAt(bindingCtx.Fork("lastSyncStartedAt"), value.LastSyncStartedAt)

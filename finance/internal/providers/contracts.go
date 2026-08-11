@@ -63,7 +63,6 @@ type LinkTokenRequest struct {
 type LinkResult struct {
 	DisplayName       string
 	ProviderReference string
-	ExternalID        string
 	Secret            string
 	State             domain.BankConnectionState
 	RawPayloads       []domain.ProviderRawPayloadObservation

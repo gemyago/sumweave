@@ -129,7 +129,6 @@ export interface FinanceBankConnection {
   provider: string
   displayName: string
   providerReference: string
-  externalId: string
   state: string
   lastSyncJobId?: string
   lastSyncStartedAt?: Date | null
@@ -392,6 +391,7 @@ export interface SignalFinanceApi {
   getTransferPartner(params: { tenantId: string; transactionId: string }): Promise<FinanceTransaction>
   listConnections(params: { tenantId: string }): Promise<FinanceBankConnection[]>
   listConnectionSyncedAccounts(params: { tenantId: string; connectionId: string }): Promise<FinanceConnectionSyncedAccount[]>
+  renameConnection(params: { tenantId: string; connectionId: string; name: string }): Promise<void>
   linkTokenConnection(params: { tenantId: string; provider: string; token: string }): Promise<FinanceBankConnection>
   startRedirectConnection(params: { tenantId: string; provider: string; callbackUrl: string }): Promise<FinanceConnectionRedirectStart>
   finishRedirectConnection(params: { tenantId: string; provider: string; code?: string; state: string }): Promise<FinanceBankConnection>
@@ -741,6 +741,13 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       })
       return requireItems<RawConnectionSyncedAccount>(json, 'finance.connectionSyncedAccounts.items').map(mapConnectionSyncedAccount)
     },
+    async renameConnection({ tenantId, connectionId, name }) {
+      await request<void>({
+        method: 'PATCH',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}`,
+        body: { name },
+      })
+    },
     async linkTokenConnection({ tenantId, provider, token }) {
       return mapConnection(
         await request<RawConnection>({
@@ -887,7 +894,7 @@ interface RawProviderEvidenceMetadata { id: string; scope: string; providerObjec
 interface RawProviderEvidence extends RawProviderEvidenceMetadata { payload?: Record<string, unknown> }
 interface RawTransaction { id: string; tenantId: string; accountId: string; source: string; status: string; kind: string; amountMinor: number; currency: string; description: string; effectiveAt: string; categoryId?: string | null; tagIds: string[]; transferGroupId?: string | null; transferMatchedAt?: string | null; hiddenAt?: string | null; providerOriginal?: RawTransactionProviderOriginal; createdAt: string; updatedAt: string }
 interface RawConnectionSchedule { connectionId: string; intervalSeconds: number; nextRunAt?: string | null; lastScheduledAt?: string | null; lastStartedAt?: string | null; lastCompletedAt?: string | null; lastJobId?: string; enabled: boolean; createdAt: string; updatedAt: string }
-interface RawConnection { id: string; tenantId: string; provider: string; displayName: string; providerReference: string; externalId: string; state: string; lastSyncJobId?: string; lastSyncStartedAt?: string | null; lastSuccessfulSyncAt?: string | null; lastSyncError?: string; createdAt: string; updatedAt: string; schedule?: RawConnectionSchedule }
+interface RawConnection { id: string; tenantId: string; provider: string; displayName: string; providerReference: string; state: string; lastSyncJobId?: string; lastSyncStartedAt?: string | null; lastSuccessfulSyncAt?: string | null; lastSyncError?: string; createdAt: string; updatedAt: string; schedule?: RawConnectionSchedule }
 interface RawConnectionSyncedAccount { financeAccountId: string; name: string; currency: string; lastSuccessfulSyncAt?: string | null }
 interface RawConnectionRedirectStart { provider: string; authorizationUrl: string; state: string }
 interface RawSyntheticLinkStateConfiguredAccount { key: string; name: string; currency: string }
@@ -969,7 +976,7 @@ function mapProviderEvidence(item: RawProviderEvidence): FinanceProviderEvidence
   return { ...mapProviderEvidenceMetadata(item), ...(item.payload === undefined ? {} : { payload: item.payload }) }
 }
 function mapConnection(item: RawConnection): FinanceBankConnection {
-  requireFields(item, 'finance.connection', ['id', 'tenantId', 'provider', 'displayName', 'providerReference', 'externalId', 'state', 'createdAt', 'updatedAt'])
+  requireFields(item, 'finance.connection', ['id', 'tenantId', 'provider', 'displayName', 'providerReference', 'state', 'createdAt', 'updatedAt'])
   const { schedule, ...connection } = item
   return {
     ...connection,

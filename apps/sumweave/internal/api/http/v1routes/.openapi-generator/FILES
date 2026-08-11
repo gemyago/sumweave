@@ -138,6 +138,7 @@ internal/unhide_finance_account_params_validation.go
 internal/unlink_finance_transfer_pair_params_validation.go
 internal/update_finance_account_params_validation.go
 internal/update_finance_category_params_validation.go
+internal/update_finance_connection_params_validation.go
 internal/update_finance_tag_params_validation.go
 internal/update_finance_tenant_params_validation.go
 internal/update_finance_transaction_params_validation.go
@@ -274,6 +275,7 @@ models/unhide_finance_account_params.go
 models/unlink_finance_transfer_pair_params.go
 models/update_finance_account_params.go
 models/update_finance_category_params.go
+models/update_finance_connection_params.go
 models/update_finance_tag_params.go
 models/update_finance_tenant_params.go
 models/update_finance_transaction_params.go

@@ -302,7 +302,6 @@ func TestFinanceCommand(t *testing.T) {
 		assert.Equal(t, financepkg.ProviderTokenLinkResult{
 			DisplayName:       "Fixture Connection",
 			ProviderReference: "fixture-reference",
-			ExternalID:        "fixture-external",
 			Secret:            "fixture-secret",
 			State:             domain.BankConnectionStateActive,
 		}, link)

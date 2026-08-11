@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
+  import Check from '@lucide/svelte/icons/check'
+  import Pencil from '@lucide/svelte/icons/pencil'
+  import X from '@lucide/svelte/icons/x'
   import { documentTitle } from '../lib/document-title'
   import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
@@ -28,6 +31,12 @@
   let finishingRedirect = false
   let deletingConnectionId = $state('')
   let confirmDeleteConnectionId = $state('')
+  let renamingConnectionId = $state('')
+  let connectionNameDraft = $state('')
+  let savingConnectionId = $state('')
+  let renameError = $state<string | null>(null)
+  let renamedConnectionId = $state('')
+  let renameSuccess = $state('')
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
   let syncedAccountsByConnection = $state<Record<string, FinanceConnectionSyncedAccount[]>>({})
@@ -229,13 +238,32 @@
     if (connection.providerReference) {
       return `Provider ref: ${connection.providerReference}`
     }
-    if (connection.externalId) {
-      return `External id: ${connection.externalId}`
-    }
     if (connection.createdAt) {
       return `Created: ${formatFinanceDateTime(connection.createdAt)}`
     }
     return `Connection id: ${connection.id}`
+  }
+
+  function renameControlId(connectionId: string) {
+    return `finance-connection-rename-trigger-${connectionId}`
+  }
+
+  function renameInputId(connectionId: string) {
+    return `finance-connection-rename-${connectionId}`
+  }
+
+  function renameErrorId(connectionId: string) {
+    return `finance-connection-rename-error-${connectionId}`
+  }
+
+  async function focusRenameInput(connectionId: string) {
+    await tick()
+    document.getElementById(renameInputId(connectionId))?.focus()
+  }
+
+  async function focusRenameControl(connectionId: string) {
+    await tick()
+    document.getElementById(renameControlId(connectionId))?.focus({ preventScroll: true })
   }
 
   function requestDeleteConnection(connectionId: string) {
@@ -244,6 +272,60 @@
 
   function cancelDeleteConnection() {
     confirmDeleteConnectionId = ''
+  }
+
+  function startRenameConnection(connection: FinanceBankConnection) {
+    error = null
+    renameError = null
+    renamedConnectionId = ''
+    renameSuccess = ''
+    renamingConnectionId = connection.id
+    connectionNameDraft = connection.displayName
+    void focusRenameInput(connection.id)
+  }
+
+  function cancelRenameConnection(connectionId: string) {
+    renameError = null
+    renamingConnectionId = ''
+    connectionNameDraft = ''
+    void focusRenameControl(connectionId)
+  }
+
+  async function renameConnection(event: SubmitEvent, connection: FinanceBankConnection) {
+    event.preventDefault()
+    if (!financeShell.selectedTenantId) return
+
+    let focusTarget: 'input' | 'control'
+    error = null
+    renameError = null
+    renamedConnectionId = ''
+    renameSuccess = ''
+    savingConnectionId = connection.id
+    try {
+      const displayName = connectionNameDraft.trim()
+      await financeApi.renameConnection({
+        tenantId: financeShell.selectedTenantId,
+        connectionId: connection.id,
+        name: displayName,
+      })
+      connections = connections.map((item) => item.id === connection.id ? { ...item, displayName } : item)
+      renamingConnectionId = ''
+      connectionNameDraft = ''
+      renamedConnectionId = connection.id
+      renameSuccess = `Renamed connection to ${displayName}.`
+      focusTarget = 'control'
+    } catch (renameFailure) {
+      renameError = renameFailure instanceof Error ? renameFailure.message : 'Failed to rename connection'
+      focusTarget = 'input'
+    } finally {
+      savingConnectionId = ''
+    }
+
+    if (focusTarget === 'control') {
+      await focusRenameControl(connection.id)
+    } else if (focusTarget === 'input') {
+      await focusRenameInput(connection.id)
+    }
   }
 
   async function deleteConnection(connection: FinanceBankConnection) {
@@ -460,13 +542,67 @@
                   <div class="card-body d-grid gap-3">
                     <div class="d-flex flex-column flex-xl-row justify-content-between gap-3 align-items-xl-start">
                       <div class="d-grid gap-2">
-                        <div>
-                          <h3 class="h6 mb-1">{connection.displayName}</h3>
-                          <div class="d-flex flex-wrap gap-2">
-                            <span class="badge text-bg-secondary">{connection.provider}</span>
-                            <span class={`badge ${badgeClass(connection.state)}`}>{connection.state}</span>
+                        {#if renamingConnectionId === connection.id}
+                          <form class="d-grid gap-2" onsubmit={(event) => void renameConnection(event, connection)}>
+                            <label class="form-label mb-0" for={renameInputId(connection.id)}>Connection name</label>
+                            <div class="input-group input-group-sm">
+                              <input
+                                id={renameInputId(connection.id)}
+                                class="form-control"
+                                bind:value={connectionNameDraft}
+                                aria-describedby={renameError ? renameErrorId(connection.id) : undefined}
+                                aria-invalid={renameError !== null}
+                                disabled={savingConnectionId === connection.id}
+                                required
+                              />
+                              <button
+                                class="btn btn-outline-success finance-transaction-list-action"
+                                type="submit"
+                                disabled={savingConnectionId === connection.id}
+                                aria-label="Save connection name"
+                                title="Save connection name"
+                              >
+                                <Check size={16} />
+                              </button>
+                              <button
+                                class="btn btn-outline-secondary finance-transaction-list-action"
+                                type="button"
+                                onclick={() => cancelRenameConnection(connection.id)}
+                                disabled={savingConnectionId === connection.id}
+                                aria-label="Cancel connection name edit"
+                                title="Cancel connection name edit"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                            {#if renameError}
+                              <div id={renameErrorId(connection.id)} class="alert alert-danger mb-0" role="alert">{renameError}</div>
+                            {/if}
+                          </form>
+                        {:else}
+                          <div>
+                            <div class="d-flex flex-wrap align-items-center gap-2">
+                              <h3 class="h6 mb-1">{connection.displayName}</h3>
+                              <button
+                                id={renameControlId(connection.id)}
+                                class="btn btn-outline-secondary btn-sm finance-transaction-list-action"
+                                type="button"
+                                aria-label={`Rename connection ${connection.displayName} (${getConnectionSecondaryIdentifier(connection)})`}
+                                onclick={() => startRenameConnection(connection)}
+                                disabled={savingConnectionId !== '' || deletingConnectionId === connection.id}
+                              >
+                                <Pencil size={14} />
+                              </button>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2">
+                              <span class="badge text-bg-secondary">{connection.provider}</span>
+                              <span class={`badge ${badgeClass(connection.state)}`}>{connection.state}</span>
+                            </div>
+                            {#if renamedConnectionId === connection.id}
+                              <div class="visually-hidden" role="status" aria-live="polite">{renameSuccess}</div>
+                            {/if}
                           </div>
-                        </div>
+                        {/if}
 
                         <p class="small text-body-secondary mb-0">{getConnectionSecondaryIdentifier(connection)}</p>
                       </div>

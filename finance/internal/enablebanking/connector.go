@@ -26,9 +26,15 @@ const (
 )
 
 var (
-	ErrConnectorTokenLinkUnsupported   = errors.New("enable banking connector token link unsupported")
-	ErrConnectorUnsupportedAuthBranch  = errors.New("enable banking connector unsupported auth branch")
-	ErrConnectorUnsupportedFetchBranch = errors.New("enable banking connector unsupported fetch branch")
+	ErrConnectorTokenLinkUnsupported = errors.New(
+		"enable banking connector token link unsupported",
+	)
+	ErrConnectorUnsupportedAuthBranch = errors.New(
+		"enable banking connector unsupported auth branch",
+	)
+	ErrConnectorUnsupportedFetchBranch = errors.New(
+		"enable banking connector unsupported fetch branch",
+	)
 )
 
 type connectorClient interface {
@@ -124,16 +130,20 @@ func NewConnector(args Args, opts ...Option) *Connector {
 	if validDays <= 0 {
 		validDays = defaultValidDays
 	}
+	logger := args.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	connector := &Connector{
 		api: enablebankingclient.NewClient(enablebankingclient.Args{
 			BaseURL:        args.BaseURL,
 			HTTPClient:     httpClient,
-			Logger:         args.Logger,
+			Logger:         logger,
 			AppID:          args.AppID,
 			PrivateKeyPath: args.PrivateKeyPath,
 			Now:            now,
 		}),
-		logger:         args.Logger.WithGroup("enableBankingConnector"),
+		logger:         logger.WithGroup("enableBankingConnector"),
 		stateProvider:  stateProvider,
 		appID:          strings.TrimSpace(args.AppID),
 		privateKeyPath: strings.TrimSpace(args.PrivateKeyPath),
@@ -179,11 +189,19 @@ func (c *Connector) StartLink(
 		Request: c.buildOfficialStartLinkRequest(request.RedirectURL, state),
 	})
 	if err != nil {
+		c.logLinkFailure(ctx, "redirectStart", "createAuth", err)
 		return providers.StartLinkResult{}, fmt.Errorf("enable banking create auth: %w", err)
 	}
+	c.logger.InfoContext(
+		ctx,
+		"enable banking redirect authorization created",
+		slog.String("operation", "redirectStart"),
+	)
 	authorizationURL := response.AuthorizationURL
 	if authorizationURL == "" {
-		return providers.StartLinkResult{}, errors.New("enable banking auth response missing authorization URL")
+		return providers.StartLinkResult{}, errors.New(
+			"enable banking auth response missing authorization URL",
+		)
 	}
 	providerObjectID := firstNonEmpty(response.ProviderReference, response.ID, "auth")
 	return providers.StartLinkResult{
@@ -211,14 +229,21 @@ func (c *Connector) FinishLink(
 		},
 	})
 	if err != nil {
+		c.logLinkFailure(ctx, "redirectFinish", "createSession", err)
 		return providers.LinkResult{}, fmt.Errorf("enable banking create session: %w", err)
 	}
-	externalID := firstNonEmpty(response.ExternalID, response.SessionID, response.ID)
-	if externalID == "" {
-		return providers.LinkResult{}, errors.New("enable banking session response missing session ID")
+	c.logger.InfoContext(
+		ctx,
+		"enable banking redirect session created",
+		slog.String("operation", "redirectFinish"),
+	)
+	providerReference := firstNonEmpty(response.ProviderReference, response.SessionID, response.ID)
+	if providerReference == "" {
+		return providers.LinkResult{}, errors.New(
+			"enable banking session response missing session ID",
+		)
 	}
-	providerReference := firstNonEmpty(response.ProviderReference, externalID)
-	providerObjectID := firstNonEmpty(externalID, providerReference, "session")
+	providerObjectID := firstNonEmpty(providerReference, "session")
 	return providers.LinkResult{
 		DisplayName: firstNonEmpty(
 			response.DisplayName,
@@ -226,7 +251,6 @@ func (c *Connector) FinishLink(
 			"Enable Banking",
 		),
 		ProviderReference: providerReference,
-		ExternalID:        externalID,
 		Secret:            response.Secret,
 		State: domain.BankConnectionState(firstNonEmpty(
 			response.State,
@@ -238,7 +262,6 @@ func (c *Connector) FinishLink(
 			PayloadJSON: mustJSON(&enablebankingclient.SessionResponse{
 				ID:                response.ID,
 				SessionID:         response.SessionID,
-				ExternalID:        response.ExternalID,
 				ProviderReference: response.ProviderReference,
 				DisplayName:       response.DisplayName,
 				State:             response.State,
@@ -250,7 +273,10 @@ func (c *Connector) FinishLink(
 	}, nil
 }
 
-func (c *Connector) LinkToken(context.Context, providers.LinkTokenRequest) (providers.LinkResult, error) {
+func (c *Connector) LinkToken(
+	context.Context,
+	providers.LinkTokenRequest,
+) (providers.LinkResult, error) {
 	return providers.LinkResult{}, ErrConnectorTokenLinkUnsupported
 }
 
@@ -268,13 +294,13 @@ func (c *Connector) fetchOfficial(
 	ctx context.Context,
 	request providers.FetchRequest,
 ) (domain.ProviderSyncBatch, error) {
-	if request.Connection.ExternalID == "" ||
+	if request.Connection.ProviderReference == "" ||
 		request.Secret.ID != "" ||
 		request.Secret.Reference != "" {
 		return domain.ProviderSyncBatch{}, ErrConnectorUnsupportedFetchBranch
 	}
 	session, err := c.api.GetSession(ctx, enablebankingclient.GetSessionParams{
-		SessionID: request.Connection.ExternalID,
+		SessionID: request.Connection.ProviderReference,
 	})
 	if err != nil {
 		return domain.ProviderSyncBatch{}, fmt.Errorf("enable banking get session: %w", err)
@@ -283,7 +309,7 @@ func (c *Connector) fetchOfficial(
 		ctx,
 		"fetched enable banking session",
 		slog.String("connectionId", request.Connection.ConnectionID),
-		slog.String("externalId", request.Connection.ExternalID),
+		slog.String("providerReference", request.Connection.ProviderReference),
 		slog.Time("requestedStart", request.RequestedWindow.Start),
 		slog.Time("requestedEnd", request.RequestedWindow.End),
 		slog.Int("accountCount", len(session.Accounts)),
@@ -327,13 +353,24 @@ func (c *Connector) mapBatch(
 		account := normalizeAccount(request.Connection, accountID, typedAccount)
 		batch.Accounts = append(batch.Accounts, account)
 
-		balancesResponse, err := c.api.GetAccountBalances(ctx, enablebankingclient.GetAccountBalancesParams{
-			AccountID: accountID,
-		})
+		balancesResponse, err := c.api.GetAccountBalances(
+			ctx,
+			enablebankingclient.GetAccountBalancesParams{
+				AccountID: accountID,
+			},
+		)
 		if err != nil {
-			return domain.ProviderSyncBatch{}, fmt.Errorf("enable banking get account balances: %w", err)
+			return domain.ProviderSyncBatch{}, fmt.Errorf(
+				"enable banking get account balances: %w",
+				err,
+			)
 		}
-		balance := normalizeBalance(request.Connection, account, balancesResponse.Balances, capturedAt)
+		balance := normalizeBalance(
+			request.Connection,
+			account,
+			balancesResponse.Balances,
+			capturedAt,
+		)
 		batch.Balances = append(batch.Balances, balance)
 		batch.RawPayloads = append(batch.RawPayloads, domain.ProviderRawPayloadObservation{
 			Connection:       request.Connection,
@@ -383,6 +420,33 @@ func (c *Connector) mapBatch(
 	return batch, nil
 }
 
+func (c *Connector) logLinkFailure(
+	ctx context.Context,
+	operation string,
+	failureStage string,
+	err error,
+) {
+	attributes := []slog.Attr{
+		slog.String("operation", operation),
+		slog.String("failureStage", failureStage),
+		slog.String("errorClass", "upstreamRequest"),
+	}
+	var responseErr *enablebankingclient.ResponseError
+	if errors.As(err, &responseErr) {
+		attributes = append(
+			attributes,
+			slog.Int("providerStatus", responseErr.StatusCode),
+			slog.String("providerCode", responseErr.Code),
+			slog.Bool(
+				"retryable",
+				responseErr.StatusCode == http.StatusTooManyRequests ||
+					responseErr.StatusCode >= http.StatusInternalServerError,
+			),
+		)
+	}
+	c.logger.LogAttrs(ctx, slog.LevelWarn, "enable banking link failed", attributes...)
+}
+
 func newSyncBatch(
 	request providers.FetchRequest,
 	session *enablebankingclient.SessionResponse,
@@ -398,7 +462,7 @@ func newSyncBatch(
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
 			Connection:       request.Connection,
 			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: firstNonEmpty(request.Connection.ExternalID, "session"),
+			ProviderObjectID: firstNonEmpty(request.Connection.ProviderReference, "session"),
 			PayloadJSON:      mustJSON(session),
 			CapturedAt:       capturedAt,
 		}},
@@ -473,12 +537,15 @@ func (c *Connector) fetchTransactionPages(
 	transactions := make([]enablebankingclient.AccountTransaction, 0)
 	continuationKey := ""
 	for {
-		page, err := c.api.GetAccountTransactions(ctx, enablebankingclient.GetAccountTransactionsParams{
-			AccountID:       accountID,
-			DateFrom:        request.RequestedWindow.Start,
-			DateTo:          request.RequestedWindow.End,
-			ContinuationKey: continuationKey,
-		})
+		page, err := c.api.GetAccountTransactions(
+			ctx,
+			enablebankingclient.GetAccountTransactionsParams{
+				AccountID:       accountID,
+				DateFrom:        request.RequestedWindow.Start,
+				DateTo:          request.RequestedWindow.End,
+				ContinuationKey: continuationKey,
+			},
+		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("enable banking get account transactions: %w", err)
 		}
@@ -558,7 +625,10 @@ func normalizeTransaction(
 	transaction enablebankingclient.AccountTransaction,
 ) domain.ProviderTransactionObservation {
 	effectiveAt := transactionTime(transaction)
-	description := firstNonEmpty(transaction.Description, transaction.RemittanceInformationUnstructured)
+	description := firstNonEmpty(
+		transaction.Description,
+		transaction.RemittanceInformationUnstructured,
+	)
 	currency := strings.ToUpper(firstNonEmpty(
 		transaction.Currency,
 		transactionAmountCurrency(transaction.Amount),
@@ -587,9 +657,15 @@ func normalizeTransaction(
 		Currency:              currency,
 		Description:           description,
 		EffectiveAt:           effectiveAt,
-		Fingerprint:           providerFingerprint(accountID, description, amountMinor, currency, effectiveAt),
-		ProviderOriginal:      providerOriginal,
-		RawPayloadJSON:        mustJSON(transaction),
+		Fingerprint: providerFingerprint(
+			accountID,
+			description,
+			amountMinor,
+			currency,
+			effectiveAt,
+		),
+		ProviderOriginal: providerOriginal,
+		RawPayloadJSON:   mustJSON(transaction),
 	}
 }
 

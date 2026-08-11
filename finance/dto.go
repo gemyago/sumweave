@@ -43,3 +43,10 @@ type FinishBankConnectionLinkParams struct {
 	Code        string
 	Start       ProviderLinkStart
 }
+
+type UpdateBankConnectionParams struct {
+	ActorUserID  string
+	TenantID     string
+	ConnectionID string
+	Name         string
+}

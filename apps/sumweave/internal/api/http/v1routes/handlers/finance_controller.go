@@ -492,6 +492,15 @@ type FinanceController interface {
 		*UpdateFinanceCategoryParams,
 	]) http.Handler
 
+	// PATCH /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
+	//
+	// Request type: UpdateFinanceConnectionParams,
+	//
+	// Response type: none
+	UpdateFinanceConnection(NoResponseHandlerBuilder[
+		*UpdateFinanceConnectionParams,
+	]) http.Handler
+
 	// PATCH /api/v1/finance/tenants/{tenantId}/tags/{tagId}
 	//
 	// Request type: UpdateFinanceTagParams,
@@ -621,6 +630,8 @@ type FinanceController interface {
 // 
 // - PATCH /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
 // 
+// - PATCH /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
+// 
 // - PATCH /api/v1/finance/tenants/{tenantId}/tags/{tagId}
 // 
 // - PATCH /api/v1/finance/tenants/{tenantId}
@@ -679,6 +690,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/transactions/transfer-links", controller.UnlinkFinanceTransferPair(builder.UnlinkFinanceTransferPair))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.UpdateFinanceAccount(builder.UpdateFinanceAccount))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/categories/{categoryId}", controller.UpdateFinanceCategory(builder.UpdateFinanceCategory))
+	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}", controller.UpdateFinanceConnection(builder.UpdateFinanceConnection))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/tags/{tagId}", controller.UpdateFinanceTag(builder.UpdateFinanceTag))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}", controller.UpdateFinanceTenant(builder.UpdateFinanceTenant))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}", controller.UpdateFinanceTransaction(builder.UpdateFinanceTransaction))

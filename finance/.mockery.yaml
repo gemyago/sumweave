@@ -8,6 +8,7 @@ packages:
   github.com/gemyago/sumweave/finance:
     interfaces:
       accessGuardStore:
+      bankConnectionMetadataStore:
       FXRatesProvider:
       providerEvidenceServiceStore:
   github.com/gemyago/sumweave/finance/internal/providers:

@@ -19,7 +19,6 @@ type FinanceBankConnection struct {
 	Provider string `json:"provider"`
 	DisplayName string `json:"displayName"`
 	ProviderReference string `json:"providerReference"`
-	ExternalID string `json:"externalId"`
 	State string `json:"state"`
 	LastSyncJobID string `json:"lastSyncJobId,omitempty"`
 	LastSyncStartedAt *time.Time `json:"lastSyncStartedAt,omitempty"`

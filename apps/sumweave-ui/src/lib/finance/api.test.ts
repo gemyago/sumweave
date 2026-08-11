@@ -14,7 +14,7 @@ describe('finance api', () => {
     const responses = [
       { ok: true, json: { items: [{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: '2026-06-20T12:00:00Z', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] } },
       { ok: true, json: { period: { preset: 'current_month', startDate: '2026-06-01T00:00:00-07:00', endDate: '2026-06-30T00:00:00-07:00', previous: { startDate: '2026-05-01T00:00:00-07:00', endDate: '2026-05-31T00:00:00-07:00' }, next: { startDate: '2026-07-01T00:00:00-07:00', endDate: '2026-07-31T00:00:00-07:00' } }, settled: { displayCurrency: 'USD', incomeMinor: 10, expenseMinor: 5, netMinor: 5, transactionCount: 1, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1, netMinor: -1, transactionCount: 1, complete: true }, categoryBreakdowns: [], accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 10, nativePendingMinor: 1, displayBookedMinor: null, displayPendingMinor: 0, missingFx: false }], alerts: [], fxCoverage: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 3, affectedAccountCount: 2 }], currentFxRates: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', effectiveAt: '2026-06-20T00:00:00Z', lastSuccessfulRefreshAt: '2026-06-20T12:00:00Z', stale: false }], nativeSettledTotals: [] } },
-      { ok: true, json: { items: [{ id: 'connection-1', tenantId: 'tenant-1', provider: 'monobank', displayName: 'Mono', providerReference: 'ref', externalId: 'ext', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z', schedule: { connectionId: 'connection-1', intervalSeconds: 900, enabled: true, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' } }] } },
+      { ok: true, json: { items: [{ id: 'connection-1', tenantId: 'tenant-1', provider: 'monobank', displayName: 'Mono', providerReference: 'ref', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z', schedule: { connectionId: 'connection-1', intervalSeconds: 900, enabled: true, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' } }] } },
       { ok: true, json: { importId: 'import-1', importableCount: 1, headers: ['Date'], duplicateRows: [], rejectedRows: [], wouldCreateAccounts: ['Checking'], wouldCreateCategories: [], wouldCreateTags: [], accountOptions: [{ name: 'Checking', sourceRowCount: 1, selected: true }] } },
       { ok: true, json: { jobId: 'job-1', jobType: 'finance.fx_rates_refresh', provider: 'frankfurter' } },
     ]
@@ -215,6 +215,22 @@ describe('finance api', () => {
     ])
   })
 
+  it('renames a connection with its tenant-scoped endpoint', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      return { ok: true, status: 204, statusText: 'No Content', json: async () => undefined } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await api.renameConnection({ tenantId: 'tenant 1', connectionId: 'connection 1', name: 'Joint checking' })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].init?.method).toBe('PATCH')
+    expect(new URL(String(calls[0].input)).pathname).toBe('/api/v1/finance/tenants/tenant%201/connections/connection%201')
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ name: 'Joint checking' })
+  })
+
   it('rejects malformed or missing required dashboard timestamps and nested fields', async () => {
     const dashboard = {
       period: { preset: 'current_month', startDate: '2026-03-29T00:00:00+14:00', endDate: '2026-03-31', previous: { startDate: '2026-02-01', endDate: '2026-02-28' }, next: { startDate: '2026-04-01', endDate: '2026-04-30' } },
@@ -249,7 +265,7 @@ describe('finance api', () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
     const responses = [
       { ok: true, json: { id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100, currency: 'USD', description: '', effectiveAt: '2026-06-20T12:00:00Z', tagIds: ['tag-1'], createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' } },
-      { ok: true, json: { items: [{ id: 'connection-1', tenantId: 'tenant-1', provider: 'mono', displayName: 'Mono', providerReference: 'ref', externalId: 'ext', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] } },
+      { ok: true, json: { items: [{ id: 'connection-1', tenantId: 'tenant-1', provider: 'mono', displayName: 'Mono', providerReference: 'ref', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] } },
       { ok: true, json: { importId: 'import-1', tenantId: 'tenant-1', status: 'completed', jobId: 'job-1', confirmedByUserId: 'user-1', importedCount: 1, rejectedRows: [], rowOutcomes: [], createdAt: '2026-06-20T12:00:00Z' } },
       { ok: true, json: { items: [{ importId: 'import-1', tenantId: 'tenant-1', status: 'completed', jobId: 'job-1', confirmedByUserId: 'user-1', importedCount: 1, rejectedRows: [], rowOutcomes: [], createdAt: '2026-06-20T12:00:00Z' }] } },
     ]
@@ -376,7 +392,6 @@ describe('finance api', () => {
           provider: 'pko',
           displayName: 'PKO',
           providerReference: 'ref',
-          externalId: 'ext',
           state: 'active',
           lastSyncStartedAt: '2026-06-20T12:00:00Z',
           lastSuccessfulSyncAt: '2026-06-20T12:05:00Z',
@@ -664,7 +679,7 @@ describe('finance api', () => {
       json: async () => ({
         items: [{
           id: 'connection-1', tenantId: 'tenant-1', provider: 'monobank', displayName: 'Mono',
-          providerReference: 'ref', externalId: 'ext', state: 'active',
+          providerReference: 'ref', state: 'active',
           createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
           schedule: {
             connectionId: 'connection-1', intervalSeconds: 900, enabled: false,
@@ -771,7 +786,7 @@ describe('finance api', () => {
       { items: [{ id: 'tag-1', tenantId: 'tenant-1', name: 'Budget', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] },
       { id: 'tag-2', tenantId: 'tenant-1', name: 'Holiday', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
       { items: [{ id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100, currency: 'USD', description: 'Coffee', effectiveAt: '2026-06-20T12:00:00Z', tagIds: [], createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] },
-      { id: 'connection-1', tenantId: 'tenant-1', provider: 'mono', displayName: 'Mono', providerReference: 'ref', externalId: 'ext', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
+      { id: 'connection-1', tenantId: 'tenant-1', provider: 'mono', displayName: 'Mono', providerReference: 'ref', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' },
       undefined,
       { jobId: 'job-1', jobType: 'finance.bank_connection_sync' },
       { defaultProvider: 'frankfurter', storedRatesCount: 3, providers: [] },

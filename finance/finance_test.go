@@ -97,7 +97,7 @@ func TestFinance(t *testing.T) {
 
 		assert.Equal(t, string(domain.ProviderIDMonobank), connection.Provider)
 		assert.Equal(t, domain.ProviderConnectorIDMonobank, connection.ConnectorID)
-		assert.Equal(t, monobankName, connection.ProviderReference)
+		assert.Empty(t, connection.ProviderReference)
 	})
 
 	t.Run("New returns config validation error", func(t *testing.T) {

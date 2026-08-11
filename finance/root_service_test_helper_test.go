@@ -719,19 +719,6 @@ func (s *Service) saveLinkedBankConnection(
 	if err != nil {
 		return domain.BankConnection{}, err
 	}
-	reusedConnection := domain.BankConnection{}
-	if strings.TrimSpace(providerName) == bankProviderPKO {
-		connections, listErr := syncStore.ListBankConnections(ctx, tenantID)
-		if listErr != nil {
-			return domain.BankConnection{}, errors.New("list bank connections: " + listErr.Error())
-		}
-		for _, existingConnection := range connections {
-			if existingConnection.Provider == providerName {
-				reusedConnection = existingConnection
-				break
-			}
-		}
-	}
 	now := s.now().UTC()
 	connection := domain.BankConnection{
 		ID:                s.newID(),
@@ -740,15 +727,10 @@ func (s *Service) saveLinkedBankConnection(
 		ConnectorID:       connectorID,
 		DisplayName:       strings.TrimSpace(result.DisplayName),
 		ProviderReference: strings.TrimSpace(result.ProviderReference),
-		ExternalID:        strings.TrimSpace(result.ExternalID),
 		SecretID:          secretID,
 		State:             result.State,
 		CreatedAt:         now,
 		UpdatedAt:         now,
-	}
-	if reusedConnection.ID != "" {
-		connection.ID = reusedConnection.ID
-		connection.CreatedAt = reusedConnection.CreatedAt
 	}
 	saved, err := syncStore.SaveBankConnection(ctx, connection)
 	if err != nil {

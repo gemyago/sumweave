@@ -2,9 +2,11 @@ package persistence
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/internal/providers"
 	"github.com/jaswdr/faker/v2"
@@ -14,6 +16,205 @@ import (
 )
 
 func TestProviderLinkPersistence(t *testing.T) {
+	t.Run("persists one compatible linked connection across concurrent finishes", func(t *testing.T) {
+		fake := faker.New()
+		store := NewStore(openTestDatabase(t))
+		linkPersistence := NewProviderLinkPersistence(store)
+		now := time.Date(2026, time.August, 10, 18, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		tenantID := "tenant-" + fake.UUID().V4()
+		reference := "reference-" + fake.UUID().V4()
+		makeLinked := func(id string, secretID string) (domain.BankConnection, domain.ConnectionSecret) {
+			connection := domain.BankConnection{
+				ID:                id,
+				TenantID:          tenantID,
+				Provider:          string(domain.ProviderIDPKO),
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+				ProviderReference: reference,
+				SecretID:          secretID,
+				State:             domain.BankConnectionStateActive,
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			}
+			secret := domain.ConnectionSecret{
+				ID:        secretID,
+				Provider:  string(domain.ProviderIDPKO),
+				Reference: reference,
+				Envelope: credentials.Envelope{
+					KeyVersion: "v1", Algorithm: "test", Nonce: "nonce", Ciphertext: "ciphertext",
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			return connection, secret
+		}
+
+		start := make(chan struct{})
+		results := make(chan domain.BankConnection, 2)
+		errorsByFinish := make(chan error, 2)
+		var finishes sync.WaitGroup
+		for range 2 {
+			connection, secret := makeLinked(
+				"connection-"+fake.UUID().V4(),
+				"secret-"+fake.UUID().V4(),
+			)
+			finishes.Go(func() {
+				<-start
+				saved, err := linkPersistence.SaveLinkedConnection(t.Context(), connection, secret)
+				if err != nil {
+					errorsByFinish <- err
+					return
+				}
+				results <- saved
+			})
+		}
+		close(start)
+		finishes.Wait()
+		close(results)
+		close(errorsByFinish)
+		for err := range errorsByFinish {
+			require.NoError(t, err)
+		}
+		var saved []domain.BankConnection
+		for connection := range results {
+			saved = append(saved, connection)
+		}
+		require.Len(t, saved, 2)
+		assert.Equal(t, saved[0].ID, saved[1].ID)
+		var secretCount int64
+		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).Count(&secretCount).Error)
+		assert.Equal(t, int64(1), secretCount)
+
+		retry, retrySecret := makeLinked("connection-"+fake.UUID().V4(), "secret-"+fake.UUID().V4())
+		retried, err := linkPersistence.SaveLinkedConnection(t.Context(), retry, retrySecret)
+		require.NoError(t, err)
+		assert.Equal(t, saved[0].ID, retried.ID)
+	})
+
+	t.Run("rolls back the secret when linked connection insertion fails", func(t *testing.T) {
+		fake := faker.New()
+		store := NewStore(openTestDatabase(t))
+		linkPersistence := NewProviderLinkPersistence(store)
+		now := time.Date(2026, time.August, 10, 18, 30, 0, 0, time.FixedZone("test", 2*60*60))
+		connection := domain.BankConnection{
+			ID: "connection-" + fake.UUID().V4(), TenantID: "tenant-" + fake.UUID().V4(),
+			Provider: string(domain.ProviderIDPKO), ConnectorID: domain.ProviderConnectorIDEnableBanking,
+			ProviderReference: "reference-" + fake.UUID().V4(), SecretID: "secret-" + fake.UUID().V4(),
+			State: domain.BankConnectionStateActive, CreatedAt: now, UpdatedAt: now,
+		}
+		secret := domain.ConnectionSecret{
+			ID:        connection.SecretID,
+			Provider:  connection.Provider,
+			Reference: connection.ProviderReference,
+			Envelope: credentials.Envelope{
+				KeyVersion: "v1", Algorithm: "test", Nonce: "nonce", Ciphertext: "ciphertext",
+			},
+			CreatedAt: time.Time{},
+			UpdatedAt: time.Time{},
+		}
+		triggerName := "fail_link_connection"
+		require.NoError(t, store.DB().Exec(
+			"CREATE TRIGGER "+triggerName+" BEFORE INSERT ON finance_bank_connections "+
+				"WHEN NEW.id = '"+connection.ID+"' BEGIN SELECT RAISE(ABORT, 'connection insertion failed'); END",
+		).Error)
+		t.Cleanup(func() {
+			require.NoError(t, store.DB().Exec("DROP TRIGGER "+triggerName).Error)
+		})
+
+		_, err := linkPersistence.SaveLinkedConnection(t.Context(), connection, secret)
+		require.ErrorContains(t, err, "create bank connection")
+		var secretCount int64
+		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).Count(&secretCount).Error)
+		assert.Zero(t, secretCount)
+	})
+
+	t.Run("scopes exact non-empty references and never deduplicates empty references", func(t *testing.T) {
+		fake := faker.New()
+		store := NewStore(openTestDatabase(t))
+		linkPersistence := NewProviderLinkPersistence(store)
+		now := time.Date(2026, time.August, 10, 18, 45, 0, 0, time.FixedZone("test", 2*60*60))
+		tenantID := "tenant-" + fake.UUID().V4()
+		providerReference := "reference-" + fake.UUID().V4()
+		makeLinked := func(
+			tenant string,
+			provider string,
+			connector domain.ProviderConnectorID,
+			reference string,
+		) (domain.BankConnection, domain.ConnectionSecret) {
+			connectionID := "connection-" + fake.UUID().V4()
+			secretID := "secret-" + fake.UUID().V4()
+			return domain.BankConnection{
+					ID:                connectionID,
+					TenantID:          tenant,
+					Provider:          provider,
+					ConnectorID:       connector,
+					ProviderReference: reference,
+					SecretID:          secretID,
+					State:             domain.BankConnectionStateActive,
+					CreatedAt:         now,
+					UpdatedAt:         now,
+				}, domain.ConnectionSecret{
+					ID:        secretID,
+					Provider:  provider,
+					Reference: reference,
+					Envelope: credentials.Envelope{
+						KeyVersion: "v1", Algorithm: "test", Nonce: "nonce", Ciphertext: "ciphertext",
+					},
+					CreatedAt: now,
+					UpdatedAt: now,
+				}
+		}
+		save := func(
+			tenant string,
+			provider string,
+			connector domain.ProviderConnectorID,
+			reference string,
+		) domain.BankConnection {
+			connection, secret := makeLinked(tenant, provider, connector, reference)
+			saved, err := linkPersistence.SaveLinkedConnection(t.Context(), connection, secret)
+			require.NoError(t, err)
+			return saved
+		}
+
+		first := save(
+			tenantID,
+			string(domain.ProviderIDPKO),
+			domain.ProviderConnectorIDEnableBanking,
+			providerReference,
+		)
+		retry := save(
+			tenantID,
+			string(domain.ProviderIDPKO),
+			domain.ProviderConnectorIDEnableBanking,
+			providerReference,
+		)
+		withWhitespace := save(
+			tenantID,
+			string(domain.ProviderIDPKO),
+			domain.ProviderConnectorIDEnableBanking,
+			" "+providerReference,
+		)
+		otherTenant := save(
+			"tenant-"+fake.UUID().V4(),
+			string(domain.ProviderIDPKO),
+			domain.ProviderConnectorIDEnableBanking,
+			providerReference,
+		)
+		otherConnector := save(
+			tenantID,
+			string(domain.ProviderIDPKO),
+			domain.ProviderConnectorIDMonobank,
+			providerReference,
+		)
+		emptyFirst := save(tenantID, string(domain.ProviderIDMonobank), domain.ProviderConnectorIDMonobank, "")
+		emptySecond := save(tenantID, string(domain.ProviderIDMonobank), domain.ProviderConnectorIDMonobank, "")
+
+		assert.Equal(t, first.ID, retry.ID)
+		assert.NotEqual(t, first.ID, withWhitespace.ID)
+		assert.NotEqual(t, first.ID, otherTenant.ID)
+		assert.NotEqual(t, first.ID, otherConnector.ID)
+		assert.NotEqual(t, emptyFirst.ID, emptySecond.ID)
+	})
+
 	t.Run("stores parallel pending starts per connector and consumes matching connector only", func(t *testing.T) {
 		fake := faker.New()
 		store := NewStore(openTestDatabase(t))
@@ -201,6 +402,93 @@ func TestProviderLinkPersistence(t *testing.T) {
 		savedPayload, err := persistence.SaveRawPayload(t.Context(), payload)
 		require.NoError(t, err)
 		assert.Equal(t, payload.ID, savedPayload.ID)
+	})
+
+	t.Run("renames only connection metadata without replacing concurrent fields", func(t *testing.T) {
+		fake := faker.New()
+		store := NewStore(openTestDatabase(t))
+		persistence := NewProviderLinkPersistence(store)
+		createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		tenantID := "tenant-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		original := domain.BankConnection{
+			ID:                connectionID,
+			TenantID:          tenantID,
+			Provider:          string(domain.ProviderIDPKO),
+			ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+			DisplayName:       "Original " + fake.Company().Name(),
+			ProviderReference: "reference-original-" + fake.UUID().V4(),
+			SecretID:          "secret-original-" + fake.UUID().V4(),
+			State:             domain.BankConnectionStateActive,
+			LastSyncJobID:     "job-original-" + fake.UUID().V4(),
+			LastSyncError:     "sync-original-" + fake.UUID().V4(),
+			CreatedAt:         createdAt,
+			UpdatedAt:         createdAt,
+		}
+		_, err := persistence.SaveBankConnection(t.Context(), original)
+		require.NoError(t, err)
+
+		reauthAt := createdAt.Add(time.Hour)
+		lastSyncStartedAt := createdAt.Add(2 * time.Hour)
+		lastSuccessfulSyncAt := createdAt.Add(3 * time.Hour)
+		concurrent := original
+		concurrent.ProviderReference = "reference-concurrent-" + fake.UUID().V4()
+		concurrent.SecretID = "secret-concurrent-" + fake.UUID().V4()
+		concurrent.State = domain.BankConnectionStateReauthRequired
+		concurrent.Reauth = &domain.ConnectionReauthMetadata{
+			RequiredAt: &reauthAt,
+			Reason:     "reason-" + fake.Lorem().Word(),
+		}
+		concurrent.LastSyncJobID = "job-concurrent-" + fake.UUID().V4()
+		concurrent.LastSyncStartedAt = &lastSyncStartedAt
+		concurrent.LastSuccessfulSyncAt = &lastSuccessfulSyncAt
+		concurrent.LastSyncError = "sync-concurrent-" + fake.UUID().V4()
+		concurrent.UpdatedAt = createdAt.Add(4 * time.Hour)
+		_, err = persistence.SaveBankConnection(t.Context(), concurrent)
+		require.NoError(t, err)
+
+		renamedAt := createdAt.Add(5 * time.Hour)
+		renamedDisplayName := "Renamed " + fake.Company().Name()
+		require.NoError(t, persistence.UpdateBankConnectionDisplayName(
+			t.Context(), tenantID, connectionID, renamedDisplayName, renamedAt,
+		))
+		got, err := persistence.GetBankConnection(t.Context(), connectionID)
+		require.NoError(t, err)
+		expected := concurrent
+		expected.DisplayName = renamedDisplayName
+		expected.UpdatedAt = renamedAt
+		gotMetadata := *got
+		expectedMetadata := expected
+		gotMetadata.CreatedAt = time.Time{}
+		gotMetadata.UpdatedAt = time.Time{}
+		gotMetadata.LastSyncStartedAt = nil
+		gotMetadata.LastSuccessfulSyncAt = nil
+		expectedMetadata.CreatedAt = time.Time{}
+		expectedMetadata.UpdatedAt = time.Time{}
+		expectedMetadata.LastSyncStartedAt = nil
+		expectedMetadata.LastSuccessfulSyncAt = nil
+		require.NotNil(t, gotMetadata.Reauth)
+		require.NotNil(t, expectedMetadata.Reauth)
+		gotReauth := *gotMetadata.Reauth
+		gotReauth.RequiredAt = nil
+		gotMetadata.Reauth = &gotReauth
+		expectedReauth := *expectedMetadata.Reauth
+		expectedReauth.RequiredAt = nil
+		expectedMetadata.Reauth = &expectedReauth
+		assert.Equal(t, expectedMetadata, gotMetadata)
+		assert.True(t, expected.CreatedAt.Equal(got.CreatedAt))
+		assert.True(t, expected.UpdatedAt.Equal(got.UpdatedAt))
+		require.NotNil(t, got.LastSyncStartedAt)
+		require.NotNil(t, got.LastSuccessfulSyncAt)
+		assert.True(t, expected.LastSyncStartedAt.Equal(*got.LastSyncStartedAt))
+		assert.True(t, expected.LastSuccessfulSyncAt.Equal(*got.LastSuccessfulSyncAt))
+		require.NotNil(t, got.Reauth.RequiredAt)
+		assert.True(t, expected.Reauth.RequiredAt.Equal(*got.Reauth.RequiredAt))
+
+		err = persistence.UpdateBankConnectionDisplayName(
+			t.Context(), "tenant-foreign-"+fake.UUID().V4(), connectionID, renamedDisplayName, renamedAt,
+		)
+		require.ErrorIs(t, err, ErrBankConnectionNotFound)
 	})
 
 	t.Run("returns persistence errors when tables are unavailable", func(t *testing.T) {

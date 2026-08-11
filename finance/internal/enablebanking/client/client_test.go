@@ -181,6 +181,7 @@ func TestClient_InternalHelpers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, responseErr.StatusCode)
 		assert.Equal(t, "BAD_BODY", responseErr.Code)
 		assert.Equal(t, "bad body", responseErr.Message)
+		assert.Equal(t, []byte(responseBody), responseErr.Body)
 	})
 
 	t.Run("constructor and normalization helpers cover defaults", func(t *testing.T) {
@@ -210,7 +211,6 @@ func TestClient_InternalHelpers(t *testing.T) {
 			ASPSP:      &ASPSP{Name: "Nordea"},
 			AccountIDs: []string{"account-1"},
 		})
-		assert.Equal(t, "session-1", normalizedSession.ExternalID)
 		assert.Equal(t, "Nordea", normalizedSession.DisplayName)
 		require.Len(t, normalizedSession.Accounts, 1)
 		assert.Equal(t, "account-1", normalizedSession.Accounts[0].UID)

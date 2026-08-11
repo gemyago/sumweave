@@ -64,6 +64,10 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 				AccountID:   makeAccountID(),
 				Name:        "account-" + fake.Lorem().Word(),
 			},
+			UpdateBankConnectionParams{
+				ActorUserID: makeUserID(), TenantID: makeTenantID(), ConnectionID: "connection-" + fake.UUID().V4(),
+				Name: "connection-" + fake.Lorem().Word(),
+			},
 			HideAccountParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
 			UnhideAccountParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
 			AttachLinkedAccountParams{
@@ -155,12 +159,13 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 			GetAccountBalanceParams{ActorUserID: makeUserID(), TenantID: makeTenantID(), AccountID: makeAccountID()},
 		}
 
-		require.Len(t, params, 30)
+		require.Len(t, params, 31)
 		assert.Len(t, []error{
 			ErrTenantAccessDenied,
 			ErrInviteNotFound,
 			ErrInviteAccepted,
 			ErrInvalidTenantDisplayCurrency,
+			ErrBankConnectionNameRequired,
 			ErrAccountNotFound,
 			ErrHiddenAccount,
 			ErrCategoryNotFound,
@@ -168,7 +173,7 @@ func TestPublicDeclarationsRemainAvailable(t *testing.T) {
 			ErrTransactionNotFound,
 			ErrCSVImportAlreadyConfirmed,
 			ErrCSVImportAlreadyCompleted,
-		}, 11)
+		}, 12)
 	})
 
 	t.Run("internal tenant seed and transfer helpers keep behavior", func(t *testing.T) {

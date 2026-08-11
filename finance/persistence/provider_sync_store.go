@@ -39,7 +39,6 @@ func (s *Store) SaveBankConnection(
 				"connector_id",
 				"display_name",
 				"provider_reference",
-				"external_id",
 				"secret_id",
 				columnState,
 				"reauth_required_at",

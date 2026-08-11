@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/internal/providers"
@@ -112,6 +113,111 @@ func (p *ProviderLinkPersistence) SaveBankConnection(
 	connection domain.BankConnection,
 ) (domain.BankConnection, error) {
 	return p.Store.SaveBankConnection(ctx, connection)
+}
+
+// SaveLinkedConnection stores a newly encrypted secret and its connection as one unit.
+// A matching non-empty provider reference is idempotent.
+func (p *ProviderLinkPersistence) SaveLinkedConnection(
+	ctx context.Context,
+	connection domain.BankConnection,
+	secret domain.ConnectionSecret,
+) (domain.BankConnection, error) {
+	var saved domain.BankConnection
+	err := p.Store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existing, found, lookupErr := findProviderLinkConnection(tx, connection)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if found {
+			saved = existing
+			return nil
+		}
+
+		secretModel := newConnectionSecretModel(secret)
+		if secretModel.CreatedAt.IsZero() {
+			secretModel.CreatedAt = p.Store.now()
+		}
+		if secretModel.UpdatedAt.IsZero() {
+			secretModel.UpdatedAt = secretModel.CreatedAt
+		}
+		if createErr := tx.Table(secretModel.TableName()).Create(&secretModel).Error; createErr != nil {
+			return fmt.Errorf("create connection secret: %w", createErr)
+		}
+
+		connectionModel := newBankConnectionModel(connection)
+		if createErr := tx.Table(connectionModel.TableName()).Create(&connectionModel).Error; createErr != nil {
+			return fmt.Errorf("create bank connection: %w", createErr)
+		}
+		saved = bankConnectionFromModel(connectionModel)
+		return nil
+	})
+	if err == nil {
+		return saved, nil
+	}
+
+	// A concurrent insert can win after this transaction's initial lookup. The
+	// uniqueness index decides the winner; loading it here makes the finish retry-safe.
+	existing, found, lookupErr := findProviderLinkConnection(p.Store.db.WithContext(ctx), connection)
+	if lookupErr == nil && found {
+		return existing, nil
+	}
+	if lookupErr != nil {
+		return domain.BankConnection{}, lookupErr
+	}
+	return domain.BankConnection{}, fmt.Errorf("save linked connection: %w", err)
+}
+
+func findProviderLinkConnection(
+	db *gorm.DB,
+	candidate domain.BankConnection,
+) (domain.BankConnection, bool, error) {
+	if candidate.ProviderReference == "" {
+		return domain.BankConnection{}, false, nil
+	}
+	var model bankConnectionModel
+	if err := db.Table((bankConnectionModel{}).TableName()).
+		Where(
+			"tenant_id = ? AND provider = ? AND connector_id = ? AND provider_reference = ?",
+			strings.TrimSpace(candidate.TenantID),
+			strings.TrimSpace(candidate.Provider),
+			strings.TrimSpace(string(candidate.ConnectorID)),
+			candidate.ProviderReference,
+		).
+		First(&model).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return domain.BankConnection{}, false, nil
+		}
+		return domain.BankConnection{}, false, fmt.Errorf("find provider link connection: %w", err)
+	}
+	return bankConnectionFromModel(model), true, nil
+}
+
+func (p *ProviderLinkPersistence) GetBankConnection(
+	ctx context.Context,
+	connectionID string,
+) (*domain.BankConnection, error) {
+	return p.Store.GetBankConnection(ctx, connectionID)
+}
+
+func (p *ProviderLinkPersistence) UpdateBankConnectionDisplayName(
+	ctx context.Context,
+	tenantID string,
+	connectionID string,
+	displayName string,
+	updatedAt time.Time,
+) error {
+	model := bankConnectionModel{}
+	result := p.Store.db.WithContext(ctx).
+		Table(model.TableName()).
+		Where("id = ? AND tenant_id = ?", strings.TrimSpace(connectionID), strings.TrimSpace(tenantID)).
+		Updates(map[string]any{"display_name": displayName, columnUpdatedAt: updatedAt})
+	if result.Error != nil {
+		return fmt.Errorf("update bank connection display name: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrBankConnectionNotFound
+	}
+	return nil
 }
 
 func (p *ProviderLinkPersistence) ListBankConnections(
