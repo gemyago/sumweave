@@ -19,7 +19,6 @@ type SessionResponse struct {
 	Authorized        string         `json:"authorized,omitempty"`
 	Created           string         `json:"created,omitempty"`
 	ID                string         `json:"-"`
-	ExternalID        string         `json:"-"`
 	ProviderReference string         `json:"-"`
 	DisplayName       string         `json:"-"`
 	Secret            string         `json:"-"`

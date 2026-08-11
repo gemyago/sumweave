@@ -23,7 +23,6 @@ type BankConnection struct {
 	ConnectorID          ProviderConnectorID
 	DisplayName          string
 	ProviderReference    string
-	ExternalID           string
 	SecretID             string
 	State                BankConnectionState
 	Reauth               *ConnectionReauthMetadata

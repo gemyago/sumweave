@@ -160,8 +160,7 @@ func (c *Connector) LinkToken(
 	providerObjectID := firstNonEmpty(body.Name, "monobank")
 	return providers.LinkResult{
 		DisplayName:       providerObjectID,
-		ProviderReference: providerObjectID,
-		ExternalID:        firstAccountID(body.Accounts),
+		ProviderReference: "",
 		Secret:            strings.TrimSpace(request.Token),
 		State:             domain.BankConnectionStateActive,
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
@@ -217,7 +216,7 @@ func (c *Connector) Fetch(
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
 			Connection:       request.Connection,
 			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: firstNonEmpty(request.Connection.ExternalID, "client-info"),
+			ProviderObjectID: "client-info",
 			PayloadJSON:      clientInfoResponse.RawJSON,
 			CapturedAt:       capturedAt,
 		}},
@@ -394,13 +393,6 @@ func statusFromHold(hold bool) domain.TransactionStatus {
 		return domain.TransactionStatusPending
 	}
 	return domain.TransactionStatusBooked
-}
-
-func firstAccountID(accounts []monobankclient.InfoAccount) string {
-	if len(accounts) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(accounts[0].ID)
 }
 
 func firstMaskedPAN(maskedPANs []string) string {

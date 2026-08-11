@@ -41,7 +41,6 @@ function createConnectionFixtureBase() {
     provider: 'monobank',
     displayName: 'Mono',
     providerReference: 'ref',
-    externalId: 'ext',
     state: 'active',
     lastSyncJobId: 'job-1',
     lastSyncStartedAt: now,
@@ -113,23 +112,16 @@ describe('Finance connections page', () => {
     await waitFor(() => expect(mocks.listConnectionSyncedAccounts).toHaveBeenCalledTimes(3))
   })
 
-  it('falls back to external id when provider reference is missing', async () => {
-    mocks.listConnections.mockResolvedValueOnce([
-      createConnectionFixture({ providerReference: '', externalId: 'ext-2' }),
-    ])
-
-    renderPage()
-
-    expect(await screen.findByText('External id: ext-2')).toBeInTheDocument()
-  })
-
-  it('falls back to created timestamp when provider reference and external id are missing', async () => {
-    const connection = createConnectionFixture({ providerReference: '', externalId: '' })
+  it('uses created time as an accessible fallback when provider reference is empty', async () => {
+    const connection = createConnectionFixture({ providerReference: '' })
     mocks.listConnections.mockResolvedValueOnce([connection])
 
     renderPage()
 
     expect(await screen.findByText(`Created: ${formatFinanceDateTime(connection.createdAt)}`)).toBeInTheDocument()
+    expect(screen.getByRole('button', {
+      name: `Rename connection Mono (Created: ${formatFinanceDateTime(connection.createdAt)})`,
+    })).toBeInTheDocument()
   })
 
   it('submits the monobank token form without a free-text provider field', async () => {
@@ -206,7 +198,7 @@ describe('Finance connections page', () => {
     const name = screen.getByLabelText('Connection name')
     await user.clear(name)
     await user.type(name, 'Joint checking')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Save connection name' }))
 
     await waitFor(() => expect(mocks.renameConnection).toHaveBeenCalledWith({
       tenantId: 'tenant-1',
@@ -227,7 +219,7 @@ describe('Finance connections page', () => {
     await user.click(rename)
     expect(screen.getByLabelText('Connection name')).toHaveFocus()
 
-    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel connection name edit' }))
     expect(screen.getByRole('button', { name: 'Rename connection Mono (Provider ref: ref)' })).toHaveFocus()
   })
 
@@ -240,7 +232,7 @@ describe('Finance connections page', () => {
     const name = screen.getByLabelText('Connection name')
     await user.clear(name)
     await user.type(name, 'Joint checking')
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Save connection name' }))
 
     const renameError = await screen.findByRole('alert')
     const nameInput = screen.getByLabelText('Connection name')
@@ -346,7 +338,7 @@ describe('Finance connections page', () => {
 
   it('renders failed connection state badges', async () => {
     mocks.listConnections.mockResolvedValueOnce([
-      createConnectionFixture({ state: 'failed', providerReference: '', externalId: 'failed-ext' }),
+      createConnectionFixture({ state: 'failed', providerReference: '' }),
     ])
 
     renderPage()
@@ -357,7 +349,7 @@ describe('Finance connections page', () => {
 
   it('renders fallback connection state badges for non-active states', async () => {
     mocks.listConnections.mockResolvedValueOnce([
-      createConnectionFixture({ state: 'paused', providerReference: '', externalId: 'paused-ext' }),
+      createConnectionFixture({ state: 'paused', providerReference: '' }),
     ])
 
     renderPage()

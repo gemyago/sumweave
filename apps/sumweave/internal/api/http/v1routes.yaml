@@ -2083,14 +2083,13 @@ components:
         windowEnd: { type: string, format: date-time, nullable: true }
     FinanceBankConnection:
       type: object
-      required: [id, tenantId, provider, displayName, providerReference, externalId, state, createdAt, updatedAt]
+      required: [id, tenantId, provider, displayName, providerReference, state, createdAt, updatedAt]
       properties:
         id: { type: string }
         tenantId: { type: string }
         provider: { type: string }
         displayName: { type: string }
         providerReference: { type: string }
-        externalId: { type: string }
         state: { type: string }
         lastSyncJobId: { type: string }
         lastSyncStartedAt: { type: string, format: date-time, nullable: true }

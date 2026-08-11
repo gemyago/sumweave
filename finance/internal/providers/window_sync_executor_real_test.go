@@ -44,7 +44,6 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 				ProviderID:        providerID,
 				ConnectorID:       connectorID,
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
-				ExternalID:        "external-" + fake.UUID().V4(),
 			}
 		}
 		makeSecret := func(providerID domain.ProviderID) domain.ConnectionSecret {
@@ -110,11 +109,11 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			assert.NotEmpty(t, r.Header.Get("Authorization"))
 
 			switch r.URL.Path {
-			case "/sessions/" + enableBankingConnection.ExternalID:
+			case "/sessions/" + enableBankingConnection.ProviderReference:
 				_, _ = fmt.Fprintf(
 					w,
 					`{"session_id":"%s","accounts":["%s"],"accounts_data":[{"uid":"%s","name":"PKO Main","currency":"pln","account_id":{"iban":"PL11111111111111111111111111"}}]}`,
-					enableBankingConnection.ExternalID,
+					enableBankingConnection.ProviderReference,
 					enableBankingAccountID,
 					enableBankingAccountID,
 				)

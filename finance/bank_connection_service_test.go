@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ import (
 	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
 	internalenablebanking "github.com/gemyago/sumweave/finance/internal/enablebanking"
+	enablebankingclient "github.com/gemyago/sumweave/finance/internal/enablebanking/client"
 	internalmonobank "github.com/gemyago/sumweave/finance/internal/monobank"
 	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
 	"github.com/gemyago/sumweave/finance/persistence"
@@ -210,6 +212,77 @@ func TestBankConnectionService(t *testing.T) {
 		assert.Equal(t, 1, coordinator.finishCalls)
 	})
 
+	t.Run("maps wrapped Enable Banking client failures to public response errors", func(t *testing.T) {
+		fake := faker.New()
+		providerMessage := "provider-message-" + fake.UUID().V4()
+		providerBody := []byte(`{"message":"` + providerMessage + `"}`)
+		coordinator := &recordingBankConnectionLinkCoordinator{
+			startErr: fmt.Errorf(
+				"start redirect link: %w",
+				&enablebankingclient.ResponseError{
+					Operation:  "auth",
+					StatusCode: http.StatusBadRequest,
+					Code:       "REDIRECT_URI_NOT_ALLOWED",
+					Message:    providerMessage,
+					Body:       providerBody,
+				},
+			),
+			finishErr: fmt.Errorf(
+				"finish redirect link: %w",
+				&enablebankingclient.ResponseError{
+					Operation:  "sessions",
+					StatusCode: http.StatusBadRequest,
+					Code:       "INVALID_AUTHORIZATION_CODE",
+					Message:    providerMessage,
+					Body:       providerBody,
+				},
+			),
+		}
+		service := makeTestBankConnectionService(testBankConnectionServiceArgs{
+			tenantMembershipStore: recordingTenantMembershipStore{allowed: true},
+			pendingStartLookup:    recordingPendingStartLookup{},
+			linkCoordinator:       coordinator,
+		})
+
+		_, err := service.StartBankConnectionLink(t.Context(), StartBankConnectionLinkParams{
+			ActorUserID: "actor-" + fake.UUID().V4(),
+			TenantID:    "tenant-" + fake.UUID().V4(),
+			Provider:    bankProviderPKO,
+			RedirectURL: "https://app.example.test/" + fake.UUID().V4(),
+		})
+
+		var providerResponseErr *ProviderResponseError
+		require.ErrorAs(t, err, &providerResponseErr)
+		assert.Equal(t, &ProviderResponseError{
+			Provider:   bankConnectorEnableBanking,
+			Operation:  "auth",
+			StatusCode: http.StatusBadRequest,
+			Code:       "REDIRECT_URI_NOT_ALLOWED",
+			Message:    providerMessage,
+		}, providerResponseErr)
+		assert.Contains(t, err.Error(), providerMessage)
+		var upstreamResponseErr *enablebankingclient.ResponseError
+		assert.NotErrorAs(t, err, &upstreamResponseErr)
+
+		_, err = service.FinishBankConnectionLink(t.Context(), FinishBankConnectionLinkParams{
+			ActorUserID: "actor-" + fake.UUID().V4(),
+			TenantID:    "tenant-" + fake.UUID().V4(),
+			Provider:    bankProviderPKO,
+			State:       "state-" + fake.UUID().V4(),
+			Code:        "code-" + fake.UUID().V4(),
+		})
+		require.ErrorAs(t, err, &providerResponseErr)
+		assert.Equal(t, &ProviderResponseError{
+			Provider:   bankConnectorEnableBanking,
+			Operation:  "sessions",
+			StatusCode: http.StatusBadRequest,
+			Code:       "INVALID_AUTHORIZATION_CODE",
+			Message:    providerMessage,
+		}, providerResponseErr)
+		assert.Contains(t, err.Error(), providerMessage)
+		assert.NotErrorAs(t, err, &upstreamResponseErr)
+	})
+
 	t.Run(
 		"delegates monobank token link and pko redirect flows through v2 coordination",
 		func(t *testing.T) {
@@ -233,7 +306,6 @@ func TestBankConnectionService(t *testing.T) {
 				ConnectorID:       domain.ProviderConnectorIDMonobank,
 				DisplayName:       "Monobank " + fake.Company().Name(),
 				ProviderReference: "mono-ref-" + fake.UUID().V4(),
-				ExternalID:        "mono-external-" + fake.UUID().V4(),
 				SecretID:          "secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 				CreatedAt:         now,
@@ -246,7 +318,6 @@ func TestBankConnectionService(t *testing.T) {
 				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
 				DisplayName:       "PKO " + fake.Company().Name(),
 				ProviderReference: "pko-ref-" + fake.UUID().V4(),
-				ExternalID:        "pko-external-" + fake.UUID().V4(),
 				SecretID:          "secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 				CreatedAt:         now,
@@ -522,6 +593,196 @@ func TestBankConnectionService(t *testing.T) {
 			assert.Empty(t, decryptedPKOSecret)
 		},
 	)
+
+	t.Run("preserves persisted PKO sessions for distinct links and retries", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.August, 10, 15, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		store := persistence.NewStore(openTestDatabase(t))
+		key := sha256.Sum256([]byte("key-" + fake.UUID().V4()))
+		cipher, err := credentials.NewAESGCMCipher(key[:], "finance-bank-connections")
+		require.NoError(t, err)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
+		require.NoError(t, err)
+		privateKeyPath := filepath.Join(t.TempDir(), "enable-banking-private-key.pem")
+		require.NoError(t, os.WriteFile(
+			privateKeyPath,
+			pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER}),
+			0o600,
+		))
+
+		reference := "reference-" + fake.UUID().V4()
+		externalID := "session-" + fake.UUID().V4()
+		secondProviderReference := "session-second-" + fake.UUID().V4()
+		thirdProviderReference := "session-third-" + fake.UUID().V4()
+		retryReference := "reference-retry-" + fake.UUID().V4()
+		retryProviderReference := "session-retry-" + fake.UUID().V4()
+		sessionByCode := map[string]map[string]any{
+			"first": {
+				"session_id":         externalID,
+				"provider_reference": reference,
+				"status":             string(domain.BankConnectionStateActive),
+			},
+			"second": {
+				"session_id":         secondProviderReference,
+				"provider_reference": secondProviderReference,
+				"status":             string(domain.BankConnectionStateActive),
+			},
+			"third": {
+				"session_id":         thirdProviderReference,
+				"provider_reference": thirdProviderReference,
+				"status":             string(domain.BankConnectionStateActive),
+			},
+			"retry": {
+				"session_id":         retryProviderReference,
+				"provider_reference": retryReference,
+				"status":             string(domain.BankConnectionStateActive),
+			},
+		}
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/auth":
+				writeJSON(t, w, map[string]any{
+					"url":              "https://enable-banking.example.test/auth/" + fake.UUID().V4(),
+					"authorization_id": "auth-" + fake.UUID().V4(),
+				})
+			case "/sessions":
+				var request struct {
+					Code string `json:"code"`
+				}
+				if decodeErr := json.NewDecoder(r.Body).Decode(&request); decodeErr != nil {
+					t.Errorf("decode session request: %v", decodeErr)
+					return
+				}
+				response, ok := sessionByCode[request.Code]
+				if !ok {
+					t.Errorf("unexpected session code %q", request.Code)
+					return
+				}
+				writeJSON(t, w, response)
+			default:
+				t.Fatalf("unexpected enable banking path: %s", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		states := []string{
+			"state-first-" + fake.UUID().V4(),
+			"state-second-" + fake.UUID().V4(),
+			"state-third-" + fake.UUID().V4(),
+			"state-retry-" + fake.UUID().V4(),
+		}
+		stateIndex := 0
+		connector := internalenablebanking.NewConnector(internalenablebanking.Args{
+			BaseURL:        server.URL,
+			Logger:         slog.New(slog.DiscardHandler),
+			AppID:          "app-" + fake.UUID().V4(),
+			PrivateKeyPath: privateKeyPath,
+			StateProvider: func() (string, error) {
+				state := states[stateIndex]
+				stateIndex++
+				return state, nil
+			},
+			Now: func() time.Time { return now },
+		})
+		linkPersistence := persistence.NewProviderLinkPersistence(store)
+		coordinator, err := internalproviders.NewLinkCoordinator(internalproviders.LinkCoordinatorArgs{
+			ProviderProfileRegistry: internalproviders.NewStaticProviderProfileRegistry(internalproviders.PKOProfile()),
+			ConnectorRegistry:       internalproviders.NewStaticConnectorRegistry(connector),
+			PendingStartStore:       linkPersistence,
+			ConnectionSecretWriter: newBankConnectionSecretWriter(
+				store,
+				cipher,
+				func() time.Time { return now },
+				uuid.NewString,
+			),
+			ConnectionStore:  linkPersistence,
+			RawPayloadWriter: linkPersistence,
+			Logger:           slog.New(slog.DiscardHandler),
+			Now:              func() time.Time { return now },
+			NewID:            uuid.NewString,
+			PendingStartTTL:  time.Minute,
+		})
+		require.NoError(t, err)
+		tenantID := "tenant-" + fake.UUID().V4()
+		actorUserID := "actor-" + fake.UUID().V4()
+		start := func() internalproviders.StartLinkResult {
+			result, startErr := coordinator.StartRedirectLink(t.Context(), internalproviders.RedirectLinkStartRequest{
+				TenantID:           tenantID,
+				ActorUserID:        actorUserID,
+				ProviderID:         domain.ProviderIDPKO,
+				RedirectURL:        "https://backend.example.test/callback",
+				BrowserCallbackURL: "https://app.example.test/connections",
+			})
+			require.NoError(t, startErr)
+			return result
+		}
+		finish := func(state string, code string) (domain.BankConnection, error) {
+			return coordinator.FinishRedirectLink(t.Context(), internalproviders.RedirectLinkFinishRequest{
+				TenantID:    tenantID,
+				ActorUserID: actorUserID,
+				ProviderID:  domain.ProviderIDPKO,
+				State:       state,
+				Code:        code,
+			})
+		}
+
+		firstStart := start()
+		first, err := finish(firstStart.State, "first")
+		require.NoError(t, err)
+		firstStored, err := store.GetBankConnection(t.Context(), first.ID)
+		require.NoError(t, err)
+
+		secondStart := start()
+		second, err := finish(secondStart.State, "second")
+		require.NoError(t, err)
+		thirdStart := start()
+		third, err := finish(thirdStart.State, "third")
+		require.NoError(t, err)
+		assert.NotEqual(t, first.ID, second.ID)
+		assert.NotEqual(t, first.ID, third.ID)
+		assert.NotEqual(t, first.SecretID, second.SecretID)
+		assert.NotEqual(t, first.SecretID, third.SecretID)
+		loadedFirst, err := store.GetBankConnection(t.Context(), first.ID)
+		require.NoError(t, err)
+		assert.Equal(t, firstStored, loadedFirst)
+
+		retryStart := start()
+		require.NoError(t, store.DB().Exec(
+			"CREATE TRIGGER fail_retry_payload BEFORE INSERT ON finance_raw_payloads "+
+				"WHEN NEW.provider_object_id = '"+retryProviderReference+"' "+
+				"BEGIN SELECT RAISE(FAIL, 'retry payload failure'); END",
+		).Error)
+		_, err = finish(retryStart.State, "retry")
+		require.ErrorContains(t, err, "save raw payload")
+		retryBefore, err := store.ListBankConnections(t.Context(), tenantID)
+		require.NoError(t, err)
+		require.Len(t, retryBefore, 4)
+		var retryStored domain.BankConnection
+		for _, connection := range retryBefore {
+			if connection.ProviderReference == retryProviderReference {
+				retryStored = connection
+				break
+			}
+		}
+		require.NotEmpty(t, retryStored.ID)
+		var secretsBefore int64
+		require.NoError(t, store.DB().Table("finance_connection_secrets").Count(&secretsBefore).Error)
+		assert.Equal(t, int64(4), secretsBefore)
+		require.NoError(t, store.DB().Exec("DROP TRIGGER fail_retry_payload").Error)
+
+		retry, err := finish(retryStart.State, "retry")
+		require.NoError(t, err)
+		assert.Equal(t, retryStored.ID, retry.ID)
+		assert.Equal(t, retryStored.SecretID, retry.SecretID)
+		loadedFirst, err = store.GetBankConnection(t.Context(), first.ID)
+		require.NoError(t, err)
+		assert.Equal(t, firstStored, loadedFirst)
+		var secretsAfter int64
+		require.NoError(t, store.DB().Table("finance_connection_secrets").Count(&secretsAfter).Error)
+		assert.Equal(t, secretsBefore, secretsAfter)
+	})
 
 	t.Run("wraps constructor and service errors", func(t *testing.T) {
 		fake := faker.New()

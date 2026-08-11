@@ -21,6 +21,8 @@ import (
 	"go.uber.org/dig"
 )
 
+const providerRequestFailedMessage = "provider request failed"
+
 type tenantService interface {
 	CreateTenant(context.Context, financepkg.CreateTenantParams) (domain.Tenant, error)
 	UpdateTenant(context.Context, financepkg.UpdateTenantParams) (domain.Tenant, error)
@@ -2299,7 +2301,6 @@ func mapConnection(
 		Provider:             item.Connection.Provider,
 		DisplayName:          item.Connection.DisplayName,
 		ProviderReference:    item.Connection.ProviderReference,
-		ExternalID:           item.Connection.ExternalID,
 		State:                string(item.Connection.State),
 		LastSyncJobID:        item.Connection.LastSyncJobID,
 		LastSyncStartedAt:    item.Connection.LastSyncStartedAt,
@@ -2763,7 +2764,7 @@ func mapSyntheticLinkStateError(err error) error {
 
 func humanizeProviderResponseError(err *financepkg.ProviderResponseError) string {
 	if err == nil {
-		return "provider request failed"
+		return providerRequestFailedMessage
 	}
 	if err.IsEnableBankingWrongASPSP() {
 		return "Enable Banking rejected the configured ASPSP name; this sandbox app may not expose PKO, so discover an available ASPSP and set finance.providers.enableBanking.aspspName (for example via APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME=Mock ASPSP)"

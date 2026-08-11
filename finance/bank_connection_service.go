@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
+	enablebankingclient "github.com/gemyago/sumweave/finance/internal/enablebanking/client"
 	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
 	"github.com/gemyago/sumweave/finance/persistence"
 )
@@ -162,16 +164,42 @@ func (s *BankConnectionService) StartBankConnectionLink(
 		},
 	)
 	if err != nil {
-		s.logger.WarnContext(ctx, "bank connection link failed",
-			slog.String("operation", "redirectStart"), slog.String("failureStage", "coordinator"),
-			slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
-			slog.String("provider", params.Provider), slog.Any("err", err))
+		var responseErr *enablebankingclient.ResponseError
+		errorClass := "coordinator"
+		if errors.As(err, &responseErr) {
+			errorClass = "providerResponse"
+		}
+		attributes := []slog.Attr{
+			slog.String("operation", "redirectStart"),
+			slog.String("failureStage", "coordinator"),
+			slog.String("tenantId", params.TenantID),
+			slog.String("actorUserId", params.ActorUserID),
+			slog.String("provider", params.Provider),
+			slog.String("errorClass", errorClass),
+		}
+		if responseErr != nil {
+			attributes = append(
+				attributes,
+				slog.Int("providerStatus", responseErr.StatusCode),
+				slog.String("providerCode", responseErr.Code),
+				slog.Bool(
+					"retryable",
+					responseErr.StatusCode == http.StatusTooManyRequests ||
+						responseErr.StatusCode >= http.StatusInternalServerError,
+				),
+			)
+		}
+		attributes = append(attributes, slog.Any("err", err))
+		s.logger.LogAttrs(ctx, slog.LevelWarn, "bank connection link failed", attributes...)
 		if isBankProviderConfigurationError(err) {
 			return ProviderLinkStart{}, fmt.Errorf(
 				"%w: %s",
 				ErrBankProviderNotConfigured,
 				params.Provider,
 			)
+		}
+		if providerResponseErr := providerResponseErrorForBankConnection(err); providerResponseErr != nil {
+			return ProviderLinkStart{}, fmt.Errorf("start bank connection link: %w", providerResponseErr)
 		}
 		return ProviderLinkStart{}, fmt.Errorf("start bank connection link: %w", err)
 	}
@@ -213,27 +241,53 @@ func (s *BankConnectionService) FinishBankConnectionLink(
 			Code:        params.Code,
 		},
 	)
-	if err != nil {
-		s.logger.WarnContext(ctx, "bank connection link failed",
-			slog.String("operation", "redirectFinish"), slog.String("failureStage", "coordinator"),
+	if err == nil {
+		s.logger.InfoContext(ctx, "bank connection redirect link completed",
 			slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
-			slog.String("provider", params.Provider), slog.Any("err", err))
-		if errors.Is(err, internalproviders.ErrPendingStartNotFound) {
-			return domain.BankConnection{}, ErrPendingBankConnectionLinkStartNotFound
-		}
-		if isBankProviderConfigurationError(err) {
-			return domain.BankConnection{}, fmt.Errorf(
-				"%w: %s",
-				ErrBankProviderNotConfigured,
-				params.Provider,
-			)
-		}
-		return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", err)
+			slog.String("provider", params.Provider), slog.String("connectionId", connection.ID))
+		return connection, nil
 	}
-	s.logger.InfoContext(ctx, "bank connection redirect link completed",
-		slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
-		slog.String("provider", params.Provider), slog.String("connectionId", connection.ID))
-	return connection, nil
+	var responseErr *enablebankingclient.ResponseError
+	errorClass := "coordinator"
+	if errors.As(err, &responseErr) {
+		errorClass = "providerResponse"
+	}
+	attributes := []slog.Attr{
+		slog.String("operation", "redirectFinish"),
+		slog.String("failureStage", "coordinator"),
+		slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID),
+		slog.String("provider", params.Provider),
+		slog.String("errorClass", errorClass),
+	}
+	if responseErr != nil {
+		attributes = append(
+			attributes,
+			slog.Int("providerStatus", responseErr.StatusCode),
+			slog.String("providerCode", responseErr.Code),
+			slog.Bool(
+				"retryable",
+				responseErr.StatusCode == http.StatusTooManyRequests ||
+					responseErr.StatusCode >= http.StatusInternalServerError,
+			),
+		)
+	}
+	attributes = append(attributes, slog.Any("err", err))
+	s.logger.LogAttrs(ctx, slog.LevelWarn, "bank connection link failed", attributes...)
+	if errors.Is(err, internalproviders.ErrPendingStartNotFound) {
+		return domain.BankConnection{}, ErrPendingBankConnectionLinkStartNotFound
+	}
+	if isBankProviderConfigurationError(err) {
+		return domain.BankConnection{}, fmt.Errorf(
+			"%w: %s",
+			ErrBankProviderNotConfigured,
+			params.Provider,
+		)
+	}
+	if providerResponseErr := providerResponseErrorForBankConnection(err); providerResponseErr != nil {
+		return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", providerResponseErr)
+	}
+	return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", err)
 }
 
 func (s *BankConnectionService) UpdateBankConnection(
@@ -302,6 +356,20 @@ func isBankProviderConfigurationError(err error) bool {
 		errors.Is(err, internalproviders.ErrConnectorNotConfigured)
 }
 
+func providerResponseErrorForBankConnection(err error) *ProviderResponseError {
+	var responseErr *enablebankingclient.ResponseError
+	if !errors.As(err, &responseErr) {
+		return nil
+	}
+	return &ProviderResponseError{
+		Provider:   bankConnectorEnableBanking,
+		Operation:  responseErr.Operation,
+		StatusCode: responseErr.StatusCode,
+		Code:       responseErr.Code,
+		Message:    responseErr.Message,
+	}
+}
+
 type bankConnectionSecretWriter struct {
 	store  connectionSecretStore
 	cipher connectionSecretCipher
@@ -324,22 +392,33 @@ func (w *bankConnectionSecretWriter) SaveConnectionSecret(
 	reference string,
 	secret string,
 ) (string, error) {
+	prepared, err := w.PrepareConnectionSecret(provider, reference, secret)
+	if err != nil {
+		return "", err
+	}
+	_, err = w.store.SaveConnectionSecret(ctx, prepared)
+	if err != nil {
+		return "", fmt.Errorf("save connection secret: %w", err)
+	}
+	return prepared.ID, nil
+}
+
+func (w *bankConnectionSecretWriter) PrepareConnectionSecret(
+	provider string,
+	reference string,
+	secret string,
+) (domain.ConnectionSecret, error) {
 	envelope, err := w.cipher.SealString(secret)
 	if err != nil {
-		return "", fmt.Errorf("seal connection secret: %w", err)
+		return domain.ConnectionSecret{}, fmt.Errorf("seal connection secret: %w", err)
 	}
-	secretID := w.newID()
 	now := w.now()
-	_, err = w.store.SaveConnectionSecret(ctx, domain.ConnectionSecret{
-		ID:        secretID,
+	return domain.ConnectionSecret{
+		ID:        w.newID(),
 		Provider:  provider,
 		Reference: reference,
 		Envelope:  envelope,
 		CreatedAt: now,
 		UpdatedAt: now,
-	})
-	if err != nil {
-		return "", fmt.Errorf("save connection secret: %w", err)
-	}
-	return secretID, nil
+	}, nil
 }

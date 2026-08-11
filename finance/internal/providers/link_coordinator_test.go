@@ -210,10 +210,11 @@ func newPendingStartStoreFixture(t *testing.T, fixture pendingStartStoreFixture)
 }
 
 type connectionSecretWriterFixture struct {
-	mock     *MockConnectionSecretWriter
-	saved    []savedSecret
-	secretID string
-	saveErr  error
+	mock      *MockConnectionSecretWriter
+	saved     []savedSecret
+	secretID  string
+	secretIDs []string
+	saveErr   error
 }
 
 type savedSecret struct {
@@ -230,16 +231,20 @@ func newConnectionSecretWriterFixture(
 
 	fixture.mock = NewMockConnectionSecretWriter(t)
 	fixture.mock.EXPECT().
-		SaveConnectionSecret(testifymock.Anything, testifymock.Anything, testifymock.Anything, testifymock.Anything).
-		RunAndReturn(func(_ context.Context, provider string, reference string, secret string) (string, error) {
+		PrepareConnectionSecret(testifymock.Anything, testifymock.Anything, testifymock.Anything).
+		RunAndReturn(func(provider string, reference string, secret string) (domain.ConnectionSecret, error) {
 			if fixture.saveErr != nil {
-				return "", fixture.saveErr
+				return domain.ConnectionSecret{}, fixture.saveErr
+			}
+			secretID := fixture.secretID
+			if len(fixture.secretIDs) > len(fixture.saved) {
+				secretID = fixture.secretIDs[len(fixture.saved)]
 			}
 			fixture.saved = append(
 				fixture.saved,
 				savedSecret{provider: provider, reference: reference, secret: secret},
 			)
-			return fixture.secretID, nil
+			return domain.ConnectionSecret{ID: secretID, Provider: provider, Reference: reference}, nil
 		}).
 		Maybe()
 
@@ -251,21 +256,26 @@ type connectionStoreFixture struct {
 	saved      []domain.BankConnection
 	listResult []domain.BankConnection
 	saveErr    error
-	listErr    error
 }
 
 func newConnectionStoreFixture(t *testing.T, fixture connectionStoreFixture) *connectionStoreFixture {
 	t.Helper()
 
 	fixture.mock = NewMockConnectionStore(t)
-	saveBankConnectionCall := fixture.mock.EXPECT().SaveBankConnection(
+	saveBankConnectionCall := fixture.mock.EXPECT().SaveLinkedConnection(
+		testifymock.Anything,
 		testifymock.Anything,
 		testifymock.Anything,
 	)
 	saveBankConnectionCall.RunAndReturn(
-		func(_ context.Context, connection domain.BankConnection) (domain.BankConnection, error) {
+		func(_ context.Context, connection domain.BankConnection, _ domain.ConnectionSecret) (domain.BankConnection, error) {
 			if fixture.saveErr != nil {
 				return domain.BankConnection{}, fixture.saveErr
+			}
+			for _, existing := range fixture.listResult {
+				if hasSameProviderSessionIdentity(existing, connection) {
+					return existing, nil
+				}
 			}
 			fixture.saved = append(fixture.saved, connection)
 			return connection, nil
@@ -273,23 +283,15 @@ func newConnectionStoreFixture(t *testing.T, fixture connectionStoreFixture) *co
 	)
 	saveBankConnectionCall.Maybe()
 
-	listBankConnectionsCall := fixture.mock.EXPECT().ListBankConnections(
-		testifymock.Anything,
-		testifymock.Anything,
-	)
-	listBankConnectionsCall.RunAndReturn(
-		func(_ context.Context, _ string) ([]domain.BankConnection, error) {
-			if fixture.listErr != nil {
-				return nil, fixture.listErr
-			}
-			items := make([]domain.BankConnection, len(fixture.listResult))
-			copy(items, fixture.listResult)
-			return items, nil
-		},
-	)
-	listBankConnectionsCall.Maybe()
-
 	return &fixture
+}
+
+func hasSameProviderSessionIdentity(existing domain.BankConnection, candidate domain.BankConnection) bool {
+	if existing.Provider != candidate.Provider || existing.ConnectorID != candidate.ConnectorID {
+		return false
+	}
+	return candidate.ProviderReference != "" &&
+		candidate.ProviderReference == existing.ProviderReference
 }
 
 type rawPayloadWriterFixture struct {
@@ -456,7 +458,6 @@ func TestLinkCoordinator(t *testing.T) {
 			tokenResult: LinkResult{
 				DisplayName:       "mono-" + fake.Person().FirstName(),
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
-				ExternalID:        "external-" + fake.UUID().V4(),
 				Secret:            "token-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
@@ -868,7 +869,7 @@ func TestLinkCoordinator(t *testing.T) {
 			require.Equal(t, 1, pendingStore.restoreCallsByState[state])
 		})
 
-		t.Run("returns PKO list error and token-link save-fallback behavior", func(t *testing.T) {
+		t.Run("returns token-link persistence errors and save-fallback behavior", func(t *testing.T) {
 			connector := newLinkConnectorFixture(t, linkConnectorFixture{
 				connectorID:  domain.ProviderConnectorIDEnableBanking,
 				capabilities: ConnectorCapabilities{SupportsTokenLink: true},
@@ -886,7 +887,7 @@ func TestLinkCoordinator(t *testing.T) {
 					secretID: "secret-row-" + fake.UUID().V4(),
 				}).mock,
 				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{
-					listErr: errors.New("list failed"),
+					saveErr: errors.New("save failed"),
 				}).mock,
 				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
 				Now:              func() time.Time { return now },
@@ -899,8 +900,7 @@ func TestLinkCoordinator(t *testing.T) {
 				ProviderID:  domain.ProviderIDPKO,
 				Token:       "token-" + fake.UUID().V4(),
 			})
-			require.ErrorContains(t, err, "save bank connection")
-			require.ErrorContains(t, err, "list bank connections")
+			require.ErrorContains(t, err, "save linked bank connection")
 
 			connector.tokenErr = nil
 			connector.tokenResult = LinkResult{
@@ -938,7 +938,7 @@ func TestLinkCoordinator(t *testing.T) {
 				ProviderID:  domain.ProviderIDMonobank,
 				Token:       "token-" + fake.UUID().V4(),
 			})
-			require.ErrorContains(t, err, "save bank connection")
+			require.ErrorContains(t, err, "save linked bank connection")
 
 			connector.tokenResult.RawPayloads[0].CapturedAt = time.Time{}
 			rawPayloadWriter := newRawPayloadWriterFixture(t)
@@ -1007,7 +1007,6 @@ func TestLinkCoordinator(t *testing.T) {
 				finishResult: LinkResult{
 					DisplayName:       "pko-" + fake.Company().Name(),
 					ProviderReference: "provider-ref-" + fake.UUID().V4(),
-					ExternalID:        "external-" + fake.UUID().V4(),
 					Secret:            "secret-" + fake.UUID().V4(),
 					State:             domain.BankConnectionStateActive,
 					RawPayloads: []domain.ProviderRawPayloadObservation{{
@@ -1144,7 +1143,7 @@ func TestLinkCoordinator(t *testing.T) {
 		})
 
 	t.Run(
-		"persists final link results through secret writer and reuses existing pko connection identity",
+		"keeps distinct PKO sessions separate and retries the same session idempotently",
 		func(t *testing.T) {
 			fake := faker.New()
 			now := time.Date(2026, time.June, 29, 16, 0, 0, 0, time.UTC)
@@ -1155,7 +1154,6 @@ func TestLinkCoordinator(t *testing.T) {
 				finishResult: LinkResult{
 					DisplayName:       "pko-" + fake.Company().Name(),
 					ProviderReference: "provider-ref-" + fake.UUID().V4(),
-					ExternalID:        "external-" + fake.UUID().V4(),
 					Secret:            "secret-plain-" + fake.UUID().V4(),
 					State:             domain.BankConnectionStateActive,
 					RawPayloads: []domain.ProviderRawPayloadObservation{{
@@ -1167,10 +1165,13 @@ func TestLinkCoordinator(t *testing.T) {
 				},
 			})
 			existing := domain.BankConnection{
-				ID:        "existing-" + fake.UUID().V4(),
-				TenantID:  "tenant-" + fake.UUID().V4(),
-				Provider:  string(domain.ProviderIDPKO),
-				CreatedAt: now.Add(-24 * time.Hour),
+				ID:                "existing-" + fake.UUID().V4(),
+				TenantID:          "tenant-" + fake.UUID().V4(),
+				Provider:          string(domain.ProviderIDPKO),
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+				ProviderReference: "existing-provider-ref-" + fake.UUID().V4(),
+				SecretID:          "existing-secret-" + fake.UUID().V4(),
+				CreatedAt:         now.Add(-24 * time.Hour),
 			}
 			pendingStore := newPendingStartStoreFixture(
 				t,
@@ -1205,6 +1206,7 @@ func TestLinkCoordinator(t *testing.T) {
 				listResult: []domain.BankConnection{existing},
 			})
 			rawPayloadWriter := newRawPayloadWriterFixture(t)
+			rawPayloadWriter.saveErr = errors.New("save raw payload failed")
 
 			coordinator, err := NewLinkCoordinator(LinkCoordinatorArgs{
 				ProviderProfileRegistry: NewStaticProviderProfileRegistry(PKOProfile()),
@@ -1219,25 +1221,41 @@ func TestLinkCoordinator(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			connection, err := coordinator.FinishRedirectLink(t.Context(), RedirectLinkFinishRequest{
+			_, err = coordinator.FinishRedirectLink(t.Context(), RedirectLinkFinishRequest{
 				TenantID:    existing.TenantID,
 				ActorUserID: pendingStore.savedByState[pendingState].ActorUserID,
 				ProviderID:  domain.ProviderIDPKO,
 				State:       pendingState,
 				Code:        "code-" + fake.UUID().V4(),
 			})
-			require.NoError(t, err)
+			require.ErrorContains(t, err, "save raw payload")
 			require.Len(t, secretWriter.saved, 1)
 			assert.Equal(t, string(domain.ProviderIDPKO), secretWriter.saved[0].provider)
 			assert.Equal(t, connector.finishResult.ProviderReference, secretWriter.saved[0].reference)
 			assert.Equal(t, connector.finishResult.Secret, secretWriter.saved[0].secret)
 			require.Len(t, connectionStore.saved, 1)
-			assert.Equal(t, existing.ID, connection.ID)
-			assert.Equal(t, existing.ID, connectionStore.saved[0].ID)
-			assert.Equal(t, secretWriter.secretID, connectionStore.saved[0].SecretID)
-			assert.Equal(t, string(domain.ProviderIDPKO), connectionStore.saved[0].Provider)
-			assert.Equal(t, domain.ProviderConnectorIDEnableBanking, connectionStore.saved[0].ConnectorID)
-			assert.Equal(t, existing.CreatedAt, connectionStore.saved[0].CreatedAt)
+			firstSaved := connectionStore.saved[0]
+			assert.NotEqual(t, existing.ID, firstSaved.ID)
+			assert.NotEqual(t, existing.SecretID, firstSaved.SecretID)
+			assert.Equal(t, connector.finishResult.ProviderReference, firstSaved.ProviderReference)
+			assert.Equal(t, secretWriter.secretID, firstSaved.SecretID)
+			assert.Equal(t, string(domain.ProviderIDPKO), firstSaved.Provider)
+			assert.Equal(t, domain.ProviderConnectorIDEnableBanking, firstSaved.ConnectorID)
+			assert.Equal(t, now, firstSaved.CreatedAt)
+
+			connectionStore.listResult = append(connectionStore.listResult, firstSaved)
+			rawPayloadWriter.saveErr = nil
+			connection, err := coordinator.FinishRedirectLink(t.Context(), RedirectLinkFinishRequest{
+				TenantID:    existing.TenantID,
+				ActorUserID: pendingStore.savedByState[pendingState].ActorUserID,
+				ProviderID:  domain.ProviderIDPKO,
+				State:       pendingState,
+				Code:        "code-retry-" + fake.UUID().V4(),
+			})
+			require.NoError(t, err)
+			assert.Equal(t, firstSaved.ID, connection.ID)
+			require.Len(t, connectionStore.saved, 1)
+			require.Len(t, secretWriter.saved, 2)
 			require.Len(t, rawPayloadWriter.saved, 1)
 			assert.Equal(
 				t, connector.finishResult.RawPayloads[0].ProviderObjectID,
@@ -1245,6 +1263,96 @@ func TestLinkCoordinator(t *testing.T) {
 			)
 			assert.Equal(t, "finish", extractPhase(t, rawPayloadWriter.saved[0].PayloadJSON))
 		})
+
+	t.Run("matches PKO sessions by exact non-empty provider reference", func(t *testing.T) {
+		fake := faker.New()
+		reference := "reference-" + fake.UUID().V4()
+		existing := domain.BankConnection{
+			Provider:          string(domain.ProviderIDPKO),
+			ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+			ProviderReference: reference,
+		}
+
+		assert.True(t, hasSameProviderSessionIdentity(existing, existing))
+		assert.False(t, hasSameProviderSessionIdentity(existing, domain.BankConnection{
+			Provider:          existing.Provider,
+			ConnectorID:       existing.ConnectorID,
+			ProviderReference: "conflicting-reference-" + fake.UUID().V4(),
+		}))
+		assert.False(t, hasSameProviderSessionIdentity(existing, domain.BankConnection{
+			Provider:    existing.Provider,
+			ConnectorID: existing.ConnectorID,
+		}))
+	})
+
+	t.Run("persists conflicting PKO sessions without replacing the first connection", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.August, 10, 17, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		existing := domain.BankConnection{
+			ID:                "connection-existing-" + fake.UUID().V4(),
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			Provider:          string(domain.ProviderIDPKO),
+			ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+			ProviderReference: "reference-" + fake.UUID().V4(),
+			SecretID:          "secret-existing-" + fake.UUID().V4(),
+			State:             domain.BankConnectionStateActive,
+			CreatedAt:         now.Add(-time.Hour),
+			UpdatedAt:         now.Add(-time.Hour),
+		}
+		secretWriter := newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
+			secretIDs: []string{
+				"secret-reference-conflict-" + fake.UUID().V4(),
+				"secret-retry-" + fake.UUID().V4(),
+			},
+		})
+		connectionStore := newConnectionStoreFixture(t, connectionStoreFixture{
+			listResult: []domain.BankConnection{existing},
+		})
+		coordinator, err := NewLinkCoordinator(LinkCoordinatorArgs{
+			ProviderProfileRegistry: NewStaticProviderProfileRegistry(PKOProfile()),
+			ConnectorRegistry:       NewStaticConnectorRegistry(),
+			PendingStartStore:       newPendingStartStoreFixture(t, pendingStartStoreFixture{}).mock,
+			ConnectionSecretWriter:  secretWriter.mock,
+			ConnectionStore:         connectionStore.mock,
+			RawPayloadWriter:        newRawPayloadWriterFixture(t).mock,
+			Now:                     func() time.Time { return now },
+			NewID:                   func() string { return "connection-" + fake.UUID().V4() },
+			PendingStartTTL:         time.Minute,
+		})
+		require.NoError(t, err)
+
+		referenceConflict, err := coordinator.saveLinkedConnection(
+			t.Context(),
+			"test",
+			existing.TenantID,
+			PKOProfile(),
+			LinkResult{
+				ProviderReference: "reference-conflict-" + fake.UUID().V4(),
+				Secret:            "secret-plain-" + fake.UUID().V4(),
+				State:             domain.BankConnectionStateActive,
+			},
+		)
+		require.NoError(t, err)
+		connectionStore.listResult = append(connectionStore.listResult, referenceConflict)
+		retry, err := coordinator.saveLinkedConnection(
+			t.Context(),
+			"test",
+			existing.TenantID,
+			PKOProfile(),
+			LinkResult{
+				ProviderReference: referenceConflict.ProviderReference,
+				Secret:            "secret-plain-" + fake.UUID().V4(),
+				State:             domain.BankConnectionStateActive,
+			},
+		)
+		require.NoError(t, err)
+
+		assert.NotEqual(t, existing.ID, referenceConflict.ID)
+		assert.Equal(t, referenceConflict.ID, retry.ID)
+		assert.NotEqual(t, existing.SecretID, referenceConflict.SecretID)
+		assert.NotEqual(t, existing.SecretID, retry.SecretID)
+		assert.Equal(t, existing, connectionStore.listResult[0])
+	})
 }
 
 func extractPhase(t *testing.T, payload []byte) string {

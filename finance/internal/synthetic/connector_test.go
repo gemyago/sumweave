@@ -79,7 +79,6 @@ func TestConnector(t *testing.T) {
 			ProviderID:        domain.ProviderIDSynthetic,
 			ConnectorID:       domain.ProviderConnectorIDSynthetic,
 			ProviderReference: "provider-ref-" + fake.UUID().V4(),
-			ExternalID:        "external-" + fake.UUID().V4(),
 		}
 	}
 

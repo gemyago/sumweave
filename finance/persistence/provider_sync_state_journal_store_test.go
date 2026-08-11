@@ -47,7 +47,6 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 			ProviderID:        providerID,
 			ConnectorID:       connectorID,
 			ProviderReference: "provider-ref-" + fake.UUID().V4(),
-			ExternalID:        "external-" + fake.UUID().V4(),
 		}
 	}
 

@@ -64,20 +64,15 @@ type PendingStartStore interface {
 }
 
 type ConnectionSecretWriter interface {
-	SaveConnectionSecret(
-		ctx context.Context,
-		provider string,
-		reference string,
-		secret string,
-	) (string, error)
+	PrepareConnectionSecret(provider string, reference string, secret string) (domain.ConnectionSecret, error)
 }
 
 type ConnectionStore interface {
-	SaveBankConnection(
+	SaveLinkedConnection(
 		ctx context.Context,
 		connection domain.BankConnection,
+		secret domain.ConnectionSecret,
 	) (domain.BankConnection, error)
-	ListBankConnections(ctx context.Context, tenantID string) ([]domain.BankConnection, error)
 }
 
 type RawPayloadWriter interface {
@@ -629,7 +624,6 @@ func (c *LinkCoordinator) restorePendingStartOnError(
 	return fmt.Errorf("%s: %w", operation, linkErr)
 }
 
-//nolint:funlen // Ordered persistence milestones remain together for traceable recovery.
 func (c *LinkCoordinator) saveLinkedConnection(
 	ctx context.Context,
 	operation string,
@@ -637,10 +631,21 @@ func (c *LinkCoordinator) saveLinkedConnection(
 	profile ProviderProfile,
 	result LinkResult,
 ) (domain.BankConnection, error) {
-	secretID, err := c.connectionSecretWriter.SaveConnectionSecret(
-		ctx,
+	now := c.now()
+	connection := domain.BankConnection{
+		TenantID:          tenantID,
+		Provider:          string(profile.ProviderID),
+		ConnectorID:       profile.ConnectorID,
+		DisplayName:       strings.TrimSpace(result.DisplayName),
+		ProviderReference: strings.TrimSpace(result.ProviderReference),
+		State:             result.State,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+
+	secret, err := c.connectionSecretWriter.PrepareConnectionSecret(
 		string(profile.ProviderID),
-		strings.TrimSpace(result.ProviderReference),
+		connection.ProviderReference,
 		strings.TrimSpace(result.Secret),
 	)
 	if err != nil {
@@ -648,7 +653,7 @@ func (c *LinkCoordinator) saveLinkedConnection(
 			ctx,
 			"bank link coordinator failed",
 			slog.String("operation", operation),
-			slog.String("failureStage", "saveSecret"),
+			slog.String("failureStage", "prepareSecret"),
 			slog.String("tenantId", tenantID),
 			slog.String("provider", string(profile.ProviderID)),
 			slog.String("connectorId", string(profile.ConnectorID)),
@@ -656,67 +661,21 @@ func (c *LinkCoordinator) saveLinkedConnection(
 		)
 		return domain.BankConnection{}, fmt.Errorf("save connection secret: %w", err)
 	}
-	c.logger.InfoContext(
-		ctx,
-		"bank link secret saved",
-		slog.String("operation", "persist"),
-		slog.String("tenantId", tenantID),
-		slog.String("provider", string(profile.ProviderID)),
-		slog.String("connectorId", string(profile.ConnectorID)),
-	)
-
-	now := c.now()
-	connection := domain.BankConnection{
-		ID:                c.newID(),
-		TenantID:          tenantID,
-		Provider:          string(profile.ProviderID),
-		ConnectorID:       profile.ConnectorID,
-		DisplayName:       strings.TrimSpace(result.DisplayName),
-		ProviderReference: strings.TrimSpace(result.ProviderReference),
-		ExternalID:        strings.TrimSpace(result.ExternalID),
-		SecretID:          secretID,
-		State:             result.State,
-		CreatedAt:         now,
-		UpdatedAt:         now,
-	}
-
-	if profile.ProviderID == domain.ProviderIDPKO {
-		existingConnections, listErr := c.connectionStore.ListBankConnections(ctx, tenantID)
-		if listErr != nil {
-			c.logger.WarnContext(
-				ctx,
-				"bank link coordinator failed",
-				slog.String("operation", operation),
-				slog.String("failureStage", "pkoConnectionLookup"),
-				slog.String("tenantId", tenantID),
-				slog.String("provider", string(profile.ProviderID)),
-				slog.String("connectorId", string(profile.ConnectorID)),
-				slog.Any("err", listErr),
-			)
-			return domain.BankConnection{}, fmt.Errorf("list bank connections: %w", listErr)
-		}
-		for _, existingConnection := range existingConnections {
-			if existingConnection.Provider == string(profile.ProviderID) {
-				connection.ID = existingConnection.ID
-				connection.CreatedAt = existingConnection.CreatedAt
-				break
-			}
-		}
-	}
-
-	savedConnection, err := c.connectionStore.SaveBankConnection(ctx, connection)
+	connection.ID = c.newID()
+	connection.SecretID = secret.ID
+	savedConnection, err := c.connectionStore.SaveLinkedConnection(ctx, connection, secret)
 	if err != nil {
 		c.logger.WarnContext(
 			ctx,
 			"bank link coordinator failed",
 			slog.String("operation", operation),
-			slog.String("failureStage", "saveConnection"),
+			slog.String("failureStage", "saveLinkedConnection"),
 			slog.String("tenantId", tenantID),
 			slog.String("provider", string(profile.ProviderID)),
 			slog.String("connectorId", string(profile.ConnectorID)),
 			slog.Any("err", err),
 		)
-		return domain.BankConnection{}, fmt.Errorf("save bank connection: %w", err)
+		return domain.BankConnection{}, fmt.Errorf("save linked bank connection: %w", err)
 	}
 	c.logger.InfoContext(
 		ctx,

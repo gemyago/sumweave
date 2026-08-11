@@ -97,14 +97,12 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 			finishResult: LinkResult{
 				DisplayName:       "PKO " + fake.Company().Name(),
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
-				ExternalID:        "external-" + fake.UUID().V4(),
 				Secret:            "secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
 			tokenResult: LinkResult{
 				DisplayName:       "token-link-" + fake.Lorem().Word(),
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
-				ExternalID:        "external-" + fake.UUID().V4(),
 				Secret:            "secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},

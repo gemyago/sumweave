@@ -87,7 +87,6 @@ type ProviderTokenLinkParams struct {
 type ProviderLinkResult struct {
 	DisplayName       string
 	ProviderReference string
-	ExternalID        string
 	Secret            string
 	State             domain.BankConnectionState
 	RawPayloads       []ProviderRawPayload
@@ -127,7 +126,6 @@ type ProviderSyncParams struct {
 	ConnectionID      string
 	ProviderReference string
 	Secret            string
-	ExternalID        string
 	WindowStart       time.Time
 	WindowEnd         time.Time
 }

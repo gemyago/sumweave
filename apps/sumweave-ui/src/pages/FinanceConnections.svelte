@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
+  import Check from '@lucide/svelte/icons/check'
+  import Pencil from '@lucide/svelte/icons/pencil'
+  import X from '@lucide/svelte/icons/x'
   import { documentTitle } from '../lib/document-title'
   import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
@@ -234,9 +237,6 @@
   function getConnectionSecondaryIdentifier(connection: FinanceBankConnection) {
     if (connection.providerReference) {
       return `Provider ref: ${connection.providerReference}`
-    }
-    if (connection.externalId) {
-      return `External id: ${connection.externalId}`
     }
     if (connection.createdAt) {
       return `Created: ${formatFinanceDateTime(connection.createdAt)}`
@@ -545,20 +545,35 @@
                         {#if renamingConnectionId === connection.id}
                           <form class="d-grid gap-2" onsubmit={(event) => void renameConnection(event, connection)}>
                             <label class="form-label mb-0" for={renameInputId(connection.id)}>Connection name</label>
-                            <div class="d-flex flex-wrap gap-2">
+                            <div class="input-group input-group-sm">
                               <input
                                 id={renameInputId(connection.id)}
-                                class="form-control form-control-sm"
+                                class="form-control"
                                 bind:value={connectionNameDraft}
                                 aria-describedby={renameError ? renameErrorId(connection.id) : undefined}
                                 aria-invalid={renameError !== null}
                                 disabled={savingConnectionId === connection.id}
                                 required
                               />
-                              <button class="btn btn-outline-success btn-sm" type="submit" disabled={savingConnectionId === connection.id}>
-                                {savingConnectionId === connection.id ? 'Saving…' : 'Save'}
+                              <button
+                                class="btn btn-outline-success finance-transaction-list-action"
+                                type="submit"
+                                disabled={savingConnectionId === connection.id}
+                                aria-label="Save connection name"
+                                title="Save connection name"
+                              >
+                                <Check size={16} />
                               </button>
-                              <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => cancelRenameConnection(connection.id)} disabled={savingConnectionId === connection.id}>Cancel</button>
+                              <button
+                                class="btn btn-outline-secondary finance-transaction-list-action"
+                                type="button"
+                                onclick={() => cancelRenameConnection(connection.id)}
+                                disabled={savingConnectionId === connection.id}
+                                aria-label="Cancel connection name edit"
+                                title="Cancel connection name edit"
+                              >
+                                <X size={16} />
+                              </button>
                             </div>
                             {#if renameError}
                               <div id={renameErrorId(connection.id)} class="alert alert-danger mb-0" role="alert">{renameError}</div>
@@ -570,13 +585,13 @@
                               <h3 class="h6 mb-1">{connection.displayName}</h3>
                               <button
                                 id={renameControlId(connection.id)}
-                                class="btn btn-outline-secondary btn-sm"
+                                class="btn btn-outline-secondary btn-sm finance-transaction-list-action"
                                 type="button"
                                 aria-label={`Rename connection ${connection.displayName} (${getConnectionSecondaryIdentifier(connection)})`}
                                 onclick={() => startRenameConnection(connection)}
                                 disabled={savingConnectionId !== '' || deletingConnectionId === connection.id}
                               >
-                                Rename
+                                <Pencil size={14} />
                               </button>
                             </div>
                             <div class="d-flex flex-wrap gap-2">

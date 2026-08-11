@@ -196,7 +196,6 @@ func TestFinanceProviderSync(t *testing.T) {
 			ConnectorID:       connectorID,
 			DisplayName:       strings.TrimSpace(result.DisplayName),
 			ProviderReference: strings.TrimSpace(result.ProviderReference),
-			ExternalID:        strings.TrimSpace(result.ExternalID),
 			SecretID:          secretID,
 			State:             result.State,
 			CreatedAt:         now,
@@ -382,7 +381,6 @@ func TestFinanceProviderSync(t *testing.T) {
 				linkResult: ProviderTokenLinkResult{
 					DisplayName:       "Connection " + fake.Company().Name(),
 					ProviderReference: "provider-ref-" + fake.UUID().V4(),
-					ExternalID:        "external-" + fake.UUID().V4(),
 					Secret:            providerSecret,
 					State:             domain.BankConnectionStateActive,
 					RawPayloads: []ProviderRawPayload{{
@@ -505,7 +503,6 @@ func TestFinanceProviderSync(t *testing.T) {
 				ProviderLinkResult{
 					DisplayName:       provider.linkResult.DisplayName,
 					ProviderReference: provider.linkResult.ProviderReference,
-					ExternalID:        provider.linkResult.ExternalID,
 					Secret:            providerSecret,
 					State:             provider.linkResult.State,
 					RawPayloads:       provider.linkResult.RawPayloads,
@@ -847,7 +844,6 @@ func TestFinanceProviderSync(t *testing.T) {
 			linkResult: ProviderTokenLinkResult{
 				DisplayName:       "PKO " + fake.Company().Name(),
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
-				ExternalID:        "external-" + fake.UUID().V4(),
 				Secret:            "secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
@@ -870,7 +866,6 @@ func TestFinanceProviderSync(t *testing.T) {
 			ProviderLinkResult{
 				DisplayName:       provider.linkResult.DisplayName,
 				ProviderReference: provider.linkResult.ProviderReference,
-				ExternalID:        provider.linkResult.ExternalID,
 				Secret:            provider.linkResult.Secret,
 				State:             provider.linkResult.State,
 			},
@@ -906,7 +901,6 @@ func TestFinanceProviderSync(t *testing.T) {
 			linkResult: ProviderTokenLinkResult{
 				DisplayName:       "Connection " + failureFake.Company().Name(),
 				ProviderReference: "provider-ref-" + failureFake.UUID().V4(),
-				ExternalID:        "external-" + failureFake.UUID().V4(),
 				Secret:            "secret-" + failureFake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
@@ -930,7 +924,6 @@ func TestFinanceProviderSync(t *testing.T) {
 			ProviderLinkResult{
 				DisplayName:       failureProvider.linkResult.DisplayName,
 				ProviderReference: failureProvider.linkResult.ProviderReference,
-				ExternalID:        failureProvider.linkResult.ExternalID,
 				Secret:            failureProvider.linkResult.Secret,
 				State:             failureProvider.linkResult.State,
 			},

@@ -147,6 +147,7 @@ The rules are:
 - Render the Helm chart with `make -C deploy lint` before deployment changes.
 - Allow obvious local-only placeholder keys in committed local config.
 - Use environment-specific config values, not runtime environment labels.
+- Log ordinary provider errors; avoid generic provider-error redaction.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

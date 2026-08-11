@@ -237,14 +237,13 @@ func (c *Connector) FinishLink(
 		"enable banking redirect session created",
 		slog.String("operation", "redirectFinish"),
 	)
-	externalID := firstNonEmpty(response.ExternalID, response.SessionID, response.ID)
-	if externalID == "" {
+	providerReference := firstNonEmpty(response.ProviderReference, response.SessionID, response.ID)
+	if providerReference == "" {
 		return providers.LinkResult{}, errors.New(
 			"enable banking session response missing session ID",
 		)
 	}
-	providerReference := firstNonEmpty(response.ProviderReference, externalID)
-	providerObjectID := firstNonEmpty(externalID, providerReference, "session")
+	providerObjectID := firstNonEmpty(providerReference, "session")
 	return providers.LinkResult{
 		DisplayName: firstNonEmpty(
 			response.DisplayName,
@@ -252,7 +251,6 @@ func (c *Connector) FinishLink(
 			"Enable Banking",
 		),
 		ProviderReference: providerReference,
-		ExternalID:        externalID,
 		Secret:            response.Secret,
 		State: domain.BankConnectionState(firstNonEmpty(
 			response.State,
@@ -264,7 +262,6 @@ func (c *Connector) FinishLink(
 			PayloadJSON: mustJSON(&enablebankingclient.SessionResponse{
 				ID:                response.ID,
 				SessionID:         response.SessionID,
-				ExternalID:        response.ExternalID,
 				ProviderReference: response.ProviderReference,
 				DisplayName:       response.DisplayName,
 				State:             response.State,
@@ -297,13 +294,13 @@ func (c *Connector) fetchOfficial(
 	ctx context.Context,
 	request providers.FetchRequest,
 ) (domain.ProviderSyncBatch, error) {
-	if request.Connection.ExternalID == "" ||
+	if request.Connection.ProviderReference == "" ||
 		request.Secret.ID != "" ||
 		request.Secret.Reference != "" {
 		return domain.ProviderSyncBatch{}, ErrConnectorUnsupportedFetchBranch
 	}
 	session, err := c.api.GetSession(ctx, enablebankingclient.GetSessionParams{
-		SessionID: request.Connection.ExternalID,
+		SessionID: request.Connection.ProviderReference,
 	})
 	if err != nil {
 		return domain.ProviderSyncBatch{}, fmt.Errorf("enable banking get session: %w", err)
@@ -312,7 +309,7 @@ func (c *Connector) fetchOfficial(
 		ctx,
 		"fetched enable banking session",
 		slog.String("connectionId", request.Connection.ConnectionID),
-		slog.String("externalId", request.Connection.ExternalID),
+		slog.String("providerReference", request.Connection.ProviderReference),
 		slog.Time("requestedStart", request.RequestedWindow.Start),
 		slog.Time("requestedEnd", request.RequestedWindow.End),
 		slog.Int("accountCount", len(session.Accounts)),
@@ -465,7 +462,7 @@ func newSyncBatch(
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
 			Connection:       request.Connection,
 			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: firstNonEmpty(request.Connection.ExternalID, "session"),
+			ProviderObjectID: firstNonEmpty(request.Connection.ProviderReference, "session"),
 			PayloadJSON:      mustJSON(session),
 			CapturedAt:       capturedAt,
 		}},

@@ -30,6 +30,8 @@ const (
 	columnProviderObjectID  = "provider_object_id"
 	columnPayloadJSON       = "payload_json"
 	columnCapturedAt        = "captured_at"
+	columnNonce             = "nonce"
+	columnCiphertext        = "ciphertext"
 )
 
 var (
