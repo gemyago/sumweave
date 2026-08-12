@@ -2,13 +2,9 @@ package server
 
 import (
 	"net/http"
-
-	"go.uber.org/dig"
 )
 
 type HTTPRouterDeps struct {
-	dig.In
-
 	Middleware RouterMiddleware
 }
 

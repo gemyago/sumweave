@@ -10,24 +10,19 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
-	"go.uber.org/dig"
 )
 
 type OTELTracesConfig struct {
-	dig.In
-
-	Enabled       bool    `name:"config.openTelemetry.traces.enabled"`
-	Endpoint      string  `name:"config.openTelemetry.traces.endpoint"`
-	URLPath       string  `name:"config.openTelemetry.traces.urlPath"`
-	Protocol      string  `name:"config.openTelemetry.traces.protocol"`
-	SamplingRate  float64 `name:"config.openTelemetry.traces.samplingRate"`
-	AuthToken     string  `name:"config.openTelemetry.traces.auth.token"`
-	AuthTokenType string  `name:"config.openTelemetry.traces.auth.tokenType"`
+	Enabled       bool
+	Endpoint      string
+	URLPath       string
+	Protocol      string
+	SamplingRate  float64
+	AuthToken     string
+	AuthTokenType string
 }
 
 type TracerProviderDeps struct {
-	dig.In
-
 	Resource     *resource.Resource
 	Config       OTELConfig
 	TracesConfig OTELTracesConfig

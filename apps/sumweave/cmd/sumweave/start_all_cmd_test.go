@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/dig"
 )
 
 func TestStartAllRuntime(t *testing.T) {
@@ -38,14 +37,12 @@ func TestStartAllRuntime(t *testing.T) {
 		runner := newMockstartAllRunner(t)
 		runner.EXPECT().Run(mock.Anything).Return(nil)
 		cmd := newStartAllCmdWithResolver(
-			dig.New(),
-			func(*cobra.Command, *dig.Container, startServerParams) (startAllRunner, error) { return runner, nil },
+			func(*cobra.Command, startServerParams) (startAllRunner, error) { return runner, nil },
 		)
 		require.NoError(t, cmd.ExecuteContext(t.Context()))
 		want := errors.New(fake.Lorem().Sentence(3))
 		cmd = newStartAllCmdWithResolver(
-			dig.New(),
-			func(*cobra.Command, *dig.Container, startServerParams) (startAllRunner, error) { return nil, want },
+			func(*cobra.Command, startServerParams) (startAllRunner, error) { return nil, want },
 		)
 		require.ErrorIs(t, cmd.ExecuteContext(t.Context()), want)
 	})
@@ -62,6 +59,20 @@ func TestStartAllRuntime(t *testing.T) {
 			require.NoError(t, runtime.Run(ctx))
 		},
 	)
+	t.Run("noop validates and closes HTTP resources without starting jobs", func(t *testing.T) {
+		server := newMockstartAllHTTPServer(t)
+		server.EXPECT().Close(mock.Anything).Return(nil).Once()
+		worker := newMockjobsWorkerRunner(t)
+		scheduler := newMockjobsSchedulerRunner(t)
+		runtime := &startAllRuntime{
+			engine:    server,
+			worker:    worker,
+			scheduler: scheduler,
+			noop:      true,
+		}
+
+		require.NoError(t, runtime.Run(t.Context()))
+	})
 	t.Run(
 		"runtime reports component failures and validates all required dependencies",
 		func(t *testing.T) {

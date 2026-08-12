@@ -19,8 +19,8 @@ type JWTClaims struct {
 // JWTServiceDeps are the dependencies for JWTService.
 type JWTServiceDeps struct {
 	// SigningKey is the required HMAC-SHA256 signing key.
-	SigningKey     string        `name:"config.auth.jwtSigningKey"`
-	AccessTokenTTL time.Duration `name:"config.auth.accessTokenTTL"`
+	SigningKey     string
+	AccessTokenTTL time.Duration
 	Logger         *slog.Logger
 }
 

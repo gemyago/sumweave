@@ -11,7 +11,6 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	"github.com/gemyago/sumweave/runtime/httpapi"
-	"go.uber.org/dig"
 )
 
 type jobsService interface {
@@ -19,8 +18,6 @@ type jobsService interface {
 	Get(context.Context, string) (*jobspkg.Job, error)
 }
 type JobsControllerDeps struct {
-	dig.In
-
 	JobsService    jobsService
 	AuthMiddleware middleware.AuthMiddleware
 }

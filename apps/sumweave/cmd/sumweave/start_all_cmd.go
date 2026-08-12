@@ -9,10 +9,8 @@ import (
 	"time"
 
 	sumweave "github.com/gemyago/sumweave/apps/sumweave"
-	"github.com/gemyago/sumweave/apps/sumweave/internal"
-	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/wireup"
 	"github.com/spf13/cobra"
-	"go.uber.org/dig"
 )
 
 const startAllCommandName = "start-all"
@@ -21,13 +19,14 @@ type startHTTPServerOpt = sumweave.EngineStartServerOpt
 
 type startAllHTTPServer interface {
 	StartHTTPServer(context.Context, ...startHTTPServerOpt) error
+	Close(context.Context) error
 }
 
 type startAllRunner interface {
 	Run(context.Context) error
 }
 
-type startAllResolver func(*cobra.Command, *dig.Container, startServerParams) (startAllRunner, error)
+type startAllResolver func(*cobra.Command, startServerParams) (startAllRunner, error)
 
 type startAllComponentResult struct {
 	name string
@@ -41,19 +40,20 @@ type startAllRuntime struct {
 	scheduler             jobsSchedulerRunner
 	schedulerLoopInterval time.Duration
 	startServerOpts       []startHTTPServerOpt
+	noop                  bool
 }
 
-func newStartAllCmd(container *dig.Container) *cobra.Command {
-	return newStartAllCmdWithResolver(container, resolveStartAllRuntime)
+func newStartAllCmd() *cobra.Command {
+	return newStartAllCmdWithResolver(resolveStartAllRuntime)
 }
 
-func newStartAllCmdWithResolver(container *dig.Container, resolver startAllResolver) *cobra.Command {
+func newStartAllCmdWithResolver(resolver startAllResolver) *cobra.Command {
 	params := startServerParams{}
 	cmd := &cobra.Command{
 		Use:   startAllCommandName,
 		Short: "Start the local backend with HTTP server, jobs worker, and scheduler loop",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			runner, err := resolver(cmd, container, params)
+			runner, err := resolver(cmd, params)
 			if err != nil {
 				return err
 			}
@@ -72,54 +72,56 @@ func newStartAllCmdWithResolver(container *dig.Container, resolver startAllResol
 //nolint:ireturn // Cobra wiring resolves a concrete runtime behind a command-local interface.
 func resolveStartAllRuntime(
 	cmd *cobra.Command,
-	container *dig.Container,
 	params startServerParams,
-) (startAllRunner, error) {
-	engine, setupErr := newEngineFromRootWithOpts(
-		cmd.Root(),
-		container,
-		internal.WithEngineJobsWorkerAutoStart(false),
-	)
-	if setupErr != nil {
-		return nil, setupErr
+) (startAllRunner, error) { // coverage-ignore // Root construction is covered by wireup and command smoke tests.
+	options, err := commandRootOptionsFromRoot(cmd.Root())
+	if err != nil {
+		return nil, err
 	}
-	primeErr := primeFinanceJobs(container)
-	if primeErr != nil {
-		return nil, primeErr
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = cmd.Root().Context()
 	}
-
-	type deps struct {
-		dig.In
-
-		RootLogger            *slog.Logger
-		Worker                *jobspkg.Worker
-		Scheduler             *jobspkg.Scheduler
-		SchedulerLoopInterval time.Duration `name:"config.jobs.scheduler.loopInterval"`
+	if ctx == nil {
+		return nil, errors.New("start-all command context is required")
 	}
-
-	var resolved deps
-	invokeErr := container.Invoke(func(inner deps) {
-		resolved = inner
+	root, err := wireup.BuildHTTP(ctx, wireup.HTTPOptions{
+		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
+		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile,
 	})
-	if invokeErr != nil {
-		return nil, fmt.Errorf("resolve start-all dependencies: %w", invokeErr)
+	if err != nil {
+		return nil, fmt.Errorf("build start-all HTTP root: %w", err)
 	}
 
 	return &startAllRuntime{
-		logger:                resolved.RootLogger,
-		engine:                engine,
-		worker:                resolved.Worker,
-		scheduler:             resolved.Scheduler,
-		schedulerLoopInterval: resolved.SchedulerLoopInterval,
+		logger: root.Logger(), engine: startAllHTTPRoot{root: root, noop: params.noop}, worker: root.Worker,
+		scheduler: root.Scheduler, schedulerLoopInterval: root.SchedulerLoopInterval(),
+		noop: params.noop,
 		startServerOpts: []startHTTPServerOpt{
 			sumweave.WithStartHTTPServerNoop(params.noop),
 		},
 	}, nil
 }
 
+type startAllHTTPRoot struct {
+	root *wireup.HTTPRoot
+	noop bool
+}
+
+func (server startAllHTTPRoot) StartHTTPServer(ctx context.Context, _ ...startHTTPServerOpt) error {
+	return server.root.StartHTTPServer(ctx, server.noop)
+}
+
+func (server startAllHTTPRoot) Close(ctx context.Context) error {
+	return server.root.Close(ctx)
+}
+
 func (r *startAllRuntime) Run(ctx context.Context) error {
 	if err := r.validate(); err != nil {
 		return err
+	}
+	if r.noop {
+		return r.engine.Close(context.WithoutCancel(ctx))
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -168,6 +170,9 @@ func (r *startAllRuntime) runSchedulerTick(ctx context.Context) {
 func (r *startAllRuntime) validate() error {
 	if r.engine == nil {
 		return errors.New("start-all HTTP server is required")
+	}
+	if r.noop {
+		return nil
 	}
 	if r.worker == nil {
 		return errors.New("start-all jobs worker is required")

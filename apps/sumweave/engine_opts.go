@@ -1,41 +1,51 @@
 package sumweave
 
-import "github.com/gemyago/sumweave/apps/sumweave/internal"
+type engineConfig struct {
+	environment     string
+	defaultLogLevel *string
+	jsonLogs        *bool
+	logsFile        *string
+}
+
+func (cfg *engineConfig) Apply(opts ...EngineOpt) {
+	for _, opt := range opts {
+		opt.apply(cfg)
+	}
+}
 
 // EngineOpt allows configuring the engine configuration.
-type EngineOpt = internal.EngineOpt
+type EngineOpt interface{ apply(*engineConfig) }
+
+type engineOptFunc func(*engineConfig)
+
+func (f engineOptFunc) apply(cfg *engineConfig) { f(cfg) }
 
 // WithEngineLogsFormatJSON sets the logs format to JSON.
 func WithEngineLogsFormatJSON(logsFormatJSON bool) EngineOpt { //nolint:ireturn
-	return internal.EngineCfgOptFunc(func(opts *internal.EngineCfg) {
-		opts.LogsFormatJSON = logsFormatJSON
+	return engineOptFunc(func(opts *engineConfig) {
+		opts.jsonLogs = &logsFormatJSON
 	})
 }
 
 // WithEngineLogsOutputFile sets the logs output file.
 func WithEngineLogsOutputFile(logsOutputFile string) EngineOpt { //nolint:ireturn
-	return internal.EngineCfgOptFunc(func(opts *internal.EngineCfg) {
-		opts.LogsOutputFile = logsOutputFile
+	return engineOptFunc(func(opts *engineConfig) {
+		opts.logsFile = &logsOutputFile
 	})
 }
 
 // WithEngineDefaultLogLevel sets the default log level.
 // Value must be [slog.Level] string representation.
 func WithEngineDefaultLogLevel(defaultLogLevel string) EngineOpt { //nolint:ireturn
-	return internal.EngineCfgOptFunc(func(opts *internal.EngineCfg) {
-		if defaultLogLevel == "" {
-			return
-		}
-		opts.DefaultLogLevel = &defaultLogLevel
+	return engineOptFunc(func(opts *engineConfig) {
+		opts.defaultLogLevel = &defaultLogLevel
 	})
 }
 
 // WithEngineEnv sets which embedded config layer loads (e.g. test, local).
-// Empty string leaves default behavior in [config.Load].
-// TODO: Make this internal
 func WithEngineEnv(env string) EngineOpt { //nolint:ireturn
-	return internal.EngineCfgOptFunc(func(opts *internal.EngineCfg) {
-		opts.Env = env
+	return engineOptFunc(func(opts *engineConfig) {
+		opts.environment = env
 	})
 }
 

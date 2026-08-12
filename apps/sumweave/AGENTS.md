@@ -10,7 +10,7 @@ This module is part of the intended long-term product path. Treat `apps/sumweave
 
 This module was originally bootstrapped from backend boilerplate and then trimmed. Template-origin material that remains here is foundation only, not product scope by itself:
 - Cobra CLI / process skeleton under `cmd/sumweave/`
-- shared config and DI wiring under `internal/config/` and `internal/`
+- typed app config loading under `internal/config/`
 - generic HTTP/server/telemetry scaffolding
 
 Use retained boilerplate patterns as reference and a starting point. Do not reintroduce removed sample domains, demo persistence, MCP, or other old template features unless the user explicitly asks for them.
@@ -23,13 +23,13 @@ Notable layout parts of `apps/sumweave`:
 .
 ├── cmd/sumweave/     # `package main`: Cobra CLI (`start`, user commands, …)
 ├── doc/              # Architecture notes for the module
-├── internal/         # Config, DI, HTTP API, auth, app layer, infrastructure, telemetry, …
+├── internal/         # Wireup, HTTP API, auth, app layer, infrastructure, telemetry, …
 ├── engine.go         # Root package: thin embed/test surface (`NewEngine`, `StartHTTPServer`, typed getters)
 └── project.json      # Nx project
 ```
 
 Rules for some files:
-- internal/config/load_test.go - testing generic config loading, not specific variables
+- internal/config/load_test.go - generic config loading only
 
 ## API Routes
 
@@ -98,13 +98,14 @@ The rules are:
 - Keep files referenced by test.yaml as committed test fixtures, never use real secrets or ssh keys, generate fake random values instead.
 - Run local backend CLI commands with `apps/sumweave` as CWD.
 - Error responses stay empty unless a documented endpoint contract justifies a safe body.
+- Only wireup should consume app config; components use native inputs.
 
 ## Purpose (directional)
 
 - **Architecture overview:** [doc/architecture.md](doc/architecture.md) (module boundaries and current implementation notes).
 - Consumer-facing entrypoint is `package main` under `cmd/sumweave/` (standard Go `cmd/<binary>` layout); application code lives under `internal/`.
 - May depend on `runtime/` and coordinate with `apps/sumweave-ui` for delivery when that work lands.
-- `engine.go` is a thin surface for embedding and tests: it wraps the DI container after `internal.Setup` and exposes a small API (`NewEngine`, `StartHTTPServer`, typed `Get*` resolvers). Details: [doc/architecture.md](doc/architecture.md#root-package-enginego).
+- `engine.go` is a thin explicit HTTP-root surface for embedding and tests. It exposes `NewEngine`, `Close`, `StartHTTPServer`, and typed `Get*` accessors. Call `Close` for every eagerly constructed Engine that is not already closed by `StartHTTPServer`; it is safe to call more than once. Details: [doc/architecture.md](doc/architecture.md#root-package-enginego).
 
 ## Task Completion Protocol
 

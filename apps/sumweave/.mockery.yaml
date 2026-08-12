@@ -47,6 +47,8 @@ packages:
     interfaces:
       databaseMigrationRunner:
       jobsWorkerRunner:
+      jobsWorkerCommandRunner:
       jobsSchedulerRunner:
+      jobsSchedulerCommandRunner:
       startAllHTTPServer:
       startAllRunner:

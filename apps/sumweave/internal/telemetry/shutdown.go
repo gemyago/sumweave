@@ -13,7 +13,8 @@ type shutdowner interface {
 	Shutdown(ctx context.Context) error
 }
 
-func registerShutdownHook(logger *slog.Logger, hooks ShutdownHooks, name string, target any) { // coverage-ignore
+// RegisterShutdownHook registers a provider cleanup hook when it supports shutdown.
+func RegisterShutdownHook(logger *slog.Logger, hooks ShutdownHooks, name string, target any) { // coverage-ignore
 	switch target := target.(type) {
 	case shutdowner:
 		hooks.Register(name, target.Shutdown)
