@@ -3,20 +3,30 @@
 package sumweave_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	sumweave "github.com/gemyago/sumweave/apps/sumweave"
-	"github.com/gemyago/sumweave/apps/sumweave/internal"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/wireup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/dig"
 )
 
 func TestEngine(t *testing.T) {
+	makeEngine := func(t *testing.T) *sumweave.Engine {
+		t.Helper()
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
+		migration, err := wireup.BuildMigration(t.Context(), wireup.MigrationOptions{Environment: "test"})
+		require.NoError(t, err)
+		require.NoError(t, migration.Migrate(t.Context()))
+		engine, err := sumweave.NewEngine(sumweave.WithEngineEnv("test"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, engine.Close(t.Context())) })
+		return engine
+	}
 	t.Run("GetToolsRegistry", func(t *testing.T) {
-		t.Run("returns non-nil registry from DI container", func(t *testing.T) {
-			engine, err := sumweave.NewEngine(sumweave.WithEngineEnv("test"))
-			require.NoError(t, err)
+		t.Run("returns non-nil registry from explicit HTTP state", func(t *testing.T) {
+			engine := makeEngine(t)
 			require.NotNil(t, engine)
 
 			reg, err := engine.GetToolsRegistry()
@@ -25,8 +35,7 @@ func TestEngine(t *testing.T) {
 		})
 
 		t.Run("returns same registry instance on multiple calls", func(t *testing.T) {
-			engine, err := sumweave.NewEngine(sumweave.WithEngineEnv("test"))
-			require.NoError(t, err)
+			engine := makeEngine(t)
 			require.NotNil(t, engine)
 
 			reg1, err := engine.GetToolsRegistry()
@@ -39,17 +48,16 @@ func TestEngine(t *testing.T) {
 		})
 	})
 
-	t.Run("HTTP route and controller composition", func(t *testing.T) {
-		container := dig.New()
-		engine, err := sumweave.NewEngine(
-			sumweave.WithEngineEnv("test"),
-			internal.WithEngineContainer(container),
-		)
-		require.NoError(t, err)
-
-		var migrator *internal.DatabaseMigrator
-		require.NoError(t, container.Invoke(func(resolved *internal.DatabaseMigrator) { migrator = resolved }))
-		require.NoError(t, migrator.Migrate(t.Context()))
+	t.Run("HTTP route and controller wireup", func(t *testing.T) {
+		engine := makeEngine(t)
 		require.NoError(t, engine.StartHTTPServer(t.Context(), sumweave.WithStartHTTPServerNoop(true)))
+		require.NoError(t, engine.Close(t.Context()))
+	})
+
+	t.Run("Close releases a constructed engine without starting and is idempotent", func(t *testing.T) {
+		engine := makeEngine(t)
+
+		require.NoError(t, engine.Close(t.Context()))
+		require.NoError(t, engine.Close(t.Context()))
 	})
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	"github.com/gemyago/sumweave/runtime/httpapi"
-	"go.uber.org/dig"
 )
 
 // AuthenticatingService is the auth dependency for AuthController.
@@ -25,8 +24,6 @@ var _ AuthenticatingService = (*auth.AuthService)(nil)
 
 // AuthControllerDeps holds the dependencies for AuthController.
 type AuthControllerDeps struct {
-	dig.In
-
 	AuthService    AuthenticatingService
 	AuthMiddleware middleware.AuthMiddleware
 }

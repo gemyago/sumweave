@@ -5,12 +5,9 @@ import (
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1routes/handlers"
-	"go.uber.org/dig"
 )
 
 type RootHandlerDeps struct {
-	dig.In
-
 	RootLogger *slog.Logger
 	Router     *HTTPRouter
 }

@@ -19,10 +19,10 @@ auth:
 finance:
   providers:
     enableBanking:
-      # Dummy app ID and private key for local development.
-      # Create local-user.yaml to override
-      appID: "local-dummy-app-id"
-      privateKeyPath: "internal/config/local-dummy-private-key.pem"
+      # Local-only dummy app ID for startup validation; it cannot access a live provider.
+      appID: local-dummy-enable-banking-app-id
+      # Committed fake key fixture only; replace in local-user.yaml for live banking.
+      privateKeyPath: data/test-enable-banking-private-key.pem
 
 workspacefs:
   platformAgentsPath: ../../.platform-agents

@@ -57,10 +57,7 @@ func New() *viper.Viper {
 	return v
 }
 
-func Load(cfg *viper.Viper, opts *LoadOpts) error {
-	// env should only be used for tracing/debugging purposes
-	cfg.Set("env", opts.env)
-
+func load(cfg *viper.Viper, opts *LoadOpts) error {
 	if err := mergeResourceCfg(cfg, opts.defaultConfigFileName); err != nil {
 		return err
 	}
@@ -75,10 +72,6 @@ func Load(cfg *viper.Viper, opts *LoadOpts) error {
 			return err
 		}
 	}
-
-	// Some common aliases to have cli params with the same name as config keys
-	cfg.RegisterAlias("defaultLogLevel", "log-level")
-	cfg.RegisterAlias("jsonLogs", "json-logs")
 
 	return nil
 }

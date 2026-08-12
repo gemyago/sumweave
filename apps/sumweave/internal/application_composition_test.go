@@ -15,10 +15,8 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	"github.com/gemyago/sumweave/runtime/agent"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/dig"
 )
 
 func TestApplicationComposition(t *testing.T) {
@@ -79,7 +77,7 @@ func TestApplicationComposition(t *testing.T) {
 		"database migration composes agent auth dispatch jobs and finance schemas",
 		func(t *testing.T) {
 			deps := makeMigrationDeps(t)
-			migrator := newDatabaseMigrator(deps)
+			migrator := NewDatabaseMigrator(deps)
 			require.NoError(t, migrator.Migrate(t.Context()))
 			require.NoError(t, migrator.Migrate(t.Context()))
 			for _, table := range []string{"app_auth_auth_users", "app_auth_auth_refresh_tokens", appdispatch.Config{TablePrefix: "app_"}.MessagesTable(), "app_jobs_jobs", "app_jobs_job_schedules", "finance_tenants"} {
@@ -156,35 +154,15 @@ func TestApplicationComposition(t *testing.T) {
 		},
 	)
 
-	t.Run("engine options configure application database lifecycle", func(t *testing.T) {
-		cfg, container := viper.New(), dig.New()
-		engineCfg := &EngineCfg{}
-		engineCfg.Apply(
-			WithEngineConfig(cfg),
-			WithEngineContainer(container),
-			WithEngineJobsWorkerAutoStart(false),
-		)
-		assert.Same(t, cfg, engineCfg.Config)
-		assert.Same(t, container, engineCfg.Container)
-		require.NotNil(t, engineCfg.JobsWorkerAutoStart)
+	t.Run("application database registers lifecycle cleanup", func(t *testing.T) {
 		hooks := lifecycle.NewTestShutdownHooks()
-		db, err := newApplicationSQLDB(
-			applicationDatabaseDeps{
-				DatabaseDSN:   filepath.Join(t.TempDir(), "application.sqlite"),
-				ShutdownHooks: hooks,
-			},
-		)
+		db, err := NewApplicationSQLDB(filepath.Join(t.TempDir(), "application.sqlite"), hooks)
 		require.NoError(t, err)
 		require.NotNil(t, db)
 	})
 
 	t.Run("application database constructor returns open errors", func(t *testing.T) {
-		_, err := newApplicationSQLDB(
-			applicationDatabaseDeps{
-				DatabaseDSN:   "",
-				ShutdownHooks: lifecycle.NewTestShutdownHooks(),
-			},
-		)
+		_, err := NewApplicationSQLDB("", lifecycle.NewTestShutdownHooks())
 		require.Error(t, err)
 	})
 }

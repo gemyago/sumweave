@@ -7,14 +7,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/dig"
 )
 
 type OtelHTTPTransportFactory = func(http.RoundTripper) http.RoundTripper
 
 type OtelHTTPTransportFactoryDeps struct {
-	dig.In
-
 	metric.MeterProvider
 	trace.TracerProvider
 	propagation.TextMapPropagator

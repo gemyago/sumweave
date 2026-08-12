@@ -40,7 +40,7 @@ type ServiceDeps struct {
 	JWTService        jwtService
 	RefreshTokenStore refreshTokenStore
 	PasswordHasher    passwordHasher
-	RefreshTokenTTL   time.Duration `name:"config.auth.refreshTokenTTL"`
+	RefreshTokenTTL   time.Duration
 	Logger            *slog.Logger
 }
 

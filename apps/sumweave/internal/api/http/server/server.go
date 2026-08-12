@@ -14,30 +14,27 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	sloghttp "github.com/samber/slog-http"
-	"go.uber.org/dig"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
 	financepkg "github.com/gemyago/sumweave/finance"
 )
 
 type HTTPServerDeps struct {
-	dig.In `ignore-unexported:"true"`
-
 	// services
 	ShutdownHooks *lifecycle.ShutdownHooks
 
 	RootLogger *slog.Logger
 
 	// config
-	Host              string        `name:"config.httpServer.host"`
-	Port              int           `name:"config.httpServer.port"`
-	TLSCertFile       string        `name:"config.httpServer.tls.certFile"`
-	TLSKeyFile        string        `name:"config.httpServer.tls.keyFile"`
-	IdleTimeout       time.Duration `name:"config.httpServer.idleTimeout"`
-	ReadHeaderTimeout time.Duration `name:"config.httpServer.readHeaderTimeout"`
-	ReadTimeout       time.Duration `name:"config.httpServer.readTimeout"`
-	WriteTimeout      time.Duration `name:"config.httpServer.writeTimeout"`
-	AccessLogsLevel   string        `name:"config.httpServer.accessLogsLevel"`
+	Host              string
+	Port              int
+	TLSCertFile       string
+	TLSKeyFile        string
+	IdleTimeout       time.Duration
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	AccessLogsLevel   string
 
 	// handler
 	Handler http.Handler
@@ -143,12 +140,10 @@ type RouterMiddleware func(http.Handler) http.Handler
 const maxFinanceCSVImportRequestBodyBytes = 2*financepkg.MaxCSVImportBytes + 1<<20
 
 type RouterMiddlewareDeps struct {
-	dig.In
-
 	RootLogger *slog.Logger
 
 	// config
-	AccessLogsLevel string `name:"config.httpServer.accessLogsLevel"`
+	AccessLogsLevel string
 
 	OTELMiddleware telemetry.OtelHTTPMiddleware
 	IDGen          ident.Generator

@@ -5,30 +5,28 @@ import (
 
 	sumweave "github.com/gemyago/sumweave/apps/sumweave"
 	"github.com/spf13/cobra"
-	"go.uber.org/dig"
 )
 
 const startCommandName = "start"
 
 func setupCommands() *cobra.Command {
-	container := dig.New()
 	rootCmd := newRootCmd()
 	rootCmd.PersistentPreRunE = func(activeCmd *cobra.Command, _ []string) error {
 		setPerCommandDefaults(activeCmd)
 		return nil
 	}
 	rootCmd.AddCommand(
-		newStartServerCmd(container),
-		newStartAllCmd(container),
-		newDatabaseMigrateCmd(container),
-		newJobsCmd(container),
+		newStartServerCmd(),
+		newStartAllCmd(),
+		newDatabaseMigrateCmd(),
+		newJobsCmd(),
 		newFinanceCmd(financeFixturesCommandDeps{
 			ResolveRuntimeConfig: func(cmd *cobra.Command) (financeFixturesRuntimeConfig, error) {
-				return resolveFinanceFixturesRuntimeConfig(cmd.Root(), container)
+				return resolveFinanceFixturesRuntimeConfig(cmd.Root())
 			},
 		}),
 		newFinancePOCCmd(financePOCCommandDeps{}),
-		newUserCmd(container),
+		newUserCmd(),
 	)
 	return rootCmd
 }
@@ -71,7 +69,7 @@ type startServerParams struct {
 	noop bool
 }
 
-func newStartServerCmd(container *dig.Container) *cobra.Command {
+func newStartServerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   startCommandName,
 		Short: "Start the HTTP server",
@@ -86,7 +84,7 @@ func newStartServerCmd(container *dig.Container) *cobra.Command {
 		"Do not start. Just setup params and exit. Useful for testing if setup is all working.",
 	)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		engine, err := newEngineFromRoot(cmd.Root(), container)
+		engine, err := newEngineFromRoot(cmd.Root())
 		if err != nil {
 			return err
 		}

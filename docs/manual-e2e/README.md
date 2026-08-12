@@ -20,10 +20,15 @@ Optional local verification helpers:
 ## Setup
 
 Commands assume the repo shell environment is loaded first. In a human shell,
-run `direnv allow` once at the repo root. Run npm, Playwright, and PM2 commands
-from the repo root; run backend CLI commands from `apps/sumweave`.
+run `direnv allow` once at the repo root. Run repo-root npm, Playwright, and
+PM2 commands from the repo root; run UI npm commands from `apps/sumweave-ui`
+and backend CLI commands from `apps/sumweave`.
 
-1. Run `npm i` at the repo root.
+1. Install the separate project-scoped npm packages:
+   - at the repo root, run `npm ci` for PM2 and Playwright;
+   - from `apps/sumweave-ui`, run `npm ci` for Vite and the UI dependencies.
+   The root package is not an npm workspace for the UI, so installing its
+   dependencies does not install the UI package's Vite executable.
 2. Verify local CLI: `npx playwright-cli --version`.
 3. For the standard HTTP workflow, make sure optional local TLS is disabled:
    - remove `APP_HTTPSERVER_TLS_CERTFILE` and `APP_HTTPSERVER_TLS_KEYFILE`

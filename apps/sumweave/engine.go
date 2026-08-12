@@ -4,88 +4,48 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/server"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/system/startupmode"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/wireup"
 	"github.com/gemyago/sumweave/runtime/agent"
-	"github.com/spf13/viper"
-	"go.uber.org/dig"
 )
 
 type Engine struct {
-	container *dig.Container
-	cfg       *viper.Viper
+	httpRoot *wireup.HTTPRoot
 }
 
 func NewEngine(opts ...EngineOpt) (*Engine, error) {
-	rootCtx := context.Background()
-
-	o := &internal.EngineCfg{
-		LogsFormatJSON: false,
-		LogsOutputFile: "",
-		Container:      dig.New(),
-		Config:         config.New(),
-	}
+	o := &engineConfig{}
 	o.Apply(opts...)
-
-	cfg := o.Config
-	container := o.Container
-	autoStart := false
-	if o.JobsWorkerAutoStart != nil {
-		autoStart = *o.JobsWorkerAutoStart
+	root, err := wireup.BuildHTTP(context.Background(), wireup.HTTPOptions{
+		Environment: o.environment, DefaultLogLevel: o.defaultLogLevel, JSONLogs: o.jsonLogs, LogsFile: o.logsFile,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("build HTTP engine: %w", err)
 	}
-	if err := container.Provide(
-		func() *startupmode.JobsWorkerAutoStart {
-			return &startupmode.JobsWorkerAutoStart{Enabled: autoStart}
-		},
-		dig.Name("internal.jobs.worker.autoStart"),
-	); err != nil {
-		return nil, fmt.Errorf("provide jobs worker auto-start: %w", err)
-	}
-
-	if o.LogsFormatJSON {
-		cfg.Set("jsonLogs", true)
-	}
-	if o.LogsOutputFile != "" {
-		cfg.Set("logs-file", o.LogsOutputFile)
-	}
-	if o.DefaultLogLevel != nil {
-		cfg.Set("defaultLogLevel", *o.DefaultLogLevel)
-	}
-	if o.Env != "" {
-		cfg.Set("env", o.Env)
-	}
-
-	if err := internal.Setup(rootCtx, cfg, container); err != nil {
-		return nil, fmt.Errorf("failed to setup engine: %w", err)
-	}
-
-	return &Engine{container: container, cfg: cfg}, nil
+	return &Engine{httpRoot: root}, nil
 }
 
 func (e *Engine) GetToolsRegistry() (*agent.ToolsRegistry, error) {
-	var reg *agent.ToolsRegistry
-	if err := e.container.Invoke(func(r *agent.ToolsRegistry) {
-		reg = r
-	}); err != nil {
-		return nil, fmt.Errorf("failed resolve tools registry: %w", err)
+	if e == nil || e.httpRoot == nil || e.httpRoot.ToolsRegistry == nil {
+		return nil, errors.New("engine tools registry is unavailable")
 	}
-	return reg, nil
+	return e.httpRoot.ToolsRegistry, nil
 }
 
 func (e *Engine) GetAgentRunner() (*agent.Runner, error) {
-	var runner *agent.Runner
-	if err := e.container.Invoke(func(r *internal.Runtime) {
-		runner = r.Runner
-	}); err != nil {
-		return nil, fmt.Errorf("failed resolve agent runner: %w", err)
+	if e == nil || e.httpRoot == nil || e.httpRoot.Runner == nil {
+		return nil, errors.New("engine agent runner is unavailable")
 	}
-	return runner, nil
+	return e.httpRoot.Runner, nil
+}
+
+// Close releases resources owned by the eagerly constructed Engine. It is safe
+// to call after StartHTTPServer returns and may be called more than once.
+func (e *Engine) Close(ctx context.Context) error {
+	if e == nil || e.httpRoot == nil {
+		return errors.New("engine HTTP root is unavailable")
+	}
+	return e.httpRoot.Close(ctx)
 }
 
 // StartHTTPServer starts the HTTP server.
@@ -100,35 +60,8 @@ func (e *Engine) StartHTTPServer(ctx context.Context, opts ...EngineStartServerO
 		opt.apply(o)
 	}
 
-	if err := errors.Join(
-		server.Register(e.container),
-		http.Register(e.container),
-	); err != nil {
-		return fmt.Errorf("failed to register HTTP server: %w", err)
+	if e == nil || e.httpRoot == nil {
+		return errors.New("engine HTTP root is unavailable")
 	}
-
-	type startServerDeps struct {
-		dig.In
-
-		StartupGroupFactory lifecycle.StartupGroupFactory
-		RootLogger          *slog.Logger
-
-		HTTPServer *server.HTTPServer
-	}
-
-	return e.container.Invoke(func(deps startServerDeps) error {
-		rootLogger := deps.RootLogger
-		httpServer := deps.HTTPServer
-
-		startupGroup := deps.StartupGroupFactory.NewGroup()
-		startupGroup.Add(func(groupCtx context.Context) error {
-			if o.noop {
-				rootLogger.InfoContext(groupCtx, "NOOP: Starting http server")
-				return nil
-			}
-			return httpServer.Start(groupCtx)
-		})
-
-		return startupGroup.Start(ctx)
-	})
+	return e.httpRoot.StartHTTPServer(ctx, o.noop)
 }

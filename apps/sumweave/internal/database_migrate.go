@@ -12,18 +12,15 @@ import (
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/gemyago/sumweave/runtime/agent"
-	"go.uber.org/dig"
 )
 
 type DatabaseMigrationDeps struct {
-	dig.In
-
 	RootLogger                      *slog.Logger
-	AgentRuntimeStorageType         string `name:"config.agentRuntime.storage.type"`
-	AgentRuntimeDatabaseDSN         string `name:"config.agentRuntime.database.dsn"`
-	AgentRuntimeDatabaseTablePrefix string `name:"config.agentRuntime.database.tablePrefix"`
-	ApplicationDatabaseDSN          string `name:"config.application.database.dsn"`
-	ApplicationDatabaseTablePrefix  string `name:"config.application.database.tablePrefix"`
+	AgentRuntimeStorageType         string
+	AgentRuntimeDatabaseDSN         string
+	AgentRuntimeDatabaseTablePrefix string
+	ApplicationDatabaseDSN          string
+	ApplicationDatabaseTablePrefix  string
 	ApplicationSQLDB                *sql.DB
 	AuthUsers                       *auth.UserStore
 	AuthRefreshTokens               *auth.RefreshTokenStore
@@ -42,7 +39,8 @@ type DatabaseMigrator struct {
 	authRefreshTokens               *auth.RefreshTokenStore
 }
 
-func newDatabaseMigrator(deps DatabaseMigrationDeps) *DatabaseMigrator {
+// NewDatabaseMigrator constructs the migration runner from direct dependencies.
+func NewDatabaseMigrator(deps DatabaseMigrationDeps) *DatabaseMigrator {
 	return &DatabaseMigrator{
 		rootLogger:                      deps.RootLogger,
 		agentRuntimeStorageType:         deps.AgentRuntimeStorageType,

@@ -8,33 +8,29 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/di"
 	"github.com/gemyago/sumweave/runtime/agent"
 	"github.com/gemyago/sumweave/runtime/httpapi"
 	"github.com/gemyago/sumweave/tools/skills"
 	"github.com/gemyago/sumweave/tools/workspacefs"
-	"go.uber.org/dig"
 )
 
 const storageTypeDatabase = "database"
 
 type RuntimeDeps struct {
-	dig.In
-
 	RootLogger                      *slog.Logger
-	DataDir                         string        `name:"config.dataDir"`
-	PlatformAgentsPath              string        `name:"config.workspacefs.platformAgentsPath"`
-	ExecEnabled                     bool          `name:"config.workspacefs.exec.enabled"`
-	ExecMaxOutputBytes              int64         `name:"config.workspacefs.exec.maxOutputBytes"`
-	ExecDefaultTimeout              time.Duration `name:"config.workspacefs.exec.defaultTimeout"`
-	ExecMaxConcurrentJobs           int           `name:"config.workspacefs.exec.maxConcurrentJobs"`
-	AgentRuntimeStorageType         string        `name:"config.agentRuntime.storage.type"`
-	AgentRuntimeDatabaseDSN         string        `name:"config.agentRuntime.database.dsn"`
-	AgentRuntimeDatabaseTablePrefix string        `name:"config.agentRuntime.database.tablePrefix"`
-	SkillsEnabled                   bool          `name:"config.skills.enabled"`
-	SkillsPaths                     []string      `name:"config.skills.paths"`
-	SkillsMaxSkillBytes             int           `name:"config.skills.maxSkillBytes"`
-	SkillsMaxCatalogEntries         int           `name:"config.skills.maxCatalogEntries"`
+	DataDir                         string
+	PlatformAgentsPath              string
+	ExecEnabled                     bool
+	ExecMaxOutputBytes              int64
+	ExecDefaultTimeout              time.Duration
+	ExecMaxConcurrentJobs           int
+	AgentRuntimeStorageType         string
+	AgentRuntimeDatabaseDSN         string
+	AgentRuntimeDatabaseTablePrefix string
+	SkillsEnabled                   bool
+	SkillsPaths                     []string
+	SkillsMaxSkillBytes             int
+	SkillsMaxCatalogEntries         int
 	ToolsRegistry                   *agent.ToolsRegistry
 }
 
@@ -97,10 +93,6 @@ func newRuntimeServices(deps RuntimeDeps) (*runtimeServices, error) {
 		return nil, err
 	}
 	return &runtimeServices{providersConfigSvc: providersConfigSvc, agentProfilesSvc: agentProfilesSvc}, nil
-}
-
-func registerRuntime(container *dig.Container) error {
-	return di.ProvideAll(container, agent.NewToolsRegistry, newRuntime)
 }
 
 func workspacefsRegisterOptions(deps RuntimeDeps) ([]workspacefs.RegisterToolsOpt, error) {
@@ -196,4 +188,9 @@ func newRuntime(deps RuntimeDeps) (*Runtime, error) {
 		return nil, fmt.Errorf("create agent http handler: %w", err)
 	}
 	return &Runtime{Runner: runner, HTTPHandler: handler, ToolsRegistry: deps.ToolsRegistry}, nil
+}
+
+// NewRuntime constructs the agent runtime for an explicit application root.
+func NewRuntime(deps RuntimeDeps) (*Runtime, error) {
+	return newRuntime(deps)
 }

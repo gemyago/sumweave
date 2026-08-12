@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
-	financepkg "github.com/gemyago/sumweave/finance"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/wireup"
 	"github.com/spf13/cobra"
-	"go.uber.org/dig"
 )
 
 const (
@@ -17,9 +16,9 @@ const (
 	enqueueDueCommandName = "enqueue-due"
 )
 
-func newJobsCmd(container *dig.Container) *cobra.Command {
+func newJobsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: jobsCommandName, Short: "Run durable jobs worker and scheduler commands"}
-	cmd.AddCommand(newJobsWorkerCmd(container), newJobsEnqueueDueCmd(container))
+	cmd.AddCommand(newJobsWorkerCmd(), newJobsEnqueueDueCmd())
 	return cmd
 }
 
@@ -28,112 +27,138 @@ type jobsWorkerRunner interface {
 	RunOnce(context.Context) error
 }
 
-type jobsWorkerResolver func(*cobra.Command, *dig.Container) (jobsWorkerRunner, error)
+type jobsWorkerCommandRunner interface {
+	jobsWorkerRunner
+	Close(context.Context) error
+}
+
+type jobsWorkerResolver func(*cobra.Command) (jobsWorkerCommandRunner, error)
 
 type jobsSchedulerRunner interface {
 	EnqueueDue(context.Context) (int, error)
 }
 
-type jobsSchedulerResolver func(*cobra.Command, *dig.Container) (jobsSchedulerRunner, error)
-
-func newJobsWorkerCmd(container *dig.Container) *cobra.Command {
-	return newJobsWorkerCmdWithResolver(container, resolveJobsWorker)
+type jobsSchedulerCommandRunner interface {
+	jobsSchedulerRunner
+	Close(context.Context) error
 }
 
-func newJobsWorkerCmdWithResolver(container *dig.Container, resolver jobsWorkerResolver) *cobra.Command {
+type jobsSchedulerResolver func(*cobra.Command) (jobsSchedulerCommandRunner, error)
+
+func newJobsWorkerCmd() *cobra.Command {
+	return newJobsWorkerCmdWithResolver(resolveJobsWorker)
+}
+
+func newJobsWorkerCmdWithResolver(resolver jobsWorkerResolver) *cobra.Command {
 	once := false
 	cmd := &cobra.Command{
 		Use:   jobsWorkerCommandName,
 		Short: "Run durable jobs worker mode",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			worker, err := resolver(cmd, container)
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
+			worker, err := resolver(cmd)
 			if err != nil {
 				return err
 			}
+			defer func() {
+				err = errors.Join(err, worker.Close(cmd.Context()))
+			}()
 			if once {
-				return worker.RunOnce(cmd.Context())
+				err = worker.RunOnce(cmd.Context())
+				return err
 			}
-			return worker.Run(cmd.Context())
+			err = worker.Run(cmd.Context())
+			return err
 		},
 	}
 	cmd.Flags().BoolVar(&once, "once", false, "Run a single consumer pass and exit")
 	return cmd
 }
 
-func newJobsEnqueueDueCmd(container *dig.Container) *cobra.Command {
-	return newJobsEnqueueDueCmdWithResolver(container, resolveJobsScheduler)
+func newJobsEnqueueDueCmd() *cobra.Command {
+	return newJobsEnqueueDueCmdWithResolver(resolveJobsScheduler)
 }
 
-func newJobsEnqueueDueCmdWithResolver(container *dig.Container, resolver jobsSchedulerResolver) *cobra.Command {
+func newJobsEnqueueDueCmdWithResolver(resolver jobsSchedulerResolver) *cobra.Command {
 	return &cobra.Command{
 		Use:   enqueueDueCommandName,
 		Short: "Enqueue due durable jobs from the schedule registry",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			scheduler, err := resolver(cmd, container)
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
+			scheduler, err := resolver(cmd)
 			if err != nil {
 				return err
 			}
+			defer func() {
+				err = errors.Join(err, scheduler.Close(cmd.Context()))
+			}()
 			_, err = scheduler.EnqueueDue(cmd.Context())
 			return err
 		},
 	}
 }
 
-func resolveJobsWorker(cmd *cobra.Command, container *dig.Container) (jobsWorkerRunner, error) { //nolint:ireturn
-	if _, err := newEngineFromRootWithOpts(
-		cmd.Root(),
-		container,
-		internal.WithEngineJobsWorkerAutoStart(false),
-	); err != nil {
+func resolveJobsWorker(cmd *cobra.Command) (jobsWorkerCommandRunner, error) { //nolint:ireturn
+	root, err := resolveJobsRoot(cmd)
+	if err != nil {
 		return nil, err
 	}
-	return resolveJobsWorkerAfterSetup(container)
+	return &jobsWorkerRuntime{worker: root.Worker, close: root.Close}, nil
 }
 
-func resolveJobsWorkerAfterSetup(container *dig.Container) (jobsWorkerRunner, error) { //nolint:ireturn
-	if err := primeFinanceJobs(container); err != nil {
+func resolveJobsScheduler(cmd *cobra.Command) (jobsSchedulerCommandRunner, error) { //nolint:ireturn
+	root, err := resolveJobsRoot(cmd)
+	if err != nil {
 		return nil, err
 	}
-	var worker *jobspkg.Worker
-	if err := container.Invoke(func(resolved *jobspkg.Worker) { worker = resolved }); err != nil {
-		return nil, fmt.Errorf("resolve jobs worker: %w", err)
-	}
-	return worker, nil
+	return &jobsSchedulerRuntime{scheduler: root.Scheduler, close: root.Close}, nil
 }
 
-func resolveJobsScheduler(cmd *cobra.Command, container *dig.Container) (jobsSchedulerRunner, error) { //nolint:ireturn
-	if _, err := newEngineFromRootWithOpts(
-		cmd.Root(),
-		container,
-		internal.WithEngineJobsWorkerAutoStart(false),
-	); err != nil {
+func resolveJobsRoot(cmd *cobra.Command) (*wireup.JobsRoot, error) {
+	options, err := jobsOptionsFromRoot(cmd.Root())
+	if err != nil {
 		return nil, err
 	}
-	return resolveJobsSchedulerAfterSetup(container)
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = cmd.Root().Context()
+	}
+	if ctx == nil {
+		return nil, errors.New("jobs command context is required")
+	}
+	root, err := wireup.BuildJobs(ctx, options)
+	if err != nil {
+		return nil, fmt.Errorf("build jobs root: %w", err)
+	}
+	return root, nil
 }
 
-func resolveJobsSchedulerAfterSetup(container *dig.Container) (jobsSchedulerRunner, error) { //nolint:ireturn
-	if err := primeFinanceJobs(container); err != nil {
-		return nil, err
+func jobsOptionsFromRoot(root *cobra.Command) (wireup.JobsOptions, error) {
+	options, err := commandRootOptionsFromRoot(root)
+	if err != nil {
+		return wireup.JobsOptions{}, err
 	}
-	var scheduler *jobspkg.Scheduler
-	if err := container.Invoke(func(resolved *jobspkg.Scheduler) { scheduler = resolved }); err != nil {
-		return nil, fmt.Errorf("resolve jobs scheduler: %w", err)
-	}
-	return scheduler, nil
+	return wireup.JobsOptions{
+		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
+		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile,
+	}, nil
 }
 
-func primeFinanceJobs(container *dig.Container) error {
-	if container == nil {
-		return nil
-	}
-	if err := container.Invoke(func(
-		*financepkg.FXService,
-		*financepkg.CSVImportService,
-		*financepkg.BankSyncService,
-	) {
-	}); err != nil {
-		return fmt.Errorf("prime finance jobs: %w", err)
-	}
-	return nil
+type jobsWorkerRuntime struct {
+	worker *jobspkg.Worker
+	close  func(context.Context) error
 }
+
+func (runtime *jobsWorkerRuntime) Run(ctx context.Context) error { return runtime.worker.Run(ctx) }
+func (runtime *jobsWorkerRuntime) RunOnce(ctx context.Context) error {
+	return runtime.worker.RunOnce(ctx)
+}
+func (runtime *jobsWorkerRuntime) Close(ctx context.Context) error { return runtime.close(ctx) }
+
+type jobsSchedulerRuntime struct {
+	scheduler *jobspkg.Scheduler
+	close     func(context.Context) error
+}
+
+func (runtime *jobsSchedulerRuntime) EnqueueDue(ctx context.Context) (int, error) {
+	return runtime.scheduler.EnqueueDue(ctx)
+}
+func (runtime *jobsSchedulerRuntime) Close(ctx context.Context) error { return runtime.close(ctx) }
