@@ -1255,6 +1255,34 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
   /api/v1/finance/tenants/{tenantId}/connections/{connectionId}:
+    patch:
+      summary: Rename finance bank connection
+      operationId: updateFinanceConnection
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: connectionId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinanceRenameRequest"
+      responses:
+        '204':
+          description: Finance bank connection renamed
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     delete:
       summary: Delete finance bank connection
       operationId: deleteFinanceConnection
@@ -2055,14 +2083,13 @@ components:
         windowEnd: { type: string, format: date-time, nullable: true }
     FinanceBankConnection:
       type: object
-      required: [id, tenantId, provider, displayName, providerReference, externalId, state, createdAt, updatedAt]
+      required: [id, tenantId, provider, displayName, providerReference, state, createdAt, updatedAt]
       properties:
         id: { type: string }
         tenantId: { type: string }
         provider: { type: string }
         displayName: { type: string }
         providerReference: { type: string }
-        externalId: { type: string }
         state: { type: string }
         lastSyncJobId: { type: string }
         lastSyncStartedAt: { type: string, format: date-time, nullable: true }

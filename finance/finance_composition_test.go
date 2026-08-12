@@ -105,7 +105,6 @@ func TestFinanceComposition(t *testing.T) {
 		result, err := provider.Sync(t.Context(), ProviderSyncParams{
 			ProviderReference: "mono-ref-1",
 			Secret:            "mono-token",
-			ExternalID:        "acc-1",
 			WindowStart:       windowStart,
 			WindowEnd:         windowEnd,
 		})

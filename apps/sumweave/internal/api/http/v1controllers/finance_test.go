@@ -175,6 +175,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "list connections", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/connections"},
 			{name: "list connection synced accounts", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a/accounts"},
 			{name: "delete connection", method: http.MethodDelete, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a"},
+			{name: "rename connection", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a", body: `{"name":"Connection updated"}`},
 			{name: "link connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-token", body: `{"provider":"monobank","token":"token-1"}`},
 			{name: "start redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/start", body: `{"provider":"pko","callbackUrl":"https://app.example.test/#/finance/connections"}`},
 			{name: "finish redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/finish", body: `{"provider":"pko","state":"state-1","code":"code-1"}`},
@@ -1228,7 +1229,6 @@ func TestFinanceController(t *testing.T) {
 						TenantID:          tenantID,
 						Provider:          "monobank",
 						DisplayName:       "Primary",
-						ExternalID:        "ext-1",
 						ProviderReference: "ref-1",
 						State:             domain.BankConnectionStateActive,
 						CreatedAt:         now,
@@ -1243,6 +1243,11 @@ func TestFinanceController(t *testing.T) {
 					},
 				}}, nil)
 			bankConnections.EXPECT().
+				UpdateBankConnection(mock.Anything, financepkg.UpdateBankConnectionParams{
+					ActorUserID: userID, TenantID: tenantID, ConnectionID: connectionID, Name: "Renamed connection",
+				}).
+				Return(nil)
+			bankConnections.EXPECT().
 				LinkTokenBankConnection(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.LinkTokenBankConnectionParams) (domain.BankConnection, error) {
 					require.Equal(t, userID, params.ActorUserID)
@@ -1253,7 +1258,6 @@ func TestFinanceController(t *testing.T) {
 						TenantID:          tenantID,
 						Provider:          params.Provider,
 						DisplayName:       "Linked",
-						ExternalID:        "ext-2",
 						ProviderReference: "ref-2",
 						State:             domain.BankConnectionStateActive,
 						CreatedAt:         now,
@@ -1289,7 +1293,6 @@ func TestFinanceController(t *testing.T) {
 						TenantID:          tenantID,
 						Provider:          params.Provider,
 						DisplayName:       "PKO Linked",
-						ExternalID:        "ext-redirect",
 						ProviderReference: "ref-redirect",
 						State:             domain.BankConnectionStateActive,
 						CreatedAt:         now,
@@ -1471,6 +1474,12 @@ func TestFinanceController(t *testing.T) {
 				{
 					method: http.MethodDelete,
 					target: "/api/v1/finance/tenants/" + tenantID + "/connections/" + connectionID,
+					status: http.StatusNoContent,
+				},
+				{
+					method: http.MethodPatch,
+					target: "/api/v1/finance/tenants/" + tenantID + "/connections/" + connectionID,
+					body:   `{"name":"Renamed connection"}`,
 					status: http.StatusNoContent,
 				},
 				{
@@ -1729,6 +1738,46 @@ func TestFinanceController(t *testing.T) {
 		},
 	)
 
+	t.Run("registered connection rename route maps access not found and invalid names", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		connectionID := "connection-" + fake.UUID().V4()
+		target := "/api/v1/finance/tenants/" + tenantID + "/connections/" + connectionID
+
+		for _, tc := range []struct {
+			name   string
+			err    error
+			status int
+		}{
+			{name: "tenant access denied", err: financepkg.ErrTenantAccessDenied, status: http.StatusUnauthorized},
+			{name: "connection not found", err: financepkg.ErrBankConnectionNotFound, status: http.StatusNotFound},
+			{name: "blank name", err: financepkg.ErrBankConnectionNameRequired, status: http.StatusBadRequest},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				name := "Renamed " + fake.Lorem().Word()
+				bankConnections := newMockbankConnectionService(t)
+				bankConnections.EXPECT().UpdateBankConnection(
+					mock.Anything,
+					financepkg.UpdateBankConnectionParams{
+						ActorUserID:  userID,
+						TenantID:     tenantID,
+						ConnectionID: connectionID,
+						Name:         name,
+					},
+				).Return(tc.err).Once()
+
+				resp := httptest.NewRecorder()
+				newHandler(
+					newMockfinanceService(t),
+					bankConnections,
+					makeAuthMiddleware(userID),
+				).ServeHTTP(resp, newRequest(http.MethodPatch, target, `{"name":`+fmt.Sprintf("%q", name)+`}`, true))
+				require.Equal(t, tc.status, resp.Code)
+				assert.Empty(t, resp.Body.String())
+			})
+		}
+	})
+
 	t.Run(
 		"synthetic link-state endpoints round trip stable account keys with auth and tenant isolation",
 		func(t *testing.T) {
@@ -1961,7 +2010,6 @@ func TestFinanceController(t *testing.T) {
 				TenantID:          tenantID,
 				Provider:          "synthetic",
 				DisplayName:       "Synthetic",
-				ExternalID:        connectionID,
 				ProviderReference: syntheticState,
 				State:             domain.BankConnectionStateActive,
 				CreatedAt:         time.Now().UTC(),
@@ -2176,7 +2224,6 @@ func TestFinanceController(t *testing.T) {
 			return domain.BankConnection{
 				ID: id, TenantID: tenantID, Provider: "provider-" + fake.Lorem().Word(),
 				DisplayName: "connection-" + fake.Lorem().Word(), ProviderReference: "reference-" + fake.UUID().V4(),
-				ExternalID: "external-" + fake.UUID().V4(), State: domain.BankConnectionStateActive,
 				CreatedAt: presentAt, UpdatedAt: presentAt,
 			}
 		}
@@ -2742,6 +2789,74 @@ func TestFinanceController(t *testing.T) {
 			assert.NotContains(t, resp.Body.String(), secret)
 		})
 
+		t.Run("provider client failures return an empty client error", func(t *testing.T) {
+			service := newMockfinanceService(t)
+			bankConnections := newMockbankConnectionService(t)
+			bankConnections.EXPECT().
+				StartBankConnectionLink(mock.Anything, mock.Anything).
+				Return(financepkg.ProviderLinkStart{}, fmt.Errorf(
+					"start bank connection link: %w",
+					&financepkg.ProviderResponseError{
+						Provider:   "enable-banking",
+						Operation:  "auth",
+						StatusCode: http.StatusBadRequest,
+						Code:       "REDIRECT_URI_NOT_ALLOWED",
+						Message:    "provider request failed",
+					},
+				))
+			resp := httptest.NewRecorder()
+			newHandler(
+				service,
+				bankConnections,
+				makeAuthMiddleware(userID),
+			).ServeHTTP(
+				resp,
+				newRequest(
+					http.MethodPost,
+					"/api/v1/finance/tenants/tenant-a/connections/link-redirect/start",
+					`{"provider":"pko","callbackUrl":"https://app.example.test/#/finance/connections"}`,
+					true,
+				),
+			)
+
+			require.Equal(t, http.StatusBadRequest, resp.Code)
+			assert.Empty(t, resp.Body.String())
+		})
+
+		t.Run("redirect finish provider client failures return an empty client error", func(t *testing.T) {
+			service := newMockfinanceService(t)
+			bankConnections := newMockbankConnectionService(t)
+			bankConnections.EXPECT().
+				FinishBankConnectionLink(mock.Anything, mock.Anything).
+				Return(domain.BankConnection{}, fmt.Errorf(
+					"finish bank connection link: %w",
+					&financepkg.ProviderResponseError{
+						Provider:   "enable-banking",
+						Operation:  "sessions",
+						StatusCode: http.StatusBadRequest,
+						Code:       "INVALID_AUTHORIZATION_CODE",
+						Message:    "provider request failed",
+					},
+				))
+			resp := httptest.NewRecorder()
+			newHandler(
+				service,
+				bankConnections,
+				makeAuthMiddleware(userID),
+			).ServeHTTP(
+				resp,
+				newRequest(
+					http.MethodPost,
+					"/api/v1/finance/tenants/tenant-a/connections/link-redirect/finish",
+					`{"provider":"pko","state":"state-1","code":"code-1"}`,
+					true,
+				),
+			)
+
+			require.Equal(t, http.StatusBadRequest, resp.Code)
+			assert.Empty(t, resp.Body.String())
+		})
+
 		t.Run("unconfigured bank providers return sanitized client error", func(t *testing.T) {
 			service := newMockfinanceService(t)
 			bankConnections := newMockbankConnectionService(t)
@@ -2777,7 +2892,6 @@ func TestFinanceController(t *testing.T) {
 					Provider:             "provider-1",
 					DisplayName:          "Primary",
 					ProviderReference:    "ref-1",
-					ExternalID:           "ext-1",
 					State:                domain.BankConnectionStateActive,
 					LastSyncJobID:        "job-1",
 					LastSyncStartedAt:    ptrTime(now),
@@ -2799,6 +2913,11 @@ func TestFinanceController(t *testing.T) {
 				},
 			})
 			require.NotNil(t, mappedConnection.Schedule)
+			encodedConnection, err := json.Marshal(mappedConnection)
+			require.NoError(t, err)
+			var publicConnection map[string]any
+			require.NoError(t, json.Unmarshal(encodedConnection, &publicConnection))
+			assert.NotContains(t, publicConnection, "externalId")
 			assert.Equal(t, int64(900), mappedConnection.Schedule.IntervalSeconds)
 			assert.Equal(t, now, mappedConnection.CreatedAt)
 			assert.Equal(t, now, *mappedConnection.LastSyncStartedAt)

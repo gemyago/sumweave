@@ -136,6 +136,8 @@ The rules are:
 - Launch local backend CLI commands from `apps/sumweave`.
 - Avoid markdown tables, prefer lists or other formatting. Tables are hard to read by humans. Use tables only when user explicitly requests it.
 - Do not run `git diff --check` as a routine verification step.
+- Routine CI tests must not require PostgreSQL to be available.
+- Do not test generated ORM queries by matching SQL strings.
 - Do not explicitly normalize dates or timestamps to UTC.
 - Consider SQLite as local-dev only storage. Small issues and inconsistencies are tolerable.
 - Keep API responses single-purpose by default (e.g operating on a single entity); Composition must have a good justification.
@@ -145,6 +147,7 @@ The rules are:
 - Render the Helm chart with `make -C deploy lint` before deployment changes.
 - Allow obvious local-only placeholder keys in committed local config.
 - Use environment-specific config values, not runtime environment labels.
+- Log ordinary provider errors; avoid generic provider-error redaction.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 
@@ -156,13 +159,14 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 - unless explicitly documented, internal logic do not need to trim or otherwise normalize identifiers. Upper orchestration layer may chose to do it if needed.
 - system must have reasonable logging that allows to troubleshoot problems and understand the flow of the system.
 - when logging attributes, use camelCase for keys
+- avoid logging helpers, inline the logging statements instead
 - required component dependencies must be enforced in constructor, not in methods that use them
 
 ### Testing and mocking
 
 - Mockery is the default for dependency mocks in tests.
 - Hand-written stubs/fakes/spies are forbidden without user approval.
-- Avoid unit testing logger statements unless it's part of a business logic (which is rare).
+- Avoid unit testing logger statements unless it's part of a business logic (which is rare). Logs are not business logic.
 
 ## Manual E2E Testing
 

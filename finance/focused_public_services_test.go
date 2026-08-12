@@ -339,7 +339,6 @@ func TestFocusedPublicServices(t *testing.T) {
 			ConnectorID:       domain.ProviderConnectorIDMonobank,
 			DisplayName:       "Connection " + fake.Company().Name(),
 			ProviderReference: "ref-" + fake.UUID().V4(),
-			ExternalID:        "external-" + fake.UUID().V4(),
 			SecretID:          secretID,
 			State:             domain.BankConnectionStateActive,
 			CreatedAt:         time.Now().UTC(),

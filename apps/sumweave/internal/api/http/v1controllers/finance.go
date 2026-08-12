@@ -20,6 +20,8 @@ import (
 	"github.com/gemyago/sumweave/runtime/httpapi"
 )
 
+const providerRequestFailedMessage = "provider request failed"
+
 type tenantService interface {
 	CreateTenant(context.Context, financepkg.CreateTenantParams) (domain.Tenant, error)
 	UpdateTenant(context.Context, financepkg.UpdateTenantParams) (domain.Tenant, error)
@@ -166,6 +168,7 @@ type financeService interface {
 }
 
 type bankConnectionService interface {
+	UpdateBankConnection(context.Context, financepkg.UpdateBankConnectionParams) error
 	LinkTokenBankConnection(
 		context.Context,
 		financepkg.LinkTokenBankConnectionParams,
@@ -1560,6 +1563,25 @@ func (c *FinanceController) DeleteFinanceConnection(
 	return c.deps.AuthMiddleware(inner)
 }
 
+func (c *FinanceController) UpdateFinanceConnection(
+	builder handlers.NoResponseHandlerBuilder[*models.UpdateFinanceConnectionParams],
+) http.Handler {
+	inner := builder.HandleWith(func(ctx context.Context, params *models.UpdateFinanceConnectionParams) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		err = c.deps.BankConnectionService.UpdateBankConnection(ctx, financepkg.UpdateBankConnectionParams{
+			ActorUserID:  userID,
+			TenantID:     params.TenantID,
+			ConnectionID: params.ConnectionID,
+			Name:         params.Payload.Name,
+		})
+		return mapBankConnectionError(err, "rename finance connection failed")
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
 func (c *FinanceController) ListFinanceTags(
 	builder handlers.HandlerBuilder[*models.ListFinanceTagsParams, *models.FinanceTagsResponse],
 ) http.Handler {
@@ -2276,7 +2298,6 @@ func mapConnection(
 		Provider:             item.Connection.Provider,
 		DisplayName:          item.Connection.DisplayName,
 		ProviderReference:    item.Connection.ProviderReference,
-		ExternalID:           item.Connection.ExternalID,
 		State:                string(item.Connection.State),
 		LastSyncJobID:        item.Connection.LastSyncJobID,
 		LastSyncStartedAt:    item.Connection.LastSyncStartedAt,
@@ -2697,6 +2718,8 @@ func mapBankConnectionError(err error, fallback string) error {
 		)
 	case errors.Is(err, financepkg.ErrBankConnectionNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("bank connection", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrBankConnectionNameRequired):
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("name", "bank connection name is required"), err)
 	case errors.As(err, &providerResponseErr) && providerResponseErr.IsClientError():
 		return fmt.Errorf(
 			"%w: %w",
@@ -2738,7 +2761,7 @@ func mapSyntheticLinkStateError(err error) error {
 
 func humanizeProviderResponseError(err *financepkg.ProviderResponseError) string {
 	if err == nil {
-		return "provider request failed"
+		return providerRequestFailedMessage
 	}
 	if err.IsEnableBankingWrongASPSP() {
 		return "Enable Banking rejected the configured ASPSP name; this sandbox app may not expose PKO, so discover an available ASPSP and set finance.providers.enableBanking.aspspName (for example via APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME=Mock ASPSP)"

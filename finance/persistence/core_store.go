@@ -26,6 +26,12 @@ const (
 	columnProviderAccountID = "provider_account_id"
 	columnEffectiveAt       = "effective_at"
 	columnFingerprint       = "fingerprint"
+	columnScope             = "scope"
+	columnProviderObjectID  = "provider_object_id"
+	columnPayloadJSON       = "payload_json"
+	columnCapturedAt        = "captured_at"
+	columnNonce             = "nonce"
+	columnCiphertext        = "ciphertext"
 )
 
 var (

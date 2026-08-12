@@ -69,7 +69,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			linkResult: ProviderTokenLinkResult{
 				DisplayName:       "display",
 				ProviderReference: "ref",
-				ExternalID:        "external",
 				Secret:            "secret",
 				State:             domain.BankConnectionStateActive,
 			},
@@ -337,7 +336,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			linkResult: ProviderTokenLinkResult{
 				DisplayName:       "display",
 				ProviderReference: "ref",
-				ExternalID:        "external",
 				Secret:            "secret",
 				State:             domain.BankConnectionStateActive,
 			},
@@ -371,7 +369,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			ConnectorID:       domain.ProviderConnectorIDMonobank,
 			DisplayName:       "display",
 			ProviderReference: "ref",
-			ExternalID:        "external",
 			SecretID:          "secret-1",
 			State:             domain.BankConnectionStateActive,
 			CreatedAt:         time.Now().UTC(),
@@ -480,7 +477,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			ConnectorID:       domain.ProviderConnectorIDMonobank,
 			DisplayName:       "display",
 			ProviderReference: "ref-schedule-1",
-			ExternalID:        "external-schedule-1",
 			SecretID:          "secret-schedule-1",
 			State:             domain.BankConnectionStateActive,
 			CreatedAt:         time.Now().UTC(),
@@ -548,7 +544,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			ConnectorID:       domain.ProviderConnectorIDMonobank,
 			DisplayName:       "display",
 			ProviderReference: "ref-other-tenant",
-			ExternalID:        "external-other-tenant",
 			State:             domain.BankConnectionStateActive,
 			CreatedAt:         time.Now().UTC(),
 			UpdatedAt:         time.Now().UTC(),
@@ -617,22 +612,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 		require.ErrorContains(t, err, "apply provider sync result")
 		failingStore.getSyncRunErr = nil
 
-		failingStore.listBankConnectionsErr = errors.New("list bank connections failed")
-		_, err = service.saveLinkedBankConnection(
-			t.Context(),
-			"tenant-1",
-			bankProviderPKO,
-			domain.ProviderConnectorIDEnableBanking,
-			ProviderLinkResult{
-				DisplayName:       "display",
-				ProviderReference: "ref-2",
-				Secret:            "secret-2",
-				State:             domain.BankConnectionStateActive,
-			},
-		)
-		require.ErrorContains(t, err, "list bank connections")
-		failingStore.listBankConnectionsErr = nil
-
 		failingStore.saveRawPayloadErr = errors.New("save raw payload failed")
 		_, err = service.saveLinkedBankConnection(
 			t.Context(),
@@ -661,7 +640,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			ConnectorID:       domain.ProviderConnectorIDMonobank,
 			DisplayName:       "display",
 			ProviderReference: "ref-root-schedule-1",
-			ExternalID:        "external-root-schedule-1",
 			SecretID:          "root-secret-open-failure",
 			State:             domain.BankConnectionStateActive,
 			CreatedAt:         time.Now().UTC(),
@@ -692,7 +670,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			linkResult: ProviderTokenLinkResult{
 				DisplayName:       "display",
 				ProviderReference: "ref",
-				ExternalID:        "external",
 				Secret:            "secret",
 				State:             domain.BankConnectionStateActive,
 			},
@@ -729,7 +706,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			ConnectorID:       domain.ProviderConnectorIDMonobank,
 			DisplayName:       "display",
 			ProviderReference: "ref-root-sync-state",
-			ExternalID:        "external-root-sync-state",
 			SecretID:          "",
 			State:             domain.BankConnectionStateActive,
 			CreatedAt:         time.Now().UTC(),
@@ -777,7 +753,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			linkResult: ProviderTokenLinkResult{
 				DisplayName:       "display",
 				ProviderReference: "ref",
-				ExternalID:        "external",
 				Secret:            "secret",
 				State:             domain.BankConnectionStateActive,
 			},

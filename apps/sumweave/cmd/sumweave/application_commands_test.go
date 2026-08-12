@@ -89,13 +89,20 @@ func TestApplicationCommands(t *testing.T) {
 	t.Run("user administration creates lists and changes financial operators", func(t *testing.T) {
 		store, hasher := makeUserDeps(t)
 		username, password := fake.Internet().User(), fake.Internet().Password()
+		makeAddParams := func(candidatePassword string, ifNotExists bool) userAddParams {
+			return userAddParams{
+				Username:    username,
+				Password:    candidatePassword,
+				IfNotExists: ifNotExists,
+			}
+		}
 		var output bytes.Buffer
 		require.NoError(
 			t,
 			runUserAdd(
 				t.Context(),
 				userAddCmdDeps{Store: store, Hasher: hasher},
-				userAddParams{Username: username, Password: password},
+				makeAddParams(password, false),
 				&output,
 			),
 		)
@@ -105,10 +112,26 @@ func TestApplicationCommands(t *testing.T) {
 			runUserAdd(
 				t.Context(),
 				userAddCmdDeps{Store: store, Hasher: hasher},
-				userAddParams{Username: username, Password: fake.Internet().Password()},
+				makeAddParams(fake.Internet().Password(), false),
 				&bytes.Buffer{},
 			),
 		)
+		var ensureOutput bytes.Buffer
+		require.NoError(
+			t,
+			runUserAdd(
+				t.Context(),
+				userAddCmdDeps{Store: store, Hasher: hasher},
+				makeAddParams(fake.Internet().Password(), true),
+				&ensureOutput,
+			),
+		)
+		require.Contains(t, ensureOutput.String(), "already exists")
+		existingUser, err := store.GetByUsername(t.Context(), username)
+		require.NoError(t, err)
+		passwordUnchanged, err := hasher.Verify(password, existingUser.PasswordHash)
+		require.NoError(t, err)
+		require.True(t, passwordUnchanged)
 		var listed bytes.Buffer
 		require.NoError(t, runUserList(t.Context(), userListCmdDeps{Store: store}, &listed))
 		require.Contains(t, listed.String(), username)

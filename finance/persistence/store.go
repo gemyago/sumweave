@@ -68,8 +68,8 @@ func (s *Store) SaveConnectionSecret(
 				"reference",
 				"key_version",
 				"algorithm",
-				"nonce",
-				"ciphertext",
+				columnNonce,
+				columnCiphertext,
 				columnUpdatedAt,
 			}),
 		}).

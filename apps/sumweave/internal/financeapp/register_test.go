@@ -775,7 +775,6 @@ func TestNewFinanceModule(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		require.Equal(t, "session-123", connection.ExternalID)
 
 		jobRef, err := bankSyncService.TriggerBankConnectionSync(
 			t.Context(),

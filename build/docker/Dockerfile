@@ -8,5 +8,4 @@ ARG TARGETARCH
 COPY build/dist/${TARGETOS}/${TARGETARCH}/sumweave /usr/local/bin/sumweave
 COPY build/dist/platform-agents/skills /app/.platform-agents/skills
 
-USER nonroot:nonroot
 ENTRYPOINT ["sumweave"]

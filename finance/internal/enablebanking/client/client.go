@@ -347,7 +347,6 @@ func normalizeSessionResponse(response *SessionResponse) *SessionResponse {
 		return nil
 	}
 	response.ID = response.SessionID
-	response.ExternalID = response.SessionID
 	response.ProviderReference = response.SessionID
 	response.DisplayName = ""
 	if response.ASPSP != nil {

@@ -193,7 +193,6 @@ func (p connectorBankSyncProvider) Sync(
 			ProviderID:        domain.ProviderID(strings.TrimSpace(p.name)),
 			ConnectorID:       p.connector.ConnectorID(),
 			ProviderReference: strings.TrimSpace(params.ProviderReference),
-			ExternalID:        strings.TrimSpace(params.ExternalID),
 		},
 		Secret: domain.ConnectionSecret{Envelope: credentialsEnvelopeFromPlaintext(params.Secret)},
 		RequestedWindow: domain.ProviderSyncWindow{

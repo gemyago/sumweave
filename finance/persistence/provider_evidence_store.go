@@ -55,8 +55,8 @@ func (s *ProviderEvidenceStore) SaveProviderEvidence(
 	if createErr := s.db.WithContext(ctx).Table(model.TableName()).Clauses(clause.OnConflict{
 		Columns: providerEvidenceIdentityColumns(),
 		DoUpdates: clause.Assignments(map[string]any{
-			"payload_json": model.PayloadJSON,
-			"captured_at":  model.CapturedAt,
+			columnPayloadJSON: model.PayloadJSON,
+			columnCapturedAt:  model.CapturedAt,
 		}),
 		Where: latestProviderObservationClause(),
 	}).Create(&model).Error; createErr != nil {
@@ -74,12 +74,12 @@ func (s *ProviderEvidenceStore) SaveProviderEvidence(
 func providerEvidenceIdentityColumns() []clause.Column {
 	return []clause.Column{
 		{Name: "tenant_id"},
-		{Name: "connection_id"},
+		{Name: columnConnectionID},
 		{Name: "subject"},
 		{Name: "finance_account_id"},
 		{Name: "finance_transaction_id"},
-		{Name: "scope"},
-		{Name: "provider_object_id"},
+		{Name: columnScope},
+		{Name: columnProviderObjectID},
 	}
 }
 
@@ -102,7 +102,10 @@ func providerEvidenceIdentityValues(model providerEvidenceModel) []any {
 
 func latestProviderObservationClause() clause.Where {
 	return clause.Where{Exprs: []clause.Expression{
-		clause.Expr{SQL: "excluded.captured_at >= captured_at"},
+		clause.Gte{
+			Column: clause.Column{Table: "excluded", Name: columnCapturedAt},
+			Value:  clause.Column{Table: clause.CurrentTable, Name: columnCapturedAt},
+		},
 	}}
 }
 

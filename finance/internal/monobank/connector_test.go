@@ -54,7 +54,6 @@ func TestConnector(t *testing.T) {
 			ProviderID:        domain.ProviderIDMonobank,
 			ConnectorID:       domain.ProviderConnectorIDMonobank,
 			ProviderReference: "provider-ref-" + fake.UUID().V4(),
-			ExternalID:        "external-" + fake.UUID().V4(),
 		}
 	}
 
@@ -122,8 +121,7 @@ func TestConnector(t *testing.T) {
 
 		require.Len(t, result.RawPayloads, 1)
 		assert.Equal(t, clientName, result.DisplayName)
-		assert.Equal(t, clientName, result.ProviderReference)
-		assert.Equal(t, accountID, result.ExternalID)
+		assert.Empty(t, result.ProviderReference)
 		assert.Equal(t, token, result.Secret)
 		assert.Equal(t, domain.BankConnectionStateActive, result.State)
 		assert.Equal(t, domain.ProviderRawPayloadObservation{
@@ -384,7 +382,7 @@ func TestConnector(t *testing.T) {
 		assert.Equal(t, domain.ProviderRawPayloadObservation{
 			Connection:       connection,
 			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: connection.ExternalID,
+			ProviderObjectID: "client-info",
 			PayloadJSON:      []byte(clientInfoBody),
 			CapturedAt:       capturedAt,
 		}, batch.RawPayloads[0])
@@ -476,7 +474,7 @@ func TestConnector(t *testing.T) {
 		result, err := connector.LinkToken(t.Context(), providers.LinkTokenRequest{Token: "token"})
 		require.NoError(t, err)
 		assert.Equal(t, "monobank", result.DisplayName)
-		assert.Empty(t, result.ExternalID)
+		assert.Empty(t, result.ProviderReference)
 
 		stubbedAPI.clientInfoErr = clientInfoErr
 		_, err = connector.LinkToken(t.Context(), providers.LinkTokenRequest{Token: "token"})
@@ -499,7 +497,6 @@ func TestConnector(t *testing.T) {
 		assert.Equal(t, currencyEUR, currencyCodeToISO(monobankCurrencyEUR))
 		assert.Empty(t, firstNonEmpty("", "   "))
 		assert.Empty(t, firstMaskedPAN([]string{"", "   "}))
-		assert.Empty(t, firstAccountID(nil))
 		assert.Equal(t, domain.TransactionStatusBooked, statusFromHold(false))
 		assert.Equal(
 			t,

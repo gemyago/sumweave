@@ -35,4 +35,5 @@ Run `sumweave db-migrate` before `sumweave start-all` locally.
 Release builds run on the host with `make -C build dist`; Docker packages the
 prepared binary and staged platform-agent root. The Helm chart deploys app,
 singleton worker, scheduler, and migration processes because finance uses all
-of them.
+of them. It can also run an optional post-migration initial-user bootstrap Job
+from credentials held in a consumer-managed Kubernetes Secret.

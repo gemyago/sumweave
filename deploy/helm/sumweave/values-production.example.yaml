@@ -1,9 +1,64 @@
+# Lock specific image tag
 image:
-  tag: git-commit-abcdef0
-existingConfigMap: sumweave-production
-existingSecret: sumweave-production
+  tag: git-commit-da05388
+
+# These are illustrative, consumer-owned, namespace-local resources. The chart
+# does not create or validate them.
+envFrom:
+  # Include at least the following configs:
+  # * APP_FINANCE_PROVIDERS_ENABLEBANKING_APPID - EnableBanking app ID
+  # * APP_FINANCE_PROVIDERS_ENABLEBANKING_ASPSPNAME - Agent runtime database DSN
+  # * APP_FINANCE_PROVIDERS_ENABLEBANKING_CALLBACKBASEURL - EnableBanking callback base URL, must match public app host and configured callback in enable banking app.
+  - configMapRef:
+      name: sumweave-app-config
+  # 
+  # Include at least the following in the secret:
+  # * APP_AUTH_JWTSIGNINGKEY - JWT signing key for API authentication
+  # * enable-banking-private-key.pem - EnableBanking private key
+  - secretRef:
+      name: sumweave-app-secrets
+
+# Mount the EnableBanking private key from the existing application Secret into
+# each runtime workload. The chart does not create this Secret.
+volumeMounts:
+  - name: enable-banking-private-key
+    mountPath: /var/run/secrets/sumweave/enable-banking
+    readOnly: true
+volumes:
+  - name: enable-banking-private-key
+    secret:
+      secretName: sumweave-app-secrets
+      items:
+        - key: enable-banking-private-key.pem
+          path: private-key.pem
+
+# Kubelet expands $(VARIABLE) only from earlier entries in this ordered list.
+# It does not URL-encode interpolated values. For arbitrary passwords, use a
+# consumer-managed Secret key containing a complete, safely encoded DSN instead.
+env:
+  - name: APP_FINANCE_PROVIDERS_ENABLEBANKING_PRIVATEKEYPATH
+    value: /var/run/secrets/sumweave/enable-banking/private-key.pem
+  - name: DB_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: sumweave-db-secret
+        key: username
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: sumweave-db-secret
+        key: password
+  - name: DB_HOST
+    valueFrom:
+      secretKeyRef:
+        name: sumweave-db-secret
+        key: host
+  - name: APP_APPLICATION_DATABASE_DSN
+    value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
+  - name: APP_AGENTRUNTIME_DATABASE_DSN
+    value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
 imagePullSecrets:
-  - name: ghcr-registry
+  - name: docker-registry-secret
 app:
   replicaCount: 2
   resources:
@@ -17,12 +72,68 @@ scheduler:
 migration:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
+  # Migrations must use a distinct DDL-capable database identity. Avoid using
+  # runtime credentials. Migration job does not need other app configs.
+  env:
+    - name: DB_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-ops-db-secret
+          key: username
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-ops-db-secret
+          key: password
+    - name: DB_HOST
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-ops-db-secret
+          key: host
+    - name: APP_APPLICATION_DATABASE_DSN
+      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
+    - name: APP_AGENTRUNTIME_DATABASE_DSN
+      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
+initialUser:
+  enabled: true
+  secret:
+    name: sumweave-initial-user
+    usernameKey: username
+    passwordKey: password
+  # Initial user creation performs DML only and uses the runtime database identity.
+  env:
+    - name: DB_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-db-secret
+          key: username
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-db-secret
+          key: password
+    - name: DB_HOST
+      valueFrom:
+        secretKeyRef:
+          name: sumweave-db-secret
+          key: host
+    - name: APP_APPLICATION_DATABASE_DSN
+      value: postgres://$(DB_USERNAME):$(DB_PASSWORD)@$(DB_HOST):5432/sumweave?sslmode=require
 httpRoute:
   enabled: true
-  gatewayName: public
-  namespace: gateway-system
-  sectionName: https
-  hostnames: [sumweave.example.com]
-  rules:
-    - matches:
-        - path: {type: PathPrefix, value: /}
+
+  # HTTPRoute spec to create a route to the sumweave service.
+  spec:
+    parentRefs:
+      - name: your-gateway-name
+        namespace: gateway-namespace
+        sectionName: https
+    hostnames:
+      - your-hostname.com
+    rules:
+      - matches:
+          - path: {type: PathPrefix, value: /}
+        backendRefs:
+          # Service name is release-chart (e.g. sumweave-sumweave); override via fullnameOverride.
+          - name: sumweave-sumweave
+            port: 4501

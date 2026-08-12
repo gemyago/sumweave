@@ -203,12 +203,11 @@ func (csvImportRowOutcomeModel) TableName() string { return "finance_csv_import_
 
 type bankConnectionModel struct {
 	ID                   string     `gorm:"column:id;size:255;not null;primaryKey"`
-	TenantID             string     `gorm:"column:tenant_id;size:255;not null;index;index:idx_finance_bank_connections_created_order,priority:1"`
-	Provider             string     `gorm:"column:provider;size:255;not null"`
-	ConnectorID          string     `gorm:"column:connector_id;size:255;not null;default:''"`
+	TenantID             string     `gorm:"column:tenant_id;size:255;not null;index;index:idx_finance_bank_connections_created_order,priority:1;index:idx_finance_bank_connections_provider_reference,unique,priority:1,where:provider_reference <> ''"`
+	Provider             string     `gorm:"column:provider;size:255;not null;index:idx_finance_bank_connections_provider_reference,unique,priority:2,where:provider_reference <> ''"`
+	ConnectorID          string     `gorm:"column:connector_id;size:255;not null;default:'';index:idx_finance_bank_connections_provider_reference,unique,priority:3,where:provider_reference <> ''"`
 	DisplayName          string     `gorm:"column:display_name;size:255;not null"`
-	ProviderReference    string     `gorm:"column:provider_reference;size:255;not null"`
-	ExternalID           string     `gorm:"column:external_id;size:255;not null;default:''"`
+	ProviderReference    string     `gorm:"column:provider_reference;size:255;not null;default:'';index:idx_finance_bank_connections_provider_reference,unique,priority:4,where:provider_reference <> ''"`
 	SecretID             string     `gorm:"column:secret_id;size:255;not null"`
 	State                string     `gorm:"column:state;size:64;not null"`
 	ReauthRequiredAt     *time.Time `gorm:"column:reauth_required_at"`
@@ -812,7 +811,6 @@ func newBankConnectionModel(connection domain.BankConnection) bankConnectionMode
 		ConnectorID:          string(connection.ConnectorID),
 		DisplayName:          connection.DisplayName,
 		ProviderReference:    connection.ProviderReference,
-		ExternalID:           connection.ExternalID,
 		SecretID:             connection.SecretID,
 		State:                string(connection.State),
 		LastSyncJobID:        connection.LastSyncJobID,
@@ -837,7 +835,6 @@ func bankConnectionFromModel(model bankConnectionModel) domain.BankConnection {
 		ConnectorID:          domain.ProviderConnectorID(model.ConnectorID),
 		DisplayName:          model.DisplayName,
 		ProviderReference:    model.ProviderReference,
-		ExternalID:           model.ExternalID,
 		SecretID:             model.SecretID,
 		State:                domain.BankConnectionState(model.State),
 		LastSyncJobID:        model.LastSyncJobID,

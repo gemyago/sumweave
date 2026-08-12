@@ -33,8 +33,7 @@ func TestConnector(t *testing.T) {
 			ConnectionID:      "connection-" + fake.UUID().V4(),
 			ProviderID:        domain.ProviderIDPKO,
 			ConnectorID:       domain.ProviderConnectorIDEnableBanking,
-			ProviderReference: "provider-ref-" + fake.UUID().V4(),
-			ExternalID:        "session-" + fake.UUID().V4(),
+			ProviderReference: "session-" + fake.UUID().V4(),
 		}
 	}
 
@@ -205,7 +204,6 @@ func TestConnector(t *testing.T) {
 
 		assert.Equal(t, "PKO official", result.DisplayName)
 		assert.Equal(t, sessionID, result.ProviderReference)
-		assert.Equal(t, sessionID, result.ExternalID)
 		assert.Empty(t, result.Secret)
 		assert.Equal(t, domain.BankConnectionStateActive, result.State)
 		require.Len(t, result.RawPayloads, 1)
@@ -264,7 +262,7 @@ func TestConnector(t *testing.T) {
 		require.ErrorIs(t, err, ErrConnectorUnsupportedFetchBranch)
 
 		missingSessionConnection := makeConnection()
-		missingSessionConnection.ExternalID = ""
+		missingSessionConnection.ProviderReference = ""
 		_, err = officialConnector.Fetch(
 			t.Context(),
 			providers.FetchRequest{Connection: missingSessionConnection},
@@ -274,7 +272,7 @@ func TestConnector(t *testing.T) {
 
 	t.Run("fetch uses typed session balance and paged transaction operations", func(t *testing.T) {
 		connection := makeConnection()
-		connection.ExternalID = "session-" + fake.UUID().V4()
+		connection.ProviderReference = "session-" + fake.UUID().V4()
 		capturedAt := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
 		requestedWindow := domain.ProviderSyncWindow{
 			Start: time.Date(2026, time.June, 10, 14, 0, 0, 0, time.FixedZone("UTC+2", 2*60*60)),
@@ -293,9 +291,9 @@ func TestConnector(t *testing.T) {
 			assert.NotEmpty(t, request.Header.Get("Authorization"))
 
 			switch request.URL.Path {
-			case "/sessions/" + connection.ExternalID:
+			case "/sessions/" + connection.ProviderReference:
 				_, _ = w.Write([]byte(
-					`{"session_id":"` + connection.ExternalID + `","accounts":["` + accountID + `"],"accounts_data":[{"uid":"` + accountID + `","name":"Savings","currency":"pln","account_id":{"iban":" PL33333333333333333333333333 "}}]}`,
+					`{"session_id":"` + connection.ProviderReference + `","accounts":["` + accountID + `"],"accounts_data":[{"uid":"` + accountID + `","name":"Savings","currency":"pln","account_id":{"iban":" PL33333333333333333333333333 "}}]}`,
 				))
 			case "/accounts/" + accountID + "/balances":
 				_, _ = w.Write([]byte(
@@ -437,7 +435,7 @@ func TestConnector(t *testing.T) {
 
 	t.Run("fetch fills account name from account details when session only returns account IDs", func(t *testing.T) {
 		connection := makeConnection()
-		connection.ExternalID = "session-" + fake.UUID().V4()
+		connection.ProviderReference = "session-" + fake.UUID().V4()
 		accountID := "account-" + fake.UUID().V4()
 		accountName := "Mock ASPSP " + fake.Lorem().Word()
 		privateKeyPath := makeSignedKeyPath(t)
@@ -446,9 +444,9 @@ func TestConnector(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 			requestCount++
 			switch request.URL.Path {
-			case "/sessions/" + connection.ExternalID:
+			case "/sessions/" + connection.ProviderReference:
 				_, _ = w.Write([]byte(
-					`{"session_id":"` + connection.ExternalID + `","accounts":["` + accountID + `"]}`,
+					`{"session_id":"` + connection.ProviderReference + `","accounts":["` + accountID + `"]}`,
 				))
 			case "/accounts/" + accountID + "/details":
 				_, _ = w.Write([]byte(
@@ -554,9 +552,9 @@ func TestConnector(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				requestCount++
 				switch request.URL.Path {
-				case "/sessions/" + connection.ExternalID:
+				case "/sessions/" + connection.ProviderReference:
 					_, _ = w.Write([]byte(
-						`{"session_id":"` + connection.ExternalID + `","accounts":["` + accountID + `"],"accounts_data":[{"name":"Mock ROR","currency":"EUR","iban":"PL123"}]}`,
+						`{"session_id":"` + connection.ProviderReference + `","accounts":["` + accountID + `"],"accounts_data":[{"name":"Mock ROR","currency":"EUR","iban":"PL123"}]}`,
 					))
 				default:
 					http.NotFound(w, request)
@@ -690,7 +688,6 @@ func TestConnector(t *testing.T) {
 			t,
 			mustJSON(&enablebankingclient.SessionResponse{
 				ID:          "session-id",
-				ExternalID:  "external-id",
 				DisplayName: "PKO official",
 				State:       "active",
 				Secret:      "secret-value",

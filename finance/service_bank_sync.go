@@ -329,7 +329,6 @@ func (s *BankSyncService) RunBankConnectionSync(
 		ConnectionID:      connection.ID,
 		ProviderReference: connection.ProviderReference,
 		Secret:            secret,
-		ExternalID:        connection.ExternalID,
 		WindowStart:       windowStart,
 		WindowEnd:         windowEnd,
 	})
@@ -915,7 +914,7 @@ func (s *BankSyncService) findOrCreateFinanceAccountForProviderAccount(
 		return domain.Account{}, fmt.Errorf("list accounts: %w", err)
 	}
 	for _, account := range accounts {
-		if !isFinanceAccountForProviderAccount(account, connection, item, existingProviderAccount) {
+		if !isFinanceAccountForProviderAccount(account, existingProviderAccount) {
 			continue
 		}
 		return s.refreshFinanceAccountForProviderAccount(ctx, account, item, existingProviderAccount, now)
@@ -963,16 +962,13 @@ func (s *BankSyncService) refreshFinanceAccountForProviderAccount(
 
 func isFinanceAccountForProviderAccount(
 	account domain.Account,
-	connection domain.BankConnection,
-	item ProviderNormalizedAccount,
 	existingProviderAccount *domain.ConnectionProviderAccount,
 ) bool {
 	if existingProviderAccount != nil && existingProviderAccount.FinanceAccountID != "" &&
 		account.ID == existingProviderAccount.FinanceAccountID {
 		return true
 	}
-	return account.LinkedAccount != nil && account.LinkedAccount.Provider == connection.Provider &&
-		account.LinkedAccount.ProviderAccountID == item.ProviderAccountID
+	return false
 }
 
 func shouldRefreshProviderLinkedAccountName(

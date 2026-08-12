@@ -24,6 +24,7 @@ const (
 
 var (
 	ErrBankConnectionNotFound                 = errors.New("bank connection not found")
+	ErrBankConnectionNameRequired             = errors.New("bank connection name is required")
 	ErrPendingBankConnectionLinkStartNotFound = errors.New("pending bank connection link start not found")
 	ErrBankProviderNotConfigured              = errors.New("bank provider not configured")
 	ErrUnsupportedBankProvider                = errors.New("unsupported bank provider")
@@ -86,7 +87,6 @@ type ProviderTokenLinkParams struct {
 type ProviderLinkResult struct {
 	DisplayName       string
 	ProviderReference string
-	ExternalID        string
 	Secret            string
 	State             domain.BankConnectionState
 	RawPayloads       []ProviderRawPayload
@@ -126,7 +126,6 @@ type ProviderSyncParams struct {
 	ConnectionID      string
 	ProviderReference string
 	Secret            string
-	ExternalID        string
 	WindowStart       time.Time
 	WindowEnd         time.Time
 }

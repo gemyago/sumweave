@@ -469,7 +469,6 @@ func (financeFixturesProvider) LinkToken(
 	return financepkg.ProviderTokenLinkResult{
 		DisplayName:       "Fixture Connection",
 		ProviderReference: "fixture-reference",
-		ExternalID:        "fixture-external",
 		Secret:            "fixture-secret",
 		State:             domain.BankConnectionStateActive,
 	}, nil

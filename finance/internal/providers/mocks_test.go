@@ -1429,51 +1429,50 @@ func (_m *MockConnectionSecretWriter) EXPECT() *MockConnectionSecretWriter_Expec
 	return &MockConnectionSecretWriter_Expecter{mock: &_m.Mock}
 }
 
-// SaveConnectionSecret provides a mock function for the type MockConnectionSecretWriter
-func (_mock *MockConnectionSecretWriter) SaveConnectionSecret(ctx context.Context, provider string, reference string, secret string) (string, error) {
-	ret := _mock.Called(ctx, provider, reference, secret)
+// PrepareConnectionSecret provides a mock function for the type MockConnectionSecretWriter
+func (_mock *MockConnectionSecretWriter) PrepareConnectionSecret(provider string, reference string, secret string) (domain.ConnectionSecret, error) {
+	ret := _mock.Called(provider, reference, secret)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SaveConnectionSecret")
+		panic("no return value specified for PrepareConnectionSecret")
 	}
 
-	var r0 string
+	var r0 domain.ConnectionSecret
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (string, error)); ok {
-		return returnFunc(ctx, provider, reference, secret)
+	if returnFunc, ok := ret.Get(0).(func(string, string, string) (domain.ConnectionSecret, error)); ok {
+		return returnFunc(provider, reference, secret)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) string); ok {
-		r0 = returnFunc(ctx, provider, reference, secret)
+	if returnFunc, ok := ret.Get(0).(func(string, string, string) domain.ConnectionSecret); ok {
+		r0 = returnFunc(provider, reference, secret)
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Get(0).(domain.ConnectionSecret)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) error); ok {
-		r1 = returnFunc(ctx, provider, reference, secret)
+	if returnFunc, ok := ret.Get(1).(func(string, string, string) error); ok {
+		r1 = returnFunc(provider, reference, secret)
 	} else {
 		r1 = ret.Error(1)
 	}
 	return r0, r1
 }
 
-// MockConnectionSecretWriter_SaveConnectionSecret_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveConnectionSecret'
-type MockConnectionSecretWriter_SaveConnectionSecret_Call struct {
+// MockConnectionSecretWriter_PrepareConnectionSecret_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PrepareConnectionSecret'
+type MockConnectionSecretWriter_PrepareConnectionSecret_Call struct {
 	*mock.Call
 }
 
-// SaveConnectionSecret is a helper method to define mock.On call
-//   - ctx context.Context
+// PrepareConnectionSecret is a helper method to define mock.On call
 //   - provider string
 //   - reference string
 //   - secret string
-func (_e *MockConnectionSecretWriter_Expecter) SaveConnectionSecret(ctx interface{}, provider interface{}, reference interface{}, secret interface{}) *MockConnectionSecretWriter_SaveConnectionSecret_Call {
-	return &MockConnectionSecretWriter_SaveConnectionSecret_Call{Call: _e.mock.On("SaveConnectionSecret", ctx, provider, reference, secret)}
+func (_e *MockConnectionSecretWriter_Expecter) PrepareConnectionSecret(provider interface{}, reference interface{}, secret interface{}) *MockConnectionSecretWriter_PrepareConnectionSecret_Call {
+	return &MockConnectionSecretWriter_PrepareConnectionSecret_Call{Call: _e.mock.On("PrepareConnectionSecret", provider, reference, secret)}
 }
 
-func (_c *MockConnectionSecretWriter_SaveConnectionSecret_Call) Run(run func(ctx context.Context, provider string, reference string, secret string)) *MockConnectionSecretWriter_SaveConnectionSecret_Call {
+func (_c *MockConnectionSecretWriter_PrepareConnectionSecret_Call) Run(run func(provider string, reference string, secret string)) *MockConnectionSecretWriter_PrepareConnectionSecret_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
+		var arg0 string
 		if args[0] != nil {
-			arg0 = args[0].(context.Context)
+			arg0 = args[0].(string)
 		}
 		var arg1 string
 		if args[1] != nil {
@@ -1483,26 +1482,21 @@ func (_c *MockConnectionSecretWriter_SaveConnectionSecret_Call) Run(run func(ctx
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
-		var arg3 string
-		if args[3] != nil {
-			arg3 = args[3].(string)
-		}
 		run(
 			arg0,
 			arg1,
 			arg2,
-			arg3,
 		)
 	})
 	return _c
 }
 
-func (_c *MockConnectionSecretWriter_SaveConnectionSecret_Call) Return(s string, err error) *MockConnectionSecretWriter_SaveConnectionSecret_Call {
-	_c.Call.Return(s, err)
+func (_c *MockConnectionSecretWriter_PrepareConnectionSecret_Call) Return(connectionSecret domain.ConnectionSecret, err error) *MockConnectionSecretWriter_PrepareConnectionSecret_Call {
+	_c.Call.Return(connectionSecret, err)
 	return _c
 }
 
-func (_c *MockConnectionSecretWriter_SaveConnectionSecret_Call) RunAndReturn(run func(ctx context.Context, provider string, reference string, secret string) (string, error)) *MockConnectionSecretWriter_SaveConnectionSecret_Call {
+func (_c *MockConnectionSecretWriter_PrepareConnectionSecret_Call) RunAndReturn(run func(provider string, reference string, secret string) (domain.ConnectionSecret, error)) *MockConnectionSecretWriter_PrepareConnectionSecret_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1534,113 +1528,46 @@ func (_m *MockConnectionStore) EXPECT() *MockConnectionStore_Expecter {
 	return &MockConnectionStore_Expecter{mock: &_m.Mock}
 }
 
-// ListBankConnections provides a mock function for the type MockConnectionStore
-func (_mock *MockConnectionStore) ListBankConnections(ctx context.Context, tenantID string) ([]domain.BankConnection, error) {
-	ret := _mock.Called(ctx, tenantID)
+// SaveLinkedConnection provides a mock function for the type MockConnectionStore
+func (_mock *MockConnectionStore) SaveLinkedConnection(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret) (domain.BankConnection, error) {
+	ret := _mock.Called(ctx, connection, secret)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ListBankConnections")
-	}
-
-	var r0 []domain.BankConnection
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]domain.BankConnection, error)); ok {
-		return returnFunc(ctx, tenantID)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []domain.BankConnection); ok {
-		r0 = returnFunc(ctx, tenantID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]domain.BankConnection)
-		}
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, tenantID)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockConnectionStore_ListBankConnections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListBankConnections'
-type MockConnectionStore_ListBankConnections_Call struct {
-	*mock.Call
-}
-
-// ListBankConnections is a helper method to define mock.On call
-//   - ctx context.Context
-//   - tenantID string
-func (_e *MockConnectionStore_Expecter) ListBankConnections(ctx interface{}, tenantID interface{}) *MockConnectionStore_ListBankConnections_Call {
-	return &MockConnectionStore_ListBankConnections_Call{Call: _e.mock.On("ListBankConnections", ctx, tenantID)}
-}
-
-func (_c *MockConnectionStore_ListBankConnections_Call) Run(run func(ctx context.Context, tenantID string)) *MockConnectionStore_ListBankConnections_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockConnectionStore_ListBankConnections_Call) Return(bankConnections []domain.BankConnection, err error) *MockConnectionStore_ListBankConnections_Call {
-	_c.Call.Return(bankConnections, err)
-	return _c
-}
-
-func (_c *MockConnectionStore_ListBankConnections_Call) RunAndReturn(run func(ctx context.Context, tenantID string) ([]domain.BankConnection, error)) *MockConnectionStore_ListBankConnections_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveBankConnection provides a mock function for the type MockConnectionStore
-func (_mock *MockConnectionStore) SaveBankConnection(ctx context.Context, connection domain.BankConnection) (domain.BankConnection, error) {
-	ret := _mock.Called(ctx, connection)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveBankConnection")
+		panic("no return value specified for SaveLinkedConnection")
 	}
 
 	var r0 domain.BankConnection
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection) (domain.BankConnection, error)); ok {
-		return returnFunc(ctx, connection)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret) (domain.BankConnection, error)); ok {
+		return returnFunc(ctx, connection, secret)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection) domain.BankConnection); ok {
-		r0 = returnFunc(ctx, connection)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret) domain.BankConnection); ok {
+		r0 = returnFunc(ctx, connection, secret)
 	} else {
 		r0 = ret.Get(0).(domain.BankConnection)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.BankConnection) error); ok {
-		r1 = returnFunc(ctx, connection)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.BankConnection, domain.ConnectionSecret) error); ok {
+		r1 = returnFunc(ctx, connection, secret)
 	} else {
 		r1 = ret.Error(1)
 	}
 	return r0, r1
 }
 
-// MockConnectionStore_SaveBankConnection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveBankConnection'
-type MockConnectionStore_SaveBankConnection_Call struct {
+// MockConnectionStore_SaveLinkedConnection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveLinkedConnection'
+type MockConnectionStore_SaveLinkedConnection_Call struct {
 	*mock.Call
 }
 
-// SaveBankConnection is a helper method to define mock.On call
+// SaveLinkedConnection is a helper method to define mock.On call
 //   - ctx context.Context
 //   - connection domain.BankConnection
-func (_e *MockConnectionStore_Expecter) SaveBankConnection(ctx interface{}, connection interface{}) *MockConnectionStore_SaveBankConnection_Call {
-	return &MockConnectionStore_SaveBankConnection_Call{Call: _e.mock.On("SaveBankConnection", ctx, connection)}
+//   - secret domain.ConnectionSecret
+func (_e *MockConnectionStore_Expecter) SaveLinkedConnection(ctx interface{}, connection interface{}, secret interface{}) *MockConnectionStore_SaveLinkedConnection_Call {
+	return &MockConnectionStore_SaveLinkedConnection_Call{Call: _e.mock.On("SaveLinkedConnection", ctx, connection, secret)}
 }
 
-func (_c *MockConnectionStore_SaveBankConnection_Call) Run(run func(ctx context.Context, connection domain.BankConnection)) *MockConnectionStore_SaveBankConnection_Call {
+func (_c *MockConnectionStore_SaveLinkedConnection_Call) Run(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret)) *MockConnectionStore_SaveLinkedConnection_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1650,20 +1577,25 @@ func (_c *MockConnectionStore_SaveBankConnection_Call) Run(run func(ctx context.
 		if args[1] != nil {
 			arg1 = args[1].(domain.BankConnection)
 		}
+		var arg2 domain.ConnectionSecret
+		if args[2] != nil {
+			arg2 = args[2].(domain.ConnectionSecret)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
 }
 
-func (_c *MockConnectionStore_SaveBankConnection_Call) Return(bankConnection domain.BankConnection, err error) *MockConnectionStore_SaveBankConnection_Call {
+func (_c *MockConnectionStore_SaveLinkedConnection_Call) Return(bankConnection domain.BankConnection, err error) *MockConnectionStore_SaveLinkedConnection_Call {
 	_c.Call.Return(bankConnection, err)
 	return _c
 }
 
-func (_c *MockConnectionStore_SaveBankConnection_Call) RunAndReturn(run func(ctx context.Context, connection domain.BankConnection) (domain.BankConnection, error)) *MockConnectionStore_SaveBankConnection_Call {
+func (_c *MockConnectionStore_SaveLinkedConnection_Call) RunAndReturn(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret) (domain.BankConnection, error)) *MockConnectionStore_SaveLinkedConnection_Call {
 	_c.Call.Return(run)
 	return _c
 }

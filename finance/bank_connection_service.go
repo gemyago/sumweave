@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
+	enablebankingclient "github.com/gemyago/sumweave/finance/internal/enablebanking/client"
 	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
 	"github.com/gemyago/sumweave/finance/persistence"
 )
@@ -15,8 +18,10 @@ import (
 type BankConnectionService struct {
 	access             *accessGuard
 	pendingStartLookup bankConnectionPendingStartLookup
+	connectionStore    bankConnectionMetadataStore
 	linkCoordinator    bankConnectionLinkCoordinator
 	logger             *slog.Logger
+	now                func() time.Time
 }
 
 type bankConnectionServiceArgs struct {
@@ -41,6 +46,16 @@ type bankConnectionPendingStartLookup interface {
 		providerID domain.ProviderID,
 		state string,
 	) (*domain.PendingBankConnectionLinkStart, error)
+}
+
+type bankConnectionMetadataStore interface {
+	UpdateBankConnectionDisplayName(
+		ctx context.Context,
+		tenantID string,
+		connectionID string,
+		displayName string,
+		updatedAt time.Time,
+	) error
 }
 
 type bankConnectionLinkCoordinator interface {
@@ -72,6 +87,7 @@ func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionSe
 		),
 		ConnectionStore:  linkPersistence,
 		RawPayloadWriter: linkPersistence,
+		Logger:           args.Logger,
 		Now:              args.Now,
 		NewID:            args.NewID,
 		PendingStartTTL:  pendingBankConnectionLinkStartTTL,
@@ -82,8 +98,10 @@ func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionSe
 	return &BankConnectionService{
 		access:             newAccessGuard(args.Store),
 		pendingStartLookup: linkPersistence,
+		connectionStore:    linkPersistence,
 		linkCoordinator:    coordinator,
 		logger:             args.Logger.With("component", "bankConnectionService"),
+		now:                args.Now,
 	}, nil
 }
 
@@ -94,6 +112,9 @@ func (s *BankConnectionService) LinkTokenBankConnection(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.BankConnection{}, err
 	}
+	s.logger.InfoContext(ctx, "bank connection link requested",
+		slog.String("operation", "token"), slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID), slog.String("provider", params.Provider))
 	connection, err := s.linkCoordinator.LinkToken(ctx, internalproviders.TokenLinkRequest{
 		TenantID:    params.TenantID,
 		ActorUserID: params.ActorUserID,
@@ -101,11 +122,22 @@ func (s *BankConnectionService) LinkTokenBankConnection(
 		Token:       params.Token,
 	})
 	if err != nil {
+		s.logger.WarnContext(ctx, "bank connection link failed",
+			slog.String("operation", "token"), slog.String("failureStage", "coordinator"),
+			slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
+			slog.String("provider", params.Provider), slog.Any("err", err))
 		if isBankProviderConfigurationError(err) {
-			return domain.BankConnection{}, fmt.Errorf("%w: %s", ErrBankProviderNotConfigured, params.Provider)
+			return domain.BankConnection{}, fmt.Errorf(
+				"%w: %s",
+				ErrBankProviderNotConfigured,
+				params.Provider,
+			)
 		}
 		return domain.BankConnection{}, fmt.Errorf("link token bank connection: %w", err)
 	}
+	s.logger.InfoContext(ctx, "bank connection token link completed",
+		slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
+		slog.String("provider", params.Provider), slog.String("connectionId", connection.ID))
 	return connection, nil
 }
 
@@ -117,28 +149,71 @@ func (s *BankConnectionService) StartBankConnectionLink(
 		return ProviderLinkStart{}, err
 	}
 
-	s.logger.InfoContext(
-		ctx,
-		"starting bank connection link",
-		slog.String("redirectURL", params.RedirectURL),
-		slog.String("tenantId", params.TenantID),
-		slog.String("actorUserId", params.ActorUserID),
-		slog.String("provider", params.Provider),
-	)
+	s.logger.InfoContext(ctx, "bank connection link requested",
+		slog.String("operation", "redirectStart"), slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID), slog.String("provider", params.Provider))
 
-	result, err := s.linkCoordinator.StartRedirectLink(ctx, internalproviders.RedirectLinkStartRequest{
-		TenantID:           params.TenantID,
-		ActorUserID:        params.ActorUserID,
-		ProviderID:         domain.ProviderID(params.Provider),
-		RedirectURL:        params.RedirectURL,
-		BrowserCallbackURL: params.BrowserCallbackURL,
-	})
+	result, err := s.linkCoordinator.StartRedirectLink(
+		ctx,
+		internalproviders.RedirectLinkStartRequest{
+			TenantID:           params.TenantID,
+			ActorUserID:        params.ActorUserID,
+			ProviderID:         domain.ProviderID(params.Provider),
+			RedirectURL:        params.RedirectURL,
+			BrowserCallbackURL: params.BrowserCallbackURL,
+		},
+	)
 	if err != nil {
+		var responseErr *enablebankingclient.ResponseError
+		errorClass := "coordinator"
+		if errors.As(err, &responseErr) {
+			errorClass = "providerResponse"
+		}
+		attributes := []slog.Attr{
+			slog.String("operation", "redirectStart"),
+			slog.String("failureStage", "coordinator"),
+			slog.String("tenantId", params.TenantID),
+			slog.String("actorUserId", params.ActorUserID),
+			slog.String("provider", params.Provider),
+			slog.String("errorClass", errorClass),
+		}
+		if responseErr != nil {
+			attributes = append(
+				attributes,
+				slog.Int("providerStatus", responseErr.StatusCode),
+				slog.String("providerCode", responseErr.Code),
+				slog.Bool(
+					"retryable",
+					responseErr.StatusCode == http.StatusTooManyRequests ||
+						responseErr.StatusCode >= http.StatusInternalServerError,
+				),
+			)
+		}
+		attributes = append(attributes, slog.Any("err", err))
+		s.logger.LogAttrs(ctx, slog.LevelWarn, "bank connection link failed", attributes...)
 		if isBankProviderConfigurationError(err) {
-			return ProviderLinkStart{}, fmt.Errorf("%w: %s", ErrBankProviderNotConfigured, params.Provider)
+			return ProviderLinkStart{}, fmt.Errorf(
+				"%w: %s",
+				ErrBankProviderNotConfigured,
+				params.Provider,
+			)
+		}
+		if providerResponseErr := providerResponseErrorForBankConnection(err); providerResponseErr != nil {
+			return ProviderLinkStart{}, fmt.Errorf("start bank connection link: %w", providerResponseErr)
 		}
 		return ProviderLinkStart{}, fmt.Errorf("start bank connection link: %w", err)
 	}
+	s.logger.InfoContext(
+		ctx,
+		"bank connection redirect link started",
+		slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID),
+		slog.String(
+			"provider",
+			params.Provider,
+		),
+		slog.Int("rawPayloadCount", len(result.RawPayloads)),
+	)
 	return ProviderLinkStart{
 		State:            result.State,
 		AuthorizationURL: result.AuthorizationURL,
@@ -153,23 +228,92 @@ func (s *BankConnectionService) FinishBankConnectionLink(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return domain.BankConnection{}, err
 	}
-	connection, err := s.linkCoordinator.FinishRedirectLink(ctx, internalproviders.RedirectLinkFinishRequest{
-		TenantID:    params.TenantID,
-		ActorUserID: params.ActorUserID,
-		ProviderID:  domain.ProviderID(params.Provider),
-		State:       params.State,
-		Code:        params.Code,
-	})
-	if err != nil {
-		if errors.Is(err, internalproviders.ErrPendingStartNotFound) {
-			return domain.BankConnection{}, ErrPendingBankConnectionLinkStartNotFound
-		}
-		if isBankProviderConfigurationError(err) {
-			return domain.BankConnection{}, fmt.Errorf("%w: %s", ErrBankProviderNotConfigured, params.Provider)
-		}
-		return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", err)
+	s.logger.InfoContext(ctx, "bank connection link requested",
+		slog.String("operation", "redirectFinish"), slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID), slog.String("provider", params.Provider))
+	connection, err := s.linkCoordinator.FinishRedirectLink(
+		ctx,
+		internalproviders.RedirectLinkFinishRequest{
+			TenantID:    params.TenantID,
+			ActorUserID: params.ActorUserID,
+			ProviderID:  domain.ProviderID(params.Provider),
+			State:       params.State,
+			Code:        params.Code,
+		},
+	)
+	if err == nil {
+		s.logger.InfoContext(ctx, "bank connection redirect link completed",
+			slog.String("tenantId", params.TenantID), slog.String("actorUserId", params.ActorUserID),
+			slog.String("provider", params.Provider), slog.String("connectionId", connection.ID))
+		return connection, nil
 	}
-	return connection, nil
+	var responseErr *enablebankingclient.ResponseError
+	errorClass := "coordinator"
+	if errors.As(err, &responseErr) {
+		errorClass = "providerResponse"
+	}
+	attributes := []slog.Attr{
+		slog.String("operation", "redirectFinish"),
+		slog.String("failureStage", "coordinator"),
+		slog.String("tenantId", params.TenantID),
+		slog.String("actorUserId", params.ActorUserID),
+		slog.String("provider", params.Provider),
+		slog.String("errorClass", errorClass),
+	}
+	if responseErr != nil {
+		attributes = append(
+			attributes,
+			slog.Int("providerStatus", responseErr.StatusCode),
+			slog.String("providerCode", responseErr.Code),
+			slog.Bool(
+				"retryable",
+				responseErr.StatusCode == http.StatusTooManyRequests ||
+					responseErr.StatusCode >= http.StatusInternalServerError,
+			),
+		)
+	}
+	attributes = append(attributes, slog.Any("err", err))
+	s.logger.LogAttrs(ctx, slog.LevelWarn, "bank connection link failed", attributes...)
+	if errors.Is(err, internalproviders.ErrPendingStartNotFound) {
+		return domain.BankConnection{}, ErrPendingBankConnectionLinkStartNotFound
+	}
+	if isBankProviderConfigurationError(err) {
+		return domain.BankConnection{}, fmt.Errorf(
+			"%w: %s",
+			ErrBankProviderNotConfigured,
+			params.Provider,
+		)
+	}
+	if providerResponseErr := providerResponseErrorForBankConnection(err); providerResponseErr != nil {
+		return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", providerResponseErr)
+	}
+	return domain.BankConnection{}, fmt.Errorf("finish bank connection link: %w", err)
+}
+
+func (s *BankConnectionService) UpdateBankConnection(
+	ctx context.Context,
+	params UpdateBankConnectionParams,
+) error {
+	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
+		return err
+	}
+	displayName := strings.TrimSpace(params.Name)
+	if displayName == "" {
+		return ErrBankConnectionNameRequired
+	}
+	if err := s.connectionStore.UpdateBankConnectionDisplayName(
+		ctx,
+		strings.TrimSpace(params.TenantID),
+		strings.TrimSpace(params.ConnectionID),
+		displayName,
+		s.now(),
+	); err != nil {
+		if errors.Is(err, persistence.ErrBankConnectionNotFound) {
+			return ErrBankConnectionNotFound
+		}
+		return fmt.Errorf("update bank connection display name: %w", err)
+	}
+	return nil
 }
 
 func (s *BankConnectionService) GetPendingBankConnectionLinkStartByState(
@@ -212,6 +356,20 @@ func isBankProviderConfigurationError(err error) bool {
 		errors.Is(err, internalproviders.ErrConnectorNotConfigured)
 }
 
+func providerResponseErrorForBankConnection(err error) *ProviderResponseError {
+	var responseErr *enablebankingclient.ResponseError
+	if !errors.As(err, &responseErr) {
+		return nil
+	}
+	return &ProviderResponseError{
+		Provider:   bankConnectorEnableBanking,
+		Operation:  responseErr.Operation,
+		StatusCode: responseErr.StatusCode,
+		Code:       responseErr.Code,
+		Message:    responseErr.Message,
+	}
+}
+
 type bankConnectionSecretWriter struct {
 	store  connectionSecretStore
 	cipher connectionSecretCipher
@@ -234,22 +392,33 @@ func (w *bankConnectionSecretWriter) SaveConnectionSecret(
 	reference string,
 	secret string,
 ) (string, error) {
+	prepared, err := w.PrepareConnectionSecret(provider, reference, secret)
+	if err != nil {
+		return "", err
+	}
+	_, err = w.store.SaveConnectionSecret(ctx, prepared)
+	if err != nil {
+		return "", fmt.Errorf("save connection secret: %w", err)
+	}
+	return prepared.ID, nil
+}
+
+func (w *bankConnectionSecretWriter) PrepareConnectionSecret(
+	provider string,
+	reference string,
+	secret string,
+) (domain.ConnectionSecret, error) {
 	envelope, err := w.cipher.SealString(secret)
 	if err != nil {
-		return "", fmt.Errorf("seal connection secret: %w", err)
+		return domain.ConnectionSecret{}, fmt.Errorf("seal connection secret: %w", err)
 	}
-	secretID := w.newID()
 	now := w.now()
-	_, err = w.store.SaveConnectionSecret(ctx, domain.ConnectionSecret{
-		ID:        secretID,
+	return domain.ConnectionSecret{
+		ID:        w.newID(),
 		Provider:  provider,
 		Reference: reference,
 		Envelope:  envelope,
 		CreatedAt: now,
 		UpdatedAt: now,
-	})
-	if err != nil {
-		return "", fmt.Errorf("save connection secret: %w", err)
-	}
-	return secretID, nil
+	}, nil
 }

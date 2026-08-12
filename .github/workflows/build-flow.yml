@@ -33,4 +33,4 @@ jobs:
           go-version-file: go.work
           cache-dependency-path: go.work.sum
       - run: make -C build test dist
-      - run: make -C deploy lint render-production
+      - run: make -C deploy lint render-production test

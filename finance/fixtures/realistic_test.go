@@ -151,7 +151,6 @@ func (s *realisticScenarioFinanceAdapter) LinkTokenBankConnection(
 		ConnectorID:       domain.ProviderConnectorIDMonobank,
 		DisplayName:       result.DisplayName,
 		ProviderReference: result.ProviderReference,
-		ExternalID:        result.ExternalID,
 		SecretID:          secretID,
 		State:             result.State,
 		CreatedAt:         now,
@@ -1196,7 +1195,6 @@ func (realisticScenarioProvider) LinkToken(
 	return financepkg.ProviderTokenLinkResult{
 		DisplayName:       "Scenario Connection",
 		ProviderReference: "scenario-ref",
-		ExternalID:        "ext-1",
 		Secret:            "secret",
 		State:             "active",
 	}, nil

@@ -31,7 +31,9 @@ const (
 var (
 	ErrConnectorStartLinkUnsupported  = errors.New("monobank connector start link unsupported")
 	ErrConnectorFinishLinkUnsupported = errors.New("monobank connector finish link unsupported")
-	ErrSecretTokenResolverRequired    = errors.New("monobank connector secret token resolver required")
+	ErrSecretTokenResolverRequired    = errors.New(
+		"monobank connector secret token resolver required",
+	)
 )
 
 type secretTokenResolver func(ctx context.Context, secret domain.ConnectionSecret) (string, error)
@@ -57,6 +59,7 @@ type Option func(*Connector)
 
 type Connector struct {
 	api                 monobankAPI
+	logger              *slog.Logger
 	now                 func() time.Time
 	secretTokenResolver secretTokenResolver
 }
@@ -69,7 +72,9 @@ func WithNow(now func() time.Time) Option {
 	}
 }
 
-func WithSecretTokenResolver(resolver func(context.Context, domain.ConnectionSecret) (string, error)) Option {
+func WithSecretTokenResolver(
+	resolver func(context.Context, domain.ConnectionSecret) (string, error),
+) Option {
 	return func(connector *Connector) {
 		if resolver != nil {
 			connector.secretTokenResolver = resolver
@@ -90,13 +95,18 @@ func NewConnector(args Args, opts ...Option) *Connector {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	logger := args.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
 	connector := &Connector{
 		api: monobankclient.NewClient(
 			monobankclient.Args{BaseURL: args.BaseURL},
 			monobankclient.WithHTTPClient(httpClient),
 			monobankclient.WithLogger(args.Logger),
 		),
-		now: time.Now,
+		now:    time.Now,
+		logger: logger.WithGroup("monobankConnector"),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -114,26 +124,43 @@ func (c *Connector) Capabilities() providers.ConnectorCapabilities {
 	return providers.ConnectorCapabilities{SupportsTokenLink: true, SupportsFetch: true}
 }
 
-func (c *Connector) StartLink(context.Context, providers.StartLinkRequest) (providers.StartLinkResult, error) {
+func (c *Connector) StartLink(
+	context.Context,
+	providers.StartLinkRequest,
+) (providers.StartLinkResult, error) {
 	return providers.StartLinkResult{}, ErrConnectorStartLinkUnsupported
 }
 
-func (c *Connector) FinishLink(context.Context, providers.FinishLinkRequest) (providers.LinkResult, error) {
+func (c *Connector) FinishLink(
+	context.Context,
+	providers.FinishLinkRequest,
+) (providers.LinkResult, error) {
 	return providers.LinkResult{}, ErrConnectorFinishLinkUnsupported
 }
 
-func (c *Connector) LinkToken(ctx context.Context, request providers.LinkTokenRequest) (providers.LinkResult, error) {
-	response, err := c.api.GetPersonalClientInfo(ctx, monobankclient.GetPersonalClientInfoParams{Token: request.Token})
+func (c *Connector) LinkToken(
+	ctx context.Context,
+	request providers.LinkTokenRequest,
+) (providers.LinkResult, error) {
+	response, err := c.api.GetPersonalClientInfo(
+		ctx,
+		monobankclient.GetPersonalClientInfoParams{Token: request.Token},
+	)
 	if err != nil {
+		c.logTokenLinkFailure(ctx, err)
 		return providers.LinkResult{}, normalizeClientError(err)
 	}
+	c.logger.InfoContext(
+		ctx,
+		"monobank token link client info received",
+		slog.Int("accountCount", len(response.ClientInfo.Accounts)),
+	)
 	capturedAt := c.now()
 	body := response.ClientInfo
 	providerObjectID := firstNonEmpty(body.Name, "monobank")
 	return providers.LinkResult{
 		DisplayName:       providerObjectID,
-		ProviderReference: providerObjectID,
-		ExternalID:        firstAccountID(body.Accounts),
+		ProviderReference: "",
 		Secret:            strings.TrimSpace(request.Token),
 		State:             domain.BankConnectionStateActive,
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
@@ -143,6 +170,24 @@ func (c *Connector) LinkToken(ctx context.Context, request providers.LinkTokenRe
 			CapturedAt:       capturedAt,
 		}},
 	}, nil
+}
+
+func (c *Connector) logTokenLinkFailure(ctx context.Context, err error) {
+	attributes := []slog.Attr{
+		slog.String("operation", "token"),
+		slog.String("failureStage", "getPersonalClientInfo"),
+		slog.String("errorClass", "upstreamRequest"),
+	}
+	var apiErr *monobankclient.APIError
+	if errors.As(err, &apiErr) {
+		retryable := apiErr.StatusCode == http.StatusTooManyRequests ||
+			apiErr.StatusCode >= http.StatusInternalServerError
+		attributes = append(attributes,
+			slog.Int("providerStatus", apiErr.StatusCode),
+			slog.Bool("retryable", retryable),
+		)
+	}
+	c.logger.LogAttrs(ctx, slog.LevelWarn, "monobank token link failed", attributes...)
 }
 
 func (c *Connector) Fetch(
@@ -171,14 +216,17 @@ func (c *Connector) Fetch(
 		RawPayloads: []domain.ProviderRawPayloadObservation{{
 			Connection:       request.Connection,
 			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: firstNonEmpty(request.Connection.ExternalID, "client-info"),
+			ProviderObjectID: "client-info",
 			PayloadJSON:      clientInfoResponse.RawJSON,
 			CapturedAt:       capturedAt,
 		}},
 	}
 	for _, account := range clientInfo.Accounts {
 		batch.Accounts = append(batch.Accounts, normalizeAccount(request.Connection, account))
-		batch.Balances = append(batch.Balances, normalizeBalance(request.Connection, account, capturedAt))
+		batch.Balances = append(
+			batch.Balances,
+			normalizeBalance(request.Connection, account, capturedAt),
+		)
 		for _, chunk := range makeChunks(account.ID, request.RequestedWindow) {
 			statementResponse, statementErr := c.api.GetPersonalStatement(
 				ctx,
@@ -200,7 +248,11 @@ func (c *Connector) Fetch(
 				CapturedAt:       capturedAt,
 			})
 			for _, item := range statementResponse.Items {
-				transaction, normalizeErr := normalizeTransaction(request.Connection, chunk.accountID, item)
+				transaction, normalizeErr := normalizeTransaction(
+					request.Connection,
+					chunk.accountID,
+					item,
+				)
 				if normalizeErr != nil {
 					return domain.ProviderSyncBatch{}, fmt.Errorf(
 						"serialize monobank transaction evidence: %w",
@@ -277,7 +329,10 @@ func normalizeTransaction(
 ) (domain.ProviderTransactionObservation, error) {
 	rawPayloadJSON, err := json.Marshal(item)
 	if err != nil {
-		return domain.ProviderTransactionObservation{}, fmt.Errorf("marshal monobank transaction: %w", err)
+		return domain.ProviderTransactionObservation{}, fmt.Errorf(
+			"marshal monobank transaction: %w",
+			err,
+		)
 	}
 	effectiveAt := time.Unix(item.Time, 0)
 	description := strings.TrimSpace(item.Description)
@@ -291,7 +346,13 @@ func normalizeTransaction(
 		Currency:              currency,
 		Description:           description,
 		EffectiveAt:           effectiveAt,
-		Fingerprint:           providerFingerprint(providerAccountID, description, item.Amount, currency, effectiveAt),
+		Fingerprint: providerFingerprint(
+			providerAccountID,
+			description,
+			item.Amount,
+			currency,
+			effectiveAt,
+		),
 		ProviderOriginal: &domain.ProviderTransactionOriginal{
 			AmountMinor: item.Amount,
 			Currency:    currency,
@@ -332,13 +393,6 @@ func statusFromHold(hold bool) domain.TransactionStatus {
 		return domain.TransactionStatusPending
 	}
 	return domain.TransactionStatusBooked
-}
-
-func firstAccountID(accounts []monobankclient.InfoAccount) string {
-	if len(accounts) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(accounts[0].ID)
 }
 
 func firstMaskedPAN(maskedPANs []string) string {

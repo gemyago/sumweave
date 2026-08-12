@@ -477,7 +477,6 @@ func TestProviderSyncInternals(t *testing.T) {
 			TenantID:          tenantID,
 			Provider:          providerName,
 			ProviderReference: result.ProviderReference,
-			ExternalID:        result.ExternalID,
 			SecretID:          secretID,
 			State:             result.State,
 			CreatedAt:         now,
@@ -570,7 +569,6 @@ func TestProviderSyncInternals(t *testing.T) {
 			TenantID:          tenantID,
 			Provider:          string(domain.ProviderIDPKO),
 			ProviderReference: "provider-reference-" + fake.UUID().V4(),
-			ExternalID:        "external-" + fake.UUID().V4(),
 			State:             domain.BankConnectionStateActive,
 			CreatedAt:         now.Add(-time.Hour),
 			UpdatedAt:         now.Add(-time.Hour),
@@ -617,6 +615,138 @@ func TestProviderSyncInternals(t *testing.T) {
 		assert.Equal(t, "EUR", loaded.Currency)
 	})
 
+	t.Run("isolates identical provider account IDs across same-provider connections", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		evidenceStore := persistence.NewProviderEvidenceStoreFromStore(store)
+		now := time.Date(2026, time.August, 10, 14, 30, 0, 0, time.FixedZone("test", 2*60*60))
+		service := NewBankSyncService(
+			store,
+			WithBankSyncServiceNow(func() time.Time { return now }),
+			WithBankSyncServiceEvidenceWriter(evidenceStore),
+		)
+		tenantID := "tenant-" + fake.UUID().V4()
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		makeConnection := func(reference string) domain.BankConnection {
+			return domain.BankConnection{
+				ID:                "connection-" + fake.UUID().V4(),
+				TenantID:          tenantID,
+				Provider:          string(domain.ProviderIDPKO),
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+				ProviderReference: reference,
+				State:             domain.BankConnectionStateActive,
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			}
+		}
+		firstConnection, err := store.SaveBankConnection(t.Context(), makeConnection("reference-"+fake.UUID().V4()))
+		require.NoError(t, err)
+		secondConnection, err := store.SaveBankConnection(t.Context(), makeConnection("reference-"+fake.UUID().V4()))
+		require.NoError(t, err)
+		makeResult := func(providerTransactionID string, balance int64) ProviderSyncResult {
+			return ProviderSyncResult{
+				SyncKey: "sync-" + fake.UUID().V4(),
+				Accounts: []ProviderNormalizedAccount{{
+					ProviderAccountID:   providerAccountID,
+					Name:                "Account " + fake.Lorem().Word(),
+					Currency:            "PLN",
+					CurrentBalanceMinor: &balance,
+				}},
+				Transactions: []ProviderNormalizedTransaction{{
+					ProviderAccountID:     providerAccountID,
+					ProviderTransactionID: providerTransactionID,
+					Status:                domain.TransactionStatusBooked,
+					AmountMinor:           balance,
+					Currency:              "PLN",
+					Description:           "Transaction " + fake.Lorem().Word(),
+					EffectiveAt:           now,
+					Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+					RawPayloadJSON:        []byte(`{"transaction":"` + providerTransactionID + `"}`),
+				}},
+				RawPayloads: []ProviderRawPayload{{
+					Scope:            domain.RawPayloadScopeAccount,
+					ProviderObjectID: providerAccountID,
+					PayloadJSON:      []byte(`{"account":"` + providerAccountID + `"}`),
+				}},
+			}
+		}
+		firstTransactionID := "transaction-" + fake.UUID().V4()
+		secondTransactionID := "transaction-" + fake.UUID().V4()
+		_, err = service.ApplyProviderSyncResult(t.Context(), ApplyProviderSyncResultParams{
+			ConnectionID: firstConnection.ID,
+			Result:       makeResult(firstTransactionID, 100),
+		})
+		require.NoError(t, err)
+		_, err = service.ApplyProviderSyncResult(t.Context(), ApplyProviderSyncResultParams{
+			ConnectionID: secondConnection.ID,
+			Result:       makeResult(secondTransactionID, 200),
+		})
+		require.NoError(t, err)
+
+		firstMappings, err := store.ListConnectionProviderAccounts(t.Context(), firstConnection.ID)
+		require.NoError(t, err)
+		secondMappings, err := store.ListConnectionProviderAccounts(t.Context(), secondConnection.ID)
+		require.NoError(t, err)
+		require.Len(t, firstMappings, 1)
+		require.Len(t, secondMappings, 1)
+		assert.Equal(t, providerAccountID, firstMappings[0].ProviderAccountID)
+		assert.Equal(t, providerAccountID, secondMappings[0].ProviderAccountID)
+		assert.NotEqual(t, firstMappings[0].FinanceAccountID, secondMappings[0].FinanceAccountID)
+
+		firstSnapshots, err := store.ListBalanceSnapshots(t.Context(), firstConnection.ID)
+		require.NoError(t, err)
+		secondSnapshots, err := store.ListBalanceSnapshots(t.Context(), secondConnection.ID)
+		require.NoError(t, err)
+		require.Len(t, firstSnapshots, 1)
+		require.Len(t, secondSnapshots, 1)
+		assert.Equal(t, firstConnection.ID, firstSnapshots[0].ConnectionID)
+		assert.Equal(t, firstMappings[0].FinanceAccountID, firstSnapshots[0].FinanceAccountID)
+		assert.Equal(t, secondConnection.ID, secondSnapshots[0].ConnectionID)
+		assert.Equal(t, secondMappings[0].FinanceAccountID, secondSnapshots[0].FinanceAccountID)
+
+		firstMatch, err := store.GetProviderTransactionMatchByProviderID(
+			t.Context(), firstConnection.ID, providerAccountID, firstTransactionID,
+		)
+		require.NoError(t, err)
+		secondMatch, err := store.GetProviderTransactionMatchByProviderID(
+			t.Context(), secondConnection.ID, providerAccountID, secondTransactionID,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, firstConnection.ID, firstMatch.ConnectionID)
+		assert.Equal(t, secondConnection.ID, secondMatch.ConnectionID)
+		assert.NotEqual(t, firstMatch.TransactionID, secondMatch.TransactionID)
+
+		firstAccountEvidence, err := evidenceStore.ListAccountProviderEvidence(
+			t.Context(), tenantID, firstMappings[0].FinanceAccountID,
+		)
+		require.NoError(t, err)
+		secondAccountEvidence, err := evidenceStore.ListAccountProviderEvidence(
+			t.Context(), tenantID, secondMappings[0].FinanceAccountID,
+		)
+		require.NoError(t, err)
+		require.Len(t, firstAccountEvidence, 1)
+		require.Len(t, secondAccountEvidence, 1)
+		assert.Equal(t, firstConnection.ID, firstAccountEvidence[0].ConnectionID)
+		assert.Equal(t, firstMappings[0].FinanceAccountID, firstAccountEvidence[0].FinanceAccountID)
+		assert.Equal(t, secondConnection.ID, secondAccountEvidence[0].ConnectionID)
+		assert.Equal(t, secondMappings[0].FinanceAccountID, secondAccountEvidence[0].FinanceAccountID)
+
+		firstTransactionEvidence, err := evidenceStore.ListTransactionProviderEvidence(
+			t.Context(), tenantID, firstMatch.TransactionID,
+		)
+		require.NoError(t, err)
+		secondTransactionEvidence, err := evidenceStore.ListTransactionProviderEvidence(
+			t.Context(), tenantID, secondMatch.TransactionID,
+		)
+		require.NoError(t, err)
+		require.Len(t, firstTransactionEvidence, 1)
+		require.Len(t, secondTransactionEvidence, 1)
+		assert.Equal(t, firstConnection.ID, firstTransactionEvidence[0].ConnectionID)
+		assert.Equal(t, firstMatch.TransactionID, firstTransactionEvidence[0].FinanceTransactionID)
+		assert.Equal(t, secondConnection.ID, secondTransactionEvidence[0].ConnectionID)
+		assert.Equal(t, secondMatch.TransactionID, secondTransactionEvidence[0].FinanceTransactionID)
+	})
+
 	t.Run("preserves custom linked finance account names during provider metadata refresh", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
@@ -635,7 +765,6 @@ func TestProviderSyncInternals(t *testing.T) {
 			TenantID:          tenantID,
 			Provider:          string(domain.ProviderIDPKO),
 			ProviderReference: "provider-reference-" + fake.UUID().V4(),
-			ExternalID:        "external-" + fake.UUID().V4(),
 			State:             domain.BankConnectionStateActive,
 			CreatedAt:         now.Add(-time.Hour),
 			UpdatedAt:         now.Add(-time.Hour),
@@ -1044,7 +1173,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("reuses pko linked connections and lists schedules when present", func(t *testing.T) {
+	t.Run("keeps same-provider linked connections separate and lists their schedules", func(t *testing.T) {
 		fake := faker.New()
 		service, tenant, ownerUserID := makeService(t, nil)
 
@@ -1056,7 +1185,6 @@ func TestProviderSyncInternals(t *testing.T) {
 			ProviderLinkResult{
 				DisplayName:       "Monobank " + fake.Company().Name(),
 				ProviderReference: "mono-ref-" + fake.UUID().V4(),
-				ExternalID:        "mono-external-" + fake.UUID().V4(),
 				Secret:            "mono-secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 				RawPayloads: []ProviderRawPayload{{
@@ -1076,7 +1204,6 @@ func TestProviderSyncInternals(t *testing.T) {
 			ProviderLinkResult{
 				DisplayName:       "PKO " + fake.Company().Name(),
 				ProviderReference: "pko-ref-1-" + fake.UUID().V4(),
-				ExternalID:        "pko-external-1-" + fake.UUID().V4(),
 				Secret:            "pko-secret-1-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
@@ -1091,14 +1218,21 @@ func TestProviderSyncInternals(t *testing.T) {
 			ProviderLinkResult{
 				DisplayName:       "PKO again " + fake.Company().Name(),
 				ProviderReference: "pko-ref-2-" + fake.UUID().V4(),
-				ExternalID:        "pko-external-2-" + fake.UUID().V4(),
 				Secret:            "pko-secret-2-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
 			},
 		)
 		require.NoError(t, err)
-		assert.Equal(t, firstPKOConnection.ID, secondPKOConnection.ID)
-		assert.Equal(t, firstPKOConnection.CreatedAt, secondPKOConnection.CreatedAt)
+		assert.NotEqual(t, firstPKOConnection.ID, secondPKOConnection.ID)
+		assert.NotEqual(t, firstPKOConnection.SecretID, secondPKOConnection.SecretID)
+		assert.NotEqual(t, firstPKOConnection.ProviderReference, secondPKOConnection.ProviderReference)
+
+		connections, err := service.ListBankConnections(t.Context(), ListBankConnectionsParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+		})
+		require.NoError(t, err)
+		require.Len(t, connections, 3)
 
 		_, err = service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
 			ActorUserID:  ownerUserID,
@@ -1114,7 +1248,7 @@ func TestProviderSyncInternals(t *testing.T) {
 			TenantID:    tenant.ID,
 		})
 		require.NoError(t, err)
-		require.Len(t, views, 2)
+		require.Len(t, views, 3)
 		viewsByID := map[string]BankConnectionView{}
 		for _, view := range views {
 			viewsByID[view.Connection.ID] = view
@@ -1161,7 +1295,6 @@ func TestProviderSyncInternals(t *testing.T) {
 			ProviderLinkResult{
 				DisplayName:       "display",
 				ProviderReference: "ref",
-				ExternalID:        "external",
 				Secret:            "secret",
 				State:             domain.BankConnectionStateActive,
 			},

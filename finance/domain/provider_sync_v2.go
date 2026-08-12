@@ -23,7 +23,6 @@ type ProviderConnectionRef struct {
 	ProviderID        ProviderID
 	ConnectorID       ProviderConnectorID
 	ProviderReference string
-	ExternalID        string
 }
 
 type ProviderSyncWindow struct {
