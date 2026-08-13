@@ -237,6 +237,7 @@ func buildSQLiteMigrationQueries(config Config) []string {
 			consumer_group TEXT NOT NULL,
 			offset_acked INTEGER NOT NULL,
 			locked_until INTEGER NOT NULL,
+			lease_id TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY(topic, consumer_group)
 		)`,
 	}

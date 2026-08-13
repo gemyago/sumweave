@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThreeDotsLabs/watermill"
 	wmsql "github.com/ThreeDotsLabs/watermill-sql/v4/pkg/sql"
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
@@ -270,6 +271,63 @@ func TestAppDispatch(t *testing.T) {
 		require.Eventually(t, func() bool { return handled.Load() == 1 }, 5*time.Second, 20*time.Millisecond)
 		time.Sleep(100 * time.Millisecond)
 		assert.Equal(t, int32(1), handled.Load())
+	})
+
+	t.Run("does not let a stale lease holder release its successor", func(t *testing.T) {
+		config := makeConfig(t)
+		db := openMigrated(t, config)
+		publisher := makePublisher(t, config, db)
+		topic := "topic." + fake.UUID().V4()
+		group := "group." + fake.UUID().V4()
+		require.NoError(t, publisher.Publish(t.Context(), NewMessage(topic, []byte("payload-"+fake.UUID().V4()))))
+		_, err := db.ExecContext(
+			t.Context(),
+			`INSERT INTO `+quoteIdentifier(config.OffsetsTable())+
+				` (topic, consumer_group, offset_acked, locked_until, lease_id) VALUES (?, ?, 0, 0, '')`,
+			topic,
+			group,
+		)
+		require.NoError(t, err)
+
+		first := newSQLiteSubscription(config, db, group, topic, watermill.NewSlogLogger(logger))
+		t.Cleanup(func() {
+			first.pollTicker.Stop()
+			first.lockTicker.Stop()
+		})
+		firstBatch, err := first.NextBatch(t.Context())
+		require.NoError(t, err)
+		require.Len(t, firstBatch, 1)
+		_, err = db.ExecContext(
+			t.Context(),
+			`UPDATE `+quoteIdentifier(config.OffsetsTable())+` SET locked_until=0 WHERE topic=? AND consumer_group=?`,
+			topic,
+			group,
+		)
+		require.NoError(t, err)
+
+		second := newSQLiteSubscription(config, db, group, topic, watermill.NewSlogLogger(logger))
+		t.Cleanup(func() {
+			second.pollTicker.Stop()
+			second.lockTicker.Stop()
+		})
+		secondBatch, err := second.NextBatch(t.Context())
+		require.NoError(t, err)
+		require.Len(t, secondBatch, 1)
+		first.lastAckedOffset = firstBatch[0].Offset
+		require.ErrorIs(t, first.ReleaseLock(t.Context()), errSQLiteDeliveryLeaseLost)
+
+		var offset int64
+		var leaseID string
+		require.NoError(t, db.QueryRowContext(
+			t.Context(),
+			`SELECT offset_acked, lease_id FROM `+quoteIdentifier(config.OffsetsTable())+
+				` WHERE topic=? AND consumer_group=?`,
+			topic,
+			group,
+		).Scan(&offset, &leaseID))
+		assert.Zero(t, offset)
+		assert.Equal(t, second.leaseID, leaseID)
+		assert.NotEqual(t, first.leaseID, leaseID)
 	})
 
 	t.Run("routes topics with bounded retry panic recovery and dead letters", func(t *testing.T) {

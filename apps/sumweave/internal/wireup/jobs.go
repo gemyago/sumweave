@@ -193,7 +193,7 @@ func buildJobs(ctx context.Context, rootConfig config.JobsRootConfig) (_ *JobsRo
 		DatabaseTablePrefix: rootConfig.Application.Database.TablePrefix, Logger: rootLogger,
 		WorkerConfig: jobspkg.WorkerConfig{
 			Enabled: rootConfig.Jobs.Worker.Enabled, PollInterval: rootConfig.Jobs.Worker.PollInterval,
-			MaxAttempts: rootConfig.Jobs.Worker.MaxAttempts,
+			MaxAttempts: rootConfig.Jobs.Worker.MaxAttempts, DrainTimeout: rootConfig.GracefulShutdownTimeout,
 		},
 		IDGenerator: ident.NewDefaultGenerator(),
 	})

@@ -56,6 +56,14 @@ type StoreOpts struct {
 	TablePrefix string
 }
 
+type terminalJobState struct {
+	status      JobStatus
+	workerID    string
+	resultJSON  json.RawMessage
+	jobError    *JobError
+	completedAt time.Time
+}
+
 type jobModel struct {
 	ID                 string     `gorm:"column:id;size:255;not null;primaryKey"`
 	JobType            string     `gorm:"column:job_type;size:64;not null;index:idx_jobs_type_status_created_id,priority:1;index:idx_jobs_idempotency,unique,where:idempotency_key <> '',priority:3"`
@@ -376,22 +384,31 @@ func (s *Store) MarkSucceeded(
 	if err != nil {
 		return err
 	}
+	return s.persistTerminalState(ctx, jobID, newSucceededTerminalJobState(workerID, resultJSON, completedAt))
+}
+
+func (s *Store) persistTerminalState(ctx context.Context, jobID string, state terminalJobState) error {
 	updates := map[string]any{
-		columnStatus:       string(JobStatusSucceeded),
-		columnWorkerID:     strings.TrimSpace(workerID),
-		columnResultJSON:   string(resultJSON),
+		columnStatus:       string(state.status),
+		columnWorkerID:     strings.TrimSpace(state.workerID),
+		columnResultJSON:   string(state.resultJSON),
 		columnErrorCode:    "",
 		columnErrorSummary: "",
 		columnErrorDetails: "",
-		columnCompletedAt:  completedAt,
-		columnUpdatedAt:    completedAt,
+		columnCompletedAt:  state.completedAt,
+		columnUpdatedAt:    state.completedAt,
+	}
+	if state.jobError != nil {
+		updates[columnErrorCode] = truncateBounded(state.jobError.Code, 128)
+		updates[columnErrorSummary] = truncateBounded(state.jobError.Summary, maxErrorSummaryLength)
+		updates[columnErrorDetails] = truncateBounded(state.jobError.Details, maxErrorDetailsLength)
 	}
 	updateErr := s.db.WithContext(ctx).Table(s.tableName).
 		Model(&jobModel{}).
 		Where("id = ?", strings.TrimSpace(jobID)).
 		Updates(updates).Error
 	if updateErr != nil {
-		return fmt.Errorf("mark job succeeded: %w", updateErr)
+		return fmt.Errorf("persist terminal job state: %w", updateErr)
 	}
 	return nil
 }
@@ -401,8 +418,14 @@ func resultJSONFromValue(result any) (json.RawMessage, error) {
 	case nil:
 		return nil, nil
 	case json.RawMessage:
+		if len(typed) > 0 && !json.Valid(typed) {
+			return nil, errors.New("job result JSON is invalid")
+		}
 		return typed, nil
 	case []byte:
+		if len(typed) > 0 && !json.Valid(typed) {
+			return nil, errors.New("job result JSON is invalid")
+		}
 		return json.RawMessage(typed), nil
 	default:
 		encoded, err := json.Marshal(result)
@@ -460,28 +483,25 @@ func (s *Store) MarkFailed(
 	if err := validateRequiredTimestamp("completedAt", completedAt); err != nil {
 		return err
 	}
-	updates := map[string]any{
-		columnStatus:       string(JobStatusFailed),
-		columnWorkerID:     strings.TrimSpace(workerID),
-		columnErrorCode:    "",
-		columnErrorSummary: "",
-		columnErrorDetails: "",
-		columnCompletedAt:  completedAt,
-		columnUpdatedAt:    completedAt,
+	return s.persistTerminalState(ctx, jobID, newFailedTerminalJobState(workerID, jobErr, completedAt))
+}
+
+func newSucceededTerminalJobState(workerID string, resultJSON json.RawMessage, completedAt time.Time) terminalJobState {
+	return terminalJobState{
+		status:      JobStatusSucceeded,
+		workerID:    workerID,
+		resultJSON:  resultJSON,
+		completedAt: completedAt,
 	}
-	if jobErr != nil {
-		updates[columnErrorCode] = truncateBounded(jobErr.Code, 128)
-		updates[columnErrorSummary] = truncateBounded(jobErr.Summary, maxErrorSummaryLength)
-		updates[columnErrorDetails] = truncateBounded(jobErr.Details, maxErrorDetailsLength)
+}
+
+func newFailedTerminalJobState(workerID string, jobErr *JobError, completedAt time.Time) terminalJobState {
+	return terminalJobState{
+		status:      JobStatusFailed,
+		workerID:    workerID,
+		jobError:    jobErr,
+		completedAt: completedAt,
 	}
-	updateErr := s.db.WithContext(ctx).Table(s.tableName).
-		Model(&jobModel{}).
-		Where("id = ?", strings.TrimSpace(jobID)).
-		Updates(updates).Error
-	if updateErr != nil {
-		return fmt.Errorf("mark job failed: %w", updateErr)
-	}
-	return nil
 }
 
 func (s *Store) RecoverStaleRunning(ctx context.Context, now time.Time, maxAttempts int) error {

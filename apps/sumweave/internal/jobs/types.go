@@ -20,6 +20,7 @@ const (
 	maxListLimit                              = 100
 	defaultWorkerPollInterval                 = 2 * time.Second
 	defaultWorkerMaxAttempts                  = 3
+	defaultWorkerDrainTimeout                 = 10 * time.Second
 	maxErrorSummaryLength                     = 240
 	maxErrorDetailsLength                     = 1024
 	jobExecutionTopic                         = "jobs.execution.v1"
@@ -122,6 +123,7 @@ type WorkerConfig struct {
 	Enabled      bool
 	PollInterval time.Duration
 	MaxAttempts  int
+	DrainTimeout time.Duration
 }
 type idempotencyConflictError struct{ key string }
 
@@ -139,6 +141,9 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	}
 	if cfg.MaxAttempts <= 0 {
 		cfg.MaxAttempts = defaultWorkerMaxAttempts
+	}
+	if cfg.DrainTimeout <= 0 {
+		cfg.DrainTimeout = defaultWorkerDrainTimeout
 	}
 	return cfg
 }
@@ -213,6 +218,13 @@ func jobErrorFromExecution(err error) *JobError {
 		Code:    "job_execution_failed",
 		Summary: truncateBounded(summary, maxErrorSummaryLength),
 		Details: truncateBounded(details, maxErrorDetailsLength),
+	}
+}
+func jobResultEncodingError(err error) *JobError {
+	return &JobError{
+		Code:    "job_result_encoding_failed",
+		Summary: "job result encoding failed",
+		Details: truncateBounded(err.Error(), maxErrorDetailsLength),
 	}
 }
 func truncateBounded(value string, maxLen int) string {

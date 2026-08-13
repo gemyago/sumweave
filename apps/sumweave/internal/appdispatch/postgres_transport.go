@@ -79,31 +79,29 @@ func (s singleTablePostgresSchema) SelectQuery(params wmsql.SelectQueryParams) (
 	if !ok {
 		return wmsql.Query{}, errors.New("single-table postgres offsets adapter is required")
 	}
-	offsetsTable := offsets.MessagesOffsetsTable(params.Topic)
+	nextOffsetQuery, err := offsets.NextOffsetQuery(wmsql.NextOffsetQueryParams{
+		Topic:         params.Topic,
+		ConsumerGroup: params.ConsumerGroup,
+	})
+	if err != nil {
+		return wmsql.Query{}, fmt.Errorf("create next postgres offset query: %w", err)
+	}
 	return wmsql.Query{
-		Query: `SELECT "offset", uuid, payload, metadata, transaction_id
+		Query: `SELECT "offset", uuid, payload, metadata, transaction_id FROM (
+			WITH last_processed AS (` + nextOffsetQuery.Query + `)
+			SELECT "offset", uuid, payload, metadata, transaction_id
 			FROM ` + s.MessagesTable(params.Topic) + `
 			WHERE topic = $1
 			AND (
-				transaction_id > (
-					SELECT COALESCE(last_processed_transaction_id, '0'::xid8)
-					FROM ` + offsetsTable + ` WHERE topic = $1 AND consumer_group = $2
-				)
-				OR (
-					transaction_id = (
-						SELECT COALESCE(last_processed_transaction_id, '0'::xid8)
-						FROM ` + offsetsTable + ` WHERE topic = $1 AND consumer_group = $2
-					)
-					AND "offset" > (
-						SELECT COALESCE(offset_acked, 0)
-						FROM ` + offsetsTable + ` WHERE topic = $1 AND consumer_group = $2
-					)
-				)
+				(transaction_id = (SELECT last_processed_transaction_id FROM last_processed)
+					AND "offset" > (SELECT offset_acked FROM last_processed))
+				OR transaction_id > (SELECT last_processed_transaction_id FROM last_processed)
 			)
 			AND transaction_id < pg_snapshot_xmin(pg_current_snapshot())
-			ORDER BY transaction_id, "offset"
-			LIMIT 100`,
-		Args: []any{params.Topic, params.ConsumerGroup},
+		) AS messages
+		ORDER BY transaction_id, "offset"
+		LIMIT 100`,
+		Args: nextOffsetQuery.Args,
 	}, nil
 }
 

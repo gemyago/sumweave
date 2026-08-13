@@ -224,6 +224,7 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 			Enabled:      rootConfig.Jobs.Worker.Enabled,
 			PollInterval: rootConfig.Jobs.Worker.PollInterval,
 			MaxAttempts:  rootConfig.Jobs.Worker.MaxAttempts,
+			DrainTimeout: rootConfig.GracefulShutdownTimeout,
 		},
 		IDGenerator: ids,
 	})

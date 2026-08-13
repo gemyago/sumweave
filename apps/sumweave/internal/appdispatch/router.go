@@ -25,6 +25,13 @@ type Handler struct {
 	run   func(context.Context, Message) error
 }
 
+// NonRetryable marks a handler error that must be sent directly to the durable
+// dead-letter flow instead of being retried by the generic router.
+type NonRetryable interface {
+	error
+	NonRetryable()
+}
+
 func NewHandler(topic string, run func(context.Context, Message) error) (Handler, error) {
 	if topic == "" {
 		return Handler{}, errors.New("handler topic is required")
@@ -71,7 +78,14 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 		_ = subscriber.Close()
 		return nil, fmt.Errorf("create router for consumer group %s: %w", consumerGroup, err)
 	}
-	poisonQueue, err := middleware.PoisonQueue(f.publisher.publisher, DeadLetterTopic)
+	poisonQueue, err := middleware.PoisonQueueWithFilter(
+		f.publisher.publisher,
+		DeadLetterTopic,
+		func(err error) bool {
+			var nonRetryable NonRetryable
+			return !errors.As(err, &nonRetryable)
+		},
+	)
 	if err != nil {
 		_ = subscriber.Close()
 		_ = router.Close()
@@ -83,6 +97,10 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 			MaxRetries:      routerMaxRetries,
 			InitialInterval: routerInitialInterval,
 			Logger:          wmLogger,
+			ShouldRetry: func(params middleware.RetryParams) bool {
+				var nonRetryable NonRetryable
+				return !errors.As(params.Err, &nonRetryable)
+			},
 		}.Middleware,
 		middleware.Recoverer,
 	)
@@ -152,7 +170,7 @@ func (r *Router) Run(ctx context.Context) error {
 	}
 	// External cancellation is coordinated through Close so startup subscription
 	// errors can be drained through Watermill's handler lifecycle.
-	runCtx, runCancel := context.WithCancel(context.WithoutCancel(ctx))
+	runCtx, runCancel := context.WithCancel(ctx)
 	r.started = true
 	r.runCancel = runCancel
 	r.mu.Unlock()

@@ -17,7 +17,7 @@ type typedHandler interface {
 	supportsCancel() bool
 	supportsRetry() bool
 	onScheduled(context.Context, Job) error
-	execute(context.Context, Job, func(json.RawMessage) error) (json.RawMessage, error)
+	execute(context.Context, Job, func(json.RawMessage) error) (any, error)
 }
 
 type Registry struct {
@@ -141,7 +141,7 @@ func (h *registeredTypedHandler[Input, Result, Progress]) execute(
 	ctx context.Context,
 	job Job,
 	setProgressJSON func(json.RawMessage) error,
-) (json.RawMessage, error) {
+) (any, error) {
 	input, err := DecodeJobInput[Input](job)
 	if err != nil {
 		return nil, err
@@ -162,9 +162,5 @@ func (h *registeredTypedHandler[Input, Result, Progress]) execute(
 	if err != nil {
 		return nil, err
 	}
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return nil, fmt.Errorf("marshal job result: %w", err)
-	}
-	return resultJSON, nil
+	return result, nil
 }

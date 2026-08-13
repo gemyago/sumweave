@@ -255,6 +255,48 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 			assert.True(t, subscription.runCycle(canceledCtx))
 			require.NoError(t, mockDB.ExpectationsWereMet())
 		})
+
+		t.Run("expires a pre-delivery lease without advancing the batch offset", func(t *testing.T) {
+			db, mockDB, err := sqlmock.New()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = db.Close() })
+			subscription := makeTestSQLiteSubscription(db, wmLogger)
+			subscription.lockTicker.Stop()
+			subscription.lockTicker = time.NewTicker(time.Nanosecond)
+			subscription.lockDuration = time.Nanosecond
+			t.Cleanup(subscription.lockTicker.Stop)
+			mockDB.ExpectExec("UPDATE acknowledge").
+				WithArgs(int64(0), testTopic, "group", int64(0), "lease").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+
+			done := make(chan struct{})
+			go func() {
+				subscription.processBatch(t.Context(), []sqliteRawMessage{
+					{Offset: 1, UUID: "first"},
+					{Offset: 2, UUID: "second"},
+				})
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("batch did not stop after the pre-delivery lease expired")
+			}
+			assert.Zero(t, subscription.lastAckedOffset)
+			require.NoError(t, mockDB.ExpectationsWereMet())
+		})
+
+		t.Run("rejects a stale lease release", func(t *testing.T) {
+			db, mockDB, err := sqlmock.New()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = db.Close() })
+			subscription := makeTestSQLiteSubscription(db, wmLogger)
+			mockDB.ExpectExec("UPDATE acknowledge").
+				WithArgs(int64(0), testTopic, "group", int64(0), "lease").
+				WillReturnResult(sqlmock.NewResult(0, 0))
+			require.ErrorIs(t, subscription.ReleaseLock(t.Context()), errSQLiteDeliveryLeaseLost)
+			require.NoError(t, mockDB.ExpectationsWereMet())
+		})
 	})
 
 	t.Run("covers postgres schema and row adapters", func(t *testing.T) {
@@ -271,6 +313,14 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		assert.Contains(t, insert.Query, "),(")
 		_, err = schema.SelectQuery(wmsql.SelectQueryParams{})
 		require.EqualError(t, err, "single-table postgres offsets adapter is required")
+		selectQuery, err := schema.SelectQuery(wmsql.SelectQueryParams{
+			Topic:          testTopic,
+			ConsumerGroup:  "group",
+			OffsetsAdapter: postgresOffsets(config),
+		})
+		require.NoError(t, err)
+		assert.Contains(t, selectQuery.Query, "FOR UPDATE")
+		assert.Equal(t, []any{testTopic, "group"}, selectQuery.Args)
 
 		db, mockDB, err := sqlmock.New()
 		require.NoError(t, err)
@@ -365,6 +415,32 @@ func TestMigratorPostgresTransactions(t *testing.T) {
 			migrator, err := NewMigrator(config, db)
 			require.NoError(t, err)
 			require.ErrorContains(t, migrator.Migrate(t.Context()), "commit postgres transport migration")
+		})
+
+		t.Run("stops the batch after a message is not acknowledged", func(t *testing.T) {
+			db, mockDB, err := sqlmock.New()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = db.Close() })
+			subscription := makeTestSQLiteSubscription(db, watermill.NewSlogLogger(slog.New(slog.DiscardHandler)))
+			subscription.destination = make(chan *wmmessage.Message)
+			mockDB.ExpectExec("UPDATE acknowledge").WillReturnResult(sqlmock.NewResult(0, 1))
+
+			done := make(chan struct{})
+			go func() {
+				subscription.processBatch(t.Context(), []sqliteRawMessage{
+					{Offset: 1, UUID: "first"},
+					{Offset: 2, UUID: "second"},
+				})
+				close(done)
+			}()
+			message := <-subscription.destination
+			message.Nack()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("batch did not stop after the unacknowledged message")
+			}
+			require.NoError(t, mockDB.ExpectationsWereMet())
 		})
 	})
 }
@@ -483,6 +559,54 @@ func TestRouterValidationAndClosedLifecycle(t *testing.T) {
 		runErr := preCanceledRouter.Run(preCanceledCtx)
 		require.ErrorIs(t, runErr, context.Canceled)
 		require.ErrorIs(t, runErr, closeErr)
+	})
+
+	t.Run("cancels generic active handlers while the router drains", func(t *testing.T) {
+		subscriber := NewMockSubscriber(t)
+		topic := "topic-" + faker.New().UUID().V4()
+		messages := make(chan *wmmessage.Message)
+		subscriptionContexts := make(chan context.Context, 1)
+		var closeMessages sync.Once
+		subscriber.EXPECT().Subscribe(mock.Anything, topic).Run(func(ctx context.Context, _ string) {
+			subscriptionContexts <- ctx
+			go func() {
+				<-ctx.Done()
+				closeMessages.Do(func() { close(messages) })
+			}()
+		}).Return(messages, nil).Once()
+		subscriber.EXPECT().Close().Run(func() {
+			closeMessages.Do(func() { close(messages) })
+		}).Return(nil).Once()
+		watermillRouter, routerErr := wmmessage.NewRouter(wmmessage.RouterConfig{}, watermill.NewSlogLogger(logger))
+		require.NoError(t, routerErr)
+		shutdownRouter := &Router{
+			router:        watermillRouter,
+			subscriber:    newLifecycleSubscriber(subscriber),
+			logger:        logger,
+			handlerTopics: make(map[string]struct{}),
+		}
+		handlerStarted := make(chan struct{})
+		finishHandler := make(chan struct{})
+		handlerContextErr := make(chan error, 1)
+		shutdownHandler, handlerErr := NewHandler(topic, func(ctx context.Context, _ Message) error {
+			close(handlerStarted)
+			<-finishHandler
+			handlerContextErr <- ctx.Err()
+			return nil
+		})
+		require.NoError(t, handlerErr)
+		require.NoError(t, shutdownRouter.Handle(shutdownHandler))
+
+		runCtx, cancelRun := context.WithCancel(t.Context())
+		runResult := make(chan error, 1)
+		go func() { runResult <- shutdownRouter.Run(runCtx) }()
+		<-watermillRouter.Running()
+		messages <- wmmessage.NewMessageWithContext(<-subscriptionContexts, faker.New().UUID().V4(), nil)
+		<-handlerStarted
+		cancelRun()
+		close(finishHandler)
+		require.ErrorIs(t, <-handlerContextErr, context.Canceled)
+		require.ErrorIs(t, <-runResult, context.Canceled)
 	})
 
 	realConfig := Config{DatabaseDSN: filepath.Join(t.TempDir(), "router.sqlite"), PollInterval: time.Millisecond}
@@ -682,6 +806,7 @@ func makeTestSQLiteSubscription(db sqliteDatabase, logger watermill.LoggerAdapte
 		lockTimeoutSeconds:     1,
 		topic:                  testTopic,
 		consumerGroup:          "group",
+		leaseID:                "lease",
 		sqlLockConsumerGroup:   "UPDATE offsets",
 		sqlExtendLock:          "UPDATE extend",
 		sqlNextMessageBatch:    "SELECT messages",
