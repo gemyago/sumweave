@@ -85,13 +85,14 @@ func TestDurableJobsWorkflow(t *testing.T) {
 		}
 		require.NoError(t, RegisterTypedHandler(registry, opts))
 	}
-	makeService := func(t *testing.T, store *Store, registry *Registry, now time.Time) (*Service, *mockdispatchPublisher) {
+	makeService := func(
+		t *testing.T,
+		store *Store,
+		registry *Registry,
+		publisher dispatchPublisher,
+		now time.Time,
+	) *Service {
 		t.Helper()
-		publisher := newMockdispatchPublisher(t)
-		publisher.EXPECT().
-			PublishInTx(mock.Anything, mock.Anything, mock.Anything).
-			Return(nil).
-			Maybe()
 		service, err := NewService(ServiceDeps{
 			Store:       store,
 			Registry:    registry,
@@ -100,7 +101,7 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			Clock:       func() time.Time { return now },
 		})
 		require.NoError(t, err)
-		return service, publisher
+		return service
 	}
 
 	t.Run("registry and payload helpers support typed finance execution", func(t *testing.T) {
@@ -376,7 +377,15 @@ func TestDurableJobsWorkflow(t *testing.T) {
 
 	t.Run("service and scheduler preserve durable finance job semantics", func(t *testing.T) {
 		now := time.Now()
-		store, _ := makeStore(t)
+		transactionContext := context.WithoutCancel(t.Context())
+		store, dsn := makeStore(t)
+		sqlDB, err := store.db.DB()
+		require.NoError(t, err)
+		require.NoError(t, appdispatch.AutoMigrate(
+			t.Context(),
+			appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "finance_jobs_"},
+			sqlDB,
+		))
 		registry := NewRegistry()
 		registerHandler(
 			t,
@@ -384,9 +393,16 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			JobType("finance.bank_connection_sync"),
 			TypedHandlerSpec[input, result, progress]{SupportsCancel: true, SupportsRetry: true},
 		)
-		service, publisher := makeService(t, store, registry, now)
+		publisher, err := appdispatch.NewPublisher(
+			appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "finance_jobs_"},
+			sqlDB,
+			slog.Default(),
+		)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+		service := makeService(t, store, registry, publisher, now)
 		job, err := service.Enqueue(
-			t.Context(),
+			transactionContext,
 			EnqueueParams{
 				JobType: JobType("finance.bank_connection_sync"),
 				Requester: Requester{
@@ -398,24 +414,27 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
-		require.NotEmpty(t, publisher.Calls)
-		dispatchMessage := publisher.Calls[0].Arguments.Get(2).(appdispatch.Message)
-		assert.Equal(t, jobExecutionTopic, dispatchMessage.Topic)
+		var envelopePayload []byte
+		require.NoError(t, sqlDB.QueryRowContext(
+			t.Context(),
+			`SELECT payload FROM finance_jobs_app_dispatch_messages WHERE topic=?`,
+			jobExecutionTopic,
+		).Scan(&envelopePayload))
 		var envelope executionEnvelope
-		require.NoError(t, json.Unmarshal(dispatchMessage.Payload, &envelope))
+		require.NoError(t, json.Unmarshal(envelopePayload, &envelope))
 		assert.Equal(t, jobEnvelopeVersion, envelope.Version)
 		assert.Equal(t, executionKind(job.JobType), envelope.Kind)
 		assert.Equal(t, job.ID, envelope.ObservableJobID)
 		canceled, err := service.Cancel(t.Context(), job.ID)
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusCanceled, canceled.Status)
-		retried, err := service.Retry(t.Context(), job.ID)
+		retried, err := service.Retry(transactionContext, job.ID)
 		require.NoError(t, err)
 		assert.NotEqual(t, job.ID, retried.ID)
 		_, err = service.Get(t.Context(), fake.UUID().V4())
 		require.Error(t, err)
 		_, err = service.Enqueue(
-			t.Context(),
+			transactionContext,
 			EnqueueParams{
 				JobType:   job.JobType,
 				Requester: Requester{UserID: fake.UUID().V4()},
@@ -455,10 +474,10 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			SchedulerDeps{Store: store, Service: service, Clock: func() time.Time { return now }},
 		)
 		require.NoError(t, err)
-		count, err := scheduler.EnqueueDue(t.Context())
+		count, err := scheduler.EnqueueDue(transactionContext)
 		require.NoError(t, err)
 		assert.Equal(t, 1, count)
-		count, err = scheduler.EnqueueDue(t.Context())
+		count, err = scheduler.EnqueueDue(transactionContext)
 		require.NoError(t, err)
 		assert.Zero(t, count)
 		_, err = NewScheduler(SchedulerDeps{})
@@ -723,11 +742,11 @@ func TestDurableJobsWorkflow(t *testing.T) {
 					appdispatch.NewMessage(jobExecutionTopic, envelopePayload),
 				),
 			)
-			require.NoError(t, worker.RunOnce(t.Context()))
-			completed, err := store.Get(t.Context(), job.ID)
-			require.NoError(t, err)
-			assert.Equal(t, JobStatusSucceeded, completed.Status)
 			require.NoError(t, worker.Start(t.Context()))
+			require.Eventually(t, func() bool {
+				completed, getErr := store.Get(t.Context(), job.ID)
+				return getErr == nil && completed.Status == JobStatusSucceeded
+			}, 5*time.Second, time.Millisecond)
 			require.NoError(t, worker.Stop(t.Context()))
 		},
 	)
@@ -735,6 +754,7 @@ func TestDurableJobsWorkflow(t *testing.T) {
 	t.Run(
 		"registry scheduler and service expose validation and callback failures",
 		func(t *testing.T) {
+			transactionContext := context.WithoutCancel(t.Context())
 			registry := NewRegistry()
 			registerHandler(
 				t,
@@ -764,21 +784,24 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			payload, err := EncodeJobPayload(input{AccountID: fake.UUID().V4()})
 			require.NoError(t, err)
 			_, err = handler.execute(
-				t.Context(),
+				transactionContext,
 				Job{InputJSON: payload},
 				func(json.RawMessage) error { return nil },
 			)
 			require.NoError(t, err)
 
-			store, _ := makeStore(t)
+			store, dsn := makeStore(t)
+			sqlDB, err := store.db.DB()
+			require.NoError(t, err)
+			dispatchConfig := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "finance_jobs_"}
+			require.NoError(t, appdispatch.AutoMigrate(t.Context(), dispatchConfig, sqlDB))
 			_, err = NewService(ServiceDeps{Store: store})
 			require.Error(t, err)
 			_, err = NewService(ServiceDeps{Store: store, IDGenerator: ident.NewMockGenerator()})
 			require.Error(t, err)
-			publisher := newMockdispatchPublisher(t)
-			publisher.EXPECT().
-				PublishInTx(mock.Anything, mock.Anything, mock.Anything).
-				Return(errors.New(fake.Lorem().Sentence(3)))
+			publisher, err := appdispatch.NewPublisher(dispatchConfig, sqlDB, slog.Default())
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 			service, err := NewService(
 				ServiceDeps{
 					Store:       store,
@@ -788,8 +811,12 @@ func TestDurableJobsWorkflow(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
+			_, err = sqlDB.Exec(
+				`CREATE TRIGGER finance_jobs_dispatch_write_failure BEFORE INSERT ON finance_jobs_app_dispatch_messages BEGIN SELECT RAISE(ABORT, 'dispatch write failed'); END`,
+			)
+			require.NoError(t, err)
 			_, err = service.Enqueue(
-				t.Context(),
+				transactionContext,
 				EnqueueParams{
 					JobType:   JobType("finance.callback"),
 					Requester: Requester{UserID: fake.UUID().V4(), Source: RequesterSourceOperator},
@@ -797,6 +824,8 @@ func TestDurableJobsWorkflow(t *testing.T) {
 				},
 			)
 			require.Error(t, err)
+			_, err = sqlDB.Exec(`DROP TRIGGER finance_jobs_dispatch_write_failure`)
+			require.NoError(t, err)
 
 			now := time.Now()
 			due := now.Add(-time.Minute)
@@ -818,8 +847,6 @@ func TestDurableJobsWorkflow(t *testing.T) {
 					},
 				),
 			)
-			publisher = newMockdispatchPublisher(t)
-			publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			service, err = NewService(
 				ServiceDeps{
 					Store:       store,
@@ -838,7 +865,7 @@ func TestDurableJobsWorkflow(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
-			_, err = scheduler.EnqueueDue(t.Context())
+			_, err = scheduler.EnqueueDue(transactionContext)
 			require.Error(t, err)
 			_, err = NewScheduler(SchedulerDeps{Store: store})
 			require.Error(t, err)
@@ -849,7 +876,7 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			require.NoError(t, err)
 			assert.False(t, created)
 			_, err = service.Enqueue(
-				t.Context(),
+				transactionContext,
 				EnqueueParams{
 					JobType:   JobType("finance.callback"),
 					Requester: Requester{UserID: fake.UUID().V4(), Source: RequesterSourceOperator},

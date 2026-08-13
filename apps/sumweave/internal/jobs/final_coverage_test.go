@@ -93,7 +93,7 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 		require.NoError(t, err)
 		return factory
 	}
-	makeStore := func(t *testing.T) *Store {
+	makeStore := func(t *testing.T) (*Store, *appdispatch.Publisher) {
 		t.Helper()
 		dsn := fmt.Sprintf("file:final-worker-%s?mode=memory&cache=shared", fake.UUID().V4())
 		db, err := sqlconn.Open(dsn)
@@ -102,7 +102,12 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 		store, err := NewStore(db, dsn, StoreOpts{})
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
-		return store
+		config := appdispatch.Config{DatabaseDSN: dsn}
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
+		publisher, err := appdispatch.NewPublisher(config, db, slog.Default())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+		return store, publisher
 	}
 	register := func(t *testing.T, registry *Registry, jobType JobType, run func(context.Context, struct{}, func(struct{}) error) (struct{}, error)) {
 		t.Helper()
@@ -116,7 +121,8 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 	}
 
 	t.Run("service preserves conflict and store error outcomes", func(t *testing.T) {
-		store := makeStore(t)
+		transactionContext := context.WithoutCancel(t.Context())
+		store, publisher := makeStore(t)
 		registry := NewRegistry()
 		jobType := JobType("finance.service.final")
 		register(
@@ -127,13 +133,11 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 				return struct{}{}, nil
 			},
 		)
-		publisher := newMockdispatchPublisher(t)
-		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		service, err := NewService(ServiceDeps{
 			Store: store, IDGenerator: ident.NewMockGenerator(), Publisher: publisher, Registry: registry,
 		})
 		require.NoError(t, err)
-		job, err := service.Enqueue(t.Context(), EnqueueParams{
+		job, err := service.Enqueue(transactionContext, EnqueueParams{
 			JobType: jobType, Requester: Requester{Source: RequesterSourceOperator}, Input: struct{}{},
 		})
 		require.NoError(t, err)
@@ -148,9 +152,9 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 			JobType: jobType, Requester: Requester{Source: RequesterSourceOperator},
 			IdempotencyKey: idempotencyKey, Input: struct{}{},
 		}
-		firstIdempotent, err := service.Enqueue(t.Context(), idempotentParams)
+		firstIdempotent, err := service.Enqueue(transactionContext, idempotentParams)
 		require.NoError(t, err)
-		secondIdempotent, err := service.Enqueue(t.Context(), idempotentParams)
+		secondIdempotent, err := service.Enqueue(transactionContext, idempotentParams)
 		require.NoError(t, err)
 		require.Equal(t, firstIdempotent.ID, secondIdempotent.ID)
 		_, err = NewService(ServiceDeps{
@@ -160,7 +164,8 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 	})
 
 	t.Run("scheduler reports list and transaction failures", func(t *testing.T) {
-		store := makeStore(t)
+		transactionContext := context.WithoutCancel(t.Context())
+		store, publisher := makeStore(t)
 		registry := NewRegistry()
 		register(
 			t,
@@ -170,8 +175,6 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 				return struct{}{}, nil
 			},
 		)
-		publisher := newMockdispatchPublisher(t)
-		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 		service, err := NewService(ServiceDeps{
 			Store: store, IDGenerator: ident.NewMockGenerator(), Publisher: publisher, Registry: registry,
 		})
@@ -182,7 +185,7 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 			t,
 			store.db.Exec("DROP TABLE "+store.scheduleTableName()).Error,
 		)
-		_, err = scheduler.EnqueueDue(t.Context())
+		_, err = scheduler.EnqueueDue(transactionContext)
 		require.Error(t, err)
 	})
 
