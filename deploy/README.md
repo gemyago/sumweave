@@ -22,6 +22,16 @@ provide PostgreSQL DSNs for the finance application database and agent runtime,
 non-colliding table prefixes, a JWT signing key, enabled finance-provider
 credentials, and externally correct callback URLs. SQLite is local-development-only.
 
+For a new PostgreSQL application database, the pre-install migration Job runs
+`db-migrate` and creates the topic-aware app dispatch tables. Before upgrading an
+existing database from the pre-PR #5 single-topic dispatch schema, stop all
+workloads, take a verified backup, and run the one-time
+[PostgreSQL dispatch upgrade](../docs/appdispatch-postgres-topic-upgrade.sql).
+Run it before this chart's pre-upgrade migration hook; it has explicit legacy
+schema and consumer-group preconditions, requires an operator-confirmed
+historical IANA timezone for legacy timestamps, and keeps its DDL in one
+transaction.
+
 Set `initialUser.enabled` and reference a pre-existing credential Secret through
 `initialUser.secret`. The Job runs after migrations with the runtime DML database
 identity from `initialUser.env` or `envFrom`. It does not change an existing user.
