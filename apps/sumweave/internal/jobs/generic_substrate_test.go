@@ -3,10 +3,12 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
 	"github.com/jaswdr/faker/v2"
@@ -31,7 +33,7 @@ func TestGenericSubstrate(t *testing.T) {
 		Imported int `json:"imported"`
 	}
 
-	makeStore := func(t *testing.T) *Store {
+	makeStore := func(t *testing.T) (*Store, *appdispatch.RouterFactory) {
 		t.Helper()
 		dsn := makeSQLiteMemoryDSN()
 		sqlDB, err := sqlconn.Open(dsn)
@@ -44,12 +46,19 @@ func TestGenericSubstrate(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
-		return store
+		config := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "generic_", PollInterval: time.Millisecond}
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, sqlDB))
+		dispatchPublisher, err := appdispatch.NewPublisher(config, sqlDB, slog.Default())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, dispatchPublisher.Close()) })
+		factory, err := appdispatch.NewRouterFactory(config, sqlDB, dispatchPublisher, slog.Default())
+		require.NoError(t, err)
+		return store, factory
 	}
 
 	t.Run("stores generic json payloads and dispatches typed handlers", func(t *testing.T) {
 		now := time.Now().UTC()
-		store := makeStore(t)
+		store, routerFactory := makeStore(t)
 		registry := NewRegistry()
 		publisher := newMockdispatchPublisher(t)
 		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil)
@@ -86,11 +95,12 @@ func TestGenericSubstrate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, JobType("finance.csv_import"), job.JobType)
 		worker, err := NewWorker(WorkerDeps{
-			Store:    store,
-			Registry: registry,
-			Clock:    func() time.Time { return now.Add(time.Minute) },
-			WorkerID: "worker-generic",
-			Config:   WorkerConfig{},
+			Store:         store,
+			Registry:      registry,
+			Clock:         func() time.Time { return now.Add(time.Minute) },
+			WorkerID:      "worker-generic",
+			Config:        WorkerConfig{},
+			RouterFactory: routerFactory,
 		})
 		require.NoError(t, err)
 		require.NoError(t, worker.ProcessJob(t.Context(), job.ID))
@@ -111,7 +121,7 @@ func TestGenericSubstrate(t *testing.T) {
 
 	t.Run("supports safe cancel and retry only for handlers that allow it", func(t *testing.T) {
 		now := time.Now().UTC()
-		store := makeStore(t)
+		store, _ := makeStore(t)
 		registry := NewRegistry()
 		publisher := newMockdispatchPublisher(t)
 		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
@@ -152,7 +162,7 @@ func TestGenericSubstrate(t *testing.T) {
 
 	t.Run("scheduler enqueues due windows once without replaying immediate work through polling", func(t *testing.T) {
 		now := time.Now().UTC()
-		store := makeStore(t)
+		store, _ := makeStore(t)
 		registry := NewRegistry()
 		publisher := newMockdispatchPublisher(t)
 		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil)

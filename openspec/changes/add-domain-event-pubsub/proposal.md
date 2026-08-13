@@ -39,9 +39,9 @@ application consumers from reacting durably to the same event.
 
 ## Impact
 
-- Affects `apps/sumweave/internal/appdispatch`, durable-job composition and
-  worker wiring, application database migrations, backend lifecycle wiring,
-  configuration, tests, and architecture documentation.
+- Affects `apps/sumweave/internal/appdispatch`, `jobs.NewModule`, the explicit
+  HTTP/jobs/migration roots under `internal/wireup`, CLI lifecycle cleanup,
+  application database migrations, tests, and architecture documentation.
 - Reuses the existing Watermill dependencies; no new external broker or
   infrastructure service is introduced.
 - Local databases must be recreated or reseeded after the topic-aware transport

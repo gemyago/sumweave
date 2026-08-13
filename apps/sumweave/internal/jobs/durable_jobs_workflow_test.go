@@ -40,6 +40,20 @@ func TestDurableJobsWorkflow(t *testing.T) {
 		require.NoError(t, store.AutoMigrate())
 		return store, dsn
 	}
+	makeRouterFactory := func(t *testing.T, dsn string, tablePrefix string) *appdispatch.RouterFactory {
+		t.Helper()
+		db, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		config := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: tablePrefix, PollInterval: time.Millisecond}
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
+		publisher, err := appdispatch.NewPublisher(config, db, slog.Default())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+		factory, err := appdispatch.NewRouterFactory(config, db, publisher, slog.Default())
+		require.NoError(t, err)
+		return factory
+	}
 	makeJob := func(now time.Time) Job {
 		return Job{
 			ID:      "job-" + fake.UUID().V4(),
@@ -121,14 +135,14 @@ func TestDurableJobsWorkflow(t *testing.T) {
 		}))
 		_, err := registry.Handler(JobType("finance.missing"))
 		require.ErrorIs(t, err, ErrHandlerNotRegistered)
-		_, err = registry.HandlerByExecutionKind(appdispatch.ExecutionKind("finance.missing"))
+		_, err = registry.handlerByExecutionKind(executionKind("finance.missing"))
 		require.ErrorIs(t, err, ErrHandlerNotRegistered)
 		var nilRegistry *Registry
 		_, err = nilRegistry.Handler(JobType("finance.missing"))
 		require.ErrorIs(t, err, ErrHandlerNotRegistered)
 
-		handler, err := registry.HandlerByExecutionKind(
-			appdispatch.ExecutionKind("finance.csv_import"),
+		handler, err := registry.handlerByExecutionKind(
+			executionKind("finance.csv_import"),
 		)
 		require.NoError(t, err)
 		payload, err := EncodeJobPayload(input{AccountID: "account-" + fake.UUID().V4()})
@@ -370,7 +384,7 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			JobType("finance.bank_connection_sync"),
 			TypedHandlerSpec[input, result, progress]{SupportsCancel: true, SupportsRetry: true},
 		)
-		service, _ := makeService(t, store, registry, now)
+		service, publisher := makeService(t, store, registry, now)
 		job, err := service.Enqueue(
 			t.Context(),
 			EnqueueParams{
@@ -384,6 +398,14 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			},
 		)
 		require.NoError(t, err)
+		require.NotEmpty(t, publisher.Calls)
+		dispatchMessage := publisher.Calls[0].Arguments.Get(2).(appdispatch.Message)
+		assert.Equal(t, jobExecutionTopic, dispatchMessage.Topic)
+		var envelope executionEnvelope
+		require.NoError(t, json.Unmarshal(dispatchMessage.Payload, &envelope))
+		assert.Equal(t, jobEnvelopeVersion, envelope.Version)
+		assert.Equal(t, executionKind(job.JobType), envelope.Kind)
+		assert.Equal(t, job.ID, envelope.ObservableJobID)
 		canceled, err := service.Cancel(t.Context(), job.ID)
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusCanceled, canceled.Status)
@@ -448,21 +470,22 @@ func TestDurableJobsWorkflow(t *testing.T) {
 		"worker executes, records failures, and protects terminal duplicate deliveries",
 		func(t *testing.T) {
 			now := time.Now()
-			store, _ := makeStore(t)
+			store, dsn := makeStore(t)
 			registry := NewRegistry()
 			registerHandler(
 				t,
 				registry,
 				JobType("finance.csv_import"),
-				TypedHandlerSpec[input, result, progress]{GuardDuplicateDelivery: true},
+				TypedHandlerSpec[input, result, progress]{},
 			)
 			worker, err := NewWorker(
 				WorkerDeps{
-					Store:    store,
-					Registry: registry,
-					Logger:   slog.Default(),
-					Clock:    func() time.Time { return now },
-					WorkerID: "worker-" + fake.UUID().V4(),
+					Store:         store,
+					Registry:      registry,
+					Logger:        slog.Default(),
+					Clock:         func() time.Time { return now },
+					WorkerID:      "worker-" + fake.UUID().V4(),
+					RouterFactory: makeRouterFactory(t, dsn, "finance_jobs_"),
 				},
 			)
 			require.NoError(t, err)
@@ -474,10 +497,19 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, JobStatusSucceeded, executed.Status)
 			require.NoError(t, worker.ProcessJob(t.Context(), job.ID))
+			for _, status := range []JobStatus{JobStatusRunning, JobStatusFailed, JobStatusCanceled} {
+				duplicate := makeJob(now.Add(time.Duration(len(status)) * time.Minute))
+				duplicate.Status = status
+				_, err = store.Create(t.Context(), duplicate)
+				require.NoError(t, err)
+				require.NoError(t, worker.ProcessJob(t.Context(), duplicate.ID))
+				persisted, getErr := store.Get(t.Context(), duplicate.ID)
+				require.NoError(t, getErr)
+				assert.Equal(t, status, persisted.Status)
+			}
 			_, err = NewWorker(WorkerDeps{})
 			require.Error(t, err)
 			require.NoError(t, worker.ProcessJob(t.Context(), fake.UUID().V4()))
-			require.Error(t, worker.ensureConsumer())
 			require.NoError(t, worker.Stop(t.Context()))
 
 			unknown := makeJob(now.Add(time.Minute))
@@ -496,9 +528,10 @@ func TestDurableJobsWorkflow(t *testing.T) {
 				Times(3)
 			brokenWorker, err := NewWorker(
 				WorkerDeps{
-					Store:    mockStore,
-					Registry: registry,
-					Config:   WorkerConfig{Enabled: true},
+					Store:         mockStore,
+					Registry:      registry,
+					Config:        WorkerConfig{Enabled: true},
+					RouterFactory: makeRouterFactory(t, dsn, "finance_jobs_broken_"),
 				},
 			)
 			require.NoError(t, err)
@@ -532,8 +565,8 @@ func TestDurableJobsWorkflow(t *testing.T) {
 				t,
 				executor.processEnvelope(
 					t.Context(),
-					appdispatch.Envelope{
-						Kind:    appdispatch.ExecutionKind("finance.executor"),
+					executionEnvelope{
+						Kind:    executionKind("finance.executor"),
 						Payload: payload,
 					},
 				),
@@ -552,8 +585,8 @@ func TestDurableJobsWorkflow(t *testing.T) {
 				t,
 				executor.processEnvelope(
 					t.Context(),
-					appdispatch.Envelope{
-						Kind:            appdispatch.ExecutionKind("finance.executor"),
+					executionEnvelope{
+						Kind:            executionKind("finance.executor"),
 						Payload:         payload,
 						ObservableJobID: fake.UUID().V4(),
 					},
@@ -566,19 +599,27 @@ func TestDurableJobsWorkflow(t *testing.T) {
 				t,
 				executor.processEnvelope(
 					t.Context(),
-					appdispatch.Envelope{
-						Kind:            appdispatch.ExecutionKind("finance.missing"),
+					executionEnvelope{
+						Kind:            executionKind("finance.missing"),
 						ObservableJobID: fake.UUID().V4(),
 					},
 				),
 			)
 			store.EXPECT().
 				Get(mock.Anything, mock.Anything).
-				Return((*Job)(nil), errors.New(fake.Lorem().Sentence(3)))
-			handler, err := registry.Handler(JobType("finance.executor"))
-			require.NoError(t, err)
-			_, _, err = executor.prepareObservableJob(t.Context(), fake.UUID().V4(), handler)
+				Return((*Job)(nil), errors.New(fake.Lorem().Sentence(3))).
+				Once()
+			_, _, err = executor.prepareObservableJob(t.Context(), fake.UUID().V4())
 			require.Error(t, err)
+
+			queued := makeJob(time.Now())
+			store.EXPECT().Get(mock.Anything, queued.ID).Return(&queued, nil).Once()
+			store.EXPECT().ClaimQueued(mock.Anything, queued.ID, executor.workerID, mock.Anything).
+				Return(nil, ErrJobNotQueued).Once()
+			claimed, skip, err := executor.prepareObservableJob(t.Context(), queued.ID)
+			require.NoError(t, err)
+			assert.Nil(t, claimed)
+			assert.True(t, skip)
 		},
 	)
 
@@ -649,17 +690,6 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			job.JobType, job.InputJSON = JobType("finance.dispatch_import"), payload
 			_, err = store.Create(t.Context(), job)
 			require.NoError(t, err)
-			worker, err := NewWorker(
-				WorkerDeps{
-					Store:          store,
-					Registry:       registry,
-					DispatchDB:     sqlDB,
-					DispatchConfig: DispatchConfig{DatabaseDSN: dsn, TablePrefix: "finance_jobs_"},
-					Config:         WorkerConfig{Enabled: true, PollInterval: time.Millisecond},
-					WorkerID:       fake.UUID().V4(),
-				},
-			)
-			require.NoError(t, err)
 			publisher, err := appdispatch.NewPublisher(
 				appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "finance_jobs_"},
 				sqlDB,
@@ -667,16 +697,30 @@ func TestDurableJobsWorkflow(t *testing.T) {
 			)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+			factory, err := appdispatch.NewRouterFactory(
+				appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "finance_jobs_", PollInterval: time.Millisecond},
+				sqlDB,
+				publisher,
+				slog.Default(),
+			)
+			require.NoError(t, err)
+			worker, err := NewWorker(WorkerDeps{
+				Store: store, Registry: registry, RouterFactory: factory,
+				Config: WorkerConfig{Enabled: true, PollInterval: time.Millisecond}, WorkerID: fake.UUID().V4(),
+			})
+			require.NoError(t, err)
+			envelopePayload, err := json.Marshal(executionEnvelope{
+				Version:         jobEnvelopeVersion,
+				Kind:            executionKind(job.JobType),
+				Payload:         payload,
+				ObservableJobID: job.ID,
+			})
+			require.NoError(t, err)
 			require.NoError(
 				t,
 				publisher.Publish(
 					t.Context(),
-					appdispatch.Envelope{
-						Version:         appdispatch.EnvelopeVersionV1,
-						Kind:            appdispatch.ExecutionKind(job.JobType),
-						Payload:         payload,
-						ObservableJobID: job.ID,
-					},
+					appdispatch.NewMessage(jobExecutionTopic, envelopePayload),
 				),
 			)
 			require.NoError(t, worker.RunOnce(t.Context()))
@@ -697,7 +741,7 @@ func TestDurableJobsWorkflow(t *testing.T) {
 				registry,
 				JobType("finance.callback"),
 				TypedHandlerSpec[input, result, progress]{
-					DispatchKind: appdispatch.ExecutionKind("finance.callback.dispatch"),
+					DispatchKind: "finance.callback.dispatch",
 					RunJob: func(_ context.Context, _ Job, value input, _ func(progress) error) (result, error) {
 						return result{Imported: len(value.AccountID)}, nil
 					},
@@ -710,7 +754,7 @@ func TestDurableJobsWorkflow(t *testing.T) {
 					registry,
 					TypedHandlerSpec[input, result, progress]{
 						JobType:      JobType("finance.other"),
-						DispatchKind: appdispatch.ExecutionKind("finance.callback.dispatch"),
+						DispatchKind: "finance.callback.dispatch",
 						Run:          func(context.Context, input, func(progress) error) (result, error) { return result{}, nil },
 					},
 				),

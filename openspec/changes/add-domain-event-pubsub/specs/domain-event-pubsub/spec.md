@@ -117,6 +117,26 @@ existing application-database transaction.
 - **WHEN** a transaction containing an event publication rolls back
 - **THEN** the event MUST NOT be visible to subscribers.
 
+### Requirement: Explicit router lifecycle ownership
+
+The application SHALL start each event router only through the explicit process
+root that owns its reaction handlers and SHALL release router resources before
+that root releases the shared application database.
+
+#### Scenario: Router construction does not start consumption
+
+- **WHEN** an explicit application root constructs a publisher or router
+- **THEN** no event subscription MUST start until the owning process explicitly
+  runs that router.
+
+#### Scenario: Router stops cleanly with its owner
+
+- **WHEN** an owning process cancels a running event router or closes its root
+- **THEN** the router MUST stop its subscriptions and release its messaging
+  resources before the shared application database is closed
+- **AND** cleanup errors MUST remain observable to the owning command or
+  embedder.
+
 ### Requirement: Explicit multi-driver pub/sub schema preparation
 
 The explicit database migration command SHALL prepare the topic-aware pub/sub
@@ -130,4 +150,3 @@ database.
   consumer group
 - **AND** later publisher and router startup MUST NOT create or alter those
   tables implicitly.
-

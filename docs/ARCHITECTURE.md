@@ -11,6 +11,12 @@ evidence, balances, reports, and FX.
   independent from `runtime/`.
 - `apps/sumweave/` composes finance, auth, durable jobs, dispatch, HTTP,
   migrations, telemetry, and embedded UI delivery.
+- `apps/sumweave/internal/appdispatch` is the app-owned durable SQL pub/sub
+  transport. It stores multiple topics in one message table and tracks offsets
+  independently by topic and consumer group for SQLite and PostgreSQL.
+- `apps/sumweave/internal/appevents` is the typed domain-event API. Durable
+  jobs remain imperative commands with observable job state and use their own
+  execution topic and worker consumer group on the same transport.
 - Its application config is app-internal at `internal/config`; `internal/wireup`
   owns explicit command roots. Command and Engine entrypoints pass typed startup
   options, while components receive native values or constructed collaborators.
@@ -26,9 +32,22 @@ evidence, balances, reports, and FX.
 The application database is configured at `application.database` (environment
 override `APP_APPLICATION_DATABASE_DSN`). Local default storage is
 `data/application.db`; SQLite is local development only. `db-migrate` prepares
-agent, auth, dispatch, jobs, and finance schemas. `start-all` runs the API,
-worker, and scheduler together; split worker and scheduler commands remain for
-deployment.
+agent, auth, topic-aware dispatch, jobs, and finance schemas. `start-all` runs
+the API, worker, and scheduler together; split worker and scheduler commands
+remain for deployment. API-only `start` constructs enqueue capabilities but
+does not start a message router.
+
+Message delivery is at least once. Consumer handlers must tolerate duplicate
+delivery. Routers recover panics, retry failures three times with bounded
+backoff, and then publish the original message to
+`app.dispatch.dead-letter.v1` with failure and source-topic metadata. A failed
+dead-letter publication leaves the original message unacknowledged.
+
+The topic-aware dispatch schema intentionally replaces the earlier alpha
+single-topic schema. Recreate or reseed an old local application database, then
+run `sumweave db-migrate`; mixed old and new binaries are unsupported. Explicit
+jobs and HTTP roots stop their message routers before closing the shared
+application database. The migration root creates no publisher or router.
 
 Run `sumweave db-migrate` before `sumweave start-all` locally.
 

@@ -31,8 +31,8 @@ type sqliteDatabase interface {
 }
 
 type sqliteTableGenerators struct {
-	Topic   func(string) string
-	Offsets func(string) string
+	Messages func() string
+	Offsets  func() string
 }
 
 type sqliteTransportPublisher struct {
@@ -57,12 +57,12 @@ func newSQLiteTransportPublisher(
 	tables := sqliteTableNameGenerators(config)
 	return &sqliteTransportPublisher{
 		db:                connection,
-		messagesTableName: tables.Topic(DispatchTopicExecution),
+		messagesTableName: tables.Messages(),
 		logger:            logger,
 	}, nil
 }
 
-func (p *sqliteTransportPublisher) Publish(_ string, messages ...*wmmessage.Message) error {
+func (p *sqliteTransportPublisher) Publish(topic string, messages ...*wmmessage.Message) error {
 	p.mu.Lock()
 	closed := p.closed
 	p.mu.Unlock()
@@ -72,20 +72,23 @@ func (p *sqliteTransportPublisher) Publish(_ string, messages ...*wmmessage.Mess
 	if len(messages) == 0 {
 		return nil
 	}
+	if topic == "" {
+		return errors.New("message topic is required")
+	}
 
 	var query strings.Builder
 	query.WriteString(`INSERT INTO `)
 	query.WriteString(quoteIdentifier(p.messagesTableName))
-	query.WriteString(` (uuid, created_at, payload, metadata) VALUES `)
-	args := make([]any, 0, len(messages)*4)
+	query.WriteString(` (uuid, topic, created_at, payload, metadata) VALUES `)
+	args := make([]any, 0, len(messages)*5)
 	placeholders := make([]string, 0, len(messages))
 	for _, msg := range messages {
-		placeholders = append(placeholders, `(?,?,?,?)`)
+		placeholders = append(placeholders, `(?,?,?,?,?)`)
 		metadata, err := json.Marshal(msg.Metadata)
 		if err != nil {
 			return fmt.Errorf("unable to encode message %q metadata to JSON: %w", msg.UUID, err)
 		}
-		args = append(args, msg.UUID, time.Now().Format(time.RFC3339), msg.Payload, metadata)
+		args = append(args, msg.UUID, topic, time.Now().Format(time.RFC3339), msg.Payload, metadata)
 	}
 	query.WriteString(strings.Join(placeholders, ","))
 	_, err := p.db.ExecContext(messages[0].Context(), query.String(), args...)
@@ -117,6 +120,7 @@ type sqliteTransportSubscriber struct {
 func newSQLiteTransportSubscriber(
 	config Config,
 	db *sql.DB,
+	consumerGroup string,
 	logger watermill.LoggerAdapter,
 ) (wmmessage.Subscriber, error) {
 	if db == nil {
@@ -124,7 +128,7 @@ func newSQLiteTransportSubscriber(
 	}
 	return &sqliteTransportSubscriber{
 		db:            db,
-		consumerGroup: config.ConsumerName,
+		consumerGroup: consumerGroup,
 		pollInterval:  config.PollInterval,
 		lockTimeout:   sqliteSubscriberLockTimeout,
 		tables:        sqliteTableNameGenerators(config),
@@ -143,9 +147,10 @@ func (s *sqliteTransportSubscriber) Subscribe(ctx context.Context, topic string)
 
 	if _, err := s.db.ExecContext(
 		ctx,
-		`INSERT INTO `+quoteIdentifier(s.tables.Offsets(topic))+
-			` (consumer_group, offset_acked, locked_until) VALUES (?, 0, 0)`+
-			` ON CONFLICT(consumer_group) DO NOTHING`,
+		`INSERT INTO `+quoteIdentifier(s.tables.Offsets())+
+			` (topic, consumer_group, offset_acked, locked_until) VALUES (?, ?, 0, 0)`+
+			` ON CONFLICT(topic, consumer_group) DO NOTHING`,
+		topic,
 		s.consumerGroup,
 	); err != nil {
 		return nil, err
@@ -157,16 +162,18 @@ func (s *sqliteTransportSubscriber) Subscribe(ctx context.Context, topic string)
 		lockTicker:         time.NewTicker(s.lockTimeout - 300*time.Millisecond),
 		lockDuration:       s.lockTimeout - 300*time.Millisecond,
 		lockTimeoutSeconds: int64(s.lockTimeout / time.Second),
+		topic:              topic,
 		consumerGroup:      s.consumerGroup,
-		sqlLockConsumerGroup: `UPDATE ` + quoteIdentifier(s.tables.Offsets(topic)) +
-			` SET locked_until=(unixepoch()+?) WHERE consumer_group=? AND locked_until < unixepoch() RETURNING offset_acked`,
-		sqlExtendLock: `UPDATE ` + quoteIdentifier(s.tables.Offsets(topic)) +
-			` SET locked_until=(unixepoch()+?), offset_acked=? WHERE consumer_group=? AND offset_acked=?` +
+		sqlLockConsumerGroup: `UPDATE ` + quoteIdentifier(s.tables.Offsets()) +
+			` SET locked_until=(unixepoch()+?) WHERE topic=? AND consumer_group=?` +
+			` AND locked_until < unixepoch() RETURNING offset_acked`,
+		sqlExtendLock: `UPDATE ` + quoteIdentifier(s.tables.Offsets()) +
+			` SET locked_until=(unixepoch()+?), offset_acked=? WHERE topic=? AND consumer_group=? AND offset_acked=?` +
 			` AND locked_until>=unixepoch() RETURNING COALESCE(locked_until, 0)`,
-		sqlNextMessageBatch: `SELECT "offset", uuid, payload, metadata FROM ` + quoteIdentifier(s.tables.Topic(topic)) +
-			fmt.Sprintf(` WHERE "offset">? ORDER BY offset LIMIT %d`, sqliteSubscriberBatchSize),
-		sqlAcknowledgeMessages: `UPDATE ` + quoteIdentifier(s.tables.Offsets(topic)) +
-			` SET offset_acked=?, locked_until=0 WHERE consumer_group=? AND offset_acked=?`,
+		sqlNextMessageBatch: `SELECT "offset", uuid, payload, metadata FROM ` + quoteIdentifier(s.tables.Messages()) +
+			fmt.Sprintf(` WHERE topic=? AND "offset">? ORDER BY offset LIMIT %d`, sqliteSubscriberBatchSize),
+		sqlAcknowledgeMessages: `UPDATE ` + quoteIdentifier(s.tables.Offsets()) +
+			` SET offset_acked=?, locked_until=0 WHERE topic=? AND consumer_group=? AND offset_acked=?`,
 		destination: make(chan *wmmessage.Message),
 		logger: s.logger.With(watermill.LogFields{
 			"topic":          topic,
@@ -208,6 +215,7 @@ type sqliteSubscription struct {
 	lockTicker         *time.Ticker
 	lockDuration       time.Duration
 	lockTimeoutSeconds int64
+	topic              string
 	consumerGroup      string
 
 	sqlLockConsumerGroup   string
@@ -235,7 +243,7 @@ func (s *sqliteSubscription) NextBatch(ctx context.Context) ([]sqliteRawMessage,
 		return nil, err
 	}
 
-	lock := tx.QueryRowContext(opCtx, s.sqlLockConsumerGroup, s.lockTimeoutSeconds, s.consumerGroup)
+	lock := tx.QueryRowContext(opCtx, s.sqlLockConsumerGroup, s.lockTimeoutSeconds, s.topic, s.consumerGroup)
 	if err = lock.Err(); err != nil {
 		return nil, errors.Join(fmt.Errorf("unable to acquire row lock: %w", err), rollbackSQLiteTx(tx))
 	}
@@ -247,7 +255,7 @@ func (s *sqliteSubscription) NextBatch(ctx context.Context) ([]sqliteRawMessage,
 	}
 	s.lastAckedOffset = s.lockedOffset
 
-	rows, err := tx.QueryContext(opCtx, s.sqlNextMessageBatch, s.lockedOffset)
+	rows, err := tx.QueryContext(opCtx, s.sqlNextMessageBatch, s.topic, s.lockedOffset)
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("unable to query next message batch: %w", err), rollbackSQLiteTx(tx))
 	}
@@ -304,6 +312,7 @@ func (s *sqliteSubscription) ExtendLock(ctx context.Context) error {
 		s.sqlExtendLock,
 		s.lockTimeoutSeconds,
 		s.lastAckedOffset,
+		s.topic,
 		s.consumerGroup,
 		s.lockedOffset,
 	)
@@ -320,6 +329,7 @@ func (s *sqliteSubscription) ReleaseLock(ctx context.Context) error {
 		context.WithoutCancel(ctx),
 		s.sqlAcknowledgeMessages,
 		s.lastAckedOffset,
+		s.topic,
 		s.consumerGroup,
 		s.lockedOffset,
 	)

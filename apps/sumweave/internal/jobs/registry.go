@@ -6,19 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-
-	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 )
 
 var ErrHandlerNotRegistered = errors.New("job handler not registered")
 
 type typedHandler interface {
 	jobType() JobType
-	dispatchKind() appdispatch.ExecutionKind
+	dispatchKind() executionKind
 	maxAttempts() int
 	supportsCancel() bool
 	supportsRetry() bool
-	guardDuplicateDelivery() bool
 	onScheduled(context.Context, Job) error
 	execute(context.Context, Job, func(json.RawMessage) error) (json.RawMessage, error)
 }
@@ -26,13 +23,13 @@ type typedHandler interface {
 type Registry struct {
 	mu               sync.RWMutex
 	handlers         map[JobType]typedHandler
-	dispatchHandlers map[appdispatch.ExecutionKind]typedHandler
+	dispatchHandlers map[executionKind]typedHandler
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
 		handlers:         map[JobType]typedHandler{},
-		dispatchHandlers: map[appdispatch.ExecutionKind]typedHandler{},
+		dispatchHandlers: map[executionKind]typedHandler{},
 	}
 }
 
@@ -66,7 +63,7 @@ func (r *Registry) Handler(jobType JobType) (typedHandler, error) { //nolint:ire
 	return handler, nil
 }
 
-func (r *Registry) HandlerByExecutionKind(kind appdispatch.ExecutionKind) (typedHandler, error) { //nolint:ireturn
+func (r *Registry) handlerByExecutionKind(kind executionKind) (typedHandler, error) { //nolint:ireturn
 	if r == nil {
 		return nil, ErrHandlerNotRegistered
 	}
@@ -80,15 +77,14 @@ func (r *Registry) HandlerByExecutionKind(kind appdispatch.ExecutionKind) (typed
 }
 
 type TypedHandlerSpec[Input any, Result any, Progress any] struct {
-	JobType                JobType
-	DispatchKind           appdispatch.ExecutionKind
-	MaxAttempts            int
-	SupportsCancel         bool
-	SupportsRetry          bool
-	GuardDuplicateDelivery bool
-	Run                    func(context.Context, Input, func(Progress) error) (Result, error)
-	RunJob                 func(context.Context, Job, Input, func(Progress) error) (Result, error)
-	OnScheduled            func(context.Context, Job) error
+	JobType        JobType
+	DispatchKind   string
+	MaxAttempts    int
+	SupportsCancel bool
+	SupportsRetry  bool
+	Run            func(context.Context, Input, func(Progress) error) (Result, error)
+	RunJob         func(context.Context, Job, Input, func(Progress) error) (Result, error)
+	OnScheduled    func(context.Context, Job) error
 }
 
 func RegisterTypedHandler[Input any, Result any, Progress any](
@@ -112,11 +108,11 @@ func (h *registeredTypedHandler[Input, Result, Progress]) jobType() JobType {
 	return h.spec.JobType
 }
 
-func (h *registeredTypedHandler[Input, Result, Progress]) dispatchKind() appdispatch.ExecutionKind {
+func (h *registeredTypedHandler[Input, Result, Progress]) dispatchKind() executionKind {
 	if h.spec.DispatchKind != "" {
-		return h.spec.DispatchKind
+		return executionKind(h.spec.DispatchKind)
 	}
-	return appdispatch.ExecutionKind(h.spec.JobType)
+	return executionKind(h.spec.JobType)
 }
 
 func (h *registeredTypedHandler[Input, Result, Progress]) maxAttempts() int {
@@ -132,10 +128,6 @@ func (h *registeredTypedHandler[Input, Result, Progress]) supportsCancel() bool 
 
 func (h *registeredTypedHandler[Input, Result, Progress]) supportsRetry() bool {
 	return h.spec.SupportsRetry
-}
-
-func (h *registeredTypedHandler[Input, Result, Progress]) guardDuplicateDelivery() bool {
-	return h.spec.GuardDuplicateDelivery
 }
 
 func (h *registeredTypedHandler[Input, Result, Progress]) onScheduled(ctx context.Context, job Job) error {

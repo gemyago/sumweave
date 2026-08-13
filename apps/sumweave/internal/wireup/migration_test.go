@@ -37,7 +37,13 @@ func TestBuildMigration(t *testing.T) {
 		database, err := sqlconn.Open(applicationDSN)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, database.Close()) })
-		for _, table := range []string{"migration_auth_auth_users", "migration_jobs_jobs", "finance_tenants"} {
+		for _, table := range []string{
+			"migration_auth_auth_users",
+			"migration_app_dispatch_messages",
+			"migration_app_dispatch_offsets",
+			"migration_jobs_jobs",
+			"finance_tenants",
+		} {
 			var name string
 			row := database.QueryRowContext(
 				t.Context(),
@@ -47,6 +53,27 @@ func TestBuildMigration(t *testing.T) {
 			require.NoError(t, row.Scan(&name))
 			require.Equal(t, table, name)
 		}
+		var topicPrimaryKey, consumerGroupPrimaryKey int
+		rows, err := database.QueryContext(
+			t.Context(),
+			`PRAGMA table_info("migration_app_dispatch_offsets")`,
+		)
+		require.NoError(t, err)
+		for rows.Next() {
+			var cid, notNull, primaryKey int
+			var name, columnType string
+			var defaultValue any
+			require.NoError(t, rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey))
+			switch name {
+			case "topic":
+				topicPrimaryKey = primaryKey
+			case "consumer_group":
+				consumerGroupPrimaryKey = primaryKey
+			}
+		}
+		require.NoError(t, rows.Close())
+		require.Equal(t, 1, topicPrimaryKey)
+		require.Equal(t, 2, consumerGroupPrimaryKey)
 	})
 
 	t.Run("loads typed configuration for the production root", func(t *testing.T) {

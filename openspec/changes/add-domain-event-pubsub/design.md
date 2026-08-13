@@ -23,6 +23,13 @@ transport:
 - domain events announce facts that already happened and allow independent
   consumer groups to react.
 
+Main now uses hand-written, command-specific roots under `internal/wireup`
+instead of a dependency-injection container. `jobs.NewModule` constructs the
+shared jobs capabilities, `BuildJobs` owns split worker/scheduler resources,
+`BuildHTTP` owns API and local `start-all` resources, and `BuildMigration` owns
+explicit schema preparation. The design must extend those roots without
+reintroducing container registration or allowing components to read app config.
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -32,6 +39,8 @@ transport:
 - Provide typed domain-event publishing and typed handler registration similar
   to `community-manager`.
 - Preserve the durable-jobs lifecycle and its atomic job/message enqueue.
+- Preserve explicit root ownership, cleanup error propagation, and API-only
+  startup behavior.
 - Isolate handler failures with bounded retry, panic recovery, and dead-letter
   delivery instead of terminating all subscriptions.
 - Make delivery behavior testable at the transport, router, and jobs-adapter
@@ -59,8 +68,8 @@ metadata; it will not impose job fields such as execution kind or observable job
 ID. It will provide normal and transaction-bound publication plus a router
 factory that creates a subscriber for an explicit consumer-group name.
 
-A new app-level domain-events package will define the small typed contract used
-by publishers and consumers:
+A new `internal/appevents` package will define the small typed contract used by
+publishers and consumers:
 
 - an `Event` exposes `Topic() string`;
 - a publisher JSON-encodes an event and delegates to `appdispatch`;
@@ -68,9 +77,11 @@ by publishers and consumers:
 - a router registers typed handlers by event topic.
 
 The jobs package will own its execution envelope and continue using one
-dedicated execution topic and consumer group. This keeps job-specific concepts
-out of the domain-event API while allowing both models to share transport,
-offset, migration, and middleware code.
+dedicated execution topic and consumer group. `jobs.NewModule` will receive
+native transport inputs and construct the job publisher and worker without
+starting consumption. This keeps job-specific concepts out of the domain-event
+API while allowing both models to share transport, offset, migration, and
+middleware code.
 
 Alternative considered: retain job-only `appdispatch` and create a second full
 events transport. This gives clean packages but duplicates SQL schemas,
@@ -157,15 +168,35 @@ orchestration layer rather than leaking SQL dependencies into `finance/`.
 ### Start routers with the component that owns the reactions
 
 There will be no global event router with an empty or catch-all handler set.
-Each future reaction set will create a named router and be started by the
-process that owns those reactions. In this change, the existing jobs worker is
-the production consumer migrated onto the new router behavior; transport and
-router integration tests prove independent event groups until a real finance
-event consumer is requested.
+Each future reaction set will create a named router in its owning explicit
+wireup root after its handlers are available, and that root will decide whether
+to run it. In this change, the existing jobs worker is the production consumer
+migrated onto the new router behavior; transport and router integration tests
+prove independent event groups until a real finance event consumer is
+requested. Constructing the API-only HTTP root will continue to construct jobs
+for enqueue APIs without starting job or domain-event consumption.
 
 This follows `community-manager`, where the Discord router is owned by the
 Discord process, while avoiding a new Sumweave process mode with no product
 work.
+
+### Preserve explicit root resource ownership
+
+Publishers, subscribers, and routers will expose native close behavior to their
+owner. A router's blocking `Run` will finish cancellation and subscriber cleanup
+before returning. Long-lived transport resources constructed by
+`jobs.NewModule` will be closed through the owning `JobsRoot` or `HTTPRoot`
+before their shared application database is released. Root and CLI cleanup will
+remain idempotent and will join operation and cleanup errors instead of hiding
+either one.
+
+`BuildMigration` will continue constructing only migration dependencies. It
+will use the generalized appdispatch migrator directly and will not construct a
+jobs module, event publisher, router, finance service, or HTTP server.
+
+Alternative considered: register transport closers as independent concurrent
+shutdown hooks. This does not guarantee that routers stop before their shared
+database closes, so ordered ownership at the explicit root boundary is safer.
 
 ## Risks / Trade-offs
 
@@ -185,6 +216,9 @@ work.
 - [SQLite and PostgreSQL implementations can drift] -> Run the same transport
   behavior suite against both drivers where routine CI permits, retaining only
   shallow migration smoke coverage.
+- [Router cleanup can race shared database shutdown] -> Make explicit roots
+  close owned messaging resources before performing the remaining root
+  shutdown and preserve both operation and cleanup errors.
 
 ## Migration Plan
 
@@ -193,12 +227,16 @@ work.
 2. Generalize `appdispatch` publication and subscription around explicit topics
    and named consumer groups.
 3. Add the typed domain-event publisher, handler, and router facade.
-4. Migrate durable jobs to its owned execution envelope, topic, and consumer
-   group while preserving transaction-bound enqueue.
-5. Add retry, panic recovery, dead-letter, fan-out, restart-resume, and duplicate
-   job-delivery coverage.
-6. Update architecture, terminology, migration, and process documentation.
-7. Recreate/reseed local application databases, run `db-migrate`, and verify the
+4. Migrate `jobs.NewModule` and the worker to the jobs-owned execution envelope,
+   topic, and consumer group while preserving transaction-bound enqueue.
+5. Extend `BuildJobs` and `BuildHTTP` with ordered messaging-resource ownership;
+   keep API-only startup enqueue-only and preserve cleanup errors.
+6. Update `BuildMigration` and `DatabaseMigrator` to prepare only the generalized
+   topic-aware transport schema.
+7. Add retry, panic recovery, dead-letter, fan-out, restart-resume, root cleanup,
+   and duplicate job-delivery coverage.
+8. Update architecture, terminology, migration, and process documentation.
+9. Recreate/reseed local application databases, run `db-migrate`, and verify the
    worker and scheduler lifecycle.
 
 Rollback during development is a code rollback followed by recreation of the

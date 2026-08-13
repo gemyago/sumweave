@@ -44,16 +44,16 @@ func (_m *mockdispatchPublisher) EXPECT() *mockdispatchPublisher_Expecter {
 }
 
 // PublishInTx provides a mock function for the type mockdispatchPublisher
-func (_mock *mockdispatchPublisher) PublishInTx(context1 context.Context, tx *sql.Tx, envelope appdispatch.Envelope) error {
-	ret := _mock.Called(context1, tx, envelope)
+func (_mock *mockdispatchPublisher) PublishInTx(context1 context.Context, tx *sql.Tx, message appdispatch.Message) error {
+	ret := _mock.Called(context1, tx, message)
 
 	if len(ret) == 0 {
 		panic("no return value specified for PublishInTx")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, *sql.Tx, appdispatch.Envelope) error); ok {
-		r0 = returnFunc(context1, tx, envelope)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *sql.Tx, appdispatch.Message) error); ok {
+		r0 = returnFunc(context1, tx, message)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -68,12 +68,12 @@ type mockdispatchPublisher_PublishInTx_Call struct {
 // PublishInTx is a helper method to define mock.On call
 //   - context1 context.Context
 //   - tx *sql.Tx
-//   - envelope appdispatch.Envelope
-func (_e *mockdispatchPublisher_Expecter) PublishInTx(context1 interface{}, tx interface{}, envelope interface{}) *mockdispatchPublisher_PublishInTx_Call {
-	return &mockdispatchPublisher_PublishInTx_Call{Call: _e.mock.On("PublishInTx", context1, tx, envelope)}
+//   - message appdispatch.Message
+func (_e *mockdispatchPublisher_Expecter) PublishInTx(context1 interface{}, tx interface{}, message interface{}) *mockdispatchPublisher_PublishInTx_Call {
+	return &mockdispatchPublisher_PublishInTx_Call{Call: _e.mock.On("PublishInTx", context1, tx, message)}
 }
 
-func (_c *mockdispatchPublisher_PublishInTx_Call) Run(run func(context1 context.Context, tx *sql.Tx, envelope appdispatch.Envelope)) *mockdispatchPublisher_PublishInTx_Call {
+func (_c *mockdispatchPublisher_PublishInTx_Call) Run(run func(context1 context.Context, tx *sql.Tx, message appdispatch.Message)) *mockdispatchPublisher_PublishInTx_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -83,9 +83,9 @@ func (_c *mockdispatchPublisher_PublishInTx_Call) Run(run func(context1 context.
 		if args[1] != nil {
 			arg1 = args[1].(*sql.Tx)
 		}
-		var arg2 appdispatch.Envelope
+		var arg2 appdispatch.Message
 		if args[2] != nil {
-			arg2 = args[2].(appdispatch.Envelope)
+			arg2 = args[2].(appdispatch.Message)
 		}
 		run(
 			arg0,
@@ -101,7 +101,7 @@ func (_c *mockdispatchPublisher_PublishInTx_Call) Return(err error) *mockdispatc
 	return _c
 }
 
-func (_c *mockdispatchPublisher_PublishInTx_Call) RunAndReturn(run func(context1 context.Context, tx *sql.Tx, envelope appdispatch.Envelope) error) *mockdispatchPublisher_PublishInTx_Call {
+func (_c *mockdispatchPublisher_PublishInTx_Call) RunAndReturn(run func(context1 context.Context, tx *sql.Tx, message appdispatch.Message) error) *mockdispatchPublisher_PublishInTx_Call {
 	_c.Call.Return(run)
 	return _c
 }

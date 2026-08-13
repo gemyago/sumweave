@@ -78,6 +78,21 @@ func TestFinalStoreCoverage(t *testing.T) {
 
 func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 	fake := faker.New()
+	makeRouterFactory := func(t *testing.T) *appdispatch.RouterFactory {
+		t.Helper()
+		dsn := fmt.Sprintf("file:final-router-%s?mode=memory&cache=shared", fake.UUID().V4())
+		db, err := sqlconn.Open(dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		config := appdispatch.Config{DatabaseDSN: dsn, PollInterval: time.Millisecond}
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
+		publisher, err := appdispatch.NewPublisher(config, db, slog.Default())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+		factory, err := appdispatch.NewRouterFactory(config, db, publisher, slog.Default())
+		require.NoError(t, err)
+		return factory
+	}
 	makeStore := func(t *testing.T) *Store {
 		t.Helper()
 		dsn := fmt.Sprintf("file:final-worker-%s?mode=memory&cache=shared", fake.UUID().V4())
@@ -126,6 +141,18 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 		require.Error(t, err)
 		_, err = service.Retry(t.Context(), job.ID)
 		require.Error(t, err)
+		_, err = service.Cancel(t.Context(), fake.UUID().V4())
+		require.Error(t, err)
+		idempotencyKey := fake.UUID().V4()
+		idempotentParams := EnqueueParams{
+			JobType: jobType, Requester: Requester{Source: RequesterSourceOperator},
+			IdempotencyKey: idempotencyKey, Input: struct{}{},
+		}
+		firstIdempotent, err := service.Enqueue(t.Context(), idempotentParams)
+		require.NoError(t, err)
+		secondIdempotent, err := service.Enqueue(t.Context(), idempotentParams)
+		require.NoError(t, err)
+		require.Equal(t, firstIdempotent.ID, secondIdempotent.ID)
 		_, err = NewService(ServiceDeps{
 			Store: store, IDGenerator: ident.NewMockGenerator(), Publisher: publisher,
 		})
@@ -160,6 +187,12 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 	})
 
 	t.Run("worker handles disabled, consumer setup, and execution outcomes", func(t *testing.T) {
+		constructorStore := newMockworkerStore(t)
+		_, err := NewWorker(WorkerDeps{Store: constructorStore, RouterFactory: makeRouterFactory(t)})
+		require.EqualError(t, err, "jobs registry is required")
+		_, err = NewWorker(WorkerDeps{Store: constructorStore, Registry: NewRegistry()})
+		require.EqualError(t, err, "jobs router factory is required")
+
 		registry := NewRegistry()
 		register(
 			t,
@@ -171,11 +204,15 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 		)
 		store := newMockworkerStore(t)
 		store.EXPECT().RecoverStaleRunning(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
-		worker, err := NewWorker(WorkerDeps{Store: store, Registry: registry, Config: WorkerConfig{Enabled: false}})
+		worker, err := NewWorker(WorkerDeps{
+			Store: store, Registry: registry, Config: WorkerConfig{Enabled: false}, RouterFactory: makeRouterFactory(t),
+		})
 		require.NoError(t, err)
 		require.NoError(t, worker.Start(t.Context()))
 		worker.config.Enabled = true
-		require.Error(t, worker.Run(t.Context()))
+		runCtx, cancelRun := context.WithCancel(t.Context())
+		cancelRun()
+		require.ErrorIs(t, worker.Run(runCtx), context.Canceled)
 		require.Error(t, worker.RunOnce(t.Context()))
 		store.EXPECT().Get(mock.Anything, mock.Anything).Return(nil, errors.New(fake.Lorem().Sentence(3))).Once()
 		require.Error(t, worker.ProcessJob(t.Context(), fake.UUID().V4()))
@@ -186,14 +223,25 @@ func TestFinalServiceSchedulerWorkerCoverage(t *testing.T) {
 		require.Error(
 			t,
 			executor.processEnvelope(
-				t.Context(), appdispatch.Envelope{Kind: appdispatch.ExecutionKind("finance.worker.final")},
+				t.Context(), executionEnvelope{Kind: executionKind("finance.worker.final")},
 			),
 		)
 		require.Error(
 			t,
 			executor.processEnvelope(
-				t.Context(), appdispatch.Envelope{Kind: appdispatch.ExecutionKind("finance.unknown.final")},
+				t.Context(), executionEnvelope{Kind: executionKind("finance.unknown.final")},
 			),
+		)
+		queuedJobID := fake.UUID().V4()
+		store.EXPECT().Get(mock.Anything, queuedJobID).
+			Return(&Job{ID: queuedJobID, Status: JobStatusQueued}, nil).Once()
+		store.EXPECT().ClaimQueued(mock.Anything, queuedJobID, mock.Anything, mock.Anything).
+			Return(nil, errors.New("claim failed")).Once()
+		require.Error(
+			t,
+			executor.processEnvelope(t.Context(), executionEnvelope{
+				Kind: executionKind("finance.worker.final"), ObservableJobID: queuedJobID,
+			}),
 		)
 	})
 }

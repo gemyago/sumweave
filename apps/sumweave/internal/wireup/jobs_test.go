@@ -45,6 +45,7 @@ func TestBuildJobs(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, jobs.Items, 1)
 		require.NoError(t, root.Close(t.Context()))
+		require.NoError(t, root.Close(t.Context()))
 	})
 
 	t.Run("rejects root settings before opening jobs resources", func(t *testing.T) {

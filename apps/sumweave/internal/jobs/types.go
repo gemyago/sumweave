@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 )
 
 const (
@@ -24,11 +22,24 @@ const (
 	defaultWorkerMaxAttempts                  = 3
 	maxErrorSummaryLength                     = 240
 	maxErrorDetailsLength                     = 1024
+	jobExecutionTopic                         = "jobs.execution.v1"
+	jobConsumerGroup                          = "jobs.workers.v1"
+	jobEnvelopeVersion                        = "v1"
 )
 
 type JobType string
 type JobStatus string
 type RequesterSource string
+type executionKind string
+type executionEnvelope struct {
+	Version         string          `json:"version"`
+	Kind            executionKind   `json:"kind"`
+	Payload         json.RawMessage `json:"payload"`
+	ObservableJobID string          `json:"observableJobId,omitempty"`
+	CorrelationID   string          `json:"correlationId,omitempty"`
+	RequesterID     string          `json:"requesterId,omitempty"`
+	RequesterSource string          `json:"requesterSource,omitempty"`
+}
 type Requester struct {
 	UserID         string
 	Source         RequesterSource
@@ -111,10 +122,6 @@ type WorkerConfig struct {
 	Enabled      bool
 	PollInterval time.Duration
 	MaxAttempts  int
-}
-type DispatchConfig struct {
-	DatabaseDSN string
-	TablePrefix string
 }
 type idempotencyConflictError struct{ key string }
 
@@ -222,6 +229,6 @@ func truncateBounded(value string, maxLen int) string {
 	}
 	return trimmed[:maxLen-len(ellipsis)] + ellipsis
 }
-func dispatchKindForJobType(jobType JobType) appdispatch.ExecutionKind {
-	return appdispatch.ExecutionKind(jobType)
+func dispatchKindForJobType(jobType JobType) executionKind {
+	return executionKind(jobType)
 }
