@@ -146,6 +146,13 @@ func TestAppDispatch(t *testing.T) {
 		group := "group." + fake.UUID().V4()
 		wmMessage := wmmessage.NewMessage(fake.UUID().V4(), []byte("payload"))
 		wmMessage.Metadata.Set("traceId", fake.UUID().V4())
+		sqliteInsert, err := makeSQLitePublisherSchema(config).InsertQuery(wmsql.InsertQueryParams{
+			Topic: topic,
+			Msgs:  wmmessage.Messages{wmMessage},
+		})
+		require.NoError(t, err)
+		assert.Contains(t, sqliteInsert.Query, "uuid, topic, created_at, payload, metadata")
+		assert.Equal(t, topic, sqliteInsert.Args[1])
 
 		insert, err := postgresSchema(config).InsertQuery(wmsql.InsertQueryParams{
 			Topic: topic,

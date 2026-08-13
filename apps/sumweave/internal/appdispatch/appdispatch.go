@@ -180,13 +180,14 @@ func makeMessage(topic string, message *wmmessage.Message) Message {
 //nolint:ireturn // Watermill publisher is defined by the library interface.
 func newMessagePublisher(config Config, db any, logger *slog.Logger) (wmmessage.Publisher, error) {
 	wmLogger := watermill.NewSlogLogger(logger)
+	schema := wmsql.SchemaAdapter(makeSQLitePublisherSchema(config))
 	if config.Driver() == TransportDriverPostgres {
-		return wmsql.NewPublisher(asContextExecutor(db), wmsql.PublisherConfig{
-			SchemaAdapter:        postgresSchema(config),
-			AutoInitializeSchema: false,
-		}, wmLogger)
+		schema = postgresSchema(config)
 	}
-	return newSQLiteTransportPublisher(config, db, wmLogger)
+	return wmsql.NewPublisher(asContextExecutor(db), wmsql.PublisherConfig{
+		SchemaAdapter:        schema,
+		AutoInitializeSchema: false,
+	}, wmLogger)
 }
 
 //nolint:ireturn // Watermill subscriber is defined by the library interface.
@@ -264,8 +265,10 @@ func asContextExecutor(db any) wmsql.ContextExecutor {
 	if tx, ok := db.(*sql.Tx); ok {
 		return wmsql.TxFromStdSQL(tx)
 	}
-	executor, _ := db.(*sql.DB)
-	return wmsql.BeginnerFromStdSQL(executor)
+	if executor, ok := db.(*sql.DB); ok {
+		return wmsql.BeginnerFromStdSQL(executor)
+	}
+	return nil
 }
 
 func closeIfPresent(closer interface{ Close() error }) error {

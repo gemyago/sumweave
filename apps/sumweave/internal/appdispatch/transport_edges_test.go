@@ -40,8 +40,8 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		assert.Empty(t, makeWatermillMessage(t.Context(), NewMessage(testTopic, nil)).Metadata)
 		require.NoError(t, closeIfPresent(nil))
 
-		_, err := newSQLiteTransportPublisher(Config{}, struct{}{}, wmLogger)
-		require.EqualError(t, err, "sqlite publisher connection is required")
+		_, err := newMessagePublisher(Config{}, struct{}{}, logger)
+		require.EqualError(t, err, "db is nil")
 		_, err = newSQLiteTransportSubscriber(Config{}, nil, "group", wmLogger)
 		require.EqualError(t, err, "sqlite subscriber database is required")
 		_, err = newMessageSubscriber(Config{}, &sql.DB{}, "", logger)
@@ -63,12 +63,10 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		db, mockDB, err := sqlmock.New()
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = db.Close() })
-		publisherValue, err := newSQLiteTransportPublisher(Config{}, db, wmLogger)
+		publisherValue, err := newMessagePublisher(Config{}, db, logger)
 		require.NoError(t, err)
-		publisher := publisherValue.(*sqliteTransportPublisher)
+		publisher := publisherValue.(*wmsql.Publisher)
 
-		require.NoError(t, publisher.Publish(testTopic))
-		require.EqualError(t, publisher.Publish("", wmmessage.NewMessage("id", nil)), "message topic is required")
 		writeErr := errors.New("write failed")
 		mockDB.ExpectExec("INSERT INTO").WillReturnError(writeErr)
 		require.ErrorIs(t, publisher.Publish(testTopic, wmmessage.NewMessage("id", nil)), writeErr)
@@ -80,11 +78,7 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		mockDB.ExpectRollback()
 		require.NoError(t, tx.Rollback())
 		require.NoError(t, publisher.Close())
-		require.EqualError(
-			t,
-			publisher.Publish(testTopic, wmmessage.NewMessage("id", nil)),
-			"sqlite publisher is closed",
-		)
+		require.ErrorIs(t, publisher.Publish(testTopic, wmmessage.NewMessage("id", nil)), wmsql.ErrPublisherClosed)
 		require.NoError(t, mockDB.ExpectationsWereMet())
 	})
 

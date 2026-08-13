@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ThreeDotsLabs/watermill"
+	wmsql "github.com/ThreeDotsLabs/watermill-sql/v4/pkg/sql"
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
 )
 
@@ -35,71 +36,39 @@ type sqliteTableGenerators struct {
 	Offsets  func() string
 }
 
-type sqliteTransportPublisher struct {
-	db                sqliteConnection
-	messagesTableName string
-	logger            watermill.LoggerAdapter
-
-	mu     sync.Mutex
-	closed bool
+// sqlitePublisherSchema embeds Watermill's default schema because its publisher
+// depends on a schema interface that also contains subscriber-only methods.
+// Auto-initialization is disabled and only InsertQuery is used.
+type sqlitePublisherSchema struct {
+	wmsql.DefaultMySQLSchema
 }
 
-//nolint:ireturn // The app dispatch seam returns the Watermill publisher interface.
-func newSQLiteTransportPublisher(
-	config Config,
-	db any,
-	logger watermill.LoggerAdapter,
-) (wmmessage.Publisher, error) {
-	connection, ok := db.(sqliteConnection)
-	if !ok {
-		return nil, errors.New("sqlite publisher connection is required")
-	}
-	tables := sqliteTableNameGenerators(config)
-	return &sqliteTransportPublisher{
-		db:                connection,
-		messagesTableName: tables.Messages(),
-		logger:            logger,
-	}, nil
+func makeSQLitePublisherSchema(config Config) sqlitePublisherSchema {
+	return sqlitePublisherSchema{DefaultMySQLSchema: wmsql.DefaultMySQLSchema{
+		//nolint:gocritic // Every topic intentionally uses the configured shared table.
+		GenerateMessagesTableName: func(string) string {
+			return quoteIdentifier(config.MessagesTable())
+		},
+	}}
 }
 
-func (p *sqliteTransportPublisher) Publish(topic string, messages ...*wmmessage.Message) error {
-	p.mu.Lock()
-	closed := p.closed
-	p.mu.Unlock()
-	if closed {
-		return errors.New("sqlite publisher is closed")
-	}
-	if len(messages) == 0 {
-		return nil
-	}
-	if topic == "" {
-		return errors.New("message topic is required")
-	}
-
+func (s sqlitePublisherSchema) InsertQuery(params wmsql.InsertQueryParams) (wmsql.Query, error) {
 	var query strings.Builder
 	query.WriteString(`INSERT INTO `)
-	query.WriteString(quoteIdentifier(p.messagesTableName))
+	query.WriteString(s.MessagesTable(params.Topic))
 	query.WriteString(` (uuid, topic, created_at, payload, metadata) VALUES `)
-	args := make([]any, 0, len(messages)*5)
-	placeholders := make([]string, 0, len(messages))
-	for _, msg := range messages {
+	args := make([]any, 0, len(params.Msgs)*5)
+	placeholders := make([]string, 0, len(params.Msgs))
+	for _, msg := range params.Msgs {
 		placeholders = append(placeholders, `(?,?,?,?,?)`)
 		metadata, err := json.Marshal(msg.Metadata)
 		if err != nil {
-			return fmt.Errorf("unable to encode message %q metadata to JSON: %w", msg.UUID, err)
+			return wmsql.Query{}, fmt.Errorf("encode message %q metadata to JSON: %w", msg.UUID, err)
 		}
-		args = append(args, msg.UUID, topic, time.Now().Format(time.RFC3339), msg.Payload, metadata)
+		args = append(args, msg.UUID, params.Topic, time.Now().Format(time.RFC3339), msg.Payload, metadata)
 	}
 	query.WriteString(strings.Join(placeholders, ","))
-	_, err := p.db.ExecContext(messages[0].Context(), query.String(), args...)
-	return err
-}
-
-func (p *sqliteTransportPublisher) Close() error {
-	p.mu.Lock()
-	p.closed = true
-	p.mu.Unlock()
-	return nil
+	return wmsql.Query{Query: query.String(), Args: args}, nil
 }
 
 type sqliteTransportSubscriber struct {
