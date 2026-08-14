@@ -118,6 +118,7 @@ func TestClient_InternalHelpers(t *testing.T) {
 
 	t.Run("typed request helper covers decode status auth and response body capture", func(t *testing.T) {
 		responseBody := `{"message":"bad body","error":"BAD_BODY"}`
+		aspspsResponse := `{"aspsps":[{"name":"aspsp-1","country":"","logo":"","psu_types":[],"auth_methods":[],"maximum_consent_validity":0,"beta":false}]}`
 		client := makeTestClient("https://provider.example.test", func(args *Args) {
 			args.HTTPClient = &http.Client{
 				Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
@@ -128,7 +129,7 @@ func TestClient_InternalHelpers(t *testing.T) {
 						assert.Equal(t, "application/json", request.Header.Get("Content-Type"))
 						return &http.Response{
 							StatusCode: http.StatusOK,
-							Body:       io.NopCloser(strings.NewReader(`{"aspsps":[{"id":"aspsp-1"}]}`)),
+							Body:       io.NopCloser(strings.NewReader(aspspsResponse)),
 						}, nil
 					case "/bad-json":
 						return &http.Response{
@@ -157,10 +158,8 @@ func TestClient_InternalHelpers(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		require.NotNil(t, result.Value)
-		assert.JSONEq(t, `{"aspsps":[{"id":"aspsp-1"}]}`, string(result.Body))
-		require.Len(t, result.Value.ASPSPs, 1)
-		assert.Equal(t, "aspsp-1", result.Value.ASPSPs[0].ID)
+		require.Len(t, result.ASPSPs, 1)
+		assert.Equal(t, "aspsp-1", result.ASPSPs[0].Name)
 
 		_, err = sendJSON[struct{}, ListASPSPsResponse](
 			ctx,

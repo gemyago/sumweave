@@ -56,11 +56,6 @@ type sendJSONParams[TBody any] struct {
 	Body   *TBody
 }
 
-type sendJSONResult[TTarget any] struct {
-	Value *TTarget
-	Body  []byte
-}
-
 // ResponseError reports a non-2xx upstream response.
 type ResponseError struct {
 	Operation  string
@@ -117,7 +112,7 @@ func sendJSON[TBody any, TTarget any](
 	ctx context.Context,
 	client *Client,
 	params sendJSONParams[TBody],
-) (*sendJSONResult[TTarget], error) {
+) (*TTarget, error) {
 	body, err := doJSONRequest(ctx, client, params)
 	if err != nil {
 		return nil, err
@@ -126,10 +121,7 @@ func sendJSON[TBody any, TTarget any](
 	if err = json.Unmarshal(body, &target); err != nil {
 		return nil, fmt.Errorf("enable banking response decode: %w", err)
 	}
-	return &sendJSONResult[TTarget]{
-		Value: &target,
-		Body:  append([]byte(nil), body...),
-	}, nil
+	return &target, nil
 }
 
 func doJSONRequest[TBody any](

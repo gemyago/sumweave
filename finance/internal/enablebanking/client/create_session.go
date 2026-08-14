@@ -21,5 +21,5 @@ func (c *Client) CreateSession(ctx context.Context, params CreateSessionParams) 
 	if err != nil {
 		return nil, fmt.Errorf("create session failed: %w", err)
 	}
-	return result.Value, nil
+	return result, nil
 }

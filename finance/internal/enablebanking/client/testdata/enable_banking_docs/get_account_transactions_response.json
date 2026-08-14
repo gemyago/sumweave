@@ -9,6 +9,9 @@
       },
       "creditor": {
         "name": "MyPreferredAisp",
+        "organisation_id": {"identification": "creditor-org", "scheme_name": "BBAN", "issuer": "creditor-issuer"},
+        "private_id": {"identification": "creditor-private", "scheme_name": "BBAN", "issuer": "private-issuer"},
+        "contact_details": {"email_address": "creditor@example.test", "phone_number": ""},
         "postal_address": {
           "address_line": ["Creditor address"],
           "address_type": "Business",
@@ -22,14 +25,17 @@
           "town_name": "Helsinki"
         }
       },
-      "creditor_account": {"iban": "FI0455231152453547"},
+      "creditor_account": {"iban": "FI0455231152453547", "other": {"identification": "creditor-other", "scheme_name": "BBAN", "issuer": "creditor-account-issuer"}},
       "creditor_agent": {
         "bic_fi": "NDEAFIHH",
-        "clearing_system_member_id": {"clearing_system_id": "NZNCC", "member_id": 0},
+        "clearing_system_member_id": {"clearing_system_id": "NZNCC", "member_id": "20368"},
         "name": "Nordea"
       },
       "debtor": {
         "name": "Debtor",
+        "organisation_id": {"identification": "debtor-org", "scheme_name": "BBAN", "issuer": "debtor-issuer"},
+        "private_id": {"identification": "debtor-private", "scheme_name": "BBAN", "issuer": "private-issuer"},
+        "contact_details": {"email_address": "debtor@example.test", "phone_number": ""},
         "postal_address": {
           "address_line": ["Debtor address"],
           "address_type": "Residential",
@@ -43,10 +49,10 @@
           "town_name": "Helsinki"
         }
       },
-      "debtor_account": {"iban": "FI0455231152453547"},
+      "debtor_account": {"iban": "FI0455231152453547", "other": {"identification": "debtor-other", "scheme_name": "BBAN", "issuer": "debtor-account-issuer"}},
       "debtor_agent": {
         "bic_fi": "NDEAFIHH",
-        "clearing_system_member_id": {"clearing_system_id": "NZNCC", "member_id": 0},
+        "clearing_system_member_id": {"clearing_system_id": "NZNCC", "member_id": "20368"},
         "name": "Nordea"
       },
       "bank_transaction_code": {
@@ -66,8 +72,8 @@
         "RF07850352502356628678117",
         "Gift for Alex"
       ],
-      "debtor_account_additional_identification": {"identification": "12345678", "scheme_name": "CPAN"},
-      "creditor_account_additional_identification": {"identification": "12345678", "scheme_name": "BBAN"},
+      "debtor_account_additional_identification": [{"identification": "12345678", "scheme_name": "CPAN", "issuer": "debtor-additional"}],
+      "creditor_account_additional_identification": [{"identification": "12345678", "scheme_name": "BBAN", "issuer": "creditor-additional"}],
       "exchange_rate": {
         "unit_currency": "EUR",
         "exchange_rate": "1.00",
@@ -79,5 +85,5 @@
       "transaction_id": "transaction-docs-1"
     }
   ],
-  "continuation_key": "string"
+  "continuation_key": null
 }

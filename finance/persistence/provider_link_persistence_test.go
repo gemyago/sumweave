@@ -100,14 +100,14 @@ func TestProviderLinkPersistence(t *testing.T) {
 			Where("id = ?", failedSecret.ID).Count(&secretCount).Error)
 		assert.Zero(t, secretCount)
 	})
-	t.Run("persists one compatible linked connection across concurrent finishes", func(t *testing.T) {
+	t.Run("recovers the atomic linked connection snapshot winner across concurrent finishes", func(t *testing.T) {
 		fake := faker.New()
 		store := NewStore(openTestDatabase(t))
 		linkPersistence := NewProviderLinkPersistence(store)
 		now := time.Date(2026, time.August, 10, 18, 0, 0, 0, time.FixedZone("test", 2*60*60))
 		tenantID := "tenant-" + fake.UUID().V4()
 		reference := "reference-" + fake.UUID().V4()
-		makeLinked := func(id string, secretID string) (domain.BankConnection, domain.ConnectionSecret) {
+		makeLinked := func(id string, secretID string) (domain.BankConnection, domain.ConnectionSecret, domain.ProviderSnapshot) {
 			connection := domain.BankConnection{
 				ID:                id,
 				TenantID:          tenantID,
@@ -129,21 +129,35 @@ func TestProviderLinkPersistence(t *testing.T) {
 				CreatedAt: now,
 				UpdatedAt: now,
 			}
-			return connection, secret
+			snapshot := domain.ProviderSnapshot{
+				ID:               "snapshot-" + fake.UUID().V4(),
+				TenantID:         tenantID,
+				ConnectionID:     connection.ID,
+				Subject:          domain.ProviderSnapshotSubjectConnection,
+				Kind:             domain.ProviderSnapshotKindConnection,
+				ProviderObjectID: reference,
+				DocumentJSON:     []byte(`{"finish":"` + connection.ID + `"}`),
+				CapturedAt:       now,
+			}
+			return connection, secret, snapshot
 		}
 
 		start := make(chan struct{})
 		results := make(chan domain.BankConnection, 2)
 		errorsByFinish := make(chan error, 2)
+		candidateSnapshots := make([]domain.ProviderSnapshot, 0, 2)
 		var finishes sync.WaitGroup
 		for range 2 {
-			connection, secret := makeLinked(
+			connection, secret, snapshot := makeLinked(
 				"connection-"+fake.UUID().V4(),
 				"secret-"+fake.UUID().V4(),
 			)
+			candidateSnapshots = append(candidateSnapshots, snapshot)
 			finishes.Go(func() {
 				<-start
-				saved, err := linkPersistence.SaveLinkedConnection(t.Context(), connection, secret)
+				saved, err := linkPersistence.SaveLinkedConnectionWithSnapshot(
+					t.Context(), connection, secret, &snapshot,
+				)
 				if err != nil {
 					errorsByFinish <- err
 					return
@@ -164,14 +178,131 @@ func TestProviderLinkPersistence(t *testing.T) {
 		}
 		require.Len(t, saved, 2)
 		assert.Equal(t, saved[0].ID, saved[1].ID)
+		var connectionCount int64
+		require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).Count(&connectionCount).Error)
+		assert.Equal(t, int64(1), connectionCount)
 		var secretCount int64
 		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).Count(&secretCount).Error)
 		assert.Equal(t, int64(1), secretCount)
+		snapshots, err := NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(
+			t.Context(), saved[0].ID,
+		)
+		require.NoError(t, err)
+		require.Len(t, snapshots, 1)
+		require.NoError(t, snapshots[0].Validate())
+		assert.Equal(t, saved[0].ID, snapshots[0].ConnectionID)
+		assert.Equal(t, candidateSnapshots[0].TenantID, snapshots[0].TenantID)
+		assert.Equal(t, candidateSnapshots[0].ProviderObjectID, snapshots[0].ProviderObjectID)
+		assert.Contains(t, []string{
+			string(candidateSnapshots[0].DocumentJSON),
+			string(candidateSnapshots[1].DocumentJSON),
+		}, string(snapshots[0].DocumentJSON))
 
-		retry, retrySecret := makeLinked("connection-"+fake.UUID().V4(), "secret-"+fake.UUID().V4())
-		retried, err := linkPersistence.SaveLinkedConnection(t.Context(), retry, retrySecret)
+		retry, retrySecret, _ := makeLinked("connection-"+fake.UUID().V4(), "secret-"+fake.UUID().V4())
+		retried, err := linkPersistence.SaveLinkedConnectionWithSnapshot(t.Context(), retry, retrySecret, nil)
 		require.NoError(t, err)
 		assert.Equal(t, saved[0].ID, retried.ID)
+	})
+
+	t.Run("returns the committed snapshot winner after a concurrent insert race", func(t *testing.T) {
+		fake := faker.New()
+		database := openTestDatabase(t)
+		store := NewStore(database)
+		linkPersistence := NewProviderLinkPersistence(store)
+		now := time.Date(2026, time.August, 10, 19, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		tenantID := "tenant-" + fake.UUID().V4()
+		reference := "reference-" + fake.UUID().V4()
+		makeLinked := func(id string, secretID string, documentJSON []byte) (domain.BankConnection, domain.ConnectionSecret, domain.ProviderSnapshot) {
+			connection := domain.BankConnection{
+				ID:                id,
+				TenantID:          tenantID,
+				Provider:          string(domain.ProviderIDPKO),
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+				ProviderReference: reference,
+				SecretID:          secretID,
+				State:             domain.BankConnectionStateActive,
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			}
+			secret := domain.ConnectionSecret{
+				ID:        secretID,
+				Provider:  connection.Provider,
+				Reference: reference,
+				Envelope: credentials.Envelope{
+					KeyVersion: "v1", Algorithm: "test", Nonce: "nonce", Ciphertext: "ciphertext",
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			snapshot := domain.ProviderSnapshot{
+				ID:               "snapshot-" + fake.UUID().V4(),
+				TenantID:         tenantID,
+				ConnectionID:     connection.ID,
+				Subject:          domain.ProviderSnapshotSubjectConnection,
+				Kind:             domain.ProviderSnapshotKindConnection,
+				ProviderObjectID: reference,
+				DocumentJSON:     documentJSON,
+				CapturedAt:       now,
+			}
+			return connection, secret, snapshot
+		}
+		winner, winnerSecret, winnerSnapshot := makeLinked(
+			"connection-"+fake.UUID().V4(),
+			"secret-"+fake.UUID().V4(),
+			[]byte(`{"finish":"winner"}`),
+		)
+		savedWinner, err := linkPersistence.SaveLinkedConnectionWithSnapshot(
+			t.Context(), winner, winnerSecret, &winnerSnapshot,
+		)
+		require.NoError(t, err)
+		loser, loserSecret, loserSnapshot := makeLinked(
+			"connection-"+fake.UUID().V4(),
+			"secret-"+fake.UUID().V4(),
+			[]byte(`{"finish":"loser"}`),
+		)
+
+		callbackName := fmt.Sprintf("hide-committed-winner-%s", fake.UUID().V4())
+		callbackCalled := false
+		require.NoError(t, database.db.Callback().Query().Before("gorm:query").Register(
+			callbackName,
+			func(tx *gorm.DB) {
+				if callbackCalled || tx.Statement.Table != (bankConnectionModel{}).TableName() {
+					return
+				}
+				tx.AddError(gorm.ErrRecordNotFound)
+				callbackCalled = true
+			},
+		))
+		t.Cleanup(func() {
+			require.NoError(t, database.db.Callback().Query().Remove(callbackName))
+		})
+
+		recovered, err := linkPersistence.SaveLinkedConnectionWithSnapshot(
+			t.Context(), loser, loserSecret, &loserSnapshot,
+		)
+		require.NoError(t, err)
+		require.True(t, callbackCalled)
+		assert.Equal(t, savedWinner.ID, recovered.ID)
+		var connectionCount int64
+		require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).Count(&connectionCount).Error)
+		assert.Equal(t, int64(1), connectionCount)
+		var secretCount int64
+		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).Count(&secretCount).Error)
+		assert.Equal(t, int64(1), secretCount)
+		snapshots, err := NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(
+			t.Context(), recovered.ID,
+		)
+		require.NoError(t, err)
+		require.Len(t, snapshots, 1)
+		require.NoError(t, snapshots[0].Validate())
+		assert.Equal(t, winnerSnapshot.ID, snapshots[0].ID)
+		assert.Equal(t, winnerSnapshot.TenantID, snapshots[0].TenantID)
+		assert.Equal(t, recovered.ID, snapshots[0].ConnectionID)
+		assert.Equal(t, winnerSnapshot.Subject, snapshots[0].Subject)
+		assert.Equal(t, winnerSnapshot.Kind, snapshots[0].Kind)
+		assert.Equal(t, winnerSnapshot.ProviderObjectID, snapshots[0].ProviderObjectID)
+		assert.Equal(t, winnerSnapshot.DocumentJSON, snapshots[0].DocumentJSON)
+		assert.True(t, winnerSnapshot.CapturedAt.Equal(snapshots[0].CapturedAt))
 	})
 
 	t.Run("rolls back the secret when linked connection insertion fails", func(t *testing.T) {

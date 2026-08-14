@@ -1,18 +1,20 @@
 {
   "account_id": {
-    "iban": "FI0455231152453547"
+    "iban": "FI0455231152453547",
+    "other": {"identification": "other-account", "scheme_name": "BBAN", "issuer": "Nordea"}
   },
   "all_account_ids": [
     {
       "identification": "123456",
-      "scheme_name": "BBAN"
+      "scheme_name": "BBAN",
+      "issuer": "issuer"
     }
   ],
   "account_servicer": {
     "bic_fi": "NDEAFIHH",
     "clearing_system_member_id": {
       "clearing_system_id": "NZNCC",
-      "member_id": 0
+      "member_id": "20368"
     },
     "name": "Nordea"
   },

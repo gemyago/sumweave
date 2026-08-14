@@ -155,14 +155,12 @@ func (p *ProviderLinkPersistence) SaveLinkedConnection(
 		return saved, nil
 	}
 
-	// A concurrent insert can win after this transaction's initial lookup. The
-	// uniqueness index decides the winner; loading it here makes the finish retry-safe.
-	existing, found, lookupErr := findProviderLinkConnection(p.Store.db.WithContext(ctx), connection)
-	if lookupErr == nil && found {
-		return existing, nil
-	}
+	existing, found, lookupErr := p.recoverProviderLinkConnection(ctx, connection)
 	if lookupErr != nil {
 		return domain.BankConnection{}, lookupErr
+	}
+	if found {
+		return existing, nil
 	}
 	return domain.BankConnection{}, fmt.Errorf("save linked connection: %w", err)
 }
@@ -214,7 +212,24 @@ func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
 	if err == nil {
 		return saved, nil
 	}
+
+	existing, found, lookupErr := p.recoverProviderLinkConnection(ctx, connection)
+	if lookupErr != nil {
+		return domain.BankConnection{}, lookupErr
+	}
+	if found {
+		return existing, nil
+	}
 	return domain.BankConnection{}, fmt.Errorf("save linked connection with snapshot: %w", err)
+}
+
+func (p *ProviderLinkPersistence) recoverProviderLinkConnection(
+	ctx context.Context,
+	connection domain.BankConnection,
+) (domain.BankConnection, bool, error) {
+	// A concurrent insert can win after this transaction's initial lookup. The
+	// uniqueness index decides the winner; loading it here makes the finish retry-safe.
+	return findProviderLinkConnection(p.Store.db.WithContext(ctx), connection)
 }
 
 func findProviderLinkConnection(

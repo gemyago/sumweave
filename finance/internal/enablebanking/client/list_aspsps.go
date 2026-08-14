@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 // ListASPSPsParams contains ASPSP query parameters.
@@ -27,9 +26,5 @@ func (c *Client) ListASPSPs(ctx context.Context, params ListASPSPsParams) (*List
 	if err != nil {
 		return nil, fmt.Errorf("list aspsps failed: %w", err)
 	}
-	response := result.Value
-	for index := range response.ASPSPs {
-		response.ASPSPs[index].Country = strings.TrimSpace(response.ASPSPs[index].Country)
-	}
-	return response, nil
+	return result, nil
 }

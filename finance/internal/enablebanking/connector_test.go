@@ -27,6 +27,7 @@ import (
 func TestConnector(t *testing.T) {
 	fake := faker.New()
 	logger := slog.New(slog.DiscardHandler)
+	stringPointer := func(value string) *string { return &value }
 
 	makeConnection := func() domain.ProviderConnectionRef {
 		return domain.ProviderConnectionRef{
@@ -176,7 +177,7 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, map[string]any{"code": code}, payload)
 
 			_, _ = w.Write([]byte(
-				`{"session_id":"` + sessionID + `","aspsp":{"name":"PKO official","country":"PL"},"status":"active","secret":"` + secretValue + `"}`,
+				`{"session_id":"` + sessionID + `","accounts":[],"aspsp":{"name":"PKO official","country":"PL"},"psu_type":"personal","access":{"valid_until":"2026-08-14T00:00:00Z"},"secret":"` + secretValue + `"}`,
 			))
 		}))
 		defer server.Close()
@@ -209,7 +210,7 @@ func TestConnector(t *testing.T) {
 		assertPayloadJSON(
 			t,
 			result.ConnectionSnapshot.DocumentJSON,
-			`{"session_id":"`+sessionID+`","aspsp":{"name":"PKO official","country":"PL"}}`,
+			`{"session_id":"`+sessionID+`","accounts":[],"aspsp":{"name":"PKO official","country":"PL"},"psu_type":"personal","access":{"valid_until":"2026-08-14T00:00:00Z"}}`,
 		)
 	})
 
@@ -291,7 +292,11 @@ func TestConnector(t *testing.T) {
 			switch request.URL.Path {
 			case "/sessions/" + connection.ProviderReference:
 				_, _ = w.Write([]byte(
-					`{"session_id":"` + connection.ProviderReference + `","accounts":["` + accountID + `"],"accounts_data":[{"uid":"` + accountID + `","name":"Savings","currency":"pln","account_id":{"iban":" PL33333333333333333333333333 "}}]}`,
+					`{"accounts":["` + accountID + `"],"accounts_data":[{"uid":"` + accountID + `","identification_hash":"hash","identification_hashes":[]}]}`,
+				))
+			case "/accounts/" + accountID + "/details":
+				_, _ = w.Write([]byte(
+					`{"name":"Savings","currency":"pln","account_id":{"iban":" PL33333333333333333333333333 "}}`,
 				))
 			case "/accounts/" + accountID + "/balances":
 				_, _ = w.Write([]byte(
@@ -333,7 +338,7 @@ func TestConnector(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		assert.Equal(t, 4, requestCount)
+		assert.Equal(t, 5, requestCount)
 		assert.Equal(t, connection, batch.Connection)
 		assert.Equal(t, requestedWindow, batch.RequestedWindow)
 		require.Len(t, batch.Accounts, 1)
@@ -475,10 +480,10 @@ func TestConnector(t *testing.T) {
 
 		makeAccount := func(name string, details string, product string) enablebankingclient.Account {
 			return enablebankingclient.Account{
-				Name:      name,
-				Details:   details,
-				Product:   product,
-				AccountID: &enablebankingclient.AccountIdentification{IBAN: iban},
+				Name:      stringPointer(name),
+				Details:   stringPointer(details),
+				Product:   stringPointer(product),
+				AccountID: &enablebankingclient.AccountIdentification{IBAN: stringPointer(iban)},
 				Currency:  "pln",
 			}
 		}
@@ -582,9 +587,9 @@ func TestConnector(t *testing.T) {
 			connection,
 			" account-id ",
 			enablebankingclient.Account{
-				Name:      "",
+				Name:      stringPointer(""),
 				Currency:  "pln",
-				AccountID: &enablebankingclient.AccountIdentification{IBAN: " PL123 "},
+				AccountID: &enablebankingclient.AccountIdentification{IBAN: stringPointer(" PL123 ")},
 			},
 		)
 		assert.Equal(t, " account-id ", account.ProviderAccountID)
@@ -595,14 +600,14 @@ func TestConnector(t *testing.T) {
 		current, available, currency := selectBalanceAmounts([]enablebankingclient.AccountBalance{
 			{
 				BalanceType: "closingBooked",
-				BalanceAmount: &enablebankingclient.BalanceAmount{
+				BalanceAmount: enablebankingclient.BalanceAmount{
 					Amount:   "10.50",
 					Currency: "pln",
 				},
 			},
 			{
 				BalanceType: "available",
-				BalanceAmount: &enablebankingclient.BalanceAmount{
+				BalanceAmount: enablebankingclient.BalanceAmount{
 					Amount:   "12.00",
 					Currency: "pln",
 				},
@@ -618,7 +623,7 @@ func TestConnector(t *testing.T) {
 			account,
 			[]enablebankingclient.AccountBalance{{
 				BalanceType: "available",
-				BalanceAmount: &enablebankingclient.BalanceAmount{
+				BalanceAmount: enablebankingclient.BalanceAmount{
 					Amount:   "77.70",
 					Currency: "eur",
 				},
@@ -636,13 +641,13 @@ func TestConnector(t *testing.T) {
 			connection,
 			"account-id",
 			enablebankingclient.AccountTransaction{
-				TransactionAmount: &enablebankingclient.TransactionAmount{
+				TransactionAmount: enablebankingclient.TransactionAmount{
 					Amount:   "12.34",
 					Currency: "pln",
 				},
 				CreditDebitIndicator: "DBIT",
 				Note:                 &fallbackNote,
-				BookingDate:          "2026-07-02",
+				BookingDate:          stringPointer("2026-07-02"),
 			},
 		)
 		assert.Equal(t, "fallback", transaction.Description)
@@ -654,18 +659,22 @@ func TestConnector(t *testing.T) {
 		assert.Equal(
 			t,
 			effectiveAt,
-			transactionTime(enablebankingclient.AccountTransaction{BookingDate: "2026-07-02"}),
+			transactionTime(enablebankingclient.AccountTransaction{BookingDate: stringPointer("2026-07-02")}),
 		)
 		assert.Equal(
 			t,
 			int64(-1234),
 			amountMinor(enablebankingclient.AccountTransaction{
-				TransactionAmount:    &enablebankingclient.TransactionAmount{Amount: "12.34"},
+				TransactionAmount:    enablebankingclient.TransactionAmount{Amount: "12.34"},
 				CreditDebitIndicator: "DBIT",
 			}),
 		)
 
-		assertPayloadJSON(t, mustJSON(&enablebankingclient.SessionResponse{}), `{}`)
+		assertPayloadJSON(
+			t,
+			mustJSON(&enablebankingclient.SessionResponse{}),
+			`{"status":"","accounts":null,"accounts_data":null,"aspsp":{"name":"","country":""},"psu_type":"","psu_id_hash":"","access":{"valid_until":""},"created":""}`,
+		)
 
 		assert.Equal(t, int64(-1234), decimalToMinor("-12.34"))
 		assert.Equal(t, "fallback", firstNonEmpty("", " fallback "))
@@ -790,13 +799,13 @@ func TestConnector(t *testing.T) {
 			t,
 			int64(1234),
 			amountMinor(enablebankingclient.AccountTransaction{
-				TransactionAmount: &enablebankingclient.TransactionAmount{Amount: "12.34"},
+				TransactionAmount: enablebankingclient.TransactionAmount{Amount: "12.34"},
 			}),
 		)
-		assert.Empty(t, balanceAmountValue(nil))
-		assert.Empty(t, balanceAmountCurrency(nil))
-		assert.Empty(t, transactionAmountValue(nil))
-		assert.Empty(t, transactionAmountCurrency(nil))
+		assert.Empty(t, balanceAmountValue(enablebankingclient.BalanceAmount{}))
+		assert.Empty(t, balanceAmountCurrency(enablebankingclient.BalanceAmount{}))
+		assert.Empty(t, transactionAmountValue(enablebankingclient.TransactionAmount{}))
+		assert.Empty(t, transactionAmountCurrency(enablebankingclient.TransactionAmount{}))
 		assert.Equal(t, domain.TransactionStatusPending, normalizeTransactionStatus("pending"))
 		assert.Equal(t, domain.TransactionStatus("custom"), normalizeTransactionStatus(" custom "))
 		assert.Equal(t, int64(0), decimalToMinor("bad"))

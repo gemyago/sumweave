@@ -7,9 +7,9 @@
         "amount": "1.23"
       },
       "balance_type": "CLAV",
-      "last_change_date_time": "2019-08-24T14:15:22Z",
-      "reference_date": "2019-08-24",
-      "last_committed_transaction": "4604aa90f8a8418092d80c3270846f0a"
+      "last_change_date_time": "",
+      "reference_date": "",
+      "last_committed_transaction": ""
     }
   ]
 }

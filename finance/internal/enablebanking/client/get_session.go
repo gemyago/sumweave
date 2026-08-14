@@ -23,7 +23,7 @@ func (c *Client) GetSession(ctx context.Context, params GetSessionParams) (*Sess
 	if err != nil {
 		return nil, fmt.Errorf("get session failed: %w", err)
 	}
-	response := result.Value
+	response := result
 	c.logger.DebugContext(ctx, "fetched enable banking session", slog.Int("accountCount", len(response.AccountsData)))
 	return response, nil
 }

@@ -305,7 +305,7 @@ func (c *Connector) mapBatch(
 	accountItems := sessionAccounts(session)
 	batch := newSyncBatch(request, session, capturedAt, len(accountItems))
 	for _, typedAccount := range accountItems {
-		accountID := typedAccount.UID
+		accountID := optionalString(typedAccount.UID)
 		if accountID == "" {
 			continue
 		}
@@ -389,7 +389,7 @@ func (c *Connector) mapBatch(
 				ProviderObjectID:      normalized.ProviderTransactionID,
 				ProviderAccountID:     accountID,
 				ProviderTransactionID: normalized.ProviderTransactionID,
-				DocumentJSON:          mustJSON(transaction),
+				DocumentJSON:          mustJSON(&transaction),
 				CapturedAt:            capturedAt,
 			})
 		}
@@ -408,11 +408,20 @@ func (c *Connector) mapBatch(
 
 func sessionAccounts(session *enablebankingclient.SessionResponse) []enablebankingclient.Account {
 	if len(session.AccountsData) > 0 {
-		return session.AccountsData
+		accounts := make([]enablebankingclient.Account, 0, len(session.AccountsData))
+		for _, account := range session.AccountsData {
+			accountID := account.UID
+			accounts = append(accounts, enablebankingclient.Account{
+				UID:                  &accountID,
+				IdentificationHash:   account.IdentificationHash,
+				IdentificationHashes: account.IdentificationHashes,
+			})
+		}
+		return accounts
 	}
 	accounts := make([]enablebankingclient.Account, 0, len(session.Accounts))
 	for _, accountID := range session.Accounts {
-		accounts = append(accounts, enablebankingclient.Account{UID: accountID})
+		accounts = append(accounts, enablebankingclient.Account{UID: &accountID})
 	}
 	return accounts
 }
@@ -492,7 +501,7 @@ func (c *Connector) enrichAccountMetadata(
 }
 
 func accountDetailsNeeded(account enablebankingclient.Account) bool {
-	return strings.TrimSpace(account.Name) == "" || strings.TrimSpace(account.Currency) == ""
+	return strings.TrimSpace(optionalString(account.Name)) == "" || strings.TrimSpace(account.Currency) == ""
 }
 
 func mergeAccountDetails(
@@ -502,13 +511,13 @@ func mergeAccountDetails(
 	if details == nil {
 		return account
 	}
-	if strings.TrimSpace(account.Name) == "" {
+	if strings.TrimSpace(optionalString(account.Name)) == "" {
 		account.Name = details.Name
 	}
-	if strings.TrimSpace(account.Details) == "" {
+	if strings.TrimSpace(optionalString(account.Details)) == "" {
 		account.Details = details.Details
 	}
-	if strings.TrimSpace(account.Product) == "" {
+	if strings.TrimSpace(optionalString(account.Product)) == "" {
 		account.Product = details.Product
 	}
 	if strings.TrimSpace(account.Currency) == "" {
@@ -543,7 +552,7 @@ func (c *Connector) fetchTransactionPages(
 		}
 		pages = append(pages, page)
 		transactions = append(transactions, page.Transactions...)
-		continuationKey = page.ContinuationKey
+		continuationKey = page.ContinuationKey.String()
 		if continuationKey == "" {
 			break
 		}
@@ -582,9 +591,14 @@ func normalizeAccount(
 	return domain.ProviderAccountObservation{
 		Connection:        connection,
 		ProviderAccountID: accountID,
-		Name:              firstNonEmpty(account.Name, account.Details, account.Product, accountID),
-		Currency:          strings.ToUpper(account.Currency),
-		IBAN:              accountIBAN(account),
+		Name: firstNonEmpty(
+			optionalString(account.Name),
+			optionalString(account.Details),
+			optionalString(account.Product),
+			accountID,
+		),
+		Currency: strings.ToUpper(account.Currency),
+		IBAN:     accountIBAN(account),
 	}
 }
 
@@ -592,13 +606,10 @@ func accountIBAN(account enablebankingclient.Account) string {
 	if account.AccountID == nil {
 		return ""
 	}
-	return strings.TrimSpace(account.AccountID.IBAN)
+	return strings.TrimSpace(optionalString(account.AccountID.IBAN))
 }
 
-func aspspName(aspsp *enablebankingclient.ASPSP) string {
-	if aspsp == nil {
-		return ""
-	}
+func aspspName(aspsp enablebankingclient.ASPSP) string {
 	return aspsp.Name
 }
 
@@ -631,13 +642,16 @@ func normalizeTransaction(
 	transaction enablebankingclient.AccountTransaction,
 ) domain.ProviderTransactionObservation {
 	effectiveAt := transactionTime(transaction)
-	description := firstNonEmpty(transactionNote(transaction), firstSliceValue(transaction.RemittanceInformation))
+	description := firstNonEmpty(
+		transactionNote(transaction),
+		firstSliceValue(optionalStrings(transaction.RemittanceInformation)),
+	)
 	currency := strings.ToUpper(transactionAmountCurrency(transaction.TransactionAmount))
 	amountMinor := amountMinor(transaction)
 	transactionID := firstNonEmpty(
-		transaction.EntryReference,
-		transaction.TransactionID,
-		providerFingerprint(accountID, mustJSON(transaction)),
+		optionalString(transaction.EntryReference),
+		transaction.TransactionID.String(),
+		providerFingerprint(accountID, mustJSON(&transaction)),
 	)
 	status := normalizeTransactionStatus(transaction.Status)
 	providerOriginal := &domain.ProviderTransactionOriginal{
@@ -703,9 +717,9 @@ func selectBalanceAmounts(items []enablebankingclient.AccountBalance) (int64, *i
 
 func transactionTime(transaction enablebankingclient.AccountTransaction) time.Time {
 	for _, value := range []string{
-		transaction.TransactionDate,
-		transaction.BookingDate,
-		transaction.ValueDate,
+		optionalString(transaction.TransactionDate),
+		optionalString(transaction.BookingDate),
+		optionalString(transaction.ValueDate),
 	} {
 		if value == "" {
 			continue
@@ -728,31 +742,19 @@ func amountMinor(transaction enablebankingclient.AccountTransaction) int64 {
 	return amount
 }
 
-func balanceAmountValue(amount *enablebankingclient.BalanceAmount) string {
-	if amount == nil {
-		return ""
-	}
+func balanceAmountValue(amount enablebankingclient.BalanceAmount) string {
 	return amount.Amount
 }
 
-func balanceAmountCurrency(amount *enablebankingclient.BalanceAmount) string {
-	if amount == nil {
-		return ""
-	}
+func balanceAmountCurrency(amount enablebankingclient.BalanceAmount) string {
 	return amount.Currency
 }
 
-func transactionAmountValue(amount *enablebankingclient.TransactionAmount) string {
-	if amount == nil {
-		return ""
-	}
+func transactionAmountValue(amount enablebankingclient.TransactionAmount) string {
 	return amount.Amount
 }
 
-func transactionAmountCurrency(amount *enablebankingclient.TransactionAmount) string {
-	if amount == nil {
-		return ""
-	}
+func transactionAmountCurrency(amount enablebankingclient.TransactionAmount) string {
 	return amount.Currency
 }
 
@@ -770,6 +772,20 @@ func firstSliceValue(values []string) string {
 		}
 	}
 	return ""
+}
+
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func optionalStrings(values *[]string) []string {
+	if values == nil {
+		return nil
+	}
+	return *values
 }
 
 const enableBankingBookedStatus = "BOOKED"

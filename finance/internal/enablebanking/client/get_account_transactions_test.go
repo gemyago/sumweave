@@ -47,12 +47,42 @@ func TestClient_GetAccountTransactions(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		assert.Equal(t, "string", response.ContinuationKey)
+		assert.True(t, response.ContinuationKey.Present)
+		assert.True(t, response.ContinuationKey.Null)
 		require.Len(t, response.Transactions, 1)
-		assert.Equal(t, "5561990681", response.Transactions[0].EntryReference)
-		assert.Equal(t, "transaction-docs-1", response.Transactions[0].TransactionID)
-		require.NotNil(t, response.Transactions[0].TransactionAmount)
+		require.NotNil(t, response.Transactions[0].EntryReference)
+		assert.Equal(t, "5561990681", *response.Transactions[0].EntryReference)
+		assert.True(t, response.Transactions[0].TransactionID.Present)
+		assert.Equal(t, "transaction-docs-1", response.Transactions[0].TransactionID.String())
 		assert.Equal(t, "EUR", response.Transactions[0].TransactionAmount.Currency)
+		require.NotNil(t, response.Transactions[0].DebtorAccountAdditionalIdentification)
+		assert.True(t, response.Transactions[0].DebtorAccountAdditionalIdentification.Array)
+	})
+
+	t.Run("decodes the documented example object additional identification form", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(
+				`{"transactions":[{"transaction_amount":{"currency":"EUR","amount":"0.00"},"credit_debit_indicator":"CRDT","status":"BOOK","debtor_account_additional_identification":{"identification":"additional","scheme_name":"BBAN"}}],"continuation_key":""}`,
+			))
+		}))
+		defer server.Close()
+
+		client := makeTestClient(server.URL, withSignedAuth(t))
+		response, err := client.GetAccountTransactions(
+			t.Context(),
+			GetAccountTransactionsParams{AccountID: "acc-" + fake.UUID().V4()},
+		)
+
+		require.NoError(t, err)
+		assert.True(t, response.ContinuationKey.Present)
+		assert.False(t, response.ContinuationKey.Null)
+		assert.Empty(t, response.ContinuationKey.Value)
+		require.Len(t, response.Transactions, 1)
+		identifications := response.Transactions[0].DebtorAccountAdditionalIdentification
+		require.NotNil(t, identifications)
+		assert.False(t, identifications.Array)
+		require.Len(t, identifications.Values, 1)
+		assert.Equal(t, "additional", identifications.Values[0].Identification)
 	})
 
 	t.Run("ignores undocumented transaction aliases", func(t *testing.T) {
@@ -70,8 +100,8 @@ func TestClient_GetAccountTransactions(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Len(t, response.Transactions, 1)
-		assert.Empty(t, response.Transactions[0].TransactionID)
-		assert.Nil(t, response.Transactions[0].TransactionAmount)
+		assert.False(t, response.Transactions[0].TransactionID.Present)
+		assert.Equal(t, Amount{}, response.Transactions[0].TransactionAmount)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

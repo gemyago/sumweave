@@ -1,5 +1,8 @@
 {
   "access": {
+    "accounts": [],
+    "balances": false,
+    "transactions": false,
     "valid_until": "2020-12-01T12:00:00.000000+00:00"
   },
   "accounts": [
@@ -8,6 +11,7 @@
   "accounts_data": [
     {
       "identification_hash": "WwpbCiJhY2NvdW50IiwKImFjY291bnRfaWQiLAoiaWJhbiIKXQpd.E8GzhnnsFC7K+4e3YMYYKpyM83Zx6toXrjgcvPP/Lqc=",
+      "identification_hashes": [],
       "uid": "497f6eca-6276-4993-bfeb-53cbbbba6f08"
     }
   ],
@@ -16,7 +20,9 @@
     "name": "Nordea"
   },
   "authorized": "2020-12-01T12:00:00.000000+00:00",
+  "closed": "",
   "created": "2020-12-01T12:00:00.000000+00:00",
   "psu_type": "business",
+  "psu_id_hash": "psu-hash",
   "status": "AUTHORIZED"
 }
