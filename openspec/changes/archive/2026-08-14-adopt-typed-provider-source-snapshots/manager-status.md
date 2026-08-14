@@ -2,11 +2,11 @@
 
 ## Current State
 
-- Phase: submission
+- Phase: complete
 - Task reference: apply `adopt-typed-provider-source-snapshots` in ordered chunks; implementation and final acceptance complete
 - Change slug: adopt-typed-provider-source-snapshots
-- Last updated: post-archive validation passed; submission in progress
-  (2026-08-14)
+- Last updated: archive and submission complete; PR
+  https://github.com/gemyago/sumweave/pull/7 (2026-08-14)
 
 ## Workflow Board
 
@@ -14,7 +14,7 @@
 - Implementation: complete
 - User review/correction: complete
 - Archive: complete
-- Submission: in progress
+- Submission: complete
 
 ## Standard Artifacts
 
@@ -153,5 +153,6 @@
 ## Open Decisions / Blockers
 
 - Archive command completed successfully and promoted the approved finance
-  management and operator UI spec deltas. Post-archive validation passed;
-  submission is in progress.
+  management and operator UI spec deltas. Post-archive validation passed and
+  PR submission completed at
+  https://github.com/gemyago/sumweave/pull/7.
