@@ -2,19 +2,19 @@
 
 ## Current State
 
-- Phase: user-review
+- Phase: submission
 - Task reference: apply `adopt-typed-provider-source-snapshots` in ordered chunks; implementation and final acceptance complete
 - Change slug: adopt-typed-provider-source-snapshots
-- Last updated: whole-change review approved and Mock ASPSP final acceptance
-  passed; ready for user review (2026-08-14)
+- Last updated: post-archive validation passed; submission in progress
+  (2026-08-14)
 
 ## Workflow Board
 
 - Planning: complete
 - Implementation: complete
-- User review/correction: pending
-- Archive: pending
-- Submission: pending
+- User review/correction: complete
+- Archive: complete
+- Submission: in progress
 
 ## Standard Artifacts
 
@@ -152,5 +152,6 @@
 
 ## Open Decisions / Blockers
 
-- None. Final review and Mock ASPSP acceptance passed; the change is ready for
-  user review. Archive and submission remain pending user approval.
+- Archive command completed successfully and promoted the approved finance
+  management and operator UI spec deltas. Post-archive validation passed;
+  submission is in progress.
