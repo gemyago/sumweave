@@ -15,7 +15,7 @@
     formatFinanceMoney,
   } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
-  import FinanceProviderEvidence from '../components/FinanceProviderEvidence.svelte'
+  import FinanceProviderSourceData from '../components/FinanceProviderSourceData.svelte'
   import FinancePager from '../components/FinancePager.svelte'
   import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
 
@@ -282,7 +282,7 @@
                    </div>
                  </div>
                {/if}
-               <FinanceProviderEvidence tenantId={financeShell.selectedTenantId} entityId={account.id} entityLabel="account" scope="account" />
+               <FinanceProviderSourceData tenantId={financeShell.selectedTenantId} entityId={account.id} entityLabel="account" scope="account" />
             </div>
           </div>
         </section>

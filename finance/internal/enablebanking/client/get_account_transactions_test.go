@@ -51,12 +51,8 @@ func TestClient_GetAccountTransactions(t *testing.T) {
 		require.Len(t, response.Transactions, 1)
 		assert.Equal(t, "5561990681", response.Transactions[0].EntryReference)
 		assert.Equal(t, "transaction-docs-1", response.Transactions[0].TransactionID)
-		assert.Equal(t, "string", response.Transactions[0].Description)
-		assert.Equal(t, "RF07850352502356628678117", response.Transactions[0].RemittanceInformationUnstructured)
-		assert.Equal(t, int64(123), response.Transactions[0].AmountMinor)
-		assert.Equal(t, "EUR", response.Transactions[0].Currency)
 		require.NotNil(t, response.Transactions[0].TransactionAmount)
-		assert.Equal(t, response.Transactions[0].TransactionAmount, response.Transactions[0].Amount)
+		assert.Equal(t, "EUR", response.Transactions[0].TransactionAmount.Currency)
 	})
 
 	t.Run("ignores undocumented transaction aliases", func(t *testing.T) {
@@ -76,7 +72,6 @@ func TestClient_GetAccountTransactions(t *testing.T) {
 		require.Len(t, response.Transactions, 1)
 		assert.Empty(t, response.Transactions[0].TransactionID)
 		assert.Nil(t, response.Transactions[0].TransactionAmount)
-		assert.Empty(t, response.Transactions[0].Description)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

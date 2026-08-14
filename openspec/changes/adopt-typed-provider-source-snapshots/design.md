@@ -35,7 +35,7 @@ Constraints include the early-alpha allowance for breaking APIs and storage, fin
 
 ### 1. Typed provider DTOs define the persisted source-document boundary
 
-The Enable Banking client will model the complete documented shapes used by sync: session account resources, account details, balance resources, transaction-page envelopes, transaction items, and all referenced nested schemas. Documentation-derived fixtures will contain the full documented examples available when the change is implemented.
+The Enable Banking client will model the complete documented shapes used by sync: session account resources, account details, balance resources, transaction-page envelopes, transaction items, and all referenced nested schemas. The supported contract is the official API reference at `https://enablebanking.com/docs/api/reference/`, checked on August 14, 2026. Documentation-derived fixtures will contain every field from the applicable endpoint examples and referenced schemas as of that date, and fixture comments will record that source and date.
 
 For any provider response field documented in the supported shape, decode followed by encode MUST retain the same JSON value. Optional scalars and nested resources will use pointers or another explicit optional representation when absence must remain distinguishable from a valid zero, false, or empty value. Tests will compare JSON semantics rather than bytes.
 
@@ -67,6 +67,8 @@ A snapshot contains:
 
 The JSON field may remain internally byte-backed, but domain/API naming will describe it as the snapshot document or data rather than raw payload.
 
+Subject validation will keep attachment identity unambiguous: a `connection` snapshot has no finance account or transaction ID; an `account` snapshot requires a finance account ID and has no finance transaction ID; and a `transaction` snapshot requires both its finance account and finance transaction IDs. Tenant ID, connection ID, subject, kind, provider object ID, document, and capture time are always required. The provider object ID uses the connector's stable provider identity selected for normalization, with the existing deterministic fingerprint only when the provider supplies no stable transaction ID.
+
 Alternative considered: retain `ProviderEvidence` and only correct payload generation. It avoids API renaming but leaves the central semantic ambiguity unresolved and preserves overlapping evidence/raw-payload concepts.
 
 ### 4. Snapshot kind distinguishes document shape from attachment subject
@@ -88,7 +90,7 @@ Alternative considered: use provider endpoint paths as kinds. Generic semantic k
 
 ### 5. One latest-snapshot store replaces duplicate evidence and raw-payload stores
 
-Finance will use a dedicated provider snapshot store rather than extending the legacy broad store. The current snapshot identity will include tenant ID, connection ID, subject, finance subject IDs, kind, and provider object ID. A later capture replaces the current document for the same identity; a different kind creates a different current snapshot.
+Finance will use a dedicated provider snapshot store rather than extending the legacy broad store. The current snapshot identity will include tenant ID, connection ID, subject, the finance account and transaction IDs required by that subject, kind, and provider object ID. A later capture replaces the current document for the same identity; a different kind creates a different current snapshot. Durable sync writes the normalized records, matches, and snapshots in its existing atomic apply transaction. Link completion writes the encrypted secret, durable connection, and final connection snapshot in one transaction. Deleting a bank connection deletes all of its current snapshots through the existing connection-owned metadata cleanup transaction. A pending redirect start may retain a sanitized, re-encoded typed start-response document inside its existing pending-start envelope for retry/diagnostics, but it will not use `ProviderSnapshot`, `RawPayload`, or raw-payload naming and will not be copied into current-snapshot storage.
 
 The existing provider-evidence and raw-payload tables and services will no longer be read or written. Because the product is early alpha, implementation will introduce the finance-owned snapshot table through GORM auto-migrate and require local/test database recreation where stale tables or data matter instead of adding compatibility copying or an application-managed data migration. GORM auto-migrate does not remove retired tables, so operators upgrading a persistent deployed database must execute the explicit post-upgrade cleanup below.
 
@@ -112,7 +114,9 @@ No compatibility routes, aliases, or dual UI wording will remain.
 
 ### 8. Other connectors adopt the common snapshot boundary
 
-Monobank will stop forwarding successful `RawJSON` into finance-domain observations and will encode its existing typed client response/item DTOs. Synthetic will encode its provider-owned typed account and transaction source structures. This change does not add provider fields or endpoints for those connectors; it only makes their output conform to the common snapshot model.
+Monobank will stop forwarding successful `RawJSON` into finance-domain observations and will encode its existing typed client response/item DTOs. Its typed client-info document supplies the connection snapshot, each typed account item supplies the account snapshot, and each typed statement item supplies the transaction snapshot. Because Monobank has no separate balance response document, it does not duplicate the account item under `account_balance`; the account snapshot already retains the provider fields used for normalized balance mapping. Transaction-list response bytes/envelopes are not persisted.
+
+Synthetic will replace generic source maps with provider-owned typed connection, account, and transaction source structures and encode those structures for the corresponding snapshot kinds. It likewise emits no separate `account_balance` snapshot unless it introduces a distinct typed provider balance document; this change does not require such a new document. This change does not add provider fields or endpoints for either connector; it only makes their output conform to the common snapshot model.
 
 ## Risks / Trade-offs
 
@@ -136,6 +140,8 @@ Monobank will stop forwarding successful `RawJSON` into finance-domain observati
 8. Update finance terminology, provider-sync architecture, and affected OpenSpec wording; recreate local/test databases for manual validation.
 9. Copy the operator-action block below into the implementation pull request description and release handoff so deployment cannot be treated as complete without the database cleanup.
 
+Final manual acceptance follows `docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md` against a recreated local database and the configured Mock ASPSP. It must complete PKO linking and a durable sync, confirm the job succeeds, reveal distinct `account` and `account_balance` source-data rows for a linked account, reveal a complete per-item `transaction` snapshot for an imported transaction, and confirm the protected legacy `/evidence` routes are absent. The run evidence belongs in the standard final review artifact.
+
 Rollback is a source revert plus database recreation. The change does not provide a data-preserving downgrade.
 
 ### Required post-upgrade operator action
@@ -150,6 +156,8 @@ DROP TABLE IF EXISTS finance_raw_payloads;
 The operator MUST confirm that both retired tables are absent after executing the statements. No row copying or backup for these tables is required by this change. Fresh databases and recreated local/test databases require no manual drop.
 
 The implementation pull request description and release notes MUST reproduce this operator action, including the exact table names and SQL statements, under a visible **Operator action required after upgrade** heading.
+
+The repository workflow archives a completed change before submission. Therefore the implementation handoff MUST also reproduce this block verbatim in `review-final.md`; the submitting manager then copies it into the pull request description and release handoff rather than leaving the implementation task blocked on a pull request that does not exist yet.
 
 ## Open Questions
 

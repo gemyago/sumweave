@@ -289,31 +289,20 @@ type balanceSnapshotModel struct {
 
 func (balanceSnapshotModel) TableName() string { return "finance_balance_snapshots" }
 
-type rawPayloadModel struct {
-	ID               string    `gorm:"column:id;size:255;not null;primaryKey"`
-	ConnectionID     string    `gorm:"column:connection_id;size:255;not null;index:idx_finance_raw_payloads_connection_id,priority:1;index:idx_finance_raw_payloads_identity,unique,priority:1"`
-	Scope            string    `gorm:"column:scope;size:64;not null;index:idx_finance_raw_payloads_identity,unique,priority:2"`
-	ProviderObjectID string    `gorm:"column:provider_object_id;size:255;not null;default:'';index:idx_finance_raw_payloads_identity,unique,priority:3"`
-	PayloadJSON      string    `gorm:"column:payload_json;type:text;not null"`
-	CapturedAt       time.Time `gorm:"column:captured_at;not null;index:idx_finance_raw_payloads_connection_id,priority:2"`
-}
-
-func (rawPayloadModel) TableName() string { return "finance_raw_payloads" }
-
-type providerEvidenceModel struct {
+type providerSnapshotModel struct {
 	ID                   string    `gorm:"column:id;size:255;not null;primaryKey"`
-	TenantID             string    `gorm:"column:tenant_id;size:255;not null;index:idx_finance_provider_evidence_account_order,priority:1;index:idx_finance_provider_evidence_transaction_order,priority:1;index:idx_finance_provider_evidence_identity,unique,priority:1"`
-	ConnectionID         string    `gorm:"column:connection_id;size:255;not null;index:idx_finance_provider_evidence_identity,unique,priority:2"`
-	FinanceAccountID     string    `gorm:"column:finance_account_id;size:255;not null;default:'';index:idx_finance_provider_evidence_account_order,priority:3;index:idx_finance_provider_evidence_identity,unique,priority:4"`
-	FinanceTransactionID string    `gorm:"column:finance_transaction_id;size:255;not null;default:'';index:idx_finance_provider_evidence_transaction_order,priority:3;index:idx_finance_provider_evidence_identity,unique,priority:5"`
-	Subject              string    `gorm:"column:subject;size:64;not null;default:'';index:idx_finance_provider_evidence_account_order,priority:2;index:idx_finance_provider_evidence_transaction_order,priority:2;index:idx_finance_provider_evidence_identity,unique,priority:3"`
-	Scope                string    `gorm:"column:scope;size:64;not null;index:idx_finance_provider_evidence_identity,unique,priority:6"`
-	ProviderObjectID     string    `gorm:"column:provider_object_id;size:255;not null;default:'';index:idx_finance_provider_evidence_identity,unique,priority:7"`
-	PayloadJSON          string    `gorm:"column:payload_json;type:text;not null"`
-	CapturedAt           time.Time `gorm:"column:captured_at;not null;index:idx_finance_provider_evidence_account_order,priority:3;index:idx_finance_provider_evidence_transaction_order,priority:3"`
+	TenantID             string    `gorm:"column:tenant_id;size:255;not null;index:idx_finance_provider_snapshots_account_order,priority:1;index:idx_finance_provider_snapshots_transaction_order,priority:1;index:idx_finance_provider_snapshots_identity,unique,priority:1"`
+	ConnectionID         string    `gorm:"column:connection_id;size:255;not null;index:idx_finance_provider_snapshots_connection_id,priority:1;index:idx_finance_provider_snapshots_identity,unique,priority:2"`
+	FinanceAccountID     string    `gorm:"column:finance_account_id;size:255;not null;default:'';index:idx_finance_provider_snapshots_account_order,priority:3;index:idx_finance_provider_snapshots_identity,unique,priority:4"`
+	FinanceTransactionID string    `gorm:"column:finance_transaction_id;size:255;not null;default:'';index:idx_finance_provider_snapshots_transaction_order,priority:3;index:idx_finance_provider_snapshots_identity,unique,priority:5"`
+	Subject              string    `gorm:"column:subject;size:64;not null;index:idx_finance_provider_snapshots_account_order,priority:2;index:idx_finance_provider_snapshots_transaction_order,priority:2;index:idx_finance_provider_snapshots_identity,unique,priority:3"`
+	Kind                 string    `gorm:"column:kind;size:64;not null;index:idx_finance_provider_snapshots_identity,unique,priority:6"`
+	ProviderObjectID     string    `gorm:"column:provider_object_id;size:255;not null;index:idx_finance_provider_snapshots_identity,unique,priority:7"`
+	DocumentJSON         string    `gorm:"column:document_json;type:text;not null"`
+	CapturedAt           time.Time `gorm:"column:captured_at;not null;index:idx_finance_provider_snapshots_connection_id,priority:2;index:idx_finance_provider_snapshots_account_order,priority:4;index:idx_finance_provider_snapshots_transaction_order,priority:4"`
 }
 
-func (providerEvidenceModel) TableName() string { return "finance_provider_evidence" }
+func (providerSnapshotModel) TableName() string { return "finance_provider_snapshots" }
 
 type bankConnectionSyncRunModel struct {
 	ID           string    `gorm:"column:id;size:255;not null;primaryKey"`
@@ -993,54 +982,32 @@ func balanceSnapshotFromModel(model balanceSnapshotModel) domain.BalanceSnapshot
 	}
 }
 
-func newRawPayloadModel(payload domain.RawPayload) rawPayloadModel {
-	return rawPayloadModel{
-		ID:               payload.ID,
-		ConnectionID:     payload.ConnectionID,
-		Scope:            string(payload.Scope),
-		ProviderObjectID: payload.ProviderObjectID,
-		PayloadJSON:      string(payload.PayloadJSON),
-		CapturedAt:       payload.CapturedAt,
+func newProviderSnapshotModel(snapshot domain.ProviderSnapshot) providerSnapshotModel {
+	return providerSnapshotModel{
+		ID:                   snapshot.ID,
+		TenantID:             snapshot.TenantID,
+		ConnectionID:         snapshot.ConnectionID,
+		FinanceAccountID:     snapshot.FinanceAccountID,
+		FinanceTransactionID: snapshot.FinanceTransactionID,
+		Subject:              string(snapshot.Subject),
+		Kind:                 string(snapshot.Kind),
+		ProviderObjectID:     snapshot.ProviderObjectID,
+		DocumentJSON:         string(snapshot.DocumentJSON),
+		CapturedAt:           snapshot.CapturedAt,
 	}
 }
 
-func rawPayloadFromModel(model rawPayloadModel) domain.RawPayload {
-	return domain.RawPayload{
-		ID:               model.ID,
-		ConnectionID:     model.ConnectionID,
-		Scope:            domain.RawPayloadScope(model.Scope),
-		ProviderObjectID: model.ProviderObjectID,
-		PayloadJSON:      []byte(model.PayloadJSON),
-		CapturedAt:       model.CapturedAt,
-	}
-}
-
-func newProviderEvidenceModel(evidence domain.ProviderEvidence) providerEvidenceModel {
-	return providerEvidenceModel{
-		ID:                   evidence.ID,
-		TenantID:             evidence.TenantID,
-		ConnectionID:         evidence.ConnectionID,
-		FinanceAccountID:     evidence.FinanceAccountID,
-		FinanceTransactionID: evidence.FinanceTransactionID,
-		Subject:              string(evidence.Subject),
-		Scope:                string(evidence.Scope),
-		ProviderObjectID:     evidence.ProviderObjectID,
-		PayloadJSON:          string(evidence.PayloadJSON),
-		CapturedAt:           evidence.CapturedAt,
-	}
-}
-
-func providerEvidenceFromModel(model providerEvidenceModel) domain.ProviderEvidence {
-	return domain.ProviderEvidence{
+func providerSnapshotFromModel(model providerSnapshotModel) domain.ProviderSnapshot {
+	return domain.ProviderSnapshot{
 		ID:                   model.ID,
 		TenantID:             model.TenantID,
 		ConnectionID:         model.ConnectionID,
 		FinanceAccountID:     model.FinanceAccountID,
 		FinanceTransactionID: model.FinanceTransactionID,
-		Subject:              domain.ProviderEvidenceSubject(model.Subject),
-		Scope:                domain.RawPayloadScope(model.Scope),
+		Subject:              domain.ProviderSnapshotSubject(model.Subject),
+		Kind:                 domain.ProviderSnapshotKind(model.Kind),
 		ProviderObjectID:     model.ProviderObjectID,
-		PayloadJSON:          []byte(model.PayloadJSON),
+		DocumentJSON:         []byte(model.DocumentJSON),
 		CapturedAt:           model.CapturedAt,
 	}
 }

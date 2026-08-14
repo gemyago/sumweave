@@ -33,6 +33,7 @@ packages:
       AuthenticatingService:
       bankConnectionService:
       financeService:
+      providerSnapshotService:
       transferDetailService:
       jobsService:
       userDirectory:

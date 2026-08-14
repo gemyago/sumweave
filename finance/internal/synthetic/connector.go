@@ -57,6 +57,35 @@ type Connector struct {
 	randomIntn func(int) int
 }
 
+type sourceWindow struct {
+	Start time.Time `json:"start"`
+	End   time.Time `json:"end"`
+}
+
+type sourceConnection struct {
+	ProviderReference string `json:"providerReference"`
+}
+
+type sourceAccount struct {
+	GenerationMode    string       `json:"generationMode"`
+	ProviderAccountID string       `json:"providerAccountId"`
+	AccountKey        string       `json:"accountKey"`
+	Window            sourceWindow `json:"window"`
+}
+
+type sourceTransaction struct {
+	GenerationMode        string       `json:"generationMode"`
+	ProviderTransactionID string       `json:"providerTransactionId"`
+	ProviderAccountID     string       `json:"providerAccountId"`
+	AccountKey            string       `json:"accountKey"`
+	Window                sourceWindow `json:"window"`
+	IntervalStart         time.Time    `json:"intervalStart"`
+	Sequence              int          `json:"sequence"`
+	AmountMinor           int64        `json:"amountMinor"`
+	Currency              string       `json:"currency"`
+	Description           string       `json:"description"`
+}
+
 func WithConnectorLogger(logger *slog.Logger) ConnectorOption {
 	return func(connector *Connector) {
 		connector.logger = logger
@@ -133,6 +162,7 @@ func (c *Connector) StartLink(
 		State:             state,
 		ProviderReference: state,
 		AuthorizationURL:  "#/finance/connections/synthetic?state=" + state,
+		PendingDocument:   mustJSON(sourceConnection{ProviderReference: state}),
 	}, nil
 }
 
@@ -158,6 +188,12 @@ func (c *Connector) FinishLink(
 		DisplayName:       ConnectionDisplayName,
 		ProviderReference: providerReference,
 		State:             domain.BankConnectionStateActive,
+		ConnectionSnapshot: &domain.ProviderSnapshotObservation{
+			Kind:             domain.ProviderSnapshotKindConnection,
+			ProviderObjectID: providerReference,
+			DocumentJSON:     mustJSON(sourceConnection{ProviderReference: providerReference}),
+			CapturedAt:       c.now(),
+		},
 	}, nil
 }
 
@@ -204,17 +240,13 @@ func (c *Connector) Fetch(
 		updatedState.CreatedAt = updatedState.UpdatedAt
 	}
 
-	batch, err := c.generateBatch(
+	batch := c.generateBatch(
 		request.Connection,
 		windowKey,
 		generationInstants,
 		mode,
 		&updatedState.Envelope,
 	)
-	if err != nil {
-		return domain.ProviderSyncBatch{}, err
-	}
-
 	if repeatIndex >= 0 {
 		updatedState.Envelope.WindowHistory[repeatIndex].RepeatCount++
 	} else {
@@ -246,7 +278,7 @@ func (c *Connector) generateBatch(
 	generationInstants []time.Time,
 	mode string,
 	envelope *domain.SyntheticProviderStateEnvelope,
-) (domain.ProviderSyncBatch, error) {
+) domain.ProviderSyncBatch {
 	batch := domain.ProviderSyncBatch{
 		Connection:      connection,
 		RequestedWindow: domain.ProviderSyncWindow(windowKey),
@@ -261,22 +293,15 @@ func (c *Connector) generateBatch(
 			Name:              configuredAccount.Name,
 			Currency:          configuredAccount.Currency,
 		})
-		accountPayload, err := payloadJSON(map[string]any{
-			"provider":          string(domain.ProviderIDSynthetic),
-			"generationMode":    mode,
-			"providerAccountId": providerAccountID,
-			"accountKey":        configuredAccount.Key,
-			"window":            windowPayload(windowKey),
-		})
-		if err != nil {
-			return domain.ProviderSyncBatch{}, err
-		}
-		batch.RawPayloads = append(batch.RawPayloads, domain.ProviderRawPayloadObservation{
-			Connection:       connection,
-			Scope:            domain.RawPayloadScopeAccount,
-			ProviderObjectID: providerAccountID,
-			PayloadJSON:      accountPayload,
-			CapturedAt:       c.now(),
+		batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
+			Kind:              domain.ProviderSnapshotKindAccount,
+			ProviderObjectID:  providerAccountID,
+			ProviderAccountID: providerAccountID,
+			DocumentJSON: mustJSON(sourceAccount{
+				GenerationMode: mode, ProviderAccountID: providerAccountID,
+				AccountKey: configuredAccount.Key, Window: sourceWindowFromKey(windowKey),
+			}),
+			CapturedAt: c.now(),
 		})
 
 		for _, instant := range generationInstants {
@@ -288,7 +313,7 @@ func (c *Connector) generateBatch(
 			}
 			for range transactionsForInterval {
 				sequence := nextSequence(&sequenceCounters, configuredAccount.Key, instant)
-				transaction, payload, makeTransactionErr := c.makeTransaction(
+				transaction, source := c.makeTransaction(
 					connection,
 					windowKey,
 					mode,
@@ -297,11 +322,15 @@ func (c *Connector) generateBatch(
 					instant,
 					sequence,
 				)
-				if makeTransactionErr != nil {
-					return domain.ProviderSyncBatch{}, makeTransactionErr
-				}
 				batch.Transactions = append(batch.Transactions, transaction)
-				batch.RawPayloads = append(batch.RawPayloads, payload)
+				batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
+					Kind:                  domain.ProviderSnapshotKindTransaction,
+					ProviderObjectID:      transaction.ProviderTransactionID,
+					ProviderAccountID:     transaction.ProviderAccountID,
+					ProviderTransactionID: transaction.ProviderTransactionID,
+					DocumentJSON:          mustJSON(source),
+					CapturedAt:            c.now(),
+				})
 				accountTotals[providerAccountID] += transaction.AmountMinor
 			}
 		}
@@ -316,7 +345,7 @@ func (c *Connector) generateBatch(
 		})
 	}
 	envelope.SequenceCounters = sequenceCounters
-	return batch, nil
+	return batch
 }
 
 func (c *Connector) makeTransaction(
@@ -327,7 +356,7 @@ func (c *Connector) makeTransaction(
 	providerAccountID string,
 	intervalStart time.Time,
 	sequence int,
-) (domain.ProviderTransactionObservation, domain.ProviderRawPayloadObservation, error) {
+) (domain.ProviderTransactionObservation, sourceTransaction) {
 	intervalEnd := intervalStart.Add(syntheticWindowStep)
 	if windowKey.End.Before(intervalEnd) {
 		intervalEnd = windowKey.End
@@ -377,30 +406,13 @@ func (c *Connector) makeTransaction(
 		),
 		ProviderOriginal: providerOriginal,
 	}
-	payload, err := payloadJSON(map[string]any{
-		"provider":              string(domain.ProviderIDSynthetic),
-		"generationMode":        mode,
-		"window":                windowPayload(windowKey),
-		"providerTransactionId": providerTransactionID,
-		"providerAccountId":     providerAccountID,
-		"accountKey":            configuredAccount.Key,
-		"intervalStart":         intervalStart.Format(time.RFC3339Nano),
-		"sequence":              sequence,
-		"amountMinor":           amountMinor,
-		"currency":              configuredAccount.Currency,
-		"description":           description,
-	})
-	if err != nil {
-		return domain.ProviderTransactionObservation{}, domain.ProviderRawPayloadObservation{}, err
+	return transaction, sourceTransaction{
+		GenerationMode: mode, ProviderTransactionID: providerTransactionID,
+		ProviderAccountID: providerAccountID, AccountKey: configuredAccount.Key,
+		Window: sourceWindowFromKey(windowKey), IntervalStart: intervalStart,
+		Sequence: sequence, AmountMinor: amountMinor, Currency: configuredAccount.Currency,
+		Description: description,
 	}
-	transaction.RawPayloadJSON = payload
-	return transaction, domain.ProviderRawPayloadObservation{
-		Connection:       connection,
-		Scope:            domain.RawPayloadScopeTransaction,
-		ProviderObjectID: providerTransactionID,
-		PayloadJSON:      payload,
-		CapturedAt:       c.now(),
-	}, nil
 }
 
 func (c *Connector) randomBounded(bound int) int {
@@ -485,19 +497,26 @@ func sanitizeIDPart(value string) string {
 	return trimmed
 }
 
-func windowPayload(windowKey domain.SyntheticWindowKey) map[string]string {
-	return map[string]string{
-		"start": windowKey.Start.Format(time.RFC3339Nano),
-		"end":   windowKey.End.Format(time.RFC3339Nano),
-	}
+func sourceWindowFromKey(windowKey domain.SyntheticWindowKey) sourceWindow {
+	return sourceWindow{Start: windowKey.Start, End: windowKey.End}
 }
 
-func payloadJSON(payload any) ([]byte, error) {
-	payloadJSON, err := json.Marshal(payload)
+func mustJSON(value any) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return []byte("{}")
+	}
+	return encoded
+}
+
+// payloadJSON remains for callers that need bounded synthetic serialization;
+// connector source documents are constructed only from the typed source types above.
+func payloadJSON(value any) ([]byte, error) {
+	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, fmt.Errorf("marshal synthetic payload: %w", err)
 	}
-	return payloadJSON, nil
+	return encoded, nil
 }
 
 func cloneEnvelope(envelope domain.SyntheticProviderStateEnvelope) domain.SyntheticProviderStateEnvelope {

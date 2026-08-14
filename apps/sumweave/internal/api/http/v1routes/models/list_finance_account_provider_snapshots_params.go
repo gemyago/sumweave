@@ -13,8 +13,8 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-// ListFinanceTransactionProviderEvidenceParams - Parameters for the listFinanceTransactionProviderEvidence operation.
-type ListFinanceTransactionProviderEvidenceParams struct { 
+// ListFinanceAccountProviderSnapshotsParams - Parameters for the listFinanceAccountProviderSnapshots operation.
+type ListFinanceAccountProviderSnapshotsParams struct { 
 	TenantID string `json:"tenantId"`
-	TransactionID string `json:"transactionId"`
+	AccountID string `json:"accountId"`
 }

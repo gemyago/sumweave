@@ -486,10 +486,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence:
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots:
     get:
-      summary: List current finance account provider evidence metadata
-      operationId: listFinanceAccountProviderEvidence
+      summary: List current finance account provider snapshot metadata
+      operationId: listFinanceAccountProviderSnapshots
       tags: [finance]
       parameters:
         - in: path
@@ -502,11 +502,11 @@ paths:
           schema: { type: string }
       responses:
         '200':
-          description: Current provider evidence metadata for a finance account
+          description: Current provider snapshot metadata for a finance account
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FinanceProviderEvidenceListResponse"
+                $ref: "#/components/schemas/FinanceProviderSnapshotListResponse"
         default:
           description: unexpected error
           content:
@@ -559,10 +559,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}:
+  /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}:
     get:
-      summary: Get sanitized finance account provider evidence
-      operationId: getFinanceAccountProviderEvidence
+      summary: Get sanitized finance account provider snapshot
+      operationId: getFinanceAccountProviderSnapshot
       tags: [finance]
       parameters:
         - in: path
@@ -574,16 +574,16 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: evidenceId
+          name: snapshotId
           required: true
           schema: { type: string }
       responses:
         '200':
-          description: Sanitized provider evidence for a finance account
+          description: Sanitized provider snapshot for a finance account
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FinanceProviderEvidence"
+                $ref: "#/components/schemas/FinanceProviderSnapshot"
         default:
           description: unexpected error
           content:
@@ -1000,10 +1000,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence:
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots:
     get:
-      summary: List current finance transaction provider evidence metadata
-      operationId: listFinanceTransactionProviderEvidence
+      summary: List current finance transaction provider snapshot metadata
+      operationId: listFinanceTransactionProviderSnapshots
       tags: [finance]
       parameters:
         - in: path
@@ -1016,21 +1016,21 @@ paths:
           schema: { type: string }
       responses:
         '200':
-          description: Current provider evidence metadata for a finance transaction
+          description: Current provider snapshot metadata for a finance transaction
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FinanceProviderEvidenceListResponse"
+                $ref: "#/components/schemas/FinanceProviderSnapshotListResponse"
         default:
           description: unexpected error
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}:
+  /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots/{snapshotId}:
     get:
-      summary: Get sanitized finance transaction provider evidence
-      operationId: getFinanceTransactionProviderEvidence
+      summary: Get sanitized finance transaction provider snapshot
+      operationId: getFinanceTransactionProviderSnapshot
       tags: [finance]
       parameters:
         - in: path
@@ -1042,16 +1042,16 @@ paths:
           required: true
           schema: { type: string }
         - in: path
-          name: evidenceId
+          name: snapshotId
           required: true
           schema: { type: string }
       responses:
         '200':
-          description: Sanitized provider evidence for a finance transaction
+          description: Sanitized provider snapshot for a finance transaction
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FinanceProviderEvidence"
+                $ref: "#/components/schemas/FinanceProviderSnapshot"
         default:
           description: unexpected error
           content:
@@ -1868,27 +1868,27 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/FinanceAccount" }
-    FinanceProviderEvidenceMetadata:
+    FinanceProviderSnapshotMetadata:
       type: object
-      required: [id, scope, providerObjectId, capturedAt]
+      required: [id, kind, providerObjectId, capturedAt]
       properties:
         id: { type: string }
-        scope: { type: string }
+        kind: { type: string, enum: [connection, account, account_balance, transaction] }
         providerObjectId: { type: string }
         capturedAt: { type: string, format: date-time }
-    FinanceProviderEvidenceListResponse:
+    FinanceProviderSnapshotListResponse:
       type: object
       required: [items]
       properties:
         items:
           type: array
-          items: { $ref: "#/components/schemas/FinanceProviderEvidenceMetadata" }
-    FinanceProviderEvidence:
+          items: { $ref: "#/components/schemas/FinanceProviderSnapshotMetadata" }
+    FinanceProviderSnapshot:
       allOf:
-        - $ref: "#/components/schemas/FinanceProviderEvidenceMetadata"
+        - $ref: "#/components/schemas/FinanceProviderSnapshotMetadata"
         - type: object
           properties:
-            payload:
+            data:
               type: object
               additionalProperties: true
     FinanceCategoryCreateRequest:

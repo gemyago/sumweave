@@ -16,6 +16,90 @@ import (
 )
 
 func TestProviderLinkPersistence(t *testing.T) {
+	t.Run("atomically saves final connection snapshots and rolls back an invalid one", func(t *testing.T) {
+		fake := faker.New()
+		store := NewStore(openTestDatabase(t))
+		linkPersistence := NewProviderLinkPersistence(store)
+		now := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
+		//nolint:golines // The atomic-link fixture keeps the coupled identity values together.
+		connection := domain.BankConnection{ID: "connection-" + fake.UUID().V4(), TenantID: "tenant-" + fake.UUID().V4(), Provider: string(domain.ProviderIDPKO), ConnectorID: domain.ProviderConnectorIDEnableBanking, ProviderReference: "reference-" + fake.UUID().V4(), SecretID: "secret-" + fake.UUID().V4(), State: domain.BankConnectionStateActive, CreatedAt: now, UpdatedAt: now}
+		secret := domain.ConnectionSecret{ID: connection.SecretID, Provider: connection.Provider, Reference: connection.ProviderReference, Envelope: credentials.Envelope{KeyVersion: "v1", Algorithm: "test", Nonce: "nonce", Ciphertext: "ciphertext"}, CreatedAt: now, UpdatedAt: now}
+		snapshot := &domain.ProviderSnapshot{ID: "snapshot-" + fake.UUID().V4(), TenantID: connection.TenantID, ConnectionID: connection.ID, Subject: domain.ProviderSnapshotSubjectConnection, Kind: domain.ProviderSnapshotKindConnection, ProviderObjectID: connection.ProviderReference, DocumentJSON: []byte(`{"session":"typed"}`), CapturedAt: now}
+		saved, err := linkPersistence.SaveLinkedConnectionWithSnapshot(t.Context(), connection, secret, snapshot)
+		require.NoError(t, err)
+		items, err := NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(t.Context(), saved.ID)
+		require.NoError(t, err)
+		assert.Equal(t, []domain.ProviderSnapshot{*snapshot}, items)
+		latestSnapshot := *snapshot
+		latestSnapshot.ID = "snapshot-" + fake.UUID().V4()
+		latestSnapshot.DocumentJSON = []byte(`{"session":"updated"}`)
+		latestSnapshot.CapturedAt = now.Add(time.Minute)
+		repeated, err := linkPersistence.SaveLinkedConnectionWithSnapshot(
+			t.Context(), connection, secret, &latestSnapshot,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, saved.ID, repeated.ID)
+		items, err = NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(t.Context(), saved.ID)
+		require.NoError(t, err)
+		expectedLatestSnapshot := latestSnapshot
+		expectedLatestSnapshot.ID = snapshot.ID
+		assert.Equal(t, []domain.ProviderSnapshot{expectedLatestSnapshot}, items)
+
+		connectionWithoutSnapshot := connection
+		connectionWithoutSnapshot.ID = "connection-" + fake.UUID().V4()
+		connectionWithoutSnapshot.ProviderReference = "reference-" + fake.UUID().V4()
+		connectionWithoutSnapshot.SecretID = "secret-" + fake.UUID().V4()
+		secretWithoutSnapshot := secret
+		secretWithoutSnapshot.ID = connectionWithoutSnapshot.SecretID
+		secretWithoutSnapshot.Reference = connectionWithoutSnapshot.ProviderReference
+		savedWithoutSnapshot, err := linkPersistence.SaveLinkedConnectionWithSnapshot(
+			t.Context(), connectionWithoutSnapshot, secretWithoutSnapshot, nil,
+		)
+		require.NoError(t, err)
+		items, err = NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(
+			t.Context(), savedWithoutSnapshot.ID,
+		)
+		require.NoError(t, err)
+		assert.Empty(t, items)
+
+		duplicateSecretConnection := connection
+		duplicateSecretConnection.ID = "connection-" + fake.UUID().V4()
+		duplicateSecretConnection.ProviderReference = "reference-" + fake.UUID().V4()
+		duplicateSecretConnection.SecretID = secret.ID
+		_, err = linkPersistence.SaveLinkedConnectionWithSnapshot(t.Context(), duplicateSecretConnection, secret, nil)
+		require.ErrorContains(t, err, "create connection secret")
+		var duplicateConnectionCount int64
+		require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).
+			Where("id = ?", duplicateSecretConnection.ID).Count(&duplicateConnectionCount).Error)
+		assert.Zero(t, duplicateConnectionCount)
+
+		failedConnection := connection
+		failedConnection.ID = "connection-" + fake.UUID().V4()
+		failedConnection.ProviderReference = "reference-" + fake.UUID().V4()
+		failedConnection.SecretID = "secret-" + fake.UUID().V4()
+		failedSecret := secret
+		failedSecret.ID = failedConnection.SecretID
+		failedSecret.Reference = failedConnection.ProviderReference
+		failedSecret.CreatedAt = time.Time{}
+		failedSecret.UpdatedAt = time.Time{}
+		failedSnapshot := *snapshot
+		failedSnapshot.ID = "snapshot-" + fake.UUID().V4()
+		failedSnapshot.ConnectionID = failedConnection.ID
+		failedSnapshot.ProviderObjectID = failedConnection.ProviderReference
+		failedSnapshot.DocumentJSON = []byte("not-json")
+		_, err = linkPersistence.SaveLinkedConnectionWithSnapshot(
+			t.Context(), failedConnection, failedSecret, &failedSnapshot,
+		)
+		require.ErrorContains(t, err, "save linked connection provider snapshot")
+		var connectionCount int64
+		require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).
+			Where("id = ?", failedConnection.ID).Count(&connectionCount).Error)
+		assert.Zero(t, connectionCount)
+		var secretCount int64
+		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).
+			Where("id = ?", failedSecret.ID).Count(&secretCount).Error)
+		assert.Zero(t, secretCount)
+	})
 	t.Run("persists one compatible linked connection across concurrent finishes", func(t *testing.T) {
 		fake := faker.New()
 		store := NewStore(openTestDatabase(t))
@@ -366,14 +450,13 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.ErrorIs(t, err, providers.ErrPendingStartNotFound)
 	})
 
-	t.Run("delegates bank connection and payload operations", func(t *testing.T) {
+	t.Run("delegates bank connection operations", func(t *testing.T) {
 		store := NewStore(openTestDatabase(t))
 		persistence := NewProviderLinkPersistence(store)
 		fake := faker.New()
 
 		tenantID := "tenant-" + fake.UUID().V4()
 		connectionID := "connection-" + fake.UUID().V4()
-		rawPayloadID := "payload-" + fake.UUID().V4()
 		observedAt := time.Now().UTC()
 
 		savedConnection, err := persistence.SaveBankConnection(t.Context(), domain.BankConnection{
@@ -390,18 +473,6 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, connections, 1)
 		assert.Equal(t, connectionID, connections[0].ID)
-
-		payload := domain.RawPayload{
-			ID:               rawPayloadID,
-			ConnectionID:     connectionID,
-			Scope:            domain.RawPayloadScopeTransaction,
-			ProviderObjectID: "obj-" + fake.UUID().V4(),
-			PayloadJSON:      []byte(`{"scope":"transaction"}`),
-			CapturedAt:       time.Now().UTC(),
-		}
-		savedPayload, err := persistence.SaveRawPayload(t.Context(), payload)
-		require.NoError(t, err)
-		assert.Equal(t, payload.ID, savedPayload.ID)
 	})
 
 	t.Run("renames only connection metadata without replacing concurrent fields", func(t *testing.T) {
@@ -497,7 +568,6 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.NoError(t, database.db.WithContext(t.Context()).Migrator().DropTable(
 			&bankConnectionModel{},
 			&pendingBankConnectionLinkStartModel{},
-			&rawPayloadModel{},
 		))
 		persistence := NewProviderLinkPersistence(NewStore(database))
 
@@ -525,9 +595,6 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.Error(t, err)
 
 		_, err = persistence.ListBankConnections(t.Context(), "tenant-"+fake.UUID().V4())
-		require.Error(t, err)
-
-		_, err = persistence.SaveRawPayload(t.Context(), domain.RawPayload{ID: "missing-payload-" + fake.UUID().V4()})
 		require.Error(t, err)
 	})
 

@@ -82,7 +82,7 @@ func TestConnector(t *testing.T) {
 		}
 	}
 
-	t.Run("fetch generates first-window account balance transaction and raw payload observations", func(t *testing.T) {
+	t.Run("fetch generates first-window account balance transaction and snapshot observations", func(t *testing.T) {
 		fake := faker.New()
 		connection := makeConnection(fake)
 		duplicateName := "wallet-" + fake.Lorem().Word()
@@ -134,7 +134,7 @@ func TestConnector(t *testing.T) {
 		require.Len(t, batch.Balances, 2)
 		assert.GreaterOrEqual(t, len(batch.Transactions), 4)
 		assert.LessOrEqual(t, len(batch.Transactions), 8)
-		require.Len(t, batch.RawPayloads, len(batch.Accounts)+len(batch.Transactions))
+		require.Len(t, batch.Snapshots, len(batch.Accounts)+len(batch.Transactions))
 		assert.Equal(t, connection, batch.Accounts[0].Connection)
 		assert.Equal(t, connection, batch.Balances[0].Connection)
 
@@ -162,7 +162,6 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, transaction.AmountMinor, transaction.ProviderOriginal.AmountMinor)
 			assert.Equal(t, transaction.Currency, transaction.ProviderOriginal.Currency)
 			assert.NotEmpty(t, transaction.Fingerprint)
-			assert.Contains(t, string(transaction.RawPayloadJSON), transaction.ProviderTransactionID)
 			assert.Contains(
 				t,
 				transaction.ProviderTransactionID,
@@ -184,6 +183,11 @@ func TestConnector(t *testing.T) {
 				seenIntervalsByAccount[transaction.ProviderAccountID] = map[int]int{}
 			}
 			seenIntervalsByAccount[transaction.ProviderAccountID][intervalIndex]++
+		}
+		for _, snapshot := range batch.Snapshots {
+			if snapshot.Kind == domain.ProviderSnapshotKindTransaction {
+				assert.Contains(t, string(snapshot.DocumentJSON), snapshot.ProviderTransactionID)
+			}
 		}
 		for _, account := range batch.Accounts {
 			require.Len(t, seenIntervalsByAccount[account.ProviderAccountID], len(generatedInstants))
@@ -440,7 +444,7 @@ func TestConnector(t *testing.T) {
 			Name:     "Stable account",
 			Currency: "USD",
 		}
-		first, _, err := connector.makeTransaction(
+		first, _ := connector.makeTransaction(
 			domain.ProviderConnectionRef{ConnectionID: "stable-connection"},
 			windowKey,
 			"firstWindow",
@@ -449,8 +453,7 @@ func TestConnector(t *testing.T) {
 			windowKey.Start,
 			1,
 		)
-		require.NoError(t, err)
-		second, _, err := connector.makeTransaction(
+		second, _ := connector.makeTransaction(
 			domain.ProviderConnectionRef{ConnectionID: "stable-connection"},
 			windowKey,
 			"firstWindow",
@@ -459,10 +462,9 @@ func TestConnector(t *testing.T) {
 			windowKey.Start,
 			1,
 		)
-		require.NoError(t, err)
 		assert.Equal(t, first.ProviderTransactionID, second.ProviderTransactionID)
 
-		_, err = payloadJSON(make(chan int))
+		_, err := payloadJSON(make(chan int))
 		require.ErrorContains(t, err, "marshal synthetic payload")
 	})
 }

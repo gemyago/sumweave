@@ -4,6 +4,16 @@ Follow preparation steps in [README.md](./README.md) first.
 
 This guide covers the browser flow for PKO linking through Enable Banking sandbox when the configured sandbox ASPSP is `Mock ASPSP`. It also covers how to prepare mock accounts and transactions before authorizing access.
 
+## Before the run: recreate the local database
+
+This acceptance run must produce new snapshots, not inspect data from a prior
+schema. Stop the local services, remove the local application database and its
+SQLite sidecar files under `apps/sumweave/data/`, then run `sumweave db-migrate`
+from `apps/sumweave`. Reseed the first `.local-users` entry if needed, recreate
+the PM2 services from the repository root, and confirm both health endpoints
+before continuing. This early-alpha workflow intentionally performs no data
+migration or compatibility copy.
+
 ## 1. Open the browser
 
 Use the default browser mode unless one of these is true:
@@ -132,13 +142,21 @@ Expected:
 - the job type is `finance.bank_connection_sync`
 - the job reaches `succeeded`
 
-## 8. Optional app checks
+## 8. Verify provider source data and retired routes
 
 After a successful sync, inspect the tenant data in the app:
 
-1. Open `#/finance/accounts` to check linked accounts.
-2. Open `#/finance/transactions` to check synced transactions.
-3. If expected provider data is missing despite a succeeded sync job, capture the connection provider reference, job id, selected tenant, and visible account or transaction counts.
+1. Open a linked account detail and expand **Provider source data**. Confirm
+   distinct `account` and `account_balance` rows, then reveal both documents.
+2. Open one imported transaction detail and reveal its `transaction` source
+   data. Confirm it contains the complete typed transaction item seeded in
+   Mock ASPSP, not a page envelope or raw response bytes.
+3. Using an authenticated API token, request the retired account and transaction
+   `/evidence` list routes. Confirm both return `404`; do not accept redirects
+   or aliases.
+4. If expected provider data is missing despite a succeeded sync job, capture
+   the connection provider reference, job id, selected tenant, and visible
+   account or transaction counts.
 
 ## 9. If anything is wrong, report it
 

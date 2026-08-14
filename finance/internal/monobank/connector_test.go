@@ -119,18 +119,13 @@ func TestConnector(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		require.Len(t, result.RawPayloads, 1)
+		require.NotNil(t, result.ConnectionSnapshot)
 		assert.Equal(t, clientName, result.DisplayName)
 		assert.Empty(t, result.ProviderReference)
 		assert.Equal(t, token, result.Secret)
 		assert.Equal(t, domain.BankConnectionStateActive, result.State)
-		assert.Equal(t, domain.ProviderRawPayloadObservation{
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: clientName,
-			PayloadJSON:      []byte(responseBody),
-			CapturedAt:       capturedAt,
-		}, result.RawPayloads[0])
-		assert.NotContains(t, string(result.RawPayloads[0].PayloadJSON), token)
+		assert.Equal(t, "client-info", result.ConnectionSnapshot.ProviderObjectID)
+		assert.NotContains(t, string(result.ConnectionSnapshot.DocumentJSON), token)
 	})
 
 	t.Run("token link sanitizes upstream errors", func(t *testing.T) {
@@ -150,7 +145,7 @@ func TestConnector(t *testing.T) {
 		assert.NotContains(t, err.Error(), token)
 	})
 
-	t.Run("fetch maps accounts balances transactions raw payloads and requested window", func(t *testing.T) {
+	t.Run("fetch maps accounts balances transactions and requested window", func(t *testing.T) {
 		token := "token-" + fake.UUID().V4()
 		capturedAt := time.Date(2026, time.June, 30, 9, 45, 0, 0, time.UTC)
 		connection := makeConnection()
@@ -245,11 +240,7 @@ func TestConnector(t *testing.T) {
 		require.Len(t, batch.Accounts, 2)
 		require.Len(t, batch.Balances, 2)
 		require.Len(t, batch.Transactions, 3)
-		require.Len(t, batch.RawPayloads, 3)
-		for _, transaction := range batch.Transactions {
-			assert.NotEmpty(t, transaction.RawPayloadJSON)
-			assert.Contains(t, string(transaction.RawPayloadJSON), transaction.ProviderTransactionID)
-		}
+		require.Len(t, batch.Snapshots, 6)
 
 		assert.Equal(t, domain.ProviderAccountObservation{
 			Connection:        connection,
@@ -310,13 +301,6 @@ func TestConnector(t *testing.T) {
 				Description: firstDescription,
 				EffectiveAt: &firstEffectiveAt,
 			},
-			RawPayloadJSON: fmt.Appendf(
-				nil,
-				`{"id":"%s","time":%d,"description":"%s","hold":true,"amount":-5050,"currencyCode":980,"balance":145450}`,
-				firstTransactionID,
-				firstTime.Unix(),
-				firstDescription,
-			),
 		}, batch.Transactions[0])
 		assert.Equal(t, domain.ProviderTransactionObservation{
 			Connection:            connection,
@@ -340,13 +324,6 @@ func TestConnector(t *testing.T) {
 				Description: secondDescription,
 				EffectiveAt: &secondEffectiveAt,
 			},
-			RawPayloadJSON: fmt.Appendf(
-				nil,
-				`{"id":"%s","time":%d,"description":"%s","amount":250000,"currencyCode":980,"balance":395450}`,
-				secondTransactionID,
-				secondTime.Unix(),
-				secondDescription,
-			),
 		}, batch.Transactions[1])
 		assert.Equal(t, domain.ProviderTransactionObservation{
 			Connection:            connection,
@@ -370,39 +347,10 @@ func TestConnector(t *testing.T) {
 				Description: thirdDescription,
 				EffectiveAt: &thirdEffectiveAt,
 			},
-			RawPayloadJSON: fmt.Appendf(
-				nil,
-				`{"id":"%s","time":%d,"description":"%s","amount":-1200,"currencyCode":840,"balance":49300}`,
-				thirdTransactionID,
-				thirdTime.Unix(),
-				thirdDescription,
-			),
 		}, batch.Transactions[2])
 
-		assert.Equal(t, domain.ProviderRawPayloadObservation{
-			Connection:       connection,
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: "client-info",
-			PayloadJSON:      []byte(clientInfoBody),
-			CapturedAt:       capturedAt,
-		}, batch.RawPayloads[0])
-		assert.Equal(t, domain.ProviderRawPayloadObservation{
-			Connection:       connection,
-			Scope:            domain.RawPayloadScopeTransaction,
-			ProviderObjectID: firstAccountID,
-			PayloadJSON:      []byte(firstStatementBody),
-			CapturedAt:       capturedAt,
-		}, batch.RawPayloads[1])
-		assert.Equal(t, domain.ProviderRawPayloadObservation{
-			Connection:       connection,
-			Scope:            domain.RawPayloadScopeTransaction,
-			ProviderObjectID: secondAccountID,
-			PayloadJSON:      []byte(secondStatementBody),
-			CapturedAt:       capturedAt,
-		}, batch.RawPayloads[2])
-
-		for _, payload := range batch.RawPayloads {
-			assert.NotContains(t, string(payload.PayloadJSON), token)
+		for _, snapshot := range batch.Snapshots {
+			assert.NotContains(t, string(snapshot.DocumentJSON), token)
 		}
 		assert.Equal(t, fmt.Sprintf(
 			"/personal/statement/%s/%d/%d",
@@ -458,9 +406,8 @@ func TestConnector(t *testing.T) {
 		stubbedAPI := &stubAPI{
 			clientInfoResponse: &client.GetPersonalClientInfoResponse{
 				ClientInfo: &client.Info{Accounts: []client.InfoAccount{{ID: ""}}},
-				RawJSON:    []byte(`{"accounts":[{"id":""}]}`),
 			},
-			statementResponse: &client.GetPersonalStatementResponse{RawJSON: []byte(`[]`)},
+			statementResponse: &client.GetPersonalStatementResponse{},
 		}
 		connector = NewConnector(
 			Args{},
@@ -523,5 +470,55 @@ func TestConnector(t *testing.T) {
 		)
 		_, err = connector.resolveToken(t.Context(), secret)
 		require.ErrorIs(t, err, resolverErr)
+	})
+
+	t.Run("uses stable connection identity and a fingerprint snapshot fallback", func(t *testing.T) {
+		capturedAt := time.Date(2026, time.August, 14, 14, 0, 0, 0, time.UTC)
+		connection := makeConnection()
+		accountID := "account-" + fake.UUID().V4()
+		statementItem := client.PersonalStatementItem{
+			Time:         capturedAt.Unix(),
+			Description:  "transaction-" + fake.Lorem().Word(),
+			Amount:       -int64(fake.IntBetween(100, 90000)),
+			CurrencyCode: monobankCurrencyUSD,
+		}
+		clientInfo := &client.Info{
+			Name: "client-" + fake.Person().Name(),
+			Accounts: []client.InfoAccount{{
+				ID: accountID, CurrencyCode: monobankCurrencyUSD,
+			}},
+		}
+		connector := NewConnector(
+			Args{BaseURL: "https://example.test"},
+			WithAPI(&stubAPI{
+				clientInfoResponse: &client.GetPersonalClientInfoResponse{ClientInfo: clientInfo},
+				statementResponse: &client.GetPersonalStatementResponse{
+					Items: []client.PersonalStatementItem{statementItem},
+				},
+			}),
+			WithNow(func() time.Time { return capturedAt }),
+			WithSecretTokenResolver(func(context.Context, domain.ConnectionSecret) (string, error) {
+				return "token-" + fake.UUID().V4(), nil
+			}),
+		)
+
+		linked, err := connector.LinkToken(t.Context(), providers.LinkTokenRequest{Token: "token-" + fake.UUID().V4()})
+		require.NoError(t, err)
+		batch, err := connector.Fetch(t.Context(), providers.FetchRequest{
+			Connection: connection,
+			Secret:     makeSecret("reference-" + fake.UUID().V4()),
+			RequestedWindow: domain.ProviderSyncWindow{
+				Start: capturedAt.Add(-time.Hour), End: capturedAt,
+			},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, linked.ConnectionSnapshot)
+		require.Len(t, batch.Transactions, 1)
+		require.Len(t, batch.Snapshots, 3)
+		assert.Equal(t, "client-info", linked.ConnectionSnapshot.ProviderObjectID)
+		assert.Equal(t, "client-info", batch.Snapshots[0].ProviderObjectID)
+		assert.Empty(t, batch.Transactions[0].ProviderTransactionID)
+		assert.Equal(t, batch.Transactions[0].Fingerprint, batch.Snapshots[2].ProviderObjectID)
+		assert.Empty(t, batch.Snapshots[2].ProviderTransactionID)
 	})
 }

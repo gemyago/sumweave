@@ -54,7 +54,7 @@ func TestClient_GetPersonalStatement(t *testing.T) {
 
 		client := makeClient(t, server)
 
-		expected := &GetPersonalStatementResponse{RawJSON: []byte(responseBody)}
+		expected := &GetPersonalStatementResponse{}
 		require.NoError(t, json.Unmarshal([]byte(responseBody), &expected.Items))
 
 		// Act
@@ -85,7 +85,7 @@ func TestClient_GetPersonalStatement(t *testing.T) {
 
 		client := makeClient(t, server)
 
-		expected := &GetPersonalStatementResponse{RawJSON: []byte(responseBody)}
+		expected := &GetPersonalStatementResponse{}
 		require.NoError(t, json.Unmarshal([]byte(responseBody), &expected.Items))
 
 		// Act

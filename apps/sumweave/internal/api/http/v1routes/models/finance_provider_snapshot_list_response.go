@@ -13,6 +13,6 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-type FinanceProviderEvidenceListResponse struct { 
-	Items []*FinanceProviderEvidenceMetadata `json:"items"`
+type FinanceProviderSnapshotListResponse struct { 
+	Items []*FinanceProviderSnapshotMetadata `json:"items"`
 }

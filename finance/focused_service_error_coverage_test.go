@@ -612,27 +612,6 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 		require.ErrorContains(t, err, "apply provider sync result")
 		failingStore.getSyncRunErr = nil
 
-		failingStore.saveRawPayloadErr = errors.New("save raw payload failed")
-		_, err = service.saveLinkedBankConnection(
-			t.Context(),
-			"tenant-1",
-			bankProviderMonobank,
-			domain.ProviderConnectorIDMonobank,
-			ProviderLinkResult{
-				DisplayName:       "display",
-				ProviderReference: "ref-3",
-				Secret:            "secret-3",
-				State:             domain.BankConnectionStateActive,
-				RawPayloads: []ProviderRawPayload{{
-					Scope:            domain.RawPayloadScopeConnection,
-					ProviderObjectID: "payload-1",
-					PayloadJSON:      []byte(`{"ok":true}`),
-				}},
-			},
-		)
-		require.ErrorContains(t, err, "save raw payload")
-		failingStore.saveRawPayloadErr = nil
-
 		connection, err := store.SaveBankConnection(t.Context(), domain.BankConnection{
 			ID:                "root-schedule-connection-1",
 			TenantID:          "tenant-1",

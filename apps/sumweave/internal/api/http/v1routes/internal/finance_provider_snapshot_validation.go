@@ -10,12 +10,12 @@ import (
 // Below is to workaround unused imports.
 var _ = time.Time{}
 
-func NewFinanceProviderEvidenceValidator() FieldValidator[*FinanceProviderEvidence] {
+func NewFinanceProviderSnapshotValidator() FieldValidator[*FinanceProviderSnapshot] {
 	validateID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateScope := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
+	validateKind := NewSimpleFieldValidator[FinanceProviderSnapshotKind](
+		EnsureNonDefault[FinanceProviderSnapshotKind],
 	)
 	validateProviderObjectID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
@@ -23,14 +23,14 @@ func NewFinanceProviderEvidenceValidator() FieldValidator[*FinanceProviderEviden
 	validateCapturedAt := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
-	validatePayload := NewSimpleFieldValidator[map[string]interface{}](
+	validateData := NewSimpleFieldValidator[map[string]interface{}](
 	)
 	
-	return func(bindingCtx *BindingContext, value *FinanceProviderEvidence) {
+	return func(bindingCtx *BindingContext, value *FinanceProviderSnapshot) {
 		validateID(bindingCtx.Fork("id"), value.ID)
-		validateScope(bindingCtx.Fork("scope"), value.Scope)
+		validateKind(bindingCtx.Fork("kind"), value.Kind)
 		validateProviderObjectID(bindingCtx.Fork("providerObjectId"), value.ProviderObjectID)
 		validateCapturedAt(bindingCtx.Fork("capturedAt"), value.CapturedAt)
-		validatePayload(bindingCtx.Fork("payload"), value.Payload)
+		validateData(bindingCtx.Fork("data"), value.Data)
 	}
 }

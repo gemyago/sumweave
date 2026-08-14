@@ -47,15 +47,14 @@ func TestClient_CreateSession(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, "session-docs-1", response.SessionID)
-		assert.Equal(t, "Nordea", response.DisplayName)
 		assert.Equal(t, "business", response.PSUType)
 		require.NotNil(t, response.Access)
 		assert.Equal(t, "2019-08-24T14:15:22Z", response.Access.ValidUntil)
 		require.Len(t, response.Accounts, 1)
 		assert.Equal(t, "07cc67f4-45d6-494b-adac-09b5cbc7e2b5", response.Accounts[0].UID)
-		assert.Equal(t, "FI0455231152453547", response.Accounts[0].IBAN)
-		assert.Equal(t, "EUR", response.Accounts[0].Currency)
-		assert.Equal(t, []string{"07cc67f4-45d6-494b-adac-09b5cbc7e2b5"}, response.AccountIDs)
+		require.NotNil(t, response.Accounts[0].AccountID)
+		assert.Equal(t, "FI0455231152453547", response.Accounts[0].AccountID.IBAN)
+		assert.Equal(t, "eur", response.Accounts[0].Currency)
 	})
 
 	t.Run("ignores undocumented create session response aliases", func(t *testing.T) {
@@ -73,7 +72,6 @@ func TestClient_CreateSession(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Empty(t, response.SessionID)
-		assert.Empty(t, response.ID)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

@@ -58,10 +58,7 @@ func TestClient_CreateAuth(t *testing.T) {
 			"https://auth.enablebanking.com/ais/start?sessionid=73100c65-c54d-46a1-87d1-aa3effde435a",
 			response.URL,
 		)
-		assert.Equal(t, response.URL, response.AuthorizationURL)
 		assert.Equal(t, "73100c65-c54d-46a1-87d1-aa3effde435a", response.AuthorizationID)
-		assert.Equal(t, response.AuthorizationID, response.ID)
-		assert.Equal(t, response.AuthorizationID, response.ProviderReference)
 		assert.NotEmpty(t, response.PSUIDHash)
 	})
 
@@ -77,9 +74,7 @@ func TestClient_CreateAuth(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Empty(t, response.URL)
-		assert.Empty(t, response.AuthorizationURL)
 		assert.Empty(t, response.AuthorizationID)
-		assert.Empty(t, response.ID)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

@@ -2,20 +2,80 @@
   "transactions": [
     {
       "entry_reference": "5561990681",
+      "merchant_category_code": "5511",
       "transaction_amount": {
         "currency": "EUR",
         "amount": "1.23"
+      },
+      "creditor": {
+        "name": "MyPreferredAisp",
+        "postal_address": {
+          "address_line": ["Creditor address"],
+          "address_type": "Business",
+          "building_number": "4",
+          "country": "FI",
+          "country_sub_division": "Uusimaa",
+          "department": "Department of resources",
+          "post_code": "00123",
+          "street_name": "Vasavagen",
+          "sub_department": "Sub Department of resources",
+          "town_name": "Helsinki"
+        }
+      },
+      "creditor_account": {"iban": "FI0455231152453547"},
+      "creditor_agent": {
+        "bic_fi": "NDEAFIHH",
+        "clearing_system_member_id": {"clearing_system_id": "NZNCC", "member_id": 0},
+        "name": "Nordea"
+      },
+      "debtor": {
+        "name": "Debtor",
+        "postal_address": {
+          "address_line": ["Debtor address"],
+          "address_type": "Residential",
+          "building_number": "8",
+          "country": "FI",
+          "country_sub_division": "Uusimaa",
+          "department": "Debtor department",
+          "post_code": "00124",
+          "street_name": "Mannerheimintie",
+          "sub_department": "Debtor subdepartment",
+          "town_name": "Helsinki"
+        }
+      },
+      "debtor_account": {"iban": "FI0455231152453547"},
+      "debtor_agent": {
+        "bic_fi": "NDEAFIHH",
+        "clearing_system_member_id": {"clearing_system_id": "NZNCC", "member_id": 0},
+        "name": "Nordea"
+      },
+      "bank_transaction_code": {
+        "description": "Utlandsbetalning",
+        "code": "12",
+        "sub_code": "32"
       },
       "credit_debit_indicator": "CRDT",
       "status": "BOOK",
       "booking_date": "2020-01-03",
       "value_date": "2020-01-02",
       "transaction_date": "2020-01-01",
+      "balance_after_transaction": {"currency": "EUR", "amount": "0.00"},
+      "reference_number": "RF07850352502356628678117",
+      "reference_number_schema": "SEBG",
       "remittance_information": [
         "RF07850352502356628678117",
         "Gift for Alex"
       ],
-      "note": "string",
+      "debtor_account_additional_identification": {"identification": "12345678", "scheme_name": "CPAN"},
+      "creditor_account_additional_identification": {"identification": "12345678", "scheme_name": "BBAN"},
+      "exchange_rate": {
+        "unit_currency": "EUR",
+        "exchange_rate": "1.00",
+        "rate_type": "SPOT",
+        "contract_identification": "",
+        "instructed_amount": {"currency": "EUR", "amount": "0.00"}
+      },
+      "note": "",
       "transaction_id": "transaction-docs-1"
     }
   ],

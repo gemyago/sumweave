@@ -61,7 +61,7 @@ func TestClient_GetPersonalClientInfo(t *testing.T) {
 
 		client := makeClient(t, server)
 
-		expected := &GetPersonalClientInfoResponse{ClientInfo: &Info{}, RawJSON: []byte(responseBody)}
+		expected := &GetPersonalClientInfoResponse{ClientInfo: &Info{}}
 		require.NoError(t, json.Unmarshal([]byte(responseBody), expected.ClientInfo))
 
 		// Act
@@ -91,7 +91,6 @@ func TestClient_GetPersonalClientInfo(t *testing.T) {
 
 		expected := &GetPersonalClientInfoResponse{
 			ClientInfo: &Info{},
-			RawJSON:    []byte(responseBody),
 		}
 		require.NoError(t, json.Unmarshal([]byte(responseBody), expected.ClientInfo))
 

@@ -59,15 +59,17 @@ type ProviderTransactionObservation struct {
 	EffectiveAt           time.Time
 	Fingerprint           string
 	ProviderOriginal      *ProviderTransactionOriginal
-	RawPayloadJSON        []byte
 }
 
-type ProviderRawPayloadObservation struct {
-	Connection       ProviderConnectionRef
-	Scope            RawPayloadScope
-	ProviderObjectID string
-	PayloadJSON      []byte
-	CapturedAt       time.Time
+// ProviderSnapshotObservation is a schema-derived provider document awaiting
+// attachment to the normalized finance object created by sync persistence.
+type ProviderSnapshotObservation struct {
+	Kind                  ProviderSnapshotKind
+	ProviderObjectID      string
+	ProviderAccountID     string
+	ProviderTransactionID string
+	DocumentJSON          []byte
+	CapturedAt            time.Time
 }
 
 type ProviderSyncBatch struct {
@@ -76,7 +78,7 @@ type ProviderSyncBatch struct {
 	Accounts        []ProviderAccountObservation
 	Balances        []ProviderBalanceObservation
 	Transactions    []ProviderTransactionObservation
-	RawPayloads     []ProviderRawPayloadObservation
+	Snapshots       []ProviderSnapshotObservation
 }
 
 type ProviderSyncRunStatus string

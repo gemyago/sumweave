@@ -112,6 +112,14 @@ func (s *ProviderWindowSyncStore) ApplySync(
 	now := s.now()
 	return s.persistence.WithTransaction(ctx, func(store WindowSyncApplyStore) error {
 		providerAccounts := providerAccountsByProviderID(snapshot.Accounts)
+		if saveErr := s.saveConnectionSnapshots(
+			ctx,
+			store,
+			diffPlan.Connection,
+			diffPlan.SnapshotObservations,
+		); saveErr != nil {
+			return saveErr
+		}
 		err = s.saveObservedAccounts(
 			ctx,
 			store,
@@ -133,16 +141,17 @@ func (s *ProviderWindowSyncStore) ApplySync(
 		if err != nil {
 			return err
 		}
-		err = s.saveRawPayloads(
+		err = s.saveAccountSnapshots(
 			ctx,
 			store,
+			providerAccounts,
 			diffPlan.Connection,
-			diffPlan.RawPayloadObservations,
+			diffPlan.SnapshotObservations,
 		)
 		if err != nil {
 			return err
 		}
-		return s.saveTransactionWrites(
+		transactions, saveErr := s.saveTransactionWritesWithResults(
 			ctx,
 			store,
 			providerAccounts,
@@ -151,7 +160,52 @@ func (s *ProviderWindowSyncStore) ApplySync(
 			applyPlan.TransactionWrites,
 			now,
 		)
+		if saveErr != nil {
+			return saveErr
+		}
+		return s.saveTransactionSnapshots(
+			ctx,
+			store,
+			providerAccounts,
+			diffPlan.Connection,
+			transactions,
+			diffPlan.SnapshotObservations,
+		)
 	})
+}
+
+func (s *ProviderWindowSyncStore) saveConnectionSnapshots(
+	ctx context.Context,
+	store WindowSyncApplyStore,
+	connection domain.ProviderConnectionRef,
+	observations []domain.ProviderSnapshotObservation,
+) error {
+	for _, observation := range observations {
+		if observation.Kind != domain.ProviderSnapshotKindConnection {
+			continue
+		}
+		bankConnection, err := store.GetBankConnection(ctx, connection.ConnectionID)
+		if err != nil {
+			return fmt.Errorf("get bank connection for provider snapshot: %w", err)
+		}
+		if bankConnection == nil {
+			return fmt.Errorf("bank connection not found for provider snapshot: %s", connection.ConnectionID)
+		}
+		_, err = store.SaveProviderSnapshot(ctx, domain.ProviderSnapshot{
+			ID:               s.idGenerator(),
+			TenantID:         bankConnection.TenantID,
+			ConnectionID:     bankConnection.ID,
+			Subject:          domain.ProviderSnapshotSubjectConnection,
+			Kind:             domain.ProviderSnapshotKindConnection,
+			ProviderObjectID: observation.ProviderObjectID,
+			DocumentJSON:     append([]byte(nil), observation.DocumentJSON...),
+			CapturedAt:       observation.CapturedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("save connection provider snapshot: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *ProviderWindowSyncStore) saveObservedAccounts(
@@ -276,29 +330,48 @@ func (s *ProviderWindowSyncStore) saveBalanceSnapshots(
 	return nil
 }
 
-func (s *ProviderWindowSyncStore) saveRawPayloads(
+func (s *ProviderWindowSyncStore) saveAccountSnapshots(
 	ctx context.Context,
 	store WindowSyncApplyStore,
+	providerAccounts map[string]domain.ConnectionProviderAccount,
 	connection domain.ProviderConnectionRef,
-	observations []domain.ProviderRawPayloadObservation,
+	observations []domain.ProviderSnapshotObservation,
 ) error {
 	for _, observation := range observations {
-		_, err := store.SaveRawPayload(ctx, domain.RawPayload{
+		if observation.Kind != domain.ProviderSnapshotKindAccount &&
+			observation.Kind != domain.ProviderSnapshotKindAccountBalance {
+			continue
+		}
+		providerAccount, err := resolveProviderAccount(providerAccounts, observation.ProviderAccountID)
+		if err != nil {
+			return err
+		}
+		financeAccount, err := store.GetAccount(ctx, providerAccount.FinanceAccountID)
+		if err != nil {
+			return fmt.Errorf("get finance account for provider snapshot: %w", err)
+		}
+		if financeAccount == nil {
+			return fmt.Errorf("finance account not found for provider snapshot: %s", providerAccount.FinanceAccountID)
+		}
+		_, err = store.SaveProviderSnapshot(ctx, domain.ProviderSnapshot{
 			ID:               s.idGenerator(),
+			TenantID:         financeAccount.TenantID,
 			ConnectionID:     connection.ConnectionID,
-			Scope:            observation.Scope,
+			FinanceAccountID: providerAccount.FinanceAccountID,
+			Subject:          domain.ProviderSnapshotSubjectAccount,
+			Kind:             observation.Kind,
 			ProviderObjectID: observation.ProviderObjectID,
-			PayloadJSON:      append([]byte(nil), observation.PayloadJSON...),
+			DocumentJSON:     append([]byte(nil), observation.DocumentJSON...),
 			CapturedAt:       observation.CapturedAt,
 		})
 		if err != nil {
-			return fmt.Errorf("save raw payload: %w", err)
+			return fmt.Errorf("save provider snapshot: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *ProviderWindowSyncStore) saveTransactionWrites(
+func (s *ProviderWindowSyncStore) saveTransactionWritesWithResults(
 	ctx context.Context,
 	store WindowSyncApplyStore,
 	providerAccounts map[string]domain.ConnectionProviderAccount,
@@ -306,15 +379,16 @@ func (s *ProviderWindowSyncStore) saveTransactionWrites(
 	snapshot ExistingWindowSnapshot,
 	writes []ApplyTransactionWrite,
 	now time.Time,
-) error {
+) (map[string]domain.Transaction, error) {
+	savedTransactions := make(map[string]domain.Transaction, len(writes))
 	for _, write := range writes {
 		transaction, err := s.buildTransactionWrite(write, providerAccounts, snapshot, now)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		savedTransaction, err := store.SaveTransaction(ctx, transaction)
 		if err != nil {
-			return fmt.Errorf("save transaction: %w", err)
+			return nil, fmt.Errorf("save transaction: %w", err)
 		}
 		match := s.buildProviderTransactionMatch(
 			connection,
@@ -324,10 +398,67 @@ func (s *ProviderWindowSyncStore) saveTransactionWrites(
 			now,
 		)
 		if _, err = store.SaveProviderTransactionMatch(ctx, match); err != nil {
-			return fmt.Errorf("save provider transaction match: %w", err)
+			return nil, fmt.Errorf("save provider transaction match: %w", err)
+		}
+		savedTransactions[providerSnapshotTransactionKey(
+			write.Action.Observation.ProviderAccountID,
+			providerObservationObjectID(write.Action.Observation),
+		)] = savedTransaction
+	}
+	return savedTransactions, nil
+}
+
+func (s *ProviderWindowSyncStore) saveTransactionSnapshots(
+	ctx context.Context,
+	store WindowSyncApplyStore,
+	providerAccounts map[string]domain.ConnectionProviderAccount,
+	connection domain.ProviderConnectionRef,
+	transactions map[string]domain.Transaction,
+	observations []domain.ProviderSnapshotObservation,
+) error {
+	for _, observation := range observations {
+		if observation.Kind != domain.ProviderSnapshotKindTransaction {
+			continue
+		}
+		providerAccount, err := resolveProviderAccount(providerAccounts, observation.ProviderAccountID)
+		if err != nil {
+			return err
+		}
+		transaction, ok := transactions[providerSnapshotTransactionKey(
+			observation.ProviderAccountID,
+			observation.ProviderObjectID,
+		)]
+		if !ok {
+			continue
+		}
+		_, err = store.SaveProviderSnapshot(ctx, domain.ProviderSnapshot{
+			ID:                   s.idGenerator(),
+			TenantID:             transaction.TenantID,
+			ConnectionID:         connection.ConnectionID,
+			FinanceAccountID:     providerAccount.FinanceAccountID,
+			FinanceTransactionID: transaction.ID,
+			Subject:              domain.ProviderSnapshotSubjectTransaction,
+			Kind:                 domain.ProviderSnapshotKindTransaction,
+			ProviderObjectID:     observation.ProviderObjectID,
+			DocumentJSON:         append([]byte(nil), observation.DocumentJSON...),
+			CapturedAt:           observation.CapturedAt,
+		})
+		if err != nil {
+			return fmt.Errorf("save transaction provider snapshot: %w", err)
 		}
 	}
 	return nil
+}
+
+func providerObservationObjectID(observation domain.ProviderTransactionObservation) string {
+	if observation.ProviderTransactionID != "" {
+		return observation.ProviderTransactionID
+	}
+	return observation.Fingerprint
+}
+
+func providerSnapshotTransactionKey(providerAccountID string, providerObjectID string) string {
+	return providerAccountID + "\x00" + providerObjectID
 }
 
 func (s *ProviderWindowSyncStore) buildObservedProviderAccount(

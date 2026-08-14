@@ -54,7 +54,7 @@ type PendingBankConnectionLinkStart struct {
 type PendingBankConnectionLinkStartResult struct {
 	State            string
 	AuthorizationURL string
-	RawPayloads      []ProviderRawPayloadObservation
+	DocumentJSON     []byte
 }
 
 type BankConnectionSchedule struct {
@@ -93,23 +93,6 @@ type BalanceSnapshot struct {
 	CurrentBalanceMinor   int64
 	AvailableBalanceMinor *int64
 	CapturedAt            time.Time
-}
-
-type RawPayloadScope string
-
-const (
-	RawPayloadScopeConnection  RawPayloadScope = "connection"
-	RawPayloadScopeAccount     RawPayloadScope = "account"
-	RawPayloadScopeTransaction RawPayloadScope = "transaction"
-)
-
-type RawPayload struct {
-	ID               string
-	ConnectionID     string
-	Scope            RawPayloadScope
-	ProviderObjectID string
-	PayloadJSON      []byte
-	CapturedAt       time.Time
 }
 
 type ProviderTransactionMatch struct {

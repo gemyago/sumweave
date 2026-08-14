@@ -2,8 +2,8 @@
 
 Sumweave is a finance-only system. Its product domain is tenant-aware
 financial management: members, accounts, categories and tags, ledger
-transactions and transfers, CSV imports, bank connections and sync, provider
-evidence, balances, reports, and FX.
+transactions and transfers, CSV imports, bank connections and sync, current
+provider snapshots, balances, reports, and FX.
 
 ## Boundaries
 

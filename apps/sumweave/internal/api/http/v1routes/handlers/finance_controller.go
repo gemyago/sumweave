@@ -150,14 +150,14 @@ type FinanceController interface {
 		*FinanceCsvImportAuditResponse,
 	]) http.Handler
 
-	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}
+	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}
 	//
-	// Request type: GetFinanceAccountProviderEvidenceParams,
+	// Request type: GetFinanceAccountProviderSnapshotParams,
 	//
-	// Response type: FinanceProviderEvidence
-	GetFinanceAccountProviderEvidence(HandlerBuilder[
-		*GetFinanceAccountProviderEvidenceParams,
-		*FinanceProviderEvidence,
+	// Response type: FinanceProviderSnapshot
+	GetFinanceAccountProviderSnapshot(HandlerBuilder[
+		*GetFinanceAccountProviderSnapshotParams,
+		*FinanceProviderSnapshot,
 	]) http.Handler
 
 	// GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
@@ -219,14 +219,14 @@ type FinanceController interface {
 		*FinanceTransaction,
 	]) http.Handler
 
-	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}
+	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots/{snapshotId}
 	//
-	// Request type: GetFinanceTransactionProviderEvidenceParams,
+	// Request type: GetFinanceTransactionProviderSnapshotParams,
 	//
-	// Response type: FinanceProviderEvidence
-	GetFinanceTransactionProviderEvidence(HandlerBuilder[
-		*GetFinanceTransactionProviderEvidenceParams,
-		*FinanceProviderEvidence,
+	// Response type: FinanceProviderSnapshot
+	GetFinanceTransactionProviderSnapshot(HandlerBuilder[
+		*GetFinanceTransactionProviderSnapshotParams,
+		*FinanceProviderSnapshot,
 	]) http.Handler
 
 	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner
@@ -267,14 +267,14 @@ type FinanceController interface {
 		*LinkFinanceTransferPairParams,
 	]) http.Handler
 
-	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence
+	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots
 	//
-	// Request type: ListFinanceAccountProviderEvidenceParams,
+	// Request type: ListFinanceAccountProviderSnapshotsParams,
 	//
-	// Response type: FinanceProviderEvidenceListResponse
-	ListFinanceAccountProviderEvidence(HandlerBuilder[
-		*ListFinanceAccountProviderEvidenceParams,
-		*FinanceProviderEvidenceListResponse,
+	// Response type: FinanceProviderSnapshotListResponse
+	ListFinanceAccountProviderSnapshots(HandlerBuilder[
+		*ListFinanceAccountProviderSnapshotsParams,
+		*FinanceProviderSnapshotListResponse,
 	]) http.Handler
 
 	// GET /api/v1/finance/tenants/{tenantId}/accounts
@@ -356,14 +356,14 @@ type FinanceController interface {
 		*FinanceTenantListResponse,
 	]) http.Handler
 
-	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence
+	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots
 	//
-	// Request type: ListFinanceTransactionProviderEvidenceParams,
+	// Request type: ListFinanceTransactionProviderSnapshotsParams,
 	//
-	// Response type: FinanceProviderEvidenceListResponse
-	ListFinanceTransactionProviderEvidence(HandlerBuilder[
-		*ListFinanceTransactionProviderEvidenceParams,
-		*FinanceProviderEvidenceListResponse,
+	// Response type: FinanceProviderSnapshotListResponse
+	ListFinanceTransactionProviderSnapshots(HandlerBuilder[
+		*ListFinanceTransactionProviderSnapshotsParams,
+		*FinanceProviderSnapshotListResponse,
 	]) http.Handler
 
 	// GET /api/v1/finance/tenants/{tenantId}/transactions
@@ -560,7 +560,7 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/account-imports/{importId}
 // 
-// - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}
+// - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 // 
@@ -574,7 +574,7 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}
 // 
-// - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}
+// - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots/{snapshotId}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner
 // 
@@ -584,7 +584,7 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/transactions/transfer-links
 // 
-// - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence
+// - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/accounts
 // 
@@ -602,7 +602,7 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants
 // 
-// - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence
+// - GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/transactions
 // 
@@ -655,19 +655,19 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/finish", controller.FinishFinanceConnectionRedirectLink(builder.FinishFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.GetFinanceAccount(builder.GetFinanceAccount))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/account-imports/{importId}", controller.GetFinanceAccountCsvImportAudit(builder.GetFinanceAccountCsvImportAudit))
-	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}", controller.GetFinanceAccountProviderEvidence(builder.GetFinanceAccountProviderEvidence))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}", controller.GetFinanceAccountProviderSnapshot(builder.GetFinanceAccountProviderSnapshot))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports/{importId}", controller.GetFinanceCsvImportAudit(builder.GetFinanceCsvImportAudit))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/dashboard", controller.GetFinanceDashboard(builder.GetFinanceDashboard))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/fx/diagnostics", controller.GetFinanceFxDiagnostics(builder.GetFinanceFxDiagnostics))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}", controller.GetFinanceSyntheticLinkState(builder.GetFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}", controller.GetFinanceTenant(builder.GetFinanceTenant))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}", controller.GetFinanceTransaction(builder.GetFinanceTransaction))
-	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}", controller.GetFinanceTransactionProviderEvidence(builder.GetFinanceTransactionProviderEvidence))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots/{snapshotId}", controller.GetFinanceTransactionProviderSnapshot(builder.GetFinanceTransactionProviderSnapshot))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner", controller.GetFinanceTransferPartner(builder.GetFinanceTransferPartner))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/hide", controller.HideFinanceAccount(builder.HideFinanceAccount))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-token", controller.LinkFinanceConnectionToken(builder.LinkFinanceConnectionToken))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/transactions/transfer-links", controller.LinkFinanceTransferPair(builder.LinkFinanceTransferPair))
-	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence", controller.ListFinanceAccountProviderEvidence(builder.ListFinanceAccountProviderEvidence))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots", controller.ListFinanceAccountProviderSnapshots(builder.ListFinanceAccountProviderSnapshots))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts", controller.ListFinanceAccounts(builder.ListFinanceAccounts))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/categories", controller.ListFinanceCategories(builder.ListFinanceCategories))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts", controller.ListFinanceConnectionSyncedAccounts(builder.ListFinanceConnectionSyncedAccounts))
@@ -676,7 +676,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/invites", controller.ListFinanceTenantInvites(builder.ListFinanceTenantInvites))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/members", controller.ListFinanceTenantMembers(builder.ListFinanceTenantMembers))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants", controller.ListFinanceTenants(builder.ListFinanceTenants))
-	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence", controller.ListFinanceTransactionProviderEvidence(builder.ListFinanceTransactionProviderEvidence))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots", controller.ListFinanceTransactionProviderSnapshots(builder.ListFinanceTransactionProviderSnapshots))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions", controller.ListFinanceTransactions(builder.ListFinanceTransactions))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-candidates", controller.ListFinanceTransferCandidates(builder.ListFinanceTransferCandidates))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports", controller.ListRecentFinanceCsvImportAudits(builder.ListRecentFinanceCsvImportAudits))

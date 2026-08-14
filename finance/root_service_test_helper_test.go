@@ -171,6 +171,12 @@ func (s *Service) bindServices() {
 		WithCSVImportServiceJobEnqueuer(s.csvImportJobEnqueuer),
 	)
 	if bankSyncStore, ok := s.store.(bankSyncFocusedStore); ok {
+		var snapshotStore providerSnapshotWriter
+		var snapshotDeleter providerSnapshotConnectionDeleter
+		if store, storeOK := s.store.(*persistence.Store); storeOK {
+			snapshotStore = persistence.NewProviderSnapshotStoreFromStore(store)
+			snapshotDeleter = persistence.NewProviderSnapshotStoreFromStore(store)
+		}
 		s.bankSync = NewBankSyncService(
 			bankSyncStore,
 			WithBankSyncServiceNow(s.now),
@@ -180,6 +186,8 @@ func (s *Service) bindServices() {
 			WithBankSyncServiceJobEnqueuer(s.bankSyncJobEnqueuer),
 			WithBankSyncServiceScheduleWriter(s.bankSyncScheduleWriter),
 			WithBankSyncServiceLogger(s.logger),
+			WithBankSyncServiceSnapshotWriter(snapshotStore),
+			WithBankSyncServiceSnapshotDeleter(snapshotDeleter),
 		)
 	}
 }
@@ -735,19 +743,6 @@ func (s *Service) saveLinkedBankConnection(
 	saved, err := syncStore.SaveBankConnection(ctx, connection)
 	if err != nil {
 		return domain.BankConnection{}, errors.New("save bank connection: " + err.Error())
-	}
-	for _, payload := range result.RawPayloads {
-		_, rawErr := syncStore.SaveRawPayload(ctx, domain.RawPayload{
-			ID:               s.newID(),
-			ConnectionID:     saved.ID,
-			Scope:            payload.Scope,
-			ProviderObjectID: payload.ProviderObjectID,
-			PayloadJSON:      payload.PayloadJSON,
-			CapturedAt:       now,
-		})
-		if rawErr != nil {
-			return domain.BankConnection{}, errors.New("save raw payload: " + rawErr.Error())
-		}
 	}
 	return saved, nil
 }

@@ -45,7 +45,7 @@ type connectorClient interface {
 	CreateSession(
 		ctx context.Context,
 		params enablebankingclient.CreateSessionParams,
-	) (*enablebankingclient.SessionResponse, error)
+	) (*enablebankingclient.CreateSessionResponse, error)
 	GetSession(
 		ctx context.Context,
 		params enablebankingclient.GetSessionParams,
@@ -197,22 +197,16 @@ func (c *Connector) StartLink(
 		"enable banking redirect authorization created",
 		slog.String("operation", "redirectStart"),
 	)
-	authorizationURL := response.AuthorizationURL
+	authorizationURL := response.URL
 	if authorizationURL == "" {
 		return providers.StartLinkResult{}, errors.New(
 			"enable banking auth response missing authorization URL",
 		)
 	}
-	providerObjectID := firstNonEmpty(response.ProviderReference, response.ID, "auth")
 	return providers.StartLinkResult{
 		State:            state,
 		AuthorizationURL: authorizationURL,
-		RawPayloads: []domain.ProviderRawPayloadObservation{{
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: providerObjectID,
-			PayloadJSON:      mustJSON(response),
-			CapturedAt:       c.now(),
-		}},
+		PendingDocument:  mustJSON(response),
 	}, nil
 }
 
@@ -237,7 +231,7 @@ func (c *Connector) FinishLink(
 		"enable banking redirect session created",
 		slog.String("operation", "redirectFinish"),
 	)
-	providerReference := firstNonEmpty(response.ProviderReference, response.SessionID, response.ID)
+	providerReference := response.SessionID
 	if providerReference == "" {
 		return providers.LinkResult{}, errors.New(
 			"enable banking session response missing session ID",
@@ -245,31 +239,15 @@ func (c *Connector) FinishLink(
 	}
 	providerObjectID := firstNonEmpty(providerReference, "session")
 	return providers.LinkResult{
-		DisplayName: firstNonEmpty(
-			response.DisplayName,
-			c.aspspName,
-			"Enable Banking",
-		),
+		DisplayName:       firstNonEmpty(aspspName(response.ASPSP), c.aspspName, "Enable Banking"),
 		ProviderReference: providerReference,
-		Secret:            response.Secret,
-		State: domain.BankConnectionState(firstNonEmpty(
-			response.State,
-			string(domain.BankConnectionStateActive),
-		)),
-		RawPayloads: []domain.ProviderRawPayloadObservation{{
-			Scope:            domain.RawPayloadScopeConnection,
+		State:             domain.BankConnectionStateActive,
+		ConnectionSnapshot: &domain.ProviderSnapshotObservation{
+			Kind:             domain.ProviderSnapshotKindConnection,
 			ProviderObjectID: providerObjectID,
-			PayloadJSON: mustJSON(&enablebankingclient.SessionResponse{
-				ID:                response.ID,
-				SessionID:         response.SessionID,
-				ProviderReference: response.ProviderReference,
-				DisplayName:       response.DisplayName,
-				State:             response.State,
-				Access:            response.Access,
-				Accounts:          response.Accounts,
-			}),
-			CapturedAt: c.now(),
-		}},
+			DocumentJSON:     mustJSON(response),
+			CapturedAt:       c.now(),
+		},
 	}, nil
 }
 
@@ -317,16 +295,17 @@ func (c *Connector) fetchOfficial(
 	return c.mapBatch(ctx, request, session)
 }
 
+//nolint:funlen // Account enrichment, balances, and item snapshots stay aligned in one provider mapping flow.
 func (c *Connector) mapBatch(
 	ctx context.Context,
 	request providers.FetchRequest,
 	session *enablebankingclient.SessionResponse,
 ) (domain.ProviderSyncBatch, error) {
 	capturedAt := c.now()
-	accountItems := session.Accounts
+	accountItems := sessionAccounts(session)
 	batch := newSyncBatch(request, session, capturedAt, len(accountItems))
 	for _, typedAccount := range accountItems {
-		accountID := firstNonEmpty(typedAccount.UID, typedAccount.ID)
+		accountID := typedAccount.UID
 		if accountID == "" {
 			continue
 		}
@@ -336,9 +315,8 @@ func (c *Connector) mapBatch(
 			slog.String("connectionId", request.Connection.ConnectionID),
 			slog.String("accountId", accountID),
 		)
-		enrichedAccount, detailsRawPayload, hasDetailsRawPayload, err := c.enrichAccountMetadata(
+		enrichedAccount, accountSnapshot, hasAccountSnapshot, err := c.enrichAccountMetadata(
 			ctx,
-			request.Connection,
 			accountID,
 			typedAccount,
 			capturedAt,
@@ -347,9 +325,17 @@ func (c *Connector) mapBatch(
 			return domain.ProviderSyncBatch{}, err
 		}
 		typedAccount = enrichedAccount
-		if hasDetailsRawPayload {
-			batch.RawPayloads = append(batch.RawPayloads, detailsRawPayload)
+		accountDocument := mustJSON(typedAccount)
+		if hasAccountSnapshot {
+			accountDocument = accountSnapshot.DocumentJSON
 		}
+		batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
+			Kind:              domain.ProviderSnapshotKindAccount,
+			ProviderObjectID:  accountID,
+			ProviderAccountID: accountID,
+			DocumentJSON:      accountDocument,
+			CapturedAt:        capturedAt,
+		})
 		account := normalizeAccount(request.Connection, accountID, typedAccount)
 		batch.Accounts = append(batch.Accounts, account)
 
@@ -372,12 +358,12 @@ func (c *Connector) mapBatch(
 			capturedAt,
 		)
 		batch.Balances = append(batch.Balances, balance)
-		batch.RawPayloads = append(batch.RawPayloads, domain.ProviderRawPayloadObservation{
-			Connection:       request.Connection,
-			Scope:            domain.RawPayloadScopeAccount,
-			ProviderObjectID: accountID,
-			PayloadJSON:      mustJSON(balancesResponse),
-			CapturedAt:       capturedAt,
+		batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
+			Kind:              domain.ProviderSnapshotKindAccountBalance,
+			ProviderObjectID:  accountID,
+			ProviderAccountID: accountID,
+			DocumentJSON:      mustJSON(balancesResponse),
+			CapturedAt:        capturedAt,
 		})
 
 		transactionPages, transactions, err := c.fetchTransactionPages(ctx, request, accountID)
@@ -392,20 +378,20 @@ func (c *Connector) mapBatch(
 			slog.Int("pageCount", len(transactionPages)),
 			slog.Int("transactionCount", len(transactions)),
 		)
-		for _, page := range transactionPages {
-			batch.RawPayloads = append(batch.RawPayloads, domain.ProviderRawPayloadObservation{
-				Connection:       request.Connection,
-				Scope:            domain.RawPayloadScopeTransaction,
-				ProviderObjectID: accountID,
-				PayloadJSON:      mustJSON(page),
-				CapturedAt:       capturedAt,
-			})
-		}
 		for _, transaction := range transactions {
+			normalized := normalizeTransaction(request.Connection, accountID, transaction)
 			batch.Transactions = append(
 				batch.Transactions,
-				normalizeTransaction(request.Connection, accountID, transaction),
+				normalized,
 			)
+			batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
+				Kind:                  domain.ProviderSnapshotKindTransaction,
+				ProviderObjectID:      normalized.ProviderTransactionID,
+				ProviderAccountID:     accountID,
+				ProviderTransactionID: normalized.ProviderTransactionID,
+				DocumentJSON:          mustJSON(transaction),
+				CapturedAt:            capturedAt,
+			})
 		}
 	}
 	c.logger.InfoContext(
@@ -415,9 +401,20 @@ func (c *Connector) mapBatch(
 		slog.Int("accountCount", len(batch.Accounts)),
 		slog.Int("balanceCount", len(batch.Balances)),
 		slog.Int("transactionCount", len(batch.Transactions)),
-		slog.Int("rawPayloadCount", len(batch.RawPayloads)),
+		slog.Int("snapshotCount", len(batch.Snapshots)),
 	)
 	return batch, nil
+}
+
+func sessionAccounts(session *enablebankingclient.SessionResponse) []enablebankingclient.Account {
+	if len(session.AccountsData) > 0 {
+		return session.AccountsData
+	}
+	accounts := make([]enablebankingclient.Account, 0, len(session.Accounts))
+	for _, accountID := range session.Accounts {
+		accounts = append(accounts, enablebankingclient.Account{UID: accountID})
+	}
+	return accounts
 }
 
 func (c *Connector) logLinkFailure(
@@ -459,11 +456,10 @@ func newSyncBatch(
 		Accounts:        make([]domain.ProviderAccountObservation, 0, accountCount),
 		Balances:        make([]domain.ProviderBalanceObservation, 0, accountCount),
 		Transactions:    []domain.ProviderTransactionObservation{},
-		RawPayloads: []domain.ProviderRawPayloadObservation{{
-			Connection:       request.Connection,
-			Scope:            domain.RawPayloadScopeConnection,
+		Snapshots: []domain.ProviderSnapshotObservation{{
+			Kind:             domain.ProviderSnapshotKindConnection,
 			ProviderObjectID: firstNonEmpty(request.Connection.ProviderReference, "session"),
-			PayloadJSON:      mustJSON(session),
+			DocumentJSON:     mustJSON(session),
 			CapturedAt:       capturedAt,
 		}},
 	}
@@ -471,28 +467,27 @@ func newSyncBatch(
 
 func (c *Connector) enrichAccountMetadata(
 	ctx context.Context,
-	connection domain.ProviderConnectionRef,
 	accountID string,
 	account enablebankingclient.Account,
 	capturedAt time.Time,
-) (enablebankingclient.Account, domain.ProviderRawPayloadObservation, bool, error) {
+) (enablebankingclient.Account, domain.ProviderSnapshotObservation, bool, error) {
 	if !accountDetailsNeeded(account) {
-		return account, domain.ProviderRawPayloadObservation{}, false, nil
+		return account, domain.ProviderSnapshotObservation{}, false, nil
 	}
 	details, err := c.api.GetAccountDetails(ctx, enablebankingclient.GetAccountDetailsParams{
 		AccountID: accountID,
 	})
 	if err != nil {
-		return account, domain.ProviderRawPayloadObservation{}, false,
+		return account, domain.ProviderSnapshotObservation{}, false,
 			fmt.Errorf("enable banking get account details: %w", err)
 	}
 	account = mergeAccountDetails(account, details)
-	return account, domain.ProviderRawPayloadObservation{
-		Connection:       connection,
-		Scope:            domain.RawPayloadScopeAccount,
-		ProviderObjectID: accountID,
-		PayloadJSON:      mustJSON(details),
-		CapturedAt:       capturedAt,
+	return account, domain.ProviderSnapshotObservation{
+		Kind:              domain.ProviderSnapshotKindAccount,
+		ProviderObjectID:  accountID,
+		ProviderAccountID: accountID,
+		DocumentJSON:      mustJSON(details),
+		CapturedAt:        capturedAt,
 	}, true, nil
 }
 
@@ -518,9 +513,6 @@ func mergeAccountDetails(
 	}
 	if strings.TrimSpace(account.Currency) == "" {
 		account.Currency = details.Currency
-	}
-	if strings.TrimSpace(account.IBAN) == "" {
-		account.IBAN = details.IBAN
 	}
 	if account.AccountID == nil {
 		account.AccountID = details.AccountID
@@ -592,8 +584,22 @@ func normalizeAccount(
 		ProviderAccountID: accountID,
 		Name:              firstNonEmpty(account.Name, account.Details, account.Product, accountID),
 		Currency:          strings.ToUpper(account.Currency),
-		IBAN:              account.IBAN,
+		IBAN:              accountIBAN(account),
 	}
+}
+
+func accountIBAN(account enablebankingclient.Account) string {
+	if account.AccountID == nil {
+		return ""
+	}
+	return strings.TrimSpace(account.AccountID.IBAN)
+}
+
+func aspspName(aspsp *enablebankingclient.ASPSP) string {
+	if aspsp == nil {
+		return ""
+	}
+	return aspsp.Name
 }
 
 func normalizeBalance(
@@ -625,17 +631,11 @@ func normalizeTransaction(
 	transaction enablebankingclient.AccountTransaction,
 ) domain.ProviderTransactionObservation {
 	effectiveAt := transactionTime(transaction)
-	description := firstNonEmpty(
-		transaction.Description,
-		transaction.RemittanceInformationUnstructured,
-	)
-	currency := strings.ToUpper(firstNonEmpty(
-		transaction.Currency,
-		transactionAmountCurrency(transaction.Amount),
-	))
+	description := firstNonEmpty(transactionNote(transaction), firstSliceValue(transaction.RemittanceInformation))
+	currency := strings.ToUpper(transactionAmountCurrency(transaction.TransactionAmount))
 	amountMinor := amountMinor(transaction)
 	transactionID := firstNonEmpty(
-		transaction.ID,
+		transaction.EntryReference,
 		transaction.TransactionID,
 		providerFingerprint(accountID, mustJSON(transaction)),
 	)
@@ -665,7 +665,6 @@ func normalizeTransaction(
 			effectiveAt,
 		),
 		ProviderOriginal: providerOriginal,
-		RawPayloadJSON:   mustJSON(transaction),
 	}
 }
 
@@ -674,11 +673,8 @@ func selectBalanceAmounts(items []enablebankingclient.AccountBalance) (int64, *i
 	var available *int64
 	currency := ""
 	for _, item := range items {
-		amountMinor := firstNonZeroInt64(
-			item.CurrentBalanceMinor,
-			decimalToMinor(balanceAmountValue(item.BalanceAmount)),
-		)
-		balanceType := strings.ToLower(strings.TrimSpace(item.Type))
+		amountMinor := decimalToMinor(balanceAmountValue(item.BalanceAmount))
+		balanceType := strings.ToLower(strings.TrimSpace(item.BalanceType))
 		switch balanceType {
 		case "interimavailable", balanceAvailable, "availablebalance", "expectedavailable":
 			value := amountMinor
@@ -692,11 +688,7 @@ func selectBalanceAmounts(items []enablebankingclient.AccountBalance) (int64, *i
 		}
 	}
 	if current == nil && len(items) > 0 {
-		fallback := firstNonZeroInt64(
-			items[0].CurrentBalanceMinor,
-			items[0].AvailableBalanceMinor,
-			decimalToMinor(balanceAmountValue(items[0].BalanceAmount)),
-		)
+		fallback := decimalToMinor(balanceAmountValue(items[0].BalanceAmount))
 		current = &fallback
 	}
 	if available == nil && current != nil {
@@ -711,7 +703,7 @@ func selectBalanceAmounts(items []enablebankingclient.AccountBalance) (int64, *i
 
 func transactionTime(transaction enablebankingclient.AccountTransaction) time.Time {
 	for _, value := range []string{
-		transaction.EffectiveAt,
+		transaction.TransactionDate,
 		transaction.BookingDate,
 		transaction.ValueDate,
 	} {
@@ -729,10 +721,7 @@ func transactionTime(transaction enablebankingclient.AccountTransaction) time.Ti
 }
 
 func amountMinor(transaction enablebankingclient.AccountTransaction) int64 {
-	if transaction.AmountMinor != 0 {
-		return transaction.AmountMinor
-	}
-	amount := decimalToMinor(transactionAmountValue(transaction.Amount))
+	amount := decimalToMinor(transactionAmountValue(transaction.TransactionAmount))
 	if amount > 0 && strings.EqualFold(transaction.CreditDebitIndicator, "DBIT") {
 		return -amount
 	}
@@ -765,6 +754,22 @@ func transactionAmountCurrency(amount *enablebankingclient.TransactionAmount) st
 		return ""
 	}
 	return amount.Currency
+}
+
+func transactionNote(transaction enablebankingclient.AccountTransaction) string {
+	if transaction.Note == nil {
+		return ""
+	}
+	return *transaction.Note
+}
+
+func firstSliceValue(values []string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 const enableBankingBookedStatus = "BOOKED"

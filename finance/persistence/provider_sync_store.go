@@ -299,7 +299,7 @@ func (s *Store) SaveConnectionProviderAccount(
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: columnConnectionID}, {Name: columnProviderAccountID}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"finance_account_id",
+				columnFinanceAccountID,
 				columnName,
 				columnCurrency,
 				"iban",
@@ -382,73 +382,6 @@ func (s *Store) DeleteBalanceSnapshots(ctx context.Context, connectionID string)
 		Where("connection_id = ?", strings.TrimSpace(connectionID)).
 		Delete(&balanceSnapshotModel{}).Error; err != nil {
 		return fmt.Errorf("delete balance snapshots: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) SaveRawPayload(
-	ctx context.Context,
-	payload domain.RawPayload,
-) (domain.RawPayload, error) {
-	sanitizedPayload, sanitizeErr := domain.SanitizeProviderEvidenceJSON(payload.PayloadJSON)
-	if sanitizeErr != nil {
-		return domain.RawPayload{}, fmt.Errorf("sanitize raw payload: %w", sanitizeErr)
-	}
-	payload.PayloadJSON = sanitizedPayload
-	model := newRawPayloadModel(payload)
-	if saveErr := s.db.WithContext(ctx).Table(model.TableName()).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: columnConnectionID},
-			{Name: columnScope},
-			{Name: columnProviderObjectID},
-		},
-		DoUpdates: clause.Assignments(map[string]any{
-			columnPayloadJSON: model.PayloadJSON,
-			columnCapturedAt:  model.CapturedAt,
-		}),
-		Where: latestProviderObservationClause(),
-	}).Create(&model).Error; saveErr != nil {
-		return domain.RawPayload{}, fmt.Errorf("save raw payload: %w", saveErr)
-	}
-	var persisted rawPayloadModel
-	if readErr := s.db.WithContext(ctx).Table(model.TableName()).
-		Where(
-			"connection_id = ? AND scope = ? AND provider_object_id = ?",
-			model.ConnectionID,
-			model.Scope,
-			model.ProviderObjectID,
-		).
-		First(&persisted).Error; readErr != nil {
-		return domain.RawPayload{}, fmt.Errorf("read saved raw payload: %w", readErr)
-	}
-	return rawPayloadFromModel(persisted), nil
-}
-
-func (s *Store) ListRawPayloads(
-	ctx context.Context,
-	connectionID string,
-) ([]domain.RawPayload, error) {
-	var models []rawPayloadModel
-	if err := s.db.WithContext(ctx).
-		Table((rawPayloadModel{}).TableName()).
-		Where("connection_id = ?", strings.TrimSpace(connectionID)).
-		Order("captured_at ASC, id ASC").
-		Find(&models).Error; err != nil {
-		return nil, fmt.Errorf("list raw payloads: %w", err)
-	}
-	items := make([]domain.RawPayload, 0, len(models))
-	for _, model := range models {
-		items = append(items, rawPayloadFromModel(model))
-	}
-	return items, nil
-}
-
-func (s *Store) DeleteRawPayloads(ctx context.Context, connectionID string) error {
-	if err := s.db.WithContext(ctx).
-		Table((rawPayloadModel{}).TableName()).
-		Where("connection_id = ?", strings.TrimSpace(connectionID)).
-		Delete(&rawPayloadModel{}).Error; err != nil {
-		return fmt.Errorf("delete raw payloads: %w", err)
 	}
 	return nil
 }

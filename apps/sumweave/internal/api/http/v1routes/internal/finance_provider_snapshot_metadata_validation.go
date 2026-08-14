@@ -10,12 +10,12 @@ import (
 // Below is to workaround unused imports.
 var _ = time.Time{}
 
-func NewFinanceProviderEvidenceMetadataValidator() FieldValidator[*FinanceProviderEvidenceMetadata] {
+func NewFinanceProviderSnapshotMetadataValidator() FieldValidator[*FinanceProviderSnapshotMetadata] {
 	validateID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateScope := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
+	validateKind := NewSimpleFieldValidator[FinanceProviderSnapshotMetadataKind](
+		EnsureNonDefault[FinanceProviderSnapshotMetadataKind],
 	)
 	validateProviderObjectID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
@@ -24,9 +24,9 @@ func NewFinanceProviderEvidenceMetadataValidator() FieldValidator[*FinanceProvid
 		EnsureNonDefault[time.Time],
 	)
 	
-	return func(bindingCtx *BindingContext, value *FinanceProviderEvidenceMetadata) {
+	return func(bindingCtx *BindingContext, value *FinanceProviderSnapshotMetadata) {
 		validateID(bindingCtx.Fork("id"), value.ID)
-		validateScope(bindingCtx.Fork("scope"), value.Scope)
+		validateKind(bindingCtx.Fork("kind"), value.Kind)
 		validateProviderObjectID(bindingCtx.Fork("providerObjectId"), value.ProviderObjectID)
 		validateCapturedAt(bindingCtx.Fork("capturedAt"), value.CapturedAt)
 	}

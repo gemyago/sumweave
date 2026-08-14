@@ -31,15 +31,15 @@ type ProviderTransactionAction struct {
 }
 
 type ProviderDiffPlan struct {
-	Connection             domain.ProviderConnectionRef
-	RequestedWindow        domain.ProviderSyncWindow
-	SnapshotWindow         domain.ProviderSyncWindow
-	AccountObservations    []domain.ProviderAccountObservation
-	BalanceObservations    []domain.ProviderBalanceObservation
-	TransactionActions     []ProviderTransactionAction
-	RawPayloadObservations []domain.ProviderRawPayloadObservation
-	Stats                  domain.ProviderSyncStats
-	Issues                 []domain.ProviderSyncIssue
+	Connection           domain.ProviderConnectionRef
+	RequestedWindow      domain.ProviderSyncWindow
+	SnapshotWindow       domain.ProviderSyncWindow
+	AccountObservations  []domain.ProviderAccountObservation
+	BalanceObservations  []domain.ProviderBalanceObservation
+	TransactionActions   []ProviderTransactionAction
+	SnapshotObservations []domain.ProviderSnapshotObservation
+	Stats                domain.ProviderSyncStats
+	Issues               []domain.ProviderSyncIssue
 }
 
 type DiffPlanner struct{}
@@ -54,12 +54,12 @@ func (p *DiffPlanner) Plan(
 	snapshot ExistingWindowSnapshot,
 ) ProviderDiffPlan {
 	plan := ProviderDiffPlan{
-		Connection:             batch.Connection,
-		RequestedWindow:        batch.RequestedWindow,
-		SnapshotWindow:         snapshot.SnapshotWindow,
-		AccountObservations:    batch.Accounts,
-		BalanceObservations:    batch.Balances,
-		RawPayloadObservations: batch.RawPayloads,
+		Connection:           batch.Connection,
+		RequestedWindow:      batch.RequestedWindow,
+		SnapshotWindow:       snapshot.SnapshotWindow,
+		AccountObservations:  batch.Accounts,
+		BalanceObservations:  batch.Balances,
+		SnapshotObservations: batch.Snapshots,
 		Stats: domain.ProviderSyncStats{
 			ObservedAccounts:     len(batch.Accounts),
 			ObservedTransactions: len(batch.Transactions),

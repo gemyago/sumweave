@@ -250,20 +250,12 @@ func TestWindowSyncExecutor(t *testing.T) {
 					EffectiveAt: &providerOriginalEffectiveAt,
 				},
 			}
-			rawPayload := domain.ProviderRawPayloadObservation{
-				Connection:       request.Connection,
-				Scope:            domain.RawPayloadScopeTransaction,
-				ProviderObjectID: transaction.ProviderTransactionID,
-				PayloadJSON:      []byte(`{"provider":"synthetic"}`),
-				CapturedAt:       capturedAt,
-			}
 			connector := &stubConnector{
 				connectorID: domain.ProviderConnectorIDSynthetic,
 				fetchResult: domain.ProviderSyncBatch{
 					Accounts:     []domain.ProviderAccountObservation{account},
 					Balances:     []domain.ProviderBalanceObservation{balance},
 					Transactions: []domain.ProviderTransactionObservation{transaction},
-					RawPayloads:  []domain.ProviderRawPayloadObservation{rawPayload},
 				},
 			}
 			snapshotWindow := domain.ProviderSyncWindow{
@@ -300,11 +292,9 @@ func TestWindowSyncExecutor(t *testing.T) {
 			require.Len(t, result.Batch.Accounts, 1)
 			require.Len(t, result.Batch.Balances, 1)
 			require.Len(t, result.Batch.Transactions, 1)
-			require.Len(t, result.Batch.RawPayloads, 1)
 			assert.Equal(t, account, result.Batch.Accounts[0])
 			assert.Equal(t, balance, result.Batch.Balances[0])
 			assert.Equal(t, transaction, result.Batch.Transactions[0])
-			assert.Equal(t, rawPayload, result.Batch.RawPayloads[0])
 			assert.Equal(t, []domain.ProviderSyncWindow{request.RequestedWindow}, snapshotPolicy.determineCalls)
 			assert.Equal(t, []domain.ProviderConnectionRef{request.Connection}, store.loadConnections)
 			assert.Equal(t, []domain.ProviderSyncWindow{snapshotWindow}, store.loadCalls)
@@ -335,12 +325,10 @@ func TestWindowSyncExecutor(t *testing.T) {
 			require.Len(t, diffPlan.AccountObservations, 1)
 			require.Len(t, diffPlan.BalanceObservations, 1)
 			require.Len(t, diffPlan.TransactionActions, 1)
-			require.Len(t, diffPlan.RawPayloadObservations, 1)
 			assert.Equal(t, account, diffPlan.AccountObservations[0])
 			assert.Equal(t, balance, diffPlan.BalanceObservations[0])
 			assert.Equal(t, transaction.Fingerprint, diffPlan.TransactionActions[0].Observation.Fingerprint)
 			assert.Equal(t, transaction.ProviderOriginal, diffPlan.TransactionActions[0].Observation.ProviderOriginal)
-			assert.Equal(t, rawPayload, diffPlan.RawPayloadObservations[0])
 		})
 
 		t.Run("returns fetch errors after connector resolution", func(t *testing.T) {

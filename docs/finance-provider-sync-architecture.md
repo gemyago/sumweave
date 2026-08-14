@@ -16,7 +16,10 @@ This document explains the finance provider sync flow at a high level.
 - Diff planner: the pure component that builds the diff plan for one requested sync window.
 - Sync orchestrator: the component that loads the latest sync state, chooses the target window, splits it into chunk windows, and coordinates per-window execution.
 - Window sync executor: the component that executes one requested sync window end to end.
-- Provider-original fields: the last known raw provider values stored next to a transaction.
+- Provider-original fields: the last known provider values stored next to a transaction.
+- Provider snapshot: the latest sanitized, schema-derived provider document for
+  a connection, account, account balance, or transaction. It is not a raw HTTP
+  response and does not provide a history timeline.
 - Sync state: one recorded chunk-attempt state for one connection.
 - Sync state journal: the append-only history of chunk-attempt states for one connection.
 - Latest sync state: the newest appended attempt state loaded to decide the next target window.
@@ -99,7 +102,7 @@ That includes:
 - provider accounts
 - provider balances
 - provider transactions
-- raw provider payloads
+- current provider snapshots
 
 This keeps provider data separate from the user-facing finance ledger.
 
@@ -157,7 +160,7 @@ At a high level, this writes:
 - updated or newly created transactions
 - provider match records
 - account and balance observations
-- raw payload observations
+- current provider snapshots
 - sync run and sync state metadata
 
 ### 10. Sync state is updated
@@ -192,6 +195,8 @@ latest state should affect the next plan.
 ## Design Principles
 
 - Keep provider data separate from ledger data.
+- Persist only typed, sanitized provider snapshots; do not retain successful
+  response bodies.
 - Plan before writing.
 - Prefer explicit matches over clever guesses.
 - Preserve user edits.

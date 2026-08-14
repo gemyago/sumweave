@@ -2,5 +2,5 @@
 
 package internal
 
-// GetFinanceAccountProviderEvidenceParams is request parameters model. The validation for 
+// ListFinanceTransactionProviderSnapshotsParams is request parameters model. The validation for 
 // parameters model is performed at parsing stage.

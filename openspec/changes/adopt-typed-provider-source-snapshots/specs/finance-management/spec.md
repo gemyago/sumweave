@@ -16,7 +16,7 @@ The finance module SHALL retain current, sanitized provider source snapshots rec
 - **AND** an account snapshot and account-balance snapshot for the same provider account MUST coexist without replacing each other
 
 #### Scenario: Latest snapshot replaces only the same snapshot identity
-- **WHEN** a newer snapshot is captured for the same tenant, connection, finance subject, provider object, and snapshot kind
+- **WHEN** a newer snapshot is captured for the same tenant, connection, finance subject, applicable finance account and transaction IDs, provider object, and snapshot kind
 - **THEN** it MUST replace the current document for that exact identity
 - **AND** snapshots with another provider object, finance subject, or kind MUST remain independently readable
 - **AND** the system MUST NOT expose a snapshot history timeline as part of this change
@@ -25,6 +25,17 @@ The finance module SHALL retain current, sanitized provider source snapshots rec
 - **WHEN** a provider transaction is imported or refreshed
 - **THEN** its finance transaction MUST receive a `transaction` snapshot containing the complete supported typed transaction item
 - **AND** transport pagination envelopes and continuation keys MUST NOT replace or stand in for that transaction snapshot
+
+#### Scenario: Snapshot attachment matches its finance subject
+- **WHEN** a provider snapshot is accepted for persistence
+- **THEN** a `connection` subject MUST omit finance account and transaction IDs
+- **AND** an `account` subject MUST identify its finance account and omit a finance transaction ID
+- **AND** a `transaction` subject MUST identify both its finance account and finance transaction
+- **AND** tenant ID, connection ID, subject, kind, provider object ID, document, and capture time MUST be present
+
+#### Scenario: Connection deletion removes its current snapshots
+- **WHEN** a tenant member deletes a bank connection
+- **THEN** every provider snapshot owned by that connection MUST be deleted in the connection-owned metadata cleanup transaction
 
 #### Scenario: Snapshots remain sanitized and tenant-authorized
 - **WHEN** a snapshot is persisted or returned through a protected finance API
@@ -259,6 +270,12 @@ The finance module SHALL implement Enable Banking through complete documented ty
 - **THEN** connector business mapping MUST use typed schema fields only
 - **AND** the snapshot document MUST be encoded from the unchanged typed provider DTO
 - **AND** generated request and response structs MUST NOT expose generic raw maps, raw-message fields, or successful response-body fields for snapshot persistence
+
+#### Scenario: Providers without separate balance documents do not invent them
+- **WHEN** a supported provider reports account identity and balance fields in one typed account item rather than a separate typed balance response
+- **THEN** the connector MUST retain that typed item as the `account` snapshot used to explain both mappings
+- **AND** it MUST NOT duplicate the same document under `account_balance`
+- **AND** `account_balance` MUST remain reserved for a distinct typed provider balance document
 
 #### Scenario: Unsupported or undocumented operations stay out of the generated client surface
 - **WHEN** an Enable Banking endpoint or response shape is not documented by the current official API reference and is not required for the supported PKO workflow

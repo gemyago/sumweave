@@ -167,6 +167,56 @@ func (p *ProviderLinkPersistence) SaveLinkedConnection(
 	return domain.BankConnection{}, fmt.Errorf("save linked connection: %w", err)
 }
 
+// SaveLinkedConnectionWithSnapshot persists the encrypted secret, durable
+// connection, and final typed source snapshot in one database transaction.
+func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
+	ctx context.Context,
+	connection domain.BankConnection,
+	secret domain.ConnectionSecret,
+	snapshot *domain.ProviderSnapshot,
+) (domain.BankConnection, error) {
+	var saved domain.BankConnection
+	err := p.Store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existing, found, lookupErr := findProviderLinkConnection(tx, connection)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		//nolint:nestif // Link persistence keeps the connection, secret, and snapshot transaction together.
+		if found {
+			saved = existing
+		} else {
+			secretModel := newConnectionSecretModel(secret)
+			if secretModel.CreatedAt.IsZero() {
+				secretModel.CreatedAt = p.Store.now()
+			}
+			if secretModel.UpdatedAt.IsZero() {
+				secretModel.UpdatedAt = secretModel.CreatedAt
+			}
+			if createErr := tx.Table(secretModel.TableName()).Create(&secretModel).Error; createErr != nil {
+				return fmt.Errorf("create connection secret: %w", createErr)
+			}
+			connectionModel := newBankConnectionModel(connection)
+			if createErr := tx.Table(connectionModel.TableName()).Create(&connectionModel).Error; createErr != nil {
+				return fmt.Errorf("create bank connection: %w", createErr)
+			}
+			saved = bankConnectionFromModel(connectionModel)
+		}
+		if snapshot == nil {
+			return nil
+		}
+		attached := *snapshot
+		attached.ConnectionID = saved.ID
+		if _, saveErr := (&ProviderSnapshotStore{db: tx}).SaveProviderSnapshot(ctx, attached); saveErr != nil {
+			return fmt.Errorf("save linked connection provider snapshot: %w", saveErr)
+		}
+		return nil
+	})
+	if err == nil {
+		return saved, nil
+	}
+	return domain.BankConnection{}, fmt.Errorf("save linked connection with snapshot: %w", err)
+}
+
 func findProviderLinkConnection(
 	db *gorm.DB,
 	candidate domain.BankConnection,
@@ -225,11 +275,4 @@ func (p *ProviderLinkPersistence) ListBankConnections(
 	tenantID string,
 ) ([]domain.BankConnection, error) {
 	return p.Store.ListBankConnections(ctx, tenantID)
-}
-
-func (p *ProviderLinkPersistence) SaveRawPayload(
-	ctx context.Context,
-	payload domain.RawPayload,
-) (domain.RawPayload, error) {
-	return p.Store.SaveRawPayload(ctx, payload)
 }

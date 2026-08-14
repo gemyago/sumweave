@@ -254,6 +254,7 @@ func newConnectionSecretWriterFixture(
 type connectionStoreFixture struct {
 	mock       *MockConnectionStore
 	saved      []domain.BankConnection
+	snapshots  []*domain.ProviderSnapshot
 	listResult []domain.BankConnection
 	saveErr    error
 }
@@ -262,13 +263,19 @@ func newConnectionStoreFixture(t *testing.T, fixture connectionStoreFixture) *co
 	t.Helper()
 
 	fixture.mock = NewMockConnectionStore(t)
-	saveBankConnectionCall := fixture.mock.EXPECT().SaveLinkedConnection(
+	saveBankConnectionCall := fixture.mock.EXPECT().SaveLinkedConnectionWithSnapshot(
+		testifymock.Anything,
 		testifymock.Anything,
 		testifymock.Anything,
 		testifymock.Anything,
 	)
 	saveBankConnectionCall.RunAndReturn(
-		func(_ context.Context, connection domain.BankConnection, _ domain.ConnectionSecret) (domain.BankConnection, error) {
+		func(
+			_ context.Context,
+			connection domain.BankConnection,
+			_ domain.ConnectionSecret,
+			snapshot *domain.ProviderSnapshot,
+		) (domain.BankConnection, error) {
 			if fixture.saveErr != nil {
 				return domain.BankConnection{}, fixture.saveErr
 			}
@@ -278,6 +285,7 @@ func newConnectionStoreFixture(t *testing.T, fixture connectionStoreFixture) *co
 				}
 			}
 			fixture.saved = append(fixture.saved, connection)
+			fixture.snapshots = append(fixture.snapshots, snapshot)
 			return connection, nil
 		},
 	)
@@ -294,40 +302,12 @@ func hasSameProviderSessionIdentity(existing domain.BankConnection, candidate do
 		candidate.ProviderReference == existing.ProviderReference
 }
 
-type rawPayloadWriterFixture struct {
-	mock    *MockRawPayloadWriter
-	saved   []domain.RawPayload
-	saveErr error
-}
-
-func newRawPayloadWriterFixture(t *testing.T) *rawPayloadWriterFixture {
-	t.Helper()
-
-	fixture := rawPayloadWriterFixture{}
-	fixture.mock = NewMockRawPayloadWriter(t)
-	saveRawPayloadCall := fixture.mock.EXPECT().SaveRawPayload(
-		testifymock.Anything,
-		testifymock.Anything,
-	)
-	saveRawPayloadCall.RunAndReturn(
-		func(_ context.Context, payload domain.RawPayload) (domain.RawPayload, error) {
-			if fixture.saveErr != nil {
-				return domain.RawPayload{}, fixture.saveErr
-			}
-			fixture.saved = append(fixture.saved, payload)
-			return payload, nil
-		},
-	)
-	saveRawPayloadCall.Maybe()
-
-	return &fixture
-}
-
 func TestLinkCoordinator(t *testing.T) {
 	t.Run("validates construction requirements and applies defaults", func(t *testing.T) {
 		t.Run("requires all collaborators", func(t *testing.T) {
 			_, err := NewLinkCoordinator(LinkCoordinatorArgs{})
 			require.ErrorIs(t, err, ErrProviderProfileRegistryRequired)
+			var coordinator *LinkCoordinator
 
 			_, err = NewLinkCoordinator(LinkCoordinatorArgs{
 				ProviderProfileRegistry: NewStaticProviderProfileRegistry(PKOProfile()),
@@ -355,16 +335,16 @@ func TestLinkCoordinator(t *testing.T) {
 			})
 			require.ErrorIs(t, err, ErrConnectionStoreRequired)
 
-			_, err = NewLinkCoordinator(LinkCoordinatorArgs{
+			coordinator, err = NewLinkCoordinator(LinkCoordinatorArgs{
 				ProviderProfileRegistry: NewStaticProviderProfileRegistry(PKOProfile()),
 				ConnectorRegistry:       NewStaticConnectorRegistry(),
 				PendingStartStore:       newPendingStartStoreFixture(t, pendingStartStoreFixture{}).mock,
 				ConnectionSecretWriter:  newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{}).mock,
 				ConnectionStore:         newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
 			})
-			require.ErrorIs(t, err, ErrRawPayloadWriterRequired)
+			require.NoError(t, err)
+			require.NotNil(t, coordinator)
 		})
-
 		t.Run("applies defaults for identity and ttl", func(t *testing.T) {
 			fake := faker.New()
 			connector := newLinkConnectorFixture(t, linkConnectorFixture{
@@ -383,8 +363,7 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
-				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
+				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
 			})
 			require.NoError(t, err)
 
@@ -418,8 +397,7 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
-				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
+				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
 			})
 			require.NoError(t, err)
 
@@ -460,6 +438,12 @@ func TestLinkCoordinator(t *testing.T) {
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
 				Secret:            "token-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
+				ConnectionSnapshot: &domain.ProviderSnapshotObservation{
+					Kind:             domain.ProviderSnapshotKindConnection,
+					ProviderObjectID: "client-info",
+					DocumentJSON:     []byte(`{"name":"typed"}`),
+					CapturedAt:       now,
+				},
 			},
 		})
 		enableBankingConnector := newLinkConnectorFixture(t, linkConnectorFixture{
@@ -475,7 +459,6 @@ func TestLinkCoordinator(t *testing.T) {
 			secretID: "secret-" + fake.UUID().V4(),
 		})
 		connectionStore := newConnectionStoreFixture(t, connectionStoreFixture{})
-		rawPayloadWriter := newRawPayloadWriterFixture(t)
 
 		coordinator, err := NewLinkCoordinator(LinkCoordinatorArgs{
 			ProviderProfileRegistry: NewStaticProviderProfileRegistry(
@@ -486,7 +469,6 @@ func TestLinkCoordinator(t *testing.T) {
 			PendingStartStore:      pendingStore.mock,
 			ConnectionSecretWriter: secretWriter.mock,
 			ConnectionStore:        connectionStore.mock,
-			RawPayloadWriter:       rawPayloadWriter.mock,
 			Now:                    func() time.Time { return now },
 			NewID:                  func() string { return "id-" + fake.UUID().V4() },
 			PendingStartTTL:        15 * time.Minute,
@@ -524,6 +506,10 @@ func TestLinkCoordinator(t *testing.T) {
 		assert.Equal(t, domain.ProviderIDMonobank, monobankConnector.lastToken.Profile.ProviderID)
 		assert.Equal(t, domain.ProviderConnectorIDMonobank, monobankConnector.lastToken.Profile.ConnectorID)
 		assert.Equal(t, domain.ProviderConnectorIDMonobank, connection.ConnectorID)
+		require.Len(t, connectionStore.snapshots, 1)
+		require.NotNil(t, connectionStore.snapshots[0])
+		assert.Equal(t, domain.ProviderSnapshotKindConnection, connectionStore.snapshots[0].Kind)
+		assert.Equal(t, "client-info", connectionStore.snapshots[0].ProviderObjectID)
 
 		start, err := coordinator.StartRedirectLink(t.Context(), RedirectLinkStartRequest{
 			TenantID:           "tenant-redirect-" + fake.UUID().V4(),
@@ -547,6 +533,95 @@ func TestLinkCoordinator(t *testing.T) {
 		})
 		require.ErrorIs(t, err, ErrProviderNotConfigured)
 		assert.Equal(t, 1, monobankConnector.tokenCalls)
+	})
+
+	t.Run("sanitizes pending redirect-start documents without creating current snapshots", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.August, 14, 14, 0, 0, 0, time.UTC)
+		credentialSentinel := "credential-" + fake.UUID().V4()
+		pendingDocument := []byte(
+			`{"name":"typed","nested":{"accessToken":"` +
+				credentialSentinel +
+				`","privateKey":"` +
+				credentialSentinel +
+				`"},"items":[{"password":"` +
+				credentialSentinel +
+				`","visible":"yes"}]}`,
+		)
+		connector := newLinkConnectorFixture(t, linkConnectorFixture{
+			connectorID:  domain.ProviderConnectorIDEnableBanking,
+			capabilities: ConnectorCapabilities{SupportsStartLink: true},
+			startResult: StartLinkResult{
+				State:            "state-" + fake.UUID().V4(),
+				AuthorizationURL: "https://example.test/auth/" + fake.UUID().V4(),
+				PendingDocument:  pendingDocument,
+			},
+		})
+		pendingStore := newPendingStartStoreFixture(t, pendingStartStoreFixture{})
+		connectionStore := newConnectionStoreFixture(t, connectionStoreFixture{})
+		coordinator, err := NewLinkCoordinator(LinkCoordinatorArgs{
+			ProviderProfileRegistry: NewStaticProviderProfileRegistry(PKOProfile()),
+			ConnectorRegistry:       NewStaticConnectorRegistry(connector.mock),
+			PendingStartStore:       pendingStore.mock,
+			ConnectionSecretWriter:  newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{}).mock,
+			ConnectionStore:         connectionStore.mock,
+			Now:                     func() time.Time { return now },
+			NewID:                   func() string { return "pending-" + fake.UUID().V4() },
+		})
+		require.NoError(t, err)
+
+		_, err = coordinator.StartRedirectLink(t.Context(), RedirectLinkStartRequest{
+			TenantID:           "tenant-" + fake.UUID().V4(),
+			ActorUserID:        "actor-" + fake.UUID().V4(),
+			ProviderID:         domain.ProviderIDPKO,
+			RedirectURL:        "https://app.example.test/redirect/" + fake.UUID().V4(),
+			BrowserCallbackURL: "http://localhost:5173/#/finance/connections",
+		})
+		require.NoError(t, err)
+		require.Len(t, pendingStore.saved, 1)
+		assert.JSONEq(
+			t,
+			`{"name":"typed","nested":{},"items":[{"visible":"yes"}]}`,
+			string(pendingStore.saved[0].StartResult.DocumentJSON),
+		)
+		assert.NotContains(t, string(pendingStore.saved[0].StartResult.DocumentJSON), credentialSentinel)
+		assert.Empty(t, connectionStore.saved)
+		assert.Empty(t, connectionStore.snapshots)
+	})
+
+	t.Run("rejects invalid pending redirect-start documents before persistence", func(t *testing.T) {
+		fake := faker.New()
+		connector := newLinkConnectorFixture(t, linkConnectorFixture{
+			connectorID:  domain.ProviderConnectorIDEnableBanking,
+			capabilities: ConnectorCapabilities{SupportsStartLink: true},
+			startResult: StartLinkResult{
+				State:            "state-" + fake.UUID().V4(),
+				AuthorizationURL: "https://example.test/auth/" + fake.UUID().V4(),
+				PendingDocument:  []byte(`{"invalid"`),
+			},
+		})
+		pendingStore := newPendingStartStoreFixture(t, pendingStartStoreFixture{})
+		connectionStore := newConnectionStoreFixture(t, connectionStoreFixture{})
+		coordinator, err := NewLinkCoordinator(LinkCoordinatorArgs{
+			ProviderProfileRegistry: NewStaticProviderProfileRegistry(PKOProfile()),
+			ConnectorRegistry:       NewStaticConnectorRegistry(connector.mock),
+			PendingStartStore:       pendingStore.mock,
+			ConnectionSecretWriter:  newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{}).mock,
+			ConnectionStore:         connectionStore.mock,
+		})
+		require.NoError(t, err)
+
+		_, err = coordinator.StartRedirectLink(t.Context(), RedirectLinkStartRequest{
+			TenantID:           "tenant-" + fake.UUID().V4(),
+			ActorUserID:        "actor-" + fake.UUID().V4(),
+			ProviderID:         domain.ProviderIDPKO,
+			RedirectURL:        "https://app.example.test/redirect/" + fake.UUID().V4(),
+			BrowserCallbackURL: "http://localhost:5173/#/finance/connections",
+		})
+		require.ErrorContains(t, err, "sanitize pending start document")
+		assert.Empty(t, pendingStore.saved)
+		assert.Empty(t, connectionStore.saved)
+		assert.Empty(t, connectionStore.snapshots)
 	})
 
 	t.Run("supports connector-declared redirect lifecycle requirements", func(t *testing.T) {
@@ -611,7 +686,6 @@ func TestLinkCoordinator(t *testing.T) {
 			PendingStartStore:      pendingStore.mock,
 			ConnectionSecretWriter: secretWriter.mock,
 			ConnectionStore:        connectionStore.mock,
-			RawPayloadWriter:       newRawPayloadWriterFixture(t).mock,
 			Now:                    func() time.Time { return now },
 			NewID:                  func() string { return "id-" + fake.UUID().V4() },
 		})
@@ -675,8 +749,7 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
-				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
+				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
 			})
 			require.NoError(t, err)
 
@@ -724,8 +797,7 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
-				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
+				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
 			})
 			require.NoError(t, err)
 
@@ -755,8 +827,7 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
-				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
+				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
 			})
 			require.NoError(t, err)
 
@@ -791,7 +862,6 @@ func TestLinkCoordinator(t *testing.T) {
 				PendingStartStore:       newPendingStartStoreFixture(t, pendingStartStoreFixture{}).mock,
 				ConnectionSecretWriter:  secretWriter.mock,
 				ConnectionStore:         connectionStore.mock,
-				RawPayloadWriter:        newRawPayloadWriterFixture(t).mock,
 			})
 			require.NoError(t, err)
 
@@ -851,9 +921,8 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-row-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
-				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
-				Now:              func() time.Time { return now },
+				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
+				Now:             func() time.Time { return now },
 			})
 			require.NoError(t, err)
 
@@ -876,7 +945,6 @@ func TestLinkCoordinator(t *testing.T) {
 				tokenResult: LinkResult{
 					ProviderReference: "provider-ref-" + fake.UUID().V4(),
 					Secret:            "secret-" + fake.UUID().V4(),
-					RawPayloads:       []domain.ProviderRawPayloadObservation{},
 				},
 			})
 			coordinatorWithListError, err := NewLinkCoordinator(LinkCoordinatorArgs{
@@ -889,8 +957,7 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{
 					saveErr: errors.New("save failed"),
 				}).mock,
-				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
-				Now:              func() time.Time { return now },
+				Now: func() time.Time { return now },
 			})
 			require.NoError(t, err)
 
@@ -906,11 +973,6 @@ func TestLinkCoordinator(t *testing.T) {
 			connector.tokenResult = LinkResult{
 				ProviderReference: "provider-ref-" + fake.UUID().V4(),
 				Secret:            "secret-" + fake.UUID().V4(),
-				RawPayloads: []domain.ProviderRawPayloadObservation{{
-					Scope:            domain.RawPayloadScopeConnection,
-					ProviderObjectID: "payload-" + fake.UUID().V4(),
-					PayloadJSON:      []byte(`{"phase":"token"}`),
-				}},
 			}
 			connectionStore := newConnectionStoreFixture(t, connectionStoreFixture{
 				saveErr: errors.New("save failed"),
@@ -926,9 +988,8 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-row-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  connectionStore.mock,
-				RawPayloadWriter: newRawPayloadWriterFixture(t).mock,
-				Now:              func() time.Time { return now },
+				ConnectionStore: connectionStore.mock,
+				Now:             func() time.Time { return now },
 			})
 			require.NoError(t, err)
 
@@ -940,8 +1001,6 @@ func TestLinkCoordinator(t *testing.T) {
 			})
 			require.ErrorContains(t, err, "save linked bank connection")
 
-			connector.tokenResult.RawPayloads[0].CapturedAt = time.Time{}
-			rawPayloadWriter := newRawPayloadWriterFixture(t)
 			var coordinatorWithNow *LinkCoordinator
 			providerProfile = ProviderProfile{
 				ProviderID:  domain.ProviderIDMonobank,
@@ -954,9 +1013,8 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-row-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
-				RawPayloadWriter: rawPayloadWriter.mock,
-				Now:              func() time.Time { return now },
+				ConnectionStore: newConnectionStoreFixture(t, connectionStoreFixture{}).mock,
+				Now:             func() time.Time { return now },
 			})
 			require.NoError(t, err)
 
@@ -968,8 +1026,6 @@ func TestLinkCoordinator(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.Equal(t, string(domain.ProviderIDMonobank), connection.Provider)
-			require.Len(t, rawPayloadWriter.saved, 1)
-			assert.Equal(t, now, rawPayloadWriter.saved[0].CapturedAt)
 		})
 	})
 
@@ -988,16 +1044,7 @@ func TestLinkCoordinator(t *testing.T) {
 				StartResult: domain.PendingBankConnectionLinkStartResult{
 					State:            "start-state-" + fake.UUID().V4(),
 					AuthorizationURL: "https://example.test/start/" + fake.UUID().V4(),
-					RawPayloads: []domain.ProviderRawPayloadObservation{{
-						Connection: domain.ProviderConnectionRef{
-							ProviderID:  domain.ProviderIDPKO,
-							ConnectorID: domain.ProviderConnectorIDEnableBanking,
-						},
-						Scope:            domain.RawPayloadScopeConnection,
-						ProviderObjectID: "start-payload-" + fake.UUID().V4(),
-						PayloadJSON:      []byte(`{"phase":"start"}`),
-						CapturedAt:       now.Add(-time.Minute),
-					}},
+					DocumentJSON:     []byte(`{"phase":"start"}`),
 				},
 				ExpiresAt: now.Add(15 * time.Minute),
 			}
@@ -1009,12 +1056,6 @@ func TestLinkCoordinator(t *testing.T) {
 					ProviderReference: "provider-ref-" + fake.UUID().V4(),
 					Secret:            "secret-" + fake.UUID().V4(),
 					State:             domain.BankConnectionStateActive,
-					RawPayloads: []domain.ProviderRawPayloadObservation{{
-						Scope:            domain.RawPayloadScopeConnection,
-						ProviderObjectID: "finish-payload-" + fake.UUID().V4(),
-						PayloadJSON:      []byte(`{"phase":"finish"}`),
-						CapturedAt:       now,
-					}},
 				},
 			})
 			pendingStore := newPendingStartStoreFixture(
@@ -1026,7 +1067,6 @@ func TestLinkCoordinator(t *testing.T) {
 				},
 			)
 			connectionStore := newConnectionStoreFixture(t, connectionStoreFixture{})
-			rawPayloadWriter := newRawPayloadWriterFixture(t)
 
 			coordinator, err := NewLinkCoordinator(LinkCoordinatorArgs{
 				ProviderProfileRegistry: NewStaticProviderProfileRegistry(PKOProfile()),
@@ -1035,11 +1075,10 @@ func TestLinkCoordinator(t *testing.T) {
 				ConnectionSecretWriter: newConnectionSecretWriterFixture(t, connectionSecretWriterFixture{
 					secretID: "secret-row-" + fake.UUID().V4(),
 				}).mock,
-				ConnectionStore:  connectionStore.mock,
-				RawPayloadWriter: rawPayloadWriter.mock,
-				Now:              func() time.Time { return now },
-				NewID:            func() string { return "id-" + fake.UUID().V4() },
-				PendingStartTTL:  15 * time.Minute,
+				ConnectionStore: connectionStore.mock,
+				Now:             func() time.Time { return now },
+				NewID:           func() string { return "id-" + fake.UUID().V4() },
+				PendingStartTTL: 15 * time.Minute,
 			})
 			require.NoError(t, err)
 
@@ -1055,10 +1094,7 @@ func TestLinkCoordinator(t *testing.T) {
 			assert.Equal(t, domain.ProviderIDPKO, pendingStore.consumed[0].ProviderID)
 			assert.Equal(t, domain.ProviderConnectorIDEnableBanking, pendingStore.consumed[0].ConnectorID)
 			assert.Equal(t, pendingStart.StartResult.State, connector.lastFinish.Start.State)
-			assert.Equal(t, pendingStart.StartResult.RawPayloads, connector.lastFinish.Start.RawPayloads)
 			assert.Equal(t, domain.ProviderConnectorIDEnableBanking, connection.ConnectorID)
-			require.Len(t, rawPayloadWriter.saved, 1)
-			assert.Equal(t, "finish", extractPhase(t, rawPayloadWriter.saved[0].PayloadJSON))
 
 			_, err = coordinator.FinishRedirectLink(t.Context(), RedirectLinkFinishRequest{
 				TenantID:    pendingStart.TenantID,
@@ -1118,15 +1154,14 @@ func TestLinkCoordinator(t *testing.T) {
 
 			connector.finishErr = nil
 			connectionStore.saveErr = nil
-			rawPayloadWriter.saveErr = errors.New("save raw payload failed")
-			restoreOnRawPayloadState := "restore-raw-payload-" + fake.UUID().V4()
-			pendingStore.savedByState[restoreOnRawPayloadState] = domain.PendingBankConnectionLinkStart{
+			successfulRetryState := "retry-" + fake.UUID().V4()
+			pendingStore.savedByState[successfulRetryState] = domain.PendingBankConnectionLinkStart{
 				ID:          pendingStart.ID,
 				TenantID:    pendingStart.TenantID,
 				ActorUserID: pendingStart.ActorUserID,
 				Provider:    pendingStart.Provider,
 				ConnectorID: pendingStart.ConnectorID,
-				State:       restoreOnRawPayloadState,
+				State:       successfulRetryState,
 				StartResult: pendingStart.StartResult,
 				ExpiresAt:   pendingStart.ExpiresAt,
 			}
@@ -1134,12 +1169,10 @@ func TestLinkCoordinator(t *testing.T) {
 				TenantID:    pendingStart.TenantID,
 				ActorUserID: pendingStart.ActorUserID,
 				ProviderID:  domain.ProviderIDPKO,
-				State:       restoreOnRawPayloadState,
-				Code:        "code-save-raw-" + fake.UUID().V4(),
+				State:       successfulRetryState,
+				Code:        "code-retry-" + fake.UUID().V4(),
 			})
-			require.ErrorContains(t, err, "save bank connection")
-			require.ErrorContains(t, err, "save raw payload")
-			assert.Equal(t, 1, pendingStore.restoreCallsByState[restoreOnRawPayloadState])
+			require.NoError(t, err)
 		})
 
 	t.Run(
@@ -1156,12 +1189,6 @@ func TestLinkCoordinator(t *testing.T) {
 					ProviderReference: "provider-ref-" + fake.UUID().V4(),
 					Secret:            "secret-plain-" + fake.UUID().V4(),
 					State:             domain.BankConnectionStateActive,
-					RawPayloads: []domain.ProviderRawPayloadObservation{{
-						Scope:            domain.RawPayloadScopeConnection,
-						ProviderObjectID: "final-payload-" + fake.UUID().V4(),
-						PayloadJSON:      []byte(`{"phase":"finish"}`),
-						CapturedAt:       now.Add(time.Minute),
-					}},
 				},
 			})
 			existing := domain.BankConnection{
@@ -1187,12 +1214,7 @@ func TestLinkCoordinator(t *testing.T) {
 							StartResult: domain.PendingBankConnectionLinkStartResult{
 								State:            pendingState,
 								AuthorizationURL: "https://example.test/start/" + fake.UUID().V4(),
-								RawPayloads: []domain.ProviderRawPayloadObservation{{
-									Scope:            domain.RawPayloadScopeConnection,
-									ProviderObjectID: "start-payload-" + fake.UUID().V4(),
-									PayloadJSON:      []byte(`{"phase":"start"}`),
-									CapturedAt:       now,
-								}},
+								DocumentJSON:     []byte(`{"phase":"start"}`),
 							},
 							ExpiresAt: now.Add(15 * time.Minute),
 						},
@@ -1205,8 +1227,6 @@ func TestLinkCoordinator(t *testing.T) {
 			connectionStore := newConnectionStoreFixture(t, connectionStoreFixture{
 				listResult: []domain.BankConnection{existing},
 			})
-			rawPayloadWriter := newRawPayloadWriterFixture(t)
-			rawPayloadWriter.saveErr = errors.New("save raw payload failed")
 
 			coordinator, err := NewLinkCoordinator(LinkCoordinatorArgs{
 				ProviderProfileRegistry: NewStaticProviderProfileRegistry(PKOProfile()),
@@ -1214,7 +1234,6 @@ func TestLinkCoordinator(t *testing.T) {
 				PendingStartStore:       pendingStore.mock,
 				ConnectionSecretWriter:  secretWriter.mock,
 				ConnectionStore:         connectionStore.mock,
-				RawPayloadWriter:        rawPayloadWriter.mock,
 				Now:                     func() time.Time { return now },
 				NewID:                   func() string { return "id-" + fake.UUID().V4() },
 				PendingStartTTL:         15 * time.Minute,
@@ -1228,7 +1247,7 @@ func TestLinkCoordinator(t *testing.T) {
 				State:       pendingState,
 				Code:        "code-" + fake.UUID().V4(),
 			})
-			require.ErrorContains(t, err, "save raw payload")
+			require.NoError(t, err)
 			require.Len(t, secretWriter.saved, 1)
 			assert.Equal(t, string(domain.ProviderIDPKO), secretWriter.saved[0].provider)
 			assert.Equal(t, connector.finishResult.ProviderReference, secretWriter.saved[0].reference)
@@ -1242,26 +1261,6 @@ func TestLinkCoordinator(t *testing.T) {
 			assert.Equal(t, string(domain.ProviderIDPKO), firstSaved.Provider)
 			assert.Equal(t, domain.ProviderConnectorIDEnableBanking, firstSaved.ConnectorID)
 			assert.Equal(t, now, firstSaved.CreatedAt)
-
-			connectionStore.listResult = append(connectionStore.listResult, firstSaved)
-			rawPayloadWriter.saveErr = nil
-			connection, err := coordinator.FinishRedirectLink(t.Context(), RedirectLinkFinishRequest{
-				TenantID:    existing.TenantID,
-				ActorUserID: pendingStore.savedByState[pendingState].ActorUserID,
-				ProviderID:  domain.ProviderIDPKO,
-				State:       pendingState,
-				Code:        "code-retry-" + fake.UUID().V4(),
-			})
-			require.NoError(t, err)
-			assert.Equal(t, firstSaved.ID, connection.ID)
-			require.Len(t, connectionStore.saved, 1)
-			require.Len(t, secretWriter.saved, 2)
-			require.Len(t, rawPayloadWriter.saved, 1)
-			assert.Equal(
-				t, connector.finishResult.RawPayloads[0].ProviderObjectID,
-				rawPayloadWriter.saved[0].ProviderObjectID,
-			)
-			assert.Equal(t, "finish", extractPhase(t, rawPayloadWriter.saved[0].PayloadJSON))
 		})
 
 	t.Run("matches PKO sessions by exact non-empty provider reference", func(t *testing.T) {
@@ -1314,7 +1313,6 @@ func TestLinkCoordinator(t *testing.T) {
 			PendingStartStore:       newPendingStartStoreFixture(t, pendingStartStoreFixture{}).mock,
 			ConnectionSecretWriter:  secretWriter.mock,
 			ConnectionStore:         connectionStore.mock,
-			RawPayloadWriter:        newRawPayloadWriterFixture(t).mock,
 			Now:                     func() time.Time { return now },
 			NewID:                   func() string { return "connection-" + fake.UUID().V4() },
 			PendingStartTTL:         time.Minute,
@@ -1353,15 +1351,4 @@ func TestLinkCoordinator(t *testing.T) {
 		assert.NotEqual(t, existing.SecretID, retry.SecretID)
 		assert.Equal(t, existing, connectionStore.listResult[0])
 	})
-}
-
-func extractPhase(t *testing.T, payload []byte) string {
-	t.Helper()
-	if string(payload) == `{"phase":"finish"}` {
-		return "finish"
-	}
-	if string(payload) == `{"phase":"start"}` {
-		return "start"
-	}
-	return string(payload)
 }

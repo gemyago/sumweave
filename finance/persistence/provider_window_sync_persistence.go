@@ -90,6 +90,13 @@ type providerWindowSyncApplyStore struct {
 	*Store
 }
 
+func (s *providerWindowSyncApplyStore) SaveProviderSnapshot(
+	ctx context.Context,
+	snapshot domain.ProviderSnapshot,
+) (domain.ProviderSnapshot, error) {
+	return NewProviderSnapshotStoreFromStore(s.Store).SaveProviderSnapshot(ctx, snapshot)
+}
+
 func nonEmptyTrimmedStrings(values []string) []string {
 	trimmed := make([]string, 0, len(values))
 	for _, value := range values {

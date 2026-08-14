@@ -10,14 +10,12 @@ packages:
       accessGuardStore:
       bankConnectionMetadataStore:
       FXRatesProvider:
-      providerEvidenceServiceStore:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:
       ConnectionStore:
       Connector:
       PendingStartStore:
-      RawPayloadWriter:
       SyncStateJournal:
       TargetWindowPolicy:
       WindowSyncApplyStore:

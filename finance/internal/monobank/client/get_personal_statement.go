@@ -16,10 +16,9 @@ type GetPersonalStatementParams struct {
 	To      int64
 }
 
-// GetPersonalStatementResponse contains the decoded response and raw payload.
+// GetPersonalStatementResponse contains decoded statement items.
 type GetPersonalStatementResponse struct {
-	Items   []PersonalStatementItem
-	RawJSON []byte
+	Items []PersonalStatementItem
 }
 
 // GetPersonalStatement loads account statement items for the given range.
@@ -43,5 +42,5 @@ func (c *Client) GetPersonalStatement(
 		return nil, fmt.Errorf("get personal statement: decode response: %w", decodeErr)
 	}
 
-	return &GetPersonalStatementResponse{Items: body, RawJSON: rawJSON}, nil
+	return &GetPersonalStatementResponse{Items: body}, nil
 }

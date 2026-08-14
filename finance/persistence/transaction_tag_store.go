@@ -159,7 +159,7 @@ func saveTransactionModel(db *gorm.DB, model transactionModel) error {
 	return db.Table(model.TableName()).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"tenant_id", "account_id", "source", "status", "kind", "amount_minor", columnCurrency,
+			columnTenantID, "account_id", "source", "status", "kind", "amount_minor", columnCurrency,
 			"description", columnEffectiveAt, "category_id", "transfer_group_id", "transfer_matched_at",
 			"hidden_at", "original_amount_minor", "original_currency", "original_description",
 			"original_effective_at", "updated_at",

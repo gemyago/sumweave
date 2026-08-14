@@ -17,7 +17,7 @@ The application database is configured at `application.database` and is shared
 by the finance application and its supporting infrastructure:
 
 - finance tenants, accounts, transactions, imports, connections, reporting,
-  and provider evidence
+  and current provider snapshots
 - authentication users and refresh tokens
 - application dispatch transport
 - durable jobs and schedules
@@ -74,9 +74,10 @@ secret values and stdout logging.
 
 Finance persistence remains owned by the `finance/` module and is initialized
 as part of the application database migration. Finance provider credentials
-are encrypted with the configured system key. Provider evidence may be kept
-with finance records for sync idempotency, support, and debugging, but it
-remains owned by the finance application rather than by a separate subsystem.
+are encrypted with the configured system key. Current provider snapshots are
+sanitized, schema-derived typed documents retained with finance records for
+support and debugging; they are not raw response retention or a history
+timeline.
 
 Finance persistence uses explicit table prefixes and domain models separate
 from persistence models. SQLite remains the local baseline; PostgreSQL is the
@@ -98,7 +99,9 @@ order:
 Migration failures must identify the owning component. Migration tests remain
 shallow: one schema smoke path and migration-failure context are sufficient.
 
-No migration from abandoned local files or obsolete databases is required.
+No data migration from abandoned local files or obsolete databases is required.
+For this early-alpha provider-snapshot change, recreate local and test
+databases instead of retaining retired provider source-data tables or rows.
 
 ## Worker And Scheduler Lifecycle
 
@@ -122,7 +125,7 @@ scaling.
    databases.
 2. Reseed the first `.local-users` entry and verify login and token rotation.
 3. Start the API and worker with no persistent data directory.
-4. Verify finance data, finance provider evidence, agent sessions, provider
+4. Verify finance data, current finance provider snapshots, agent sessions, provider
    configuration, and profiles survive process replacement through database
    reads.
 5. Repeat migration and smoke behavior against PostgreSQL.
@@ -140,3 +143,17 @@ This design is satisfied when:
 - production workloads require no persistent filesystem volume
 - local development continues to work with SQLite
 - PostgreSQL smoke verification passes
+
+## Provider snapshot upgrade cleanup
+
+GORM auto-migrate creates `finance_provider_snapshots` but does not drop retired
+tables. After confirming a persistent upgraded deployment is healthy, the new
+snapshot table exists, and rollback to a legacy build is no longer needed, run:
+
+```sql
+DROP TABLE IF EXISTS finance_provider_evidence;
+DROP TABLE IF EXISTS finance_raw_payloads;
+```
+
+Confirm both retired tables are absent. Fresh and recreated local/test databases
+need no manual drop; this early-alpha change requires no row copy or backup.

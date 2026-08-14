@@ -114,7 +114,7 @@ func TestFinanceComposition(t *testing.T) {
 		assert.Equal(t, int64(12345), *result.Accounts[0].CurrentBalanceMinor)
 		require.Len(t, result.Transactions, 1)
 		assert.Equal(t, "txn-1", result.Transactions[0].ProviderTransactionID)
-		assert.Len(t, result.RawPayloads, 2)
+		assert.Len(t, result.Snapshots, 3)
 	})
 
 	t.Run("connector bank sync provider rejects nil connectors", func(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 // GetSessionParams contains session lookup parameters.
@@ -25,10 +24,6 @@ func (c *Client) GetSession(ctx context.Context, params GetSessionParams) (*Sess
 		return nil, fmt.Errorf("get session failed: %w", err)
 	}
 	response := result.Value
-	if strings.TrimSpace(response.SessionID) == "" {
-		response.SessionID = strings.TrimSpace(params.SessionID)
-	}
-	response.AccountsData = normalizeAccounts(response.AccountsData)
 	c.logger.DebugContext(ctx, "fetched enable banking session", slog.Int("accountCount", len(response.AccountsData)))
-	return normalizeSessionResponse(response), nil
+	return response, nil
 }
