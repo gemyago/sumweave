@@ -22,4 +22,4 @@
 
 ## 4. Documentation And Contract Alignment
 
-- [ ] 4.1 Document the separate job-command and domain-event models, shared transport, at-least-once guarantees, dead-letter behavior, schema reset, explicit wireup roots, and process ownership; follow TDD flow by updating documentation assertions where present before aligning `AGENTS.md`, architecture, terminology, module docs, and migration guidance.
+- [x] 4.1 Document the separate job-command and domain-event models, shared transport, at-least-once guarantees, dead-letter behavior, schema reset, explicit wireup roots, and process ownership; follow TDD flow by updating documentation assertions where present before aligning `AGENTS.md`, architecture, terminology, module docs, and migration guidance.
