@@ -74,6 +74,9 @@ Durable jobs workflow:
 - `sumweave start` starts only the API/server path; it must not execute durable jobs inline.
 - `sumweave jobs worker [--once]` is the dedicated split-mode consumer path for production-like or supervised environments. `--once` consumes until two poll intervals pass idle, so it can drain a reused DB backlog; use a reseeded or isolated local DB for a bounded E2E step.
 - `sumweave jobs enqueue-due` performs one scheduler tick and enqueues due scheduled jobs without running them; keep it for split or externally scheduled environments.
+- Durable jobs are commands; domain events are facts on the shared transport.
+- Message routers use at-least-once delivery and durable dead letters.
+- Recreate old local databases before the topic-aware dispatch migration.
 
 ## Lint / test
 
@@ -99,6 +102,7 @@ The rules are:
 - Run local backend CLI commands with `apps/sumweave` as CWD.
 - Error responses stay empty unless a documented endpoint contract justifies a safe body.
 - Only wireup should consume app config; components use native inputs.
+- Explicit roots stop message routers before the shared SQL database.
 
 ## Purpose (directional)
 

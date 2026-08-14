@@ -3,7 +3,6 @@ package appdispatch
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,13 +14,10 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	wmsql "github.com/ThreeDotsLabs/watermill-sql/v4/pkg/sql"
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 )
 
 const (
-	DispatchTopicExecution  = "app.dispatch.execution.v1"
-	EnvelopeVersionV1       = "v1"
-	sqliteBusyTimeoutMillis = 5000
+	DeadLetterTopic = "app.dispatch.dead-letter.v1"
 )
 
 type TransportDriver string
@@ -31,55 +27,37 @@ const (
 	TransportDriverPostgres TransportDriver = "postgres"
 )
 
-type ExecutionKind string
-
-type Envelope struct {
-	Version           string          `json:"version"`
-	Kind              ExecutionKind   `json:"kind"`
-	Payload           json.RawMessage `json:"payload"`
-	ObservableJobID   string          `json:"observableJobId,omitempty"`
-	CorrelationID     string          `json:"correlationId,omitempty"`
-	RequesterID       string          `json:"requesterId,omitempty"`
-	RequesterSource   string          `json:"requesterSource,omitempty"`
-	ScheduleWindowKey string          `json:"scheduleWindowKey,omitempty"`
+// Message is the app-owned durable transport contract. Payload and metadata
+// are opaque to appdispatch; semantic packages own their encoding.
+type Message struct {
+	ID       string
+	Topic    string
+	Payload  []byte
+	Metadata map[string]string
 }
 
-func (e Envelope) Topic() string {
-	return DispatchTopicExecution
+// NewMessage creates a message with a transport-safe identity.
+func NewMessage(topic string, payload []byte) Message {
+	return Message{ID: watermill.NewUUID(), Topic: topic, Payload: payload}
 }
 
-func (e Envelope) validate() error {
-	if e.Version != EnvelopeVersionV1 {
-		return fmt.Errorf("unsupported envelope version: %s", e.Version)
+func (m Message) validate() error {
+	if m.ID == "" {
+		return errors.New("message id is required")
 	}
-	if e.Kind == "" {
-		return errors.New("execution kind is required")
-	}
-	if len(e.Payload) == 0 {
-		return errors.New("execution payload is required")
+	if m.Topic == "" {
+		return errors.New("message topic is required")
 	}
 	return nil
-}
-
-func EncodePayload(value any) ([]byte, error) {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("marshal payload: %w", err)
-	}
-	return payload, nil
 }
 
 type Config struct {
 	DatabaseDSN  string
 	TablePrefix  string
-	ConsumerName string
 	PollInterval time.Duration
 }
 
 func (c Config) normalize() Config {
-	if c.ConsumerName == "" {
-		c.ConsumerName = "sumweave-app-dispatch"
-	}
 	if c.PollInterval <= 0 {
 		c.PollInterval = 100 * time.Millisecond
 	}
@@ -110,93 +88,17 @@ func (c Config) OffsetsTable() string {
 	return c.TablePrefix + "app_dispatch_offsets"
 }
 
-type registeredHandler interface {
-	kind() ExecutionKind
-	handle(context.Context, Envelope) error
-}
-
-type HandlerRegistry struct {
-	mu       sync.RWMutex
-	handlers map[ExecutionKind]registeredHandler
-}
-
-func NewHandlerRegistry() *HandlerRegistry {
-	return &HandlerRegistry{handlers: map[ExecutionKind]registeredHandler{}}
-}
-
-func (r *HandlerRegistry) register(handler registeredHandler) error {
-	if handler == nil {
-		return errors.New("handler is required")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.handlers[handler.kind()]; exists {
-		return fmt.Errorf("handler already registered: %s", handler.kind())
-	}
-	r.handlers[handler.kind()] = handler
-	return nil
-}
-
-func (r *HandlerRegistry) Handle(ctx context.Context, envelope Envelope) error {
-	if r == nil {
-		return errors.New("handler registry is required")
-	}
-	r.mu.RLock()
-	handler, ok := r.handlers[envelope.Kind]
-	r.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("handler not registered: %s", envelope.Kind)
-	}
-	return handler.handle(ctx, envelope)
-}
-
-type TypedHandlerSpec[Payload any] struct {
-	Kind ExecutionKind
-	Run  func(context.Context, Envelope, Payload) error
-}
-
-func RegisterTypedHandler[Payload any](registry *HandlerRegistry, spec TypedHandlerSpec[Payload]) error {
-	if registry == nil {
-		return errors.New("handler registry is required")
-	}
-	if spec.Run == nil {
-		return errors.New("handler run func is required")
-	}
-	return registry.register(typedHandler[Payload]{spec: spec})
-}
-
-type typedHandler[Payload any] struct {
-	spec TypedHandlerSpec[Payload]
-}
-
-func (h typedHandler[Payload]) kind() ExecutionKind {
-	return h.spec.Kind
-}
-
-func (h typedHandler[Payload]) handle(ctx context.Context, envelope Envelope) error {
-	var payload Payload
-	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
-		return fmt.Errorf("decode envelope payload: %w", err)
-	}
-	return h.spec.Run(ctx, envelope, payload)
-}
-
 type Publisher struct {
 	config    Config
 	db        *sql.DB
-	ownsDB    bool
 	publisher wmmessage.Publisher
 	logger    *slog.Logger
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func NewPublisher(config Config, db *sql.DB, logger *slog.Logger) (*Publisher, error) {
-	if logger == nil {
-		return nil, errors.New("logger is required")
-	}
-	return newPublisher(config, db, false, logger)
-}
-
-func newPublisher(config Config, db *sql.DB, ownsDB bool, logger *slog.Logger) (*Publisher, error) {
 	config = config.normalize()
 	if logger == nil {
 		return nil, errors.New("logger is required")
@@ -207,218 +109,114 @@ func newPublisher(config Config, db *sql.DB, ownsDB bool, logger *slog.Logger) (
 	logger = logger.WithGroup("appdispatch")
 	publisher, err := newMessagePublisher(config, db, logger)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create transport publisher: %w", err)
 	}
-	return &Publisher{config: config, db: db, ownsDB: ownsDB, publisher: publisher, logger: logger}, nil
+	return &Publisher{config: config, db: db, publisher: publisher, logger: logger}, nil
 }
 
 func (p *Publisher) Close() error {
 	if p == nil {
 		return nil
 	}
-	var dbErr error
-	if p.ownsDB {
-		dbErr = closeDB(p.db)
-	}
-	return errors.Join(closeIfPresent(p.publisher), dbErr)
+	p.closeOnce.Do(func() {
+		p.closeErr = closeIfPresent(p.publisher)
+	})
+	return p.closeErr
 }
 
-func (p *Publisher) Publish(ctx context.Context, envelope Envelope) error {
-	if err := envelope.validate(); err != nil {
+func (p *Publisher) Publish(ctx context.Context, message Message) error {
+	if err := message.validate(); err != nil {
 		return err
 	}
-	msg, err := envelopeMessage(ctx, envelope)
-	if err != nil {
-		return err
+	wmMessage := makeWatermillMessage(ctx, message)
+	if err := p.publisher.Publish(message.Topic, wmMessage); err != nil {
+		return fmt.Errorf("publish message on topic %s: %w", message.Topic, err)
 	}
-	if err = p.publisher.Publish(DispatchTopicExecution, msg); err != nil {
-		return fmt.Errorf("publish dispatch envelope: %w", err)
-	}
-	p.logger.DebugContext(ctx, "message envelope published",
-		slog.String("messageId", msg.UUID),
-		slog.String("requesterId", envelope.RequesterID),
+	p.logger.DebugContext(ctx, "message published",
+		slog.String("messageId", message.ID),
+		slog.String("topic", message.Topic),
 	)
-
 	return nil
 }
 
-func (p *Publisher) PublishInTx(ctx context.Context, tx *sql.Tx, envelope Envelope) error {
+func (p *Publisher) PublishInTx(ctx context.Context, tx *sql.Tx, message Message) error {
 	if tx == nil {
 		return errors.New("publish transaction is required")
 	}
-	if err := envelope.validate(); err != nil {
+	if err := message.validate(); err != nil {
 		return err
 	}
 	publisher, err := newMessagePublisher(p.config, tx, p.logger)
 	if err != nil {
-		return err
+		return fmt.Errorf("create transaction publisher: %w", err)
 	}
 	defer func() { _ = closeIfPresent(publisher) }()
-	msg, err := envelopeMessage(ctx, envelope)
-	if err != nil {
-		return err
+	if err = publisher.Publish(message.Topic, makeWatermillMessage(ctx, message)); err != nil {
+		return fmt.Errorf("publish message in transaction on topic %s: %w", message.Topic, err)
 	}
-	if err = publisher.Publish(DispatchTopicExecution, msg); err != nil {
-		return fmt.Errorf("publish dispatch envelope in tx: %w", err)
-	}
-	p.logger.DebugContext(ctx, "message envelope published in tx",
-		slog.String("messageId", msg.UUID),
-		slog.String("requesterId", envelope.RequesterID),
+	p.logger.DebugContext(ctx, "message published in transaction",
+		slog.String("messageId", message.ID),
+		slog.String("topic", message.Topic),
 	)
 	return nil
 }
 
-type Consumer struct {
-	db         *sql.DB
-	ownsDB     bool
-	subscriber wmmessage.Subscriber
-	registry   *HandlerRegistry
-	logger     *slog.Logger
+func makeWatermillMessage(ctx context.Context, message Message) *wmmessage.Message {
+	wmMessage := wmmessage.NewMessageWithContext(ctx, message.ID, message.Payload)
+	if len(message.Metadata) > 0 {
+		wmMessage.Metadata = wmmessage.Metadata(message.Metadata)
+	}
+	return wmMessage
 }
 
-func NewConsumer(config Config, db *sql.DB, registry *HandlerRegistry, logger *slog.Logger) (*Consumer, error) {
-	if registry == nil {
-		return nil, errors.New("handler registry is required")
+func makeMessage(topic string, message *wmmessage.Message) Message {
+	metadata := make(map[string]string, len(message.Metadata))
+	for key, value := range message.Metadata {
+		metadata[key] = value
 	}
-	if logger == nil {
-		return nil, errors.New("logger is required")
-	}
-	return newConsumer(config, db, false, registry, logger)
-}
-
-//nolint:golines // Internal constructor keeps the ownership and dependency shape explicit.
-func newConsumer(config Config, db *sql.DB, ownsDB bool, registry *HandlerRegistry, logger *slog.Logger) (*Consumer, error) {
-	config = config.normalize()
-	if registry == nil {
-		return nil, errors.New("handler registry is required")
-	}
-	if logger == nil {
-		return nil, errors.New("logger is required")
-	}
-	if db == nil {
-		return nil, errors.New("sql database is required")
-	}
-	logger = logger.WithGroup("appdispatch")
-	subscriber, err := newMessageSubscriber(config, db, logger)
-	if err != nil {
-		return nil, err
-	}
-	return &Consumer{
-		db:         db,
-		ownsDB:     ownsDB,
-		subscriber: subscriber,
-		registry:   registry,
-		logger:     logger,
-	}, nil
-}
-
-func (c *Consumer) Run(ctx context.Context) error {
-	messages, err := c.subscriber.Subscribe(ctx, DispatchTopicExecution)
-	if err != nil {
-		return fmt.Errorf("subscribe dispatch topic: %w", err)
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case msg, ok := <-messages:
-			if !ok {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				return nil
-			}
-			envelope, decodeErr := decodeEnvelope(msg.Payload)
-			if decodeErr != nil {
-				msg.Nack()
-				return decodeErr
-			}
-			handlerCtx := context.WithoutCancel(msg.Context())
-			msgCtx := telemetry.SetLogAttributesToContext(
-				handlerCtx,
-				telemetry.LogAttributes{
-					CorrelationID: slog.StringValue(msg.UUID),
-				},
-			)
-			c.logger.InfoContext(msgCtx, "processing message",
-				slog.String("messageId", msg.UUID),
-				slog.String("requesterId", envelope.RequesterID),
-				slog.String("MessageCorrelationID", envelope.CorrelationID),
-				slog.Any("metadata", msg.Metadata),
-			)
-			if handleErr := c.registry.Handle(msgCtx, envelope); handleErr != nil {
-				msg.Nack()
-				return handleErr
-			}
-			msg.Ack()
-		}
-	}
-}
-func (c *Consumer) Close() error {
-	if c == nil {
-		return nil
-	}
-	var dbErr error
-	if c.ownsDB {
-		dbErr = closeDB(c.db)
-	}
-	return errors.Join(closeIfPresent(c.subscriber), dbErr)
+	return Message{ID: message.UUID, Topic: topic, Payload: message.Payload, Metadata: metadata}
 }
 
 //nolint:ireturn // Watermill publisher is defined by the library interface.
 func newMessagePublisher(config Config, db any, logger *slog.Logger) (wmmessage.Publisher, error) {
 	wmLogger := watermill.NewSlogLogger(logger)
+	schema := wmsql.SchemaAdapter(makeSQLitePublisherSchema(config))
 	if config.Driver() == TransportDriverPostgres {
-		return wmsql.NewPublisher(asContextExecutor(db), wmsql.PublisherConfig{
-			SchemaAdapter:        postgresSchema(config),
-			AutoInitializeSchema: false,
-		}, wmLogger)
+		schema = postgresSchema(config)
 	}
-	return newSQLiteTransportPublisher(config, db, wmLogger)
+	return wmsql.NewPublisher(asContextExecutor(db), wmsql.PublisherConfig{
+		SchemaAdapter:        schema,
+		AutoInitializeSchema: false,
+	}, wmLogger)
 }
 
 //nolint:ireturn // Watermill subscriber is defined by the library interface.
-func newMessageSubscriber(config Config, db *sql.DB, logger *slog.Logger) (wmmessage.Subscriber, error) {
+func newMessageSubscriber(
+	config Config,
+	db *sql.DB,
+	consumerGroup string,
+	logger *slog.Logger,
+) (wmmessage.Subscriber, error) {
+	if consumerGroup == "" {
+		return nil, errors.New("consumer group is required")
+	}
 	wmLogger := watermill.NewSlogLogger(logger)
 	if config.Driver() == TransportDriverPostgres {
 		return wmsql.NewSubscriber(wmsql.BeginnerFromStdSQL(db), wmsql.SubscriberConfig{
-			ConsumerGroup:    config.ConsumerName,
+			ConsumerGroup:    consumerGroup,
 			PollInterval:     config.PollInterval,
 			SchemaAdapter:    postgresSchema(config),
 			OffsetsAdapter:   postgresOffsets(config),
 			InitializeSchema: false,
 		}, wmLogger)
 	}
-	return newSQLiteTransportSubscriber(config, db, wmLogger)
-}
-
-func envelopeMessage(ctx context.Context, envelope Envelope) (*wmmessage.Message, error) {
-	payload, err := json.Marshal(envelope)
-	if err != nil {
-		return nil, fmt.Errorf("marshal dispatch envelope: %w", err)
-	}
-	return wmmessage.NewMessageWithContext(ctx, watermill.NewUUID(), payload), nil
-}
-
-func decodeEnvelope(payload []byte) (Envelope, error) {
-	var envelope Envelope
-	if err := json.Unmarshal(payload, &envelope); err != nil {
-		return Envelope{}, fmt.Errorf("decode dispatch envelope: %w", err)
-	}
-	if err := envelope.validate(); err != nil {
-		return Envelope{}, err
-	}
-	return envelope, nil
+	return newSQLiteTransportSubscriber(config, db, consumerGroup, wmLogger)
 }
 
 func sqliteTableNameGenerators(config Config) sqliteTableGenerators {
 	return sqliteTableGenerators{
-		Topic: func(string) string {
-			return config.MessagesTable()
-		},
-		Offsets: func(string) string {
-			return config.OffsetsTable()
-		},
+		Messages: config.MessagesTable,
+		Offsets:  config.OffsetsTable,
 	}
 }
 
@@ -427,47 +225,36 @@ func buildSQLiteMigrationQueries(config Config) []string {
 		`CREATE TABLE IF NOT EXISTS ` + quoteIdentifier(config.MessagesTable()) + ` (
 			"offset" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			uuid TEXT NOT NULL,
+			topic TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			payload BLOB,
 			metadata JSON NOT NULL
 		)`,
+		`CREATE INDEX IF NOT EXISTS ` + quoteIdentifier(config.MessagesTable()+"_topic_offset_idx") +
+			` ON ` + quoteIdentifier(config.MessagesTable()) + ` (topic, "offset")`,
 		`CREATE TABLE IF NOT EXISTS ` + quoteIdentifier(config.OffsetsTable()) + ` (
+			topic TEXT NOT NULL,
 			consumer_group TEXT NOT NULL,
 			offset_acked INTEGER NOT NULL,
 			locked_until INTEGER NOT NULL,
-			PRIMARY KEY(consumer_group)
+			lease_id TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY(topic, consumer_group)
 		)`,
 	}
 }
 
 func buildPostgresMigrationQueries(config Config) ([]wmsql.Query, error) {
-	queries, err := postgresSchema(config).SchemaInitializingQueries(wmsql.SchemaInitializingQueriesParams{
-		Topic: DispatchTopicExecution,
-	})
+	queries, err := postgresSchema(config).SchemaInitializingQueries(wmsql.SchemaInitializingQueriesParams{})
 	if err != nil {
 		return nil, fmt.Errorf("build postgres messages schema queries: %w", err)
 	}
 	offsetQueries, err := postgresOffsets(config).SchemaInitializingQueries(
-		wmsql.OffsetsSchemaInitializingQueriesParams{Topic: DispatchTopicExecution},
+		wmsql.OffsetsSchemaInitializingQueriesParams{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build postgres offsets schema queries: %w", err)
 	}
 	return append(queries, offsetQueries...), nil
-}
-
-func postgresSchema(config Config) wmsql.DefaultPostgreSQLSchema {
-	messagesTable := quoteIdentifier(config.MessagesTable())
-	return wmsql.DefaultPostgreSQLSchema{
-		GenerateMessagesTableName: func(string) string { return messagesTable },
-	}
-}
-
-func postgresOffsets(config Config) wmsql.DefaultPostgreSQLOffsetsAdapter {
-	offsetsTable := quoteIdentifier(config.OffsetsTable())
-	return wmsql.DefaultPostgreSQLOffsetsAdapter{
-		GenerateMessagesOffsetsTableName: func(string) string { return offsetsTable },
-	}
 }
 
 func quoteIdentifier(value string) string {
@@ -479,8 +266,10 @@ func asContextExecutor(db any) wmsql.ContextExecutor {
 	if tx, ok := db.(*sql.Tx); ok {
 		return wmsql.TxFromStdSQL(tx)
 	}
-	executor, _ := db.(*sql.DB)
-	return wmsql.BeginnerFromStdSQL(executor)
+	if executor, ok := db.(*sql.DB); ok {
+		return wmsql.BeginnerFromStdSQL(executor)
+	}
+	return nil
 }
 
 func closeIfPresent(closer interface{ Close() error }) error {
@@ -488,11 +277,4 @@ func closeIfPresent(closer interface{ Close() error }) error {
 		return nil
 	}
 	return closer.Close()
-}
-
-func closeDB(db *sql.DB) error {
-	if db == nil {
-		return nil
-	}
-	return db.Close()
 }

@@ -43,6 +43,12 @@ packages:
     interfaces:
       dispatchPublisher:
       workerStore:
+  github.com/ThreeDotsLabs/watermill/message:
+    interfaces:
+      Subscriber:
+        config:
+          dir: internal/appdispatch/
+          pkgname: appdispatch
   github.com/gemyago/sumweave/apps/sumweave/cmd/sumweave:
     interfaces:
       databaseMigrationRunner:

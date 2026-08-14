@@ -45,14 +45,6 @@ func (m *Migrator) migrateSQLite(ctx context.Context) error {
 	return nil
 }
 
-func migratePostgres(ctx context.Context, db *sql.DB, config Config) error {
-	migrator, err := NewMigrator(config, db)
-	if err != nil {
-		return err
-	}
-	return migrator.migratePostgres(ctx)
-}
-
 func (m *Migrator) migratePostgres(ctx context.Context) error {
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {

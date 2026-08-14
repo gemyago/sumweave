@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,7 +15,7 @@ import (
 )
 
 type dispatchPublisher interface {
-	PublishInTx(context.Context, *sql.Tx, appdispatch.Envelope) error
+	PublishInTx(context.Context, *sql.Tx, appdispatch.Message) error
 }
 type ServiceDeps struct {
 	Store       *Store
@@ -137,19 +138,11 @@ func (s *Service) enqueueJSONInTx(ctx context.Context, tx *StoreTx, params Enque
 		if !createdNew {
 			return nil
 		}
-		return s.publisher.PublishInTx(
-			ctx,
-			storeTx.SQLTx(),
-			appdispatch.Envelope{
-				Version:         appdispatch.EnvelopeVersionV1,
-				Kind:            dispatchKindForJobType(created.JobType),
-				Payload:         created.InputJSON,
-				ObservableJobID: created.ID,
-				CorrelationID:   created.CorrelationID,
-				RequesterID:     created.Requester.UserID,
-				RequesterSource: string(created.Requester.Source),
-			},
-		)
+		message, marshalErr := makeExecutionMessage(created)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		return s.publisher.PublishInTx(ctx, storeTx.SQLTx(), message)
 	}
 	if tx != nil {
 		err = run(tx)
@@ -160,6 +153,26 @@ func (s *Service) enqueueJSONInTx(ctx context.Context, tx *StoreTx, params Enque
 		return nil, false, err
 	}
 	return &created, createdNew, nil
+}
+
+func makeExecutionMessage(job Job) (appdispatch.Message, error) {
+	payload, err := json.Marshal(executionEnvelope{
+		Version:         jobEnvelopeVersion,
+		Kind:            dispatchKindForJobType(job.JobType),
+		Payload:         job.InputJSON,
+		ObservableJobID: job.ID,
+		CorrelationID:   job.CorrelationID,
+		RequesterID:     job.Requester.UserID,
+		RequesterSource: string(job.Requester.Source),
+	})
+	if err != nil {
+		return appdispatch.Message{}, fmt.Errorf("marshal job execution envelope: %w", err)
+	}
+	message := appdispatch.NewMessage(jobExecutionTopic, payload)
+	if job.CorrelationID != "" {
+		message.Metadata = map[string]string{"correlationId": job.CorrelationID}
+	}
+	return message, nil
 }
 func (s *Service) Cancel(ctx context.Context, jobID string) (*Job, error) {
 	job, err := s.Get(ctx, jobID)

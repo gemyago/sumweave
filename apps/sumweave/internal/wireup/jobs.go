@@ -168,10 +168,18 @@ func buildJobs(ctx context.Context, rootConfig config.JobsRootConfig) (_ *JobsRo
 		return nil, fmt.Errorf("set up jobs telemetry: %w", err)
 	}
 
-	database, err := internal.NewApplicationSQLDB(rootConfig.Application.Database.DSN, shutdownHooks)
+	database, err := internal.OpenApplicationSQLDB(rootConfig.Application.Database.DSN)
 	if err != nil {
 		return nil, err
 	}
+	var jobsModule *jobspkg.Module
+	shutdownHooks.Register("jobs-messaging-and-application-db", func(shutdownCtx context.Context) error {
+		var messagingErr error
+		if jobsModule != nil {
+			messagingErr = jobsModule.Close(shutdownCtx)
+		}
+		return errors.Join(messagingErr, database.Close())
+	})
 	transportFactory := telemetry.NewOtelHTTPTransportFactory(telemetry.OtelHTTPTransportFactoryDeps{
 		MeterProvider: meterProvider, TracerProvider: tracerProvider,
 		TextMapPropagator: telemetry.NewTextMapPropagator(), OTELConfig: otelConfig,
@@ -180,12 +188,12 @@ func buildJobs(ctx context.Context, rootConfig config.JobsRootConfig) (_ *JobsRo
 		RootLogger: rootLogger, RetryAfterFallbackDelay: rootConfig.HTTPClient.RetryAfterFallbackDelay,
 		OtelHTTPTransportFactory: transportFactory,
 	})
-	jobsModule, err := jobspkg.NewModule(jobspkg.ModuleDeps{
+	jobsModule, err = jobspkg.NewModule(jobspkg.ModuleDeps{
 		SQLDB: database, DatabaseDSN: rootConfig.Application.Database.DSN,
 		DatabaseTablePrefix: rootConfig.Application.Database.TablePrefix, Logger: rootLogger,
 		WorkerConfig: jobspkg.WorkerConfig{
 			Enabled: rootConfig.Jobs.Worker.Enabled, PollInterval: rootConfig.Jobs.Worker.PollInterval,
-			MaxAttempts: rootConfig.Jobs.Worker.MaxAttempts,
+			MaxAttempts: rootConfig.Jobs.Worker.MaxAttempts, DrainTimeout: rootConfig.GracefulShutdownTimeout,
 		},
 		IDGenerator: ident.NewDefaultGenerator(),
 	})

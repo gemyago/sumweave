@@ -35,7 +35,7 @@ import (
 
 type publisherStub struct{}
 
-func (publisherStub) PublishInTx(context.Context, *sql.Tx, appdispatch.Envelope) error { return nil }
+func (publisherStub) PublishInTx(context.Context, *sql.Tx, appdispatch.Message) error { return nil }
 
 type financeAppRoundTripperFunc func(*http.Request) (*http.Response, error)
 
@@ -251,6 +251,15 @@ func TestFXRefreshJobHandler(t *testing.T) {
 	jobsStore, err := jobspkg.NewStore(jobsSQLDB, jobsDSN, jobspkg.StoreOpts{TablePrefix: "finance_fx_"})
 	require.NoError(t, err)
 	require.NoError(t, jobsStore.AutoMigrate())
+	dispatchConfig := appdispatch.Config{
+		DatabaseDSN: jobsDSN, TablePrefix: "finance_fx_", PollInterval: time.Millisecond,
+	}
+	require.NoError(t, appdispatch.AutoMigrate(t.Context(), dispatchConfig, jobsSQLDB))
+	dispatchPublisher, err := appdispatch.NewPublisher(dispatchConfig, jobsSQLDB, slog.Default())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, dispatchPublisher.Close()) })
+	routerFactory, err := appdispatch.NewRouterFactory(dispatchConfig, jobsSQLDB, dispatchPublisher, slog.Default())
+	require.NoError(t, err)
 	registry := jobspkg.NewRegistry()
 	require.NoError(t, registerFXRefreshJobHandler(registry, fxService))
 	jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{
@@ -265,7 +274,7 @@ func TestFXRefreshJobHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 	worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
-		Store: jobsStore, Registry: registry, WorkerID: "worker-" + fake.UUID().V4(),
+		Store: jobsStore, Registry: registry, WorkerID: "worker-" + fake.UUID().V4(), RouterFactory: routerFactory,
 	})
 	require.NoError(t, err)
 	require.NoError(t, worker.ProcessJob(t.Context(), jobRef.ID))
@@ -346,6 +355,18 @@ func TestNewFinanceModule(t *testing.T) {
 
 		return service, store
 	}
+	makeJobsRouterFactory := func(t *testing.T, dsn string) *appdispatch.RouterFactory {
+		t.Helper()
+		db := openSharedDB(t, dsn)
+		config := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "jobs_", PollInterval: time.Millisecond}
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
+		publisher, err := appdispatch.NewPublisher(config, db, slog.Default())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+		factory, err := appdispatch.NewRouterFactory(config, db, publisher, slog.Default())
+		require.NoError(t, err)
+		return factory
+	}
 
 	makePrivateKeyPath := func(t *testing.T) string {
 		t.Helper()
@@ -386,7 +407,8 @@ func TestNewFinanceModule(t *testing.T) {
 		database := makeDatabase(t, makeSQLiteMemoryDSN("finance-fx-refresh"))
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
 		registry := jobspkg.NewRegistry()
-		jobsService, jobsStore := makeJobsService(t, registry, makeSQLiteMemoryDSN("jobs-fx-refresh"))
+		jobsDSN := makeSQLiteMemoryDSN("jobs-fx-refresh")
+		jobsService, jobsStore := makeJobsService(t, registry, jobsDSN)
 		deps := ModuleDeps{
 			Database:                        database,
 			Jobs:                            jobsService,
@@ -435,6 +457,7 @@ func TestNewFinanceModule(t *testing.T) {
 		require.Len(t, scheduledJobs.Items, 1)
 		worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
 			Store: jobsStore, Registry: registry, WorkerID: "worker-" + faker.New().UUID().V4(),
+			RouterFactory: makeJobsRouterFactory(t, jobsDSN),
 		})
 		require.NoError(t, err)
 		require.NoError(t, worker.ProcessJob(t.Context(), scheduledJobs.Items[0].ID))

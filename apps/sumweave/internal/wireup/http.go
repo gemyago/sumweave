@@ -144,10 +144,18 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 		return nil, fmt.Errorf("set up HTTP telemetry: %w", err)
 	}
 
-	database, err := internal.NewApplicationSQLDB(rootConfig.Application.Database.DSN, shutdownHooks)
+	database, err := internal.OpenApplicationSQLDB(rootConfig.Application.Database.DSN)
 	if err != nil {
 		return nil, err
 	}
+	var jobsModule *jobspkg.Module
+	shutdownHooks.Register("jobs-messaging-and-application-db", func(shutdownCtx context.Context) error {
+		var messagingErr error
+		if jobsModule != nil {
+			messagingErr = jobsModule.Close(shutdownCtx)
+		}
+		return errors.Join(messagingErr, database.Close())
+	})
 	ids := ident.NewDefaultGenerator()
 	runtime, err := internal.NewRuntime(internal.RuntimeDeps{
 		RootLogger:                      rootLogger,
@@ -207,7 +215,7 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 		RootLogger: rootLogger, RetryAfterFallbackDelay: rootConfig.HTTPClient.RetryAfterFallbackDelay,
 		OtelHTTPTransportFactory: transportFactory,
 	})
-	jobsModule, err := jobspkg.NewModule(jobspkg.ModuleDeps{
+	jobsModule, err = jobspkg.NewModule(jobspkg.ModuleDeps{
 		SQLDB:               database,
 		DatabaseDSN:         rootConfig.Application.Database.DSN,
 		DatabaseTablePrefix: rootConfig.Application.Database.TablePrefix,
@@ -216,6 +224,7 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 			Enabled:      rootConfig.Jobs.Worker.Enabled,
 			PollInterval: rootConfig.Jobs.Worker.PollInterval,
 			MaxAttempts:  rootConfig.Jobs.Worker.MaxAttempts,
+			DrainTimeout: rootConfig.GracefulShutdownTimeout,
 		},
 		IDGenerator: ids,
 	})

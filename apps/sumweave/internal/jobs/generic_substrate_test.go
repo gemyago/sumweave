@@ -3,15 +3,16 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,7 +32,7 @@ func TestGenericSubstrate(t *testing.T) {
 		Imported int `json:"imported"`
 	}
 
-	makeStore := func(t *testing.T) *Store {
+	makeStore := func(t *testing.T) (*Store, *appdispatch.RouterFactory, *appdispatch.Publisher) {
 		t.Helper()
 		dsn := makeSQLiteMemoryDSN()
 		sqlDB, err := sqlconn.Open(dsn)
@@ -44,15 +45,21 @@ func TestGenericSubstrate(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.NoError(t, store.AutoMigrate())
-		return store
+		config := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "generic_", PollInterval: time.Millisecond}
+		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, sqlDB))
+		dispatchPublisher, err := appdispatch.NewPublisher(config, sqlDB, slog.Default())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, dispatchPublisher.Close()) })
+		factory, err := appdispatch.NewRouterFactory(config, sqlDB, dispatchPublisher, slog.Default())
+		require.NoError(t, err)
+		return store, factory, dispatchPublisher
 	}
 
 	t.Run("stores generic json payloads and dispatches typed handlers", func(t *testing.T) {
 		now := time.Now().UTC()
-		store := makeStore(t)
+		transactionContext := context.WithoutCancel(t.Context())
+		store, routerFactory, publisher := makeStore(t)
 		registry := NewRegistry()
-		publisher := newMockdispatchPublisher(t)
-		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		var runCalls atomic.Int64
 		require.NoError(t, RegisterTypedHandler(
 			registry,
@@ -76,7 +83,7 @@ func TestGenericSubstrate(t *testing.T) {
 			Registry:    registry,
 		})
 		require.NoError(t, err)
-		job, err := svc.Enqueue(t.Context(), EnqueueParams{
+		job, err := svc.Enqueue(transactionContext, EnqueueParams{
 			JobType:        JobType("finance.csv_import"),
 			Requester:      Requester{UserID: "user-" + fake.UUID().V4(), Source: RequesterSourceOperator},
 			Input:          financeInput{AccountID: "acct-" + fake.UUID().V4(), Scope: "tenant"},
@@ -86,11 +93,12 @@ func TestGenericSubstrate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, JobType("finance.csv_import"), job.JobType)
 		worker, err := NewWorker(WorkerDeps{
-			Store:    store,
-			Registry: registry,
-			Clock:    func() time.Time { return now.Add(time.Minute) },
-			WorkerID: "worker-generic",
-			Config:   WorkerConfig{},
+			Store:         store,
+			Registry:      registry,
+			Clock:         func() time.Time { return now.Add(time.Minute) },
+			WorkerID:      "worker-generic",
+			Config:        WorkerConfig{},
+			RouterFactory: routerFactory,
 		})
 		require.NoError(t, err)
 		require.NoError(t, worker.ProcessJob(t.Context(), job.ID))
@@ -111,10 +119,9 @@ func TestGenericSubstrate(t *testing.T) {
 
 	t.Run("supports safe cancel and retry only for handlers that allow it", func(t *testing.T) {
 		now := time.Now().UTC()
-		store := makeStore(t)
+		transactionContext := context.WithoutCancel(t.Context())
+		store, _, publisher := makeStore(t)
 		registry := NewRegistry()
-		publisher := newMockdispatchPublisher(t)
-		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
 		require.NoError(t, RegisterTypedHandler(
 			registry,
 			TypedHandlerSpec[financeInput, financeResult, financeProgress]{
@@ -135,7 +142,7 @@ func TestGenericSubstrate(t *testing.T) {
 			Registry:    registry,
 		})
 		require.NoError(t, err)
-		job, err := svc.Enqueue(t.Context(), EnqueueParams{
+		job, err := svc.Enqueue(transactionContext, EnqueueParams{
 			JobType:   JobType("finance.bank_connection_sync"),
 			Requester: Requester{UserID: "user-" + fake.UUID().V4(), Source: RequesterSourceOperator},
 			Input:     financeInput{AccountID: "acct-" + fake.UUID().V4()},
@@ -144,7 +151,7 @@ func TestGenericSubstrate(t *testing.T) {
 		canceled, err := svc.Cancel(t.Context(), job.ID)
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusCanceled, canceled.Status)
-		retried, err := svc.Retry(t.Context(), job.ID)
+		retried, err := svc.Retry(transactionContext, job.ID)
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusQueued, retried.Status)
 		assert.NotEqual(t, job.ID, retried.ID)
@@ -152,10 +159,9 @@ func TestGenericSubstrate(t *testing.T) {
 
 	t.Run("scheduler enqueues due windows once without replaying immediate work through polling", func(t *testing.T) {
 		now := time.Now().UTC()
-		store := makeStore(t)
+		transactionContext := context.WithoutCancel(t.Context())
+		store, _, publisher := makeStore(t)
 		registry := NewRegistry()
-		publisher := newMockdispatchPublisher(t)
-		publisher.EXPECT().PublishInTx(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		var financeCalls atomic.Int64
 		require.NoError(t, RegisterTypedHandler(
 			registry,
@@ -192,10 +198,10 @@ func TestGenericSubstrate(t *testing.T) {
 			Clock:   func() time.Time { return now },
 		})
 		require.NoError(t, err)
-		count, err := scheduler.EnqueueDue(t.Context())
+		count, err := scheduler.EnqueueDue(transactionContext)
 		require.NoError(t, err)
 		assert.Equal(t, 1, count)
-		count, err = scheduler.EnqueueDue(t.Context())
+		count, err = scheduler.EnqueueDue(transactionContext)
 		require.NoError(t, err)
 		assert.Equal(t, 0, count)
 		queued, err := store.List(t.Context(), ListParams{Statuses: []JobStatus{JobStatusQueued}, Limit: 10})

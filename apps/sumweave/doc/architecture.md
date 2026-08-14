@@ -42,6 +42,34 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 - **`internal/telemetry/`** — slog, OTEL resource, HTTP middleware, pprof helper.
 - **`internal/infrastructure/`** — outbound HTTP client factory and middleware (correlation, logging).
 
+## Messaging model
+
+- **`internal/appdispatch/`** is a low-level, multi-topic SQL transport. One
+  message table stores topic, identity, opaque payload, and metadata; one
+  offsets table is keyed by topic and consumer group. SQLite and PostgreSQL
+  follow the same delivery contract.
+- **`internal/appevents/`** publishes typed facts and creates typed handlers.
+  A named router can react to several event topics, and separate groups each
+  receive the same event independently.
+- **`internal/jobs/`** owns the `jobs.execution.v1` command envelope and the
+  `jobs.workers.v1` consumer group. A job message asks one logical worker group
+  to execute persisted work; it is not a domain event.
+- Delivery is **at least once**. A router acknowledges only after successful
+  handling or successful publication to `app.dispatch.dead-letter.v1`.
+  Handlers therefore own idempotency. A duplicate command for any non-queued
+  job is acknowledged without another execution.
+- Handler errors and panics receive three bounded retries. Exhausted deliveries
+  preserve the original message identity, topic, payload, and diagnostic
+  metadata in the dead-letter topic. A dead-letter publication failure leaves
+  the source offset unchanged.
+- Publishers and routers never create tables implicitly. **`db-migrate`**
+  creates the topic-aware schema. Existing early-alpha local databases using
+  the old single-topic layout must be recreated or reseeded first.
+- Router construction does not start consumption. The split jobs command or
+  `start-all` explicitly runs the worker router; API-only `start` only exposes
+  enqueue paths. HTTP and jobs roots stop messaging before closing their shared
+  SQL database, while the migration root constructs no runtime messaging.
+
 ## Configuration and env
 
 - **Layers:** embedded **`default.yaml`**, then **`internal/config/<env>.yaml`** (from **`--env` / `-e`**, default **`local`**), then optional **`<env>-user.yaml`** for local secrets.
@@ -69,7 +97,7 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 
 ## Technical notes (one-liners)
 
-- **Local persistence:** app-root launches use **`data`** for filesystem-backed agent state and **`data/application.db`** as the finance application database for auth, finance, durable transport, and jobs. Agent runtime database persistence is configured separately. On disk these are under **`apps/sumweave/data`**.
+- **Local persistence:** app-root launches use **`data`** for filesystem-backed agent state and **`data/application.db`** as the finance application database for auth, finance, multi-topic durable transport, and jobs. Agent runtime database persistence is configured separately. On disk these are under **`apps/sumweave/data`**.
 - **LLM HTTP client timeout** in **`internal/agent_runtime.go`** should stay consistent with **`httpServer.writeTimeout`** for streaming runs.
 - **Health** and **auth** routes use the generated v1 stack (**`RegisterHealthRoutes`**, **`RegisterAuthRoutes`**); **`GET /api/v1/auth/me`** is wrapped with **`AuthMiddleware`** in controller. **Agent** traffic is a separate subtree under **`/api/v1/runtime/`**.
 
