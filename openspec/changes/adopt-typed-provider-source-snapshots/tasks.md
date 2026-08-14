@@ -27,4 +27,4 @@
 
 ## 6. Legacy Removal And Documentation
 
-- [ ] 6.1 Remove obsolete provider-evidence/raw-payload domain, persistence, API, UI, and connector paths and update finance terminology and architecture documentation; follow TDD by first updating affected regression tests to reject legacy routes and writes, then delete unused code, document the early-alpha database recreation requirement, and complete the repository `make affected-lint-test` protocol.
+- [ ] 6.1 Remove obsolete provider-evidence/raw-payload domain, persistence, API, UI, and connector paths and update finance terminology and architecture documentation; follow TDD by first updating affected regression tests to reject legacy routes and writes, then delete unused code, document database recreation and manual cleanup, copy the design's exact **Operator action required after upgrade** SQL block into the implementation pull request and release notes, and complete the repository `make affected-lint-test` protocol.

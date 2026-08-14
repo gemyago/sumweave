@@ -29,6 +29,7 @@ Enable Banking sync currently decodes successful account and transaction respons
 - Affected finance code: `finance/internal/enablebanking/client`, `finance/internal/enablebanking`, provider sync DTOs and connectors, focused bank-sync services, provider source-data services, and finance persistence/migration models.
 - Affected backend code: finance OpenAPI routes, generated route models/handlers, controllers, and finance app wiring under `apps/sumweave`.
 - Affected UI code: finance API client mappings, account details, transaction details/editor source-data disclosure, tests, and `apps/sumweave-ui/ui-wireframe.md`.
-- Affected storage: early-alpha provider evidence/raw-payload tables may be replaced without backward-compatible data migration guarantees.
+- Affected storage: the new provider-snapshot table replaces the early-alpha provider evidence/raw-payload tables without data migration; GORM auto-migrate will not drop the retired tables, so upgraded database operators must remove them manually after validating the new application version.
+- Affected operations: the implementation pull request and release handoff must include the exact post-upgrade table-drop statements from the design as a required operator action.
 - Affected documentation/specs: finance terminology, provider-sync architecture, finance management, and finance operator UI.
 - No new provider endpoint, bank provider, payment behavior, or raw-response retention mechanism is introduced.

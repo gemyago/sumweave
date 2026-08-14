@@ -90,7 +90,7 @@ Alternative considered: use provider endpoint paths as kinds. Generic semantic k
 
 Finance will use a dedicated provider snapshot store rather than extending the legacy broad store. The current snapshot identity will include tenant ID, connection ID, subject, finance subject IDs, kind, and provider object ID. A later capture replaces the current document for the same identity; a different kind creates a different current snapshot.
 
-The existing provider-evidence and raw-payload tables and services will no longer be read or written. Because the product is early alpha, implementation will introduce the finance-owned snapshot table through GORM auto-migrate and require local/test database recreation where stale tables or data matter instead of adding compatibility copying or custom SQL migration logic.
+The existing provider-evidence and raw-payload tables and services will no longer be read or written. Because the product is early alpha, implementation will introduce the finance-owned snapshot table through GORM auto-migrate and require local/test database recreation where stale tables or data matter instead of adding compatibility copying or an application-managed data migration. GORM auto-migrate does not remove retired tables, so operators upgrading a persistent deployed database must execute the explicit post-upgrade cleanup below.
 
 Alternative considered: retain both tables, add kind to evidence, and continue storing connection raw payloads separately. That preserves duplicated content and two retention/identity systems without a current product requirement.
 
@@ -122,7 +122,7 @@ Monobank will stop forwarding successful `RawJSON` into finance-domain observati
 - [Removing page snapshots loses pagination-level debugging context] → Keep sync logs and run metadata for page counts/errors; retain per-transaction source documents, which are the data users need to explain imported records.
 - [One latest snapshot loses history] → This is current behavior and current product intent; historical snapshots remain out of scope until a retention/use case is defined.
 - [A provider DTO accidentally includes secret material] → Keep typed request and response models separate, sanitize at persistence and response boundaries, and test credential-like fields are not stored or returned.
-- [Existing early-alpha databases retain stale tables or lack new data] → Require recreation/reseed for affected local/test environments; no backward-compatible data migration is promised.
+- [Existing early-alpha databases retain stale tables or lack new data] → Require recreation/reseed for affected local/test environments; require the documented manual table cleanup for upgraded deployed databases; no backward-compatible data migration is promised.
 
 ## Migration Plan
 
@@ -134,8 +134,22 @@ Monobank will stop forwarding successful `RawJSON` into finance-domain observati
 6. Replace backend OpenAPI routes/models/controllers and regenerate route code.
 7. Replace UI API mappings, terminology, account/transaction source-data disclosures, and wireframe documentation.
 8. Update finance terminology, provider-sync architecture, and affected OpenSpec wording; recreate local/test databases for manual validation.
+9. Copy the operator-action block below into the implementation pull request description and release handoff so deployment cannot be treated as complete without the database cleanup.
 
 Rollback is a source revert plus database recreation. The change does not provide a data-preserving downgrade.
+
+### Required post-upgrade operator action
+
+GORM auto-migrate creates `finance_provider_snapshots` but does not drop tables that are no longer registered. For an upgraded persistent database, the operator MUST first confirm that the new application version is running successfully and that `finance_provider_snapshots` exists. After confirming that rollback to a legacy build is not required, the operator MUST run these statements against the Sumweave application database:
+
+```sql
+DROP TABLE IF EXISTS finance_provider_evidence;
+DROP TABLE IF EXISTS finance_raw_payloads;
+```
+
+The operator MUST confirm that both retired tables are absent after executing the statements. No row copying or backup for these tables is required by this change. Fresh databases and recreated local/test databases require no manual drop.
+
+The implementation pull request description and release notes MUST reproduce this operator action, including the exact table names and SQL statements, under a visible **Operator action required after upgrade** heading.
 
 ## Open Questions
 
