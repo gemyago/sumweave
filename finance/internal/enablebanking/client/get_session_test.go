@@ -29,14 +29,10 @@ func TestClient_GetSession(t *testing.T) {
 		response, err := client.GetSession(t.Context(), GetSessionParams{SessionID: sessionID})
 
 		require.NoError(t, err)
-		assert.Equal(t, sessionID, response.SessionID)
-		assert.Equal(t, "Nordea", response.DisplayName)
 		assert.Equal(t, "AUTHORIZED", response.Status)
-		assert.Equal(t, []string{"497f6eca-6276-4993-bfeb-53cbbbba6f08"}, response.AccountIDs)
+		assert.Equal(t, []string{"497f6eca-6276-4993-bfeb-53cbbbba6f08"}, response.Accounts)
 		require.Len(t, response.AccountsData, 1)
 		assert.Equal(t, "497f6eca-6276-4993-bfeb-53cbbbba6f08", response.AccountsData[0].UID)
-		require.Len(t, response.Accounts, 1)
-		assert.Equal(t, "497f6eca-6276-4993-bfeb-53cbbbba6f08", response.Accounts[0].UID)
 	})
 
 	t.Run("rejects undocumented session account object array", func(t *testing.T) {

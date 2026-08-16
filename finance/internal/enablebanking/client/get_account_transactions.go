@@ -49,5 +49,5 @@ func (c *Client) GetAccountTransactions(
 	if err != nil {
 		return nil, fmt.Errorf("get account transactions failed: %w", err)
 	}
-	return normalizeTransactions(result.Value), nil
+	return result, nil
 }

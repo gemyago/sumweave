@@ -67,7 +67,7 @@ The finance module SHALL treat transactions as the explainable ledger source of 
 
 #### Scenario: Synced transactions preserve provider truth and user edits
 - **WHEN** provider-synced transactions are imported and later edited by a user
-- **THEN** the system MUST retain provider-original values and raw payloads separately from user-edited presentation/reporting fields
+- **THEN** the system MUST retain provider-original values and current schema-derived provider snapshots separately from user-edited presentation/reporting fields
 - **AND** later syncs MUST NOT silently overwrite user corrections
 
 #### Scenario: Reporting semantics stay explicit for special transaction kinds
@@ -124,7 +124,7 @@ The finance module SHALL support secure provider linking plus explicit async syn
 
 #### Scenario: Bank sync remains idempotent and job-backed
 - **WHEN** a tenant member triggers or schedules a bank sync for a linked monobank, PKO, or synthetic connection
-- **THEN** the system MUST execute the sync through durable finance jobs, persist normalized accounts/transactions, balance snapshots, provider-original identifiers, and raw payloads, and deduplicate by provider/connection/account/provider-transaction identity plus safe fallback fingerprints when needed
+- **THEN** the system MUST execute the sync through durable finance jobs, persist normalized accounts/transactions, balance snapshots, provider-original identifiers, and current schema-derived provider snapshots, and deduplicate by provider/connection/account/provider-transaction identity plus safe fallback fingerprints when needed
 
 #### Scenario: Scheduled sync management scope stays explicit
 - **WHEN** finance scheduling features are surfaced
@@ -248,7 +248,7 @@ The finance module SHALL support a configured `synthetic` bank provider through 
 - **WHEN** the synthetic provider fetches a requested sync window that is not recorded in its provider-specific state
 - **THEN** it MUST return provider account observations for the configured accounts
 - **AND** it MUST generate from 1 to 2 booked transaction observations for each configured account for each UTC day in the requested window
-- **AND** generated transaction observations MUST include provider account IDs, provider transaction IDs, amount, currency, description, effective time, fingerprint, provider-original values, and raw payload evidence
+- **AND** generated transaction observations MUST include provider account IDs, provider transaction IDs, amount, currency, description, effective time, fingerprint, provider-original values, and schema-derived provider snapshots
 - **AND** the updated provider-specific state MUST record the generated requested window and transaction sequence information needed by later fetches
 
 #### Scenario: Synthetic repeated run generates only the last day
@@ -259,13 +259,13 @@ The finance module SHALL support a configured `synthetic` bank provider through 
 - **AND** the updated provider-specific state MUST preserve prior generated-window history while advancing transaction sequence information
 
 ### Requirement: Provider Sync V2 Coordinates Bank Link Persistence
-The finance module SHALL coordinate provider sync v2 bank-link workflows through product provider profiles, technical connectors, encrypted connection-secret persistence, and durable bank connection metadata.
+The finance module SHALL coordinate provider sync v2 bank-link workflows through product provider profiles, technical connectors, encrypted connection-secret persistence, durable bank connection metadata, and typed provider source snapshots.
 
 #### Scenario: Redirect link start resolves product provider and connector
 - **WHEN** a tenant member starts a provider sync v2 redirect/SCA link for product provider `pko`
 - **THEN** the system MUST resolve the `pko` provider profile and technical connector `enable-banking` before calling connector start-link behavior
 - **AND** the system MUST persist an unconsumed pending link start scoped to tenant, actor, product provider, technical connector, state, callback URL, authorization URL, expiration, and the connector's secret-safe start result
-- **AND** the persisted redirect-start observations MUST remain in pending-start storage for later finish/retry use rather than becoming durable connection raw-payload evidence by themselves
+- **AND** the persisted redirect-start observations MUST remain in pending-start storage for later finish/retry use rather than becoming durable connection provider snapshots by themselves
 - **AND** the system MUST reject unsupported product providers or redirect-link methods before storing secrets or calling a connector
 
 #### Scenario: Redirect link finish creates a durable v2 connection
@@ -283,7 +283,7 @@ The finance module SHALL coordinate provider sync v2 bank-link workflows through
 #### Scenario: Redirect finish failure remains retryable
 - **WHEN** connector finish-link behavior or encrypted connection persistence fails after a pending redirect start is consumed
 - **THEN** the system MUST restore or preserve the pending start so the tenant member can retry until the pending start expires
-- **AND** failure handling MUST NOT persist plaintext connector credentials or secret-bearing raw payload evidence
+- **AND** failure handling MUST NOT persist plaintext connector credentials or secret-bearing provider snapshots
 
 #### Scenario: Token link creates a durable v2 connection
 - **WHEN** a tenant member token-links product provider `monobank`
@@ -296,11 +296,11 @@ The finance module SHALL coordinate provider sync v2 bank-link workflows through
 - **THEN** the persisted bank connection MUST contain enough durable metadata to build `ProviderConnectionRef` with connection ID, product provider ID, technical connector ID, provider reference, and external ID
 - **AND** provider sync v2 MUST use the persisted technical connector ID instead of deriving connector selection from product provider-specific branches
 
-#### Scenario: Link evidence and pending state remain secret-safe
-- **WHEN** provider sync v2 persists pending link-start data, final connection raw payload evidence, logs, or returned API views
+#### Scenario: Link snapshots and pending state remain secret-safe
+- **WHEN** provider sync v2 persists pending link-start data, final connection provider snapshots, logs, or returned API views
 - **THEN** Monobank tokens, Enable Banking session secrets, bearer tokens, private keys, and signed request material MUST NOT be persisted or surfaced in plaintext
-- **AND** persisted evidence MUST keep enough non-secret provider context to debug link failures and connection identity
-- **AND** successful token-link or redirect-finish flows MUST persist durable raw payload evidence only from the final connector result, without copying redirect-start observations out of the pending-start envelope
+- **AND** persisted snapshots MUST keep enough non-secret typed provider context to debug link failures and connection identity
+- **AND** successful token-link or redirect-finish flows MUST persist a durable connection snapshot only from the final connector result, without copying redirect-start observations out of the pending-start envelope
 
 ### Requirement: Finance Bank-Link API Uses Focused V2 Service
 The finance module SHALL expose protected bank-linking workflows through a focused public bank-connection service backed by provider sync v2 link coordination rather than through the overloaded root finance service.
@@ -313,7 +313,7 @@ The finance module SHALL expose protected bank-linking workflows through a focus
 #### Scenario: Focused bank-connection service coordinates v2 linking
 - **WHEN** the focused bank-connection service handles Monobank token linking or PKO redirect start/finish
 - **THEN** it MUST enforce tenant membership at the public finance boundary
-- **AND** it MUST delegate product-provider resolution, technical connector calls, pending-start persistence, encrypted secret handoff, durable connection writes, and raw evidence persistence to provider sync v2 link coordination
+- **AND** it MUST delegate product-provider resolution, technical connector calls, pending-start persistence, encrypted secret handoff, durable connection writes, and provider snapshot persistence to provider sync v2 link coordination
 - **AND** it MUST reject unsupported provider or linking-method combinations before storing secrets or calling a connector
 
 #### Scenario: Legacy bank-link path is not retained behind a toggle
@@ -352,7 +352,7 @@ The finance module SHALL expose public services by focused product responsibilit
 - **AND** any required caller change MUST be limited to Go wiring and dependency interfaces inside the repository
 
 ### Requirement: Enable Banking Client Matches Official API And App Transport
-The finance module SHALL implement Enable Banking through schema-faithful typed client operations that use the backend app's configured HTTP client instance.
+The finance module SHALL implement Enable Banking through complete documented typed client operations that use the backend app's configured HTTP client instance.
 
 #### Scenario: App wiring supplies provider HTTP client
 - **WHEN** the backend app composes the finance module
@@ -364,24 +364,91 @@ The finance module SHALL implement Enable Banking through schema-faithful typed 
 - **WHEN** an Enable Banking client operation sends an HTTP request
 - **THEN** it MUST use a typed JSON request helper with an injected HTTP client, typed request body, typed response target, standard JSON encode/decode behavior, and standard transport/status error handling
 - **AND** it MUST attach the Enable Banking JWT `Authorization` header for signed requests
-- **AND** normal operations MUST NOT decode provider responses through `map[string]any`, `DoRawObject`, or `DoRawArray`
+- **AND** normal successful operations MUST NOT decode or retain provider responses through `map[string]any`, raw-message fields, or successful raw response body envelopes
 
-#### Scenario: Generated models match documented AIS schemas
-- **WHEN** the client models request or decode the supported account-information endpoints
-- **THEN** their JSON fields MUST match the official Enable Banking API names for ASPSPs, authorization start, session authorization, session data, account details, balances, and transactions
+#### Scenario: Client models contain complete documented AIS response shapes
+- **WHEN** the client decodes the supported account-information endpoints used by finance sync
+- **THEN** its provider DTO graph MUST model every field and nested structure documented for session account resources, account details, account balances, transaction pages, and transaction items in the supported Enable Banking API reference
 - **AND** `GET /aspsps` MUST decode the documented object response with an `aspsps` array
-- **AND** session fetch MUST support documented account IDs and `accounts_data`
-- **AND** balance decoding MUST use `balance_type` and `balance_amount`
+- **AND** session fetch MUST support documented account IDs and complete `accounts_data` resources
+- **AND** account details MUST use the complete documented account resource
+- **AND** balance decoding MUST use the complete documented balance resources under `balances`
 - **AND** transaction requests MUST use the `transaction_status` query parameter when filtering by status
-- **AND** transaction decoding MUST use documented transaction fields including `transaction_amount`, `credit_debit_indicator`, `status`, `booking_date`, `value_date`, `transaction_date`, `entry_reference`, `transaction_id`, `note`, `remittance_information`, and `continuation_key`
+- **AND** transaction decoding MUST retain every documented transaction field and continuation handling MUST use `continuation_key`
 
-#### Scenario: Raw provider evidence is isolated from schema models
-- **WHEN** Enable Banking response data is exposed to connector or finance mapping code
-- **THEN** generated request and response structs MUST NOT expose generic raw map fields
-- **AND** connector business mapping MUST use typed schema fields only
-- **AND** any provider raw-payload evidence required by finance sync MUST be carried through a separate internal evidence boundary rather than through generated model `Raw` fields
+#### Scenario: Documented provider values survive typed round trip
+- **WHEN** a documentation-derived supported provider response is decoded and then encoded from its typed DTO
+- **THEN** every documented field present in the response MUST retain an equivalent JSON value
+- **AND** the client MUST model optional values so a valid documented zero, false, or empty value is not silently lost when its presence is meaningful
+- **AND** JSON whitespace, object-key order, and unknown undocumented fields need not be preserved
+
+#### Scenario: Provider DTOs remain separate from normalized finance values
+- **WHEN** connector code maps an Enable Banking response into finance account, balance, transaction, provider-original, or fingerprint observations
+- **THEN** it MUST derive normalized finance values without mutating serialized provider DTO fields
+- **AND** normalized IDs, uppercase currencies, signed minor amounts, descriptions, and effective timestamps MUST NOT be stored as undocumented provider DTO fields
+
+#### Scenario: Provider snapshots are encoded from schema models
+- **WHEN** Enable Banking response data becomes a finance provider snapshot
+- **THEN** connector business mapping MUST use typed schema fields only
+- **AND** the snapshot document MUST be encoded from the unchanged typed provider DTO
+- **AND** generated request and response structs MUST NOT expose generic raw maps, raw-message fields, or successful response-body fields for snapshot persistence
+
+#### Scenario: Providers without separate balance documents do not invent them
+- **WHEN** a supported provider reports account identity and balance fields in one typed account item rather than a separate typed balance response
+- **THEN** the connector MUST retain that typed item as the `account` snapshot used to explain both mappings
+- **AND** it MUST NOT duplicate the same document under `account_balance`
+- **AND** `account_balance` MUST remain reserved for a distinct typed provider balance document
 
 #### Scenario: Unsupported or undocumented operations stay out of the generated client surface
 - **WHEN** an Enable Banking endpoint or response shape is not documented by the current official API reference and is not required for the supported PKO workflow
 - **THEN** the client MUST NOT keep or add that operation as part of the supported generated surface
 - **AND** finance code MUST fail through bounded unsupported-path errors rather than silently falling back to raw request construction
+
+### Requirement: Provider Source Snapshots Are Typed And Distinct
+The finance module SHALL retain current, sanitized provider source snapshots reconstructed from supported typed provider documents rather than successful raw HTTP response bytes.
+
+#### Scenario: Snapshot document comes from a typed provider DTO
+- **WHEN** a supported provider response contributes source data for a linked connection, account, balance, or transaction
+- **THEN** the connector MUST encode the supported typed provider DTO into the snapshot document
+- **AND** it MUST NOT populate the snapshot from successful raw HTTP response bytes, generic raw maps, or raw-message fields
+- **AND** normalization into finance fields MUST NOT mutate the provider DTO used to construct the snapshot
+
+#### Scenario: Snapshot identity distinguishes document kinds
+- **WHEN** current provider source snapshots are persisted
+- **THEN** each snapshot MUST identify its finance subject, provider object, snapshot kind, connection, and capture time
+- **AND** supported kinds MUST distinguish `connection`, `account`, `account_balance`, and `transaction` documents
+- **AND** an account snapshot and account-balance snapshot for the same provider account MUST coexist without replacing each other
+
+#### Scenario: Latest snapshot replaces only the same snapshot identity
+- **WHEN** a newer snapshot is captured for the same tenant, connection, finance subject, applicable finance account and transaction IDs, provider object, and snapshot kind
+- **THEN** it MUST replace the current document for that exact identity
+- **AND** snapshots with another provider object, finance subject, or kind MUST remain independently readable
+- **AND** the system MUST NOT expose a snapshot history timeline as part of this change
+
+#### Scenario: Transaction snapshot represents one provider transaction
+- **WHEN** a provider transaction is imported or refreshed
+- **THEN** its finance transaction MUST receive a `transaction` snapshot containing the complete supported typed transaction item
+- **AND** transport pagination envelopes and continuation keys MUST NOT replace or stand in for that transaction snapshot
+
+#### Scenario: Snapshot attachment matches its finance subject
+- **WHEN** a provider snapshot is accepted for persistence
+- **THEN** a `connection` subject MUST omit finance account and transaction IDs
+- **AND** an `account` subject MUST identify its finance account and omit a finance transaction ID
+- **AND** a `transaction` subject MUST identify both its finance account and finance transaction
+- **AND** tenant ID, connection ID, subject, kind, provider object ID, document, and capture time MUST be present
+
+#### Scenario: Connection deletion removes its current snapshots
+- **WHEN** a tenant member deletes a bank connection
+- **THEN** every provider snapshot owned by that connection MUST be deleted in the connection-owned metadata cleanup transaction
+
+#### Scenario: Snapshots remain sanitized and tenant-authorized
+- **WHEN** a snapshot is persisted or returned through a protected finance API
+- **THEN** credential-like fields, bearer tokens, signed authorization material, private keys, and decrypted secrets MUST NOT be stored or returned
+- **AND** account and transaction snapshot reads MUST enforce tenant membership and finance-object ownership
+
+#### Scenario: Provider snapshot API exposes current source data
+- **WHEN** an authenticated tenant member lists or reads provider snapshots for a finance account or transaction
+- **THEN** the protected API MUST expose current snapshot metadata including ID, kind, provider object ID, and capture time
+- **AND** a detail read MUST return the sanitized schema-derived document as provider source data
+- **AND** the API MUST use provider-snapshot terminology and MUST NOT retain `/evidence` compatibility routes
+

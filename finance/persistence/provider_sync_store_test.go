@@ -80,29 +80,6 @@ func TestProviderSyncStore(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, later.Format(time.RFC3339Nano), snapshots[0].CapturedAt.Format(time.RFC3339Nano))
 
-		for _, payload := range []domain.RawPayload{
-			{ID: "payload-later-" + fake.UUID().V4(), ConnectionID: connectionID, Scope: domain.RawPayloadScopeTransaction, ProviderObjectID: "payload-later-" + fake.UUID().V4(), PayloadJSON: []byte(`{}`), CapturedAt: later},
-			{ID: "payload-earlier-" + fake.UUID().V4(), ConnectionID: connectionID, Scope: domain.RawPayloadScopeTransaction, ProviderObjectID: "payload-earlier-" + fake.UUID().V4(), PayloadJSON: []byte(`{}`), CapturedAt: earlier},
-		} {
-			_, err = store.SaveRawPayload(t.Context(), payload)
-			require.NoError(t, err)
-		}
-		payloads, err := store.ListRawPayloads(t.Context(), connectionID)
-		require.NoError(t, err)
-		require.Equal(t, earlier.Format(time.RFC3339Nano), payloads[0].CapturedAt.Format(time.RFC3339Nano))
-
-		current := payloads[0]
-		current.ID = "payload-current-" + fake.UUID().V4()
-		current.PayloadJSON = []byte(`{"value":"current","clientSecret":"not-stored"}`)
-		current.CapturedAt = later.Add(time.Minute)
-		updatedPayload, err := store.SaveRawPayload(t.Context(), current)
-		require.NoError(t, err)
-		assert.Equal(t, payloads[0].ID, updatedPayload.ID)
-		assert.JSONEq(t, `{"value":"current"}`, string(updatedPayload.PayloadJSON))
-		payloads, err = store.ListRawPayloads(t.Context(), connectionID)
-		require.NoError(t, err)
-		require.Len(t, payloads, 2)
-
 		fingerprint := "fingerprint-" + fake.UUID().V4()
 		earlierMatch := domain.ProviderTransactionMatch{
 			ID: "match-earlier-" + fake.UUID().V4(), ConnectionID: connectionID,
@@ -187,7 +164,7 @@ func TestProviderSyncStore(t *testing.T) {
 	})
 
 	t.Run(
-		"persists bank connections schedules accounts snapshots raw payloads and sync matches",
+		"persists bank connections schedules accounts snapshots and sync matches",
 		func(t *testing.T) {
 			fake := faker.New()
 			store := makeStore(t)
@@ -284,20 +261,6 @@ func TestProviderSyncStore(t *testing.T) {
 			snapshots, err := store.ListBalanceSnapshots(t.Context(), connection.ID)
 			require.NoError(t, err)
 			require.Len(t, snapshots, 1)
-
-			_, err = store.SaveRawPayload(t.Context(), domain.RawPayload{
-				ID:               "payload-" + fake.UUID().V4(),
-				ConnectionID:     connection.ID,
-				Scope:            domain.RawPayloadScopeTransaction,
-				ProviderObjectID: "txn-" + fake.UUID().V4(),
-				PayloadJSON:      []byte(`{"ok":true}`),
-				CapturedAt:       now,
-			})
-			require.NoError(t, err)
-
-			payloads, err := store.ListRawPayloads(t.Context(), connection.ID)
-			require.NoError(t, err)
-			require.Len(t, payloads, 1)
 
 			missingRun, err := store.GetBankConnectionSyncRun(
 				t.Context(),
@@ -511,15 +474,6 @@ func TestProviderSyncStore(t *testing.T) {
 				CapturedAt:          now,
 			})
 			require.NoError(t, err)
-			_, err = store.SaveRawPayload(t.Context(), domain.RawPayload{
-				ID:               "payload-" + fake.UUID().V4(),
-				ConnectionID:     connection.ID,
-				Scope:            domain.RawPayloadScopeTransaction,
-				ProviderObjectID: "provider-object-" + fake.UUID().V4(),
-				PayloadJSON:      []byte(`{"ok":true}`),
-				CapturedAt:       now,
-			})
-			require.NoError(t, err)
 			_, err = store.SaveBankConnectionSyncRun(t.Context(), domain.BankConnectionSyncRun{
 				ID:           "run-" + fake.UUID().V4(),
 				ConnectionID: connection.ID,
@@ -543,7 +497,6 @@ func TestProviderSyncStore(t *testing.T) {
 
 		require.NoError(t, store.DeleteProviderTransactionMatches(t.Context(), connectionOne.ID))
 		require.NoError(t, store.DeleteBankConnectionSyncRuns(t.Context(), connectionOne.ID))
-		require.NoError(t, store.DeleteRawPayloads(t.Context(), connectionOne.ID))
 		require.NoError(t, store.DeleteBalanceSnapshots(t.Context(), connectionOne.ID))
 		require.NoError(t, store.DeleteConnectionProviderAccounts(t.Context(), connectionOne.ID))
 		require.NoError(t, store.DeleteBankConnectionSchedule(t.Context(), connectionOne.ID))
@@ -562,9 +515,6 @@ func TestProviderSyncStore(t *testing.T) {
 		snapshots, err := store.ListBalanceSnapshots(t.Context(), connectionOne.ID)
 		require.NoError(t, err)
 		assert.Empty(t, snapshots)
-		payloads, err := store.ListRawPayloads(t.Context(), connectionOne.ID)
-		require.NoError(t, err)
-		assert.Empty(t, payloads)
 		run, err := store.GetBankConnectionSyncRun(t.Context(), connectionOne.ID, "missing")
 		require.ErrorIs(t, err, ErrBankConnectionSyncRunNotFound)
 		assert.Nil(t, run)
@@ -627,20 +577,7 @@ func TestProviderSyncStore(t *testing.T) {
 				StartResult: domain.PendingBankConnectionLinkStartResult{
 					State:            "start-state-" + fake.UUID().V4(),
 					AuthorizationURL: "https://example.test/start/" + fake.UUID().V4(),
-					RawPayloads: []domain.ProviderRawPayloadObservation{
-						{
-							Connection: domain.ProviderConnectionRef{
-								ConnectionID:      "connection-" + fake.UUID().V4(),
-								ProviderID:        domain.ProviderIDPKO,
-								ConnectorID:       domain.ProviderConnectorIDEnableBanking,
-								ProviderReference: "provider-ref-raw-" + fake.UUID().V4(),
-							},
-							Scope:            domain.RawPayloadScopeConnection,
-							ProviderObjectID: "payload-" + fake.UUID().V4(),
-							PayloadJSON:      []byte(`{"step":"start"}`),
-							CapturedAt:       now.Add(2 * time.Minute),
-						},
-					},
+					DocumentJSON:     []byte(`{"step":"start"}`),
 				},
 				ExpiresAt: now.Add(15 * time.Minute),
 				CreatedAt: now,
@@ -848,8 +785,6 @@ func TestProviderSyncStore(t *testing.T) {
 		)
 		require.Error(t, err)
 		_, err = store.SaveBalanceSnapshot(t.Context(), domain.BalanceSnapshot{ID: "id"})
-		require.Error(t, err)
-		_, err = store.SaveRawPayload(t.Context(), domain.RawPayload{ID: "id"})
 		require.Error(t, err)
 		_, err = store.SaveBankConnectionSyncRun(
 			t.Context(),

@@ -25,5 +25,5 @@ func (c *Client) GetAccountBalances(
 	if err != nil {
 		return nil, fmt.Errorf("get account balances failed: %w", err)
 	}
-	return normalizeBalances(result.Value), nil
+	return result, nil
 }

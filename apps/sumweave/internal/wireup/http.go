@@ -284,7 +284,7 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 			BankSyncService:              financeModule.BankSyncService,
 			ReportingService:             financeModule.ReportingService,
 			FXService:                    financeModule.FXService,
-			ProviderEvidenceService:      financeModule.ProviderEvidenceService,
+			ProviderSnapshotService:      financeModule.ProviderSnapshotService,
 			CSVImportService:             financeModule.CSVImportService,
 			BankConnectionService:        financeModule.BankConnectionService,
 			SyntheticLinkStateService:    financeModule.SyntheticLinkStateService,

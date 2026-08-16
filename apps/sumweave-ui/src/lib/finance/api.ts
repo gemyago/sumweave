@@ -99,15 +99,15 @@ export interface FinanceTransferCandidatePage {
   items: FinanceTransaction[]
 }
 
-export interface FinanceProviderEvidenceMetadata {
+export interface FinanceProviderSnapshotMetadata {
   id: string
-  scope: string
+  kind: string
   providerObjectId: string
   capturedAt: Date
 }
 
-export interface FinanceProviderEvidence extends FinanceProviderEvidenceMetadata {
-  payload?: Record<string, unknown>
+export interface FinanceProviderSnapshot extends FinanceProviderSnapshotMetadata {
+  data?: Record<string, unknown>
 }
 
 export interface FinanceBankConnectionSchedule {
@@ -336,8 +336,8 @@ export interface SignalFinanceApi {
   renameAccount(params: { tenantId: string; accountId: string; name: string }): Promise<void>
   hideAccount(params: { tenantId: string; accountId: string }): Promise<void>
   restoreAccount(params: { tenantId: string; accountId: string }): Promise<void>
-  listAccountProviderEvidence(params: { tenantId: string; accountId: string }): Promise<FinanceProviderEvidenceMetadata[]>
-  getAccountProviderEvidence(params: { tenantId: string; accountId: string; evidenceId: string }): Promise<FinanceProviderEvidence>
+  listAccountProviderSnapshots(params: { tenantId: string; accountId: string }): Promise<FinanceProviderSnapshotMetadata[]>
+  getAccountProviderSnapshot(params: { tenantId: string; accountId: string; snapshotId: string }): Promise<FinanceProviderSnapshot>
   listCategories(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceCategory[]>
   createCategory(params: { tenantId: string; name: string; kind: string }): Promise<FinanceCategory>
   updateCategory(params: { tenantId: string; categoryId: string; name: string; kind: string }): Promise<void>
@@ -354,8 +354,8 @@ export interface SignalFinanceApi {
     offset?: number
   }): Promise<FinanceTransaction[]>
   getTransaction(params: { tenantId: string; transactionId: string }): Promise<FinanceTransaction>
-  listTransactionProviderEvidence(params: { tenantId: string; transactionId: string }): Promise<FinanceProviderEvidenceMetadata[]>
-  getTransactionProviderEvidence(params: { tenantId: string; transactionId: string; evidenceId: string }): Promise<FinanceProviderEvidence>
+  listTransactionProviderSnapshots(params: { tenantId: string; transactionId: string }): Promise<FinanceProviderSnapshotMetadata[]>
+  getTransactionProviderSnapshot(params: { tenantId: string; transactionId: string; snapshotId: string }): Promise<FinanceProviderSnapshot>
   createTransaction(params: {
     tenantId: string
     accountId: string
@@ -568,17 +568,17 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/accounts/${encodeURIComponent(accountId)}/unhide`,
       })
     },
-    async listAccountProviderEvidence({ tenantId, accountId }) {
-      const json = await request<{ items?: RawProviderEvidenceMetadata[] }>({
+    async listAccountProviderSnapshots({ tenantId, accountId }) {
+      const json = await request<{ items?: RawProviderSnapshotMetadata[] }>({
         method: 'GET',
-        path: `/finance/tenants/${encodeURIComponent(tenantId)}/accounts/${encodeURIComponent(accountId)}/evidence`,
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/accounts/${encodeURIComponent(accountId)}/provider-snapshots`,
       })
-      return requireItems<RawProviderEvidenceMetadata>(json, 'finance.accountEvidence.items').map(mapProviderEvidenceMetadata)
+      return requireItems<RawProviderSnapshotMetadata>(json, 'finance.accountProviderSnapshots.items').map(mapProviderSnapshotMetadata)
     },
-    async getAccountProviderEvidence({ tenantId, accountId, evidenceId }) {
-      return mapProviderEvidence(await request<RawProviderEvidence>({
+    async getAccountProviderSnapshot({ tenantId, accountId, snapshotId }) {
+      return mapProviderSnapshot(await request<RawProviderSnapshot>({
         method: 'GET',
-        path: `/finance/tenants/${encodeURIComponent(tenantId)}/accounts/${encodeURIComponent(accountId)}/evidence/${encodeURIComponent(evidenceId)}`,
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/accounts/${encodeURIComponent(accountId)}/provider-snapshots/${encodeURIComponent(snapshotId)}`,
       }))
     },
     async listCategories({ tenantId, includeHidden }) {
@@ -645,17 +645,17 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         }),
       )
     },
-    async listTransactionProviderEvidence({ tenantId, transactionId }) {
-      const json = await request<{ items?: RawProviderEvidenceMetadata[] }>({
+    async listTransactionProviderSnapshots({ tenantId, transactionId }) {
+      const json = await request<{ items?: RawProviderSnapshotMetadata[] }>({
         method: 'GET',
-        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/${encodeURIComponent(transactionId)}/evidence`,
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/${encodeURIComponent(transactionId)}/provider-snapshots`,
       })
-      return requireItems<RawProviderEvidenceMetadata>(json, 'finance.transactionEvidence.items').map(mapProviderEvidenceMetadata)
+      return requireItems<RawProviderSnapshotMetadata>(json, 'finance.transactionProviderSnapshots.items').map(mapProviderSnapshotMetadata)
     },
-    async getTransactionProviderEvidence({ tenantId, transactionId, evidenceId }) {
-      return mapProviderEvidence(await request<RawProviderEvidence>({
+    async getTransactionProviderSnapshot({ tenantId, transactionId, snapshotId }) {
+      return mapProviderSnapshot(await request<RawProviderSnapshot>({
         method: 'GET',
-        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/${encodeURIComponent(transactionId)}/evidence/${encodeURIComponent(evidenceId)}`,
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/${encodeURIComponent(transactionId)}/provider-snapshots/${encodeURIComponent(snapshotId)}`,
       }))
     },
       async createTransaction(params) {
@@ -890,8 +890,8 @@ interface RawAccount { id: string; tenantId: string; name: string; currency: str
 interface RawCategory { id: string; tenantId: string; name: string; kind: string; seededDefault: boolean; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTag { id: string; tenantId: string; name: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTransactionProviderOriginal { amountMinor: number; currency: string; description: string; effectiveAt?: string | null }
-interface RawProviderEvidenceMetadata { id: string; scope: string; providerObjectId: string; capturedAt: string }
-interface RawProviderEvidence extends RawProviderEvidenceMetadata { payload?: Record<string, unknown> }
+interface RawProviderSnapshotMetadata { id: string; kind: string; providerObjectId: string; capturedAt: string }
+interface RawProviderSnapshot extends RawProviderSnapshotMetadata { data?: Record<string, unknown> }
 interface RawTransaction { id: string; tenantId: string; accountId: string; source: string; status: string; kind: string; amountMinor: number; currency: string; description: string; effectiveAt: string; categoryId?: string | null; tagIds: string[]; transferGroupId?: string | null; transferMatchedAt?: string | null; hiddenAt?: string | null; providerOriginal?: RawTransactionProviderOriginal; createdAt: string; updatedAt: string }
 interface RawConnectionSchedule { connectionId: string; intervalSeconds: number; nextRunAt?: string | null; lastScheduledAt?: string | null; lastStartedAt?: string | null; lastCompletedAt?: string | null; lastJobId?: string; enabled: boolean; createdAt: string; updatedAt: string }
 interface RawConnection { id: string; tenantId: string; provider: string; displayName: string; providerReference: string; state: string; lastSyncJobId?: string; lastSyncStartedAt?: string | null; lastSuccessfulSyncAt?: string | null; lastSyncError?: string; createdAt: string; updatedAt: string; schedule?: RawConnectionSchedule }
@@ -968,12 +968,12 @@ function mapTransaction(item: RawTransaction): FinanceTransaction {
     updatedAt: parseRequiredDate(item.updatedAt, 'finance.transaction.updatedAt'),
   }
 }
-function mapProviderEvidenceMetadata(item: RawProviderEvidenceMetadata): FinanceProviderEvidenceMetadata {
-  requireFields(item, 'finance.providerEvidence', ['id', 'scope', 'providerObjectId', 'capturedAt'])
-  return { ...item, capturedAt: parseRequiredDate(item.capturedAt, 'finance.providerEvidence.capturedAt') }
+function mapProviderSnapshotMetadata(item: RawProviderSnapshotMetadata): FinanceProviderSnapshotMetadata {
+  requireFields(item, 'finance.providerSnapshot', ['id', 'kind', 'providerObjectId', 'capturedAt'])
+  return { ...item, capturedAt: parseRequiredDate(item.capturedAt, 'finance.providerSnapshot.capturedAt') }
 }
-function mapProviderEvidence(item: RawProviderEvidence): FinanceProviderEvidence {
-  return { ...mapProviderEvidenceMetadata(item), ...(item.payload === undefined ? {} : { payload: item.payload }) }
+function mapProviderSnapshot(item: RawProviderSnapshot): FinanceProviderSnapshot {
+  return { ...mapProviderSnapshotMetadata(item), ...(item.data === undefined ? {} : { data: item.data }) }
 }
 function mapConnection(item: RawConnection): FinanceBankConnection {
   requireFields(item, 'finance.connection', ['id', 'tenantId', 'provider', 'displayName', 'providerReference', 'state', 'createdAt', 'updatedAt'])

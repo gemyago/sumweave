@@ -1,21 +1,51 @@
 {
   "account_id": {
-    "iban": "FI0455231152453547"
+    "iban": "FI0455231152453547",
+    "other": {"identification": "other-account", "scheme_name": "BBAN", "issuer": "Nordea"}
   },
   "all_account_ids": [
     {
       "identification": "123456",
-      "scheme_name": "BBAN"
+      "scheme_name": "BBAN",
+      "issuer": "issuer"
     }
   ],
   "account_servicer": {
     "bic_fi": "NDEAFIHH",
+    "clearing_system_member_id": {
+      "clearing_system_id": "NZNCC",
+      "member_id": "20368"
+    },
     "name": "Nordea"
   },
   "name": "Main account",
   "details": "Primary account",
+  "usage": "PRIV",
+  "cash_account_type": "CACC",
   "product": "Everyday banking",
   "currency": "eur",
+  "psu_status": "ACTIVE",
+  "credit_limit": {
+    "currency": "EUR",
+    "amount": "0.00"
+  },
+  "legal_age": false,
+  "postal_address": {
+    "address_type": "Business",
+    "department": "Department of resources",
+    "sub_department": "Sub Department of resources",
+    "street_name": "Vasavagen",
+    "building_number": "4",
+    "post_code": "00123",
+    "town_name": "Helsinki",
+    "country_sub_division": "Uusimaa",
+    "country": "FI",
+    "address_line": [
+      "Mr Asko Teirila PO Box 511",
+      "39140 AKDENMAA FINLAND"
+    ]
+  },
   "uid": "07cc67f4-45d6-494b-adac-09b5cbc7e2b5",
-  "identification_hash": "hash-1"
+  "identification_hash": "hash-1",
+  "identification_hashes": ["hash-1", "hash-2"]
 }

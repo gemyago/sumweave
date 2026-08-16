@@ -4,7 +4,10 @@
 - **Account**: a financial account tracked within one tenant.
 - **Ledger transaction**: a recorded financial movement, including transfers.
 - **Bank connection**: an authenticated external provider connection.
-- **Provider evidence**: sanitized metadata retained to explain imported data.
+- **Provider snapshot**: the latest sanitized, schema-derived provider document
+  for a connection, account, or transaction. It is not a raw HTTP response.
+- **Provider source data**: the operator-facing label for current provider
+  snapshots.
 - **Durable job**: an imperative asynchronous command with persisted lifecycle,
   result, progress, and explicit retry state.
 - **Domain event**: a typed fact that already happened and can be delivered to

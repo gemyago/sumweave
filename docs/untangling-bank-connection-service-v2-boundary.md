@@ -23,7 +23,7 @@ This matches the OpenSpec intent that the public service in `finance` should exp
 
 ## Non-V2 Parts Still Used
 
-### 1. Legacy public request and response DTOs
+### 1. Public request and response DTOs
 
 The new service still exposes older public `finance` DTOs from `finance/dto.go`, including:
 
@@ -32,12 +32,11 @@ The new service still exposes older public `finance` DTOs from `finance/dto.go`,
 - `FinishBankConnectionLinkParams`
 - `GetPendingBankConnectionLinkStartByStateParams`
 - `ProviderLinkStart`
-- `ProviderRawPayload`
 
 Why this exists:
 
 - The OpenSpec explicitly required the protected HTTP contract to remain unchanged.
-- The service therefore preserves the existing public `finance` method signatures and maps them onto v2 coordinator requests and results instead of exposing v2 internal request types directly.
+- The service therefore preserves the current public `finance` method signatures and maps them onto v2 coordinator requests and results instead of exposing v2 internal request types directly.
 
 ### 2. Public provider string handling and early config validation
 

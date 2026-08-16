@@ -21,5 +21,5 @@ func (c *Client) CreateAuth(ctx context.Context, params CreateAuthParams) (*Crea
 	if err != nil {
 		return nil, fmt.Errorf("create auth failed: %w", err)
 	}
-	return normalizeCreateAuthResponse(result.Value), nil
+	return result, nil
 }

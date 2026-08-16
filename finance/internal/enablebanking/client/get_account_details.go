@@ -25,5 +25,5 @@ func (c *Client) GetAccountDetails(
 	if err != nil {
 		return nil, fmt.Errorf("get account details failed: %w", err)
 	}
-	return normalizeAccountDetailsResponse(result.Value), nil
+	return result, nil
 }

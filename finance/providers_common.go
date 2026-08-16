@@ -10,45 +10,12 @@ import (
 	"time"
 )
 
-const (
-	providerPayloadFieldSecret = "secret"
-	providerPayloadFieldToken  = "token"
-)
-
 func mustJSON(value any) []byte {
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return []byte("{}")
 	}
 	return payload
-}
-
-func redactRawPayloadSecrets(raw map[string]any) map[string]any {
-	redacted := make(map[string]any, len(raw))
-	for key, value := range raw {
-		switch strings.ToLower(strings.TrimSpace(key)) {
-		case providerPayloadFieldSecret, providerPayloadFieldToken:
-			continue
-		}
-		switch typed := value.(type) {
-		case map[string]any:
-			redacted[key] = redactRawPayloadSecrets(typed)
-		case []any:
-			items := make([]any, 0, len(typed))
-			for _, item := range typed {
-				objectItem, ok := item.(map[string]any)
-				if ok {
-					items = append(items, redactRawPayloadSecrets(objectItem))
-					continue
-				}
-				items = append(items, item)
-			}
-			redacted[key] = items
-		default:
-			redacted[key] = value
-		}
-	}
-	return redacted
 }
 
 func stringValue(input map[string]any, keys ...string) string {

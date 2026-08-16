@@ -34,12 +34,12 @@ type bankSyncFocusedStore interface {
 	connectionSecretStore
 }
 
-type providerEvidenceWriter interface {
-	SaveProviderEvidence(context.Context, domain.ProviderEvidence) (domain.ProviderEvidence, error)
+type providerSnapshotConnectionDeleter interface {
+	DeleteProviderSnapshotsByConnection(context.Context, string) error
 }
 
-type providerEvidenceConnectionDeleter interface {
-	DeleteProviderEvidenceByConnection(context.Context, string) error
+type providerSnapshotWriter interface {
+	SaveProviderSnapshot(context.Context, domain.ProviderSnapshot) (domain.ProviderSnapshot, error)
 }
 
 type BankSyncService struct {
@@ -52,7 +52,8 @@ type BankSyncService struct {
 	bankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
 	bankSyncScheduleWriter BankConnectionSyncScheduleWriter
 	logger                 *slog.Logger
-	evidenceWriter         providerEvidenceWriter
+	snapshotDeleter        providerSnapshotConnectionDeleter
+	snapshotWriter         providerSnapshotWriter
 }
 
 const (
@@ -103,8 +104,14 @@ func WithBankSyncServiceLogger(logger *slog.Logger) BankSyncServiceOption {
 	}
 }
 
-func WithBankSyncServiceEvidenceWriter(writer providerEvidenceWriter) BankSyncServiceOption {
-	return func(service *BankSyncService) { service.evidenceWriter = writer }
+func WithBankSyncServiceSnapshotDeleter(
+	deleter providerSnapshotConnectionDeleter,
+) BankSyncServiceOption {
+	return func(service *BankSyncService) { service.snapshotDeleter = deleter }
+}
+
+func WithBankSyncServiceSnapshotWriter(writer providerSnapshotWriter) BankSyncServiceOption {
+	return func(service *BankSyncService) { service.snapshotWriter = writer }
 }
 
 func NewBankSyncService(store bankSyncFocusedStore, opts ...BankSyncServiceOption) *BankSyncService {
@@ -284,8 +291,11 @@ func (s *BankSyncService) DeleteBankConnection(
 		if txErr := txStore.WithTransaction(ctx, func(store *persistence.Store) error {
 			txService := *s
 			txService.store = store
-			if _, evidenceStore := s.evidenceWriter.(*persistence.ProviderEvidenceStore); evidenceStore {
-				txService.evidenceWriter = persistence.NewProviderEvidenceStoreFromStore(store)
+			if _, snapshotStore := s.snapshotDeleter.(*persistence.ProviderSnapshotStore); snapshotStore {
+				txService.snapshotDeleter = persistence.NewProviderSnapshotStoreFromStore(store)
+			}
+			if _, snapshotStore := s.snapshotWriter.(*persistence.ProviderSnapshotStore); snapshotStore {
+				txService.snapshotWriter = persistence.NewProviderSnapshotStoreFromStore(store)
 			}
 			return deleteConnection(&txService)
 		}); txErr != nil {
@@ -447,8 +457,11 @@ func (s *BankSyncService) ApplyProviderSyncResult(
 		err := txStore.WithTransaction(ctx, func(store *persistence.Store) error {
 			txService := *s
 			txService.store = store
-			if _, evidenceStore := s.evidenceWriter.(*persistence.ProviderEvidenceStore); evidenceStore {
-				txService.evidenceWriter = persistence.NewProviderEvidenceStoreFromStore(store)
+			if _, snapshotStore := s.snapshotDeleter.(*persistence.ProviderSnapshotStore); snapshotStore {
+				txService.snapshotDeleter = persistence.NewProviderSnapshotStoreFromStore(store)
+			}
+			if _, snapshotStore := s.snapshotWriter.(*persistence.ProviderSnapshotStore); snapshotStore {
+				txService.snapshotWriter = persistence.NewProviderSnapshotStoreFromStore(store)
 			}
 			var applyErr error
 			result, applyErr = txService.applyProviderSyncResult(ctx, params, true)
@@ -622,15 +635,14 @@ func (s *BankSyncService) deleteBankConnectionOwnedMetadata(
 	ctx context.Context,
 	connection domain.BankConnection,
 ) error {
-	if evidenceDeleter, ok := s.evidenceWriter.(providerEvidenceConnectionDeleter); ok {
-		if err := evidenceDeleter.DeleteProviderEvidenceByConnection(ctx, connection.ID); err != nil {
-			return fmt.Errorf("delete bank connection provider evidence: %w", err)
+	if s.snapshotDeleter != nil {
+		if err := s.snapshotDeleter.DeleteProviderSnapshotsByConnection(ctx, connection.ID); err != nil {
+			return fmt.Errorf("delete bank connection provider snapshots: %w", err)
 		}
 	}
 	for _, step := range []func(context.Context) error{
 		func(ctx context.Context) error { return s.store.DeleteProviderTransactionMatches(ctx, connection.ID) },
 		func(ctx context.Context) error { return s.store.DeleteBankConnectionSyncRuns(ctx, connection.ID) },
-		func(ctx context.Context) error { return s.store.DeleteRawPayloads(ctx, connection.ID) },
 		func(ctx context.Context) error { return s.store.DeleteBalanceSnapshots(ctx, connection.ID) },
 		func(ctx context.Context) error { return s.store.DeleteConnectionProviderAccounts(ctx, connection.ID) },
 		func(ctx context.Context) error { return s.store.DeleteBankConnectionSchedule(ctx, connection.ID) },
@@ -839,11 +851,8 @@ func (s *BankSyncService) applyProviderSyncResult(
 	}
 	result.ImportedTransactions = importedTransactions
 	result.UpdatedTransactions = updatedTransactions
-	if persistErr := s.persistProviderRawPayloads(
-		ctx,
-		connection.ID,
-		params.Result.RawPayloads,
-		now,
+	if persistErr := s.persistProviderSnapshots(
+		ctx, *connection, accountMap, params.Result.Snapshots, now,
 	); persistErr != nil {
 		return BankConnectionSyncResult{}, persistErr
 	}
@@ -1080,12 +1089,85 @@ func (s *BankSyncService) applyProviderTransaction(
 	if _, saveErr := s.store.SaveProviderTransactionMatch(ctx, providerMatch); saveErr != nil {
 		return false, fmt.Errorf("save provider transaction match: %w", saveErr)
 	}
-	if evidenceErr := s.persistTransactionProviderEvidence(
-		ctx, connection, providerAccount, transaction, item, now,
-	); evidenceErr != nil {
-		return false, evidenceErr
-	}
 	return updated, nil
+}
+
+func (s *BankSyncService) persistProviderSnapshots(
+	ctx context.Context,
+	connection domain.BankConnection,
+	accounts map[string]domain.ConnectionProviderAccount,
+	observations []domain.ProviderSnapshotObservation,
+	now time.Time,
+) error {
+	if s.snapshotWriter == nil {
+		return nil
+	}
+	for _, observation := range observations {
+		capturedAt := observation.CapturedAt
+		if capturedAt.IsZero() {
+			capturedAt = now
+		}
+		snapshot := domain.ProviderSnapshot{
+			ID:               s.newID(),
+			TenantID:         connection.TenantID,
+			ConnectionID:     connection.ID,
+			Kind:             observation.Kind,
+			ProviderObjectID: observation.ProviderObjectID,
+			DocumentJSON:     append([]byte(nil), observation.DocumentJSON...),
+			CapturedAt:       capturedAt,
+		}
+		switch observation.Kind {
+		case domain.ProviderSnapshotKindConnection:
+			snapshot.Subject = domain.ProviderSnapshotSubjectConnection
+		case domain.ProviderSnapshotKindAccount, domain.ProviderSnapshotKindAccountBalance:
+			account, ok := accounts[observation.ProviderAccountID]
+			if !ok {
+				return fmt.Errorf("provider account not found for provider snapshot: %s", observation.ProviderAccountID)
+			}
+			snapshot.Subject = domain.ProviderSnapshotSubjectAccount
+			snapshot.FinanceAccountID = account.FinanceAccountID
+		case domain.ProviderSnapshotKindTransaction:
+			account, ok := accounts[observation.ProviderAccountID]
+			if !ok {
+				return fmt.Errorf(
+					"provider account not found for transaction provider snapshot: %s",
+					observation.ProviderAccountID,
+				)
+			}
+			match, err := s.providerTransactionMatchForSnapshot(ctx, connection.ID, observation)
+			if err != nil {
+				return fmt.Errorf("get provider transaction match for provider snapshot: %w", err)
+			}
+			transaction, err := s.store.GetTransaction(ctx, match.TransactionID)
+			if err != nil {
+				return fmt.Errorf("get transaction for provider snapshot: %w", err)
+			}
+			snapshot.Subject = domain.ProviderSnapshotSubjectTransaction
+			snapshot.FinanceAccountID = account.FinanceAccountID
+			snapshot.FinanceTransactionID = transaction.ID
+		default:
+			return fmt.Errorf("unsupported provider snapshot kind: %s", observation.Kind)
+		}
+		if _, err := s.snapshotWriter.SaveProviderSnapshot(ctx, snapshot); err != nil {
+			return fmt.Errorf("save provider snapshot: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *BankSyncService) providerTransactionMatchForSnapshot(
+	ctx context.Context,
+	connectionID string,
+	observation domain.ProviderSnapshotObservation,
+) (*domain.ProviderTransactionMatch, error) {
+	if strings.TrimSpace(observation.ProviderTransactionID) != "" {
+		return s.store.GetProviderTransactionMatchByProviderID(
+			ctx, connectionID, observation.ProviderAccountID, observation.ProviderTransactionID,
+		)
+	}
+	return s.store.GetProviderTransactionMatchByFingerprint(
+		ctx, connectionID, observation.ProviderAccountID, observation.ProviderObjectID,
+	)
 }
 
 func (s *BankSyncService) applyProviderAccounts(
@@ -1155,52 +1237,6 @@ func (s *BankSyncService) applyProviderTransactions(
 	return importedCount, updatedCount, nil
 }
 
-func (s *BankSyncService) persistTransactionProviderEvidence(
-	ctx context.Context,
-	connection domain.BankConnection,
-	providerAccount domain.ConnectionProviderAccount,
-	transaction domain.Transaction,
-	item ProviderNormalizedTransaction,
-	capturedAt time.Time,
-) error {
-	if len(item.RawPayloadJSON) == 0 {
-		return nil
-	}
-	sanitizedPayload, err := domain.SanitizeProviderEvidenceJSON(item.RawPayloadJSON)
-	if err != nil {
-		return fmt.Errorf("sanitize transaction provider evidence: %w", err)
-	}
-	if s.evidenceWriter != nil {
-		_, saveErr := s.evidenceWriter.SaveProviderEvidence(ctx, domain.ProviderEvidence{
-			ID:                   s.newID(),
-			TenantID:             connection.TenantID,
-			ConnectionID:         connection.ID,
-			FinanceAccountID:     providerAccount.FinanceAccountID,
-			FinanceTransactionID: transaction.ID,
-			Subject:              domain.ProviderEvidenceSubjectTransaction,
-			Scope:                domain.RawPayloadScopeTransaction,
-			ProviderObjectID:     firstNonEmpty(item.ProviderTransactionID, item.Fingerprint),
-			PayloadJSON:          sanitizedPayload,
-			CapturedAt:           capturedAt,
-		})
-		if saveErr != nil {
-			return fmt.Errorf("save transaction provider evidence: %w", saveErr)
-		}
-	}
-	_, saveErr := s.store.SaveRawPayload(ctx, domain.RawPayload{
-		ID:               s.newID(),
-		ConnectionID:     connection.ID,
-		Scope:            domain.RawPayloadScopeTransaction,
-		ProviderObjectID: firstNonEmpty(item.ProviderTransactionID, item.Fingerprint),
-		PayloadJSON:      sanitizedPayload,
-		CapturedAt:       capturedAt,
-	})
-	if saveErr != nil {
-		return fmt.Errorf("save raw payload: %w", saveErr)
-	}
-	return nil
-}
-
 func (s *BankSyncService) resolveProviderAccountForTransaction(
 	ctx context.Context,
 	connectionID string,
@@ -1220,84 +1256,6 @@ func (s *BankSyncService) resolveProviderAccountForTransaction(
 		}
 	}
 	return domain.ConnectionProviderAccount{}, errors.New("provider account not found for transaction")
-}
-
-func (s *BankSyncService) persistProviderRawPayloads(
-	ctx context.Context,
-	connectionID string,
-	payloads []ProviderRawPayload,
-	now time.Time,
-) error {
-	for _, payload := range payloads {
-		sanitizedPayload, sanitizeErr := domain.SanitizeProviderEvidenceJSON(payload.PayloadJSON)
-		if sanitizeErr != nil {
-			return fmt.Errorf("sanitize provider raw payload: %w", sanitizeErr)
-		}
-		_, err := s.store.SaveRawPayload(ctx, domain.RawPayload{
-			ID:               s.newID(),
-			ConnectionID:     connectionID,
-			Scope:            payload.Scope,
-			ProviderObjectID: payload.ProviderObjectID,
-			PayloadJSON:      sanitizedPayload,
-			CapturedAt:       now,
-		})
-		if err != nil {
-			return fmt.Errorf("save raw payload: %w", err)
-		}
-		if evidenceErr := s.persistPageProviderEvidence(
-			ctx,
-			connectionID,
-			payload,
-			sanitizedPayload,
-			now,
-		); evidenceErr != nil {
-			return evidenceErr
-		}
-	}
-	return nil
-}
-
-func (s *BankSyncService) persistPageProviderEvidence(
-	ctx context.Context,
-	connectionID string,
-	payload ProviderRawPayload,
-	sanitizedPayload []byte,
-	capturedAt time.Time,
-) error {
-	if s.evidenceWriter == nil {
-		return nil
-	}
-	connection, err := s.store.GetBankConnection(ctx, connectionID)
-	if err != nil {
-		return fmt.Errorf("get bank connection for provider evidence: %w", err)
-	}
-	evidence := domain.ProviderEvidence{
-		ID:               s.newID(),
-		TenantID:         connection.TenantID,
-		ConnectionID:     connection.ID,
-		Subject:          domain.ProviderEvidenceSubjectConnection,
-		Scope:            payload.Scope,
-		ProviderObjectID: payload.ProviderObjectID,
-		PayloadJSON:      sanitizedPayload,
-		CapturedAt:       capturedAt,
-	}
-	if payload.Scope == domain.RawPayloadScopeAccount {
-		accounts, accountsErr := s.store.ListConnectionProviderAccounts(ctx, connectionID)
-		if accountsErr != nil {
-			return fmt.Errorf("list provider accounts for provider evidence: %w", accountsErr)
-		}
-		for _, account := range accounts {
-			if account.ProviderAccountID == payload.ProviderObjectID {
-				evidence.FinanceAccountID = account.FinanceAccountID
-				evidence.Subject = domain.ProviderEvidenceSubjectAccount
-				break
-			}
-		}
-	}
-	if _, saveErr := s.evidenceWriter.SaveProviderEvidence(ctx, evidence); saveErr != nil {
-		return fmt.Errorf("save page provider evidence: %w", saveErr)
-	}
-	return nil
 }
 
 func (s *BankSyncService) completeAppliedSync(

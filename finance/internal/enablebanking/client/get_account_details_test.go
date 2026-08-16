@@ -29,12 +29,21 @@ func TestClient_GetAccountDetails(t *testing.T) {
 		response, err := client.GetAccountDetails(t.Context(), GetAccountDetailsParams{AccountID: accountID})
 
 		require.NoError(t, err)
-		assert.Equal(t, "Main account", response.Name)
-		assert.Equal(t, "Main account", response.OwnerName)
-		assert.Equal(t, "Everyday banking", response.Product)
-		assert.Equal(t, "NDEAFIHH", response.BIC)
-		assert.Equal(t, "FI0455231152453547", response.IBAN)
-		assert.Equal(t, "EUR", response.Currency)
+		require.NotNil(t, response.Name)
+		assert.Equal(t, "Main account", *response.Name)
+		require.NotNil(t, response.Product)
+		assert.Equal(t, "Everyday banking", *response.Product)
+		require.NotNil(t, response.AccountServicer)
+		require.NotNil(t, response.AccountServicer.BICFI)
+		assert.Equal(t, "NDEAFIHH", *response.AccountServicer.BICFI)
+		require.NotNil(t, response.AccountServicer.ClearingSystemMemberID)
+		require.NotNil(t, response.AccountServicer.ClearingSystemMemberID.MemberID)
+		require.NotNil(t, response.AccountServicer.ClearingSystemMemberID.MemberID.String)
+		assert.Equal(t, "20368", *response.AccountServicer.ClearingSystemMemberID.MemberID.String)
+		require.NotNil(t, response.AccountID)
+		require.NotNil(t, response.AccountID.IBAN)
+		assert.Equal(t, "FI0455231152453547", *response.AccountID.IBAN)
+		assert.Equal(t, "eur", response.Currency)
 	})
 
 	t.Run("ignores undocumented ownerName alias", func(t *testing.T) {
@@ -49,7 +58,6 @@ func TestClient_GetAccountDetails(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Empty(t, response.Name)
-		assert.Empty(t, response.OwnerName)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

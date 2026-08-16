@@ -1,9 +1,55 @@
 {
   "aspsps": [
     {
-      "id": "string",
-      "name": "Mock ASPSP",
-      "country": "PL"
+      "name": "Nordea",
+      "country": "FI",
+      "logo": "https://enablebanking.com/brands/FI/Nordea/",
+      "psu_types": ["business"],
+      "auth_methods": [{
+        "name": "MTA",
+        "title": "",
+        "psu_type": "business",
+        "credentials": [{"name": "companyId", "title": "Company ID", "required": true, "description": "", "template": "^\\d{7}-\\d$"}],
+        "approach": "REDIRECT",
+        "hidden_method": false
+      }],
+      "maximum_consent_validity": 0,
+      "sandbox": {"users": [{"username": "", "password": "MySecretPassword", "otp": ""}]},
+      "beta": false,
+      "bic": "",
+      "required_psu_headers": [],
+      "payments": [{
+        "payment_type": "SEPA",
+        "max_transactions": 0,
+        "currencies": [],
+        "debtor_account_required": false,
+        "debtor_account_schemas": [],
+        "creditor_account_schemas": [],
+        "priority_codes": [],
+        "charge_bearer_values": [],
+        "creditor_country_required": false,
+        "creditor_name_required": false,
+        "creditor_postal_address_required": false,
+        "remittance_information_required": false,
+        "remittance_information_lines": [{"min_length": 0, "max_length": 0, "pattern": ""}],
+        "debtor_currency_required": false,
+        "debtor_contact_email_required": false,
+        "debtor_contact_phone_required": false,
+        "creditor_agent_bic_fi_required": false,
+        "creditor_agent_clearing_system_member_id_required": false,
+        "allowed_auth_methods": [],
+        "regulatory_reporting_codes": [{"value": "", "description": ""}],
+        "regulatory_reporting_code_required": false,
+        "reference_number_supported": false,
+        "reference_number_schemas": [],
+        "requested_execution_date_supported": false,
+        "requested_execution_date_max_period": 0,
+        "remittance_reference_supported": false,
+        "deferred_submission_supported": false,
+        "final_successful_statuses": [],
+        "psu_type": "business"
+      }],
+      "group": {"name": "Group", "logo": ""}
     }
   ]
 }

@@ -12,10 +12,9 @@ type GetPersonalClientInfoParams struct {
 	Token string
 }
 
-// GetPersonalClientInfoResponse contains the decoded response and raw payload.
+// GetPersonalClientInfoResponse contains decoded client metadata.
 type GetPersonalClientInfoResponse struct {
 	ClientInfo *Info
-	RawJSON    []byte
 }
 
 // GetPersonalClientInfo loads personal client metadata.
@@ -35,6 +34,5 @@ func (c *Client) GetPersonalClientInfo(
 
 	return &GetPersonalClientInfoResponse{
 		ClientInfo: &body,
-		RawJSON:    rawJSON,
 	}, nil
 }

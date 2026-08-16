@@ -155,16 +155,95 @@ func (p *ProviderLinkPersistence) SaveLinkedConnection(
 		return saved, nil
 	}
 
-	// A concurrent insert can win after this transaction's initial lookup. The
-	// uniqueness index decides the winner; loading it here makes the finish retry-safe.
-	existing, found, lookupErr := findProviderLinkConnection(p.Store.db.WithContext(ctx), connection)
-	if lookupErr == nil && found {
-		return existing, nil
-	}
+	existing, found, lookupErr := p.recoverProviderLinkConnection(ctx, connection)
 	if lookupErr != nil {
 		return domain.BankConnection{}, lookupErr
 	}
+	if found {
+		return existing, nil
+	}
 	return domain.BankConnection{}, fmt.Errorf("save linked connection: %w", err)
+}
+
+// SaveLinkedConnectionWithSnapshot persists the encrypted secret, durable
+// connection, and final typed source snapshot in one database transaction.
+func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
+	ctx context.Context,
+	connection domain.BankConnection,
+	secret domain.ConnectionSecret,
+	snapshot *domain.ProviderSnapshot,
+) (domain.BankConnection, error) {
+	var saved domain.BankConnection
+	connectionInsertFailed := false
+	err := p.Store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existing, found, lookupErr := findProviderLinkConnection(tx, connection)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		//nolint:nestif // Link persistence keeps the connection, secret, and snapshot transaction together.
+		if found {
+			saved = existing
+		} else {
+			secretModel := newConnectionSecretModel(secret)
+			if secretModel.CreatedAt.IsZero() {
+				secretModel.CreatedAt = p.Store.now()
+			}
+			if secretModel.UpdatedAt.IsZero() {
+				secretModel.UpdatedAt = secretModel.CreatedAt
+			}
+			if createErr := tx.Table(secretModel.TableName()).Create(&secretModel).Error; createErr != nil {
+				return fmt.Errorf("create connection secret: %w", createErr)
+			}
+			connectionModel := newBankConnectionModel(connection)
+			if createErr := tx.Table(connectionModel.TableName()).Create(&connectionModel).Error; createErr != nil {
+				connectionInsertFailed = true
+				return fmt.Errorf("create bank connection: %w", createErr)
+			}
+			saved = bankConnectionFromModel(connectionModel)
+		}
+		return saveLinkedConnectionSnapshot(ctx, tx, saved.ID, snapshot)
+	})
+	if err == nil {
+		return saved, nil
+	}
+	if !connectionInsertFailed {
+		return domain.BankConnection{}, fmt.Errorf("save linked connection with snapshot: %w", err)
+	}
+
+	existing, found, lookupErr := p.recoverProviderLinkConnection(ctx, connection)
+	if lookupErr != nil {
+		return domain.BankConnection{}, lookupErr
+	}
+	if found {
+		return existing, nil
+	}
+	return domain.BankConnection{}, fmt.Errorf("save linked connection with snapshot: %w", err)
+}
+
+func saveLinkedConnectionSnapshot(
+	ctx context.Context,
+	tx *gorm.DB,
+	connectionID string,
+	snapshot *domain.ProviderSnapshot,
+) error {
+	if snapshot == nil {
+		return nil
+	}
+	attached := *snapshot
+	attached.ConnectionID = connectionID
+	if _, err := (&ProviderSnapshotStore{db: tx}).SaveProviderSnapshot(ctx, attached); err != nil {
+		return fmt.Errorf("save linked connection provider snapshot: %w", err)
+	}
+	return nil
+}
+
+func (p *ProviderLinkPersistence) recoverProviderLinkConnection(
+	ctx context.Context,
+	connection domain.BankConnection,
+) (domain.BankConnection, bool, error) {
+	// A concurrent insert can win after this transaction's initial lookup. The
+	// uniqueness index decides the winner; loading it here makes the finish retry-safe.
+	return findProviderLinkConnection(p.Store.db.WithContext(ctx), connection)
 }
 
 func findProviderLinkConnection(
@@ -225,11 +304,4 @@ func (p *ProviderLinkPersistence) ListBankConnections(
 	tenantID string,
 ) ([]domain.BankConnection, error) {
 	return p.Store.ListBankConnections(ctx, tenantID)
-}
-
-func (p *ProviderLinkPersistence) SaveRawPayload(
-	ctx context.Context,
-	payload domain.RawPayload,
-) (domain.RawPayload, error) {
-	return p.Store.SaveRawPayload(ctx, payload)
 }

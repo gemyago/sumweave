@@ -19,7 +19,6 @@ var (
 	ErrPendingStartStoreRequired       = errors.New("pending start store is required")
 	ErrConnectionSecretWriterRequired  = errors.New("connection secret writer is required")
 	ErrConnectionStoreRequired         = errors.New("connection store is required")
-	ErrRawPayloadWriterRequired        = errors.New("raw payload writer is required")
 	ErrRedirectLinkUnsupported         = errors.New("redirect link unsupported")
 	ErrRedirectCodeRequired            = errors.New("redirect code is required")
 	ErrTokenLinkUnsupported            = errors.New("token link unsupported")
@@ -68,15 +67,12 @@ type ConnectionSecretWriter interface {
 }
 
 type ConnectionStore interface {
-	SaveLinkedConnection(
+	SaveLinkedConnectionWithSnapshot(
 		ctx context.Context,
 		connection domain.BankConnection,
 		secret domain.ConnectionSecret,
+		snapshot *domain.ProviderSnapshot,
 	) (domain.BankConnection, error)
-}
-
-type RawPayloadWriter interface {
-	SaveRawPayload(ctx context.Context, payload domain.RawPayload) (domain.RawPayload, error)
 }
 
 type LinkCoordinatorArgs struct {
@@ -85,7 +81,6 @@ type LinkCoordinatorArgs struct {
 	PendingStartStore       PendingStartStore
 	ConnectionSecretWriter  ConnectionSecretWriter
 	ConnectionStore         ConnectionStore
-	RawPayloadWriter        RawPayloadWriter
 	Logger                  *slog.Logger
 	Now                     func() time.Time
 	NewID                   func() string
@@ -98,7 +93,6 @@ type LinkCoordinator struct {
 	pendingStartStore       PendingStartStore
 	connectionSecretWriter  ConnectionSecretWriter
 	connectionStore         ConnectionStore
-	rawPayloadWriter        RawPayloadWriter
 	logger                  *slog.Logger
 	now                     func() time.Time
 	newID                   func() string
@@ -144,9 +138,6 @@ func NewLinkCoordinator(args LinkCoordinatorArgs) (*LinkCoordinator, error) {
 	if args.ConnectionStore == nil {
 		return nil, ErrConnectionStoreRequired
 	}
-	if args.RawPayloadWriter == nil {
-		return nil, ErrRawPayloadWriterRequired
-	}
 	if args.Now == nil {
 		args.Now = time.Now
 	}
@@ -165,7 +156,6 @@ func NewLinkCoordinator(args LinkCoordinatorArgs) (*LinkCoordinator, error) {
 		pendingStartStore:       args.PendingStartStore,
 		connectionSecretWriter:  args.ConnectionSecretWriter,
 		connectionStore:         args.ConnectionStore,
-		rawPayloadWriter:        args.RawPayloadWriter,
 		logger:                  args.Logger.With("component", "linkCoordinator"),
 		now:                     args.Now,
 		newID:                   args.NewID,
@@ -233,21 +223,24 @@ func (c *LinkCoordinator) StartRedirectLink(
 		)
 		return StartLinkResult{}, fmt.Errorf("start redirect link: %w", err)
 	}
-	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
-	if err != nil {
-		c.logger.WarnContext(
-			ctx,
-			"bank link coordinator failed",
-			slog.String("operation", "redirectStart"),
-			slog.String("failureStage", "sanitizePayload"),
-			slog.String("tenantId", request.TenantID),
-			slog.String("provider", string(request.ProviderID)),
-			slog.String("connectorId", string(profile.ConnectorID)),
-			slog.Any("err", err),
-		)
-		return StartLinkResult{}, err
+	pendingDocument := []byte(nil)
+	if len(result.PendingDocument) > 0 {
+		sanitizedDocument, sanitizeErr := domain.SanitizeProviderSnapshotJSON(result.PendingDocument)
+		if sanitizeErr != nil {
+			c.logger.WarnContext(
+				ctx,
+				"bank link coordinator failed",
+				slog.String("operation", "redirectStart"),
+				slog.String("failureStage", "sanitizePendingDocument"),
+				slog.String("tenantId", request.TenantID),
+				slog.String("provider", string(request.ProviderID)),
+				slog.String("connectorId", string(profile.ConnectorID)),
+				slog.Any("err", sanitizeErr),
+			)
+			return StartLinkResult{}, fmt.Errorf("sanitize pending start document: %w", sanitizeErr)
+		}
+		pendingDocument = sanitizedDocument
 	}
-
 	now := c.now()
 	pendingStart := domain.PendingBankConnectionLinkStart{
 		ID:                c.newID(),
@@ -262,7 +255,7 @@ func (c *LinkCoordinator) StartRedirectLink(
 		StartResult: domain.PendingBankConnectionLinkStartResult{
 			State:            strings.TrimSpace(result.State),
 			AuthorizationURL: strings.TrimSpace(result.AuthorizationURL),
-			RawPayloads:      result.RawPayloads,
+			DocumentJSON:     pendingDocument,
 		},
 		ExpiresAt: now.Add(c.pendingStartTTL),
 		CreatedAt: now,
@@ -290,7 +283,7 @@ func (c *LinkCoordinator) StartRedirectLink(
 		slog.String("provider", string(profile.ProviderID)),
 		slog.String("connectorId", string(profile.ConnectorID)),
 		slog.String("pendingStartId", pendingStart.ID),
-		slog.Int("rawPayloadCount", len(result.RawPayloads)),
+		slog.Bool("hasPendingDocument", len(result.PendingDocument) > 0),
 	)
 	return result, nil
 }
@@ -392,7 +385,7 @@ func (c *LinkCoordinator) FinishRedirectLink(
 		Start: StartLinkResult{
 			State:            pendingStart.StartResult.State,
 			AuthorizationURL: pendingStart.StartResult.AuthorizationURL,
-			RawPayloads:      pendingStart.StartResult.RawPayloads,
+			PendingDocument:  append([]byte(nil), pendingStart.StartResult.DocumentJSON...),
 		},
 	})
 	if err != nil {
@@ -414,27 +407,6 @@ func (c *LinkCoordinator) FinishRedirectLink(
 			"finish redirect link",
 		)
 	}
-	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
-	if err != nil {
-		c.logger.WarnContext(
-			ctx,
-			"bank link coordinator failed",
-			slog.String("operation", "redirectFinish"),
-			slog.String("failureStage", "sanitizePayload"),
-			slog.String("tenantId", request.TenantID),
-			slog.String("provider", string(request.ProviderID)),
-			slog.String("connectorId", string(profile.ConnectorID)),
-			slog.Any("err", err),
-		)
-		return domain.BankConnection{}, c.restorePendingStartOnError(
-			ctx,
-			request,
-			profile,
-			err,
-			"sanitize provider payload",
-		)
-	}
-
 	connection, err := c.saveLinkedConnection(
 		ctx,
 		"redirectFinish",
@@ -511,20 +483,6 @@ func (c *LinkCoordinator) LinkToken(
 		)
 		return domain.BankConnection{}, fmt.Errorf("link token: %w", err)
 	}
-	result.RawPayloads, err = sanitizeProviderRawPayloads(result.RawPayloads)
-	if err != nil {
-		c.logger.WarnContext(
-			ctx,
-			"bank link coordinator failed",
-			slog.String("operation", "token"),
-			slog.String("failureStage", "sanitizePayload"),
-			slog.String("tenantId", request.TenantID),
-			slog.String("provider", string(request.ProviderID)),
-			slog.String("connectorId", string(profile.ConnectorID)),
-			slog.Any("err", err),
-		)
-		return domain.BankConnection{}, err
-	}
 	connection, err := c.saveLinkedConnection(
 		ctx,
 		"token",
@@ -546,21 +504,6 @@ func (c *LinkCoordinator) LinkToken(
 		return domain.BankConnection{}, fmt.Errorf("save bank connection: %w", err)
 	}
 	return connection, nil
-}
-
-func sanitizeProviderRawPayloads(
-	payloads []domain.ProviderRawPayloadObservation,
-) ([]domain.ProviderRawPayloadObservation, error) {
-	sanitized := make([]domain.ProviderRawPayloadObservation, 0, len(payloads))
-	for _, payload := range payloads {
-		payloadJSON, err := domain.SanitizeProviderEvidenceJSON(payload.PayloadJSON)
-		if err != nil {
-			return nil, fmt.Errorf("sanitize provider payload: %w", err)
-		}
-		payload.PayloadJSON = payloadJSON
-		sanitized = append(sanitized, payload)
-	}
-	return sanitized, nil
 }
 
 //nolint:ireturn // The connector contract is intentionally resolved behind an interface seam.
@@ -663,7 +606,29 @@ func (c *LinkCoordinator) saveLinkedConnection(
 	}
 	connection.ID = c.newID()
 	connection.SecretID = secret.ID
-	savedConnection, err := c.connectionStore.SaveLinkedConnection(ctx, connection, secret)
+	var snapshot *domain.ProviderSnapshot
+	if result.ConnectionSnapshot != nil {
+		document, sanitizeErr := domain.SanitizeProviderSnapshotJSON(result.ConnectionSnapshot.DocumentJSON)
+		if sanitizeErr != nil {
+			return domain.BankConnection{}, fmt.Errorf("sanitize connection provider snapshot: %w", sanitizeErr)
+		}
+		snapshot = &domain.ProviderSnapshot{
+			ID:               c.newID(),
+			TenantID:         tenantID,
+			ConnectionID:     connection.ID,
+			Subject:          domain.ProviderSnapshotSubjectConnection,
+			Kind:             domain.ProviderSnapshotKindConnection,
+			ProviderObjectID: result.ConnectionSnapshot.ProviderObjectID,
+			DocumentJSON:     document,
+			CapturedAt:       result.ConnectionSnapshot.CapturedAt,
+		}
+		if snapshot.CapturedAt.IsZero() {
+			snapshot.CapturedAt = now
+		}
+	}
+	savedConnection, err := c.connectionStore.SaveLinkedConnectionWithSnapshot(
+		ctx, connection, secret, snapshot,
+	)
 	if err != nil {
 		c.logger.WarnContext(
 			ctx,
@@ -686,42 +651,15 @@ func (c *LinkCoordinator) saveLinkedConnection(
 		slog.String("connectorId", string(profile.ConnectorID)),
 		slog.String("connectionId", savedConnection.ID),
 	)
-	for _, payload := range result.RawPayloads {
-		capturedAt := payload.CapturedAt
-		if capturedAt.IsZero() {
-			capturedAt = now
-		}
-		_, savePayloadErr := c.rawPayloadWriter.SaveRawPayload(ctx, domain.RawPayload{
-			ID:               c.newID(),
-			ConnectionID:     savedConnection.ID,
-			Scope:            payload.Scope,
-			ProviderObjectID: payload.ProviderObjectID,
-			PayloadJSON:      payload.PayloadJSON,
-			CapturedAt:       capturedAt,
-		})
-		if savePayloadErr != nil {
-			c.logger.WarnContext(
-				ctx,
-				"bank link coordinator failed",
-				slog.String("operation", operation),
-				slog.String("failureStage", "saveRawPayload"),
-				slog.String("tenantId", tenantID),
-				slog.String("provider", string(profile.ProviderID)),
-				slog.String("connectorId", string(profile.ConnectorID)),
-				slog.Any("err", savePayloadErr),
-			)
-			return domain.BankConnection{}, fmt.Errorf("save raw payload: %w", savePayloadErr)
-		}
-	}
 	c.logger.InfoContext(
 		ctx,
-		"bank link raw payloads saved",
+		"bank link connection snapshot saved",
 		slog.String("operation", "persist"),
 		slog.String("tenantId", tenantID),
 		slog.String("provider", string(profile.ProviderID)),
 		slog.String("connectorId", string(profile.ConnectorID)),
 		slog.String("connectionId", savedConnection.ID),
-		slog.Int("rawPayloadCount", len(result.RawPayloads)),
+		slog.Bool("hasConnectionSnapshot", snapshot != nil),
 	)
 	return savedConnection, nil
 }

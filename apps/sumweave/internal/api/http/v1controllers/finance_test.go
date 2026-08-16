@@ -78,7 +78,6 @@ func TestFinanceController(t *testing.T) {
 			BankSyncService:           service,
 			ReportingService:          service,
 			FXService:                 service,
-			ProviderEvidenceService:   service,
 			CSVImportService:          service,
 			BankConnectionService:     bankConnections,
 			SyntheticLinkStateService: nil,

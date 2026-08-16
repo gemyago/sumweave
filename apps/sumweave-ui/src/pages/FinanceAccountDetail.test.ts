@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceAccountDetail from './FinanceAccountDetail.svelte'
 
-const mocks = vi.hoisted(() => ({ listTenants: vi.fn(), getAccount: vi.fn(), listTransactions: vi.fn(), listAccountProviderEvidence: vi.fn(), getAccountProviderEvidence: vi.fn(), renameAccount: vi.fn(), hideAccount: vi.fn(), restoreAccount: vi.fn() }))
+const mocks = vi.hoisted(() => ({ listTenants: vi.fn(), getAccount: vi.fn(), listTransactions: vi.fn(), listAccountProviderSnapshots: vi.fn(), getAccountProviderSnapshot: vi.fn(), renameAccount: vi.fn(), hideAccount: vi.fn(), restoreAccount: vi.fn() }))
 vi.mock('../lib/finance/api', async (importOriginal) => ({ ...(await importOriginal<typeof import('../lib/finance/api')>()), createSignalFinanceApiForAuth: vi.fn(() => ({ ...mocks })) }))
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
 
@@ -15,7 +15,7 @@ describe('Finance account detail page', () => {
     mocks.listTenants.mockResolvedValue([{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now }])
     mocks.getAccount.mockResolvedValue({ id: 'account-1', tenantId: 'tenant-1', name: 'Checking', currency: 'USD', kind: 'manual', bookedBalanceMinor: 2500, pendingBalanceMinor: 0, provider: '', providerAccountId: '', hiddenAt: null, createdAt: now, updatedAt: now })
     mocks.listTransactions.mockResolvedValue([{ id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 1200, currency: 'USD', description: 'Groceries', effectiveAt: now, categoryId: null, transferGroupId: null, transferMatchedAt: null, hiddenAt: null, createdAt: now, updatedAt: now }])
-    mocks.listAccountProviderEvidence.mockResolvedValue([])
+    mocks.listAccountProviderSnapshots.mockResolvedValue([])
     mocks.renameAccount.mockResolvedValue(undefined)
     mocks.hideAccount.mockResolvedValue(undefined)
     mocks.restoreAccount.mockResolvedValue(undefined)
@@ -44,24 +44,26 @@ describe('Finance account detail page', () => {
     expect(container.querySelector('.col-xl-5, .col-xl-7')).not.toBeInTheDocument()
   })
 
-  it('loads current account evidence metadata only when expanded and reveals sanitized details explicitly', async () => {
+  it('loads distinct account snapshot kinds only when expanded and reveals source data explicitly', async () => {
     const user = userEvent.setup()
-    mocks.listAccountProviderEvidence.mockResolvedValueOnce([
-      { id: 'evidence-1', scope: 'account', providerObjectId: 'provider-account', capturedAt: new Date('2026-06-20T12:00:00Z') },
+    mocks.listAccountProviderSnapshots.mockResolvedValueOnce([
+      { id: 'snapshot-account', kind: 'account', providerObjectId: 'provider-account', capturedAt: new Date('2026-06-20T12:00:00Z') },
+      { id: 'snapshot-balance', kind: 'account_balance', providerObjectId: 'provider-account', capturedAt: new Date('2026-06-20T12:01:00Z') },
     ])
-    mocks.getAccountProviderEvidence.mockResolvedValueOnce({
-      id: 'evidence-1', scope: 'account', providerObjectId: 'provider-account', capturedAt: new Date('2026-06-20T12:00:00Z'), payload: { name: 'sanitized' },
+    mocks.getAccountProviderSnapshot.mockResolvedValueOnce({
+      id: 'snapshot-account', kind: 'account', providerObjectId: 'provider-account', capturedAt: new Date('2026-06-20T12:00:00Z'), data: { name: 'sanitized' },
     })
     render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
 
     await screen.findAllByRole('heading', { name: 'Checking' })
-    expect(mocks.listAccountProviderEvidence).not.toHaveBeenCalled()
-    await user.click(screen.getByText('Current provider evidence'))
-    await waitFor(() => expect(mocks.listAccountProviderEvidence).toHaveBeenCalledWith({ tenantId: 'tenant-1', accountId: 'account-1' }))
-    expect(mocks.getAccountProviderEvidence).not.toHaveBeenCalled()
-    await user.click(await screen.findByRole('button', { name: 'Reveal current sanitized details' }))
-    await waitFor(() => expect(mocks.getAccountProviderEvidence).toHaveBeenCalledWith({ tenantId: 'tenant-1', accountId: 'account-1', evidenceId: 'evidence-1' }))
-    expect(screen.getByText('Current sanitized provider evidence')).toBeInTheDocument()
+    expect(mocks.listAccountProviderSnapshots).not.toHaveBeenCalled()
+    await user.click(screen.getByText('Provider source data'))
+    await waitFor(() => expect(mocks.listAccountProviderSnapshots).toHaveBeenCalledWith({ tenantId: 'tenant-1', accountId: 'account-1' }))
+    expect(screen.getByText('Account balance')).toBeInTheDocument()
+    expect(mocks.getAccountProviderSnapshot).not.toHaveBeenCalled()
+    await user.click((await screen.findAllByRole('button', { name: 'Reveal source data' }))[0])
+    await waitFor(() => expect(mocks.getAccountProviderSnapshot).toHaveBeenCalledWith({ tenantId: 'tenant-1', accountId: 'account-1', snapshotId: 'snapshot-account' }))
+    expect(screen.getByText('Provider snapshot data')).toBeInTheDocument()
   })
 
   it('renders an empty recent-transactions state', async () => {

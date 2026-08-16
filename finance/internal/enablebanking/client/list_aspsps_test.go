@@ -35,17 +35,36 @@ func TestClient_ListASPSPs(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Len(t, response.ASPSPs, 1)
-		assert.Equal(t, "string", response.ASPSPs[0].ID)
-		assert.Equal(t, "Mock ASPSP", response.ASPSPs[0].Name)
-		assert.Equal(t, country, response.ASPSPs[0].Country)
+		assert.Equal(t, "Nordea", response.ASPSPs[0].Name)
+		assert.Equal(t, "FI", response.ASPSPs[0].Country)
+		assert.Equal(t, "https://enablebanking.com/brands/FI/Nordea/", response.ASPSPs[0].Logo)
+		assert.False(t, response.ASPSPs[0].Beta)
+		require.NotNil(t, response.ASPSPs[0].Payments)
+		require.Len(t, *response.ASPSPs[0].Payments, 1)
+		assert.False(t, *(*response.ASPSPs[0].Payments)[0].CreditorNameRequired)
+	})
+
+	t.Run("preserves provider country without in-place normalization", func(t *testing.T) {
+		responseBody := `{"aspsps":[{"name":"","country":" PL ","logo":"","psu_types":[],"auth_methods":[],"maximum_consent_validity":0,"beta":false}]}`
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = fmt.Fprint(w, responseBody)
+		}))
+		defer server.Close()
+
+		client := makeTestClient(server.URL, withSignedAuth(t))
+		response, err := client.ListASPSPs(t.Context(), ListASPSPsParams{})
+
+		require.NoError(t, err)
+		assert.Equal(t, " PL ", response.ASPSPs[0].Country)
 	})
 
 	t.Run("success with required parameters only", func(t *testing.T) {
-		expectedID := "aspsp-" + fake.UUID().V4()
+		expectedName := "aspsp-" + fake.UUID().V4()
+		responseFormat := `{"aspsps":[{"name":%q,"country":"","logo":"","psu_types":[],"auth_methods":[],"maximum_consent_validity":0,"beta":false}]}`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Empty(t, r.URL.Query().Get("country"))
-			_, _ = fmt.Fprintf(w, `{"aspsps":[{"id":%q}]}`, expectedID)
+			_, _ = fmt.Fprintf(w, responseFormat, expectedName)
 		}))
 		defer server.Close()
 
@@ -55,7 +74,7 @@ func TestClient_ListASPSPs(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Len(t, response.ASPSPs, 1)
-		assert.Equal(t, expectedID, response.ASPSPs[0].ID)
+		assert.Equal(t, expectedName, response.ASPSPs[0].Name)
 	})
 
 	t.Run("rejects legacy top level array response", func(t *testing.T) {

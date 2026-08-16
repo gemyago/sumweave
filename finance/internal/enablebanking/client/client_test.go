@@ -118,6 +118,7 @@ func TestClient_InternalHelpers(t *testing.T) {
 
 	t.Run("typed request helper covers decode status auth and response body capture", func(t *testing.T) {
 		responseBody := `{"message":"bad body","error":"BAD_BODY"}`
+		aspspsResponse := `{"aspsps":[{"name":"aspsp-1","country":"","logo":"","psu_types":[],"auth_methods":[],"maximum_consent_validity":0,"beta":false}]}`
 		client := makeTestClient("https://provider.example.test", func(args *Args) {
 			args.HTTPClient = &http.Client{
 				Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
@@ -128,7 +129,7 @@ func TestClient_InternalHelpers(t *testing.T) {
 						assert.Equal(t, "application/json", request.Header.Get("Content-Type"))
 						return &http.Response{
 							StatusCode: http.StatusOK,
-							Body:       io.NopCloser(strings.NewReader(`{"aspsps":[{"id":"aspsp-1"}]}`)),
+							Body:       io.NopCloser(strings.NewReader(aspspsResponse)),
 						}, nil
 					case "/bad-json":
 						return &http.Response{
@@ -157,10 +158,8 @@ func TestClient_InternalHelpers(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		require.NotNil(t, result.Value)
-		assert.JSONEq(t, `{"aspsps":[{"id":"aspsp-1"}]}`, string(result.Body))
-		require.Len(t, result.Value.ASPSPs, 1)
-		assert.Equal(t, "aspsp-1", result.Value.ASPSPs[0].ID)
+		require.Len(t, result.ASPSPs, 1)
+		assert.Equal(t, "aspsp-1", result.ASPSPs[0].Name)
 
 		_, err = sendJSON[struct{}, ListASPSPsResponse](
 			ctx,
@@ -184,73 +183,13 @@ func TestClient_InternalHelpers(t *testing.T) {
 		assert.Equal(t, []byte(responseBody), responseErr.Body)
 	})
 
-	t.Run("constructor and normalization helpers cover defaults", func(t *testing.T) {
+	t.Run("constructor and parsing helpers cover defaults", func(t *testing.T) {
 		client := NewClient(Args{})
 		require.NotNil(t, client.httpClient)
 		assert.Equal(t, defaultBaseURL, client.baseURL)
 
 		assert.Equal(t, "message", firstNonEmpty("", "message"))
 		assert.Equal(t, int64(-1234), decimalToMinor("-12.34"))
-		assert.Equal(t, int64(-1234), signedTransactionAmountMinor(AccountTransaction{
-			TransactionAmount:    &TransactionAmount{Amount: "12.34"},
-			CreditDebitIndicator: "DBIT",
-		}))
-		assert.Equal(t, "one", firstSliceValue([]string{" ", "one", "two"}))
-
-		normalizedAccount := normalizeAccount(Account{
-			UID:       "uid-1",
-			Currency:  "pln",
-			AccountID: &AccountIdentification{IBAN: " PL123 "},
-		})
-		assert.Equal(t, "uid-1", normalizedAccount.ID)
-		assert.Equal(t, "PLN", normalizedAccount.Currency)
-		assert.Equal(t, "PL123", normalizedAccount.IBAN)
-
-		normalizedSession := normalizeSessionResponse(&SessionResponse{
-			SessionID:  "session-1",
-			ASPSP:      &ASPSP{Name: "Nordea"},
-			AccountIDs: []string{"account-1"},
-		})
-		assert.Equal(t, "Nordea", normalizedSession.DisplayName)
-		require.Len(t, normalizedSession.Accounts, 1)
-		assert.Equal(t, "account-1", normalizedSession.Accounts[0].UID)
-
-		normalizedDetails := normalizeAccountDetailsResponse(&GetAccountDetailsResponse{
-			Name:            "Main account",
-			Currency:        "eur",
-			AccountID:       &AccountIdentification{IBAN: "FI123"},
-			AccountServicer: &FinancialInstitution{BICFI: "NDEAFIHH"},
-		})
-		assert.Equal(t, "Main account", normalizedDetails.OwnerName)
-		assert.Equal(t, "FI123", normalizedDetails.IBAN)
-		assert.Equal(t, "NDEAFIHH", normalizedDetails.BIC)
-		assert.Equal(t, "EUR", normalizedDetails.Currency)
-
-		normalizedBalances := normalizeBalances(&GetAccountBalancesResponse{
-			Balances: []AccountBalance{{
-				BalanceType:   "CLAV",
-				BalanceAmount: &BalanceAmount{Currency: "eur"},
-			}},
-		})
-		assert.Equal(t, "CLAV", normalizedBalances.Balances[0].Type)
-		assert.Equal(t, "EUR", normalizedBalances.Balances[0].BalanceAmount.Currency)
-
-		normalizedTransactions := normalizeTransactions(&GetAccountTransactionsResponse{
-			Transactions: []AccountTransaction{{
-				EntryReference:       "entry-1",
-				TransactionAmount:    &TransactionAmount{Amount: "12.34", Currency: "pln"},
-				CreditDebitIndicator: "DBIT",
-				RemittanceInformation: []string{
-					"Coffee",
-				},
-				TransactionDate: "2026-07-02",
-			}},
-		})
-		assert.Equal(t, "entry-1", normalizedTransactions.Transactions[0].ID)
-		assert.Equal(t, "PLN", normalizedTransactions.Transactions[0].Currency)
-		assert.Equal(t, "Coffee", normalizedTransactions.Transactions[0].Description)
-		assert.Equal(t, int64(-1234), normalizedTransactions.Transactions[0].AmountMinor)
-
 		responseErr := &ResponseError{Message: "provider request failed"}
 		assert.Equal(t, "provider request failed", responseErr.Message)
 		message, code := parseResponseBody([]byte("{"))

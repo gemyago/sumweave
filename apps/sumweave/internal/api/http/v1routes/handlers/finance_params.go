@@ -486,25 +486,25 @@ func newParamsParserFinanceGetFinanceAccountCsvImportAudit(rootHandler *RootHand
 	}
 }
 
-type paramsParserFinanceGetFinanceAccountProviderEvidence struct {
+type paramsParserFinanceGetFinanceAccountProviderSnapshot struct {
 	bindTenantID requestParamBinder[string, string]
 	bindAccountID requestParamBinder[string, string]
-	bindEvidenceID requestParamBinder[string, string]
+	bindSnapshotID requestParamBinder[string, string]
 }
 
-func (p *paramsParserFinanceGetFinanceAccountProviderEvidence) parse(router httpRouter, req *http.Request) (*GetFinanceAccountProviderEvidenceParams, error) {
+func (p *paramsParserFinanceGetFinanceAccountProviderSnapshot) parse(router httpRouter, req *http.Request) (*GetFinanceAccountProviderSnapshotParams, error) {
 	bindingCtx := BindingContext{}
-	reqParams := &GetFinanceAccountProviderEvidenceParams{}
+	reqParams := &GetFinanceAccountProviderSnapshotParams{}
 	// path params
 	pathParamsCtx := bindingCtx.Fork("path")
 	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
 	p.bindAccountID(pathParamsCtx.Fork("accountId"), readPathValue("accountId", router, req), &reqParams.AccountID)
-	p.bindEvidenceID(pathParamsCtx.Fork("evidenceId"), readPathValue("evidenceId", router, req), &reqParams.EvidenceID)
+	p.bindSnapshotID(pathParamsCtx.Fork("snapshotId"), readPathValue("snapshotId", router, req), &reqParams.SnapshotID)
 	return reqParams, bindingCtx.AggregatedError()
 }
 
-func newParamsParserFinanceGetFinanceAccountProviderEvidence(rootHandler *RootHandler) paramsParser[*GetFinanceAccountProviderEvidenceParams] {
-	return &paramsParserFinanceGetFinanceAccountProviderEvidence{
+func newParamsParserFinanceGetFinanceAccountProviderSnapshot(rootHandler *RootHandler) paramsParser[*GetFinanceAccountProviderSnapshotParams] {
+	return &paramsParserFinanceGetFinanceAccountProviderSnapshot{
 		bindTenantID: newRequestParamBinder(binderParams[string, string]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
@@ -521,7 +521,7 @@ func newParamsParserFinanceGetFinanceAccountProviderEvidence(rootHandler *RootHa
 			validateValue: NewSimpleFieldValidator[string](
 			),
 		}),
-		bindEvidenceID: newRequestParamBinder(binderParams[string, string]{
+		bindSnapshotID: newRequestParamBinder(binderParams[string, string]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
 				rootHandler.knownParsers.stringParser,
@@ -725,25 +725,25 @@ func newParamsParserFinanceGetFinanceTransaction(rootHandler *RootHandler) param
 	}
 }
 
-type paramsParserFinanceGetFinanceTransactionProviderEvidence struct {
+type paramsParserFinanceGetFinanceTransactionProviderSnapshot struct {
 	bindTenantID requestParamBinder[string, string]
 	bindTransactionID requestParamBinder[string, string]
-	bindEvidenceID requestParamBinder[string, string]
+	bindSnapshotID requestParamBinder[string, string]
 }
 
-func (p *paramsParserFinanceGetFinanceTransactionProviderEvidence) parse(router httpRouter, req *http.Request) (*GetFinanceTransactionProviderEvidenceParams, error) {
+func (p *paramsParserFinanceGetFinanceTransactionProviderSnapshot) parse(router httpRouter, req *http.Request) (*GetFinanceTransactionProviderSnapshotParams, error) {
 	bindingCtx := BindingContext{}
-	reqParams := &GetFinanceTransactionProviderEvidenceParams{}
+	reqParams := &GetFinanceTransactionProviderSnapshotParams{}
 	// path params
 	pathParamsCtx := bindingCtx.Fork("path")
 	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
 	p.bindTransactionID(pathParamsCtx.Fork("transactionId"), readPathValue("transactionId", router, req), &reqParams.TransactionID)
-	p.bindEvidenceID(pathParamsCtx.Fork("evidenceId"), readPathValue("evidenceId", router, req), &reqParams.EvidenceID)
+	p.bindSnapshotID(pathParamsCtx.Fork("snapshotId"), readPathValue("snapshotId", router, req), &reqParams.SnapshotID)
 	return reqParams, bindingCtx.AggregatedError()
 }
 
-func newParamsParserFinanceGetFinanceTransactionProviderEvidence(rootHandler *RootHandler) paramsParser[*GetFinanceTransactionProviderEvidenceParams] {
-	return &paramsParserFinanceGetFinanceTransactionProviderEvidence{
+func newParamsParserFinanceGetFinanceTransactionProviderSnapshot(rootHandler *RootHandler) paramsParser[*GetFinanceTransactionProviderSnapshotParams] {
+	return &paramsParserFinanceGetFinanceTransactionProviderSnapshot{
 		bindTenantID: newRequestParamBinder(binderParams[string, string]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
@@ -760,7 +760,7 @@ func newParamsParserFinanceGetFinanceTransactionProviderEvidence(rootHandler *Ro
 			validateValue: NewSimpleFieldValidator[string](
 			),
 		}),
-		bindEvidenceID: newRequestParamBinder(binderParams[string, string]{
+		bindSnapshotID: newRequestParamBinder(binderParams[string, string]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
 				rootHandler.knownParsers.stringParser,
@@ -915,14 +915,14 @@ func newParamsParserFinanceLinkFinanceTransferPair(rootHandler *RootHandler) par
 	}
 }
 
-type paramsParserFinanceListFinanceAccountProviderEvidence struct {
+type paramsParserFinanceListFinanceAccountProviderSnapshots struct {
 	bindTenantID requestParamBinder[string, string]
 	bindAccountID requestParamBinder[string, string]
 }
 
-func (p *paramsParserFinanceListFinanceAccountProviderEvidence) parse(router httpRouter, req *http.Request) (*ListFinanceAccountProviderEvidenceParams, error) {
+func (p *paramsParserFinanceListFinanceAccountProviderSnapshots) parse(router httpRouter, req *http.Request) (*ListFinanceAccountProviderSnapshotsParams, error) {
 	bindingCtx := BindingContext{}
-	reqParams := &ListFinanceAccountProviderEvidenceParams{}
+	reqParams := &ListFinanceAccountProviderSnapshotsParams{}
 	// path params
 	pathParamsCtx := bindingCtx.Fork("path")
 	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
@@ -930,8 +930,8 @@ func (p *paramsParserFinanceListFinanceAccountProviderEvidence) parse(router htt
 	return reqParams, bindingCtx.AggregatedError()
 }
 
-func newParamsParserFinanceListFinanceAccountProviderEvidence(rootHandler *RootHandler) paramsParser[*ListFinanceAccountProviderEvidenceParams] {
-	return &paramsParserFinanceListFinanceAccountProviderEvidence{
+func newParamsParserFinanceListFinanceAccountProviderSnapshots(rootHandler *RootHandler) paramsParser[*ListFinanceAccountProviderSnapshotsParams] {
+	return &paramsParserFinanceListFinanceAccountProviderSnapshots{
 		bindTenantID: newRequestParamBinder(binderParams[string, string]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
@@ -1182,14 +1182,14 @@ func newParamsParserFinanceListFinanceTenantMembers(rootHandler *RootHandler) pa
 	}
 }
 
-type paramsParserFinanceListFinanceTransactionProviderEvidence struct {
+type paramsParserFinanceListFinanceTransactionProviderSnapshots struct {
 	bindTenantID requestParamBinder[string, string]
 	bindTransactionID requestParamBinder[string, string]
 }
 
-func (p *paramsParserFinanceListFinanceTransactionProviderEvidence) parse(router httpRouter, req *http.Request) (*ListFinanceTransactionProviderEvidenceParams, error) {
+func (p *paramsParserFinanceListFinanceTransactionProviderSnapshots) parse(router httpRouter, req *http.Request) (*ListFinanceTransactionProviderSnapshotsParams, error) {
 	bindingCtx := BindingContext{}
-	reqParams := &ListFinanceTransactionProviderEvidenceParams{}
+	reqParams := &ListFinanceTransactionProviderSnapshotsParams{}
 	// path params
 	pathParamsCtx := bindingCtx.Fork("path")
 	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
@@ -1197,8 +1197,8 @@ func (p *paramsParserFinanceListFinanceTransactionProviderEvidence) parse(router
 	return reqParams, bindingCtx.AggregatedError()
 }
 
-func newParamsParserFinanceListFinanceTransactionProviderEvidence(rootHandler *RootHandler) paramsParser[*ListFinanceTransactionProviderEvidenceParams] {
-	return &paramsParserFinanceListFinanceTransactionProviderEvidence{
+func newParamsParserFinanceListFinanceTransactionProviderSnapshots(rootHandler *RootHandler) paramsParser[*ListFinanceTransactionProviderSnapshotsParams] {
+	return &paramsParserFinanceListFinanceTransactionProviderSnapshots{
 		bindTenantID: newRequestParamBinder(binderParams[string, string]{
 			required: true,
 			parseValue: parseSoloValueParamAsSoloValue(
@@ -2148,16 +2148,16 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*GetFinanceAccountCsvImportAuditParams, *FinanceCsvImportAuditResponse],
 	]
 
-	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}
+	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}
 	//
-	// Request type: GetFinanceAccountProviderEvidenceParams,
+	// Request type: GetFinanceAccountProviderSnapshotParams,
 	//
-	// Response type: FinanceProviderEvidence
-	GetFinanceAccountProviderEvidence genericHandlerBuilder[
-		*GetFinanceAccountProviderEvidenceParams,
-		*FinanceProviderEvidence,
-		handlerActionFunc[*GetFinanceAccountProviderEvidenceParams, *FinanceProviderEvidence],
-		httpHandlerActionFunc[*GetFinanceAccountProviderEvidenceParams, *FinanceProviderEvidence],
+	// Response type: FinanceProviderSnapshot
+	GetFinanceAccountProviderSnapshot genericHandlerBuilder[
+		*GetFinanceAccountProviderSnapshotParams,
+		*FinanceProviderSnapshot,
+		handlerActionFunc[*GetFinanceAccountProviderSnapshotParams, *FinanceProviderSnapshot],
+		httpHandlerActionFunc[*GetFinanceAccountProviderSnapshotParams, *FinanceProviderSnapshot],
 	]
 
 	// GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
@@ -2232,16 +2232,16 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*GetFinanceTransactionParams, *FinanceTransaction],
 	]
 
-	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}
+	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots/{snapshotId}
 	//
-	// Request type: GetFinanceTransactionProviderEvidenceParams,
+	// Request type: GetFinanceTransactionProviderSnapshotParams,
 	//
-	// Response type: FinanceProviderEvidence
-	GetFinanceTransactionProviderEvidence genericHandlerBuilder[
-		*GetFinanceTransactionProviderEvidenceParams,
-		*FinanceProviderEvidence,
-		handlerActionFunc[*GetFinanceTransactionProviderEvidenceParams, *FinanceProviderEvidence],
-		httpHandlerActionFunc[*GetFinanceTransactionProviderEvidenceParams, *FinanceProviderEvidence],
+	// Response type: FinanceProviderSnapshot
+	GetFinanceTransactionProviderSnapshot genericHandlerBuilder[
+		*GetFinanceTransactionProviderSnapshotParams,
+		*FinanceProviderSnapshot,
+		handlerActionFunc[*GetFinanceTransactionProviderSnapshotParams, *FinanceProviderSnapshot],
+		httpHandlerActionFunc[*GetFinanceTransactionProviderSnapshotParams, *FinanceProviderSnapshot],
 	]
 
 	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner
@@ -2292,16 +2292,16 @@ type financeControllerBuilder struct {
 		httpHandlerActionFuncNoResponse[*LinkFinanceTransferPairParams, void],
 	]
 
-	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence
+	// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots
 	//
-	// Request type: ListFinanceAccountProviderEvidenceParams,
+	// Request type: ListFinanceAccountProviderSnapshotsParams,
 	//
-	// Response type: FinanceProviderEvidenceListResponse
-	ListFinanceAccountProviderEvidence genericHandlerBuilder[
-		*ListFinanceAccountProviderEvidenceParams,
-		*FinanceProviderEvidenceListResponse,
-		handlerActionFunc[*ListFinanceAccountProviderEvidenceParams, *FinanceProviderEvidenceListResponse],
-		httpHandlerActionFunc[*ListFinanceAccountProviderEvidenceParams, *FinanceProviderEvidenceListResponse],
+	// Response type: FinanceProviderSnapshotListResponse
+	ListFinanceAccountProviderSnapshots genericHandlerBuilder[
+		*ListFinanceAccountProviderSnapshotsParams,
+		*FinanceProviderSnapshotListResponse,
+		handlerActionFunc[*ListFinanceAccountProviderSnapshotsParams, *FinanceProviderSnapshotListResponse],
+		httpHandlerActionFunc[*ListFinanceAccountProviderSnapshotsParams, *FinanceProviderSnapshotListResponse],
 	]
 
 	// GET /api/v1/finance/tenants/{tenantId}/accounts
@@ -2400,16 +2400,16 @@ type financeControllerBuilder struct {
 		httpHandlerActionFuncNoParams[void, *FinanceTenantListResponse],
 	]
 
-	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence
+	// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots
 	//
-	// Request type: ListFinanceTransactionProviderEvidenceParams,
+	// Request type: ListFinanceTransactionProviderSnapshotsParams,
 	//
-	// Response type: FinanceProviderEvidenceListResponse
-	ListFinanceTransactionProviderEvidence genericHandlerBuilder[
-		*ListFinanceTransactionProviderEvidenceParams,
-		*FinanceProviderEvidenceListResponse,
-		handlerActionFunc[*ListFinanceTransactionProviderEvidenceParams, *FinanceProviderEvidenceListResponse],
-		httpHandlerActionFunc[*ListFinanceTransactionProviderEvidenceParams, *FinanceProviderEvidenceListResponse],
+	// Response type: FinanceProviderSnapshotListResponse
+	ListFinanceTransactionProviderSnapshots genericHandlerBuilder[
+		*ListFinanceTransactionProviderSnapshotsParams,
+		*FinanceProviderSnapshotListResponse,
+		handlerActionFunc[*ListFinanceTransactionProviderSnapshotsParams, *FinanceProviderSnapshotListResponse],
+		httpHandlerActionFunc[*ListFinanceTransactionProviderSnapshotsParams, *FinanceProviderSnapshotListResponse],
 	]
 
 	// GET /api/v1/finance/tenants/{tenantId}/transactions
@@ -2901,23 +2901,23 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
-		// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence/{evidenceId}
-		GetFinanceAccountProviderEvidence: newGenericHandlerBuilder(
+		// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}
+		GetFinanceAccountProviderSnapshot: newGenericHandlerBuilder(
 			app,
 			newHandlerAdapter[
-				*GetFinanceAccountProviderEvidenceParams,
-				*FinanceProviderEvidence,
+				*GetFinanceAccountProviderSnapshotParams,
+				*FinanceProviderSnapshot,
 			](),
 			newHTTPHandlerAdapter[
-				*GetFinanceAccountProviderEvidenceParams,
-				*FinanceProviderEvidence,
+				*GetFinanceAccountProviderSnapshotParams,
+				*FinanceProviderSnapshot,
 			](),
 			makeActionBuilderParams[
-				*GetFinanceAccountProviderEvidenceParams,
-				*FinanceProviderEvidence,
+				*GetFinanceAccountProviderSnapshotParams,
+				*FinanceProviderSnapshot,
 			]{
 				defaultStatus: 200,
-				paramsParser:  newParamsParserFinanceGetFinanceAccountProviderEvidence(app),
+				paramsParser:  newParamsParserFinanceGetFinanceAccountProviderSnapshot(app),
 			},
 		),
 
@@ -3041,23 +3041,23 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
-		// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence/{evidenceId}
-		GetFinanceTransactionProviderEvidence: newGenericHandlerBuilder(
+		// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots/{snapshotId}
+		GetFinanceTransactionProviderSnapshot: newGenericHandlerBuilder(
 			app,
 			newHandlerAdapter[
-				*GetFinanceTransactionProviderEvidenceParams,
-				*FinanceProviderEvidence,
+				*GetFinanceTransactionProviderSnapshotParams,
+				*FinanceProviderSnapshot,
 			](),
 			newHTTPHandlerAdapter[
-				*GetFinanceTransactionProviderEvidenceParams,
-				*FinanceProviderEvidence,
+				*GetFinanceTransactionProviderSnapshotParams,
+				*FinanceProviderSnapshot,
 			](),
 			makeActionBuilderParams[
-				*GetFinanceTransactionProviderEvidenceParams,
-				*FinanceProviderEvidence,
+				*GetFinanceTransactionProviderSnapshotParams,
+				*FinanceProviderSnapshot,
 			]{
 				defaultStatus: 200,
-				paramsParser:  newParamsParserFinanceGetFinanceTransactionProviderEvidence(app),
+				paramsParser:  newParamsParserFinanceGetFinanceTransactionProviderSnapshot(app),
 			},
 		),
 
@@ -3143,23 +3143,23 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
-		// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/evidence
-		ListFinanceAccountProviderEvidence: newGenericHandlerBuilder(
+		// GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots
+		ListFinanceAccountProviderSnapshots: newGenericHandlerBuilder(
 			app,
 			newHandlerAdapter[
-				*ListFinanceAccountProviderEvidenceParams,
-				*FinanceProviderEvidenceListResponse,
+				*ListFinanceAccountProviderSnapshotsParams,
+				*FinanceProviderSnapshotListResponse,
 			](),
 			newHTTPHandlerAdapter[
-				*ListFinanceAccountProviderEvidenceParams,
-				*FinanceProviderEvidenceListResponse,
+				*ListFinanceAccountProviderSnapshotsParams,
+				*FinanceProviderSnapshotListResponse,
 			](),
 			makeActionBuilderParams[
-				*ListFinanceAccountProviderEvidenceParams,
-				*FinanceProviderEvidenceListResponse,
+				*ListFinanceAccountProviderSnapshotsParams,
+				*FinanceProviderSnapshotListResponse,
 			]{
 				defaultStatus: 200,
-				paramsParser:  newParamsParserFinanceListFinanceAccountProviderEvidence(app),
+				paramsParser:  newParamsParserFinanceListFinanceAccountProviderSnapshots(app),
 			},
 		),
 
@@ -3323,23 +3323,23 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
-		// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/evidence
-		ListFinanceTransactionProviderEvidence: newGenericHandlerBuilder(
+		// GET /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots
+		ListFinanceTransactionProviderSnapshots: newGenericHandlerBuilder(
 			app,
 			newHandlerAdapter[
-				*ListFinanceTransactionProviderEvidenceParams,
-				*FinanceProviderEvidenceListResponse,
+				*ListFinanceTransactionProviderSnapshotsParams,
+				*FinanceProviderSnapshotListResponse,
 			](),
 			newHTTPHandlerAdapter[
-				*ListFinanceTransactionProviderEvidenceParams,
-				*FinanceProviderEvidenceListResponse,
+				*ListFinanceTransactionProviderSnapshotsParams,
+				*FinanceProviderSnapshotListResponse,
 			](),
 			makeActionBuilderParams[
-				*ListFinanceTransactionProviderEvidenceParams,
-				*FinanceProviderEvidenceListResponse,
+				*ListFinanceTransactionProviderSnapshotsParams,
+				*FinanceProviderSnapshotListResponse,
 			]{
 				defaultStatus: 200,
-				paramsParser:  newParamsParserFinanceListFinanceTransactionProviderEvidence(app),
+				paramsParser:  newParamsParserFinanceListFinanceTransactionProviderSnapshots(app),
 			},
 		),
 

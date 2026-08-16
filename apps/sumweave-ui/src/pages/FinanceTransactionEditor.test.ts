@@ -16,8 +16,8 @@ const mocks = vi.hoisted(() => ({
   unlinkTransferPair: vi.fn(),
   createTransaction: vi.fn(),
   updateTransaction: vi.fn(),
-  listTransactionProviderEvidence: vi.fn(),
-  getTransactionProviderEvidence: vi.fn(),
+  listTransactionProviderSnapshots: vi.fn(),
+  getTransactionProviderSnapshot: vi.fn(),
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => ({
@@ -121,8 +121,8 @@ describe('Finance transaction editor page', () => {
       createdAt: now,
       updatedAt: now,
     })
-    mocks.listTransactionProviderEvidence.mockResolvedValue([])
-    mocks.getTransactionProviderEvidence.mockResolvedValue({})
+    mocks.listTransactionProviderSnapshots.mockResolvedValue([])
+    mocks.getTransactionProviderSnapshot.mockResolvedValue({})
   })
 
   it('initializes create mode with a blank editable record and submits through the shared editor', async () => {
@@ -426,28 +426,28 @@ describe('Finance transaction editor page', () => {
     expect(mocks.createTransaction).not.toHaveBeenCalled()
   })
 
-  it('loads current evidence for distinct provider objects only after the disclosure opens and content only after reveal', async () => {
+  it('loads current transaction snapshots only after expansion and data only after reveal', async () => {
     const user = userEvent.setup()
-    mocks.listTransactionProviderEvidence.mockResolvedValueOnce([
-      { id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: new Date('2026-06-20T12:00:00Z') },
-      { id: 'evidence-2', scope: 'transaction', providerObjectId: 'provider-fee', capturedAt: new Date('2026-06-20T12:01:00Z') },
+    mocks.listTransactionProviderSnapshots.mockResolvedValueOnce([
+      { id: 'snapshot-1', kind: 'transaction', providerObjectId: 'provider-tx', capturedAt: new Date('2026-06-20T12:00:00Z') },
+      { id: 'snapshot-2', kind: 'transaction', providerObjectId: 'provider-fee', capturedAt: new Date('2026-06-20T12:01:00Z') },
     ])
-    mocks.getTransactionProviderEvidence.mockResolvedValueOnce({
-      id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: new Date('2026-06-20T12:00:00Z'), payload: { amount: 'sanitized' },
+    mocks.getTransactionProviderSnapshot.mockResolvedValueOnce({
+      id: 'snapshot-1', kind: 'transaction', providerObjectId: 'provider-tx', capturedAt: new Date('2026-06-20T12:00:00Z'), data: { amount: 'sanitized' },
     })
     render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
 
-    expect(await screen.findByText('Current provider evidence')).toBeInTheDocument()
-    expect(mocks.listTransactionProviderEvidence).not.toHaveBeenCalled()
-    await user.click(screen.getByText('Current provider evidence'))
-    await waitFor(() => expect(mocks.listTransactionProviderEvidence).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-1' }))
-    expect(mocks.getTransactionProviderEvidence).not.toHaveBeenCalled()
+    expect(await screen.findByText('Provider source data')).toBeInTheDocument()
+    expect(mocks.listTransactionProviderSnapshots).not.toHaveBeenCalled()
+    await user.click(screen.getByText('Provider source data'))
+    await waitFor(() => expect(mocks.listTransactionProviderSnapshots).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-1' }))
+    expect(mocks.getTransactionProviderSnapshot).not.toHaveBeenCalled()
     expect(screen.getByText('Provider object provider-tx', { exact: false })).toBeInTheDocument()
     expect(screen.getByText('Provider object provider-fee', { exact: false })).toBeInTheDocument()
-    await user.click(screen.getAllByRole('button', { name: 'Reveal current sanitized details' })[0])
-    await waitFor(() => expect(mocks.getTransactionProviderEvidence).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-1', evidenceId: 'evidence-1' }))
-    expect(screen.getByText('Current sanitized provider evidence')).toBeInTheDocument()
-    expect(screen.getByText(/not the raw provider payload/i)).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'Reveal source data' })[0])
+    await waitFor(() => expect(mocks.getTransactionProviderSnapshot).toHaveBeenCalledWith({ tenantId: 'tenant-1', transactionId: 'tx-1', snapshotId: 'snapshot-1' }))
+    expect(screen.getByText('Provider snapshot data')).toBeInTheDocument()
+    expect(screen.getAllByText(/not a raw HTTP response/i)).toHaveLength(2)
   })
 
   it('round-trips a local datetime value through the transaction editor', async () => {

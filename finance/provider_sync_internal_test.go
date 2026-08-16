@@ -26,7 +26,6 @@ type failingProviderSyncStore struct {
 	getSyncRunErr            error
 	saveSnapshotErr          error
 	listProviderAccountsErr  error
-	saveRawPayloadErr        error
 	saveBankConnectionErr    error
 	saveSyncRunErr           error
 	listBankConnectionsErr   error
@@ -45,7 +44,6 @@ type failingProviderSyncStore struct {
 	deleteScheduleErr        error
 	deleteProviderAcctsErr   error
 	deleteSnapshotsErr       error
-	deleteRawPayloadsErr     error
 	deleteSyncRunsErr        error
 	deleteTxnMatchesErr      error
 	deleteSecretErr          error
@@ -120,16 +118,6 @@ func (s *failingProviderSyncStore) SaveConnectionProviderAccount(
 		return domain.ConnectionProviderAccount{}, s.saveProviderAccountErr
 	}
 	return s.Store.SaveConnectionProviderAccount(ctx, account)
-}
-
-func (s *failingProviderSyncStore) SaveRawPayload(
-	ctx context.Context,
-	payload domain.RawPayload,
-) (domain.RawPayload, error) {
-	if s.saveRawPayloadErr != nil {
-		return domain.RawPayload{}, s.saveRawPayloadErr
-	}
-	return s.Store.SaveRawPayload(ctx, payload)
 }
 
 func (s *failingProviderSyncStore) SavePendingStart(
@@ -275,16 +263,6 @@ func (s *failingProviderSyncStore) DeleteBalanceSnapshots(
 		return s.deleteSnapshotsErr
 	}
 	return s.Store.DeleteBalanceSnapshots(ctx, connectionID)
-}
-
-func (s *failingProviderSyncStore) DeleteRawPayloads(
-	ctx context.Context,
-	connectionID string,
-) error {
-	if s.deleteRawPayloadsErr != nil {
-		return s.deleteRawPayloadsErr
-	}
-	return s.Store.DeleteRawPayloads(ctx, connectionID)
 }
 
 func (s *failingProviderSyncStore) DeleteBankConnectionSyncRuns(
@@ -486,19 +464,6 @@ func TestProviderSyncInternals(t *testing.T) {
 		if err != nil {
 			return domain.BankConnection{}, err
 		}
-		for _, payload := range result.RawPayloads {
-			_, rawErr := syncStore.SaveRawPayload(ctx, domain.RawPayload{
-				ID:               service.newID(),
-				ConnectionID:     saved.ID,
-				Scope:            payload.Scope,
-				ProviderObjectID: payload.ProviderObjectID,
-				PayloadJSON:      payload.PayloadJSON,
-				CapturedAt:       now,
-			})
-			if rawErr != nil {
-				return domain.BankConnection{}, rawErr
-			}
-		}
 		return saved, nil
 	}
 
@@ -618,12 +583,10 @@ func TestProviderSyncInternals(t *testing.T) {
 	t.Run("isolates identical provider account IDs across same-provider connections", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
-		evidenceStore := persistence.NewProviderEvidenceStoreFromStore(store)
 		now := time.Date(2026, time.August, 10, 14, 30, 0, 0, time.FixedZone("test", 2*60*60))
 		service := NewBankSyncService(
 			store,
 			WithBankSyncServiceNow(func() time.Time { return now }),
-			WithBankSyncServiceEvidenceWriter(evidenceStore),
 		)
 		tenantID := "tenant-" + fake.UUID().V4()
 		providerAccountID := "provider-account-" + fake.UUID().V4()
@@ -661,12 +624,6 @@ func TestProviderSyncInternals(t *testing.T) {
 					Description:           "Transaction " + fake.Lorem().Word(),
 					EffectiveAt:           now,
 					Fingerprint:           "fingerprint-" + fake.UUID().V4(),
-					RawPayloadJSON:        []byte(`{"transaction":"` + providerTransactionID + `"}`),
-				}},
-				RawPayloads: []ProviderRawPayload{{
-					Scope:            domain.RawPayloadScopeAccount,
-					ProviderObjectID: providerAccountID,
-					PayloadJSON:      []byte(`{"account":"` + providerAccountID + `"}`),
 				}},
 			}
 		}
@@ -715,36 +672,6 @@ func TestProviderSyncInternals(t *testing.T) {
 		assert.Equal(t, firstConnection.ID, firstMatch.ConnectionID)
 		assert.Equal(t, secondConnection.ID, secondMatch.ConnectionID)
 		assert.NotEqual(t, firstMatch.TransactionID, secondMatch.TransactionID)
-
-		firstAccountEvidence, err := evidenceStore.ListAccountProviderEvidence(
-			t.Context(), tenantID, firstMappings[0].FinanceAccountID,
-		)
-		require.NoError(t, err)
-		secondAccountEvidence, err := evidenceStore.ListAccountProviderEvidence(
-			t.Context(), tenantID, secondMappings[0].FinanceAccountID,
-		)
-		require.NoError(t, err)
-		require.Len(t, firstAccountEvidence, 1)
-		require.Len(t, secondAccountEvidence, 1)
-		assert.Equal(t, firstConnection.ID, firstAccountEvidence[0].ConnectionID)
-		assert.Equal(t, firstMappings[0].FinanceAccountID, firstAccountEvidence[0].FinanceAccountID)
-		assert.Equal(t, secondConnection.ID, secondAccountEvidence[0].ConnectionID)
-		assert.Equal(t, secondMappings[0].FinanceAccountID, secondAccountEvidence[0].FinanceAccountID)
-
-		firstTransactionEvidence, err := evidenceStore.ListTransactionProviderEvidence(
-			t.Context(), tenantID, firstMatch.TransactionID,
-		)
-		require.NoError(t, err)
-		secondTransactionEvidence, err := evidenceStore.ListTransactionProviderEvidence(
-			t.Context(), tenantID, secondMatch.TransactionID,
-		)
-		require.NoError(t, err)
-		require.Len(t, firstTransactionEvidence, 1)
-		require.Len(t, secondTransactionEvidence, 1)
-		assert.Equal(t, firstConnection.ID, firstTransactionEvidence[0].ConnectionID)
-		assert.Equal(t, firstMatch.TransactionID, firstTransactionEvidence[0].FinanceTransactionID)
-		assert.Equal(t, secondConnection.ID, secondTransactionEvidence[0].ConnectionID)
-		assert.Equal(t, secondMatch.TransactionID, secondTransactionEvidence[0].FinanceTransactionID)
 	})
 
 	t.Run("preserves custom linked finance account names during provider metadata refresh", func(t *testing.T) {
@@ -1187,11 +1114,6 @@ func TestProviderSyncInternals(t *testing.T) {
 				ProviderReference: "mono-ref-" + fake.UUID().V4(),
 				Secret:            "mono-secret-" + fake.UUID().V4(),
 				State:             domain.BankConnectionStateActive,
-				RawPayloads: []ProviderRawPayload{{
-					Scope:            domain.RawPayloadScopeConnection,
-					ProviderObjectID: "mono-payload-" + fake.UUID().V4(),
-					PayloadJSON:      []byte(`{"provider":"monobank"}`),
-				}},
 			},
 		)
 		require.NoError(t, err)
@@ -1543,25 +1465,6 @@ func TestProviderSyncInternals(t *testing.T) {
 		require.Error(t, err)
 		store.saveSnapshotErr = nil
 
-		store.saveRawPayloadErr = errors.New("raw payload failed")
-		_, err = service.ApplyProviderSyncResult(
-			t.Context(),
-			ApplyProviderSyncResultParams{
-				ConnectionID: connection.ID,
-				Result: ProviderSyncResult{
-					RawPayloads: []ProviderRawPayload{
-						{
-							Scope:            domain.RawPayloadScopeConnection,
-							ProviderObjectID: "obj",
-							PayloadJSON:      []byte(`{"ok":true}`),
-						},
-					},
-				},
-			},
-		)
-		require.Error(t, err)
-		store.saveRawPayloadErr = nil
-
 		store.saveBankConnectionErr = errors.New("save connection failed")
 		_, err = service.ApplyProviderSyncResult(
 			t.Context(),
@@ -1655,26 +1558,6 @@ func TestProviderSyncInternals(t *testing.T) {
 		)
 		require.Error(t, err)
 		store.saveBankConnectionErr = nil
-		store.saveRawPayloadErr = errors.New("save linked raw failed")
-		_, err = saveLinkedConnectionForTest(
-			t.Context(),
-			service,
-			tenant.ID,
-			provider.name,
-			ProviderLinkResult{
-				Secret: "secret",
-				RawPayloads: []ProviderRawPayload{
-					{
-						Scope:            domain.RawPayloadScopeConnection,
-						ProviderObjectID: "obj",
-						PayloadJSON:      []byte(`{"ok":true}`),
-					},
-				},
-			},
-		)
-		require.Error(t, err)
-		store.saveRawPayloadErr = nil
-
 		badCipher, cipherErr := credentials.NewAESGCMCipher(
 			[]byte("0123456789abcdef0123456789abcdef"),
 			"bad-key",

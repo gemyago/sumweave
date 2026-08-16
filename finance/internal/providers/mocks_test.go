@@ -109,6 +109,74 @@ func (_c *MockWindowSyncApplyStore_GetAccount_Call) RunAndReturn(run func(ctx co
 	return _c
 }
 
+// GetBankConnection provides a mock function for the type MockWindowSyncApplyStore
+func (_mock *MockWindowSyncApplyStore) GetBankConnection(ctx context.Context, connectionID string) (*domain.BankConnection, error) {
+	ret := _mock.Called(ctx, connectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBankConnection")
+	}
+
+	var r0 *domain.BankConnection
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*domain.BankConnection, error)); ok {
+		return returnFunc(ctx, connectionID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *domain.BankConnection); ok {
+		r0 = returnFunc(ctx, connectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*domain.BankConnection)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, connectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWindowSyncApplyStore_GetBankConnection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetBankConnection'
+type MockWindowSyncApplyStore_GetBankConnection_Call struct {
+	*mock.Call
+}
+
+// GetBankConnection is a helper method to define mock.On call
+//   - ctx context.Context
+//   - connectionID string
+func (_e *MockWindowSyncApplyStore_Expecter) GetBankConnection(ctx interface{}, connectionID interface{}) *MockWindowSyncApplyStore_GetBankConnection_Call {
+	return &MockWindowSyncApplyStore_GetBankConnection_Call{Call: _e.mock.On("GetBankConnection", ctx, connectionID)}
+}
+
+func (_c *MockWindowSyncApplyStore_GetBankConnection_Call) Run(run func(ctx context.Context, connectionID string)) *MockWindowSyncApplyStore_GetBankConnection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_GetBankConnection_Call) Return(bankConnection *domain.BankConnection, err error) *MockWindowSyncApplyStore_GetBankConnection_Call {
+	_c.Call.Return(bankConnection, err)
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_GetBankConnection_Call) RunAndReturn(run func(ctx context.Context, connectionID string) (*domain.BankConnection, error)) *MockWindowSyncApplyStore_GetBankConnection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveAccount provides a mock function for the type MockWindowSyncApplyStore
 func (_mock *MockWindowSyncApplyStore) SaveAccount(ctx context.Context, account domain.Account) (domain.Account, error) {
 	ret := _mock.Called(ctx, account)
@@ -307,6 +375,72 @@ func (_c *MockWindowSyncApplyStore_SaveConnectionProviderAccount_Call) RunAndRet
 	return _c
 }
 
+// SaveProviderSnapshot provides a mock function for the type MockWindowSyncApplyStore
+func (_mock *MockWindowSyncApplyStore) SaveProviderSnapshot(ctx context.Context, snapshot domain.ProviderSnapshot) (domain.ProviderSnapshot, error) {
+	ret := _mock.Called(ctx, snapshot)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SaveProviderSnapshot")
+	}
+
+	var r0 domain.ProviderSnapshot
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.ProviderSnapshot) (domain.ProviderSnapshot, error)); ok {
+		return returnFunc(ctx, snapshot)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.ProviderSnapshot) domain.ProviderSnapshot); ok {
+		r0 = returnFunc(ctx, snapshot)
+	} else {
+		r0 = ret.Get(0).(domain.ProviderSnapshot)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.ProviderSnapshot) error); ok {
+		r1 = returnFunc(ctx, snapshot)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWindowSyncApplyStore_SaveProviderSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveProviderSnapshot'
+type MockWindowSyncApplyStore_SaveProviderSnapshot_Call struct {
+	*mock.Call
+}
+
+// SaveProviderSnapshot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - snapshot domain.ProviderSnapshot
+func (_e *MockWindowSyncApplyStore_Expecter) SaveProviderSnapshot(ctx interface{}, snapshot interface{}) *MockWindowSyncApplyStore_SaveProviderSnapshot_Call {
+	return &MockWindowSyncApplyStore_SaveProviderSnapshot_Call{Call: _e.mock.On("SaveProviderSnapshot", ctx, snapshot)}
+}
+
+func (_c *MockWindowSyncApplyStore_SaveProviderSnapshot_Call) Run(run func(ctx context.Context, snapshot domain.ProviderSnapshot)) *MockWindowSyncApplyStore_SaveProviderSnapshot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 domain.ProviderSnapshot
+		if args[1] != nil {
+			arg1 = args[1].(domain.ProviderSnapshot)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_SaveProviderSnapshot_Call) Return(providerSnapshot domain.ProviderSnapshot, err error) *MockWindowSyncApplyStore_SaveProviderSnapshot_Call {
+	_c.Call.Return(providerSnapshot, err)
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_SaveProviderSnapshot_Call) RunAndReturn(run func(ctx context.Context, snapshot domain.ProviderSnapshot) (domain.ProviderSnapshot, error)) *MockWindowSyncApplyStore_SaveProviderSnapshot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SaveProviderTransactionMatch provides a mock function for the type MockWindowSyncApplyStore
 func (_mock *MockWindowSyncApplyStore) SaveProviderTransactionMatch(ctx context.Context, match domain.ProviderTransactionMatch) (domain.ProviderTransactionMatch, error) {
 	ret := _mock.Called(ctx, match)
@@ -369,72 +503,6 @@ func (_c *MockWindowSyncApplyStore_SaveProviderTransactionMatch_Call) Return(pro
 }
 
 func (_c *MockWindowSyncApplyStore_SaveProviderTransactionMatch_Call) RunAndReturn(run func(ctx context.Context, match domain.ProviderTransactionMatch) (domain.ProviderTransactionMatch, error)) *MockWindowSyncApplyStore_SaveProviderTransactionMatch_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SaveRawPayload provides a mock function for the type MockWindowSyncApplyStore
-func (_mock *MockWindowSyncApplyStore) SaveRawPayload(ctx context.Context, payload domain.RawPayload) (domain.RawPayload, error) {
-	ret := _mock.Called(ctx, payload)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveRawPayload")
-	}
-
-	var r0 domain.RawPayload
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.RawPayload) (domain.RawPayload, error)); ok {
-		return returnFunc(ctx, payload)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.RawPayload) domain.RawPayload); ok {
-		r0 = returnFunc(ctx, payload)
-	} else {
-		r0 = ret.Get(0).(domain.RawPayload)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.RawPayload) error); ok {
-		r1 = returnFunc(ctx, payload)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockWindowSyncApplyStore_SaveRawPayload_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveRawPayload'
-type MockWindowSyncApplyStore_SaveRawPayload_Call struct {
-	*mock.Call
-}
-
-// SaveRawPayload is a helper method to define mock.On call
-//   - ctx context.Context
-//   - payload domain.RawPayload
-func (_e *MockWindowSyncApplyStore_Expecter) SaveRawPayload(ctx interface{}, payload interface{}) *MockWindowSyncApplyStore_SaveRawPayload_Call {
-	return &MockWindowSyncApplyStore_SaveRawPayload_Call{Call: _e.mock.On("SaveRawPayload", ctx, payload)}
-}
-
-func (_c *MockWindowSyncApplyStore_SaveRawPayload_Call) Run(run func(ctx context.Context, payload domain.RawPayload)) *MockWindowSyncApplyStore_SaveRawPayload_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 domain.RawPayload
-		if args[1] != nil {
-			arg1 = args[1].(domain.RawPayload)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockWindowSyncApplyStore_SaveRawPayload_Call) Return(rawPayload domain.RawPayload, err error) *MockWindowSyncApplyStore_SaveRawPayload_Call {
-	_c.Call.Return(rawPayload, err)
-	return _c
-}
-
-func (_c *MockWindowSyncApplyStore_SaveRawPayload_Call) RunAndReturn(run func(ctx context.Context, payload domain.RawPayload) (domain.RawPayload, error)) *MockWindowSyncApplyStore_SaveRawPayload_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1528,46 +1596,47 @@ func (_m *MockConnectionStore) EXPECT() *MockConnectionStore_Expecter {
 	return &MockConnectionStore_Expecter{mock: &_m.Mock}
 }
 
-// SaveLinkedConnection provides a mock function for the type MockConnectionStore
-func (_mock *MockConnectionStore) SaveLinkedConnection(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret) (domain.BankConnection, error) {
-	ret := _mock.Called(ctx, connection, secret)
+// SaveLinkedConnectionWithSnapshot provides a mock function for the type MockConnectionStore
+func (_mock *MockConnectionStore) SaveLinkedConnectionWithSnapshot(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot) (domain.BankConnection, error) {
+	ret := _mock.Called(ctx, connection, secret, snapshot)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SaveLinkedConnection")
+		panic("no return value specified for SaveLinkedConnectionWithSnapshot")
 	}
 
 	var r0 domain.BankConnection
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret) (domain.BankConnection, error)); ok {
-		return returnFunc(ctx, connection, secret)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot) (domain.BankConnection, error)); ok {
+		return returnFunc(ctx, connection, secret, snapshot)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret) domain.BankConnection); ok {
-		r0 = returnFunc(ctx, connection, secret)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot) domain.BankConnection); ok {
+		r0 = returnFunc(ctx, connection, secret, snapshot)
 	} else {
 		r0 = ret.Get(0).(domain.BankConnection)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.BankConnection, domain.ConnectionSecret) error); ok {
-		r1 = returnFunc(ctx, connection, secret)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot) error); ok {
+		r1 = returnFunc(ctx, connection, secret, snapshot)
 	} else {
 		r1 = ret.Error(1)
 	}
 	return r0, r1
 }
 
-// MockConnectionStore_SaveLinkedConnection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveLinkedConnection'
-type MockConnectionStore_SaveLinkedConnection_Call struct {
+// MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveLinkedConnectionWithSnapshot'
+type MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call struct {
 	*mock.Call
 }
 
-// SaveLinkedConnection is a helper method to define mock.On call
+// SaveLinkedConnectionWithSnapshot is a helper method to define mock.On call
 //   - ctx context.Context
 //   - connection domain.BankConnection
 //   - secret domain.ConnectionSecret
-func (_e *MockConnectionStore_Expecter) SaveLinkedConnection(ctx interface{}, connection interface{}, secret interface{}) *MockConnectionStore_SaveLinkedConnection_Call {
-	return &MockConnectionStore_SaveLinkedConnection_Call{Call: _e.mock.On("SaveLinkedConnection", ctx, connection, secret)}
+//   - snapshot *domain.ProviderSnapshot
+func (_e *MockConnectionStore_Expecter) SaveLinkedConnectionWithSnapshot(ctx interface{}, connection interface{}, secret interface{}, snapshot interface{}) *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call {
+	return &MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call{Call: _e.mock.On("SaveLinkedConnectionWithSnapshot", ctx, connection, secret, snapshot)}
 }
 
-func (_c *MockConnectionStore_SaveLinkedConnection_Call) Run(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret)) *MockConnectionStore_SaveLinkedConnection_Call {
+func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call) Run(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot)) *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1581,114 +1650,26 @@ func (_c *MockConnectionStore_SaveLinkedConnection_Call) Run(run func(ctx contex
 		if args[2] != nil {
 			arg2 = args[2].(domain.ConnectionSecret)
 		}
+		var arg3 *domain.ProviderSnapshot
+		if args[3] != nil {
+			arg3 = args[3].(*domain.ProviderSnapshot)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
 }
 
-func (_c *MockConnectionStore_SaveLinkedConnection_Call) Return(bankConnection domain.BankConnection, err error) *MockConnectionStore_SaveLinkedConnection_Call {
+func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call) Return(bankConnection domain.BankConnection, err error) *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call {
 	_c.Call.Return(bankConnection, err)
 	return _c
 }
 
-func (_c *MockConnectionStore_SaveLinkedConnection_Call) RunAndReturn(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret) (domain.BankConnection, error)) *MockConnectionStore_SaveLinkedConnection_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// NewMockRawPayloadWriter creates a new instance of MockRawPayloadWriter. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
-// The first argument is typically a *testing.T value.
-func NewMockRawPayloadWriter(t interface {
-	mock.TestingT
-	Cleanup(func())
-}) *MockRawPayloadWriter {
-	mock := &MockRawPayloadWriter{}
-	mock.Mock.Test(t)
-
-	t.Cleanup(func() { mock.AssertExpectations(t) })
-
-	return mock
-}
-
-// MockRawPayloadWriter is an autogenerated mock type for the RawPayloadWriter type
-type MockRawPayloadWriter struct {
-	mock.Mock
-}
-
-type MockRawPayloadWriter_Expecter struct {
-	mock *mock.Mock
-}
-
-func (_m *MockRawPayloadWriter) EXPECT() *MockRawPayloadWriter_Expecter {
-	return &MockRawPayloadWriter_Expecter{mock: &_m.Mock}
-}
-
-// SaveRawPayload provides a mock function for the type MockRawPayloadWriter
-func (_mock *MockRawPayloadWriter) SaveRawPayload(ctx context.Context, payload domain.RawPayload) (domain.RawPayload, error) {
-	ret := _mock.Called(ctx, payload)
-
-	if len(ret) == 0 {
-		panic("no return value specified for SaveRawPayload")
-	}
-
-	var r0 domain.RawPayload
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.RawPayload) (domain.RawPayload, error)); ok {
-		return returnFunc(ctx, payload)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.RawPayload) domain.RawPayload); ok {
-		r0 = returnFunc(ctx, payload)
-	} else {
-		r0 = ret.Get(0).(domain.RawPayload)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.RawPayload) error); ok {
-		r1 = returnFunc(ctx, payload)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockRawPayloadWriter_SaveRawPayload_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveRawPayload'
-type MockRawPayloadWriter_SaveRawPayload_Call struct {
-	*mock.Call
-}
-
-// SaveRawPayload is a helper method to define mock.On call
-//   - ctx context.Context
-//   - payload domain.RawPayload
-func (_e *MockRawPayloadWriter_Expecter) SaveRawPayload(ctx interface{}, payload interface{}) *MockRawPayloadWriter_SaveRawPayload_Call {
-	return &MockRawPayloadWriter_SaveRawPayload_Call{Call: _e.mock.On("SaveRawPayload", ctx, payload)}
-}
-
-func (_c *MockRawPayloadWriter_SaveRawPayload_Call) Run(run func(ctx context.Context, payload domain.RawPayload)) *MockRawPayloadWriter_SaveRawPayload_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 domain.RawPayload
-		if args[1] != nil {
-			arg1 = args[1].(domain.RawPayload)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockRawPayloadWriter_SaveRawPayload_Call) Return(rawPayload domain.RawPayload, err error) *MockRawPayloadWriter_SaveRawPayload_Call {
-	_c.Call.Return(rawPayload, err)
-	return _c
-}
-
-func (_c *MockRawPayloadWriter_SaveRawPayload_Call) RunAndReturn(run func(ctx context.Context, payload domain.RawPayload) (domain.RawPayload, error)) *MockRawPayloadWriter_SaveRawPayload_Call {
+func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call) RunAndReturn(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot) (domain.BankConnection, error)) *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call {
 	_c.Call.Return(run)
 	return _c
 }

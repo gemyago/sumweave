@@ -89,7 +89,6 @@ type ProviderLinkResult struct {
 	ProviderReference string
 	Secret            string
 	State             domain.BankConnectionState
-	RawPayloads       []ProviderRawPayload
 }
 
 type ProviderTokenLinkResult = ProviderLinkResult
@@ -114,7 +113,6 @@ type ProviderNormalizedTransaction struct {
 	EffectiveAt           time.Time
 	Fingerprint           string
 	ProviderOriginal      *domain.ProviderTransactionOriginal
-	RawPayloadJSON        []byte
 }
 
 type ProviderScheduledRunMetadata struct {
@@ -134,7 +132,7 @@ type ProviderSyncResult struct {
 	SyncKey      string
 	Accounts     []ProviderNormalizedAccount
 	Transactions []ProviderNormalizedTransaction
-	RawPayloads  []ProviderRawPayload
+	Snapshots    []domain.ProviderSnapshotObservation
 	Reauth       *domain.ConnectionReauthMetadata
 	ScheduledRun *ProviderScheduledRunMetadata
 }
@@ -318,9 +316,6 @@ type bankSyncStore interface {
 	) (domain.BalanceSnapshot, error)
 	ListBalanceSnapshots(ctx context.Context, connectionID string) ([]domain.BalanceSnapshot, error)
 	DeleteBalanceSnapshots(ctx context.Context, connectionID string) error
-	SaveRawPayload(ctx context.Context, payload domain.RawPayload) (domain.RawPayload, error)
-	ListRawPayloads(ctx context.Context, connectionID string) ([]domain.RawPayload, error)
-	DeleteRawPayloads(ctx context.Context, connectionID string) error
 	SaveBankConnectionSyncRun(
 		ctx context.Context,
 		run domain.BankConnectionSyncRun,

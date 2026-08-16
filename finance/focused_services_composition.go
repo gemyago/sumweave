@@ -75,7 +75,7 @@ func newFocusedServices(
 	values ...any,
 ) focusedServices {
 	var csvImportStore *persistence.CSVImportStore
-	var providerEvidenceStore *persistence.ProviderEvidenceStore
+	var providerSnapshotStore *persistence.ProviderSnapshotStore
 	var currentFXRateStore *persistence.CurrentFXRateStore
 	var fxPairDiscoveryStore *persistence.FXPairDiscoveryStore
 	var cfg focusedServicesConfig
@@ -83,8 +83,8 @@ func newFocusedServices(
 		switch typed := value.(type) {
 		case *persistence.CSVImportStore:
 			csvImportStore = typed
-		case *persistence.ProviderEvidenceStore:
-			providerEvidenceStore = typed
+		case *persistence.ProviderSnapshotStore:
+			providerSnapshotStore = typed
 		case *persistence.CurrentFXRateStore:
 			currentFXRateStore = typed
 		case *persistence.FXPairDiscoveryStore:
@@ -142,7 +142,8 @@ func newFocusedServices(
 		WithBankSyncServiceIDGenerator(cfg.newID),
 		WithBankSyncServiceConnectionSecretCipher(cfg.connectionSecretCipher),
 		WithBankSyncServiceProviders(cfg.bankProviders...),
-		WithBankSyncServiceEvidenceWriter(providerEvidenceStore),
+		WithBankSyncServiceSnapshotDeleter(providerSnapshotStore),
+		WithBankSyncServiceSnapshotWriter(providerSnapshotStore),
 	}
 	if cfg.bankSyncJobEnqueuer != nil {
 		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceJobEnqueuer(cfg.bankSyncJobEnqueuer))

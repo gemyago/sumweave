@@ -45,7 +45,7 @@ type StartLinkResult struct {
 	State             string
 	ProviderReference string
 	AuthorizationURL  string
-	RawPayloads       []domain.ProviderRawPayloadObservation
+	PendingDocument   []byte
 }
 
 type FinishLinkRequest struct {
@@ -61,11 +61,11 @@ type LinkTokenRequest struct {
 }
 
 type LinkResult struct {
-	DisplayName       string
-	ProviderReference string
-	Secret            string
-	State             domain.BankConnectionState
-	RawPayloads       []domain.ProviderRawPayloadObservation
+	DisplayName        string
+	ProviderReference  string
+	Secret             string
+	State              domain.BankConnectionState
+	ConnectionSnapshot *domain.ProviderSnapshotObservation
 }
 
 type FetchRequest struct {
@@ -101,6 +101,7 @@ type WindowSyncSnapshotReader interface {
 }
 
 type WindowSyncApplyStore interface {
+	GetBankConnection(ctx context.Context, connectionID string) (*domain.BankConnection, error)
 	GetAccount(ctx context.Context, accountID string) (*domain.Account, error)
 	SaveAccount(ctx context.Context, account domain.Account) (domain.Account, error)
 	SaveConnectionProviderAccount(
@@ -111,10 +112,10 @@ type WindowSyncApplyStore interface {
 		ctx context.Context,
 		snapshot domain.BalanceSnapshot,
 	) (domain.BalanceSnapshot, error)
-	SaveRawPayload(
+	SaveProviderSnapshot(
 		ctx context.Context,
-		payload domain.RawPayload,
-	) (domain.RawPayload, error)
+		snapshot domain.ProviderSnapshot,
+	) (domain.ProviderSnapshot, error)
 	SaveTransaction(
 		ctx context.Context,
 		transaction domain.Transaction,

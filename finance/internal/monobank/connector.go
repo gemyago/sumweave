@@ -19,6 +19,8 @@ import (
 
 const statementChunkRange = 31*24*time.Hour + time.Hour
 
+const monobankConnectionSnapshotObjectID = "client-info"
+
 const (
 	monobankCurrencyUAH = 980
 	monobankCurrencyEUR = 978
@@ -163,12 +165,12 @@ func (c *Connector) LinkToken(
 		ProviderReference: "",
 		Secret:            strings.TrimSpace(request.Token),
 		State:             domain.BankConnectionStateActive,
-		RawPayloads: []domain.ProviderRawPayloadObservation{{
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: providerObjectID,
-			PayloadJSON:      response.RawJSON,
+		ConnectionSnapshot: &domain.ProviderSnapshotObservation{
+			Kind:             domain.ProviderSnapshotKindConnection,
+			ProviderObjectID: monobankConnectionSnapshotObjectID,
+			DocumentJSON:     mustJSON(body),
 			CapturedAt:       capturedAt,
-		}},
+		},
 	}, nil
 }
 
@@ -213,16 +215,22 @@ func (c *Connector) Fetch(
 		Accounts:        make([]domain.ProviderAccountObservation, 0, len(clientInfo.Accounts)),
 		Balances:        make([]domain.ProviderBalanceObservation, 0, len(clientInfo.Accounts)),
 		Transactions:    []domain.ProviderTransactionObservation{},
-		RawPayloads: []domain.ProviderRawPayloadObservation{{
-			Connection:       request.Connection,
-			Scope:            domain.RawPayloadScopeConnection,
-			ProviderObjectID: "client-info",
-			PayloadJSON:      clientInfoResponse.RawJSON,
+		Snapshots: []domain.ProviderSnapshotObservation{{
+			Kind:             domain.ProviderSnapshotKindConnection,
+			ProviderObjectID: monobankConnectionSnapshotObjectID,
+			DocumentJSON:     mustJSON(clientInfo),
 			CapturedAt:       capturedAt,
 		}},
 	}
 	for _, account := range clientInfo.Accounts {
 		batch.Accounts = append(batch.Accounts, normalizeAccount(request.Connection, account))
+		batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
+			Kind:              domain.ProviderSnapshotKindAccount,
+			ProviderObjectID:  strings.TrimSpace(account.ID),
+			ProviderAccountID: strings.TrimSpace(account.ID),
+			DocumentJSON:      mustJSON(account),
+			CapturedAt:        capturedAt,
+		})
 		batch.Balances = append(
 			batch.Balances,
 			normalizeBalance(request.Connection, account, capturedAt),
@@ -240,33 +248,35 @@ func (c *Connector) Fetch(
 			if statementErr != nil {
 				return domain.ProviderSyncBatch{}, normalizeClientError(statementErr)
 			}
-			batch.RawPayloads = append(batch.RawPayloads, domain.ProviderRawPayloadObservation{
-				Connection:       request.Connection,
-				Scope:            domain.RawPayloadScopeTransaction,
-				ProviderObjectID: chunk.accountID,
-				PayloadJSON:      statementResponse.RawJSON,
-				CapturedAt:       capturedAt,
-			})
 			for _, item := range statementResponse.Items {
-				transaction, normalizeErr := normalizeTransaction(
+				transaction := normalizeTransaction(
 					request.Connection,
 					chunk.accountID,
 					item,
 				)
-				if normalizeErr != nil {
-					return domain.ProviderSyncBatch{}, fmt.Errorf(
-						"serialize monobank transaction evidence: %w",
-						normalizeErr,
-					)
-				}
 				batch.Transactions = append(
 					batch.Transactions,
 					transaction,
 				)
+				batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
+					Kind:                  domain.ProviderSnapshotKindTransaction,
+					ProviderObjectID:      providerSnapshotObjectID(transaction),
+					ProviderAccountID:     transaction.ProviderAccountID,
+					ProviderTransactionID: transaction.ProviderTransactionID,
+					DocumentJSON:          mustJSON(item),
+					CapturedAt:            capturedAt,
+				})
 			}
 		}
 	}
 	return batch, nil
+}
+
+func providerSnapshotObjectID(transaction domain.ProviderTransactionObservation) string {
+	if transaction.ProviderTransactionID != "" {
+		return transaction.ProviderTransactionID
+	}
+	return transaction.Fingerprint
 }
 
 type statementChunk struct {
@@ -326,14 +336,7 @@ func normalizeTransaction(
 	connection domain.ProviderConnectionRef,
 	providerAccountID string,
 	item monobankclient.PersonalStatementItem,
-) (domain.ProviderTransactionObservation, error) {
-	rawPayloadJSON, err := json.Marshal(item)
-	if err != nil {
-		return domain.ProviderTransactionObservation{}, fmt.Errorf(
-			"marshal monobank transaction: %w",
-			err,
-		)
-	}
+) domain.ProviderTransactionObservation {
 	effectiveAt := time.Unix(item.Time, 0)
 	description := strings.TrimSpace(item.Description)
 	currency := currencyCodeToISO(item.CurrencyCode)
@@ -359,8 +362,7 @@ func normalizeTransaction(
 			Description: description,
 			EffectiveAt: &effectiveAt,
 		},
-		RawPayloadJSON: rawPayloadJSON,
-	}, nil
+	}
 }
 
 func makeChunks(accountID string, window domain.ProviderSyncWindow) []statementChunk {
@@ -444,4 +446,12 @@ func providerFingerprint(parts ...any) string {
 	}
 	hash := sha256.Sum256([]byte(joined.String()))
 	return hex.EncodeToString(hash[:16])
+}
+
+func mustJSON(value any) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return []byte("{}")
+	}
+	return encoded
 }

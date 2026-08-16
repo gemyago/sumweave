@@ -81,11 +81,11 @@ describe('finance api', () => {
     expect(JSON.parse(String(requestInit?.body))).toEqual({ provider: 'frankfurter' })
   })
 
-  it('loads provider evidence metadata separately from an explicit sanitized detail reveal', async () => {
+  it('loads provider snapshot metadata separately from an explicit source-data reveal', async () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
     const responses = [
-      { items: [{ id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: '2026-06-20T12:00:00Z' }] },
-      { id: 'evidence-1', scope: 'transaction', providerObjectId: 'provider-tx', capturedAt: '2026-06-20T12:00:00Z', payload: { amount: 'sanitized' } },
+      { items: [{ id: 'snapshot-1', kind: 'transaction', providerObjectId: 'provider-tx', capturedAt: '2026-06-20T12:00:00Z' }] },
+      { id: 'snapshot-1', kind: 'transaction', providerObjectId: 'provider-tx', capturedAt: '2026-06-20T12:00:00Z', data: { amount: 'sanitized' } },
     ]
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ input, init })
@@ -93,14 +93,15 @@ describe('finance api', () => {
     })
     const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
 
-    const metadata = await api.listTransactionProviderEvidence({ tenantId: 'tenant-1', transactionId: 'tx-1' })
+    const metadata = await api.listTransactionProviderSnapshots({ tenantId: 'tenant-1', transactionId: 'tx-1' })
     expect(metadata[0].capturedAt).toEqual(new Date('2026-06-20T12:00:00Z'))
-    expect(String(calls[0].input)).toContain('/transactions/tx-1/evidence')
-    expect(String(calls[0].input)).not.toContain('evidence-1')
+    expect(metadata[0].kind).toBe('transaction')
+    expect(String(calls[0].input)).toContain('/transactions/tx-1/provider-snapshots')
+    expect(String(calls[0].input)).not.toContain('snapshot-1')
 
-    const evidence = await api.getTransactionProviderEvidence({ tenantId: 'tenant-1', transactionId: 'tx-1', evidenceId: 'evidence-1' })
-    expect(evidence.payload).toEqual({ amount: 'sanitized' })
-    expect(String(calls[1].input)).toContain('/transactions/tx-1/evidence/evidence-1')
+    const snapshot = await api.getTransactionProviderSnapshot({ tenantId: 'tenant-1', transactionId: 'tx-1', snapshotId: 'snapshot-1' })
+    expect(snapshot.data).toEqual({ amount: 'sanitized' })
+    expect(String(calls[1].input)).toContain('/transactions/tx-1/provider-snapshots/snapshot-1')
   })
 
   it('calls the transfer pair link and unlink APIs with the selected records', async () => {
@@ -151,11 +152,11 @@ describe('finance api', () => {
     expect(partner.transferMatchedAt).toEqual(new Date('2026-06-20T12:05:00-07:00'))
   })
 
-  it('calls the account evidence metadata and sanitized-detail APIs', async () => {
+  it('calls the account provider snapshot metadata and detail APIs', async () => {
     const calls: Array<RequestInfo | URL> = []
     const responses = [
-      { items: [{ id: 'evidence-1', scope: 'account', providerObjectId: 'provider-account', capturedAt: '2026-06-20T12:00:00Z' }] },
-      { id: 'evidence-1', scope: 'account', providerObjectId: 'provider-account', capturedAt: '2026-06-20T12:00:00Z', payload: { balance: 'sanitized' } },
+      { items: [{ id: 'snapshot-1', kind: 'account', providerObjectId: 'provider-account', capturedAt: '2026-06-20T12:00:00Z' }] },
+      { id: 'snapshot-1', kind: 'account', providerObjectId: 'provider-account', capturedAt: '2026-06-20T12:00:00Z', data: { balance: 'sanitized' } },
     ]
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
       calls.push(input)
@@ -163,11 +164,11 @@ describe('finance api', () => {
     })
     const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
 
-    await api.listAccountProviderEvidence({ tenantId: 'tenant-1', accountId: 'account-1' })
-    await api.getAccountProviderEvidence({ tenantId: 'tenant-1', accountId: 'account-1', evidenceId: 'evidence-1' })
+    await api.listAccountProviderSnapshots({ tenantId: 'tenant-1', accountId: 'account-1' })
+    await api.getAccountProviderSnapshot({ tenantId: 'tenant-1', accountId: 'account-1', snapshotId: 'snapshot-1' })
 
-    expect(String(calls[0])).toContain('/accounts/account-1/evidence')
-    expect(String(calls[1])).toContain('/accounts/account-1/evidence/evidence-1')
+    expect(String(calls[0])).toContain('/accounts/account-1/provider-snapshots')
+    expect(String(calls[1])).toContain('/accounts/account-1/provider-snapshots/snapshot-1')
   })
 
   it('gets and manages an account with the dedicated lifecycle APIs', async () => {

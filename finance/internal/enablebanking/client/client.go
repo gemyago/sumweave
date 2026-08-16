@@ -56,11 +56,6 @@ type sendJSONParams[TBody any] struct {
 	Body   *TBody
 }
 
-type sendJSONResult[TTarget any] struct {
-	Value *TTarget
-	Body  []byte
-}
-
 // ResponseError reports a non-2xx upstream response.
 type ResponseError struct {
 	Operation  string
@@ -117,7 +112,7 @@ func sendJSON[TBody any, TTarget any](
 	ctx context.Context,
 	client *Client,
 	params sendJSONParams[TBody],
-) (*sendJSONResult[TTarget], error) {
+) (*TTarget, error) {
 	body, err := doJSONRequest(ctx, client, params)
 	if err != nil {
 		return nil, err
@@ -126,10 +121,7 @@ func sendJSON[TBody any, TTarget any](
 	if err = json.Unmarshal(body, &target); err != nil {
 		return nil, fmt.Errorf("enable banking response decode: %w", err)
 	}
-	return &sendJSONResult[TTarget]{
-		Value: &target,
-		Body:  append([]byte(nil), body...),
-	}, nil
+	return &target, nil
 }
 
 func doJSONRequest[TBody any](
@@ -299,174 +291,6 @@ func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		trimmed := strings.TrimSpace(value)
 		if trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
-func normalizeAccount(account Account) Account {
-	account.Currency = strings.ToUpper(account.Currency)
-	if account.AccountID != nil {
-		account.IBAN = strings.TrimSpace(account.AccountID.IBAN)
-	}
-	if account.ID == "" {
-		account.ID = account.UID
-	}
-	return account
-}
-
-func normalizeAccounts(accounts []Account) []Account {
-	if len(accounts) == 0 {
-		return nil
-	}
-	result := make([]Account, 0, len(accounts))
-	for _, account := range accounts {
-		result = append(result, normalizeAccount(account))
-	}
-	return result
-}
-
-func accountIDsFromAccounts(accounts []Account) []string {
-	if len(accounts) == 0 {
-		return nil
-	}
-	result := make([]string, 0, len(accounts))
-	for _, account := range accounts {
-		accountID := firstNonEmpty(account.UID, account.ID)
-		if accountID == "" {
-			continue
-		}
-		result = append(result, accountID)
-	}
-	return result
-}
-
-func normalizeSessionResponse(response *SessionResponse) *SessionResponse {
-	if response == nil {
-		return nil
-	}
-	response.ID = response.SessionID
-	response.ProviderReference = response.SessionID
-	response.DisplayName = ""
-	if response.ASPSP != nil {
-		response.DisplayName = response.ASPSP.Name
-	}
-	response.State = response.Status
-	response.AccountsData = normalizeAccounts(response.AccountsData)
-	response.Accounts = normalizeAccounts(response.Accounts)
-	if len(response.Accounts) == 0 {
-		switch {
-		case len(response.AccountsData) > 0:
-			response.Accounts = append([]Account(nil), response.AccountsData...)
-		case len(response.AccountIDs) > 0:
-			response.Accounts = make([]Account, 0, len(response.AccountIDs))
-			for _, accountID := range response.AccountIDs {
-				trimmed := strings.TrimSpace(accountID)
-				if trimmed == "" {
-					continue
-				}
-				response.Accounts = append(response.Accounts, Account{UID: trimmed, ID: trimmed})
-			}
-		}
-	}
-	return response
-}
-
-func normalizeCreateAuthResponse(response *CreateAuthResponse) *CreateAuthResponse {
-	if response == nil {
-		return nil
-	}
-	response.AuthorizationURL = response.URL
-	response.ID = response.AuthorizationID
-	response.ProviderReference = response.AuthorizationID
-	return response
-}
-
-func normalizeAccountDetailsResponse(response *GetAccountDetailsResponse) *GetAccountDetailsResponse {
-	if response == nil {
-		return nil
-	}
-	response.Currency = strings.ToUpper(response.Currency)
-	if response.AccountID != nil {
-		response.IBAN = strings.TrimSpace(response.AccountID.IBAN)
-	}
-	response.OwnerName = response.Name
-	if response.AccountServicer != nil {
-		response.BIC = response.AccountServicer.BICFI
-	}
-	return response
-}
-
-func normalizeBalances(response *GetAccountBalancesResponse) *GetAccountBalancesResponse {
-	if response == nil {
-		return nil
-	}
-	for index := range response.Balances {
-		response.Balances[index].Type = response.Balances[index].BalanceType
-		if response.Balances[index].BalanceAmount != nil {
-			response.Balances[index].BalanceAmount.Currency = strings.ToUpper(
-				response.Balances[index].BalanceAmount.Currency,
-			)
-		}
-	}
-	return response
-}
-
-func normalizeTransactions(response *GetAccountTransactionsResponse) *GetAccountTransactionsResponse {
-	if response == nil {
-		return nil
-	}
-	for index := range response.Transactions {
-		transaction := &response.Transactions[index]
-		transaction.Amount = transaction.TransactionAmount
-		transaction.Currency = strings.ToUpper(firstNonEmpty(
-			transaction.Currency,
-			transactionAmountCurrencyValue(transaction.TransactionAmount),
-		))
-		transaction.Description = firstNonEmpty(transaction.Note, firstSliceValue(transaction.RemittanceInformation))
-		transaction.RemittanceInformationUnstructured = firstNonEmpty(
-			firstSliceValue(transaction.RemittanceInformation),
-			transaction.Note,
-		)
-		transaction.EffectiveAt = firstNonEmpty(
-			transaction.TransactionDate,
-			transaction.BookingDate,
-			transaction.ValueDate,
-		)
-		transaction.AmountMinor = signedTransactionAmountMinor(*transaction)
-		if transaction.ID == "" {
-			transaction.ID = transaction.EntryReference
-		}
-	}
-	return response
-}
-
-func signedTransactionAmountMinor(transaction AccountTransaction) int64 {
-	amount := decimalToMinor(transactionAmountValue(transaction.TransactionAmount))
-	if amount > 0 && strings.EqualFold(transaction.CreditDebitIndicator, "DBIT") {
-		return -amount
-	}
-	return amount
-}
-
-func transactionAmountValue(amount *TransactionAmount) string {
-	if amount == nil {
-		return ""
-	}
-	return amount.Amount
-}
-
-func transactionAmountCurrencyValue(amount *TransactionAmount) string {
-	if amount == nil {
-		return ""
-	}
-	return amount.Currency
-}
-
-func firstSliceValue(values []string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			return trimmed
 		}
 	}

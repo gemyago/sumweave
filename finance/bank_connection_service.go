@@ -85,12 +85,11 @@ func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionSe
 			args.Now,
 			args.NewID,
 		),
-		ConnectionStore:  linkPersistence,
-		RawPayloadWriter: linkPersistence,
-		Logger:           args.Logger,
-		Now:              args.Now,
-		NewID:            args.NewID,
-		PendingStartTTL:  pendingBankConnectionLinkStartTTL,
+		ConnectionStore: linkPersistence,
+		Logger:          args.Logger,
+		Now:             args.Now,
+		NewID:           args.NewID,
+		PendingStartTTL: pendingBankConnectionLinkStartTTL,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create bank connection link coordinator: %w", err)
@@ -212,12 +211,11 @@ func (s *BankConnectionService) StartBankConnectionLink(
 			"provider",
 			params.Provider,
 		),
-		slog.Int("rawPayloadCount", len(result.RawPayloads)),
+		slog.Bool("hasPendingDocument", len(result.PendingDocument) > 0),
 	)
 	return ProviderLinkStart{
 		State:            result.State,
 		AuthorizationURL: result.AuthorizationURL,
-		RawPayloads:      providerRawPayloadsFromObservations(result.RawPayloads),
 	}, nil
 }
 
@@ -335,20 +333,6 @@ func (s *BankConnectionService) GetPendingBankConnectionLinkStartByState(
 		)
 	}
 	return *pendingStart, nil
-}
-
-func providerRawPayloadsFromObservations(
-	payloads []domain.ProviderRawPayloadObservation,
-) []ProviderRawPayload {
-	items := make([]ProviderRawPayload, 0, len(payloads))
-	for _, payload := range payloads {
-		items = append(items, ProviderRawPayload{
-			Scope:            payload.Scope,
-			ProviderObjectID: payload.ProviderObjectID,
-			PayloadJSON:      payload.PayloadJSON,
-		})
-	}
-	return items
 }
 
 func isBankProviderConfigurationError(err error) bool {

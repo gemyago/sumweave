@@ -118,23 +118,23 @@ type fxService interface {
 	TriggerFXRefresh(context.Context, financepkg.TriggerFXRefreshParams) (financepkg.FXRefreshJobRef, error)
 }
 
-type providerEvidenceService interface {
-	ListAccountProviderEvidence(
+type providerSnapshotService interface {
+	ListAccountProviderSnapshots(
 		context.Context,
-		financepkg.ListAccountProviderEvidenceParams,
-	) ([]domain.ProviderEvidence, error)
-	GetAccountProviderEvidence(
+		financepkg.ListAccountProviderSnapshotsParams,
+	) ([]domain.ProviderSnapshot, error)
+	GetAccountProviderSnapshot(
 		context.Context,
-		financepkg.GetAccountProviderEvidenceParams,
-	) (domain.ProviderEvidence, error)
-	ListTransactionProviderEvidence(
+		financepkg.GetAccountProviderSnapshotParams,
+	) (domain.ProviderSnapshot, error)
+	ListTransactionProviderSnapshots(
 		context.Context,
-		financepkg.ListTransactionProviderEvidenceParams,
-	) ([]domain.ProviderEvidence, error)
-	GetTransactionProviderEvidence(
+		financepkg.ListTransactionProviderSnapshotsParams,
+	) ([]domain.ProviderSnapshot, error)
+	GetTransactionProviderSnapshot(
 		context.Context,
-		financepkg.GetTransactionProviderEvidenceParams,
-	) (domain.ProviderEvidence, error)
+		financepkg.GetTransactionProviderSnapshotParams,
+	) (domain.ProviderSnapshot, error)
 }
 
 type csvImportService interface {
@@ -163,7 +163,6 @@ type financeService interface {
 	bankSyncService
 	reportingService
 	fxService
-	providerEvidenceService
 	csvImportService
 }
 
@@ -203,7 +202,7 @@ type FinanceControllerDeps struct {
 	BankSyncService              bankSyncService
 	ReportingService             reportingService
 	FXService                    fxService
-	ProviderEvidenceService      providerEvidenceService
+	ProviderSnapshotService      providerSnapshotService
 	CSVImportService             csvImportService
 	BankConnectionService        bankConnectionService
 	SyntheticLinkStateService    syntheticLinkStateService
@@ -835,33 +834,33 @@ func (c *FinanceController) UnlinkFinanceTransferPair(
 	return c.deps.AuthMiddleware(inner)
 }
 
-func (c *FinanceController) GetFinanceAccountProviderEvidence(
+func (c *FinanceController) GetFinanceAccountProviderSnapshot(
 	builder handlers.HandlerBuilder[
-		*models.GetFinanceAccountProviderEvidenceParams,
-		*models.FinanceProviderEvidence,
+		*models.GetFinanceAccountProviderSnapshotParams,
+		*models.FinanceProviderSnapshot,
 	],
 ) http.Handler {
 	inner := builder.HandleWith(func(
 		ctx context.Context,
-		params *models.GetFinanceAccountProviderEvidenceParams,
-	) (*models.FinanceProviderEvidence, error) {
+		params *models.GetFinanceAccountProviderSnapshotParams,
+	) (*models.FinanceProviderSnapshot, error) {
 		userID, err := operatorUserIDFromContext(ctx)
 		if err != nil {
 			return nil, err
 		}
-		item, err := c.deps.ProviderEvidenceService.GetAccountProviderEvidence(
+		item, err := c.deps.ProviderSnapshotService.GetAccountProviderSnapshot(
 			ctx,
-			financepkg.GetAccountProviderEvidenceParams{
+			financepkg.GetAccountProviderSnapshotParams{
 				ActorUserID: userID,
 				TenantID:    params.TenantID,
 				AccountID:   params.AccountID,
-				EvidenceID:  params.EvidenceID,
+				SnapshotID:  params.SnapshotID,
 			},
 		)
 		if err != nil {
-			return nil, err
+			return nil, mapProviderSnapshotError(err)
 		}
-		mapped, mapErr := mapProviderEvidence(item)
+		mapped, mapErr := mapProviderSnapshot(item)
 		if mapErr != nil {
 			return nil, mapErr
 		}
@@ -870,33 +869,33 @@ func (c *FinanceController) GetFinanceAccountProviderEvidence(
 	return c.deps.AuthMiddleware(inner)
 }
 
-func (c *FinanceController) GetFinanceTransactionProviderEvidence(
+func (c *FinanceController) GetFinanceTransactionProviderSnapshot(
 	builder handlers.HandlerBuilder[
-		*models.GetFinanceTransactionProviderEvidenceParams,
-		*models.FinanceProviderEvidence,
+		*models.GetFinanceTransactionProviderSnapshotParams,
+		*models.FinanceProviderSnapshot,
 	],
 ) http.Handler {
 	inner := builder.HandleWith(func(
 		ctx context.Context,
-		params *models.GetFinanceTransactionProviderEvidenceParams,
-	) (*models.FinanceProviderEvidence, error) {
+		params *models.GetFinanceTransactionProviderSnapshotParams,
+	) (*models.FinanceProviderSnapshot, error) {
 		userID, err := operatorUserIDFromContext(ctx)
 		if err != nil {
 			return nil, err
 		}
-		item, err := c.deps.ProviderEvidenceService.GetTransactionProviderEvidence(
+		item, err := c.deps.ProviderSnapshotService.GetTransactionProviderSnapshot(
 			ctx,
-			financepkg.GetTransactionProviderEvidenceParams{
+			financepkg.GetTransactionProviderSnapshotParams{
 				ActorUserID:   userID,
 				TenantID:      params.TenantID,
 				TransactionID: params.TransactionID,
-				EvidenceID:    params.EvidenceID,
+				SnapshotID:    params.SnapshotID,
 			},
 		)
 		if err != nil {
-			return nil, err
+			return nil, mapProviderSnapshotError(err)
 		}
-		mapped, mapErr := mapProviderEvidence(item)
+		mapped, mapErr := mapProviderSnapshot(item)
 		if mapErr != nil {
 			return nil, mapErr
 		}
@@ -1282,32 +1281,32 @@ func (c *FinanceController) ListFinanceAccounts(
 	return c.deps.AuthMiddleware(inner)
 }
 
-func (c *FinanceController) ListFinanceAccountProviderEvidence(
+func (c *FinanceController) ListFinanceAccountProviderSnapshots(
 	builder handlers.HandlerBuilder[
-		*models.ListFinanceAccountProviderEvidenceParams,
-		*models.FinanceProviderEvidenceListResponse,
+		*models.ListFinanceAccountProviderSnapshotsParams,
+		*models.FinanceProviderSnapshotListResponse,
 	],
 ) http.Handler {
 	inner := builder.HandleWith(func(
 		ctx context.Context,
-		params *models.ListFinanceAccountProviderEvidenceParams,
-	) (*models.FinanceProviderEvidenceListResponse, error) {
+		params *models.ListFinanceAccountProviderSnapshotsParams,
+	) (*models.FinanceProviderSnapshotListResponse, error) {
 		userID, err := operatorUserIDFromContext(ctx)
 		if err != nil {
 			return nil, err
 		}
-		items, err := c.deps.ProviderEvidenceService.ListAccountProviderEvidence(
+		items, err := c.deps.ProviderSnapshotService.ListAccountProviderSnapshots(
 			ctx,
-			financepkg.ListAccountProviderEvidenceParams{
+			financepkg.ListAccountProviderSnapshotsParams{
 				ActorUserID: userID,
 				TenantID:    params.TenantID,
 				AccountID:   params.AccountID,
 			},
 		)
 		if err != nil {
-			return nil, err
+			return nil, mapProviderSnapshotError(err)
 		}
-		return mapProviderEvidenceMetadataResponse(items), nil
+		return mapProviderSnapshotMetadataResponse(items), nil
 	})
 	return c.deps.AuthMiddleware(inner)
 }
@@ -1775,32 +1774,32 @@ func (c *FinanceController) ListFinanceTransactions(
 	return c.deps.AuthMiddleware(inner)
 }
 
-func (c *FinanceController) ListFinanceTransactionProviderEvidence(
+func (c *FinanceController) ListFinanceTransactionProviderSnapshots(
 	builder handlers.HandlerBuilder[
-		*models.ListFinanceTransactionProviderEvidenceParams,
-		*models.FinanceProviderEvidenceListResponse,
+		*models.ListFinanceTransactionProviderSnapshotsParams,
+		*models.FinanceProviderSnapshotListResponse,
 	],
 ) http.Handler {
 	inner := builder.HandleWith(func(
 		ctx context.Context,
-		params *models.ListFinanceTransactionProviderEvidenceParams,
-	) (*models.FinanceProviderEvidenceListResponse, error) {
+		params *models.ListFinanceTransactionProviderSnapshotsParams,
+	) (*models.FinanceProviderSnapshotListResponse, error) {
 		userID, err := operatorUserIDFromContext(ctx)
 		if err != nil {
 			return nil, err
 		}
-		items, err := c.deps.ProviderEvidenceService.ListTransactionProviderEvidence(
+		items, err := c.deps.ProviderSnapshotService.ListTransactionProviderSnapshots(
 			ctx,
-			financepkg.ListTransactionProviderEvidenceParams{
+			financepkg.ListTransactionProviderSnapshotsParams{
 				ActorUserID:   userID,
 				TenantID:      params.TenantID,
 				TransactionID: params.TransactionID,
 			},
 		)
 		if err != nil {
-			return nil, err
+			return nil, mapProviderSnapshotError(err)
 		}
-		return mapProviderEvidenceMetadataResponse(items), nil
+		return mapProviderSnapshotMetadataResponse(items), nil
 	})
 	return c.deps.AuthMiddleware(inner)
 }
@@ -2042,6 +2041,21 @@ func mapCatalogError(err error) error {
 	}
 }
 
+func mapProviderSnapshotError(err error) error {
+	switch {
+	case errors.Is(err, financepkg.ErrTenantAccessDenied):
+		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+	case errors.Is(err, financepkg.ErrAccountNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("account", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrTransactionNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("transaction", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrProviderSnapshotNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("provider snapshot", "requested resource"), err)
+	default:
+		return err
+	}
+}
+
 func mapTransferPairError(err error) error {
 	if errors.Is(err, financepkg.ErrInvalidTransferPair) {
 		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("transferPair", err.Error()), err)
@@ -2251,16 +2265,16 @@ func mapTransactionsResponse(items []domain.Transaction) *models.FinanceTransact
 	return response
 }
 
-func mapProviderEvidenceMetadataResponse(
-	items []domain.ProviderEvidence,
-) *models.FinanceProviderEvidenceListResponse {
-	response := models.FinanceProviderEvidenceListResponse{
-		Items: make([]*models.FinanceProviderEvidenceMetadata, 0, len(items)),
+func mapProviderSnapshotMetadataResponse(
+	items []domain.ProviderSnapshot,
+) *models.FinanceProviderSnapshotListResponse {
+	response := models.FinanceProviderSnapshotListResponse{
+		Items: make([]*models.FinanceProviderSnapshotMetadata, 0, len(items)),
 	}
 	for _, item := range items {
-		response.Items = append(response.Items, &models.FinanceProviderEvidenceMetadata{
+		response.Items = append(response.Items, &models.FinanceProviderSnapshotMetadata{
 			ID:               item.ID,
-			Scope:            string(item.Scope),
+			Kind:             models.FinanceProviderSnapshotMetadataKind(item.Kind),
 			ProviderObjectID: item.ProviderObjectID,
 			CapturedAt:       item.CapturedAt,
 		})
@@ -2268,17 +2282,17 @@ func mapProviderEvidenceMetadataResponse(
 	return &response
 }
 
-func mapProviderEvidence(item domain.ProviderEvidence) (models.FinanceProviderEvidence, error) {
-	payload := map[string]any{}
-	if err := json.Unmarshal(item.PayloadJSON, &payload); err != nil {
-		return models.FinanceProviderEvidence{}, fmt.Errorf("decode provider evidence payload: %w", err)
+func mapProviderSnapshot(item domain.ProviderSnapshot) (models.FinanceProviderSnapshot, error) {
+	data := map[string]any{}
+	if err := json.Unmarshal(item.DocumentJSON, &data); err != nil {
+		return models.FinanceProviderSnapshot{}, fmt.Errorf("decode provider snapshot data: %w", err)
 	}
-	return models.FinanceProviderEvidence{
+	return models.FinanceProviderSnapshot{
 		ID:               item.ID,
-		Scope:            string(item.Scope),
+		Kind:             models.FinanceProviderSnapshotKind(item.Kind),
 		ProviderObjectID: item.ProviderObjectID,
 		CapturedAt:       item.CapturedAt,
-		Payload:          payload,
+		Data:             data,
 	}, nil
 }
 

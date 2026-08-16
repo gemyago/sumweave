@@ -20,7 +20,7 @@
     defaultTransferCandidateRange,
     transferCandidateRangeFromDateInputs,
   } from '../lib/finance/transfer-range'
-  import FinanceProviderEvidence from '../components/FinanceProviderEvidence.svelte'
+  import FinanceProviderSourceData from '../components/FinanceProviderSourceData.svelte'
   import FinancePager from '../components/FinancePager.svelte'
 
   let { params = {} } = $props<{ params?: { transactionId?: string } }>()
@@ -655,7 +655,7 @@
       {#if transaction}
         <section class="card shadow-sm">
           <div class="card-body p-4">
-            <FinanceProviderEvidence tenantId={financeShell.selectedTenantId} entityId={transaction.id} entityLabel="transaction" scope="transaction" />
+            <FinanceProviderSourceData tenantId={financeShell.selectedTenantId} entityId={transaction.id} entityLabel="transaction" scope="transaction" />
           </div>
         </section>
       {/if}

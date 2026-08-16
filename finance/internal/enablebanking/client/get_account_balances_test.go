@@ -33,7 +33,6 @@ func TestClient_GetAccountBalances(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, response.Balances, 1)
 		assert.Equal(t, "CLAV", response.Balances[0].BalanceType)
-		assert.Equal(t, "CLAV", response.Balances[0].Type)
 		assert.Equal(t, "1.23", response.Balances[0].BalanceAmount.Amount)
 		assert.Equal(t, "EUR", response.Balances[0].BalanceAmount.Currency)
 	})
@@ -51,7 +50,6 @@ func TestClient_GetAccountBalances(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, response.Balances, 1)
 		assert.Empty(t, response.Balances[0].BalanceType)
-		assert.Empty(t, response.Balances[0].Type)
 	})
 
 	t.Run("handles API error", func(t *testing.T) {

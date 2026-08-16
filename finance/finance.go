@@ -25,7 +25,7 @@ type Finance struct {
 	BankConnectionService     *BankConnectionService
 	SyntheticLinkStateService *SyntheticLinkStateService
 	BankSyncService           *BankSyncService
-	ProviderEvidenceService   *ProviderEvidenceService
+	ProviderSnapshotService   *ProviderSnapshotService
 	TransferDetailService     *TransferDetailService
 }
 
@@ -39,7 +39,7 @@ func New(cfg *Config) (*Finance, error) {
 	fxPairDiscoveryStore := persistence.NewFXPairDiscoveryStore(cfg.Database)
 	transactionStore := persistence.NewTransactionTagStore(cfg.Database)
 	csvImportStore := persistence.NewCSVImportStore(cfg.Database)
-	providerEvidenceStore := persistence.NewProviderEvidenceStore(cfg.Database)
+	providerSnapshotStore := persistence.NewProviderSnapshotStore(cfg.Database)
 	transferCandidateStore := persistence.NewTransferCandidateStore(cfg.Database)
 	connectors := newConnectors(cfg, store)
 	connectorRegistry := internalproviders.NewStaticConnectorRegistry(connectors...)
@@ -48,7 +48,7 @@ func New(cfg *Config) (*Finance, error) {
 		store,
 		transactionStore,
 		csvImportStore,
-		providerEvidenceStore,
+		providerSnapshotStore,
 		currentFXRateStore,
 		fxPairDiscoveryStore,
 		focusedServicesConfigFromConfig(cfg, connectors),
@@ -82,7 +82,7 @@ func New(cfg *Config) (*Finance, error) {
 			WithSyntheticLinkStateServiceIDGenerator(cfg.NewID),
 		),
 		BankSyncService:         services.BankSyncService,
-		ProviderEvidenceService: NewProviderEvidenceService(providerEvidenceStore),
+		ProviderSnapshotService: NewProviderSnapshotService(providerSnapshotStore),
 		TransferDetailService:   NewTransferDetailService(transferCandidateStore),
 	}, nil
 }
@@ -214,7 +214,7 @@ func providerSyncResultFromBatch(batch domain.ProviderSyncBatch) ProviderSyncRes
 	result := ProviderSyncResult{
 		Accounts:     make([]ProviderNormalizedAccount, 0, len(batch.Accounts)),
 		Transactions: make([]ProviderNormalizedTransaction, 0, len(batch.Transactions)),
-		RawPayloads:  make([]ProviderRawPayload, 0, len(batch.RawPayloads)),
+		Snapshots:    append([]domain.ProviderSnapshotObservation(nil), batch.Snapshots...),
 	}
 	balanceByAccountID := make(map[string]domain.ProviderBalanceObservation, len(batch.Balances))
 	for _, balance := range batch.Balances {
@@ -250,14 +250,6 @@ func providerSyncResultFromBatch(batch domain.ProviderSyncBatch) ProviderSyncRes
 			EffectiveAt:           item.EffectiveAt,
 			Fingerprint:           item.Fingerprint,
 			ProviderOriginal:      item.ProviderOriginal,
-			RawPayloadJSON:        item.RawPayloadJSON,
-		})
-	}
-	for _, item := range batch.RawPayloads {
-		result.RawPayloads = append(result.RawPayloads, ProviderRawPayload{
-			Scope:            item.Scope,
-			ProviderObjectID: item.ProviderObjectID,
-			PayloadJSON:      item.PayloadJSON,
 		})
 	}
 	return result

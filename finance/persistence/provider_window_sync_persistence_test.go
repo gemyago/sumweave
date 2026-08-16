@@ -363,7 +363,6 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		makeFixture := func(fake faker.Faker, connectionID string) (
 			domain.ConnectionProviderAccount,
 			domain.BalanceSnapshot,
-			domain.RawPayload,
 			domain.Transaction,
 			domain.ProviderTransactionMatch,
 		) {
@@ -389,17 +388,9 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 				CurrentBalanceMinor: int64(fake.IntBetween(100, 500000)),
 				CapturedAt:          capturedAt,
 			}
-			rawPayload := domain.RawPayload{
-				ID:               "payload-" + fake.UUID().V4(),
-				ConnectionID:     connectionID,
-				Scope:            domain.RawPayloadScopeTransaction,
-				ProviderObjectID: transaction.ID,
-				PayloadJSON:      []byte(`{"id":"` + fake.UUID().V4() + `"}`),
-				CapturedAt:       capturedAt,
-			}
 			match := makeMatch(fake, connectionID, account.ProviderAccountID, transaction.ID, capturedAt)
 			match.Status = transaction.Status
-			return account, snapshot, rawPayload, transaction, match
+			return account, snapshot, transaction, match
 		}
 
 		t.Run("commits persisted writes on success", func(t *testing.T) {
@@ -407,14 +398,12 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			store := makeStore(t)
 			adapter := NewProviderWindowSyncPersistence(store)
 			connectionID := "connection-success-" + fake.UUID().V4()
-			account, snapshot, rawPayload, transaction, match := makeFixture(fake, connectionID)
+			account, snapshot, transaction, match := makeFixture(fake, connectionID)
 
 			err := adapter.WithTransaction(t.Context(), func(applyStore providers.WindowSyncApplyStore) error {
 				_, err := applyStore.SaveConnectionProviderAccount(t.Context(), account)
 				require.NoError(t, err)
 				_, err = applyStore.SaveBalanceSnapshot(t.Context(), snapshot)
-				require.NoError(t, err)
-				_, err = applyStore.SaveRawPayload(t.Context(), rawPayload)
 				require.NoError(t, err)
 				_, err = applyStore.SaveTransaction(t.Context(), transaction)
 				require.NoError(t, err)
@@ -431,10 +420,6 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			snapshots, err := store.ListBalanceSnapshots(t.Context(), connectionID)
 			require.NoError(t, err)
 			assert.Equal(t, []domain.BalanceSnapshot{snapshot}, snapshots)
-
-			payloads, err := store.ListRawPayloads(t.Context(), connectionID)
-			require.NoError(t, err)
-			assert.Equal(t, []domain.RawPayload{rawPayload}, payloads)
 
 			loadedTransaction, err := store.GetTransaction(t.Context(), transaction.ID)
 			require.NoError(t, err)
@@ -455,15 +440,13 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			store := makeStore(t)
 			adapter := NewProviderWindowSyncPersistence(store)
 			connectionID := "connection-rollback-" + fake.UUID().V4()
-			account, snapshot, rawPayload, transaction, match := makeFixture(fake, connectionID)
+			account, snapshot, transaction, match := makeFixture(fake, connectionID)
 			expectedErr := errors.New("callback-failed-" + fake.UUID().V4())
 
 			err := adapter.WithTransaction(t.Context(), func(applyStore providers.WindowSyncApplyStore) error {
 				_, err := applyStore.SaveConnectionProviderAccount(t.Context(), account)
 				require.NoError(t, err)
 				_, err = applyStore.SaveBalanceSnapshot(t.Context(), snapshot)
-				require.NoError(t, err)
-				_, err = applyStore.SaveRawPayload(t.Context(), rawPayload)
 				require.NoError(t, err)
 				_, err = applyStore.SaveTransaction(t.Context(), transaction)
 				require.NoError(t, err)
@@ -480,10 +463,6 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			snapshots, err := store.ListBalanceSnapshots(t.Context(), connectionID)
 			require.NoError(t, err)
 			assert.Empty(t, snapshots)
-
-			payloads, err := store.ListRawPayloads(t.Context(), connectionID)
-			require.NoError(t, err)
-			assert.Empty(t, payloads)
 
 			loadedTransaction, err := store.GetTransaction(t.Context(), transaction.ID)
 			require.ErrorIs(t, err, ErrTransactionNotFound)

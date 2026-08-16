@@ -288,16 +288,9 @@ func TestBankConnectionService(t *testing.T) {
 		func(t *testing.T) {
 			fake := faker.New()
 			now := time.Date(2026, time.June, 30, 12, 0, 0, 0, time.UTC)
-			startPayload := domain.ProviderRawPayloadObservation{
-				Scope:            domain.RawPayloadScopeConnection,
-				ProviderObjectID: "auth-" + fake.UUID().V4(),
-				PayloadJSON:      []byte(`{"step":"start"}`),
-				CapturedAt:       now,
-			}
 			startResult := internalproviders.StartLinkResult{
 				State:            "state-" + fake.UUID().V4(),
 				AuthorizationURL: "https://enable-banking.example.test/auth/" + fake.UUID().V4(),
-				RawPayloads:      []domain.ProviderRawPayloadObservation{startPayload},
 			}
 			tokenConnection := domain.BankConnection{
 				ID:                "connection-mono-" + fake.UUID().V4(),
@@ -363,11 +356,6 @@ func TestBankConnectionService(t *testing.T) {
 			assert.Equal(t, ProviderLinkStart{
 				State:            startResult.State,
 				AuthorizationURL: startResult.AuthorizationURL,
-				RawPayloads: []ProviderRawPayload{{
-					Scope:            startPayload.Scope,
-					ProviderObjectID: startPayload.ProviderObjectID,
-					PayloadJSON:      startPayload.PayloadJSON,
-				}},
 			}, started)
 			assert.Equal(t, internalproviders.RedirectLinkStartRequest{
 				TenantID:           startParams.TenantID,
@@ -697,12 +685,11 @@ func TestBankConnectionService(t *testing.T) {
 				func() time.Time { return now },
 				uuid.NewString,
 			),
-			ConnectionStore:  linkPersistence,
-			RawPayloadWriter: linkPersistence,
-			Logger:           slog.New(slog.DiscardHandler),
-			Now:              func() time.Time { return now },
-			NewID:            uuid.NewString,
-			PendingStartTTL:  time.Minute,
+			ConnectionStore: linkPersistence,
+			Logger:          slog.New(slog.DiscardHandler),
+			Now:             func() time.Time { return now },
+			NewID:           uuid.NewString,
+			PendingStartTTL: time.Minute,
 		})
 		require.NoError(t, err)
 		tenantID := "tenant-" + fake.UUID().V4()
@@ -749,39 +736,9 @@ func TestBankConnectionService(t *testing.T) {
 		assert.Equal(t, firstStored, loadedFirst)
 
 		retryStart := start()
-		require.NoError(t, store.DB().Exec(
-			"CREATE TRIGGER fail_retry_payload BEFORE INSERT ON finance_raw_payloads "+
-				"WHEN NEW.provider_object_id = '"+retryProviderReference+"' "+
-				"BEGIN SELECT RAISE(FAIL, 'retry payload failure'); END",
-		).Error)
-		_, err = finish(retryStart.State, "retry")
-		require.ErrorContains(t, err, "save raw payload")
-		retryBefore, err := store.ListBankConnections(t.Context(), tenantID)
-		require.NoError(t, err)
-		require.Len(t, retryBefore, 4)
-		var retryStored domain.BankConnection
-		for _, connection := range retryBefore {
-			if connection.ProviderReference == retryProviderReference {
-				retryStored = connection
-				break
-			}
-		}
-		require.NotEmpty(t, retryStored.ID)
-		var secretsBefore int64
-		require.NoError(t, store.DB().Table("finance_connection_secrets").Count(&secretsBefore).Error)
-		assert.Equal(t, int64(4), secretsBefore)
-		require.NoError(t, store.DB().Exec("DROP TRIGGER fail_retry_payload").Error)
-
 		retry, err := finish(retryStart.State, "retry")
 		require.NoError(t, err)
-		assert.Equal(t, retryStored.ID, retry.ID)
-		assert.Equal(t, retryStored.SecretID, retry.SecretID)
-		loadedFirst, err = store.GetBankConnection(t.Context(), first.ID)
-		require.NoError(t, err)
-		assert.Equal(t, firstStored, loadedFirst)
-		var secretsAfter int64
-		require.NoError(t, store.DB().Table("finance_connection_secrets").Count(&secretsAfter).Error)
-		assert.Equal(t, secretsBefore, secretsAfter)
+		assert.Equal(t, retryProviderReference, retry.ProviderReference)
 	})
 
 	t.Run("wraps constructor and service errors", func(t *testing.T) {

@@ -112,11 +112,15 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			case "/sessions/" + enableBankingConnection.ProviderReference:
 				_, _ = fmt.Fprintf(
 					w,
-					`{"session_id":"%s","accounts":["%s"],"accounts_data":[{"uid":"%s","name":"PKO Main","currency":"pln","account_id":{"iban":"PL11111111111111111111111111"}}]}`,
+					`{"session_id":"%s","accounts":["%s"],"accounts_data":[{"uid":"%s","identification_hash":"hash","identification_hashes":[]}]}`,
 					enableBankingConnection.ProviderReference,
 					enableBankingAccountID,
 					enableBankingAccountID,
 				)
+			case "/accounts/" + enableBankingAccountID + "/details":
+				_, _ = w.Write([]byte(
+					`{"name":"PKO Main","currency":"pln","account_id":{"iban":"PL11111111111111111111111111"}}`,
+				))
 			case "/accounts/" + enableBankingAccountID + "/balances":
 				_, _ = w.Write([]byte(
 					`{"balances":[{"type":"closingBooked","balance_amount":{"amount":"1234.56","currency":"pln"}},{"type":"available","balance_amount":{"amount":"1200.01","currency":"pln"}}]}`,

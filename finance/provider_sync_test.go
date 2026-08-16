@@ -203,18 +203,6 @@ func TestFinanceProviderSync(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		for _, payload := range result.RawPayloads {
-			_, err = syncStore.SaveRawPayload(t.Context(), domain.RawPayload{
-				ID:               service.newID(),
-				ConnectionID:     connection.ID,
-				Scope:            payload.Scope,
-				ProviderObjectID: payload.ProviderObjectID,
-				PayloadJSON:      payload.PayloadJSON,
-				CapturedAt:       now,
-			})
-			require.NoError(t, err)
-		}
-
 		return connection
 	}
 
@@ -383,11 +371,6 @@ func TestFinanceProviderSync(t *testing.T) {
 					ProviderReference: "provider-ref-" + fake.UUID().V4(),
 					Secret:            providerSecret,
 					State:             domain.BankConnectionStateActive,
-					RawPayloads: []ProviderRawPayload{{
-						Scope:            domain.RawPayloadScopeConnection,
-						ProviderObjectID: "link-" + fake.UUID().V4(),
-						PayloadJSON:      []byte(`{"linked":true}`),
-					}},
 				},
 				syncResults: []ProviderSyncResult{
 					{
@@ -428,12 +411,6 @@ func TestFinanceProviderSync(t *testing.T) {
 								Currency:    "PLN",
 								Description: "Pending original " + fake.Lorem().Word(),
 							},
-							RawPayloadJSON: []byte(`{"pending":true}`),
-						}},
-						RawPayloads: []ProviderRawPayload{{
-							Scope:            domain.RawPayloadScopeTransaction,
-							ProviderObjectID: "pending-" + fake.UUID().V4(),
-							PayloadJSON:      []byte(`{"stage":"pending"}`),
 						}},
 						ScheduledRun: &ProviderScheduledRunMetadata{
 							ScheduledAt: time.Date(2026, time.June, 20, 10, 1, 0, 0, time.UTC),
@@ -468,7 +445,6 @@ func TestFinanceProviderSync(t *testing.T) {
 								Currency:    "PLN",
 								Description: "Booked original " + fake.Lorem().Word(),
 							},
-							RawPayloadJSON: []byte(`{"pending":false}`),
 						}},
 						Reauth: &domain.ConnectionReauthMetadata{
 							RequiredAt: func() *time.Time {
@@ -505,7 +481,6 @@ func TestFinanceProviderSync(t *testing.T) {
 					ProviderReference: provider.linkResult.ProviderReference,
 					Secret:            providerSecret,
 					State:             provider.linkResult.State,
-					RawPayloads:       provider.linkResult.RawPayloads,
 				},
 			)
 			assert.Equal(t, domain.BankConnectionStateActive, connection.State)
@@ -670,10 +645,6 @@ func TestFinanceProviderSync(t *testing.T) {
 			require.Len(t, snapshots, 1)
 			assert.Equal(t, int64(501_23), snapshots[0].CurrentBalanceMinor)
 
-			rawPayloads, err := store.ListRawPayloads(t.Context(), connection.ID)
-			require.NoError(t, err)
-			assert.GreaterOrEqual(t, len(rawPayloads), 2)
-
 			transactions, err := service.ListTransactions(t.Context(), ListTransactionsParams{
 				ActorUserID: ownerUserID,
 				TenantID:    tenant.ID,
@@ -715,9 +686,6 @@ func TestFinanceProviderSync(t *testing.T) {
 			snapshots, err = store.ListBalanceSnapshots(t.Context(), connection.ID)
 			require.NoError(t, err)
 			assert.Empty(t, snapshots)
-			rawPayloads, err = store.ListRawPayloads(t.Context(), connection.ID)
-			require.NoError(t, err)
-			assert.Empty(t, rawPayloads)
 			_, err = store.GetConnectionSecret(t.Context(), connection.SecretID)
 			require.ErrorIs(t, err, persistence.ErrConnectionSecretNotFound)
 
