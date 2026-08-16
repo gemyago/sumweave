@@ -174,6 +174,7 @@ func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
 	snapshot *domain.ProviderSnapshot,
 ) (domain.BankConnection, error) {
 	var saved domain.BankConnection
+	connectionInsertFailed := false
 	err := p.Store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		existing, found, lookupErr := findProviderLinkConnection(tx, connection)
 		if lookupErr != nil {
@@ -195,22 +196,18 @@ func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
 			}
 			connectionModel := newBankConnectionModel(connection)
 			if createErr := tx.Table(connectionModel.TableName()).Create(&connectionModel).Error; createErr != nil {
+				connectionInsertFailed = true
 				return fmt.Errorf("create bank connection: %w", createErr)
 			}
 			saved = bankConnectionFromModel(connectionModel)
 		}
-		if snapshot == nil {
-			return nil
-		}
-		attached := *snapshot
-		attached.ConnectionID = saved.ID
-		if _, saveErr := (&ProviderSnapshotStore{db: tx}).SaveProviderSnapshot(ctx, attached); saveErr != nil {
-			return fmt.Errorf("save linked connection provider snapshot: %w", saveErr)
-		}
-		return nil
+		return saveLinkedConnectionSnapshot(ctx, tx, saved.ID, snapshot)
 	})
 	if err == nil {
 		return saved, nil
+	}
+	if !connectionInsertFailed {
+		return domain.BankConnection{}, fmt.Errorf("save linked connection with snapshot: %w", err)
 	}
 
 	existing, found, lookupErr := p.recoverProviderLinkConnection(ctx, connection)
@@ -221,6 +218,23 @@ func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
 		return existing, nil
 	}
 	return domain.BankConnection{}, fmt.Errorf("save linked connection with snapshot: %w", err)
+}
+
+func saveLinkedConnectionSnapshot(
+	ctx context.Context,
+	tx *gorm.DB,
+	connectionID string,
+	snapshot *domain.ProviderSnapshot,
+) error {
+	if snapshot == nil {
+		return nil
+	}
+	attached := *snapshot
+	attached.ConnectionID = connectionID
+	if _, err := (&ProviderSnapshotStore{db: tx}).SaveProviderSnapshot(ctx, attached); err != nil {
+		return fmt.Errorf("save linked connection provider snapshot: %w", err)
+	}
+	return nil
 }
 
 func (p *ProviderLinkPersistence) recoverProviderLinkConnection(

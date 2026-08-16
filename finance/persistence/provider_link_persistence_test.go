@@ -45,6 +45,17 @@ func TestProviderLinkPersistence(t *testing.T) {
 		expectedLatestSnapshot.ID = snapshot.ID
 		assert.Equal(t, []domain.ProviderSnapshot{expectedLatestSnapshot}, items)
 
+		failedRepeatedSnapshot := latestSnapshot
+		failedRepeatedSnapshot.ID = "snapshot-" + fake.UUID().V4()
+		failedRepeatedSnapshot.DocumentJSON = []byte("not-json")
+		_, err = linkPersistence.SaveLinkedConnectionWithSnapshot(
+			t.Context(), connection, secret, &failedRepeatedSnapshot,
+		)
+		require.ErrorContains(t, err, "save linked connection provider snapshot")
+		items, err = NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(t.Context(), saved.ID)
+		require.NoError(t, err)
+		assert.Equal(t, []domain.ProviderSnapshot{expectedLatestSnapshot}, items)
+
 		connectionWithoutSnapshot := connection
 		connectionWithoutSnapshot.ID = "connection-" + fake.UUID().V4()
 		connectionWithoutSnapshot.ProviderReference = "reference-" + fake.UUID().V4()
