@@ -90,6 +90,13 @@ type providerWindowSyncApplyStore struct {
 	*Store
 }
 
+func (s *providerWindowSyncApplyStore) AppendSyncState(
+	ctx context.Context,
+	state domain.ProviderSyncState,
+) error {
+	return NewProviderSyncStateJournalStore(s.Store).AppendSyncState(ctx, state)
+}
+
 func (s *providerWindowSyncApplyStore) SaveProviderSnapshot(
 	ctx context.Context,
 	snapshot domain.ProviderSnapshot,

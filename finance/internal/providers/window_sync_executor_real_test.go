@@ -190,12 +190,13 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 		)
 		enableBankingLoad.Once()
 
-		applySync := store.EXPECT().ApplySync(mock.Anything, mock.Anything, mock.Anything)
+		applySync := store.EXPECT().ApplySync(mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 		applySync.RunAndReturn(
 			func(
 				_ context.Context,
 				diffPlan providers.ProviderDiffPlan,
 				applyPlan providers.ApplyPlan,
+				_ ...domain.ProviderSyncState,
 			) (domain.ProviderSyncStats, error) {
 				appliedDiffPlans = append(appliedDiffPlans, diffPlan)
 				appliedApplyPlans = append(appliedApplyPlans, applyPlan)

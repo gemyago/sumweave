@@ -38,22 +38,27 @@ type providerSnapshotConnectionDeleter interface {
 	DeleteProviderSnapshotsByConnection(context.Context, string) error
 }
 
+type providerSyncStateJournalConnectionDeleter interface {
+	DeleteSyncStatesByConnection(context.Context, string) error
+}
+
 type providerSnapshotWriter interface {
 	SaveProviderSnapshot(context.Context, domain.ProviderSnapshot) (domain.ProviderSnapshot, error)
 }
 
 type BankSyncService struct {
-	store                  bankSyncFocusedStore
-	access                 *accessGuard
-	now                    func() time.Time
-	newID                  func() string
-	connectionSecretCipher connectionSecretCipher
-	bankProviders          map[string]BankConnectionProvider
-	bankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
-	bankSyncScheduleWriter BankConnectionSyncScheduleWriter
-	logger                 *slog.Logger
-	snapshotDeleter        providerSnapshotConnectionDeleter
-	snapshotWriter         providerSnapshotWriter
+	store                   bankSyncFocusedStore
+	access                  *accessGuard
+	now                     func() time.Time
+	newID                   func() string
+	connectionSecretCipher  connectionSecretCipher
+	bankProviders           map[string]BankConnectionProvider
+	bankSyncJobEnqueuer     BankConnectionSyncJobEnqueuer
+	bankSyncScheduleWriter  BankConnectionSyncScheduleWriter
+	logger                  *slog.Logger
+	snapshotDeleter         providerSnapshotConnectionDeleter
+	syncStateJournalDeleter providerSyncStateJournalConnectionDeleter
+	snapshotWriter          providerSnapshotWriter
 }
 
 const (
@@ -108,6 +113,12 @@ func WithBankSyncServiceSnapshotDeleter(
 	deleter providerSnapshotConnectionDeleter,
 ) BankSyncServiceOption {
 	return func(service *BankSyncService) { service.snapshotDeleter = deleter }
+}
+
+func WithBankSyncServiceSyncStateJournalDeleter(
+	deleter providerSyncStateJournalConnectionDeleter,
+) BankSyncServiceOption {
+	return func(service *BankSyncService) { service.syncStateJournalDeleter = deleter }
 }
 
 func WithBankSyncServiceSnapshotWriter(writer providerSnapshotWriter) BankSyncServiceOption {
@@ -296,6 +307,9 @@ func (s *BankSyncService) DeleteBankConnection(
 			}
 			if _, snapshotStore := s.snapshotWriter.(*persistence.ProviderSnapshotStore); snapshotStore {
 				txService.snapshotWriter = persistence.NewProviderSnapshotStoreFromStore(store)
+			}
+			if _, journalStore := s.syncStateJournalDeleter.(*persistence.ProviderSyncStateJournalStore); journalStore {
+				txService.syncStateJournalDeleter = persistence.NewProviderSyncStateJournalStore(store)
 			}
 			return deleteConnection(&txService)
 		}); txErr != nil {
@@ -635,6 +649,11 @@ func (s *BankSyncService) deleteBankConnectionOwnedMetadata(
 	ctx context.Context,
 	connection domain.BankConnection,
 ) error {
+	if s.syncStateJournalDeleter != nil {
+		if err := s.syncStateJournalDeleter.DeleteSyncStatesByConnection(ctx, connection.ID); err != nil {
+			return fmt.Errorf("delete bank connection provider sync states: %w", err)
+		}
+	}
 	if s.snapshotDeleter != nil {
 		if err := s.snapshotDeleter.DeleteProviderSnapshotsByConnection(ctx, connection.ID); err != nil {
 			return fmt.Errorf("delete bank connection provider snapshots: %w", err)

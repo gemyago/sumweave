@@ -401,6 +401,38 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 		assert.True(t, expected.Window.End.Equal(loadedState.Window.End))
 	})
 
+	t.Run("deletes journal records scoped to a connection", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t, nil)
+		journalStore := NewProviderSyncStateJournalStore(store)
+		connection := makeConnection(t, fake, domain.ProviderIDMonobank, domain.ProviderConnectorIDMonobank)
+		otherConnection := makeConnection(t, fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking)
+		attemptedAt := makeTimeInLocation(fake, time.UTC)
+		window := makeSyncWindow(attemptedAt.Add(-time.Hour), time.Hour)
+		state := makeState(connection, &attemptedAt, nil, window, "", "job-"+fake.UUID().V4(), "", makeStats(fake))
+		otherState := makeState(
+			otherConnection,
+			&attemptedAt,
+			nil,
+			window,
+			"",
+			"job-"+fake.UUID().V4(),
+			"",
+			makeStats(fake),
+		)
+		require.NoError(t, journalStore.AppendSyncState(t.Context(), state))
+		require.NoError(t, journalStore.AppendSyncState(t.Context(), otherState))
+
+		require.NoError(t, journalStore.DeleteSyncStatesByConnection(t.Context(), connection.ConnectionID))
+		deleted, err := journalStore.LoadLastState(t.Context(), connection)
+		require.NoError(t, err)
+		assert.Nil(t, deleted)
+		remaining, err := journalStore.LoadLastState(t.Context(), otherConnection)
+		require.NoError(t, err)
+		require.NotNil(t, remaining)
+		assert.Equal(t, otherState.JobID, remaining.JobID)
+	})
+
 	t.Run("wraps append and load database errors with journal-specific context", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t, nil)

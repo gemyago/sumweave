@@ -6,8 +6,8 @@
 ## 2. First-Sync And Journal Persistence
 
 - [x] 2.1 Create linked finance accounts and provider-account mappings during requested-window apply, derive transaction ownership from the durable connection, and track created-account statistics; must follow TDD flow by first replacing the missing-mapping expectation with failing tests for first account, first transaction, ownership mismatch, member-edit preservation, and repeated account observations, then implement the transactional ordering and additive journal statistic and verify focused finance tests.
-- [ ] 2.2 Commit successful chunk state through the requested-window apply transaction while leaving failed-state append on the standalone journal path; must follow TDD flow by first adding failing executor, orchestrator, window-store, and persistence tests proving run identity is assigned before apply, success rows commit with finance writes, and journal failure rolls back the complete window, then implement and verify focused finance tests.
-- [ ] 2.3 Delete connection-owned provider sync journal rows through a dedicated persistence component in the existing cleanup transaction; must follow TDD flow by first adding failing deletion and later-step rollback tests, then implement transaction rebinding for the narrow cleanup dependency and verify focused finance tests.
+- [x] 2.2 Commit successful chunk state through the requested-window apply transaction while leaving failed-state append on the standalone journal path; must follow TDD flow by first adding failing executor, orchestrator, window-store, and persistence tests proving run identity is assigned before apply, success rows commit with finance writes, and journal failure rolls back the complete window, then implement and verify focused finance tests.
+- [x] 2.3 Delete connection-owned provider sync journal rows through a dedicated persistence component in the existing cleanup transaction; must follow TDD flow by first adding failing deletion and later-step rollback tests, then implement transaction rebinding for the narrow cleanup dependency and verify focused finance tests.
 
 ## 3. Focused Service And Production Composition
 

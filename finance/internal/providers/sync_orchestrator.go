@@ -116,7 +116,7 @@ func NewSyncOrchestrator(
 	return orchestrator, nil
 }
 
-// Orchestrate plans chunk windows, loading the latest sync state when needed, and appends one state row per attempted chunk.
+// Orchestrate plans chunk windows, loading latest state when needed. Failed states are appended separately.
 func (o *SyncOrchestrator) Orchestrate(
 	ctx context.Context,
 	request SyncOrchestrationRequest,
@@ -287,24 +287,7 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 		return WindowSyncResult{}, domain.ProviderSyncStats{}, fmt.Errorf("execute requested window: %w", executeErr)
 	}
 
-	completedAt := o.now()
-	chunkState.SucceededAt = &completedAt
-	chunkState.RunID = windowResult.RunID
 	updatedStats := mergeProviderSyncStats(chunkState.AggregateStats, windowResult.Stats)
-	chunkState.AggregateStats = updatedStats
-	if appendErr := o.syncStateJournal.AppendSyncState(ctx, chunkState); appendErr != nil {
-		o.logger.ErrorContext(
-			ctx,
-			"append provider sync state failed",
-			slog.String("connection_id", request.Connection.ConnectionID),
-			slog.Time("requested_start", requestedWindow.Start),
-			slog.Time("requested_end", requestedWindow.End),
-			slog.String("run_id", windowResult.RunID),
-			slog.String("error", appendErr.Error()),
-		)
-
-		return WindowSyncResult{}, domain.ProviderSyncStats{}, fmt.Errorf("append sync state: %w", appendErr)
-	}
 
 	o.logger.InfoContext(
 		ctx,

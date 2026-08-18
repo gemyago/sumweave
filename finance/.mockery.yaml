@@ -9,6 +9,7 @@ packages:
     interfaces:
       accessGuardStore:
       bankConnectionMetadataStore:
+      providerSnapshotConnectionDeleter:
       FXRatesProvider:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:

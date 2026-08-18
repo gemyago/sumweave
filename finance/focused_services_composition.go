@@ -144,6 +144,7 @@ func newFocusedServices(
 		WithBankSyncServiceProviders(cfg.bankProviders...),
 		WithBankSyncServiceSnapshotDeleter(providerSnapshotStore),
 		WithBankSyncServiceSnapshotWriter(providerSnapshotStore),
+		WithBankSyncServiceSyncStateJournalDeleter(persistence.NewProviderSyncStateJournalStore(store)),
 	}
 	if cfg.bankSyncJobEnqueuer != nil {
 		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceJobEnqueuer(cfg.bankSyncJobEnqueuer))

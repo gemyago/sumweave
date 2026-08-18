@@ -32,6 +32,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		missingFinanceAccount   bool
 		saveFinanceAccountErr   error
 		saveTransactionErr      error
+		appendSyncStateErr      error
 		withTransactionErr      error
 
 		listAccountsConnectionIDs []string
@@ -46,6 +47,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		savedProviderSnapshots []domain.ProviderSnapshot
 		savedTransactions      []domain.Transaction
 		savedMatches           []domain.ProviderTransactionMatch
+		savedSyncStates        []domain.ProviderSyncState
 		transactionalAccounts  map[string]domain.ConnectionProviderAccount
 
 		operationOrder []string
@@ -105,6 +107,17 @@ func TestProviderWindowSyncStore(t *testing.T) {
 					return nil, fixture.listMatchesErr
 				}
 				return append([]domain.ProviderTransactionMatch(nil), fixture.matches...), nil
+			}).Maybe()
+
+		applyStore.EXPECT().
+			AppendSyncState(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, state domain.ProviderSyncState) error {
+				fixture.operationOrder = append(fixture.operationOrder, "appendSyncState")
+				if fixture.appendSyncStateErr != nil {
+					return fixture.appendSyncStateErr
+				}
+				fixture.savedSyncStates = append(fixture.savedSyncStates, state)
+				return nil
 			}).Maybe()
 
 		applyStore.EXPECT().
@@ -1262,6 +1275,68 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		}, ApplyPlan{})
 		require.ErrorContains(t, err, "provider account mapping not found")
 		assert.Empty(t, fixture.savedProviderSnapshots)
+	})
+
+	t.Run("appends successful state after window writes with aggregate statistics", func(t *testing.T) {
+		fake := faker.New()
+		connection := makeRandomProviderConnectionRef(
+			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
+		)
+		attemptedAt := time.Now().Add(-time.Minute)
+		completedAt := time.Now()
+		state := domain.ProviderSyncState{
+			Connection:  connection,
+			AttemptedAt: &attemptedAt,
+			SucceededAt: &completedAt,
+			Window:      makeRandomProviderSyncWindow(fake),
+			RunID:       "run-" + fake.UUID().V4(),
+			JobID:       "job-" + fake.UUID().V4(),
+			AggregateStats: domain.ProviderSyncStats{
+				ObservedAccounts: fake.IntBetween(1, 3),
+			},
+		}
+		windowStats := domain.ProviderSyncStats{
+			CreatedAccounts:      fake.IntBetween(1, 3),
+			CreatedTransactions:  fake.IntBetween(1, 3),
+			UpdatedTransactions:  fake.IntBetween(1, 3),
+			ObservedTransactions: fake.IntBetween(1, 3),
+		}
+		fixture := &persistenceFixture{}
+		store, err := NewProviderWindowSyncStore(makePersistence(t, fixture))
+		require.NoError(t, err)
+
+		stats, err := store.ApplySync(t.Context(), ProviderDiffPlan{
+			Connection:     connection,
+			SnapshotWindow: state.Window,
+		}, ApplyPlan{Stats: windowStats}, state)
+		require.NoError(t, err)
+		assert.Equal(t, windowStats, stats)
+		require.Len(t, fixture.savedSyncStates, 1)
+		assert.Equal(
+			t,
+			mergeProviderSyncStats(state.AggregateStats, windowStats),
+			fixture.savedSyncStates[0].AggregateStats,
+		)
+		assert.Equal(t, "appendSyncState", fixture.operationOrder[len(fixture.operationOrder)-1])
+	})
+
+	t.Run("returns journal failures after applying window writes", func(t *testing.T) {
+		fake := faker.New()
+		connection := makeRandomProviderConnectionRef(
+			fake, domain.ProviderIDMonobank, domain.ProviderConnectorIDMonobank,
+		)
+		expectedErr := errors.New("append-state-" + fake.UUID().V4())
+		fixture := &persistenceFixture{appendSyncStateErr: expectedErr}
+		store, err := NewProviderWindowSyncStore(makePersistence(t, fixture))
+		require.NoError(t, err)
+
+		_, err = store.ApplySync(t.Context(), ProviderDiffPlan{
+			Connection:     connection,
+			SnapshotWindow: makeRandomProviderSyncWindow(fake),
+		}, ApplyPlan{}, domain.ProviderSyncState{Connection: connection})
+		require.ErrorIs(t, err, expectedErr)
+		require.ErrorContains(t, err, "append successful provider sync state")
+		assert.Empty(t, fixture.savedSyncStates)
 	})
 
 	t.Run("rejects account snapshots whose finance account no longer exists", func(t *testing.T) {

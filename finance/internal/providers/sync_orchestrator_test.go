@@ -141,7 +141,6 @@ func TestSyncOrchestrator(t *testing.T) {
 			var determineStates []domain.ProviderSyncState
 			var splitCalls []domain.ProviderSyncWindow
 			var executeCalls []WindowSyncRequest
-			var appendCalls []domain.ProviderSyncState
 
 			deps.syncStateJournal.EXPECT().
 				LoadLastState(mock.Anything, fixture.request.Connection).
@@ -183,16 +182,6 @@ func TestSyncOrchestrator(t *testing.T) {
 					return fixture.expectedWindowResults[len(executeCalls)-1], nil
 				}).
 				Times(len(fixture.chunks))
-			deps.syncStateJournal.EXPECT().
-				AppendSyncState(mock.Anything, mock.Anything).
-				RunAndReturn(func(
-					_ context.Context,
-					state domain.ProviderSyncState,
-				) error {
-					appendCalls = append(appendCalls, state)
-					return nil
-				}).
-				Times(len(fixture.chunks))
 
 			orchestrator, err := NewSyncOrchestrator(
 				makeOrchestratorParams(deps),
@@ -212,7 +201,6 @@ func TestSyncOrchestrator(t *testing.T) {
 			assert.Equal(t, fixture.lastState, determineStates[0])
 			assert.Equal(t, []domain.ProviderSyncWindow{fixture.targetWindow}, splitCalls)
 			require.Len(t, executeCalls, len(fixture.chunks))
-			require.Len(t, appendCalls, len(fixture.chunks))
 
 			for i, executeCall := range executeCalls {
 				assert.Equal(t, fixture.request.Connection, executeCall.Connection)
@@ -224,20 +212,11 @@ func TestSyncOrchestrator(t *testing.T) {
 				assert.Equal(t, fixture.request.Reason, executeCall.Reason)
 				assert.Equal(t, fixture.chunks[i], executeCall.SyncState.Window)
 				assert.NotNil(t, executeCall.SyncState.AttemptedAt)
-
-				appendedState := appendCalls[i]
-				assert.Equal(t, fixture.chunks[i], appendedState.Window)
-				assert.Equal(t, fixture.expectedWindowResults[i].RunID, appendedState.RunID)
 			}
 
 			expectedAggregateStats := mergeProviderSyncStats(
 				fixture.expectedWindowResults[0].Stats,
 				fixture.expectedWindowResults[1].Stats,
-			)
-			assert.Equal(
-				t,
-				expectedAggregateStats,
-				appendCalls[len(appendCalls)-1].AggregateStats,
 			)
 			assert.Equal(t, fixture.targetWindow, result.TargetWindow)
 			assert.Equal(t, fixture.chunks, result.ExecutedWindows)
@@ -473,6 +452,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Return(fixture.chunks, nil)
 
 			var appendCalls []domain.ProviderSyncState
+			firstStats := makeRandomProviderSyncStats(fake)
 			deps.windowExecutor.EXPECT().
 				Execute(mock.Anything, mock.Anything).
 				RunAndReturn(func(
@@ -483,7 +463,7 @@ func TestSyncOrchestrator(t *testing.T) {
 					case fixture.chunks[0]:
 						return WindowSyncResult{
 							RunID: "run-success-" + fake.UUID().V4(),
-							Stats: makeRandomProviderSyncStats(fake),
+							Stats: firstStats,
 						}, nil
 					default:
 						return WindowSyncResult{}, expectedErr
@@ -499,7 +479,7 @@ func TestSyncOrchestrator(t *testing.T) {
 					appendCalls = append(appendCalls, state)
 					return nil
 				}).
-				Times(len(fixture.chunks))
+				Once()
 
 			orchestrator, err := NewSyncOrchestrator(
 				makeOrchestratorParams(deps),
@@ -509,13 +489,11 @@ func TestSyncOrchestrator(t *testing.T) {
 
 			_, err = orchestrator.Orchestrate(t.Context(), fixture.request)
 			require.ErrorIs(t, err, expectedErr)
-			require.Len(t, appendCalls, len(fixture.chunks))
-			assert.Equal(t, fixture.chunks[0], appendCalls[0].Window)
-			assert.NotNil(t, appendCalls[0].SucceededAt)
-			assert.Equal(t, fixture.chunks[1], appendCalls[1].Window)
-			assert.Nil(t, appendCalls[1].SucceededAt)
-			assert.Equal(t, expectedErr.Error(), appendCalls[1].ErrorSummary)
-			assert.Equal(t, appendCalls[0].AggregateStats, appendCalls[1].AggregateStats)
+			require.Len(t, appendCalls, 1)
+			assert.Equal(t, fixture.chunks[1], appendCalls[0].Window)
+			assert.Nil(t, appendCalls[0].SucceededAt)
+			assert.Equal(t, expectedErr.Error(), appendCalls[0].ErrorSummary)
+			assert.Equal(t, firstStats, appendCalls[0].AggregateStats)
 		})
 
 		t.Run("appends a failed latest state when the first chunk execution fails", func(t *testing.T) {
@@ -563,10 +541,9 @@ func TestSyncOrchestrator(t *testing.T) {
 			assert.Equal(t, expectedErr.Error(), appendCalls[0].ErrorSummary)
 		})
 
-		t.Run("fails when appending a successful chunk state", func(t *testing.T) {
+		t.Run("does not append successful chunk states through the standalone journal", func(t *testing.T) {
 			fake := faker.New()
 			fixture := makeTwoChunkFixture(fake)
-			appendErr := errors.New("append-success-" + fake.UUID().V4())
 			windowResult := makeRandomWindowSyncResult(fake)
 			deps := makeMockDeps(t)
 			deps.syncStateJournal.EXPECT().
@@ -585,17 +562,12 @@ func TestSyncOrchestrator(t *testing.T) {
 				Execute(mock.Anything, mock.Anything).
 				Once().
 				Return(windowResult, nil)
-			deps.syncStateJournal.EXPECT().
-				AppendSyncState(mock.Anything, mock.Anything).
-				Once().
-				Return(appendErr)
-
 			orchestrator, err := NewSyncOrchestrator(makeOrchestratorParams(deps))
 			require.NoError(t, err)
 
-			_, err = orchestrator.Orchestrate(t.Context(), fixture.request)
-			require.ErrorIs(t, err, appendErr)
-			assert.Contains(t, err.Error(), "append sync state")
+			result, err := orchestrator.Orchestrate(t.Context(), fixture.request)
+			require.NoError(t, err)
+			assert.Equal(t, windowResult.Stats, result.Stats)
 		})
 
 		t.Run("passes the latest failed state to target planning", func(t *testing.T) {

@@ -51,6 +51,8 @@ type stubWindowSyncStore struct {
 	loadConnections   []domain.ProviderConnectionRef
 	appliedDiffPlans  []ProviderDiffPlan
 	appliedApplyPlans []ApplyPlan
+	successStates     []domain.ProviderSyncState
+	onApply           func()
 }
 
 func (r *stubWindowSyncStore) LoadExistingWindow(
@@ -70,9 +72,14 @@ func (r *stubWindowSyncStore) ApplySync(
 	_ context.Context,
 	diffPlan ProviderDiffPlan,
 	applyPlan ApplyPlan,
+	successStates ...domain.ProviderSyncState,
 ) (domain.ProviderSyncStats, error) {
+	if r.onApply != nil {
+		r.onApply()
+	}
 	r.appliedDiffPlans = append(r.appliedDiffPlans, diffPlan)
 	r.appliedApplyPlans = append(r.appliedApplyPlans, applyPlan)
+	r.successStates = append(r.successStates, successStates...)
 	if r.applyErr != nil {
 		return domain.ProviderSyncStats{}, r.applyErr
 	}
@@ -276,12 +283,17 @@ func TestWindowSyncExecutor(t *testing.T) {
 					CreatedTransactions:  1,
 				},
 			}
+			callOrder := []string{}
+			store.onApply = func() { callOrder = append(callOrder, "apply") }
 
 			executor, err := NewWindowSyncExecutor(
 				WithConnectorRegistry(&stubConnectorRegistry{connector: connector}),
 				WithSnapshotWindowPolicy(snapshotPolicy),
 				WithWindowSyncStore(store),
-				WithRunIDGenerator(func() string { return "run-" + fake.UUID().V4() }),
+				WithRunIDGenerator(func() string {
+					callOrder = append(callOrder, "runID")
+					return "run-" + fake.UUID().V4()
+				}),
 			)
 			require.NoError(t, err)
 
@@ -308,6 +320,12 @@ func TestWindowSyncExecutor(t *testing.T) {
 			require.Len(t, store.appliedDiffPlans, 1)
 			require.Len(t, store.appliedApplyPlans, 1)
 			assert.Equal(t, request.RequestedWindow, store.appliedDiffPlans[0].RequestedWindow)
+			require.Len(t, store.successStates, 1)
+			assert.Equal(t, result.RunID, store.successStates[0].RunID)
+			assert.Equal(t, request.RequestedWindow, store.successStates[0].Window)
+			assert.Equal(t, request.JobID, store.successStates[0].JobID)
+			require.NotNil(t, store.successStates[0].SucceededAt)
+			assert.Equal(t, []string{"runID", "apply"}, callOrder)
 			assert.Equal(t, snapshotWindow, store.appliedDiffPlans[0].SnapshotWindow)
 			require.Len(t, store.appliedDiffPlans[0].TransactionActions, 1)
 			require.Len(t, store.appliedApplyPlans[0].TransactionWrites, 1)

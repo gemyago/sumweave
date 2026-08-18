@@ -10,6 +10,7 @@ import (
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -376,5 +377,63 @@ func TestFocusedPublicServices(t *testing.T) {
 			TenantID:     tenant.ID,
 			ConnectionID: connection.ID,
 		}))
+	})
+
+	t.Run("rolls back journal cleanup when a later connection cleanup step fails", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		tenantService := NewTenantService(store)
+		ownerUserID := "owner-" + fake.UUID().V4()
+		tenant, err := tenantService.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     ownerUserID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+			SeedDefaults:    true,
+		})
+		require.NoError(t, err)
+		connection := domain.BankConnection{
+			ID:        "connection-" + fake.UUID().V4(),
+			TenantID:  tenant.ID,
+			Provider:  string(domain.ProviderIDMonobank),
+			State:     domain.BankConnectionStateActive,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		_, err = store.SaveBankConnection(t.Context(), connection)
+		require.NoError(t, err)
+		journalStore := persistence.NewProviderSyncStateJournalStore(store)
+		attemptedAt := time.Now()
+		state := domain.ProviderSyncState{
+			Connection:  domain.ProviderConnectionRef{ConnectionID: connection.ID},
+			AttemptedAt: &attemptedAt,
+			Window: domain.ProviderSyncWindow{
+				Start: attemptedAt.Add(-time.Hour),
+				End:   attemptedAt,
+			},
+			JobID: "job-" + fake.UUID().V4(),
+		}
+		require.NoError(t, journalStore.AppendSyncState(t.Context(), state))
+		snapshotDeleter := newMockproviderSnapshotConnectionDeleter(t)
+		expectedErr := fmt.Errorf("snapshot-delete-%s", fake.UUID().V4())
+		snapshotDeleter.EXPECT().
+			DeleteProviderSnapshotsByConnection(mock.Anything, connection.ID).
+			Once().
+			Return(expectedErr)
+		service := NewBankSyncService(
+			store,
+			WithBankSyncServiceSyncStateJournalDeleter(journalStore),
+			WithBankSyncServiceSnapshotDeleter(snapshotDeleter),
+		)
+
+		err = service.DeleteBankConnection(t.Context(), DeleteBankConnectionParams{
+			ActorUserID:  ownerUserID,
+			TenantID:     tenant.ID,
+			ConnectionID: connection.ID,
+		})
+		require.ErrorIs(t, err, expectedErr)
+		persistedState, err := journalStore.LoadLastState(t.Context(), state.Connection)
+		require.NoError(t, err)
+		require.NotNil(t, persistedState)
+		assert.Equal(t, state.JobID, persistedState.JobID)
 	})
 }

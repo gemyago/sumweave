@@ -101,6 +101,7 @@ type WindowSyncSnapshotReader interface {
 }
 
 type WindowSyncApplyStore interface {
+	AppendSyncState(ctx context.Context, state domain.ProviderSyncState) error
 	GetBankConnection(ctx context.Context, connectionID string) (*domain.BankConnection, error)
 	GetAccount(ctx context.Context, accountID string) (*domain.Account, error)
 	SaveAccount(ctx context.Context, account domain.Account) (domain.Account, error)

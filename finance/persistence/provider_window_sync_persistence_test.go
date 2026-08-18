@@ -415,6 +415,19 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			Type:        providers.ProviderTransactionActionTypeCreate,
 			Observation: transactionObservation,
 		}
+		attemptedAt := now.Add(-time.Minute)
+		completedAt := now
+		successState := domain.ProviderSyncState{
+			Connection:  connection,
+			AttemptedAt: &attemptedAt,
+			SucceededAt: &completedAt,
+			Window: domain.ProviderSyncWindow{
+				Start: now.Add(-24 * time.Hour),
+				End:   now,
+			},
+			RunID: "run-" + fake.UUID().V4(),
+			JobID: "job-" + fake.UUID().V4(),
+		}
 		stats, err := syncStore.ApplySync(t.Context(), providers.ProviderDiffPlan{
 			Connection:     connection,
 			SnapshotWindow: domain.ProviderSyncWindow{Start: now.Add(-24 * time.Hour), End: now},
@@ -432,7 +445,7 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 				ObservedTransactions: 1,
 				CreatedTransactions:  1,
 			},
-		})
+		}, successState)
 		require.NoError(t, err)
 		assert.Equal(t, domain.ProviderSyncStats{
 			ObservedAccounts:     1,
@@ -465,6 +478,12 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, transactions, 1)
 		assert.Equal(t, tenantID, transactions[0].TenantID)
+		journalState, err := NewProviderSyncStateJournalStore(store).LoadLastState(t.Context(), connection)
+		require.NoError(t, err)
+		require.NotNil(t, journalState)
+		assert.Equal(t, successState.RunID, journalState.RunID)
+		assert.Equal(t, successState.JobID, journalState.JobID)
+		assert.Equal(t, stats, journalState.AggregateStats)
 	})
 
 	t.Run("commits on success and rolls back on callback error", func(t *testing.T) {
@@ -507,6 +526,16 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			adapter := NewProviderWindowSyncPersistence(store)
 			connectionID := "connection-success-" + fake.UUID().V4()
 			account, snapshot, transaction, match := makeFixture(fake, connectionID)
+			attemptedAt := time.Now()
+			state := domain.ProviderSyncState{
+				Connection:  domain.ProviderConnectionRef{ConnectionID: connectionID},
+				AttemptedAt: &attemptedAt,
+				Window: domain.ProviderSyncWindow{
+					Start: attemptedAt.Add(-time.Hour),
+					End:   attemptedAt,
+				},
+				JobID: "job-" + fake.UUID().V4(),
+			}
 
 			err := adapter.WithTransaction(t.Context(), func(applyStore providers.WindowSyncApplyStore) error {
 				_, err := applyStore.SaveConnectionProviderAccount(t.Context(), account)
@@ -517,6 +546,7 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 				require.NoError(t, err)
 				_, err = applyStore.SaveProviderTransactionMatch(t.Context(), match)
 				require.NoError(t, err)
+				require.NoError(t, applyStore.AppendSyncState(t.Context(), state))
 				return nil
 			})
 			require.NoError(t, err)
@@ -541,6 +571,13 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Equal(t, []domain.ProviderTransactionMatch{match}, matches)
+			journalState, err := NewProviderSyncStateJournalStore(store).LoadLastState(
+				t.Context(),
+				state.Connection,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, journalState)
+			assert.Equal(t, state.JobID, journalState.JobID)
 		})
 
 		t.Run("rolls back persisted writes on callback error", func(t *testing.T) {
@@ -550,6 +587,16 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			connectionID := "connection-rollback-" + fake.UUID().V4()
 			account, snapshot, transaction, match := makeFixture(fake, connectionID)
 			expectedErr := errors.New("callback-failed-" + fake.UUID().V4())
+			attemptedAt := time.Now()
+			state := domain.ProviderSyncState{
+				Connection:  domain.ProviderConnectionRef{ConnectionID: connectionID},
+				AttemptedAt: &attemptedAt,
+				Window: domain.ProviderSyncWindow{
+					Start: attemptedAt.Add(-time.Hour),
+					End:   attemptedAt,
+				},
+				JobID: "job-" + fake.UUID().V4(),
+			}
 
 			err := adapter.WithTransaction(t.Context(), func(applyStore providers.WindowSyncApplyStore) error {
 				_, err := applyStore.SaveConnectionProviderAccount(t.Context(), account)
@@ -560,6 +607,7 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 				require.NoError(t, err)
 				_, err = applyStore.SaveProviderTransactionMatch(t.Context(), match)
 				require.NoError(t, err)
+				require.NoError(t, applyStore.AppendSyncState(t.Context(), state))
 				return expectedErr
 			})
 			require.ErrorIs(t, err, expectedErr)
@@ -583,6 +631,12 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Empty(t, matches)
+			journalState, err := NewProviderSyncStateJournalStore(store).LoadLastState(
+				t.Context(),
+				state.Connection,
+			)
+			require.NoError(t, err)
+			assert.Nil(t, journalState)
 		})
 	})
 }

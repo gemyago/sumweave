@@ -54,3 +54,17 @@ func (s *ProviderSyncStateJournalStore) AppendSyncState(
 
 	return nil
 }
+
+func (s *ProviderSyncStateJournalStore) DeleteSyncStatesByConnection(
+	ctx context.Context,
+	connectionID string,
+) error {
+	model := providerSyncStateJournalModel{}
+	if err := s.db.WithContext(ctx).
+		Table(model.TableName()).
+		Where("connection_id = ?", connectionID).
+		Delete(&model).Error; err != nil {
+		return fmt.Errorf("delete provider sync state journal: %w", err)
+	}
+	return nil
+}

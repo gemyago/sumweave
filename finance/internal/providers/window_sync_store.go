@@ -103,6 +103,7 @@ func (s *ProviderWindowSyncStore) ApplySync(
 	ctx context.Context,
 	diffPlan ProviderDiffPlan,
 	applyPlan ApplyPlan,
+	successStates ...domain.ProviderSyncState,
 ) (domain.ProviderSyncStats, error) {
 	snapshot, err := s.LoadExistingWindow(ctx, diffPlan.Connection, diffPlan.SnapshotWindow)
 	if err != nil {
@@ -172,19 +173,39 @@ func (s *ProviderWindowSyncStore) ApplySync(
 		if saveErr != nil {
 			return saveErr
 		}
-		return s.saveTransactionSnapshots(
+		if saveErr = s.saveTransactionSnapshots(
 			ctx,
 			store,
 			providerAccounts,
 			diffPlan.Connection,
 			transactions,
 			diffPlan.SnapshotObservations,
-		)
+		); saveErr != nil {
+			return saveErr
+		}
+		return appendSuccessfulSyncState(ctx, store, successStates, stats)
 	})
 	if err != nil {
 		return domain.ProviderSyncStats{}, err
 	}
 	return stats, nil
+}
+
+func appendSuccessfulSyncState(
+	ctx context.Context,
+	store WindowSyncApplyStore,
+	successStates []domain.ProviderSyncState,
+	stats domain.ProviderSyncStats,
+) error {
+	if len(successStates) == 0 {
+		return nil
+	}
+	successState := successStates[0]
+	successState.AggregateStats = mergeProviderSyncStats(successState.AggregateStats, stats)
+	if err := store.AppendSyncState(ctx, successState); err != nil {
+		return fmt.Errorf("append successful provider sync state: %w", err)
+	}
+	return nil
 }
 
 func (s *ProviderWindowSyncStore) saveConnectionSnapshots(
