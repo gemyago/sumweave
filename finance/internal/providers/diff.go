@@ -93,12 +93,21 @@ func planTransactionAction(
 	observation domain.ProviderTransactionObservation,
 	snapshot ExistingWindowSnapshot,
 ) (ProviderTransactionAction, *domain.ProviderSyncIssue) {
-	strongMatches := matchingProviderIDs(snapshot.Matches, observation)
+	strongMatches := appendUniqueProviderTransactionMatches(
+		matchingProviderIDs(snapshot.Matches, observation),
+		matchingProviderIDs(snapshot.IdentityMatches, observation)...,
+	)
 	if len(strongMatches) == 1 {
 		transaction := snapshotTransaction(
 			snapshot.Transactions,
 			strongMatches[0].TransactionID,
 		)
+		if transaction == nil {
+			transaction = snapshotTransaction(
+				snapshot.IdentityTransactions,
+				strongMatches[0].TransactionID,
+			)
+		}
 		if transaction != nil {
 			return ProviderTransactionAction{
 				Type:                ProviderTransactionActionTypeUpdate,

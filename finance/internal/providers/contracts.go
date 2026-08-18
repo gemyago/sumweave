@@ -76,11 +76,23 @@ type FetchRequest struct {
 }
 
 type ExistingWindowSnapshot struct {
-	Connection     domain.ProviderConnectionRef
-	SnapshotWindow domain.ProviderSyncWindow
-	Accounts       []domain.ConnectionProviderAccount
-	Transactions   []domain.Transaction
-	Matches        []domain.ProviderTransactionMatch
+	Connection           domain.ProviderConnectionRef
+	SnapshotWindow       domain.ProviderSyncWindow
+	Accounts             []domain.ConnectionProviderAccount
+	Transactions         []domain.Transaction
+	Matches              []domain.ProviderTransactionMatch
+	IdentityTransactions []domain.Transaction
+	IdentityMatches      []domain.ProviderTransactionMatch
+}
+
+type ProviderTransactionIdentity struct {
+	ProviderAccountID     string
+	ProviderTransactionID string
+}
+
+type ProviderTransactionIdentityMatch struct {
+	Transaction domain.Transaction
+	Match       domain.ProviderTransactionMatch
 }
 
 type WindowSyncSnapshotReader interface {
@@ -98,6 +110,11 @@ type WindowSyncSnapshotReader interface {
 		connectionID string,
 		transactionIDs []string,
 	) ([]domain.ProviderTransactionMatch, error)
+	ListProviderTransactionIdentityMatches(
+		ctx context.Context,
+		connectionID string,
+		identities []ProviderTransactionIdentity,
+	) ([]ProviderTransactionIdentityMatch, error)
 }
 
 type WindowSyncApplyStore interface {

@@ -63,6 +63,7 @@ func (s *ProviderWindowSyncStore) LoadExistingWindow(
 	ctx context.Context,
 	connection domain.ProviderConnectionRef,
 	window domain.ProviderSyncWindow,
+	identities []ProviderTransactionIdentity,
 ) (ExistingWindowSnapshot, error) {
 	accounts, err := s.persistence.ListConnectionProviderAccounts(ctx, connection.ConnectionID)
 	if err != nil {
@@ -90,12 +91,29 @@ func (s *ProviderWindowSyncStore) LoadExistingWindow(
 		)
 	}
 
+	identityTransactions := []domain.Transaction{}
+	identityRows := []domain.ProviderTransactionMatch{}
+	if len(identities) > 0 {
+		identityMatches, identityErr := s.persistence.ListProviderTransactionIdentityMatches(
+			ctx,
+			connection.ConnectionID,
+			identities,
+		)
+		if identityErr != nil {
+			return ExistingWindowSnapshot{}, fmt.Errorf("list provider transaction identity matches: %w", identityErr)
+		}
+		identityTransactions = identityMatchTransactions(identityMatches)
+		identityRows = identityMatchRows(identityMatches)
+	}
+
 	return ExistingWindowSnapshot{
-		Connection:     connection,
-		SnapshotWindow: window,
-		Accounts:       append([]domain.ConnectionProviderAccount(nil), accounts...),
-		Transactions:   append([]domain.Transaction(nil), transactions...),
-		Matches:        append([]domain.ProviderTransactionMatch(nil), matches...),
+		Connection:           connection,
+		SnapshotWindow:       window,
+		Accounts:             append([]domain.ConnectionProviderAccount(nil), accounts...),
+		Transactions:         append([]domain.Transaction(nil), transactions...),
+		Matches:              append([]domain.ProviderTransactionMatch(nil), matches...),
+		IdentityTransactions: append([]domain.Transaction(nil), identityTransactions...),
+		IdentityMatches:      append([]domain.ProviderTransactionMatch(nil), identityRows...),
 	}, nil
 }
 
@@ -105,7 +123,12 @@ func (s *ProviderWindowSyncStore) ApplySync(
 	applyPlan ApplyPlan,
 	successStates ...domain.ProviderSyncState,
 ) (domain.ProviderSyncStats, error) {
-	snapshot, err := s.LoadExistingWindow(ctx, diffPlan.Connection, diffPlan.SnapshotWindow)
+	snapshot, err := s.LoadExistingWindow(
+		ctx,
+		diffPlan.Connection,
+		diffPlan.SnapshotWindow,
+		providerTransactionIdentitiesFromActions(diffPlan.TransactionActions),
+	)
 	if err != nil {
 		return domain.ProviderSyncStats{}, fmt.Errorf("load existing apply snapshot: %w", err)
 	}
@@ -166,7 +189,7 @@ func (s *ProviderWindowSyncStore) ApplySync(
 			providerAccounts,
 			diffPlan.Connection,
 			bankConnection.TenantID,
-			snapshot.Matches,
+			appendUniqueProviderTransactionMatches(snapshot.Matches, snapshot.IdentityMatches...),
 			applyPlan.TransactionWrites,
 			now,
 		)
@@ -699,6 +722,76 @@ func transactionIDs(transactions []domain.Transaction) []string {
 		result = append(result, transaction.ID)
 	}
 	return result
+}
+
+func providerTransactionIdentities(
+	observations []domain.ProviderTransactionObservation,
+) []ProviderTransactionIdentity {
+	identities := make([]ProviderTransactionIdentity, 0, len(observations))
+	seen := make(map[ProviderTransactionIdentity]struct{}, len(observations))
+	for _, observation := range observations {
+		identity := ProviderTransactionIdentity{
+			ProviderAccountID:     observation.ProviderAccountID,
+			ProviderTransactionID: observation.ProviderTransactionID,
+		}
+		if identity.ProviderAccountID == "" || identity.ProviderTransactionID == "" {
+			continue
+		}
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		identities = append(identities, identity)
+	}
+	return identities
+}
+
+func providerTransactionIdentitiesFromActions(
+	actions []ProviderTransactionAction,
+) []ProviderTransactionIdentity {
+	observations := make([]domain.ProviderTransactionObservation, 0, len(actions))
+	for _, action := range actions {
+		observations = append(observations, action.Observation)
+	}
+	return providerTransactionIdentities(observations)
+}
+
+func identityMatchTransactions(
+	matches []ProviderTransactionIdentityMatch,
+) []domain.Transaction {
+	transactions := make([]domain.Transaction, 0, len(matches))
+	for _, match := range matches {
+		transactions = append(transactions, match.Transaction)
+	}
+	return transactions
+}
+
+func identityMatchRows(
+	matches []ProviderTransactionIdentityMatch,
+) []domain.ProviderTransactionMatch {
+	rows := make([]domain.ProviderTransactionMatch, 0, len(matches))
+	for _, match := range matches {
+		rows = append(rows, match.Match)
+	}
+	return rows
+}
+
+func appendUniqueProviderTransactionMatches(
+	matches []domain.ProviderTransactionMatch,
+	additional ...domain.ProviderTransactionMatch,
+) []domain.ProviderTransactionMatch {
+	seen := make(map[string]struct{}, len(matches)+len(additional))
+	for _, match := range matches {
+		seen[match.ID] = struct{}{}
+	}
+	for _, match := range additional {
+		if _, ok := seen[match.ID]; ok {
+			continue
+		}
+		seen[match.ID] = struct{}{}
+		matches = append(matches, match)
+	}
+	return matches
 }
 
 func resolveProviderAccount(

@@ -166,9 +166,10 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			mock.Anything,
 			monobankConnection,
 			requestedWindow,
+			mock.Anything,
 		)
 		monobankLoad.RunAndReturn(
-			func(_ context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow) (providers.ExistingWindowSnapshot, error) {
+			func(_ context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow, _ []providers.ProviderTransactionIdentity) (providers.ExistingWindowSnapshot, error) {
 				loadConnections = append(loadConnections, connection)
 				loadWindows = append(loadWindows, window)
 				return providers.ExistingWindowSnapshot{}, nil
@@ -180,9 +181,10 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			mock.Anything,
 			enableBankingConnection,
 			requestedWindow,
+			mock.Anything,
 		)
 		enableBankingLoad.RunAndReturn(
-			func(_ context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow) (providers.ExistingWindowSnapshot, error) {
+			func(_ context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow, _ []providers.ProviderTransactionIdentity) (providers.ExistingWindowSnapshot, error) {
 				loadConnections = append(loadConnections, connection)
 				loadWindows = append(loadWindows, window)
 				return providers.ExistingWindowSnapshot{}, nil

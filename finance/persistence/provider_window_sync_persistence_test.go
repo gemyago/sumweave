@@ -268,6 +268,77 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		assert.Equal(t, later.Format(time.RFC3339Nano), matches[1].CreatedAt.Format(time.RFC3339Nano))
 	})
 
+	t.Run("lists provider transaction identity matches without effective time filtering", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		adapter := NewProviderWindowSyncPersistence(store)
+		now := time.Date(2026, time.August, 18, 10, 0, 0, 0, time.UTC)
+		connectionID := "connection-" + fake.UUID().V4()
+		otherConnectionID := "other-connection-" + fake.UUID().V4()
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		providerTransactionID := "provider-transaction-" + fake.UUID().V4()
+		accountID := "finance-account-" + fake.UUID().V4()
+
+		outsideTransaction, err := store.SaveTransaction(
+			t.Context(),
+			makeTransaction(fake, accountID, domain.TransactionSourceProvider, now.Add(-48*time.Hour)),
+		)
+		require.NoError(t, err)
+		matchingRow := makeMatch(fake, connectionID, providerAccountID, outsideTransaction.ID, now)
+		matchingRow.ProviderTransactionID = providerTransactionID
+		matchingRow, err = store.SaveProviderTransactionMatch(t.Context(), matchingRow)
+		require.NoError(t, err)
+
+		otherTransaction, err := store.SaveTransaction(
+			t.Context(),
+			makeTransaction(fake, accountID, domain.TransactionSourceProvider, now.Add(-24*time.Hour)),
+		)
+		require.NoError(t, err)
+		otherProviderIDRow := makeMatch(
+			fake,
+			connectionID,
+			providerAccountID,
+			otherTransaction.ID,
+			now.Add(time.Second),
+		)
+		_, err = store.SaveProviderTransactionMatch(t.Context(), otherProviderIDRow)
+		require.NoError(t, err)
+		otherConnectionRow := makeMatch(
+			fake,
+			otherConnectionID,
+			providerAccountID,
+			outsideTransaction.ID,
+			now.Add(2*time.Second),
+		)
+		otherConnectionRow.ProviderTransactionID = providerTransactionID
+		_, err = store.SaveProviderTransactionMatch(t.Context(), otherConnectionRow)
+		require.NoError(t, err)
+		otherAccountRow := makeMatch(
+			fake,
+			connectionID,
+			"provider-account-other-"+fake.UUID().V4(),
+			outsideTransaction.ID,
+			now.Add(3*time.Second),
+		)
+		otherAccountRow.ProviderTransactionID = providerTransactionID
+		_, err = store.SaveProviderTransactionMatch(t.Context(), otherAccountRow)
+		require.NoError(t, err)
+
+		items, err := adapter.ListProviderTransactionIdentityMatches(
+			t.Context(),
+			connectionID,
+			[]providers.ProviderTransactionIdentity{{
+				ProviderAccountID:     providerAccountID,
+				ProviderTransactionID: providerTransactionID,
+			}},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, []providers.ProviderTransactionIdentityMatch{{
+			Transaction: outsideTransaction,
+			Match:       matchingRow,
+		}}, items)
+	})
+
 	t.Run("returns empty results when snapshot query inputs are empty", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
@@ -290,6 +361,14 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.Empty(t, matches)
+
+		identityMatches, err := adapter.ListProviderTransactionIdentityMatches(
+			t.Context(),
+			"connection-"+fake.UUID().V4(),
+			[]providers.ProviderTransactionIdentity{{ProviderAccountID: "\t"}},
+		)
+		require.NoError(t, err)
+		assert.Empty(t, identityMatches)
 	})
 
 	t.Run("applies provider metadata refresh to persisted linked finance accounts", func(t *testing.T) {
@@ -485,6 +564,132 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		assert.Equal(t, successState.JobID, journalState.JobID)
 		assert.Equal(t, stats, journalState.AggregateStats)
 	})
+
+	t.Run(
+		"applies an outside-window provider-id correction without replacing persisted identities",
+		func(t *testing.T) {
+			fake := faker.New()
+			store := makeStore(t)
+			adapter := NewProviderWindowSyncPersistence(store)
+			now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
+			connection := domain.ProviderConnectionRef{
+				ConnectionID:      "connection-" + fake.UUID().V4(),
+				ProviderID:        domain.ProviderIDPKO,
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+				ProviderReference: "reference-" + fake.UUID().V4(),
+			}
+			window := domain.ProviderSyncWindow{Start: now.Add(-24 * time.Hour), End: now}
+			tenantID := "tenant-" + fake.UUID().V4()
+			financeAccountID := "finance-account-" + fake.UUID().V4()
+			providerAccountID := "provider-account-" + fake.UUID().V4()
+			_, err := store.SaveBankConnection(t.Context(), domain.BankConnection{
+				ID:                connection.ConnectionID,
+				TenantID:          tenantID,
+				Provider:          string(connection.ProviderID),
+				ConnectorID:       connection.ConnectorID,
+				ProviderReference: connection.ProviderReference,
+				State:             domain.BankConnectionStateActive,
+				CreatedAt:         now.Add(-48 * time.Hour),
+				UpdatedAt:         now.Add(-48 * time.Hour),
+			})
+			require.NoError(t, err)
+			_, err = store.SaveConnectionProviderAccount(t.Context(), domain.ConnectionProviderAccount{
+				ID:                "provider-account-row-" + fake.UUID().V4(),
+				ConnectionID:      connection.ConnectionID,
+				ProviderAccountID: providerAccountID,
+				FinanceAccountID:  financeAccountID,
+				Name:              "account-" + fake.Lorem().Word(),
+				Currency:          "PLN",
+				CreatedAt:         now.Add(-48 * time.Hour),
+				UpdatedAt:         now.Add(-48 * time.Hour),
+			})
+			require.NoError(t, err)
+			existingTransaction, err := store.SaveTransaction(t.Context(), domain.Transaction{
+				ID:          "transaction-" + fake.UUID().V4(),
+				TenantID:    tenantID,
+				AccountID:   financeAccountID,
+				Source:      domain.TransactionSourceProvider,
+				Status:      domain.TransactionStatusPending,
+				Kind:        domain.TransactionKindRegular,
+				AmountMinor: -int64(fake.IntBetween(100, 90000)),
+				Currency:    "PLN",
+				Description: "pending-" + fake.Lorem().Word(),
+				EffectiveAt: window.Start.Add(-time.Hour),
+				CreatedAt:   now.Add(-48 * time.Hour),
+				UpdatedAt:   now.Add(-48 * time.Hour),
+			})
+			require.NoError(t, err)
+			existingMatch, err := store.SaveProviderTransactionMatch(t.Context(), domain.ProviderTransactionMatch{
+				ID:                    "match-" + fake.UUID().V4(),
+				ConnectionID:          connection.ConnectionID,
+				ProviderAccountID:     providerAccountID,
+				ProviderTransactionID: "provider-transaction-" + fake.UUID().V4(),
+				Fingerprint:           "fingerprint-pending-" + fake.UUID().V4(),
+				TransactionID:         existingTransaction.ID,
+				Status:                existingTransaction.Status,
+				CreatedAt:             now.Add(-48 * time.Hour),
+				UpdatedAt:             now.Add(-48 * time.Hour),
+			})
+			require.NoError(t, err)
+
+			observation := domain.ProviderTransactionObservation{
+				Connection:            connection,
+				ProviderAccountID:     providerAccountID,
+				ProviderTransactionID: existingMatch.ProviderTransactionID,
+				Status:                domain.TransactionStatusBooked,
+				AmountMinor:           existingTransaction.AmountMinor,
+				Currency:              existingTransaction.Currency,
+				Description:           "booked-" + fake.Lorem().Word(),
+				EffectiveAt:           window.Start.Add(time.Hour),
+				Fingerprint:           "fingerprint-booked-" + fake.UUID().V4(),
+			}
+			mergedTransaction := existingTransaction
+			mergedTransaction.Status = observation.Status
+			mergedTransaction.Description = observation.Description
+			mergedTransaction.EffectiveAt = observation.EffectiveAt
+			mergedTransaction.UpdatedAt = now
+			action := providers.ProviderTransactionAction{
+				Type:                providers.ProviderTransactionActionTypeUpdate,
+				MatchStrategy:       providers.ProviderTransactionMatchStrategyProviderID,
+				Observation:         observation,
+				ExistingTransaction: &existingTransaction,
+			}
+			syncStore, err := providers.NewProviderWindowSyncStore(
+				adapter,
+				providers.WithWindowSyncStoreNow(func() time.Time { return now }),
+			)
+			require.NoError(t, err)
+
+			stats, err := syncStore.ApplySync(t.Context(), providers.ProviderDiffPlan{
+				Connection:         connection,
+				SnapshotWindow:     window,
+				TransactionActions: []providers.ProviderTransactionAction{action},
+			}, providers.ApplyPlan{
+				TransactionWrites: []providers.ApplyTransactionWrite{{
+					Action:            action,
+					MergedTransaction: &mergedTransaction,
+				}},
+				Stats: domain.ProviderSyncStats{UpdatedTransactions: 1},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, domain.ProviderSyncStats{UpdatedTransactions: 1}, stats)
+
+			loadedTransaction, err := store.GetTransaction(t.Context(), existingTransaction.ID)
+			require.NoError(t, err)
+			require.NotNil(t, loadedTransaction)
+			assert.Equal(t, mergedTransaction, *loadedTransaction)
+			matches, err := adapter.ListProviderTransactionMatchesByTransactionIDs(
+				t.Context(),
+				connection.ConnectionID,
+				[]string{existingTransaction.ID},
+			)
+			require.NoError(t, err)
+			require.Len(t, matches, 1)
+			assert.Equal(t, existingMatch.ID, matches[0].ID)
+			assert.Equal(t, existingTransaction.ID, matches[0].TransactionID)
+			assert.Equal(t, observation.ProviderTransactionID, matches[0].ProviderTransactionID)
+		},
+	)
 
 	t.Run("commits on success and rolls back on callback error", func(t *testing.T) {
 		makeFixture := func(fake faker.Faker, connectionID string) (

@@ -75,6 +75,75 @@ func (s *ProviderWindowSyncPersistence) ListProviderTransactionMatchesByTransact
 	return items, nil
 }
 
+func (s *ProviderWindowSyncPersistence) ListProviderTransactionIdentityMatches(
+	ctx context.Context,
+	connectionID string,
+	identities []providers.ProviderTransactionIdentity,
+) ([]providers.ProviderTransactionIdentityMatch, error) {
+	identities = nonEmptyProviderTransactionIdentities(identities)
+	if len(identities) == 0 {
+		return []providers.ProviderTransactionIdentityMatch{}, nil
+	}
+
+	identityPredicate := s.Store.db.Where(
+		"provider_account_id = ? AND provider_transaction_id = ?",
+		identities[0].ProviderAccountID,
+		identities[0].ProviderTransactionID,
+	)
+	for _, identity := range identities[1:] {
+		identityPredicate = identityPredicate.Or(
+			"provider_account_id = ? AND provider_transaction_id = ?",
+			identity.ProviderAccountID,
+			identity.ProviderTransactionID,
+		)
+	}
+
+	var matchModels []providerTransactionMatchModel
+	if err := s.Store.db.WithContext(ctx).
+		Table((providerTransactionMatchModel{}).TableName()).
+		Where("connection_id = ?", connectionID).
+		Where(identityPredicate).
+		Order("created_at ASC, id ASC").
+		Find(&matchModels).Error; err != nil {
+		return nil, fmt.Errorf("list provider transaction identity matches: %w", err)
+	}
+	if len(matchModels) == 0 {
+		return []providers.ProviderTransactionIdentityMatch{}, nil
+	}
+
+	transactionIDs := make([]string, 0, len(matchModels))
+	for _, match := range matchModels {
+		transactionIDs = append(transactionIDs, match.TransactionID)
+	}
+	var transactionModels []transactionModel
+	if err := s.Store.db.WithContext(ctx).
+		Table((transactionModel{}).TableName()).
+		Where("id IN ?", transactionIDs).
+		Where("source = ?", string(domain.TransactionSourceProvider)).
+		Find(&transactionModels).Error; err != nil {
+		return nil, fmt.Errorf("list provider identity match transactions: %w", err)
+	}
+	transactionsByID := make(map[string]domain.Transaction, len(transactionModels))
+	for _, model := range transactionModels {
+		transaction := transactionFromModel(model)
+		transactionsByID[transaction.ID] = transaction
+	}
+
+	items := make([]providers.ProviderTransactionIdentityMatch, 0, len(matchModels))
+	for _, model := range matchModels {
+		match := providerTransactionMatchFromModel(model)
+		transaction, ok := transactionsByID[match.TransactionID]
+		if !ok {
+			continue
+		}
+		items = append(items, providers.ProviderTransactionIdentityMatch{
+			Transaction: transaction,
+			Match:       match,
+		})
+	}
+	return items, nil
+}
+
 func (s *ProviderWindowSyncPersistence) WithTransaction(
 	ctx context.Context,
 	fn func(providers.WindowSyncApplyStore) error,
@@ -114,4 +183,22 @@ func nonEmptyTrimmedStrings(values []string) []string {
 		trimmed = append(trimmed, normalized)
 	}
 	return trimmed
+}
+
+func nonEmptyProviderTransactionIdentities(
+	identities []providers.ProviderTransactionIdentity,
+) []providers.ProviderTransactionIdentity {
+	result := make([]providers.ProviderTransactionIdentity, 0, len(identities))
+	seen := make(map[providers.ProviderTransactionIdentity]struct{}, len(identities))
+	for _, identity := range identities {
+		if identity.ProviderAccountID == "" || identity.ProviderTransactionID == "" {
+			continue
+		}
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		result = append(result, identity)
+	}
+	return result
 }

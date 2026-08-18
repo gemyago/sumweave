@@ -41,6 +41,7 @@ type WindowSyncStore interface {
 		ctx context.Context,
 		connection domain.ProviderConnectionRef,
 		window domain.ProviderSyncWindow,
+		identities []ProviderTransactionIdentity,
 	) (ExistingWindowSnapshot, error)
 	ApplySync(
 		ctx context.Context,
@@ -153,7 +154,12 @@ func (c *WindowSyncExecutor) Execute(
 	if err != nil {
 		return WindowSyncResult{}, fmt.Errorf("determine snapshot window: %w", err)
 	}
-	snapshot, err := c.windowSyncStore.LoadExistingWindow(ctx, request.Connection, snapshotWindow)
+	snapshot, err := c.windowSyncStore.LoadExistingWindow(
+		ctx,
+		request.Connection,
+		snapshotWindow,
+		providerTransactionIdentities(batch.Transactions),
+	)
 	if err != nil {
 		return WindowSyncResult{}, fmt.Errorf("load existing snapshot: %w", err)
 	}

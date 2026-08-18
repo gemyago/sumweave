@@ -20,10 +20,12 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		financeAccounts map[string]domain.Account
 		transactions    []domain.Transaction
 		matches         []domain.ProviderTransactionMatch
+		identityMatches []ProviderTransactionIdentityMatch
 
 		listAccountsErr         error
 		listTransactionsErr     error
 		listMatchesErr          error
+		listIdentityMatchesErr  error
 		saveBalanceErr          error
 		saveProviderSnapshotErr error
 		getFinanceAccountErr    error
@@ -35,11 +37,13 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		appendSyncStateErr      error
 		withTransactionErr      error
 
-		listAccountsConnectionIDs []string
-		listTransactionAccountIDs [][]string
-		listTransactionWindows    []domain.ProviderSyncWindow
-		listMatchConnectionIDs    []string
-		listMatchTransactionIDs   [][]string
+		listAccountsConnectionIDs      []string
+		listTransactionAccountIDs      [][]string
+		listTransactionWindows         []domain.ProviderSyncWindow
+		listMatchConnectionIDs         []string
+		listMatchTransactionIDs        [][]string
+		listIdentityMatchConnectionIDs []string
+		listIdentityMatchIdentities    [][]ProviderTransactionIdentity
 
 		savedAccounts          []domain.ConnectionProviderAccount
 		savedFinanceAccounts   []domain.Account
@@ -107,6 +111,28 @@ func TestProviderWindowSyncStore(t *testing.T) {
 					return nil, fixture.listMatchesErr
 				}
 				return append([]domain.ProviderTransactionMatch(nil), fixture.matches...), nil
+			}).Maybe()
+
+		persistence.EXPECT().
+			ListProviderTransactionIdentityMatches(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(
+				_ context.Context,
+				connectionID string,
+				identities []ProviderTransactionIdentity,
+			) ([]ProviderTransactionIdentityMatch, error) {
+				fixture.operationOrder = append(fixture.operationOrder, "listIdentityMatches")
+				fixture.listIdentityMatchConnectionIDs = append(
+					fixture.listIdentityMatchConnectionIDs,
+					connectionID,
+				)
+				fixture.listIdentityMatchIdentities = append(
+					fixture.listIdentityMatchIdentities,
+					append([]ProviderTransactionIdentity(nil), identities...),
+				)
+				if fixture.listIdentityMatchesErr != nil {
+					return nil, fixture.listIdentityMatchesErr
+				}
+				return append([]ProviderTransactionIdentityMatch(nil), fixture.identityMatches...), nil
 			}).Maybe()
 
 		applyStore.EXPECT().
@@ -364,7 +390,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		store, err := NewProviderWindowSyncStore(persistence)
 		require.NoError(t, err)
 
-		snapshot, err := store.LoadExistingWindow(t.Context(), connection, window)
+		snapshot, err := store.LoadExistingWindow(t.Context(), connection, window, nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, ExistingWindowSnapshot{
@@ -390,6 +416,64 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		)
 	})
 
+	t.Run("adds provider identity matches outside the window to the snapshot", func(t *testing.T) {
+		fake := faker.New()
+		connection := makeRandomProviderConnectionRef(
+			fake,
+			domain.ProviderIDMonobank,
+			domain.ProviderConnectorIDMonobank,
+		)
+		window := makeRandomProviderSyncWindow(fake)
+		account := makeProviderAccount(fake, connection.ConnectionID)
+		outsideTransaction := makeTransaction(
+			fake,
+			"tenant-"+fake.UUID().V4(),
+			account.FinanceAccountID,
+			window.Start.Add(-time.Hour),
+		)
+		outsideMatch := makeMatch(
+			fake,
+			connection.ConnectionID,
+			account.ProviderAccountID,
+			outsideTransaction.ID,
+			window.Start,
+		)
+		identity := ProviderTransactionIdentity{
+			ProviderAccountID:     account.ProviderAccountID,
+			ProviderTransactionID: outsideMatch.ProviderTransactionID,
+		}
+		fixture := &persistenceFixture{
+			accounts: []domain.ConnectionProviderAccount{account},
+			identityMatches: []ProviderTransactionIdentityMatch{{
+				Transaction: outsideTransaction,
+				Match:       outsideMatch,
+			}},
+		}
+		persistence := makePersistence(t, fixture)
+		store, err := NewProviderWindowSyncStore(persistence)
+		require.NoError(t, err)
+
+		snapshot, err := store.LoadExistingWindow(
+			t.Context(),
+			connection,
+			window,
+			[]ProviderTransactionIdentity{identity},
+		)
+		require.NoError(t, err)
+
+		assert.Empty(t, snapshot.Transactions)
+		assert.Empty(t, snapshot.Matches)
+		assert.Equal(t, []domain.Transaction{outsideTransaction}, snapshot.IdentityTransactions)
+		assert.Equal(t, []domain.ProviderTransactionMatch{outsideMatch}, snapshot.IdentityMatches)
+		assert.Equal(
+			t,
+			[]string{"listAccounts", "listTransactions", "listMatches", "listIdentityMatches"},
+			fixture.operationOrder,
+		)
+		assert.Equal(t, []string{connection.ConnectionID}, fixture.listIdentityMatchConnectionIDs)
+		assert.Equal(t, [][]ProviderTransactionIdentity{{identity}}, fixture.listIdentityMatchIdentities)
+	})
+
 	t.Run("returns constructor and snapshot read errors", func(t *testing.T) {
 		store, err := NewProviderWindowSyncStore(nil)
 		require.ErrorIs(t, err, ErrWindowSyncPersistenceRequired)
@@ -408,7 +492,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		store, err = NewProviderWindowSyncStore(persistence)
 		require.NoError(t, err)
 
-		_, err = store.LoadExistingWindow(t.Context(), connection, window)
+		_, err = store.LoadExistingWindow(t.Context(), connection, window, nil)
 		require.ErrorIs(t, err, expectedErr)
 		assert.Equal(t, []string{"listAccounts"}, fixture.operationOrder)
 
@@ -421,7 +505,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		persistence = makePersistence(t, fixture)
 		store, err = NewProviderWindowSyncStore(persistence)
 		require.NoError(t, err)
-		_, err = store.LoadExistingWindow(t.Context(), connection, window)
+		_, err = store.LoadExistingWindow(t.Context(), connection, window, nil)
 		require.ErrorContains(t, err, "list provider transactions in window")
 
 		fixture = &persistenceFixture{
@@ -434,7 +518,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		persistence = makePersistence(t, fixture)
 		store, err = NewProviderWindowSyncStore(persistence)
 		require.NoError(t, err)
-		_, err = store.LoadExistingWindow(t.Context(), connection, window)
+		_, err = store.LoadExistingWindow(t.Context(), connection, window, nil)
 		require.ErrorContains(t, err, "list provider transaction matches by transaction ids")
 	})
 
@@ -580,6 +664,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 				"listAccounts",
 				"listTransactions",
 				"listMatches",
+				"listIdentityMatches",
 				"getBankConnection",
 				"saveAccount",
 				"getFinanceAccount",
@@ -876,7 +961,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		assert.Equal(t, connectionTenantID, fixture.savedTransactions[0].TenantID)
 		assert.Equal(t, financeAccountID, fixture.savedTransactions[0].AccountID)
 		assert.Equal(t, []string{
-			"listAccounts", "listTransactions", "listMatches", "getBankConnection",
+			"listAccounts", "listTransactions", "listMatches", "listIdentityMatches", "getBankConnection",
 			"saveAccount", "saveFinanceAccount", "getFinanceAccount", "saveAccount",
 			"getFinanceAccount", "saveTransaction", "saveMatch",
 		}, fixture.operationOrder)

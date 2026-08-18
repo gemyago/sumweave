@@ -49,6 +49,7 @@ type stubWindowSyncStore struct {
 	applyStats        domain.ProviderSyncStats
 	loadCalls         []domain.ProviderSyncWindow
 	loadConnections   []domain.ProviderConnectionRef
+	loadIdentities    [][]ProviderTransactionIdentity
 	appliedDiffPlans  []ProviderDiffPlan
 	appliedApplyPlans []ApplyPlan
 	successStates     []domain.ProviderSyncState
@@ -59,9 +60,11 @@ func (r *stubWindowSyncStore) LoadExistingWindow(
 	_ context.Context,
 	connection domain.ProviderConnectionRef,
 	window domain.ProviderSyncWindow,
+	identities []ProviderTransactionIdentity,
 ) (ExistingWindowSnapshot, error) {
 	r.loadConnections = append(r.loadConnections, connection)
 	r.loadCalls = append(r.loadCalls, window)
+	r.loadIdentities = append(r.loadIdentities, append([]ProviderTransactionIdentity(nil), identities...))
 	if r.loadErr != nil {
 		return ExistingWindowSnapshot{}, r.loadErr
 	}
@@ -132,6 +135,7 @@ func TestWindowSyncExecutor(t *testing.T) {
 			assert.Equal(t, request.RequestedWindow, result.Batch.RequestedWindow)
 			assert.Equal(t, domain.ProviderSyncStats{}, result.Stats)
 			assert.Equal(t, []domain.ProviderSyncWindow{request.RequestedWindow}, store.loadCalls)
+			assert.Empty(t, store.loadIdentities[0])
 		})
 
 		t.Run("resolves pko connections through enable banking connector id", func(t *testing.T) {
@@ -317,6 +321,10 @@ func TestWindowSyncExecutor(t *testing.T) {
 			assert.Equal(t, []domain.ProviderSyncWindow{request.RequestedWindow}, snapshotPolicy.determineCalls)
 			assert.Equal(t, []domain.ProviderConnectionRef{request.Connection}, store.loadConnections)
 			assert.Equal(t, []domain.ProviderSyncWindow{snapshotWindow}, store.loadCalls)
+			assert.Equal(t, [][]ProviderTransactionIdentity{{{
+				ProviderAccountID:     account.ProviderAccountID,
+				ProviderTransactionID: transaction.ProviderTransactionID,
+			}}}, store.loadIdentities)
 			require.Len(t, store.appliedDiffPlans, 1)
 			require.Len(t, store.appliedApplyPlans, 1)
 			assert.Equal(t, request.RequestedWindow, store.appliedDiffPlans[0].RequestedWindow)
@@ -354,6 +362,92 @@ func TestWindowSyncExecutor(t *testing.T) {
 			assert.Equal(t, balance, diffPlan.BalanceObservations[0])
 			assert.Equal(t, transaction.Fingerprint, diffPlan.TransactionActions[0].Observation.Fingerprint)
 			assert.Equal(t, transaction.ProviderOriginal, diffPlan.TransactionActions[0].Observation.ProviderOriginal)
+		})
+
+		t.Run("updates an existing provider transaction moved outside the requested window", func(t *testing.T) {
+			fake := faker.New()
+			request := makeRequest(fake, domain.ProviderIDSynthetic, domain.ProviderConnectorIDSynthetic)
+			accountID := "provider-account-" + fake.UUID().V4()
+			providerTransactionID := "provider-transaction-" + fake.UUID().V4()
+			existingTransaction := domain.Transaction{
+				ID:          "transaction-" + fake.UUID().V4(),
+				TenantID:    "tenant-" + fake.UUID().V4(),
+				AccountID:   "finance-account-" + fake.UUID().V4(),
+				Source:      domain.TransactionSourceProvider,
+				Status:      domain.TransactionStatusPending,
+				Kind:        domain.TransactionKindRegular,
+				AmountMinor: -int64(fake.IntBetween(100, 90000)),
+				Currency:    "PLN",
+				Description: "transaction-" + fake.Lorem().Word(),
+				EffectiveAt: request.RequestedWindow.Start.Add(-time.Hour),
+				CreatedAt:   request.RequestedWindow.Start.Add(-2 * time.Hour),
+				UpdatedAt:   request.RequestedWindow.Start.Add(-time.Hour),
+			}
+			existingMatch := domain.ProviderTransactionMatch{
+				ID:                    "match-" + fake.UUID().V4(),
+				ConnectionID:          request.Connection.ConnectionID,
+				ProviderAccountID:     accountID,
+				ProviderTransactionID: providerTransactionID,
+				Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+				TransactionID:         existingTransaction.ID,
+				Status:                existingTransaction.Status,
+				CreatedAt:             existingTransaction.CreatedAt,
+				UpdatedAt:             existingTransaction.UpdatedAt,
+			}
+			observation := domain.ProviderTransactionObservation{
+				Connection:            request.Connection,
+				ProviderAccountID:     accountID,
+				ProviderTransactionID: providerTransactionID,
+				Status:                domain.TransactionStatusBooked,
+				AmountMinor:           existingTransaction.AmountMinor,
+				Currency:              existingTransaction.Currency,
+				Description:           existingTransaction.Description,
+				EffectiveAt:           request.RequestedWindow.Start.Add(time.Hour),
+				Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+			}
+			store := &stubWindowSyncStore{
+				snapshot: ExistingWindowSnapshot{
+					Connection:     request.Connection,
+					SnapshotWindow: request.RequestedWindow,
+					Transactions:   []domain.Transaction{existingTransaction},
+					Matches:        []domain.ProviderTransactionMatch{existingMatch},
+				},
+				applyStats: domain.ProviderSyncStats{ObservedTransactions: 1, UpdatedTransactions: 1},
+			}
+			executor, err := NewWindowSyncExecutor(
+				WithConnectorRegistry(&stubConnectorRegistry{connector: &stubConnector{
+					connectorID: domain.ProviderConnectorIDSynthetic,
+					fetchResult: domain.ProviderSyncBatch{
+						Transactions: []domain.ProviderTransactionObservation{observation},
+					},
+				}}),
+				WithWindowSyncStore(store),
+			)
+			require.NoError(t, err)
+
+			result, err := executor.Execute(t.Context(), request)
+			require.NoError(t, err)
+
+			require.Len(t, store.appliedDiffPlans, 1)
+			require.Len(t, store.appliedDiffPlans[0].TransactionActions, 1)
+			action := store.appliedDiffPlans[0].TransactionActions[0]
+			assert.Equal(t, ProviderTransactionActionTypeUpdate, action.Type)
+			assert.Equal(t, ProviderTransactionMatchStrategyProviderID, action.MatchStrategy)
+			require.NotNil(t, action.ExistingTransaction)
+			assert.Equal(t, existingTransaction.ID, action.ExistingTransaction.ID)
+			assert.Equal(t, domain.ProviderSyncStats{ObservedTransactions: 1, UpdatedTransactions: 1}, result.Stats)
+			require.Len(t, store.appliedApplyPlans, 1)
+			require.Len(t, store.appliedApplyPlans[0].TransactionWrites, 1)
+			require.NotNil(t, store.appliedApplyPlans[0].TransactionWrites[0].MergedTransaction)
+			assert.Equal(
+				t,
+				existingTransaction.ID,
+				store.appliedApplyPlans[0].TransactionWrites[0].MergedTransaction.ID,
+			)
+			assert.Equal(t, [][]ProviderTransactionIdentity{{{
+				ProviderAccountID:     accountID,
+				ProviderTransactionID: providerTransactionID,
+			}}}, store.loadIdentities)
 		})
 
 		t.Run("returns fetch errors after connector resolution", func(t *testing.T) {
