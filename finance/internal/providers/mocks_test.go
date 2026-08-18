@@ -8,7 +8,6 @@ package providers
 
 import (
 	"context"
-	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
 	mock "github.com/stretchr/testify/mock"
@@ -39,6 +38,63 @@ type MockWindowSyncApplyStore_Expecter struct {
 
 func (_m *MockWindowSyncApplyStore) EXPECT() *MockWindowSyncApplyStore_Expecter {
 	return &MockWindowSyncApplyStore_Expecter{mock: &_m.Mock}
+}
+
+// AppendSyncState provides a mock function for the type MockWindowSyncApplyStore
+func (_mock *MockWindowSyncApplyStore) AppendSyncState(ctx context.Context, state domain.ProviderSyncState) error {
+	ret := _mock.Called(ctx, state)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AppendSyncState")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.ProviderSyncState) error); ok {
+		r0 = returnFunc(ctx, state)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockWindowSyncApplyStore_AppendSyncState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AppendSyncState'
+type MockWindowSyncApplyStore_AppendSyncState_Call struct {
+	*mock.Call
+}
+
+// AppendSyncState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - state domain.ProviderSyncState
+func (_e *MockWindowSyncApplyStore_Expecter) AppendSyncState(ctx interface{}, state interface{}) *MockWindowSyncApplyStore_AppendSyncState_Call {
+	return &MockWindowSyncApplyStore_AppendSyncState_Call{Call: _e.mock.On("AppendSyncState", ctx, state)}
+}
+
+func (_c *MockWindowSyncApplyStore_AppendSyncState_Call) Run(run func(ctx context.Context, state domain.ProviderSyncState)) *MockWindowSyncApplyStore_AppendSyncState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 domain.ProviderSyncState
+		if args[1] != nil {
+			arg1 = args[1].(domain.ProviderSyncState)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_AppendSyncState_Call) Return(err error) *MockWindowSyncApplyStore_AppendSyncState_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockWindowSyncApplyStore_AppendSyncState_Call) RunAndReturn(run func(ctx context.Context, state domain.ProviderSyncState) error) *MockWindowSyncApplyStore_AppendSyncState_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // GetAccount provides a mock function for the type MockWindowSyncApplyStore
@@ -664,6 +720,80 @@ func (_c *MockWindowSyncPersistence_ListConnectionProviderAccounts_Call) Return(
 }
 
 func (_c *MockWindowSyncPersistence_ListConnectionProviderAccounts_Call) RunAndReturn(run func(ctx context.Context, connectionID string) ([]domain.ConnectionProviderAccount, error)) *MockWindowSyncPersistence_ListConnectionProviderAccounts_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListProviderTransactionIdentityMatches provides a mock function for the type MockWindowSyncPersistence
+func (_mock *MockWindowSyncPersistence) ListProviderTransactionIdentityMatches(ctx context.Context, connectionID string, identities []ProviderTransactionIdentity) ([]ProviderTransactionIdentityMatch, error) {
+	ret := _mock.Called(ctx, connectionID, identities)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListProviderTransactionIdentityMatches")
+	}
+
+	var r0 []ProviderTransactionIdentityMatch
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []ProviderTransactionIdentity) ([]ProviderTransactionIdentityMatch, error)); ok {
+		return returnFunc(ctx, connectionID, identities)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []ProviderTransactionIdentity) []ProviderTransactionIdentityMatch); ok {
+		r0 = returnFunc(ctx, connectionID, identities)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]ProviderTransactionIdentityMatch)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []ProviderTransactionIdentity) error); ok {
+		r1 = returnFunc(ctx, connectionID, identities)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListProviderTransactionIdentityMatches'
+type MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call struct {
+	*mock.Call
+}
+
+// ListProviderTransactionIdentityMatches is a helper method to define mock.On call
+//   - ctx context.Context
+//   - connectionID string
+//   - identities []ProviderTransactionIdentity
+func (_e *MockWindowSyncPersistence_Expecter) ListProviderTransactionIdentityMatches(ctx interface{}, connectionID interface{}, identities interface{}) *MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call {
+	return &MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call{Call: _e.mock.On("ListProviderTransactionIdentityMatches", ctx, connectionID, identities)}
+}
+
+func (_c *MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call) Run(run func(ctx context.Context, connectionID string, identities []ProviderTransactionIdentity)) *MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []ProviderTransactionIdentity
+		if args[2] != nil {
+			arg2 = args[2].([]ProviderTransactionIdentity)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call) Return(providerTransactionIdentityMatchs []ProviderTransactionIdentityMatch, err error) *MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call {
+	_c.Call.Return(providerTransactionIdentityMatchs, err)
+	return _c
+}
+
+func (_c *MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call) RunAndReturn(run func(ctx context.Context, connectionID string, identities []ProviderTransactionIdentity) ([]ProviderTransactionIdentityMatch, error)) *MockWindowSyncPersistence_ListProviderTransactionIdentityMatches_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1854,8 +1984,8 @@ func (_m *MockTargetWindowPolicy) EXPECT() *MockTargetWindowPolicy_Expecter {
 }
 
 // Determine provides a mock function for the type MockTargetWindowPolicy
-func (_mock *MockTargetWindowPolicy) Determine(now time.Time, state *domain.ProviderSyncState) (domain.ProviderSyncWindow, error) {
-	ret := _mock.Called(now, state)
+func (_mock *MockTargetWindowPolicy) Determine(request TargetWindowRequest) (domain.ProviderSyncWindow, error) {
+	ret := _mock.Called(request)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Determine")
@@ -1863,16 +1993,16 @@ func (_mock *MockTargetWindowPolicy) Determine(now time.Time, state *domain.Prov
 
 	var r0 domain.ProviderSyncWindow
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(time.Time, *domain.ProviderSyncState) (domain.ProviderSyncWindow, error)); ok {
-		return returnFunc(now, state)
+	if returnFunc, ok := ret.Get(0).(func(TargetWindowRequest) (domain.ProviderSyncWindow, error)); ok {
+		return returnFunc(request)
 	}
-	if returnFunc, ok := ret.Get(0).(func(time.Time, *domain.ProviderSyncState) domain.ProviderSyncWindow); ok {
-		r0 = returnFunc(now, state)
+	if returnFunc, ok := ret.Get(0).(func(TargetWindowRequest) domain.ProviderSyncWindow); ok {
+		r0 = returnFunc(request)
 	} else {
 		r0 = ret.Get(0).(domain.ProviderSyncWindow)
 	}
-	if returnFunc, ok := ret.Get(1).(func(time.Time, *domain.ProviderSyncState) error); ok {
-		r1 = returnFunc(now, state)
+	if returnFunc, ok := ret.Get(1).(func(TargetWindowRequest) error); ok {
+		r1 = returnFunc(request)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1885,25 +2015,19 @@ type MockTargetWindowPolicy_Determine_Call struct {
 }
 
 // Determine is a helper method to define mock.On call
-//   - now time.Time
-//   - state *domain.ProviderSyncState
-func (_e *MockTargetWindowPolicy_Expecter) Determine(now interface{}, state interface{}) *MockTargetWindowPolicy_Determine_Call {
-	return &MockTargetWindowPolicy_Determine_Call{Call: _e.mock.On("Determine", now, state)}
+//   - request TargetWindowRequest
+func (_e *MockTargetWindowPolicy_Expecter) Determine(request interface{}) *MockTargetWindowPolicy_Determine_Call {
+	return &MockTargetWindowPolicy_Determine_Call{Call: _e.mock.On("Determine", request)}
 }
 
-func (_c *MockTargetWindowPolicy_Determine_Call) Run(run func(now time.Time, state *domain.ProviderSyncState)) *MockTargetWindowPolicy_Determine_Call {
+func (_c *MockTargetWindowPolicy_Determine_Call) Run(run func(request TargetWindowRequest)) *MockTargetWindowPolicy_Determine_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 time.Time
+		var arg0 TargetWindowRequest
 		if args[0] != nil {
-			arg0 = args[0].(time.Time)
-		}
-		var arg1 *domain.ProviderSyncState
-		if args[1] != nil {
-			arg1 = args[1].(*domain.ProviderSyncState)
+			arg0 = args[0].(TargetWindowRequest)
 		}
 		run(
 			arg0,
-			arg1,
 		)
 	})
 	return _c
@@ -1914,7 +2038,7 @@ func (_c *MockTargetWindowPolicy_Determine_Call) Return(providerSyncWindow domai
 	return _c
 }
 
-func (_c *MockTargetWindowPolicy_Determine_Call) RunAndReturn(run func(now time.Time, state *domain.ProviderSyncState) (domain.ProviderSyncWindow, error)) *MockTargetWindowPolicy_Determine_Call {
+func (_c *MockTargetWindowPolicy_Determine_Call) RunAndReturn(run func(request TargetWindowRequest) (domain.ProviderSyncWindow, error)) *MockTargetWindowPolicy_Determine_Call {
 	_c.Call.Return(run)
 	return _c
 }

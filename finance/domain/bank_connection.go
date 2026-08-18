@@ -106,11 +106,3 @@ type ProviderTransactionMatch struct {
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }
-
-type BankConnectionSyncRun struct {
-	ID           string
-	ConnectionID string
-	SyncKey      string
-	JobID        string
-	CreatedAt    time.Time
-}

@@ -67,7 +67,6 @@ type BankConnectionProvider interface {
 	StartLink(ctx context.Context, params ProviderStartLinkParams) (ProviderLinkStart, error)
 	FinishLink(ctx context.Context, params ProviderFinishLinkParams) (ProviderLinkResult, error)
 	LinkToken(ctx context.Context, params ProviderTokenLinkParams) (ProviderTokenLinkResult, error)
-	Sync(ctx context.Context, params ProviderSyncParams) (ProviderSyncResult, error)
 }
 
 type ProviderStartLinkParams struct {
@@ -93,48 +92,9 @@ type ProviderLinkResult struct {
 
 type ProviderTokenLinkResult = ProviderLinkResult
 
-type ProviderNormalizedAccount struct {
-	ProviderAccountID     string
-	Name                  string
-	Currency              string
-	IBAN                  string
-	MaskedPAN             string
-	CurrentBalanceMinor   *int64
-	AvailableBalanceMinor *int64
-}
-
-type ProviderNormalizedTransaction struct {
-	ProviderAccountID     string
-	ProviderTransactionID string
-	Status                domain.TransactionStatus
-	AmountMinor           int64
-	Currency              string
-	Description           string
-	EffectiveAt           time.Time
-	Fingerprint           string
-	ProviderOriginal      *domain.ProviderTransactionOriginal
-}
-
 type ProviderScheduledRunMetadata struct {
 	ScheduledAt time.Time
 	NextRunAt   *time.Time
-}
-
-type ProviderSyncParams struct {
-	ConnectionID      string
-	ProviderReference string
-	Secret            string
-	WindowStart       time.Time
-	WindowEnd         time.Time
-}
-
-type ProviderSyncResult struct {
-	SyncKey      string
-	Accounts     []ProviderNormalizedAccount
-	Transactions []ProviderNormalizedTransaction
-	Snapshots    []domain.ProviderSnapshotObservation
-	Reauth       *domain.ConnectionReauthMetadata
-	ScheduledRun *ProviderScheduledRunMetadata
 }
 
 type UpsertBankConnectionScheduleParams struct {
@@ -188,12 +148,6 @@ type RecordBankConnectionSyncScheduledParams struct {
 	JobID        string
 	ScheduledAt  time.Time
 	NextRunAt    time.Time
-}
-
-type ApplyProviderSyncResultParams struct {
-	ConnectionID string
-	JobID        string
-	Result       ProviderSyncResult
 }
 
 type BankConnectionSyncResult struct {
@@ -267,31 +221,6 @@ type bankSyncStore interface {
 	GetBankConnection(ctx context.Context, connectionID string) (*domain.BankConnection, error)
 	ListBankConnections(ctx context.Context, tenantID string) ([]domain.BankConnection, error)
 	DeleteBankConnection(ctx context.Context, connectionID string) error
-	SavePendingBankConnectionLinkStart(
-		ctx context.Context,
-		start domain.PendingBankConnectionLinkStart,
-	) (domain.PendingBankConnectionLinkStart, error)
-	ConsumePendingBankConnectionLinkStart(
-		ctx context.Context,
-		tenantID string,
-		actorUserID string,
-		provider string,
-		state string,
-		consumedAt time.Time,
-	) (*domain.PendingBankConnectionLinkStart, error)
-	RestorePendingBankConnectionLinkStart(
-		ctx context.Context,
-		tenantID string,
-		actorUserID string,
-		provider string,
-		state string,
-		restoredAt time.Time,
-	) error
-	GetPendingBankConnectionLinkStartByState(
-		ctx context.Context,
-		provider string,
-		state string,
-	) (*domain.PendingBankConnectionLinkStart, error)
 	SaveBankConnectionSchedule(
 		ctx context.Context,
 		schedule domain.BankConnectionSchedule,
@@ -310,42 +239,7 @@ type bankSyncStore interface {
 		connectionID string,
 	) ([]domain.ConnectionProviderAccount, error)
 	DeleteConnectionProviderAccounts(ctx context.Context, connectionID string) error
-	SaveBalanceSnapshot(
-		ctx context.Context,
-		snapshot domain.BalanceSnapshot,
-	) (domain.BalanceSnapshot, error)
-	ListBalanceSnapshots(ctx context.Context, connectionID string) ([]domain.BalanceSnapshot, error)
 	DeleteBalanceSnapshots(ctx context.Context, connectionID string) error
-	SaveBankConnectionSyncRun(
-		ctx context.Context,
-		run domain.BankConnectionSyncRun,
-	) (domain.BankConnectionSyncRun, error)
-	ClaimBankConnectionSyncRun(
-		ctx context.Context,
-		run domain.BankConnectionSyncRun,
-	) (bool, error)
-	GetBankConnectionSyncRun(
-		ctx context.Context,
-		connectionID string,
-		syncKey string,
-	) (*domain.BankConnectionSyncRun, error)
-	DeleteBankConnectionSyncRuns(ctx context.Context, connectionID string) error
-	GetProviderTransactionMatchByProviderID(
-		ctx context.Context,
-		connectionID string,
-		providerAccountID string,
-		providerTransactionID string,
-	) (*domain.ProviderTransactionMatch, error)
-	GetProviderTransactionMatchByFingerprint(
-		ctx context.Context,
-		connectionID string,
-		providerAccountID string,
-		fingerprint string,
-	) (*domain.ProviderTransactionMatch, error)
-	SaveProviderTransactionMatch(
-		ctx context.Context,
-		match domain.ProviderTransactionMatch,
-	) (domain.ProviderTransactionMatch, error)
 	DeleteProviderTransactionMatches(ctx context.Context, connectionID string) error
 }
 
@@ -419,20 +313,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func accountID(account *domain.ConnectionProviderAccount) string {
-	if account == nil {
-		return ""
-	}
-	return account.ID
-}
-
-func matchID(match *domain.ProviderTransactionMatch) string {
-	if match == nil {
-		return ""
-	}
-	return match.ID
 }
 
 func timePtrOrNil(value time.Time) *time.Time {

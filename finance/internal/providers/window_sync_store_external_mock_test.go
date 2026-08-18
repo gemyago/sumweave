@@ -41,8 +41,9 @@ func (_mock *MockWindowSyncStore) LoadExistingWindow(
 	ctx context.Context,
 	connection domain.ProviderConnectionRef,
 	window domain.ProviderSyncWindow,
+	identities []providers.ProviderTransactionIdentity,
 ) (providers.ExistingWindowSnapshot, error) {
-	ret := _mock.Called(ctx, connection, window)
+	ret := _mock.Called(ctx, connection, window, identities)
 
 	if len(ret) == 0 {
 		panic("no return value specified for LoadExistingWindow")
@@ -50,16 +51,16 @@ func (_mock *MockWindowSyncStore) LoadExistingWindow(
 
 	var r0 providers.ExistingWindowSnapshot
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.ProviderConnectionRef, domain.ProviderSyncWindow) (providers.ExistingWindowSnapshot, error)); ok {
-		return returnFunc(ctx, connection, window)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.ProviderConnectionRef, domain.ProviderSyncWindow, []providers.ProviderTransactionIdentity) (providers.ExistingWindowSnapshot, error)); ok {
+		return returnFunc(ctx, connection, window, identities)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.ProviderConnectionRef, domain.ProviderSyncWindow) providers.ExistingWindowSnapshot); ok {
-		r0 = returnFunc(ctx, connection, window)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.ProviderConnectionRef, domain.ProviderSyncWindow, []providers.ProviderTransactionIdentity) providers.ExistingWindowSnapshot); ok {
+		r0 = returnFunc(ctx, connection, window, identities)
 	} else {
 		r0 = ret.Get(0).(providers.ExistingWindowSnapshot)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.ProviderConnectionRef, domain.ProviderSyncWindow) error); ok {
-		r1 = returnFunc(ctx, connection, window)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.ProviderConnectionRef, domain.ProviderSyncWindow, []providers.ProviderTransactionIdentity) error); ok {
+		r1 = returnFunc(ctx, connection, window, identities)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -74,12 +75,13 @@ func (_e *MockWindowSyncStore_Expecter) LoadExistingWindow(
 	ctx interface{},
 	connection interface{},
 	window interface{},
+	identities interface{},
 ) *MockWindowSyncStore_LoadExistingWindow_Call {
-	return &MockWindowSyncStore_LoadExistingWindow_Call{Call: _e.mock.On("LoadExistingWindow", ctx, connection, window)}
+	return &MockWindowSyncStore_LoadExistingWindow_Call{Call: _e.mock.On("LoadExistingWindow", ctx, connection, window, identities)}
 }
 
 func (_c *MockWindowSyncStore_LoadExistingWindow_Call) Run(
-	run func(ctx context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow),
+	run func(ctx context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow, identities []providers.ProviderTransactionIdentity),
 ) *MockWindowSyncStore_LoadExistingWindow_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
@@ -94,7 +96,11 @@ func (_c *MockWindowSyncStore_LoadExistingWindow_Call) Run(
 		if args[2] != nil {
 			arg2 = args[2].(domain.ProviderSyncWindow)
 		}
-		run(arg0, arg1, arg2)
+		var arg3 []providers.ProviderTransactionIdentity
+		if args[3] != nil {
+			arg3 = args[3].([]providers.ProviderTransactionIdentity)
+		}
+		run(arg0, arg1, arg2, arg3)
 	})
 	return _c
 }
@@ -108,7 +114,7 @@ func (_c *MockWindowSyncStore_LoadExistingWindow_Call) Return(
 }
 
 func (_c *MockWindowSyncStore_LoadExistingWindow_Call) RunAndReturn(
-	run func(context.Context, domain.ProviderConnectionRef, domain.ProviderSyncWindow) (providers.ExistingWindowSnapshot, error),
+	run func(context.Context, domain.ProviderConnectionRef, domain.ProviderSyncWindow, []providers.ProviderTransactionIdentity) (providers.ExistingWindowSnapshot, error),
 ) *MockWindowSyncStore_LoadExistingWindow_Call {
 	_c.Call.Return(run)
 	return _c
@@ -118,18 +124,35 @@ func (_mock *MockWindowSyncStore) ApplySync(
 	ctx context.Context,
 	diffPlan providers.ProviderDiffPlan,
 	applyPlan providers.ApplyPlan,
-) error {
-	ret := _mock.Called(ctx, diffPlan, applyPlan)
+	successStates ...domain.ProviderSyncState,
+) (domain.ProviderSyncStats, error) {
+	ca := make([]interface{}, 0, 3+len(successStates))
+	ca = append(ca, ctx, diffPlan, applyPlan)
+	for _, successState := range successStates {
+		ca = append(ca, successState)
+	}
+	ret := _mock.Called(ca...)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ApplySync")
 	}
 
-	if returnFunc, ok := ret.Get(0).(func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan) error); ok {
-		return returnFunc(ctx, diffPlan, applyPlan)
+	var r0 domain.ProviderSyncStats
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan, ...domain.ProviderSyncState) (domain.ProviderSyncStats, error)); ok {
+		return returnFunc(ctx, diffPlan, applyPlan, successStates...)
 	}
-
-	return ret.Error(0)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan, ...domain.ProviderSyncState) domain.ProviderSyncStats); ok {
+		r0 = returnFunc(ctx, diffPlan, applyPlan, successStates...)
+	} else {
+		r0 = ret.Get(0).(domain.ProviderSyncStats)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan, ...domain.ProviderSyncState) error); ok {
+		r1 = returnFunc(ctx, diffPlan, applyPlan, successStates...)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 type MockWindowSyncStore_ApplySync_Call struct {
@@ -140,12 +163,16 @@ func (_e *MockWindowSyncStore_Expecter) ApplySync(
 	ctx interface{},
 	diffPlan interface{},
 	applyPlan interface{},
+	successStates ...interface{},
 ) *MockWindowSyncStore_ApplySync_Call {
-	return &MockWindowSyncStore_ApplySync_Call{Call: _e.mock.On("ApplySync", ctx, diffPlan, applyPlan)}
+	ca := make([]interface{}, 0, 3+len(successStates))
+	ca = append(ca, ctx, diffPlan, applyPlan)
+	ca = append(ca, successStates...)
+	return &MockWindowSyncStore_ApplySync_Call{Call: _e.mock.On("ApplySync", ca...)}
 }
 
 func (_c *MockWindowSyncStore_ApplySync_Call) Run(
-	run func(ctx context.Context, diffPlan providers.ProviderDiffPlan, applyPlan providers.ApplyPlan),
+	run func(ctx context.Context, diffPlan providers.ProviderDiffPlan, applyPlan providers.ApplyPlan, successStates ...domain.ProviderSyncState),
 ) *MockWindowSyncStore_ApplySync_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
@@ -160,18 +187,27 @@ func (_c *MockWindowSyncStore_ApplySync_Call) Run(
 		if args[2] != nil {
 			arg2 = args[2].(providers.ApplyPlan)
 		}
-		run(arg0, arg1, arg2)
+		successStates := make([]domain.ProviderSyncState, 0, len(args)-3)
+		for index := 3; index < len(args); index++ {
+			if args[index] != nil {
+				successStates = append(successStates, args[index].(domain.ProviderSyncState))
+			}
+		}
+		run(arg0, arg1, arg2, successStates...)
 	})
 	return _c
 }
 
-func (_c *MockWindowSyncStore_ApplySync_Call) Return(err error) *MockWindowSyncStore_ApplySync_Call {
-	_c.Call.Return(err)
+func (_c *MockWindowSyncStore_ApplySync_Call) Return(
+	stats domain.ProviderSyncStats,
+	err error,
+) *MockWindowSyncStore_ApplySync_Call {
+	_c.Call.Return(stats, err)
 	return _c
 }
 
 func (_c *MockWindowSyncStore_ApplySync_Call) RunAndReturn(
-	run func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan) error,
+	run func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan, ...domain.ProviderSyncState) (domain.ProviderSyncStats, error),
 ) *MockWindowSyncStore_ApplySync_Call {
 	_c.Call.Return(run)
 	return _c

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/google/uuid"
@@ -40,8 +41,14 @@ type WindowSyncStore interface {
 		ctx context.Context,
 		connection domain.ProviderConnectionRef,
 		window domain.ProviderSyncWindow,
+		identities []ProviderTransactionIdentity,
 	) (ExistingWindowSnapshot, error)
-	ApplySync(ctx context.Context, diffPlan ProviderDiffPlan, applyPlan ApplyPlan) error
+	ApplySync(
+		ctx context.Context,
+		diffPlan ProviderDiffPlan,
+		applyPlan ApplyPlan,
+		successStates ...domain.ProviderSyncState,
+	) (domain.ProviderSyncStats, error)
 }
 
 type WindowSyncExecutorOption func(*WindowSyncExecutor)
@@ -53,6 +60,7 @@ type WindowSyncExecutor struct {
 	diffPlanner          *DiffPlanner
 	applyPlanner         *ApplyPlanner
 	runIDGenerator       func() string
+	now                  func() time.Time
 }
 
 func WithConnectorRegistry(connectorRegistry ConnectorRegistry) WindowSyncExecutorOption {
@@ -70,6 +78,12 @@ func WithConnectors(connectors ...Connector) WindowSyncExecutorOption {
 func WithRunIDGenerator(runIDGenerator func() string) WindowSyncExecutorOption {
 	return func(executor *WindowSyncExecutor) {
 		executor.runIDGenerator = runIDGenerator
+	}
+}
+
+func WithWindowSyncExecutorNow(now func() time.Time) WindowSyncExecutorOption {
+	return func(executor *WindowSyncExecutor) {
+		executor.now = now
 	}
 }
 
@@ -99,6 +113,9 @@ func NewWindowSyncExecutor(opts ...WindowSyncExecutorOption) (*WindowSyncExecuto
 	}
 	if executor.runIDGenerator == nil {
 		executor.runIDGenerator = uuid.NewString
+	}
+	if executor.now == nil {
+		executor.now = time.Now
 	}
 	if executor.connectorRegistry == nil {
 		return nil, ErrConnectorRegistryRequired
@@ -137,22 +154,43 @@ func (c *WindowSyncExecutor) Execute(
 	if err != nil {
 		return WindowSyncResult{}, fmt.Errorf("determine snapshot window: %w", err)
 	}
-	snapshot, err := c.windowSyncStore.LoadExistingWindow(ctx, request.Connection, snapshotWindow)
+	snapshot, err := c.windowSyncStore.LoadExistingWindow(
+		ctx,
+		request.Connection,
+		snapshotWindow,
+		providerTransactionIdentities(batch.Transactions),
+	)
 	if err != nil {
 		return WindowSyncResult{}, fmt.Errorf("load existing snapshot: %w", err)
 	}
 
 	diffPlan := c.diffPlanner.Plan(batch, snapshot)
 	applyPlan := c.applyPlanner.Plan(diffPlan)
-	applyErr := c.windowSyncStore.ApplySync(ctx, diffPlan, applyPlan)
+	runID := c.runIDGenerator()
+	completedAt := c.now()
+	successState := domain.ProviderSyncState{
+		Connection: request.Connection,
+		Window:     request.RequestedWindow,
+		JobID:      request.JobID,
+	}
+	if request.SyncState != nil {
+		successState = *request.SyncState
+	}
+	successState.Connection = request.Connection
+	successState.Window = request.RequestedWindow
+	successState.JobID = request.JobID
+	successState.RunID = runID
+	successState.SucceededAt = &completedAt
+
+	stats, applyErr := c.windowSyncStore.ApplySync(ctx, diffPlan, applyPlan, successState)
 	if applyErr != nil {
 		return WindowSyncResult{}, fmt.Errorf("apply sync: %w", applyErr)
 	}
 
 	return WindowSyncResult{
-		RunID: c.runIDGenerator(),
+		RunID: runID,
 		Batch: batch,
-		Stats: applyPlan.Stats,
+		Stats: stats,
 		Issues: append(
 			[]domain.ProviderSyncIssue(nil),
 			applyPlan.Issues...,

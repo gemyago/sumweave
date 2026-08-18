@@ -839,47 +839,36 @@ func TestBankConnectionService(t *testing.T) {
 		require.ErrorIs(t, err, ErrPendingBankConnectionLinkStartNotFound)
 	})
 
-	t.Run("covers secret writer failures", func(t *testing.T) {
+	t.Run("prepares and persists encrypted connection secrets", func(t *testing.T) {
 		fake := faker.New()
-		now := time.Date(2026, time.June, 30, 14, 0, 0, 0, time.UTC)
-		database := openTestDatabase(t)
-		store := persistence.NewStore(database)
+		store := persistence.NewStore(openTestDatabase(t))
+		key := sha256.Sum256([]byte("connection-secret-" + fake.UUID().V4()))
+		cipher, err := credentials.NewAESGCMCipher(key[:], "connection-secret")
+		require.NoError(t, err)
+		now := time.Now()
 		writer := newBankConnectionSecretWriter(
-			&failingProviderSyncStore{
-				Store:                   store,
-				saveConnectionSecretErr: errors.New("save failed"),
-			},
-			stubConnectionSecretCipher{sealErr: errors.New("seal failed")},
+			store,
+			cipher,
 			func() time.Time { return now },
-			func() string { return "secret-id" },
+			func() string { return "secret-" + fake.UUID().V4() },
 		)
-
-		_, err := writer.SaveConnectionSecret(
-			t.Context(),
+		prepared, err := writer.PrepareConnectionSecret(
 			bankProviderMonobank,
-			"ref-"+fake.UUID().V4(),
-			"secret-"+fake.UUID().V4(),
+			"reference-"+fake.UUID().V4(),
+			"plaintext-"+fake.UUID().V4(),
 		)
-		require.ErrorContains(t, err, "seal connection secret")
-
-		writer = newBankConnectionSecretWriter(
-			&failingProviderSyncStore{
-				Store:                   store,
-				saveConnectionSecretErr: errors.New("save failed"),
-			},
-			stubConnectionSecretCipher{
-				envelope: credentials.Envelope{KeyVersion: "v1", Ciphertext: "ciphertext"},
-			},
-			func() time.Time { return now },
-			func() string { return "secret-id" },
-		)
-		_, err = writer.SaveConnectionSecret(
+		require.NoError(t, err)
+		assert.Equal(t, now, prepared.CreatedAt)
+		secretID, err := writer.SaveConnectionSecret(
 			t.Context(),
-			bankProviderMonobank,
-			"ref-"+fake.UUID().V4(),
-			"secret-"+fake.UUID().V4(),
+			prepared.Provider,
+			prepared.Reference,
+			"plaintext-"+fake.UUID().V4(),
 		)
-		require.ErrorContains(t, err, "save connection secret")
+		require.NoError(t, err)
+		persisted, err := store.GetConnectionSecret(t.Context(), secretID)
+		require.NoError(t, err)
+		assert.NotEmpty(t, persisted.Envelope.Ciphertext)
 	})
 }
 
@@ -1025,19 +1014,3 @@ var _ interface {
 	FinishRedirectLink(context.Context, internalproviders.RedirectLinkFinishRequest) (domain.BankConnection, error)
 	LinkToken(context.Context, internalproviders.TokenLinkRequest) (domain.BankConnection, error)
 } = (*recordingBankConnectionLinkCoordinator)(nil)
-
-type stubConnectionSecretCipher struct {
-	envelope credentials.Envelope
-	sealErr  error
-}
-
-func (c stubConnectionSecretCipher) SealString(string) (credentials.Envelope, error) {
-	if c.sealErr != nil {
-		return credentials.Envelope{}, c.sealErr
-	}
-	return c.envelope, nil
-}
-
-func (stubConnectionSecretCipher) OpenString(credentials.Envelope) (string, error) {
-	return "", nil
-}

@@ -38,6 +38,7 @@ func makeRandomProviderSyncStats(fake faker.Faker) domain.ProviderSyncStats {
 
 	return domain.ProviderSyncStats{
 		ObservedAccounts:             fake.IntBetween(1, 4),
+		CreatedAccounts:              fake.IntBetween(0, 4),
 		ObservedTransactions:         observedTransactions,
 		CreatedTransactions:          fake.IntBetween(0, observedTransactions),
 		UpdatedTransactions:          fake.IntBetween(0, observedTransactions),

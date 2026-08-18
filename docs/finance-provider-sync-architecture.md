@@ -1,217 +1,93 @@
 # Finance Provider Sync Architecture
 
-This document explains the finance provider sync flow at a high level.
+Provider sync imports normalized bank observations into finance records without
+treating provider data as automatically correct ledger data.
 
 ## Terms
 
-- Provider: the bank brand or institution the user connects to, such as PKO or monobank.
-- Connector: the technical integration used to talk to a provider, such as Enable Banking.
-- Connection: one linked bank access record for one tenant.
-- Observation: normalized data reported by the provider before it becomes ledger data.
-- Target window: the overall coverage range the sync session wants to bring up to date.
-- Requested window: the time range one window sync execution asks the provider to return.
-- Chunk window: one requested window produced when a larger target window is split.
-- Snapshot window: the persisted snapshot lookup range used to catch the same transaction when the provider later shifts its timestamp or status.
-- Diff plan: the write-free plan describing what should be created or updated.
-- Diff planner: the pure component that builds the diff plan for one requested sync window.
-- Sync orchestrator: the component that loads the latest sync state, chooses the target window, splits it into chunk windows, and coordinates per-window execution.
-- Window sync executor: the component that executes one requested sync window end to end.
-- Provider-original fields: the last known provider values stored next to a transaction.
-- Provider snapshot: the latest sanitized, schema-derived provider document for
-  a connection, account, account balance, or transaction. It is not a raw HTTP
-  response and does not provide a history timeline.
-- Sync state: one recorded chunk-attempt state for one connection.
-- Sync state journal: the append-only history of chunk-attempt states for one connection.
-- Latest sync state: the newest appended attempt state loaded to decide the next target window.
+- Product provider: the bank brand a member selects, such as PKO or monobank.
+- Connector: the technical integration used to access a provider, such as
+  Enable Banking.
+- Connection: one durable linked bank access record for a tenant.
+- Target window: the overall coverage range for one sync job.
+- Requested window: one half-open chunk within the target window.
+- Provider snapshot: the current sanitized, schema-derived provider document
+  for a connection, account, balance, or transaction. It is not a raw HTTP
+  response or a historical response archive.
+- Sync-state journal: the append-only history of requested-window attempts for
+  one connection.
 
-## Purpose
+## Linking And Identity
 
-Provider sync keeps linked bank connections up to date without treating provider
-data as automatically correct ledger data.
+Provider sync v2 owns bank linking through the `LinkCoordinator`. Linking
+resolves the member-facing product provider to a connector and persists both
+identities on the connection. PKO, for example, remains the product provider
+while Enable Banking is its connector.
 
-The main idea is:
+The connector ID, provider reference, and encrypted connection-secret record
+are durable connection metadata. A sync job uses them directly; it does not
+choose a connector from product-provider-specific sync branches. Connectors
+that need a credential resolve plaintext only through their bounded configured
+resolver. Credentialless connectors use their configured credentials and the
+durable provider reference.
 
-1. Fetch what the provider currently reports.
-2. Compare it with what we already know.
-3. Decide what should change.
-4. Apply those changes conservatively.
+## Production Flow
 
-## Main Flow
-
-### 1. A connection is linked
-
-A user links a bank connection such as monobank or PKO.
-
-- Provider sync v2 owns this workflow through a `LinkCoordinator`.
-- The coordinator resolves the user-facing product provider to the technical connector before any connector call or durable write.
-- Redirect/SCA starts keep a pending, connector-safe start result for later finish/retry, while final secrets still go through encrypted secret storage.
-
-- The product-level provider is what the user sees.
-- The technical connector is how we talk to the provider.
-- For example, PKO is the provider, while Enable Banking is the connector.
-
-When linking succeeds, the durable bank connection keeps both identities:
-
-- the product provider the user chose
-- the technical connector used for sync and re-authentication
-
-That durable connector identity lets sync v2 build connection references directly from persisted connection metadata instead of re-deriving connector choice from provider-specific branches.
-
-### 2. A sync is requested
-
-Sync can be started manually or by a scheduled job.
-
-The request is scoped to one bank connection.
-
-### 3. The sync orchestrator plans the session
-
-The sync orchestrator loads the latest sync state for the connection.
-
-That detail matters because sync progress is modeled as a journal, not as one
-mutable state row that gets overwritten on every attempt.
-
-In practice:
-
-- each attempted chunk appends one sync state row
-- each row stores the exact attempted chunk window
-- `SucceededAt` being present means that attempted chunk succeeded
-- `SucceededAt` being absent means the latest known attempt for that window failed
-- target-window planning receives the latest loaded state directly and owns the succeeded-vs-failed interpretation itself
-
-It then decides the target window for this sync session.
-
-The intended policy is:
-
-- if there is no prior sync state, target the last 3 years ending at the current time
-- otherwise derive one prior checkpoint from the latest loaded state
-- use `state.Window.End` as that checkpoint when `SucceededAt` is present
-- use `state.Window.Start` as that checkpoint when `SucceededAt` is absent
-- if the derived checkpoint is within the last 30 days, target the last 30 days ending at the current time
-- if the derived checkpoint is older than 30 days, extend the target window backward to catch up from that checkpoint
-- if that target window is longer than 30 days, split it into chunk windows of at most 30 days
-- execute chunk windows oldest first
-
-This keeps the rolling refresh behavior separate from the one-window execution logic.
-
-### 4. The window sync executor fetches provider observations
-
-For each chunk window, the window sync executor uses the connector to fetch normalized observations, not final ledger records.
-
-That includes:
-
-- provider accounts
-- provider balances
-- provider transactions
-- current provider snapshots
-
-This keeps provider data separate from the user-facing finance ledger.
-
-### 5. The system loads the existing window
-
-Before changing anything, the system loads the existing persisted data that may
-match the incoming provider observations.
-
-This snapshot lookup window can be a bit wider than the requested sync window.
-
-We need that because providers do not always report the same transaction with
-exactly the same timestamp or status over time. A pending transaction may later
-become booked, or a provider may slightly shift the effective time after
-settlement. If we only looked inside the exact requested window, we could miss
-the earlier stored record and create an avoidable duplicate.
-
-### 6. The system builds a diff plan
-
-The next step is to create a plan that says what should happen.
-
-This step is pure planning:
-
-- no provider calls
-- no persistence writes
-- no hidden side effects
-
-The diff planner decides whether each provider transaction should:
-
-- update an existing transaction
-- create a new transaction
-
-### 7. Matching stays conservative
-
-Strong matches are updated.
-
-Weak or ambiguous matches create a new transaction instead of merging into an
-existing one. This is intentional: duplicates are safer than silently merging
-the wrong financial event.
-
-### 8. User edits are preserved
-
-When a synced transaction already exists, the system refreshes the stored
-provider-original values from the new provider observation.
-
-But user-facing fields are only overwritten when they still match the previous
-provider-original values. If a user changed a description, amount, or date, the
-sync should preserve that edit instead of erasing it.
-
-### 9. The plan is applied atomically
-
-After planning, the system applies the intended changes to persistence.
-
-At a high level, this writes:
-
-- updated or newly created transactions
-- provider match records
-- account and balance observations
-- current provider snapshots
-- sync run and sync state metadata
-
-### 10. Sync state is updated
-
-After each attempted chunk window, the system appends one sync state row for the
-connection.
-
-Conceptually, the journal for one connection evolves like this:
+Manual and scheduled bank-connection jobs share one path:
 
 ```text
-state0 -> state1 -> state2 -> state3
+durable connection -> BankSyncService -> SyncOrchestrator
+  -> target policy -> oldest-first requested windows -> WindowSyncExecutor
+  -> connector fetch -> load existing window -> diff plan -> atomic apply
 ```
 
-Where each next state records the concrete attempted chunk window and whether it
-succeeded.
+`BankSyncService` owns job lifecycle projections: it loads the connection and
+encrypted secret, records start/success/failure and schedule diagnostics, and
+maps aggregate orchestration statistics to the existing job result. The
+orchestrator and executor own coverage, connector fetching, planning, and
+requested-window persistence.
 
-If a later chunk fails, the failed row is still appended, and target-window
-policy decides how that latest failed row should influence the next plan.
+The orchestrator preserves explicit job bounds. A supplied start or end is
+used unchanged; an omitted end is the orchestration clock and an omitted start
+comes from journal policy relative to that end. Automatic planning uses the
+latest journal state, not `LastSuccessfulSyncAt`. The resulting target is
+validated, then split into contiguous half-open requested windows of at most
+30 calendar days and executed oldest first without explicit timezone
+normalization.
 
-That state row includes:
+## Requested-Window Apply
 
-- last attempt
-- last success
-- attempted window
-- last run or job reference
-- stats
+For each requested window, the executor resolves the persisted connector,
+fetches normalized observations, loads the matching persisted window, creates
+a pure conservative diff plan, and applies it.
 
-Failed sessions are part of the same journal. They stay visible as explicit
-attempt history, and target-window policy is the seam that decides how the
-latest state should affect the next plan.
+The transactional apply creates a finance account and provider-account mapping
+for a first observed provider account. It takes the tenant from the durable
+connection, preserves member-edited account and transaction fields under the
+merge rules, writes balances, matches, transactions, and typed provider
+snapshots, and records created-account statistics accurately across chunks.
+
+On success, all finance writes and the successful sync-state journal row commit
+in the same transaction. The row records the requested window, attempt and
+success time, run/job identity, and aggregate statistics. A journal-write or
+finance-write failure rolls back that requested window.
+
+Fetch, planning, or apply failures leave no partial writes for their requested
+window. The orchestrator then appends a failed journal attempt through its
+standalone journal path. Earlier successful chunks remain durable when a later
+chunk fails, and the next automatic target derives its checkpoint from the
+latest failed or successful journal state. At-least-once delivery can therefore
+resume without refetching completed chunks or duplicating their writes.
+
+Deleting a connection removes its journal records in the existing metadata
+cleanup transaction, together with connection-owned provider data.
 
 ## Design Principles
 
-- Keep provider data separate from ledger data.
-- Persist only typed, sanitized provider snapshots; do not retain successful
-  response bodies.
-- Plan before writing.
-- Prefer explicit matches over clever guesses.
-- Preserve user edits.
-- Keep a latest-attempt sync state journal per connection.
-- Load the latest state before planning the next session.
-- Append every attempted chunk; do not hide failures behind older success rows.
-- Keep provider-specific transport details behind connectors.
-
-## In Short
-
-Conceptually, provider sync is:
-
-```text
-connection -> load latest sync state -> choose target window -> split into chunk windows -> execute each requested window -> load existing window -> plan diff -> apply changes -> append next attempt state
-```
-
-The important part is not just fetching bank data. The important part is making
-sync explainable, conservative, and safe for user-managed ledger data.
+- Keep product-provider identity distinct from technical connector identity.
+- Keep encrypted secrets at rest; never log, persist, or snapshot plaintext.
+- Keep provider observations and typed snapshots separate from ledger data.
+- Plan before writing and use conservative transaction matching.
+- Preserve member edits under the existing merge rules.
+- Treat journal rows as durable per-window progress and connection fields as
+  whole-job operational projections.

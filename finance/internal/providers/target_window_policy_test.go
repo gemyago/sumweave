@@ -11,13 +11,113 @@ import (
 )
 
 func TestCheckpointTargetWindowPolicy(t *testing.T) {
+	t.Run("determines explicit and automatic targets", func(t *testing.T) {
+		fake := faker.New()
+		location := time.FixedZone("case-"+fake.Lorem().Word(), fake.IntBetween(-11, 12)*60*60)
+		now := time.Date(
+			2026,
+			time.Month(fake.IntBetween(1, 12)),
+			fake.IntBetween(1, 20),
+			fake.IntBetween(0, 23),
+			fake.IntBetween(0, 59),
+			0,
+			0,
+			location,
+		)
+		policy := NewCheckpointTargetWindowPolicy()
+		makeState := func() *domain.ProviderSyncState {
+			checkpointAge := fake.IntBetween(31, 60)
+			return &domain.ProviderSyncState{
+				Window: domain.ProviderSyncWindow{
+					Start: now.AddDate(0, 0, -checkpointAge-fake.IntBetween(1, 10)),
+					End:   now.AddDate(0, 0, -checkpointAge),
+				},
+				SucceededAt: &now,
+			}
+		}
+
+		t.Run("uses journal state for automatic bounds", func(t *testing.T) {
+			state := makeState()
+
+			window, err := policy.Determine(TargetWindowRequest{
+				Now:   now,
+				State: state,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, domain.ProviderSyncWindow{Start: state.Window.End, End: now}, window)
+		})
+
+		t.Run("preserves a supplied start and resolves the end to now", func(t *testing.T) {
+			start := now.AddDate(0, 0, -fake.IntBetween(1, 29))
+
+			window, err := policy.Determine(TargetWindowRequest{
+				Now:         now,
+				WindowStart: &start,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, domain.ProviderSyncWindow{Start: start, End: now}, window)
+		})
+
+		t.Run("uses a supplied end with journal-derived start", func(t *testing.T) {
+			state := makeState()
+			end := now.AddDate(0, 0, -fake.IntBetween(1, 10))
+			expectedStart := state.Window.End
+			if recentStart := end.AddDate(0, 0, -recentRefreshDays); expectedStart.After(recentStart) {
+				expectedStart = recentStart
+			}
+
+			window, err := policy.Determine(TargetWindowRequest{
+				Now:       now,
+				State:     state,
+				WindowEnd: &end,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, domain.ProviderSyncWindow{Start: expectedStart, End: end}, window)
+		})
+
+		t.Run("preserves complete explicit bounds", func(t *testing.T) {
+			start := now.AddDate(0, 0, -fake.IntBetween(31, 60))
+			end := start.AddDate(0, 0, fake.IntBetween(1, 30))
+
+			window, err := policy.Determine(TargetWindowRequest{
+				Now:         now,
+				WindowStart: &start,
+				WindowEnd:   &end,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, domain.ProviderSyncWindow{Start: start, End: end}, window)
+		})
+
+		t.Run("rejects invalid resolved windows", func(t *testing.T) {
+			for name, window := range map[string]domain.ProviderSyncWindow{
+				"equal bounds": {
+					Start: now,
+					End:   now,
+				},
+				"reversed bounds": {
+					Start: now,
+					End:   now.Add(-time.Second),
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					_, err := policy.Determine(TargetWindowRequest{
+						Now:         now,
+						WindowStart: &window.Start,
+						WindowEnd:   &window.End,
+					})
+					require.ErrorIs(t, err, ErrInvalidProviderSyncTargetWindow)
+				})
+			}
+		})
+	})
+
 	t.Run("determine", func(t *testing.T) {
 		t.Run("plans a 3 year backfill for fresh runs", func(t *testing.T) {
 			fake := faker.New()
 			now := fake.Time().Recent().UTC().Truncate(time.Second)
 			policy := NewCheckpointTargetWindowPolicy()
 
-			window, err := policy.Determine(now, nil)
+			window, err := policy.Determine(TargetWindowRequest{Now: now})
 			require.NoError(t, err)
 
 			assert.Equal(t, domain.ProviderSyncWindow{
@@ -55,7 +155,7 @@ func TestCheckpointTargetWindowPolicy(t *testing.T) {
 				End:   now.AddDate(0, 0, -5),
 			}, &succeededAt)
 
-			window, err := policy.Determine(now, state)
+			window, err := policy.Determine(TargetWindowRequest{Now: now, State: state})
 			require.NoError(t, err)
 
 			assert.Equal(t, domain.ProviderSyncWindow{
@@ -94,7 +194,7 @@ func TestCheckpointTargetWindowPolicy(t *testing.T) {
 				End:   checkpoint,
 			}, &succeededAt)
 
-			window, err := policy.Determine(now, state)
+			window, err := policy.Determine(TargetWindowRequest{Now: now, State: state})
 			require.NoError(t, err)
 
 			assert.Equal(t, domain.ProviderSyncWindow{
@@ -132,7 +232,7 @@ func TestCheckpointTargetWindowPolicy(t *testing.T) {
 				End:   checkpoint.AddDate(0, 0, 2),
 			}, nil)
 
-			window, err := policy.Determine(now, state)
+			window, err := policy.Determine(TargetWindowRequest{Now: now, State: state})
 			require.NoError(t, err)
 
 			assert.Equal(t, domain.ProviderSyncWindow{
@@ -171,7 +271,7 @@ func TestCheckpointTargetWindowPolicy(t *testing.T) {
 					End:   now.AddDate(0, 0, -10),
 				}, nil)
 
-				window, err := policy.Determine(now, state)
+				window, err := policy.Determine(TargetWindowRequest{Now: now, State: state})
 				require.NoError(t, err)
 
 				assert.Equal(t, domain.ProviderSyncWindow{
@@ -221,7 +321,10 @@ func TestCheckpointTargetWindowPolicy(t *testing.T) {
 
 			for name, invalidWindow := range testCases {
 				t.Run(name, func(t *testing.T) {
-					_, err := policy.Determine(now, makeState(invalidWindow, &succeededAt))
+					_, err := policy.Determine(TargetWindowRequest{
+						Now:   now,
+						State: makeState(invalidWindow, &succeededAt),
+					})
 					require.ErrorIs(t, err, ErrInvalidProviderSyncStateWindow)
 				})
 			}

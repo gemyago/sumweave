@@ -27,7 +27,7 @@ type SyncStateJournal interface {
 }
 
 type TargetWindowPolicy interface {
-	Determine(now time.Time, state *domain.ProviderSyncState) (domain.ProviderSyncWindow, error)
+	Determine(request TargetWindowRequest) (domain.ProviderSyncWindow, error)
 }
 
 type WindowChunkPolicy interface {
@@ -39,10 +39,12 @@ type WindowExecutor interface {
 }
 
 type SyncOrchestrationRequest struct {
-	Connection domain.ProviderConnectionRef
-	Secret     domain.ConnectionSecret
-	JobID      string
-	Reason     string
+	Connection  domain.ProviderConnectionRef
+	Secret      domain.ConnectionSecret
+	JobID       string
+	Reason      string
+	WindowStart *time.Time
+	WindowEnd   *time.Time
 }
 
 type SyncOrchestrationResult struct {
@@ -114,7 +116,7 @@ func NewSyncOrchestrator(
 	return orchestrator, nil
 }
 
-// Orchestrate loads the latest sync state, plans chunk windows, and appends one state row per attempted chunk.
+// Orchestrate plans chunk windows, loading latest state when needed. Failed states are appended separately.
 func (o *SyncOrchestrator) Orchestrate(
 	ctx context.Context,
 	request SyncOrchestrationRequest,
@@ -129,12 +131,21 @@ func (o *SyncOrchestrator) Orchestrate(
 		slog.String("reason", request.Reason),
 	)
 
-	lastState, err := o.syncStateJournal.LoadLastState(ctx, request.Connection)
-	if err != nil {
-		return SyncOrchestrationResult{}, fmt.Errorf("load sync state: %w", err)
+	var lastState *domain.ProviderSyncState
+	if request.WindowStart == nil {
+		var err error
+		lastState, err = o.syncStateJournal.LoadLastState(ctx, request.Connection)
+		if err != nil {
+			return SyncOrchestrationResult{}, fmt.Errorf("load sync state: %w", err)
+		}
 	}
 
-	targetWindow, err := o.targetWindowPolicy.Determine(o.now(), lastState)
+	targetWindow, err := o.targetWindowPolicy.Determine(TargetWindowRequest{
+		Now:         o.now(),
+		State:       lastState,
+		WindowStart: request.WindowStart,
+		WindowEnd:   request.WindowEnd,
+	})
 	if err != nil {
 		o.logger.ErrorContext(
 			ctx,
@@ -276,24 +287,7 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 		return WindowSyncResult{}, domain.ProviderSyncStats{}, fmt.Errorf("execute requested window: %w", executeErr)
 	}
 
-	completedAt := o.now()
-	chunkState.SucceededAt = &completedAt
-	chunkState.RunID = windowResult.RunID
 	updatedStats := mergeProviderSyncStats(chunkState.AggregateStats, windowResult.Stats)
-	chunkState.AggregateStats = updatedStats
-	if appendErr := o.syncStateJournal.AppendSyncState(ctx, chunkState); appendErr != nil {
-		o.logger.ErrorContext(
-			ctx,
-			"append provider sync state failed",
-			slog.String("connection_id", request.Connection.ConnectionID),
-			slog.Time("requested_start", requestedWindow.Start),
-			slog.Time("requested_end", requestedWindow.End),
-			slog.String("run_id", windowResult.RunID),
-			slog.String("error", appendErr.Error()),
-		)
-
-		return WindowSyncResult{}, domain.ProviderSyncStats{}, fmt.Errorf("append sync state: %w", appendErr)
-	}
 
 	o.logger.InfoContext(
 		ctx,
@@ -310,6 +304,7 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 func mergeProviderSyncStats(left domain.ProviderSyncStats, right domain.ProviderSyncStats) domain.ProviderSyncStats {
 	return domain.ProviderSyncStats{
 		ObservedAccounts:             left.ObservedAccounts + right.ObservedAccounts,
+		CreatedAccounts:              left.CreatedAccounts + right.CreatedAccounts,
 		ObservedTransactions:         left.ObservedTransactions + right.ObservedTransactions,
 		CreatedTransactions:          left.CreatedTransactions + right.CreatedTransactions,
 		UpdatedTransactions:          left.UpdatedTransactions + right.UpdatedTransactions,

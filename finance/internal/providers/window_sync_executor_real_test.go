@@ -166,9 +166,10 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			mock.Anything,
 			monobankConnection,
 			requestedWindow,
+			mock.Anything,
 		)
 		monobankLoad.RunAndReturn(
-			func(_ context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow) (providers.ExistingWindowSnapshot, error) {
+			func(_ context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow, _ []providers.ProviderTransactionIdentity) (providers.ExistingWindowSnapshot, error) {
 				loadConnections = append(loadConnections, connection)
 				loadWindows = append(loadWindows, window)
 				return providers.ExistingWindowSnapshot{}, nil
@@ -180,9 +181,10 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 			mock.Anything,
 			enableBankingConnection,
 			requestedWindow,
+			mock.Anything,
 		)
 		enableBankingLoad.RunAndReturn(
-			func(_ context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow) (providers.ExistingWindowSnapshot, error) {
+			func(_ context.Context, connection domain.ProviderConnectionRef, window domain.ProviderSyncWindow, _ []providers.ProviderTransactionIdentity) (providers.ExistingWindowSnapshot, error) {
 				loadConnections = append(loadConnections, connection)
 				loadWindows = append(loadWindows, window)
 				return providers.ExistingWindowSnapshot{}, nil
@@ -190,12 +192,17 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 		)
 		enableBankingLoad.Once()
 
-		applySync := store.EXPECT().ApplySync(mock.Anything, mock.Anything, mock.Anything)
+		applySync := store.EXPECT().ApplySync(mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 		applySync.RunAndReturn(
-			func(_ context.Context, diffPlan providers.ProviderDiffPlan, applyPlan providers.ApplyPlan) error {
+			func(
+				_ context.Context,
+				diffPlan providers.ProviderDiffPlan,
+				applyPlan providers.ApplyPlan,
+				_ ...domain.ProviderSyncState,
+			) (domain.ProviderSyncStats, error) {
 				appliedDiffPlans = append(appliedDiffPlans, diffPlan)
 				appliedApplyPlans = append(appliedApplyPlans, applyPlan)
-				return nil
+				return applyPlan.Stats, nil
 			},
 		)
 		applySync.Twice()

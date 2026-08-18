@@ -32,15 +32,12 @@ type Service struct {
 	fx                     *FXService
 	currentFXRates         fxServiceStore
 	csvImports             *CSVImportService
-	bankSync               *BankSyncService
 	fxProviders            map[string]FXRatesProvider
 	defaultFXProvider      string
 	fxJobEnqueuer          FXRefreshJobEnqueuer
 	fxScheduleWriter       FXRefreshScheduleWriter
 	connectionSecretCipher connectionSecretCipher
 	bankProviders          map[string]BankConnectionProvider
-	bankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
-	bankSyncScheduleWriter BankConnectionSyncScheduleWriter
 	csvImportJobEnqueuer   CSVImportJobEnqueuer
 	logger                 *slog.Logger
 }
@@ -105,14 +102,6 @@ func WithBankProviders(providers ...BankConnectionProvider) ServiceOption {
 	}
 }
 
-func WithBankSyncJobEnqueuer(enqueuer BankConnectionSyncJobEnqueuer) ServiceOption {
-	return func(service *Service) { service.bankSyncJobEnqueuer = enqueuer }
-}
-
-func WithBankConnectionSyncScheduleWriter(writer BankConnectionSyncScheduleWriter) ServiceOption {
-	return func(service *Service) { service.bankSyncScheduleWriter = writer }
-}
-
 func WithLogger(logger *slog.Logger) ServiceOption {
 	return func(service *Service) {
 		if logger != nil {
@@ -170,26 +159,6 @@ func (s *Service) bindServices() {
 		WithCSVImportServiceIDGenerator(s.newID),
 		WithCSVImportServiceJobEnqueuer(s.csvImportJobEnqueuer),
 	)
-	if bankSyncStore, ok := s.store.(bankSyncFocusedStore); ok {
-		var snapshotStore providerSnapshotWriter
-		var snapshotDeleter providerSnapshotConnectionDeleter
-		if store, storeOK := s.store.(*persistence.Store); storeOK {
-			snapshotStore = persistence.NewProviderSnapshotStoreFromStore(store)
-			snapshotDeleter = persistence.NewProviderSnapshotStoreFromStore(store)
-		}
-		s.bankSync = NewBankSyncService(
-			bankSyncStore,
-			WithBankSyncServiceNow(s.now),
-			WithBankSyncServiceIDGenerator(s.newID),
-			WithBankSyncServiceConnectionSecretCipher(s.connectionSecretCipher),
-			WithBankSyncServiceProviders(mapBankProviders(s.bankProviders)...),
-			WithBankSyncServiceJobEnqueuer(s.bankSyncJobEnqueuer),
-			WithBankSyncServiceScheduleWriter(s.bankSyncScheduleWriter),
-			WithBankSyncServiceLogger(s.logger),
-			WithBankSyncServiceSnapshotWriter(snapshotStore),
-			WithBankSyncServiceSnapshotDeleter(snapshotDeleter),
-		)
-	}
 }
 
 func mapFXProviders(values map[string]FXRatesProvider) []FXRatesProvider {
@@ -198,21 +167,6 @@ func mapFXProviders(values map[string]FXRatesProvider) []FXRatesProvider {
 		items = append(items, value)
 	}
 	return items
-}
-
-func mapBankProviders(values map[string]BankConnectionProvider) []BankConnectionProvider {
-	items := make([]BankConnectionProvider, 0, len(values))
-	for _, value := range values {
-		items = append(items, value)
-	}
-	return items
-}
-
-func (s *Service) bankSyncService() (*BankSyncService, error) {
-	if s.bankSync == nil {
-		return nil, errors.New("bank sync store is required")
-	}
-	return s.bankSync, nil
 }
 
 func (s *Service) requireTenantMember(ctx context.Context, tenantID string, userID string) error {
@@ -526,124 +480,6 @@ func (s *Service) LinkTokenBankConnection(
 	return connection, nil
 }
 
-func (s *Service) UpsertBankConnectionSchedule(
-	ctx context.Context,
-	params UpsertBankConnectionScheduleParams,
-) (domain.BankConnectionSchedule, error) {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return domain.BankConnectionSchedule{}, err
-	}
-	return service.UpsertBankConnectionSchedule(ctx, params)
-}
-
-func (s *Service) PauseBankConnectionSchedule(
-	ctx context.Context,
-	params PauseBankConnectionScheduleParams,
-) (domain.BankConnectionSchedule, error) {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return domain.BankConnectionSchedule{}, err
-	}
-	return service.PauseBankConnectionSchedule(ctx, params)
-}
-
-func (s *Service) ResumeBankConnectionSchedule(
-	ctx context.Context,
-	params ResumeBankConnectionScheduleParams,
-) (domain.BankConnectionSchedule, error) {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return domain.BankConnectionSchedule{}, err
-	}
-	return service.ResumeBankConnectionSchedule(ctx, params)
-}
-
-func (s *Service) writeBankConnectionSyncSchedule(ctx context.Context, schedule BankConnectionSyncSchedule) error {
-	if s.bankSyncScheduleWriter == nil {
-		return nil
-	}
-	if err := s.bankSyncScheduleWriter.UpsertBankConnectionSyncSchedule(ctx, schedule); err != nil {
-		return errors.New("write bank connection sync schedule: " + err.Error())
-	}
-	return nil
-}
-
-func (s *Service) TriggerBankConnectionSync(
-	ctx context.Context,
-	params TriggerBankConnectionSyncParams,
-) (BankConnectionSyncJobRef, error) {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return BankConnectionSyncJobRef{}, err
-	}
-	return service.TriggerBankConnectionSync(ctx, params)
-}
-
-func (s *Service) DeleteBankConnection(
-	ctx context.Context,
-	params DeleteBankConnectionParams,
-) error {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return err
-	}
-	return service.DeleteBankConnection(ctx, params)
-}
-
-func (s *Service) RunBankConnectionSync(
-	ctx context.Context,
-	params RunBankConnectionSyncParams,
-) (BankConnectionSyncResult, error) {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return BankConnectionSyncResult{}, err
-	}
-	return service.RunBankConnectionSync(ctx, params)
-}
-
-func (s *Service) RecordBankConnectionSyncScheduled(
-	ctx context.Context,
-	params RecordBankConnectionSyncScheduledParams,
-) (domain.BankConnectionSchedule, error) {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return domain.BankConnectionSchedule{}, err
-	}
-	return service.RecordBankConnectionSyncScheduled(ctx, params)
-}
-
-func (s *Service) ApplyProviderSyncResult(
-	ctx context.Context,
-	params ApplyProviderSyncResultParams,
-) (BankConnectionSyncResult, error) {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return BankConnectionSyncResult{}, err
-	}
-	return service.ApplyProviderSyncResult(ctx, params)
-}
-
-func (s *Service) ListBankConnections(
-	ctx context.Context,
-	params ListBankConnectionsParams,
-) ([]BankConnectionView, error) {
-	service, err := s.bankSyncService()
-	if err != nil {
-		return nil, err
-	}
-	return service.ListBankConnections(ctx, params)
-}
-
-func (s *Service) bankProvider(name string) (*bankProviderRef, error) {
-	trimmedName := strings.TrimSpace(name)
-	provider, ok := s.bankProviders[trimmedName]
-	if !ok {
-		return nil, bankProviderNotConfiguredError(trimmedName)
-	}
-	return &bankProviderRef{BankConnectionProvider: provider, bankID: trimmedName}, nil
-}
-
 func (s *Service) bankProviderForLink(bankID string, method bankLinkMethod) (*bankProviderRef, error) {
 	trimmedBankID := strings.TrimSpace(bankID)
 	providerName, err := configuredBankProviderName(trimmedBankID, method)
@@ -690,28 +526,6 @@ func (s *Service) encryptAndSaveConnectionSecret(
 	return secretWriter.SaveConnectionSecret(ctx, providerName, reference, plaintext)
 }
 
-func (s *Service) decryptConnectionSecret(
-	ctx context.Context,
-	secretID string,
-) (string, error) {
-	store, err := s.connectionSecretsStore()
-	if err != nil {
-		return "", err
-	}
-	if s.connectionSecretCipher == nil {
-		return "", errors.New("connection secret cipher is required")
-	}
-	secret, err := store.GetConnectionSecret(ctx, secretID)
-	if err != nil {
-		return "", errors.New("get connection secret: " + err.Error())
-	}
-	plaintext, err := s.connectionSecretCipher.OpenString(secret.Envelope)
-	if err != nil {
-		return "", errors.New("open connection secret: " + err.Error())
-	}
-	return plaintext, nil
-}
-
 func (s *Service) saveLinkedBankConnection(
 	ctx context.Context,
 	tenantID string,
@@ -745,192 +559,4 @@ func (s *Service) saveLinkedBankConnection(
 		return domain.BankConnection{}, errors.New("save bank connection: " + err.Error())
 	}
 	return saved, nil
-}
-
-func (s *Service) upsertProviderAccount(
-	ctx context.Context,
-	connection domain.BankConnection,
-	item ProviderNormalizedAccount,
-	now time.Time,
-) (domain.ConnectionProviderAccount, error) {
-	if s.bankSync == nil {
-		return domain.ConnectionProviderAccount{}, errors.New("bank sync store is required")
-	}
-	return s.bankSync.upsertProviderAccount(ctx, connection, item, now)
-}
-
-func (s *Service) findOrCreateFinanceAccountForProviderAccount(
-	ctx context.Context,
-	connection domain.BankConnection,
-	item ProviderNormalizedAccount,
-	existingProviderAccount *domain.ConnectionProviderAccount,
-	now time.Time,
-) (domain.Account, error) {
-	if s.bankSync == nil {
-		return domain.Account{}, errors.New("bank sync store is required")
-	}
-	return s.bankSync.findOrCreateFinanceAccountForProviderAccount(ctx, connection, item, existingProviderAccount, now)
-}
-
-//nolint:unparam // Test-only compatibility wrapper keeps the legacy bool result for existing assertions.
-func (s *Service) applyProviderTransaction(
-	ctx context.Context,
-	connection domain.BankConnection,
-	providerAccount domain.ConnectionProviderAccount,
-	item ProviderNormalizedTransaction,
-	now time.Time,
-) (bool, error) {
-	if s.bankSync == nil {
-		return false, errors.New("bank sync store is required")
-	}
-	return s.bankSync.applyProviderTransaction(ctx, connection, providerAccount, item, now)
-}
-
-func (s *Service) deleteBankConnectionOwnedMetadata(ctx context.Context, connection domain.BankConnection) error {
-	if s.bankSync == nil {
-		return errors.New("bank sync store is required")
-	}
-	return s.bankSync.deleteBankConnectionOwnedMetadata(ctx, connection)
-}
-
-func (s *Service) syncRunAlreadyApplied(
-	ctx context.Context,
-	syncStore *bankSyncStoreRef,
-	connectionID string,
-	syncKey string,
-) (bool, error) {
-	if syncStore == nil {
-		return false, nil
-	}
-	if strings.TrimSpace(syncKey) == "" {
-		return false, nil
-	}
-	existing, err := syncStore.GetBankConnectionSyncRun(ctx, connectionID, syncKey)
-	if err != nil {
-		return false, errors.New("apply provider sync result: " + err.Error())
-	}
-	return existing != nil, nil
-}
-
-func (s *Service) claimSyncRun(
-	ctx context.Context,
-	syncStore *bankSyncStoreRef,
-	connectionID string,
-	syncKey string,
-	jobID string,
-	now time.Time,
-) (bool, error) {
-	if syncStore == nil {
-		return true, nil
-	}
-	if strings.TrimSpace(syncKey) == "" {
-		return true, nil
-	}
-	newID := s.newID
-	if newID == nil {
-		newID = uuid.NewString
-	}
-	claimed, err := syncStore.ClaimBankConnectionSyncRun(ctx, domain.BankConnectionSyncRun{
-		ID:           newID(),
-		ConnectionID: connectionID,
-		SyncKey:      strings.TrimSpace(syncKey),
-		JobID:        strings.TrimSpace(jobID),
-		CreatedAt:    now,
-	})
-	if err != nil {
-		return false, errors.New("apply provider sync result: " + err.Error())
-	}
-	return claimed, nil
-}
-
-func (s *Service) makeScheduledRunMetadata(
-	ctx context.Context,
-	syncStore *bankSyncStoreRef,
-	connection domain.BankConnection,
-	params RunBankConnectionSyncParams,
-	now time.Time,
-) (*ProviderScheduledRunMetadata, bool, error) {
-	if strings.TrimSpace(params.Reason) != BankConnectionSyncReasonScheduled {
-		return nil, false, nil
-	}
-	metadata := &ProviderScheduledRunMetadata{ScheduledAt: now}
-	schedule, err := syncStore.GetBankConnectionSchedule(ctx, connection.ID)
-	if errors.Is(err, persistence.ErrBankConnectionScheduleNotFound) {
-		return metadata, true, nil
-	}
-	if err != nil {
-		return nil, false, errors.New("prepare bank connection sync schedule: " + err.Error())
-	}
-	if schedule.Enabled && schedule.Interval > 0 {
-		nextRunAt := now.Add(schedule.Interval).UTC()
-		metadata.NextRunAt = &nextRunAt
-	}
-	return metadata, true, nil
-}
-
-func (s *Service) markBankConnectionSyncStarted(
-	ctx context.Context,
-	syncStore *bankSyncStoreRef,
-	connection *domain.BankConnection,
-	params RunBankConnectionSyncParams,
-	now time.Time,
-	scheduledRun *ProviderScheduledRunMetadata,
-) error {
-	connection.LastSyncJobID = strings.TrimSpace(params.JobID)
-	connection.LastSyncStartedAt = &now
-	connection.LastSyncError = ""
-	connection.UpdatedAt = now
-	if _, err := syncStore.SaveBankConnection(ctx, *connection); err != nil {
-		return err
-	}
-	schedule, err := syncStore.GetBankConnectionSchedule(ctx, connection.ID)
-	if err != nil || schedule == nil {
-		return err
-	}
-	schedule.LastStartedAt = &now
-	schedule.LastJobID = strings.TrimSpace(params.JobID)
-	if scheduledRun != nil {
-		schedule.LastScheduledAt = &scheduledRun.ScheduledAt
-		schedule.NextRunAt = scheduledRun.NextRunAt
-	}
-	schedule.UpdatedAt = now
-	_, err = syncStore.SaveBankConnectionSchedule(ctx, *schedule)
-	return err
-}
-
-func (s *Service) recordBankConnectionSyncFailure(
-	ctx context.Context,
-	syncStore *bankSyncStoreRef,
-	connection *domain.BankConnection,
-	params RunBankConnectionSyncParams,
-	startedAt time.Time,
-	scheduledRun *ProviderScheduledRunMetadata,
-	syncErr error,
-) error {
-	nowFn := s.now
-	if nowFn == nil {
-		nowFn = func() time.Time { return time.Now().UTC() }
-	}
-	connection.LastSyncJobID = strings.TrimSpace(params.JobID)
-	connection.LastSyncStartedAt = &startedAt
-	connection.LastSyncError = strings.TrimSpace(syncErr.Error())
-	connection.UpdatedAt = nowFn().UTC()
-	if _, err := syncStore.SaveBankConnection(ctx, *connection); err != nil {
-		return err
-	}
-	schedule, err := syncStore.GetBankConnectionSchedule(ctx, connection.ID)
-	if err != nil || schedule == nil {
-		return errors.New("run bank connection sync: " + syncErr.Error())
-	}
-	schedule.LastStartedAt = &startedAt
-	schedule.LastJobID = strings.TrimSpace(params.JobID)
-	if scheduledRun != nil {
-		schedule.LastScheduledAt = &scheduledRun.ScheduledAt
-		schedule.NextRunAt = scheduledRun.NextRunAt
-	}
-	schedule.UpdatedAt = nowFn().UTC()
-	if _, err = syncStore.SaveBankConnectionSchedule(ctx, *schedule); err != nil {
-		return err
-	}
-	return errors.New("run bank connection sync: " + syncErr.Error())
 }

@@ -307,10 +307,6 @@ func TestFinanceCommand(t *testing.T) {
 			State:             domain.BankConnectionStateActive,
 		}, link)
 
-		syncResult, err := provider.Sync(t.Context(), financepkg.ProviderSyncParams{})
-		require.NoError(t, err)
-		assert.Equal(t, financepkg.ProviderSyncResult{}, syncResult)
-
 		canceledCtx, cancel := context.WithCancel(t.Context())
 		cancel()
 		_, err = provider.LinkToken(canceledCtx, financepkg.ProviderTokenLinkParams{})

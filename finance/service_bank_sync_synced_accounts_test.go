@@ -1,7 +1,6 @@
 package finance
 
 import (
-	"errors"
 	"testing"
 	"time"
 
@@ -31,7 +30,7 @@ func TestBankSyncServiceListBankConnectionSyncedAccounts(t *testing.T) {
 			State: domain.BankConnectionStateActive, CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
-		return store, NewBankSyncService(store), tenant, ownerID, connection
+		return store, NewBankSyncService(store, newMockbankSyncOrchestrator(t)), tenant, ownerID, connection
 	}
 
 	t.Run("returns resolved rows in authoritative stable order", func(t *testing.T) {
@@ -93,60 +92,5 @@ func TestBankSyncServiceListBankConnectionSyncedAccounts(t *testing.T) {
 			}
 			require.ErrorIs(t, resultErr, ErrBankConnectionNotFound)
 		}
-	})
-
-	t.Run("wraps authoritative mapping store errors", func(t *testing.T) {
-		store, _, tenant, ownerID, connection := makeFixture(t)
-		storeErr := errors.New("mapping store unavailable")
-		service := NewBankSyncService(&failingProviderSyncStore{Store: store, listProviderAccountsErr: storeErr})
-
-		_, err := service.ListBankConnectionSyncedAccounts(t.Context(), ListBankConnectionSyncedAccountsParams{
-			ActorUserID: ownerID, TenantID: tenant.ID, ConnectionID: connection.ID,
-		})
-		require.ErrorIs(t, err, storeErr)
-		require.ErrorContains(t, err, "list bank connection synced accounts")
-	})
-
-	t.Run("refreshes a hidden linked account without restoring it", func(t *testing.T) {
-		fake := faker.New()
-		store, service, tenant, _, connection := makeFixture(t)
-		now := time.Date(2026, time.July, 16, 10, 0, 0, 0, time.Local)
-		hiddenAt := now.Add(-time.Hour)
-		providerAccountID := "provider-account-" + fake.UUID().V4()
-		account, err := store.SaveAccount(t.Context(), domain.Account{
-			ID:        "account-" + fake.UUID().V4(),
-			TenantID:  tenant.ID,
-			Name:      "previous-" + fake.Lorem().Word(),
-			Currency:  "USD",
-			Kind:      domain.AccountKindLinked,
-			HiddenAt:  &hiddenAt,
-			CreatedAt: now.Add(-2 * time.Hour),
-			UpdatedAt: now.Add(-2 * time.Hour),
-			LinkedAccount: &domain.LinkedAccount{
-				Provider: connection.Provider, ProviderAccountID: providerAccountID,
-			},
-		})
-		require.NoError(t, err)
-		existingProviderAccount := &domain.ConnectionProviderAccount{
-			FinanceAccountID: account.ID,
-			Name:             account.Name,
-			Currency:         account.Currency,
-		}
-
-		refreshed, err := service.findOrCreateFinanceAccountForProviderAccount(
-			t.Context(),
-			connection,
-			ProviderNormalizedAccount{
-				ProviderAccountID: providerAccountID,
-				Name:              "current-" + fake.Lorem().Word(),
-				Currency:          "EUR",
-			},
-			existingProviderAccount,
-			now,
-		)
-		require.NoError(t, err)
-		assert.Equal(t, account.ID, refreshed.ID)
-		assert.NotNil(t, refreshed.HiddenAt)
-		assert.Equal(t, "EUR", refreshed.Currency)
 	})
 }

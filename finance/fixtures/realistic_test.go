@@ -12,6 +12,7 @@ import (
 	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/fixtures"
+	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
 	"github.com/jaswdr/faker/v2"
@@ -985,10 +986,8 @@ func TestRealisticScenario(t *testing.T) {
 	)
 	bankSyncService := financepkg.NewBankSyncService(
 		store,
+		provider,
 		financepkg.WithBankSyncServiceNow(func() time.Time { return now }),
-		financepkg.WithBankSyncServiceIDGenerator(uuid.NewString),
-		financepkg.WithBankSyncServiceConnectionSecretCipher(cipher),
-		financepkg.WithBankSyncServiceProviders(provider),
 	)
 	fxService := financepkg.NewFXService(
 		store,
@@ -1200,9 +1199,9 @@ func (realisticScenarioProvider) LinkToken(
 	}, nil
 }
 
-func (realisticScenarioProvider) Sync(
-	_ context.Context,
-	_ financepkg.ProviderSyncParams,
-) (financepkg.ProviderSyncResult, error) {
-	return financepkg.ProviderSyncResult{}, nil
+func (realisticScenarioProvider) Orchestrate(
+	context.Context,
+	internalproviders.SyncOrchestrationRequest,
+) (internalproviders.SyncOrchestrationResult, error) {
+	return internalproviders.SyncOrchestrationResult{}, nil
 }

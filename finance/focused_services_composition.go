@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
 )
@@ -28,10 +27,9 @@ type focusedServicesConfig struct {
 	fxJobEnqueuer          FXRefreshJobEnqueuer
 	fxScheduleWriter       FXRefreshScheduleWriter
 	csvImportJobEnqueuer   CSVImportJobEnqueuer
-	connectionSecretCipher connectionSecretCipher
-	bankProviders          []BankConnectionProvider
 	bankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
 	bankSyncScheduleWriter BankConnectionSyncScheduleWriter
+	bankSyncOrchestrator   bankSyncOrchestrator
 	logger                 *slog.Logger
 }
 
@@ -45,7 +43,7 @@ func defaultFocusedServicesConfig() focusedServicesConfig {
 
 func focusedServicesConfigFromConfig(
 	cfg *Config,
-	connectors []internalproviders.Connector,
+	syncOrchestrator bankSyncOrchestrator,
 ) focusedServicesConfig {
 	serviceConfig := defaultFocusedServicesConfig()
 	serviceConfig.now = cfg.Now
@@ -54,17 +52,12 @@ func focusedServicesConfigFromConfig(
 	serviceConfig.fxJobEnqueuer = cfg.FXJobEnqueuer
 	serviceConfig.fxScheduleWriter = cfg.FXScheduleWriter
 	serviceConfig.csvImportJobEnqueuer = cfg.CSVImportJobEnqueuer
-	serviceConfig.connectionSecretCipher = cfg.ConnectionSecretCipher
 	serviceConfig.bankSyncJobEnqueuer = cfg.BankSyncJobEnqueuer
 	serviceConfig.bankSyncScheduleWriter = cfg.BankSyncScheduleWriter
 	serviceConfig.logger = cfg.Logger
+	serviceConfig.bankSyncOrchestrator = syncOrchestrator
 	if trimmed := strings.TrimSpace(cfg.DefaultFXProvider); trimmed != "" {
 		serviceConfig.defaultFXProvider = trimmed
-	}
-	for _, connector := range connectors {
-		if provider, ok := newConnectorBankSyncProvider(connector); ok {
-			serviceConfig.bankProviders = append(serviceConfig.bankProviders, provider)
-		}
 	}
 	return serviceConfig
 }
@@ -139,11 +132,8 @@ func newFocusedServices(
 	csvImportService := NewCSVImportService(store, catalogService, ledgerService, csvImportOpts...)
 	bankSyncOpts := []BankSyncServiceOption{
 		WithBankSyncServiceNow(cfg.now),
-		WithBankSyncServiceIDGenerator(cfg.newID),
-		WithBankSyncServiceConnectionSecretCipher(cfg.connectionSecretCipher),
-		WithBankSyncServiceProviders(cfg.bankProviders...),
 		WithBankSyncServiceSnapshotDeleter(providerSnapshotStore),
-		WithBankSyncServiceSnapshotWriter(providerSnapshotStore),
+		WithBankSyncServiceSyncStateJournalDeleter(persistence.NewProviderSyncStateJournalStore(store)),
 	}
 	if cfg.bankSyncJobEnqueuer != nil {
 		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceJobEnqueuer(cfg.bankSyncJobEnqueuer))
@@ -161,6 +151,6 @@ func newFocusedServices(
 		ReportingService: reportingService,
 		FXService:        fxService,
 		CSVImportService: csvImportService,
-		BankSyncService:  NewBankSyncService(store, bankSyncOpts...),
+		BankSyncService:  NewBankSyncService(store, cfg.bankSyncOrchestrator, bankSyncOpts...),
 	}
 }

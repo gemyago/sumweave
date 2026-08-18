@@ -294,6 +294,75 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 		assert.Equal(t, 1, plan.Stats.UpdatedTransactions)
 	})
 
+	t.Run("diff planner confines identity-expanded rows to their strong provider id", func(t *testing.T) {
+		fake := faker.New()
+		connection := makeRandomProviderConnectionRef(
+			fake,
+			domain.ProviderIDMonobank,
+			domain.ProviderConnectorIDMonobank,
+		)
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		fingerprint := "fingerprint-" + fake.UUID().V4()
+		identityTransaction := domain.Transaction{
+			ID:          "transaction-" + fake.UUID().V4(),
+			TenantID:    "tenant-" + fake.UUID().V4(),
+			AccountID:   "finance-account-" + fake.UUID().V4(),
+			Source:      domain.TransactionSourceProvider,
+			Status:      domain.TransactionStatusPending,
+			Kind:        domain.TransactionKindRegular,
+			AmountMinor: -int64(fake.IntBetween(100, 90000)),
+			Currency:    "PLN",
+			Description: "transaction-" + fake.Lorem().Word(),
+			EffectiveAt: time.Date(2026, time.June, 20, 10, 0, 0, 0, time.UTC),
+		}
+		strongProviderTransactionID := "provider-transaction-" + fake.UUID().V4()
+		observations := []domain.ProviderTransactionObservation{
+			{
+				Connection:            connection,
+				ProviderAccountID:     providerAccountID,
+				ProviderTransactionID: strongProviderTransactionID,
+				Status:                domain.TransactionStatusBooked,
+				AmountMinor:           identityTransaction.AmountMinor,
+				Currency:              identityTransaction.Currency,
+				Description:           "strong-" + fake.Lorem().Word(),
+				EffectiveAt:           identityTransaction.EffectiveAt.Add(24 * time.Hour),
+				Fingerprint:           fingerprint,
+			},
+			{
+				Connection:            connection,
+				ProviderAccountID:     providerAccountID,
+				ProviderTransactionID: "provider-transaction-other-" + fake.UUID().V4(),
+				Status:                domain.TransactionStatusBooked,
+				AmountMinor:           identityTransaction.AmountMinor,
+				Currency:              identityTransaction.Currency,
+				Description:           "same-fingerprint-" + fake.Lorem().Word(),
+				EffectiveAt:           identityTransaction.EffectiveAt.Add(48 * time.Hour),
+				Fingerprint:           fingerprint,
+			},
+		}
+
+		plan := NewDiffPlanner().Plan(
+			domain.ProviderSyncBatch{Connection: connection, Transactions: observations},
+			ExistingWindowSnapshot{
+				Connection:           connection,
+				IdentityTransactions: []domain.Transaction{identityTransaction},
+				IdentityMatches: []domain.ProviderTransactionMatch{{
+					ConnectionID:          connection.ConnectionID,
+					ProviderAccountID:     providerAccountID,
+					ProviderTransactionID: strongProviderTransactionID,
+					Fingerprint:           fingerprint,
+					TransactionID:         identityTransaction.ID,
+				}},
+			},
+		)
+
+		require.Len(t, plan.TransactionActions, 2)
+		assert.Equal(t, ProviderTransactionActionTypeUpdate, plan.TransactionActions[0].Type)
+		assert.Equal(t, ProviderTransactionMatchStrategyProviderID, plan.TransactionActions[0].MatchStrategy)
+		assert.Equal(t, ProviderTransactionActionTypeCreate, plan.TransactionActions[1].Type)
+		assert.Equal(t, ProviderTransactionMatchStrategyNew, plan.TransactionActions[1].MatchStrategy)
+	})
+
 	t.Run("diff planner updates unique fingerprint matches", func(t *testing.T) {
 		fake := faker.New()
 		connection := makeRandomProviderConnectionRef(
