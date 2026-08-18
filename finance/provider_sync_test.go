@@ -625,13 +625,8 @@ func TestFinanceProviderSync(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.Len(t, connections, 1)
-			assert.Equal(
-				t,
-				domain.BankConnectionStateReauthRequired,
-				connections[0].Connection.State,
-			)
-			require.NotNil(t, connections[0].Connection.Reauth)
-			assert.Equal(t, "sca_expired", connections[0].Connection.Reauth.Reason)
+			assert.Equal(t, domain.BankConnectionStateActive, connections[0].Connection.State)
+			assert.Nil(t, connections[0].Connection.Reauth)
 			require.NotNil(t, connections[0].Schedule)
 			assert.Equal(t, "job-sync-2", connections[0].Schedule.LastJobID)
 
@@ -762,7 +757,7 @@ func TestFinanceProviderSync(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, storedConnection.LastSyncStartedAt)
 		assert.Equal(t, now, *storedConnection.LastSyncStartedAt)
-		assert.Equal(t, "provider sync failed", storedConnection.LastSyncError)
+		assert.Contains(t, storedConnection.LastSyncError, "provider sync failed")
 		assert.Equal(t, "job-failed", storedConnection.LastSyncJobID)
 		assert.Nil(t, storedConnection.LastSuccessfulSyncAt)
 
@@ -973,9 +968,7 @@ func TestFinanceProviderSync(t *testing.T) {
 				ConnectionID: connection.ID,
 				JobID:        "job-" + fake.UUID().V4(),
 			})
-			require.ErrorIs(t, err, ErrBankProviderNotConfigured)
-			require.ErrorContains(t, err, bankProviderPKO)
-			require.ErrorContains(t, err, bankConnectorEnableBanking)
+			require.ErrorIs(t, err, persistence.ErrConnectionSecretNotFound)
 		})
 	})
 

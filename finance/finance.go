@@ -44,6 +44,34 @@ func New(cfg *Config) (*Finance, error) {
 	connectors := newConnectors(cfg, store)
 	connectorRegistry := internalproviders.NewStaticConnectorRegistry(connectors...)
 	profileRegistry := newProviderProfileRegistry(cfg)
+	windowPersistence := persistence.NewProviderWindowSyncPersistence(store)
+	windowStore, err := internalproviders.NewProviderWindowSyncStore(
+		windowPersistence,
+		internalproviders.WithWindowSyncStoreIDGenerator(cfg.NewID),
+		internalproviders.WithWindowSyncStoreNow(cfg.Now),
+	)
+	if err != nil { // coverage-ignore // Static production wireup always supplies persistence.
+		return nil, fmt.Errorf("create provider window sync store: %w", err)
+	}
+	windowExecutor, err := internalproviders.NewWindowSyncExecutor(
+		internalproviders.WithConnectorRegistry(connectorRegistry),
+		internalproviders.WithWindowSyncStore(windowStore),
+		internalproviders.WithRunIDGenerator(cfg.NewID),
+		internalproviders.WithWindowSyncExecutorNow(cfg.Now),
+	)
+	if err != nil { // coverage-ignore // Static production wireup always supplies registry and store.
+		return nil, fmt.Errorf("create provider window sync executor: %w", err)
+	}
+	syncOrchestrator, err := internalproviders.NewSyncOrchestrator(internalproviders.SyncOrchestratorParams{
+		SyncStateJournal:   persistence.NewProviderSyncStateJournalStore(store),
+		TargetWindowPolicy: internalproviders.NewCheckpointTargetWindowPolicy(),
+		WindowChunkPolicy:  internalproviders.NewOldestFirstWindowChunkPolicy(),
+		WindowExecutor:     windowExecutor,
+		Logger:             cfg.Logger,
+	}, internalproviders.WithNow(cfg.Now))
+	if err != nil { // coverage-ignore // Static production wireup always supplies all required dependencies.
+		return nil, fmt.Errorf("create provider sync orchestrator: %w", err)
+	}
 	services := newFocusedServices(
 		store,
 		transactionStore,
@@ -51,7 +79,7 @@ func New(cfg *Config) (*Finance, error) {
 		providerSnapshotStore,
 		currentFXRateStore,
 		fxPairDiscoveryStore,
-		focusedServicesConfigFromConfig(cfg, connectors),
+		focusedServicesConfigFromConfig(cfg, connectors, syncOrchestrator),
 	)
 
 	bankConnectionService, err := newBankConnectionService(bankConnectionServiceArgs{
@@ -106,7 +134,11 @@ func newConnectors(
 			_ context.Context,
 			secret domain.ConnectionSecret,
 		) (string, error) {
-			return strings.TrimSpace(secret.Envelope.Ciphertext), nil
+			plaintext, err := cfg.ConnectionSecretCipher.OpenString(secret.Envelope)
+			if err != nil {
+				return "", fmt.Errorf("open monobank connection secret: %w", err)
+			}
+			return strings.TrimSpace(plaintext), nil
 		})),
 	}
 	enableBankingASPSP := cfg.EnableBanking.ASPSPs[0]

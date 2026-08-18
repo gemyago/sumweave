@@ -46,12 +46,22 @@ type providerSnapshotWriter interface {
 	SaveProviderSnapshot(context.Context, domain.ProviderSnapshot) (domain.ProviderSnapshot, error)
 }
 
+// bankSyncOrchestrator is the focused execution dependency for one durable
+// bank-connection sync attempt.
+type bankSyncOrchestrator interface {
+	Orchestrate(
+		ctx context.Context,
+		request internalproviders.SyncOrchestrationRequest,
+	) (internalproviders.SyncOrchestrationResult, error)
+}
+
 type BankSyncService struct {
 	store                   bankSyncFocusedStore
 	access                  *accessGuard
 	now                     func() time.Time
 	newID                   func() string
 	connectionSecretCipher  connectionSecretCipher
+	syncOrchestrator        bankSyncOrchestrator
 	bankProviders           map[string]BankConnectionProvider
 	bankSyncJobEnqueuer     BankConnectionSyncJobEnqueuer
 	bankSyncScheduleWriter  BankConnectionSyncScheduleWriter
@@ -125,14 +135,22 @@ func WithBankSyncServiceSnapshotWriter(writer providerSnapshotWriter) BankSyncSe
 	return func(service *BankSyncService) { service.snapshotWriter = writer }
 }
 
-func NewBankSyncService(store bankSyncFocusedStore, opts ...BankSyncServiceOption) *BankSyncService {
+func NewBankSyncService(
+	store bankSyncFocusedStore,
+	syncOrchestrator bankSyncOrchestrator,
+	opts ...BankSyncServiceOption,
+) *BankSyncService {
+	if syncOrchestrator == nil {
+		panic("bank sync orchestrator is required")
+	}
 	service := &BankSyncService{
-		store:         store,
-		access:        newAccessGuard(store),
-		now:           time.Now,
-		newID:         uuid.NewString,
-		bankProviders: map[string]BankConnectionProvider{},
-		logger:        slog.New(slog.DiscardHandler),
+		store:            store,
+		access:           newAccessGuard(store),
+		now:              time.Now,
+		newID:            uuid.NewString,
+		syncOrchestrator: syncOrchestrator,
+		bankProviders:    map[string]BankConnectionProvider{},
+		logger:           slog.New(slog.DiscardHandler),
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -331,6 +349,75 @@ func (s *BankSyncService) RunBankConnectionSync(
 	if err != nil {
 		return BankConnectionSyncResult{}, ErrBankConnectionNotFound
 	}
+	secret, err := s.store.GetConnectionSecret(ctx, connection.SecretID)
+	if err != nil {
+		return BankConnectionSyncResult{}, fmt.Errorf("get connection secret: %w", err)
+	}
+	now := s.now()
+	scheduledRun, hasScheduledRun, err := s.makeScheduledRunMetadata(ctx, *connection, params, now)
+	if err != nil {
+		return BankConnectionSyncResult{}, err
+	}
+	markErr := s.markBankConnectionSyncStarted(ctx, connection, params, now, scheduledRun)
+	if markErr != nil {
+		return BankConnectionSyncResult{}, markErr
+	}
+	result, err := s.syncOrchestrator.Orchestrate(ctx, internalproviders.SyncOrchestrationRequest{
+		Connection: domain.ProviderConnectionRef{
+			ConnectionID:      connection.ID,
+			ProviderID:        domain.ProviderID(connection.Provider),
+			ConnectorID:       connection.ConnectorID,
+			ProviderReference: connection.ProviderReference,
+		},
+		Secret:      *secret,
+		JobID:       params.JobID,
+		Reason:      params.Reason,
+		WindowStart: params.WindowStart,
+		WindowEnd:   params.WindowEnd,
+	})
+	if err != nil {
+		return BankConnectionSyncResult{}, s.recordBankConnectionSyncFailure(
+			ctx,
+			connection,
+			params,
+			now,
+			scheduledRun,
+			err,
+		)
+	}
+	if !hasScheduledRun {
+		scheduledRun = nil
+	}
+	err = s.completeAppliedSync(ctx, connection, ApplyProviderSyncResultParams{
+		ConnectionID: connection.ID,
+		JobID:        params.JobID,
+		Result:       ProviderSyncResult{ScheduledRun: scheduledRun},
+	}, now, false)
+	if err != nil {
+		return BankConnectionSyncResult{}, s.recordBankConnectionSyncFailure(
+			ctx,
+			connection,
+			params,
+			now,
+			scheduledRun,
+			err,
+		)
+	}
+	return BankConnectionSyncResult{
+		ImportedAccounts:     result.Stats.CreatedAccounts,
+		ImportedTransactions: result.Stats.CreatedTransactions,
+		UpdatedTransactions:  result.Stats.UpdatedTransactions,
+	}, nil
+}
+
+// runLegacyBankConnectionSync preserves the existing direct-service test seam
+// until the legacy adapter is removed in the final cutover task. finance.New
+// always supplies syncOrchestrator, so production execution cannot use it.
+func (s *BankSyncService) runLegacyBankConnectionSync(
+	ctx context.Context,
+	connection *domain.BankConnection,
+	params RunBankConnectionSyncParams,
+) (BankConnectionSyncResult, error) {
 	provider, err := s.bankProviderForSync(connection.Provider)
 	if err != nil {
 		return BankConnectionSyncResult{}, err
@@ -345,9 +432,8 @@ func (s *BankSyncService) RunBankConnectionSync(
 	if err != nil {
 		return BankConnectionSyncResult{}, err
 	}
-	markErr := s.markBankConnectionSyncStarted(ctx, connection, params, now, scheduledRun)
-	if markErr != nil {
-		return BankConnectionSyncResult{}, markErr
+	if err = s.markBankConnectionSyncStarted(ctx, connection, params, now, scheduledRun); err != nil {
+		return BankConnectionSyncResult{}, err
 	}
 	result, err := provider.Sync(ctx, ProviderSyncParams{
 		ConnectionID:      connection.ID,
@@ -358,12 +444,7 @@ func (s *BankSyncService) RunBankConnectionSync(
 	})
 	if err != nil {
 		return BankConnectionSyncResult{}, s.recordBankConnectionSyncFailure(
-			ctx,
-			connection,
-			params,
-			now,
-			scheduledRun,
-			err,
+			ctx, connection, params, now, scheduledRun, err,
 		)
 	}
 	if result.ScheduledRun == nil && hasScheduledRun {
@@ -376,12 +457,7 @@ func (s *BankSyncService) RunBankConnectionSync(
 	})
 	if err != nil {
 		return BankConnectionSyncResult{}, s.recordBankConnectionSyncFailure(
-			ctx,
-			connection,
-			params,
-			now,
-			scheduledRun,
-			err,
+			ctx, connection, params, now, scheduledRun, err,
 		)
 	}
 	return applyResult, nil

@@ -272,9 +272,7 @@ func (c *Connector) fetchOfficial(
 	ctx context.Context,
 	request providers.FetchRequest,
 ) (domain.ProviderSyncBatch, error) {
-	if request.Connection.ProviderReference == "" ||
-		request.Secret.ID != "" ||
-		request.Secret.Reference != "" {
+	if request.Connection.ProviderReference == "" {
 		return domain.ProviderSyncBatch{}, ErrConnectorUnsupportedFetchBranch
 	}
 	session, err := c.api.GetSession(ctx, enablebankingclient.GetSessionParams{

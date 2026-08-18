@@ -308,7 +308,7 @@ func TestFocusedPublicServices(t *testing.T) {
 		}
 		enqueuer := &capturedBankSyncJobEnqueuer{}
 		scheduleWriter := &capturedBankSyncScheduleWriter{}
-		service := NewBankSyncService(
+		service := newLegacyBankSyncServiceForTest(
 			store,
 			WithBankSyncServiceConnectionSecretCipher(cipher),
 			WithBankSyncServiceProviders(provider),
@@ -419,7 +419,7 @@ func TestFocusedPublicServices(t *testing.T) {
 			DeleteProviderSnapshotsByConnection(mock.Anything, connection.ID).
 			Once().
 			Return(expectedErr)
-		service := NewBankSyncService(
+		service := newLegacyBankSyncServiceForTest(
 			store,
 			WithBankSyncServiceSyncStateJournalDeleter(journalStore),
 			WithBankSyncServiceSnapshotDeleter(snapshotDeleter),

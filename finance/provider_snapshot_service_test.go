@@ -195,7 +195,7 @@ func TestProviderSnapshotService(t *testing.T) {
 		_, err = data.store.SaveProviderSnapshot(t.Context(), connectionSnapshot)
 		require.NoError(t, err)
 
-		syncService := NewBankSyncService(
+		syncService := newLegacyBankSyncServiceForTest(
 			data.coreStore,
 			WithBankSyncServiceSnapshotDeleter(data.store),
 		)

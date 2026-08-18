@@ -32,6 +32,7 @@ type focusedServicesConfig struct {
 	bankProviders          []BankConnectionProvider
 	bankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
 	bankSyncScheduleWriter BankConnectionSyncScheduleWriter
+	bankSyncOrchestrator   bankSyncOrchestrator
 	logger                 *slog.Logger
 }
 
@@ -46,6 +47,7 @@ func defaultFocusedServicesConfig() focusedServicesConfig {
 func focusedServicesConfigFromConfig(
 	cfg *Config,
 	connectors []internalproviders.Connector,
+	syncOrchestrator bankSyncOrchestrator,
 ) focusedServicesConfig {
 	serviceConfig := defaultFocusedServicesConfig()
 	serviceConfig.now = cfg.Now
@@ -58,6 +60,7 @@ func focusedServicesConfigFromConfig(
 	serviceConfig.bankSyncJobEnqueuer = cfg.BankSyncJobEnqueuer
 	serviceConfig.bankSyncScheduleWriter = cfg.BankSyncScheduleWriter
 	serviceConfig.logger = cfg.Logger
+	serviceConfig.bankSyncOrchestrator = syncOrchestrator
 	if trimmed := strings.TrimSpace(cfg.DefaultFXProvider); trimmed != "" {
 		serviceConfig.defaultFXProvider = trimmed
 	}
@@ -162,6 +165,6 @@ func newFocusedServices(
 		ReportingService: reportingService,
 		FXService:        fxService,
 		CSVImportService: csvImportService,
-		BankSyncService:  NewBankSyncService(store, bankSyncOpts...),
+		BankSyncService:  NewBankSyncService(store, cfg.bankSyncOrchestrator, bankSyncOpts...),
 	}
 }

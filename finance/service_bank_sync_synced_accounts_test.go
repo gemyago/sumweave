@@ -31,7 +31,7 @@ func TestBankSyncServiceListBankConnectionSyncedAccounts(t *testing.T) {
 			State: domain.BankConnectionStateActive, CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
-		return store, NewBankSyncService(store), tenant, ownerID, connection
+		return store, newLegacyBankSyncServiceForTest(store), tenant, ownerID, connection
 	}
 
 	t.Run("returns resolved rows in authoritative stable order", func(t *testing.T) {
@@ -98,7 +98,9 @@ func TestBankSyncServiceListBankConnectionSyncedAccounts(t *testing.T) {
 	t.Run("wraps authoritative mapping store errors", func(t *testing.T) {
 		store, _, tenant, ownerID, connection := makeFixture(t)
 		storeErr := errors.New("mapping store unavailable")
-		service := NewBankSyncService(&failingProviderSyncStore{Store: store, listProviderAccountsErr: storeErr})
+		service := newLegacyBankSyncServiceForTest(
+			&failingProviderSyncStore{Store: store, listProviderAccountsErr: storeErr},
+		)
 
 		_, err := service.ListBankConnectionSyncedAccounts(t.Context(), ListBankConnectionSyncedAccountsParams{
 			ActorUserID: ownerID, TenantID: tenant.ID, ConnectionID: connection.ID,

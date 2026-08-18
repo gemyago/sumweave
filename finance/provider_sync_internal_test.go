@@ -584,7 +584,7 @@ func TestProviderSyncInternals(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
 		now := time.Date(2026, time.August, 10, 14, 30, 0, 0, time.FixedZone("test", 2*60*60))
-		service := NewBankSyncService(
+		service := newLegacyBankSyncServiceForTest(
 			store,
 			WithBankSyncServiceNow(func() time.Time { return now }),
 		)

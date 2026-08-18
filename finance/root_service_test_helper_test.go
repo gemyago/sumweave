@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
+	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
 )
@@ -177,7 +178,7 @@ func (s *Service) bindServices() {
 			snapshotStore = persistence.NewProviderSnapshotStoreFromStore(store)
 			snapshotDeleter = persistence.NewProviderSnapshotStoreFromStore(store)
 		}
-		s.bankSync = NewBankSyncService(
+		s.bankSync = newLegacyBankSyncServiceForTest(
 			bankSyncStore,
 			WithBankSyncServiceNow(s.now),
 			WithBankSyncServiceIDGenerator(s.newID),
@@ -190,6 +191,47 @@ func (s *Service) bindServices() {
 			WithBankSyncServiceSnapshotDeleter(snapshotDeleter),
 		)
 	}
+}
+
+// legacyBankSyncOrchestratorForTest keeps pre-cutover test fixtures usable
+// without exposing BankSyncService's legacy execution path to production.
+type legacyBankSyncOrchestratorForTest struct {
+	service *BankSyncService
+}
+
+func newLegacyBankSyncServiceForTest(
+	store bankSyncFocusedStore,
+	opts ...BankSyncServiceOption,
+) *BankSyncService {
+	orchestrator := &legacyBankSyncOrchestratorForTest{}
+	service := NewBankSyncService(store, orchestrator, opts...)
+	orchestrator.service = service
+	return service
+}
+
+func (o *legacyBankSyncOrchestratorForTest) Orchestrate(
+	ctx context.Context,
+	request internalproviders.SyncOrchestrationRequest,
+) (internalproviders.SyncOrchestrationResult, error) {
+	connection, err := o.service.store.GetBankConnection(ctx, request.Connection.ConnectionID)
+	if err != nil {
+		return internalproviders.SyncOrchestrationResult{}, err
+	}
+	result, err := o.service.runLegacyBankConnectionSync(ctx, connection, RunBankConnectionSyncParams{
+		ConnectionID: request.Connection.ConnectionID,
+		JobID:        request.JobID,
+		Reason:       request.Reason,
+		WindowStart:  request.WindowStart,
+		WindowEnd:    request.WindowEnd,
+	})
+	if err != nil {
+		return internalproviders.SyncOrchestrationResult{}, err
+	}
+	return internalproviders.SyncOrchestrationResult{Stats: domain.ProviderSyncStats{
+		CreatedAccounts:     result.ImportedAccounts,
+		CreatedTransactions: result.ImportedTransactions,
+		UpdatedTransactions: result.UpdatedTransactions,
+	}}, nil
 }
 
 func mapFXProviders(values map[string]FXRatesProvider) []FXRatesProvider {

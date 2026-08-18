@@ -2,9 +2,11 @@ package finance
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,13 +25,24 @@ func TestFinance(t *testing.T) {
 		monobankToken := "mono-token-" + fake.UUID().V4()
 		monobankName := "mono-" + fake.UUID().V4()
 		monobankAccountID := "account-" + fake.UUID().V4()
+		now := time.Date(2026, time.August, 18, 12, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
+		statementBody := fmt.Sprintf(
+			`[{"id":"transaction-%s","time":%d,"description":"coffee","currencyCode":980,"amount":-250}]`,
+			fake.UUID().V4(), now.Unix(),
+		)
 		monobankServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			assert.Equal(t, "/personal/client-info", request.URL.Path)
 			assert.Equal(t, monobankToken, request.Header.Get("X-Token"))
-			_, _ = writer.Write([]byte(
-				`{"name":"` + monobankName + `","accounts":[{"id":"` +
-					monobankAccountID + `","type":"black","currencyCode":980,"balance":12345}]}`,
-			))
+			switch {
+			case request.URL.Path == "/personal/client-info":
+				_, _ = writer.Write([]byte(
+					`{"name":"` + monobankName + `","accounts":[{"id":"` +
+						monobankAccountID + `","type":"black","currencyCode":980,"balance":12345}]}`,
+				))
+			case strings.HasPrefix(request.URL.Path, "/personal/statement/"+monobankAccountID+"/"):
+				_, _ = writer.Write([]byte(statementBody))
+			default:
+				http.NotFound(writer, request)
+			}
 		}))
 		defer monobankServer.Close()
 
@@ -52,7 +65,7 @@ func TestFinance(t *testing.T) {
 		financeModule, err := New(&Config{
 			Database:               database,
 			Logger:                 slog.New(slog.DiscardHandler),
-			Now:                    func() time.Time { return time.Now().UTC() },
+			Now:                    func() time.Time { return now },
 			NewID:                  uuid.NewString,
 			HTTPClient:             monobankServer.Client(),
 			ConnectionSecretCipher: cipher,
@@ -99,6 +112,15 @@ func TestFinance(t *testing.T) {
 		assert.Equal(t, string(domain.ProviderIDMonobank), connection.Provider)
 		assert.Equal(t, domain.ProviderConnectorIDMonobank, connection.ConnectorID)
 		assert.Empty(t, connection.ProviderReference)
+
+		windowStart := now.Add(-24 * time.Hour)
+		result, err := financeModule.BankSyncService.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+			ConnectionID: connection.ID, JobID: "job-" + fake.UUID().V4(), Reason: BankConnectionSyncReasonManual,
+			WindowStart: &windowStart, WindowEnd: &now,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.ImportedAccounts)
+		assert.Equal(t, 1, result.ImportedTransactions)
 	})
 
 	t.Run("New returns config validation error", func(t *testing.T) {

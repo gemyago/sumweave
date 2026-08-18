@@ -342,7 +342,7 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			syncResults: []ProviderSyncResult{{SyncKey: "sync-1"}},
 		}
 		failingStore := &failingProviderSyncStore{Store: store}
-		service := NewBankSyncService(
+		service := newLegacyBankSyncServiceForTest(
 			failingStore,
 			WithBankSyncServiceConnectionSecretCipher(cipher),
 			WithBankSyncServiceProviders(provider),
@@ -408,7 +408,7 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 		otherCipher := makeOtherCipher(t)
 		now := time.Now().UTC()
 
-		serviceWithoutCipher := NewBankSyncService(store)
+		serviceWithoutCipher := newLegacyBankSyncServiceForTest(store)
 		_, err := serviceWithoutCipher.decryptConnectionSecret(t.Context(), "secret-1")
 		require.ErrorContains(t, err, "connection secret cipher is required")
 
@@ -418,7 +418,7 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 			getSyncRunErr:          errors.New("get sync run failed"),
 			saveSyncRunErr:         errors.New("claim sync run failed"),
 		}
-		service := NewBankSyncService(failingStore, WithBankSyncServiceConnectionSecretCipher(cipher))
+		service := newLegacyBankSyncServiceForTest(failingStore, WithBankSyncServiceConnectionSecretCipher(cipher))
 		_, err = service.decryptConnectionSecret(t.Context(), "secret-1")
 		require.ErrorContains(t, err, "get connection secret")
 
@@ -434,7 +434,10 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		serviceWithDifferentCipher := NewBankSyncService(store, WithBankSyncServiceConnectionSecretCipher(otherCipher))
+		serviceWithDifferentCipher := newLegacyBankSyncServiceForTest(
+			store,
+			WithBankSyncServiceConnectionSecretCipher(otherCipher),
+		)
 		_, err = serviceWithDifferentCipher.decryptConnectionSecret(t.Context(), "secret-open-failure")
 		require.ErrorContains(t, err, "open connection secret")
 
@@ -454,7 +457,7 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 		store := makeStore(t)
 		cipher := makeCipher(t)
 		failingStore := &failingProviderSyncStore{Store: store}
-		service := NewBankSyncService(failingStore, WithBankSyncServiceConnectionSecretCipher(cipher))
+		service := newLegacyBankSyncServiceForTest(failingStore, WithBankSyncServiceConnectionSecretCipher(cipher))
 		fake := faker.New()
 		ownerUserID := "owner-" + fake.UUID().V4()
 		tenant := makeTenant(t, NewTenantService(store), ownerUserID)
@@ -532,7 +535,7 @@ func TestFocusedServiceErrorCoverage(t *testing.T) {
 	t.Run("bank sync focused service keeps tenant and provider lookups explicit", func(t *testing.T) {
 		store := makeStore(t)
 		provider := &stubBankProvider{name: bankProviderMonobank}
-		service := NewBankSyncService(store, WithBankSyncServiceProviders(provider))
+		service := newLegacyBankSyncServiceForTest(store, WithBankSyncServiceProviders(provider))
 		fake := faker.New()
 		ownerUserID := "owner-" + fake.UUID().V4()
 		tenant := makeTenant(t, NewTenantService(store), ownerUserID)

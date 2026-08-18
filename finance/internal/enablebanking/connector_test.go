@@ -242,26 +242,15 @@ func TestConnector(t *testing.T) {
 		)
 		require.ErrorIs(t, err, ErrConnectorUnsupportedFetchBranch)
 
-		privateKeyPath := makeSignedKeyPath(t)
-		officialConnector := NewConnector(
-			Args{
-				BaseURL:        "https://example.test",
-				Logger:         logger,
-				AppID:          "app-" + fake.UUID().V4(),
-				PrivateKeyPath: privateKeyPath,
-			},
-		)
-		_, err = officialConnector.Fetch(
-			t.Context(),
-			providers.FetchRequest{
-				Connection: makeConnection(),
-				Secret:     makeSecret("reference-" + fake.UUID().V4()),
-			},
-		)
-		require.ErrorIs(t, err, ErrConnectorUnsupportedFetchBranch)
-
 		missingSessionConnection := makeConnection()
 		missingSessionConnection.ProviderReference = ""
+		privateKeyPath := makeSignedKeyPath(t)
+		officialConnector := NewConnector(Args{
+			BaseURL:        "https://example.test",
+			Logger:         logger,
+			AppID:          "app-" + fake.UUID().V4(),
+			PrivateKeyPath: privateKeyPath,
+		})
 		_, err = officialConnector.Fetch(
 			t.Context(),
 			providers.FetchRequest{Connection: missingSessionConnection},
@@ -334,6 +323,7 @@ func TestConnector(t *testing.T) {
 
 		batch, err := connector.Fetch(t.Context(), providers.FetchRequest{
 			Connection:      connection,
+			Secret:          makeSecret("reference-" + fake.UUID().V4()),
 			RequestedWindow: requestedWindow,
 		})
 		require.NoError(t, err)
