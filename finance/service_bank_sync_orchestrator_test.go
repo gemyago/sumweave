@@ -163,4 +163,59 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		assert.Empty(t, persisted.LastSuccessfulSyncAt)
 		assert.Contains(t, persisted.LastSyncError, orchestrationErr.Error())
 	})
+
+	t.Run("keeps schedule diagnostics current when an orchestration retry fails", func(t *testing.T) {
+		store, service, orchestrator, connection, _, now := makeFixture(
+			t,
+			domain.ProviderConnectorIDEnableBanking,
+		)
+		scheduledAt := now.Add(-15 * time.Minute)
+		nextRunAt := now.Add(15 * time.Minute)
+		_, err := store.SaveBankConnectionSchedule(t.Context(), domain.BankConnectionSchedule{
+			ConnectionID: connection.ID,
+			Interval:     time.Hour,
+			Enabled:      true,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		})
+		require.NoError(t, err)
+		orchestrationErr := errors.New("failed-middle-window-" + fake.UUID().V4())
+		params := RunBankConnectionSyncParams{
+			ConnectionID:       connection.ID,
+			JobID:              "job-" + fake.UUID().V4(),
+			Reason:             BankConnectionSyncReasonScheduled,
+			ScheduledAt:        &scheduledAt,
+			ScheduledNextRunAt: &nextRunAt,
+		}
+		orchestrator.EXPECT().
+			Orchestrate(mock.Anything, mock.Anything).
+			Twice().
+			Return(internalproviders.SyncOrchestrationResult{}, orchestrationErr)
+
+		_, err = service.RunBankConnectionSync(t.Context(), params)
+		require.ErrorIs(t, err, orchestrationErr)
+		_, err = service.RunBankConnectionSync(t.Context(), params)
+		require.ErrorIs(t, err, orchestrationErr)
+
+		persistedConnection, err := store.GetBankConnection(t.Context(), connection.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persistedConnection)
+		assert.Equal(t, params.JobID, persistedConnection.LastSyncJobID)
+		require.NotNil(t, persistedConnection.LastSyncStartedAt)
+		assert.True(t, persistedConnection.LastSyncStartedAt.Equal(now))
+		assert.Contains(t, persistedConnection.LastSyncError, orchestrationErr.Error())
+
+		persistedSchedule, err := store.GetBankConnectionSchedule(t.Context(), connection.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persistedSchedule)
+		assert.Equal(t, params.JobID, persistedSchedule.LastJobID)
+		require.NotNil(t, persistedSchedule.LastStartedAt)
+		assert.True(t, persistedSchedule.LastStartedAt.Equal(now))
+		require.NotNil(t, persistedSchedule.LastCompletedAt)
+		assert.True(t, persistedSchedule.LastCompletedAt.Equal(now))
+		require.NotNil(t, persistedSchedule.LastScheduledAt)
+		assert.True(t, persistedSchedule.LastScheduledAt.Equal(scheduledAt))
+		require.NotNil(t, persistedSchedule.NextRunAt)
+		assert.True(t, persistedSchedule.NextRunAt.Equal(nextRunAt))
+	})
 }

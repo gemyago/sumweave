@@ -403,6 +403,116 @@ func TestNewFinanceModule(t *testing.T) {
 		})
 	}
 
+	t.Run("forwards unchanged durable bank sync input through the registered handler", func(t *testing.T) {
+		fake := faker.New()
+		database := makeDatabase(t, makeSQLiteMemoryDSN("finance-bank-sync-handler"))
+		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
+		registry := jobspkg.NewRegistry()
+		jobsDSN := makeSQLiteMemoryDSN("jobs-bank-sync-handler")
+		jobsService, jobsStore := makeJobsService(t, registry, jobsDSN)
+		now := time.Date(2026, time.August, 18, 14, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
+		cipher, err := makeFinanceCipher("bank-sync-handler-" + fake.UUID().V4())
+		require.NoError(t, err)
+		module, err := financepkg.New(&financepkg.Config{
+			Database: database, Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
+			NewID: func() string { return "id-" + fake.UUID().V4() }, HTTPClient: http.DefaultClient,
+			ConnectionSecretCipher: cipher,
+			Monobank:               financepkg.MonobankConfig{BaseURL: "https://" + fake.Internet().Domain()},
+			EnableBanking: financepkg.EnableBankingConfig{
+				BaseURL: "https://" + fake.Internet().Domain(), AppID: "app-" + fake.UUID().V4(),
+				PrivateKeyPath: makePrivateKeyPath(t),
+				ASPSPs: []financepkg.EnableBankingASPSP{{
+					ProviderID: domain.ProviderIDPKO, Name: "PKO", Country: "PL", PSUType: "personal", ValidDays: 90,
+				}},
+			},
+		})
+		require.NoError(t, err)
+		require.NoError(t, registerBankSyncJobHandler(registry, module.BankSyncService))
+		store := persistence.NewStore(database)
+		tenant, err := module.TenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{
+			ActorUserID: "owner-" + fake.UUID().V4(), Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "PLN",
+		})
+		require.NoError(t, err)
+		secretEnvelope, err := cipher.SealString("secret-" + fake.UUID().V4())
+		require.NoError(t, err)
+		secret, err := store.SaveConnectionSecret(t.Context(), domain.ConnectionSecret{
+			ID: "secret-" + fake.UUID().V4(), Provider: string(domain.ProviderIDSynthetic),
+			Reference: "reference-" + fake.UUID().V4(), Envelope: secretEnvelope, CreatedAt: now, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+		providerReference := "synthetic-" + fake.UUID().V4()
+		_, err = persistence.NewSyntheticProviderStateStoreFromStore(store).SaveSyntheticProviderState(
+			t.Context(), domain.SyntheticProviderState{
+				ProviderReference: providerReference,
+				Envelope: domain.SyntheticProviderStateEnvelope{
+					Version: domain.SyntheticProviderStateVersion1,
+					ConfiguredAccounts: []domain.SyntheticConfiguredAccount{{
+						Key: "account-" + fake.UUID().V4(), Name: "Account " + fake.Lorem().Word(), Currency: "PLN",
+					}},
+				},
+				CreatedAt: now, UpdatedAt: now,
+			},
+		)
+		require.NoError(t, err)
+		connection, err := store.SaveBankConnection(t.Context(), domain.BankConnection{
+			ID: "connection-" + fake.UUID().V4(), TenantID: tenant.ID, Provider: string(domain.ProviderIDSynthetic),
+			ConnectorID: domain.ProviderConnectorIDSynthetic, ProviderReference: providerReference, SecretID: secret.ID,
+			State: domain.BankConnectionStateActive, CreatedAt: now, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+		_, err = store.SaveBankConnectionSchedule(t.Context(), domain.BankConnectionSchedule{
+			ConnectionID: connection.ID, Interval: time.Hour, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+		windowStart := now.Add(-time.Hour)
+		scheduledAt := now.Add(-15 * time.Minute)
+		nextRunAt := now.Add(45 * time.Minute)
+		inputJSON, err := json.Marshal(bankConnectionSyncJobInput{
+			ConnectionID: connection.ID, Reason: financepkg.BankConnectionSyncReasonScheduled,
+			WindowStart: &windowStart, WindowEnd: &now,
+		})
+		require.NoError(t, err)
+		job, err := jobsService.EnqueueJSON(t.Context(), jobspkg.EnqueueJSONParams{
+			JobType:   jobspkg.JobType(financepkg.BankConnectionSyncJobType),
+			Requester: jobspkg.Requester{Source: jobspkg.RequesterSourceOperator}, InputJSON: inputJSON,
+			ScheduledAt: &scheduledAt, ScheduledNextRunAt: &nextRunAt,
+		})
+		require.NoError(t, err)
+		worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
+			Store: jobsStore, Registry: registry, WorkerID: "worker-" + fake.UUID().V4(),
+			RouterFactory: makeJobsRouterFactory(t, jobsDSN),
+		})
+		require.NoError(t, err)
+		require.NoError(t, worker.ProcessJob(t.Context(), job.ID))
+
+		persistedJob, err := jobsStore.Get(t.Context(), job.ID)
+		require.NoError(t, err)
+		assert.Equal(t, jobspkg.JobStatusSucceeded, persistedJob.Status)
+		result, err := jobspkg.DecodeJobResult[financepkg.BankConnectionSyncResult](*persistedJob)
+		require.NoError(t, err)
+		assert.Equal(t, 1, result.ImportedAccounts)
+		assert.Positive(t, result.ImportedTransactions)
+		journalState, err := persistence.NewProviderSyncStateJournalStore(store).LoadLastState(
+			t.Context(),
+			domain.ProviderConnectionRef{
+				ConnectionID: connection.ID, ProviderID: domain.ProviderIDSynthetic,
+				ConnectorID: domain.ProviderConnectorIDSynthetic, ProviderReference: providerReference,
+			},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, journalState)
+		assert.Equal(t, job.ID, journalState.JobID)
+		assert.True(t, journalState.Window.Start.Equal(windowStart))
+		assert.True(t, journalState.Window.End.Equal(now))
+		persistedSchedule, err := store.GetBankConnectionSchedule(t.Context(), connection.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persistedSchedule)
+		require.NotNil(t, persistedSchedule.LastScheduledAt)
+		assert.True(t, persistedSchedule.LastScheduledAt.Equal(scheduledAt))
+		require.NotNil(t, persistedSchedule.NextRunAt)
+		assert.True(t, persistedSchedule.NextRunAt.Equal(nextRunAt))
+	})
+
 	t.Run("starts one daily FX refresh schedule and keeps its persisted next run", func(t *testing.T) {
 		database := makeDatabase(t, makeSQLiteMemoryDSN("finance-fx-refresh"))
 		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))

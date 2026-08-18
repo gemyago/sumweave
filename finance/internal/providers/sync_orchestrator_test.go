@@ -496,6 +496,87 @@ func TestSyncOrchestrator(t *testing.T) {
 			assert.Equal(t, firstStats, appendCalls[0].AggregateStats)
 		})
 
+		t.Run("resumes after a failed middle window without repeating durable progress", func(t *testing.T) {
+			fake := faker.New()
+			request := makeRequest(fake)
+			now := time.Date(2026, time.August, 18, 12, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
+			initialWindow := domain.ProviderSyncWindow{
+				Start: now.AddDate(0, 0, -70),
+				End:   now,
+			}
+			chunkPolicy := NewOldestFirstWindowChunkPolicy()
+			chunks, err := chunkPolicy.Split(initialWindow)
+			require.NoError(t, err)
+			require.Len(t, chunks, 3)
+			firstStats := makeRandomProviderSyncStats(fake)
+			failedWindowErr := errors.New("middle-window-" + fake.UUID().V4())
+			deps := makeMockDeps(t)
+			var latestState *domain.ProviderSyncState
+			var executedWindows []domain.ProviderSyncWindow
+			failedOnce := true
+
+			deps.syncStateJournal.EXPECT().
+				LoadLastState(mock.Anything, request.Connection).
+				RunAndReturn(func(context.Context, domain.ProviderConnectionRef) (*domain.ProviderSyncState, error) {
+					return latestState, nil
+				}).
+				Once()
+			deps.syncStateJournal.EXPECT().
+				AppendSyncState(mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, state domain.ProviderSyncState) error {
+					latestState = &state
+					return nil
+				}).
+				Once()
+			deps.windowExecutor.EXPECT().
+				Execute(mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, windowRequest WindowSyncRequest) (WindowSyncResult, error) {
+					executedWindows = append(executedWindows, windowRequest.RequestedWindow)
+					switch windowRequest.RequestedWindow {
+					case chunks[0]:
+						return WindowSyncResult{RunID: "run-first-" + fake.UUID().V4(), Stats: firstStats}, nil
+					case chunks[1]:
+						if failedOnce {
+							failedOnce = false
+							return WindowSyncResult{}, failedWindowErr
+						}
+						return WindowSyncResult{RunID: "run-retry-middle-" + fake.UUID().V4()}, nil
+					case chunks[2]:
+						return WindowSyncResult{RunID: "run-retry-last-" + fake.UUID().V4()}, nil
+					default:
+						t.Fatalf("unexpected requested window: %#v", windowRequest.RequestedWindow)
+						return WindowSyncResult{}, nil
+					}
+				})
+
+			orchestrator, err := NewSyncOrchestrator(SyncOrchestratorParams{
+				SyncStateJournal:   deps.syncStateJournal,
+				TargetWindowPolicy: NewCheckpointTargetWindowPolicy(),
+				WindowChunkPolicy:  chunkPolicy,
+				WindowExecutor:     deps.windowExecutor,
+				Logger:             slog.New(slog.DiscardHandler),
+			}, WithNow(func() time.Time { return now }))
+			require.NoError(t, err)
+
+			initialRequest := request
+			initialRequest.WindowStart = &initialWindow.Start
+			initialRequest.WindowEnd = &initialWindow.End
+			_, err = orchestrator.Orchestrate(t.Context(), initialRequest)
+			require.ErrorIs(t, err, failedWindowErr)
+			require.NotNil(t, latestState)
+			assert.Equal(t, chunks[1], latestState.Window)
+			assert.Nil(t, latestState.SucceededAt)
+			assert.Equal(t, firstStats, latestState.AggregateStats)
+
+			retryResult, err := orchestrator.Orchestrate(t.Context(), request)
+			require.NoError(t, err)
+			assert.Equal(t, domain.ProviderSyncWindow{Start: chunks[1].Start, End: now}, retryResult.TargetWindow)
+			assert.Equal(t, chunks[1:], retryResult.ExecutedWindows)
+			assert.Equal(t, []domain.ProviderSyncWindow{
+				chunks[0], chunks[1], chunks[1], chunks[2],
+			}, executedWindows)
+		})
+
 		t.Run("appends a failed latest state when the first chunk execution fails", func(t *testing.T) {
 			fake := faker.New()
 			fixture := makeTwoChunkFixture(fake)
