@@ -1,0 +1,20 @@
+## 1. Orchestrator Window Planning
+
+- [x] 1.1 Extend orchestration requests and target-window planning to accept the existing optional start/end bounds while using the latest journal state for omitted bounds; must follow TDD flow by first adding failing policy and orchestrator tests for automatic, partial explicit, complete explicit, and invalid windows, then implement and verify focused finance tests.
+- [x] 1.2 Add the concrete oldest-first policy for contiguous half-open windows advancing by at most 30 calendar days and make it a required production orchestrator dependency; must follow TDD flow by first adding failing tests for short, exact-boundary, multi-chunk, location-preserving, and invalid targets, then implement and verify focused finance tests.
+
+## 2. First-Sync And Journal Persistence
+
+- [ ] 2.1 Create linked finance accounts and provider-account mappings during requested-window apply, derive transaction ownership from the durable connection, and track created-account statistics; must follow TDD flow by first replacing the missing-mapping expectation with failing tests for first account, first transaction, ownership mismatch, member-edit preservation, and repeated account observations, then implement the transactional ordering and additive journal statistic and verify focused finance tests.
+- [ ] 2.2 Commit successful chunk state through the requested-window apply transaction while leaving failed-state append on the standalone journal path; must follow TDD flow by first adding failing executor, orchestrator, window-store, and persistence tests proving run identity is assigned before apply, success rows commit with finance writes, and journal failure rolls back the complete window, then implement and verify focused finance tests.
+- [ ] 2.3 Delete connection-owned provider sync journal rows through a dedicated persistence component in the existing cleanup transaction; must follow TDD flow by first adding failing deletion and later-step rollback tests, then implement transaction rebinding for the narrow cleanup dependency and verify focused finance tests.
+
+## 3. Focused Service And Production Composition
+
+- [ ] 3.1 Give `BankSyncService` a required consumer-defined orchestration dependency and build requests from persisted connection and encrypted-secret records; must follow TDD flow by first adding failing service tests for PKO/Enable Banking identity, unknown connectors, unchanged encrypted-secret handoff, optional bounds, created/updated result mapping, and start/success/failure projections, then implement and verify focused finance tests.
+- [ ] 3.2 Construct the journal, policies, provider window persistence, window store, executor, registry, and orchestrator inside `finance.New`, including bounded Monobank decryption and credentialless Enable Banking handling; must follow TDD flow by first adding failing connector-secret tests and a SQLite-backed finance composition test that starts from `RunBankConnectionSync` and imports a synthetic connection's first observations, then implement and verify focused finance tests.
+- [ ] 3.3 Preserve durable job and schedule behavior across chunk failure and retry; must follow TDD flow by first adding failing controlled-orchestrator and app-handler tests for unchanged job input, a failed middle chunk, durable earlier progress, failed-window checkpoint derivation, current schedule diagnostics, and retry-safe writes, then implement and verify focused finance and app tests without requiring PostgreSQL.
+
+## 4. Legacy Path Removal And Documentation
+
+- [ ] 4.1 Remove the connector-backed bank-sync adapter, legacy sync DTO conversion/application path, product-provider sync selector, obsolete persistence calls, tests that exist only for that path, and the stale executor coordination plan, then align the provider sync architecture document with the implemented single-path flow; must follow TDD flow by first adding or tightening production-path guard tests that fail while legacy execution remains reachable, then remove the obsolete code, update the documentation, and verify focused finance and app tests.

@@ -137,7 +137,7 @@ func TestSyncOrchestrator(t *testing.T) {
 			deps := makeMockDeps(t)
 
 			var loadCalls []domain.ProviderConnectionRef
-			var determineCalls []time.Time
+			var determineCalls []TargetWindowRequest
 			var determineStates []domain.ProviderSyncState
 			var splitCalls []domain.ProviderSyncWindow
 			var executeCalls []WindowSyncRequest
@@ -154,14 +154,13 @@ func TestSyncOrchestrator(t *testing.T) {
 				}).
 				Once()
 			deps.targetWindowPolicy.EXPECT().
-				Determine(mock.Anything, mock.Anything).
+				Determine(mock.Anything).
 				RunAndReturn(func(
-					now time.Time,
-					syncState *domain.ProviderSyncState,
+					request TargetWindowRequest,
 				) (domain.ProviderSyncWindow, error) {
-					determineCalls = append(determineCalls, now)
-					require.NotNil(t, syncState)
-					determineStates = append(determineStates, *syncState)
+					determineCalls = append(determineCalls, request)
+					require.NotNil(t, request.State)
+					determineStates = append(determineStates, *request.State)
 					return fixture.targetWindow, nil
 				}).
 				Once()
@@ -205,7 +204,10 @@ func TestSyncOrchestrator(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, []domain.ProviderConnectionRef{fixture.request.Connection}, loadCalls)
-			assert.Equal(t, []time.Time{fixture.now}, determineCalls)
+			assert.Equal(t, []TargetWindowRequest{{
+				Now:   fixture.now,
+				State: &fixture.lastState,
+			}}, determineCalls)
 			require.Len(t, determineStates, 1)
 			assert.Equal(t, fixture.lastState, determineStates[0])
 			assert.Equal(t, []domain.ProviderSyncWindow{fixture.targetWindow}, splitCalls)
@@ -242,6 +244,78 @@ func TestSyncOrchestrator(t *testing.T) {
 			assert.Equal(t, fixture.expectedWindowResults, result.WindowResults)
 			assert.Equal(t, expectedAggregateStats, result.Stats)
 			assert.Equal(t, fixture.expectedWindowResults[1].Issues, result.Issues)
+		})
+
+		t.Run("passes optional bounds to target planning", func(t *testing.T) {
+			fake := faker.New()
+			fixture := makeTwoChunkFixture(fake)
+			start := fixture.now.AddDate(0, 0, -fake.IntBetween(1, 29))
+			end := fixture.now.AddDate(0, 0, fake.IntBetween(1, 29))
+
+			testCases := []struct {
+				name          string
+				windowStart   *time.Time
+				windowEnd     *time.Time
+				loadLastState bool
+			}{
+				{
+					name:          "start only",
+					windowStart:   &start,
+					loadLastState: false,
+				},
+				{
+					name:          "end only",
+					windowEnd:     &end,
+					loadLastState: true,
+				},
+				{
+					name:          "complete explicit window",
+					windowStart:   &start,
+					windowEnd:     &end,
+					loadLastState: false,
+				},
+			}
+
+			for _, testCase := range testCases {
+				t.Run(testCase.name, func(t *testing.T) {
+					deps := makeMockDeps(t)
+					request := fixture.request
+					request.WindowStart = testCase.windowStart
+					request.WindowEnd = testCase.windowEnd
+
+					var lastState *domain.ProviderSyncState
+					if testCase.loadLastState {
+						lastState = &fixture.lastState
+						deps.syncStateJournal.EXPECT().
+							LoadLastState(mock.Anything, request.Connection).
+							Once().
+							Return(lastState, nil)
+					}
+					deps.targetWindowPolicy.EXPECT().
+						Determine(TargetWindowRequest{
+							Now:         fixture.now,
+							State:       lastState,
+							WindowStart: testCase.windowStart,
+							WindowEnd:   testCase.windowEnd,
+						}).
+						Once().
+						Return(fixture.targetWindow, nil)
+					deps.windowChunkPolicy.EXPECT().
+						Split(fixture.targetWindow).
+						Once().
+						Return(nil, nil)
+
+					orchestrator, err := NewSyncOrchestrator(
+						makeOrchestratorParams(deps),
+						WithNow(func() time.Time { return fixture.now }),
+					)
+					require.NoError(t, err)
+
+					result, err := orchestrator.Orchestrate(t.Context(), request)
+					require.NoError(t, err)
+					assert.Equal(t, fixture.targetWindow, result.TargetWindow)
+				})
+			}
 		})
 
 		t.Run("constructor fails when a required dependency is missing", func(t *testing.T) {
@@ -341,7 +415,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(nil, nil)
 			deps.targetWindowPolicy.EXPECT().
-				Determine(mock.Anything, mock.Anything).
+				Determine(mock.Anything).
 				Once().
 				Return(domain.ProviderSyncWindow{}, expectedErr)
 
@@ -362,7 +436,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(nil, nil)
 			deps.targetWindowPolicy.EXPECT().
-				Determine(mock.Anything, mock.Anything).
+				Determine(mock.Anything).
 				Once().
 				Return(fixture.targetWindow, nil)
 			deps.windowChunkPolicy.EXPECT().
@@ -390,7 +464,7 @@ func TestSyncOrchestrator(t *testing.T) {
 					Window:     fixture.lastWindow,
 				}, nil)
 			deps.targetWindowPolicy.EXPECT().
-				Determine(mock.Anything, mock.Anything).
+				Determine(mock.Anything).
 				Once().
 				Return(fixture.targetWindow, nil)
 			deps.windowChunkPolicy.EXPECT().
@@ -454,7 +528,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(nil, nil)
 			deps.targetWindowPolicy.EXPECT().
-				Determine(mock.Anything, mock.Anything).
+				Determine(mock.Anything).
 				Once().
 				Return(fixture.targetWindow, nil)
 			deps.windowChunkPolicy.EXPECT().
@@ -500,7 +574,7 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(nil, nil)
 			deps.targetWindowPolicy.EXPECT().
-				Determine(mock.Anything, mock.Anything).
+				Determine(mock.Anything).
 				Once().
 				Return(fixture.targetWindow, nil)
 			deps.windowChunkPolicy.EXPECT().
@@ -539,12 +613,9 @@ func TestSyncOrchestrator(t *testing.T) {
 				Once().
 				Return(&failedState, nil)
 			deps.targetWindowPolicy.EXPECT().
-				Determine(mock.Anything, mock.Anything).
-				RunAndReturn(func(
-					_ time.Time,
-					state *domain.ProviderSyncState,
-				) (domain.ProviderSyncWindow, error) {
-					determineState = state
+				Determine(mock.Anything).
+				RunAndReturn(func(request TargetWindowRequest) (domain.ProviderSyncWindow, error) {
+					determineState = request.State
 					return fixture.targetWindow, nil
 				}).
 				Once()

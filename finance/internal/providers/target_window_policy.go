@@ -13,7 +13,17 @@ const (
 	recentRefreshDays    = 30
 )
 
-var ErrInvalidProviderSyncStateWindow = errors.New("invalid provider sync state window")
+var (
+	ErrInvalidProviderSyncStateWindow  = errors.New("invalid provider sync state window")
+	ErrInvalidProviderSyncTargetWindow = errors.New("invalid provider sync target window")
+)
+
+type TargetWindowRequest struct {
+	Now         time.Time
+	State       *domain.ProviderSyncState
+	WindowStart *time.Time
+	WindowEnd   *time.Time
+}
 
 type CheckpointTargetWindowPolicy struct{}
 
@@ -22,19 +32,42 @@ func NewCheckpointTargetWindowPolicy() *CheckpointTargetWindowPolicy {
 }
 
 func (p *CheckpointTargetWindowPolicy) Determine(
-	now time.Time,
-	state *domain.ProviderSyncState,
+	request TargetWindowRequest,
 ) (domain.ProviderSyncWindow, error) {
-	targetEnd := now
+	targetEnd := request.Now
+	if request.WindowEnd != nil {
+		targetEnd = *request.WindowEnd
+	}
+
+	var targetStart time.Time
+	if request.WindowStart != nil {
+		targetStart = *request.WindowStart
+	} else {
+		var err error
+		targetStart, err = p.determineStart(targetEnd, request.State)
+		if err != nil {
+			return domain.ProviderSyncWindow{}, err
+		}
+	}
+
+	window := domain.ProviderSyncWindow{Start: targetStart, End: targetEnd}
+	if err := validateSyncWindow(window, ErrInvalidProviderSyncTargetWindow); err != nil {
+		return domain.ProviderSyncWindow{}, err
+	}
+
+	return window, nil
+}
+
+func (p *CheckpointTargetWindowPolicy) determineStart(
+	targetEnd time.Time,
+	state *domain.ProviderSyncState,
+) (time.Time, error) {
 	if state == nil {
-		return domain.ProviderSyncWindow{
-			Start: targetEnd.AddDate(-initialBackfillYears, 0, 0),
-			End:   targetEnd,
-		}, nil
+		return targetEnd.AddDate(-initialBackfillYears, 0, 0), nil
 	}
 
 	if err := validateProviderSyncWindow(state.Window); err != nil {
-		return domain.ProviderSyncWindow{}, err
+		return time.Time{}, err
 	}
 
 	recentStart := targetEnd.AddDate(0, 0, -recentRefreshDays)
@@ -43,16 +76,10 @@ func (p *CheckpointTargetWindowPolicy) Determine(
 		checkpoint = state.Window.End
 	}
 	if checkpoint.Before(recentStart) {
-		return domain.ProviderSyncWindow{
-			Start: checkpoint,
-			End:   targetEnd,
-		}, nil
+		return checkpoint, nil
 	}
 
-	return domain.ProviderSyncWindow{
-		Start: recentStart,
-		End:   targetEnd,
-	}, nil
+	return recentStart, nil
 }
 
 func validateProviderSyncWindow(window domain.ProviderSyncWindow) error {

@@ -8,7 +8,6 @@ package providers
 
 import (
 	"context"
-	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
 	mock "github.com/stretchr/testify/mock"
@@ -1854,8 +1853,8 @@ func (_m *MockTargetWindowPolicy) EXPECT() *MockTargetWindowPolicy_Expecter {
 }
 
 // Determine provides a mock function for the type MockTargetWindowPolicy
-func (_mock *MockTargetWindowPolicy) Determine(now time.Time, state *domain.ProviderSyncState) (domain.ProviderSyncWindow, error) {
-	ret := _mock.Called(now, state)
+func (_mock *MockTargetWindowPolicy) Determine(request TargetWindowRequest) (domain.ProviderSyncWindow, error) {
+	ret := _mock.Called(request)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Determine")
@@ -1863,16 +1862,16 @@ func (_mock *MockTargetWindowPolicy) Determine(now time.Time, state *domain.Prov
 
 	var r0 domain.ProviderSyncWindow
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(time.Time, *domain.ProviderSyncState) (domain.ProviderSyncWindow, error)); ok {
-		return returnFunc(now, state)
+	if returnFunc, ok := ret.Get(0).(func(TargetWindowRequest) (domain.ProviderSyncWindow, error)); ok {
+		return returnFunc(request)
 	}
-	if returnFunc, ok := ret.Get(0).(func(time.Time, *domain.ProviderSyncState) domain.ProviderSyncWindow); ok {
-		r0 = returnFunc(now, state)
+	if returnFunc, ok := ret.Get(0).(func(TargetWindowRequest) domain.ProviderSyncWindow); ok {
+		r0 = returnFunc(request)
 	} else {
 		r0 = ret.Get(0).(domain.ProviderSyncWindow)
 	}
-	if returnFunc, ok := ret.Get(1).(func(time.Time, *domain.ProviderSyncState) error); ok {
-		r1 = returnFunc(now, state)
+	if returnFunc, ok := ret.Get(1).(func(TargetWindowRequest) error); ok {
+		r1 = returnFunc(request)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1885,25 +1884,19 @@ type MockTargetWindowPolicy_Determine_Call struct {
 }
 
 // Determine is a helper method to define mock.On call
-//   - now time.Time
-//   - state *domain.ProviderSyncState
-func (_e *MockTargetWindowPolicy_Expecter) Determine(now interface{}, state interface{}) *MockTargetWindowPolicy_Determine_Call {
-	return &MockTargetWindowPolicy_Determine_Call{Call: _e.mock.On("Determine", now, state)}
+//   - request TargetWindowRequest
+func (_e *MockTargetWindowPolicy_Expecter) Determine(request interface{}) *MockTargetWindowPolicy_Determine_Call {
+	return &MockTargetWindowPolicy_Determine_Call{Call: _e.mock.On("Determine", request)}
 }
 
-func (_c *MockTargetWindowPolicy_Determine_Call) Run(run func(now time.Time, state *domain.ProviderSyncState)) *MockTargetWindowPolicy_Determine_Call {
+func (_c *MockTargetWindowPolicy_Determine_Call) Run(run func(request TargetWindowRequest)) *MockTargetWindowPolicy_Determine_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 time.Time
+		var arg0 TargetWindowRequest
 		if args[0] != nil {
-			arg0 = args[0].(time.Time)
-		}
-		var arg1 *domain.ProviderSyncState
-		if args[1] != nil {
-			arg1 = args[1].(*domain.ProviderSyncState)
+			arg0 = args[0].(TargetWindowRequest)
 		}
 		run(
 			arg0,
-			arg1,
 		)
 	})
 	return _c
@@ -1914,7 +1907,7 @@ func (_c *MockTargetWindowPolicy_Determine_Call) Return(providerSyncWindow domai
 	return _c
 }
 
-func (_c *MockTargetWindowPolicy_Determine_Call) RunAndReturn(run func(now time.Time, state *domain.ProviderSyncState) (domain.ProviderSyncWindow, error)) *MockTargetWindowPolicy_Determine_Call {
+func (_c *MockTargetWindowPolicy_Determine_Call) RunAndReturn(run func(request TargetWindowRequest) (domain.ProviderSyncWindow, error)) *MockTargetWindowPolicy_Determine_Call {
 	_c.Call.Return(run)
 	return _c
 }
