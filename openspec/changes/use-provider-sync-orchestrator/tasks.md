@@ -17,4 +17,4 @@
 
 ## 4. Legacy Path Removal And Documentation
 
-- [ ] 4.1 Remove the connector-backed bank-sync adapter, legacy sync DTO conversion/application path, product-provider sync selector, obsolete persistence calls, tests that exist only for that path, and the stale executor coordination plan, then align the provider sync architecture document with the implemented single-path flow; must follow TDD flow by first adding or tightening production-path guard tests that fail while legacy execution remains reachable, then remove the obsolete code, update the documentation, and verify focused finance and app tests.
+- [x] 4.1 Remove the connector-backed bank-sync adapter, legacy sync DTO conversion/application path, product-provider sync selector, obsolete persistence calls, tests that exist only for that path, and the stale executor coordination plan, then align the provider sync architecture document with the implemented single-path flow; must follow TDD flow by first adding or tightening production-path guard tests that fail while legacy execution remains reachable, then remove the obsolete code, update the documentation, and verify focused finance and app tests.

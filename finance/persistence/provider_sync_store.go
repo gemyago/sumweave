@@ -16,7 +16,6 @@ var (
 	ErrBankConnectionNotFound                 = errors.New("bank connection not found")
 	ErrPendingBankConnectionLinkStartNotFound = errors.New("pending bank connection link start not found")
 	ErrBankConnectionScheduleNotFound         = errors.New("bank connection schedule not found")
-	ErrBankConnectionSyncRunNotFound          = errors.New("bank connection sync run not found")
 	ErrProviderTransactionMatchNotFound       = errors.New("provider transaction match not found")
 )
 
@@ -393,64 +392,6 @@ func (s *Store) DeleteBalanceSnapshots(ctx context.Context, connectionID string)
 		Where("connection_id = ?", strings.TrimSpace(connectionID)).
 		Delete(&balanceSnapshotModel{}).Error; err != nil {
 		return fmt.Errorf("delete balance snapshots: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) SaveBankConnectionSyncRun(
-	ctx context.Context,
-	run domain.BankConnectionSyncRun,
-) (domain.BankConnectionSyncRun, error) {
-	model := newBankConnectionSyncRunModel(run)
-	if err := s.db.WithContext(ctx).
-		Table(model.TableName()).
-		Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&model).Error; err != nil {
-		return domain.BankConnectionSyncRun{}, fmt.Errorf("save bank connection sync run: %w", err)
-	}
-	return bankConnectionSyncRunFromModel(model), nil
-}
-
-func (s *Store) ClaimBankConnectionSyncRun(
-	ctx context.Context,
-	run domain.BankConnectionSyncRun,
-) (bool, error) {
-	model := newBankConnectionSyncRunModel(run)
-	result := s.db.WithContext(ctx).
-		Table(model.TableName()).
-		Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&model)
-	if result.Error != nil {
-		return false, fmt.Errorf("claim bank connection sync run: %w", result.Error)
-	}
-	return result.RowsAffected > 0, nil
-}
-
-func (s *Store) GetBankConnectionSyncRun(
-	ctx context.Context,
-	connectionID string,
-	syncKey string,
-) (*domain.BankConnectionSyncRun, error) {
-	var model bankConnectionSyncRunModel
-	if err := s.db.WithContext(ctx).
-		Table(model.TableName()).
-		Where("connection_id = ? AND sync_key = ?", strings.TrimSpace(connectionID), strings.TrimSpace(syncKey)).
-		First(&model).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrBankConnectionSyncRunNotFound
-		}
-		return nil, fmt.Errorf("get bank connection sync run: %w", err)
-	}
-	run := bankConnectionSyncRunFromModel(model)
-	return &run, nil
-}
-
-func (s *Store) DeleteBankConnectionSyncRuns(ctx context.Context, connectionID string) error {
-	if err := s.db.WithContext(ctx).
-		Table((bankConnectionSyncRunModel{}).TableName()).
-		Where("connection_id = ?", strings.TrimSpace(connectionID)).
-		Delete(&bankConnectionSyncRunModel{}).Error; err != nil {
-		return fmt.Errorf("delete bank connection sync runs: %w", err)
 	}
 	return nil
 }

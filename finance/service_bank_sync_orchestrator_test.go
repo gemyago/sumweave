@@ -218,4 +218,153 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		require.NotNil(t, persistedSchedule.NextRunAt)
 		assert.True(t, persistedSchedule.NextRunAt.Equal(nextRunAt))
 	})
+
+	t.Run("preserves schedule, job, list, and cleanup operations around orchestration", func(t *testing.T) {
+		store, service, _, connection, _, now := makeFixture(t, domain.ProviderConnectorIDEnableBanking)
+		_, err := store.SaveTenantMembership(t.Context(), domain.TenantMembership{
+			TenantID:  connection.TenantID,
+			UserID:    connection.TenantID,
+			JoinedAt:  now,
+			CreatedAt: now,
+		})
+		require.NoError(t, err)
+		enqueuer := &capturedBankSyncJobEnqueuer{}
+		writer := &capturedBankSyncScheduleWriter{}
+		WithBankSyncServiceJobEnqueuer(enqueuer)(service)
+		WithBankSyncServiceScheduleWriter(writer)(service)
+		nextRunAt := now.Add(time.Hour)
+
+		schedule, err := service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
+			ActorUserID:  connection.TenantID,
+			TenantID:     connection.TenantID,
+			ConnectionID: connection.ID,
+			Interval:     time.Hour,
+			NextRunAt:    nextRunAt,
+		})
+		require.NoError(t, err)
+		assert.True(t, schedule.Enabled)
+
+		paused, err := service.PauseBankConnectionSchedule(t.Context(), PauseBankConnectionScheduleParams{
+			ActorUserID:  connection.TenantID,
+			TenantID:     connection.TenantID,
+			ConnectionID: connection.ID,
+		})
+		require.NoError(t, err)
+		assert.False(t, paused.Enabled)
+
+		resumed, err := service.ResumeBankConnectionSchedule(t.Context(), ResumeBankConnectionScheduleParams{
+			ActorUserID:  connection.TenantID,
+			TenantID:     connection.TenantID,
+			ConnectionID: connection.ID,
+			NextRunAt:    nextRunAt,
+		})
+		require.NoError(t, err)
+		assert.True(t, resumed.Enabled)
+
+		windowStart := now.Add(-time.Hour)
+		job, err := service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
+			ActorUserID:  connection.TenantID,
+			TenantID:     connection.TenantID,
+			ConnectionID: connection.ID,
+			Reason:       BankConnectionSyncReasonManual,
+			WindowStart:  &windowStart,
+			WindowEnd:    &now,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, BankConnectionSyncJobType, job.JobType)
+		require.NotNil(t, enqueuer.request)
+		assert.Equal(t, connection.ID, enqueuer.request.Input.ConnectionID)
+
+		recorded, err := service.RecordBankConnectionSyncScheduled(t.Context(), RecordBankConnectionSyncScheduledParams{
+			ConnectionID: connection.ID,
+			JobID:        job.ID,
+			ScheduledAt:  now,
+			NextRunAt:    nextRunAt,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, job.ID, recorded.LastJobID)
+
+		connections, err := service.ListBankConnections(t.Context(), ListBankConnectionsParams{
+			ActorUserID: connection.TenantID,
+			TenantID:    connection.TenantID,
+		})
+		require.NoError(t, err)
+		require.Len(t, connections, 1)
+
+		require.NoError(t, service.DeleteBankConnection(t.Context(), DeleteBankConnectionParams{
+			ActorUserID:  connection.TenantID,
+			TenantID:     connection.TenantID,
+			ConnectionID: connection.ID,
+		}))
+		deleted, err := store.GetBankConnection(t.Context(), connection.ID)
+		require.ErrorIs(t, err, persistence.ErrBankConnectionNotFound)
+		assert.Nil(t, deleted)
+		assert.NotEmpty(t, writer.schedules)
+	})
+
+	t.Run("validates schedule metadata and retains prior schedule projections", func(t *testing.T) {
+		store, service, _, connection, _, now := makeFixture(t, domain.ProviderConnectorIDEnableBanking)
+		_, err := store.SaveTenantMembership(t.Context(), domain.TenantMembership{
+			TenantID: connection.TenantID, UserID: connection.TenantID, JoinedAt: now, CreatedAt: now,
+		})
+		require.NoError(t, err)
+		writer := &capturedBankSyncScheduleWriter{}
+		WithBankSyncServiceScheduleWriter(writer)(service)
+		nextRunAt := now.Add(time.Hour)
+		first, err := service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
+			ActorUserID: connection.TenantID, TenantID: connection.TenantID, ConnectionID: connection.ID,
+			Interval: time.Hour, NextRunAt: nextRunAt,
+		})
+		require.NoError(t, err)
+		second, err := service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
+			ActorUserID: connection.TenantID, TenantID: connection.TenantID, ConnectionID: connection.ID,
+			Interval: 2 * time.Hour, NextRunAt: nextRunAt.Add(time.Hour),
+		})
+		require.NoError(t, err)
+		assert.True(t, first.CreatedAt.Equal(second.CreatedAt))
+
+		zero := time.Time{}
+		for _, params := range []RecordBankConnectionSyncScheduledParams{
+			{},
+			{ConnectionID: connection.ID},
+			{ConnectionID: connection.ID, JobID: "job-" + fake.UUID().V4()},
+			{ConnectionID: connection.ID, JobID: "job-" + fake.UUID().V4(), ScheduledAt: now},
+			{ConnectionID: connection.ID, JobID: "job-" + fake.UUID().V4(), ScheduledAt: now, NextRunAt: now},
+		} {
+			_, recordErr := service.RecordBankConnectionSyncScheduled(t.Context(), params)
+			require.Error(t, recordErr)
+		}
+		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{WindowStart: &zero})
+		require.Error(t, err)
+		for _, params := range []RunBankConnectionSyncParams{
+			{Reason: BankConnectionSyncReasonScheduled, ScheduledAt: &zero},
+			{Reason: BankConnectionSyncReasonScheduled, ScheduledNextRunAt: &now},
+			{Reason: BankConnectionSyncReasonScheduled, ScheduledAt: &now, ScheduledNextRunAt: &now},
+		} {
+			_, _, metadataErr := service.makeScheduledRunMetadata(t.Context(), connection, params, now)
+			require.Error(t, metadataErr)
+		}
+		WithBankSyncServiceNow(func() time.Time { return now })(service)
+		WithBankSyncServiceLogger(slog.New(slog.DiscardHandler))(service)
+		WithBankSyncServiceSnapshotDeleter(persistence.NewProviderSnapshotStoreFromStore(store))(service)
+		WithBankSyncServiceSyncStateJournalDeleter(persistence.NewProviderSyncStateJournalStore(store))(service)
+	})
+
+	t.Run("returns explicit lifecycle errors before orchestration", func(t *testing.T) {
+		_, service, _, connection, _, _ := makeFixture(t, domain.ProviderConnectorIDEnableBanking)
+		_, err := service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{})
+		require.ErrorContains(t, err, "bank sync job enqueuer is required")
+		_, err = service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+			ConnectionID: "missing-" + fake.UUID().V4(),
+		})
+		require.ErrorIs(t, err, ErrBankConnectionNotFound)
+		_, err = service.ListBankConnections(t.Context(), ListBankConnectionsParams{
+			ActorUserID: "outsider-" + fake.UUID().V4(), TenantID: connection.TenantID,
+		})
+		require.ErrorIs(t, err, ErrTenantAccessDenied)
+		_, err = service.ListBankConnectionSyncedAccounts(t.Context(), ListBankConnectionSyncedAccountsParams{
+			ActorUserID: "outsider-" + fake.UUID().V4(), TenantID: connection.TenantID, ConnectionID: connection.ID,
+		})
+		require.ErrorIs(t, err, ErrTenantAccessDenied)
+	})
 }

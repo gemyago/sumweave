@@ -304,16 +304,6 @@ type providerSnapshotModel struct {
 
 func (providerSnapshotModel) TableName() string { return "finance_provider_snapshots" }
 
-type bankConnectionSyncRunModel struct {
-	ID           string    `gorm:"column:id;size:255;not null;primaryKey"`
-	ConnectionID string    `gorm:"column:connection_id;size:255;not null;index:idx_finance_connection_sync_runs_unique,unique,priority:1"`
-	SyncKey      string    `gorm:"column:sync_key;size:255;not null;index:idx_finance_connection_sync_runs_unique,unique,priority:2"`
-	JobID        string    `gorm:"column:job_id;size:255;not null;default:''"`
-	CreatedAt    time.Time `gorm:"column:created_at;not null"`
-}
-
-func (bankConnectionSyncRunModel) TableName() string { return "finance_bank_connection_sync_runs" }
-
 type providerSyncStateJournalModel struct {
 	JournalID                    int64      `gorm:"column:journal_id;not null;primaryKey;autoIncrement"`
 	ConnectionID                 string     `gorm:"column:connection_id;size:255;not null;index:idx_finance_provider_sync_state_journal_latest,priority:1"`
@@ -1010,26 +1000,6 @@ func providerSnapshotFromModel(model providerSnapshotModel) domain.ProviderSnaps
 		ProviderObjectID:     model.ProviderObjectID,
 		DocumentJSON:         []byte(model.DocumentJSON),
 		CapturedAt:           model.CapturedAt,
-	}
-}
-
-func newBankConnectionSyncRunModel(run domain.BankConnectionSyncRun) bankConnectionSyncRunModel {
-	return bankConnectionSyncRunModel{
-		ID:           run.ID,
-		ConnectionID: run.ConnectionID,
-		SyncKey:      run.SyncKey,
-		JobID:        run.JobID,
-		CreatedAt:    run.CreatedAt,
-	}
-}
-
-func bankConnectionSyncRunFromModel(model bankConnectionSyncRunModel) domain.BankConnectionSyncRun {
-	return domain.BankConnectionSyncRun{
-		ID:           model.ID,
-		ConnectionID: model.ConnectionID,
-		SyncKey:      model.SyncKey,
-		JobID:        model.JobID,
-		CreatedAt:    model.CreatedAt,
 	}
 }
 

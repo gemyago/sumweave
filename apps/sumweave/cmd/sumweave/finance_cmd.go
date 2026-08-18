@@ -473,10 +473,3 @@ func (financeFixturesProvider) LinkToken(
 		State:             domain.BankConnectionStateActive,
 	}, nil
 }
-
-func (financeFixturesProvider) Sync(
-	context.Context,
-	financepkg.ProviderSyncParams,
-) (financepkg.ProviderSyncResult, error) {
-	return financepkg.ProviderSyncResult{}, nil
-}

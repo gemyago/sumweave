@@ -1,12 +1,9 @@
 package finance
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -82,15 +79,6 @@ func objectSlice(input map[string]any, key string) []map[string]any {
 func timeValue(input map[string]any, key string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339, stringValue(input, key))
 	return parsed
-}
-
-func providerFingerprint(parts ...any) string {
-	var joined strings.Builder
-	for _, part := range parts {
-		_, _ = fmt.Fprintf(&joined, "%v\n", part)
-	}
-	hash := sha256.Sum256([]byte(joined.String()))
-	return hex.EncodeToString(hash[:16])
 }
 
 func stringValueFromFirstObject(input map[string]any, key string, nestedKey string) string {

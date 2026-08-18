@@ -1,11 +1,11 @@
 package finance
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/jaswdr/faker/v2"
@@ -286,97 +286,74 @@ func TestFocusedPublicServices(t *testing.T) {
 		assert.Equal(t, CSVImportStatusCompleted, audit.Status)
 	})
 
-	t.Run("bank sync service handles sync workflows while bank link stays separate", func(t *testing.T) {
-		store := makeStore(t)
-		tenantService := NewTenantService(store)
+	t.Run("csv import surfaces preview store failures", func(t *testing.T) {
 		fake := faker.New()
-		cipher, err := credentials.NewAESGCMCipher(
-			[]byte("0123456789abcdef0123456789abcdef"),
-			"test-key",
-		)
+		csv := "Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description\n29.05.26,wallet,,,1,,USD,purchase\n"
+		denied := NewCSVImportService(stubStore{isTenantMemberFn: func(context.Context, string, string) (bool, error) {
+			return false, nil
+		}}, &CatalogService{}, &LedgerService{})
+		_, err := denied.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+			ActorUserID: "actor-" + fake.UUID().V4(),
+			TenantID:    "tenant-" + fake.UUID().V4(),
+			ImportType:  CSVImportTypeAccounts,
+		})
+		require.ErrorIs(t, err, ErrTenantAccessDenied)
+		legacy := NewCSVImportService(stubStore{isTenantMemberFn: func(context.Context, string, string) (bool, error) {
+			return true, nil
+		}}, &CatalogService{}, &LedgerService{})
+		_, err = legacy.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+			ActorUserID: "actor-" + fake.UUID().V4(),
+			TenantID:    "tenant-" + fake.UUID().V4(),
+			ImportType:  CSVImportTypeAccounts,
+			CSV:         "name,currency,kind\naccount,USD,manual\n",
+		})
 		require.NoError(t, err)
-		provider := &stubBankProvider{
-			name: "monobank",
-			syncResults: []ProviderSyncResult{{
-				SyncKey: "sync-" + fake.UUID().V4(),
-				Accounts: []ProviderNormalizedAccount{{
-					ProviderAccountID: "provider-account-" + fake.UUID().V4(),
-					Name:              "main",
-					Currency:          "USD",
-				}},
-			}},
+		for _, makeFailureStore := range []func() stubStore{
+			func() stubStore {
+				return stubStore{isTenantMemberFn: func(context.Context, string, string) (bool, error) {
+					return true, nil
+				}, listAccountsFn: func(context.Context, string, bool) ([]domain.Account, error) {
+					return nil, assert.AnError
+				}}
+			},
+			func() stubStore {
+				return stubStore{isTenantMemberFn: func(context.Context, string, string) (bool, error) {
+					return true, nil
+				}, listCategoriesFn: func(context.Context, string, bool) ([]domain.Category, error) {
+					return nil, assert.AnError
+				}}
+			},
+			func() stubStore {
+				return stubStore{isTenantMemberFn: func(context.Context, string, string) (bool, error) {
+					return true, nil
+				}, listTagsFn: func(context.Context, string, bool) ([]domain.Tag, error) {
+					return nil, assert.AnError
+				}}
+			},
+			func() stubStore {
+				return stubStore{isTenantMemberFn: func(context.Context, string, string) (bool, error) {
+					return true, nil
+				}, listTransactionsFn: func(
+					context.Context,
+					string,
+					string,
+					domain.TransactionSource,
+					domain.TransactionStatus,
+					bool,
+				) ([]domain.Transaction, error) {
+					return nil, assert.AnError
+				}}
+			},
+		} {
+			service := NewCSVImportService(makeFailureStore(), &CatalogService{}, &LedgerService{})
+			_, previewErr := service.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
+				ActorUserID: "actor-" + fake.UUID().V4(),
+				TenantID:    "tenant-" + fake.UUID().V4(),
+				ImportType:  CSVImportTypeTransactions,
+				CSV:         csv,
+			})
+			require.ErrorIs(t, previewErr, assert.AnError)
 		}
-		enqueuer := &capturedBankSyncJobEnqueuer{}
-		scheduleWriter := &capturedBankSyncScheduleWriter{}
-		service := newLegacyBankSyncServiceForTest(
-			store,
-			WithBankSyncServiceConnectionSecretCipher(cipher),
-			WithBankSyncServiceProviders(provider),
-			WithBankSyncServiceJobEnqueuer(enqueuer),
-			WithBankSyncServiceScheduleWriter(scheduleWriter),
-		)
-		linkService := NewService(store, WithConnectionSecretCipher(cipher), WithBankProviders(provider))
-
-		ownerUserID := "owner-" + fake.UUID().V4()
-		tenant, err := tenantService.CreateTenant(t.Context(), CreateTenantParams{
-			ActorUserID:     ownerUserID,
-			Name:            "tenant-" + fake.Company().Name(),
-			DisplayCurrency: "USD",
-			SeedDefaults:    true,
-		})
-		require.NoError(t, err)
-
-		secretID, err := linkService.encryptAndSaveConnectionSecret(
-			t.Context(),
-			provider.Name(),
-			"ref-"+fake.UUID().V4(),
-			"secret-"+fake.UUID().V4(),
-		)
-		require.NoError(t, err)
-		connection, err := store.SaveBankConnection(t.Context(), domain.BankConnection{
-			ID:                "connection-" + fake.UUID().V4(),
-			TenantID:          tenant.ID,
-			Provider:          provider.Name(),
-			ConnectorID:       domain.ProviderConnectorIDMonobank,
-			DisplayName:       "Connection " + fake.Company().Name(),
-			ProviderReference: "ref-" + fake.UUID().V4(),
-			SecretID:          secretID,
-			State:             domain.BankConnectionStateActive,
-			CreatedAt:         time.Now().UTC(),
-			UpdatedAt:         time.Now().UTC(),
-		})
-		require.NoError(t, err)
-
-		_, err = service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
-			ActorUserID:  ownerUserID,
-			TenantID:     tenant.ID,
-			ConnectionID: connection.ID,
-			Interval:     time.Hour,
-			NextRunAt:    time.Now().UTC(),
-		})
-		require.NoError(t, err)
-		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
-			ActorUserID:  ownerUserID,
-			TenantID:     tenant.ID,
-			ConnectionID: connection.ID,
-			Reason:       BankConnectionSyncReasonManual,
-		})
-		require.NoError(t, err)
-		_, err = service.ListBankConnections(t.Context(), ListBankConnectionsParams{
-			ActorUserID: ownerUserID,
-			TenantID:    tenant.ID,
-		})
-		require.NoError(t, err)
-		_, err = service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
-			ConnectionID: connection.ID,
-			JobID:        "job-1",
-		})
-		require.NoError(t, err)
-		require.NoError(t, service.DeleteBankConnection(t.Context(), DeleteBankConnectionParams{
-			ActorUserID:  ownerUserID,
-			TenantID:     tenant.ID,
-			ConnectionID: connection.ID,
-		}))
 	})
 
 	t.Run("rolls back journal cleanup when a later connection cleanup step fails", func(t *testing.T) {
@@ -419,8 +396,9 @@ func TestFocusedPublicServices(t *testing.T) {
 			DeleteProviderSnapshotsByConnection(mock.Anything, connection.ID).
 			Once().
 			Return(expectedErr)
-		service := newLegacyBankSyncServiceForTest(
+		service := NewBankSyncService(
 			store,
+			newMockbankSyncOrchestrator(t),
 			WithBankSyncServiceSyncStateJournalDeleter(journalStore),
 			WithBankSyncServiceSnapshotDeleter(snapshotDeleter),
 		)

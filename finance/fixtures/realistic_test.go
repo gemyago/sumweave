@@ -988,9 +988,6 @@ func TestRealisticScenario(t *testing.T) {
 		store,
 		provider,
 		financepkg.WithBankSyncServiceNow(func() time.Time { return now }),
-		financepkg.WithBankSyncServiceIDGenerator(uuid.NewString),
-		financepkg.WithBankSyncServiceConnectionSecretCipher(cipher),
-		financepkg.WithBankSyncServiceProviders(provider),
 	)
 	fxService := financepkg.NewFXService(
 		store,
@@ -1200,13 +1197,6 @@ func (realisticScenarioProvider) LinkToken(
 		Secret:            "secret",
 		State:             "active",
 	}, nil
-}
-
-func (realisticScenarioProvider) Sync(
-	_ context.Context,
-	_ financepkg.ProviderSyncParams,
-) (financepkg.ProviderSyncResult, error) {
-	return financepkg.ProviderSyncResult{}, nil
 }
 
 func (realisticScenarioProvider) Orchestrate(

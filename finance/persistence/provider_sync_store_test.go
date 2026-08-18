@@ -294,60 +294,6 @@ func TestProviderSyncStore(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, snapshots, 1)
 
-			missingRun, err := store.GetBankConnectionSyncRun(
-				t.Context(),
-				connection.ID,
-				"sync-missing",
-			)
-			require.ErrorIs(t, err, ErrBankConnectionSyncRunNotFound)
-			assert.Nil(t, missingRun)
-
-			claimed, err := store.ClaimBankConnectionSyncRun(t.Context(), domain.BankConnectionSyncRun{
-				ID:           "claim-" + fake.UUID().V4(),
-				ConnectionID: connection.ID,
-				SyncKey:      "sync-claim-" + fake.UUID().V4(),
-				JobID:        "job-" + fake.UUID().V4(),
-				CreatedAt:    now,
-			})
-			require.NoError(t, err)
-			assert.True(t, claimed)
-
-			claimed, err = store.ClaimBankConnectionSyncRun(t.Context(), domain.BankConnectionSyncRun{
-				ID:           "claim-duplicate-" + fake.UUID().V4(),
-				ConnectionID: connection.ID,
-				SyncKey:      "sync-claim-duplicate",
-				JobID:        "job-" + fake.UUID().V4(),
-				CreatedAt:    now,
-			})
-			require.NoError(t, err)
-			assert.True(t, claimed)
-			claimed, err = store.ClaimBankConnectionSyncRun(t.Context(), domain.BankConnectionSyncRun{
-				ID:           "claim-duplicate-2-" + fake.UUID().V4(),
-				ConnectionID: connection.ID,
-				SyncKey:      "sync-claim-duplicate",
-				JobID:        "job-" + fake.UUID().V4(),
-				CreatedAt:    now,
-			})
-			require.NoError(t, err)
-			assert.False(t, claimed)
-
-			_, err = store.SaveBankConnectionSyncRun(t.Context(), domain.BankConnectionSyncRun{
-				ID:           "run-" + fake.UUID().V4(),
-				ConnectionID: connection.ID,
-				SyncKey:      "sync-" + fake.UUID().V4(),
-				JobID:        "job-" + fake.UUID().V4(),
-				CreatedAt:    now,
-			})
-			require.NoError(t, err)
-
-			loadedRun, err := store.GetBankConnectionSyncRun(
-				t.Context(),
-				connection.ID,
-				"sync-"+fake.UUID().V4(),
-			)
-			require.ErrorIs(t, err, ErrBankConnectionSyncRunNotFound)
-			assert.Nil(t, loadedRun)
-
 			match, err := store.SaveProviderTransactionMatch(
 				t.Context(),
 				domain.ProviderTransactionMatch{
@@ -506,14 +452,6 @@ func TestProviderSyncStore(t *testing.T) {
 				CapturedAt:          now,
 			})
 			require.NoError(t, err)
-			_, err = store.SaveBankConnectionSyncRun(t.Context(), domain.BankConnectionSyncRun{
-				ID:           "run-" + fake.UUID().V4(),
-				ConnectionID: connection.ID,
-				SyncKey:      "sync-" + fake.UUID().V4(),
-				JobID:        "job-" + fake.UUID().V4(),
-				CreatedAt:    now,
-			})
-			require.NoError(t, err)
 			_, err = store.SaveProviderTransactionMatch(t.Context(), domain.ProviderTransactionMatch{
 				ID:                "match-" + fake.UUID().V4(),
 				ConnectionID:      connection.ID,
@@ -528,7 +466,6 @@ func TestProviderSyncStore(t *testing.T) {
 		}
 
 		require.NoError(t, store.DeleteProviderTransactionMatches(t.Context(), connectionOne.ID))
-		require.NoError(t, store.DeleteBankConnectionSyncRuns(t.Context(), connectionOne.ID))
 		require.NoError(t, store.DeleteBalanceSnapshots(t.Context(), connectionOne.ID))
 		require.NoError(t, store.DeleteConnectionProviderAccounts(t.Context(), connectionOne.ID))
 		require.NoError(t, store.DeleteBankConnectionSchedule(t.Context(), connectionOne.ID))
@@ -547,9 +484,6 @@ func TestProviderSyncStore(t *testing.T) {
 		snapshots, err := store.ListBalanceSnapshots(t.Context(), connectionOne.ID)
 		require.NoError(t, err)
 		assert.Empty(t, snapshots)
-		run, err := store.GetBankConnectionSyncRun(t.Context(), connectionOne.ID, "missing")
-		require.ErrorIs(t, err, ErrBankConnectionSyncRunNotFound)
-		assert.Nil(t, run)
 		secret, err := store.GetConnectionSecret(t.Context(), secretOne.ID)
 		require.ErrorIs(t, err, ErrConnectionSecretNotFound)
 		assert.Nil(t, secret)
@@ -818,11 +752,6 @@ func TestProviderSyncStore(t *testing.T) {
 		require.Error(t, err)
 		_, err = store.SaveBalanceSnapshot(t.Context(), domain.BalanceSnapshot{ID: "id"})
 		require.Error(t, err)
-		_, err = store.SaveBankConnectionSyncRun(
-			t.Context(),
-			domain.BankConnectionSyncRun{ID: "id", ConnectionID: "cid", SyncKey: "key"},
-		)
-		require.Error(t, err)
 		_, err = store.SaveProviderTransactionMatch(
 			t.Context(),
 			domain.ProviderTransactionMatch{ID: "id"},
@@ -830,20 +759,11 @@ func TestProviderSyncStore(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("surfaces sync run and match query errors when database is unavailable", func(t *testing.T) {
+	t.Run("surfaces match query errors when database is unavailable", func(t *testing.T) {
 		store := makeStore(t)
 		sqlDB, err := store.DB().DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
-
-		claimed, err := store.ClaimBankConnectionSyncRun(t.Context(), domain.BankConnectionSyncRun{
-			ID:           "run-closed",
-			ConnectionID: "connection-closed",
-			SyncKey:      "sync-closed",
-			CreatedAt:    time.Now().UTC(),
-		})
-		require.Error(t, err)
-		assert.False(t, claimed)
 
 		_, err = store.ConsumePendingBankConnectionLinkStart(
 			t.Context(),
@@ -855,8 +775,6 @@ func TestProviderSyncStore(t *testing.T) {
 		)
 		require.Error(t, err)
 
-		_, err = store.GetBankConnectionSyncRun(t.Context(), "connection-closed", "sync-closed")
-		require.Error(t, err)
 		_, err = store.GetProviderTransactionMatchByProviderID(t.Context(), "connection", "account", "provider-txn")
 		require.Error(t, err)
 		_, err = store.GetProviderTransactionMatchByFingerprint(t.Context(), "connection", "account", "fingerprint")
