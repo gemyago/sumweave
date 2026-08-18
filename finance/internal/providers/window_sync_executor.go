@@ -41,7 +41,11 @@ type WindowSyncStore interface {
 		connection domain.ProviderConnectionRef,
 		window domain.ProviderSyncWindow,
 	) (ExistingWindowSnapshot, error)
-	ApplySync(ctx context.Context, diffPlan ProviderDiffPlan, applyPlan ApplyPlan) error
+	ApplySync(
+		ctx context.Context,
+		diffPlan ProviderDiffPlan,
+		applyPlan ApplyPlan,
+	) (domain.ProviderSyncStats, error)
 }
 
 type WindowSyncExecutorOption func(*WindowSyncExecutor)
@@ -144,7 +148,7 @@ func (c *WindowSyncExecutor) Execute(
 
 	diffPlan := c.diffPlanner.Plan(batch, snapshot)
 	applyPlan := c.applyPlanner.Plan(diffPlan)
-	applyErr := c.windowSyncStore.ApplySync(ctx, diffPlan, applyPlan)
+	stats, applyErr := c.windowSyncStore.ApplySync(ctx, diffPlan, applyPlan)
 	if applyErr != nil {
 		return WindowSyncResult{}, fmt.Errorf("apply sync: %w", applyErr)
 	}
@@ -152,7 +156,7 @@ func (c *WindowSyncExecutor) Execute(
 	return WindowSyncResult{
 		RunID: c.runIDGenerator(),
 		Batch: batch,
-		Stats: applyPlan.Stats,
+		Stats: stats,
 		Issues: append(
 			[]domain.ProviderSyncIssue(nil),
 			applyPlan.Issues...,

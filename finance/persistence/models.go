@@ -325,6 +325,7 @@ type providerSyncStateJournalModel struct {
 	JobID                        string     `gorm:"column:job_id;size:255;not null;default:''"`
 	ErrorSummary                 string     `gorm:"column:error_summary;type:text;not null;default:''"`
 	ObservedAccounts             int64      `gorm:"column:observed_accounts;not null"`
+	CreatedAccounts              int64      `gorm:"column:created_accounts;not null"`
 	ObservedTransactions         int64      `gorm:"column:observed_transactions;not null"`
 	CreatedTransactions          int64      `gorm:"column:created_transactions;not null"`
 	UpdatedTransactions          int64      `gorm:"column:updated_transactions;not null"`
@@ -1046,6 +1047,7 @@ func newProviderSyncStateJournalModel(
 		JobID:                        state.JobID,
 		ErrorSummary:                 state.ErrorSummary,
 		ObservedAccounts:             int64(state.AggregateStats.ObservedAccounts),
+		CreatedAccounts:              int64(state.AggregateStats.CreatedAccounts),
 		ObservedTransactions:         int64(state.AggregateStats.ObservedTransactions),
 		CreatedTransactions:          int64(state.AggregateStats.CreatedTransactions),
 		UpdatedTransactions:          int64(state.AggregateStats.UpdatedTransactions),
@@ -1072,6 +1074,7 @@ func providerSyncStateFromJournalModel(
 		ErrorSummary: model.ErrorSummary,
 		AggregateStats: domain.ProviderSyncStats{
 			ObservedAccounts:             int(model.ObservedAccounts),
+			CreatedAccounts:              int(model.CreatedAccounts),
 			ObservedTransactions:         int(model.ObservedTransactions),
 			CreatedTransactions:          int(model.CreatedTransactions),
 			UpdatedTransactions:          int(model.UpdatedTransactions),

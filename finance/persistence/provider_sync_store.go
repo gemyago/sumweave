@@ -299,7 +299,6 @@ func (s *Store) SaveConnectionProviderAccount(
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: columnConnectionID}, {Name: columnProviderAccountID}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				columnFinanceAccountID,
 				columnName,
 				columnCurrency,
 				"iban",
@@ -314,7 +313,19 @@ func (s *Store) SaveConnectionProviderAccount(
 			err,
 		)
 	}
-	return connectionProviderAccountFromModel(model), nil
+
+	var saved connectionProviderAccountModel
+	if err := s.db.WithContext(ctx).
+		Table(saved.TableName()).
+		Where("connection_id = ?", model.ConnectionID).
+		Where("provider_account_id = ?", model.ProviderAccountID).
+		First(&saved).Error; err != nil {
+		return domain.ConnectionProviderAccount{}, fmt.Errorf(
+			"load saved connection provider account: %w",
+			err,
+		)
+	}
+	return connectionProviderAccountFromModel(saved), nil
 }
 
 func (s *Store) ListConnectionProviderAccounts(

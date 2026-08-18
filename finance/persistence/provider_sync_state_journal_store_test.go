@@ -72,6 +72,7 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 		observedTransactions := fake.IntBetween(4, 12)
 		return domain.ProviderSyncStats{
 			ObservedAccounts:             fake.IntBetween(1, 4),
+			CreatedAccounts:              fake.IntBetween(0, 4),
 			ObservedTransactions:         observedTransactions,
 			CreatedTransactions:          fake.IntBetween(0, observedTransactions),
 			UpdatedTransactions:          fake.IntBetween(0, observedTransactions),
@@ -214,6 +215,7 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 			assert.True(t, secondWindow.Start.Equal(records[1].WindowStart))
 			assert.True(t, secondWindow.End.Equal(records[1].WindowEnd))
 			assert.Equal(t, int64(secondState.AggregateStats.ObservedAccounts), records[1].ObservedAccounts)
+			assert.Equal(t, int64(secondState.AggregateStats.CreatedAccounts), records[1].CreatedAccounts)
 			assert.Equal(
 				t,
 				int64(secondState.AggregateStats.ObservedTransactions),

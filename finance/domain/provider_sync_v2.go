@@ -100,6 +100,7 @@ const (
 
 type ProviderSyncStats struct {
 	ObservedAccounts             int
+	CreatedAccounts              int
 	ObservedTransactions         int
 	CreatedTransactions          int
 	UpdatedTransactions          int

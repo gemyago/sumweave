@@ -321,6 +321,7 @@ func (o *SyncOrchestrator) executeRequestedWindow(
 func mergeProviderSyncStats(left domain.ProviderSyncStats, right domain.ProviderSyncStats) domain.ProviderSyncStats {
 	return domain.ProviderSyncStats{
 		ObservedAccounts:             left.ObservedAccounts + right.ObservedAccounts,
+		CreatedAccounts:              left.CreatedAccounts + right.CreatedAccounts,
 		ObservedTransactions:         left.ObservedTransactions + right.ObservedTransactions,
 		CreatedTransactions:          left.CreatedTransactions + right.CreatedTransactions,
 		UpdatedTransactions:          left.UpdatedTransactions + right.UpdatedTransactions,

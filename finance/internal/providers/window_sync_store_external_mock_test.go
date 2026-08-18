@@ -118,18 +118,29 @@ func (_mock *MockWindowSyncStore) ApplySync(
 	ctx context.Context,
 	diffPlan providers.ProviderDiffPlan,
 	applyPlan providers.ApplyPlan,
-) error {
+) (domain.ProviderSyncStats, error) {
 	ret := _mock.Called(ctx, diffPlan, applyPlan)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ApplySync")
 	}
 
-	if returnFunc, ok := ret.Get(0).(func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan) error); ok {
+	var r0 domain.ProviderSyncStats
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan) (domain.ProviderSyncStats, error)); ok {
 		return returnFunc(ctx, diffPlan, applyPlan)
 	}
-
-	return ret.Error(0)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan) domain.ProviderSyncStats); ok {
+		r0 = returnFunc(ctx, diffPlan, applyPlan)
+	} else {
+		r0 = ret.Get(0).(domain.ProviderSyncStats)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan) error); ok {
+		r1 = returnFunc(ctx, diffPlan, applyPlan)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 type MockWindowSyncStore_ApplySync_Call struct {
@@ -165,13 +176,16 @@ func (_c *MockWindowSyncStore_ApplySync_Call) Run(
 	return _c
 }
 
-func (_c *MockWindowSyncStore_ApplySync_Call) Return(err error) *MockWindowSyncStore_ApplySync_Call {
-	_c.Call.Return(err)
+func (_c *MockWindowSyncStore_ApplySync_Call) Return(
+	stats domain.ProviderSyncStats,
+	err error,
+) *MockWindowSyncStore_ApplySync_Call {
+	_c.Call.Return(stats, err)
 	return _c
 }
 
 func (_c *MockWindowSyncStore_ApplySync_Call) RunAndReturn(
-	run func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan) error,
+	run func(context.Context, providers.ProviderDiffPlan, providers.ApplyPlan) (domain.ProviderSyncStats, error),
 ) *MockWindowSyncStore_ApplySync_Call {
 	_c.Call.Return(run)
 	return _c

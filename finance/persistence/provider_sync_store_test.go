@@ -22,6 +22,38 @@ func TestProviderSyncStore(t *testing.T) {
 		return store
 	}
 
+	t.Run("preserves provider mapping ownership during metadata refresh", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		now := time.Date(2026, time.August, 18, 14, 0, 0, 0, time.UTC)
+		first := domain.ConnectionProviderAccount{
+			ID:                "mapping-first-" + fake.UUID().V4(),
+			ConnectionID:      "connection-" + fake.UUID().V4(),
+			ProviderAccountID: "provider-account-" + fake.UUID().V4(),
+			FinanceAccountID:  "finance-account-first-" + fake.UUID().V4(),
+			Name:              "account-" + fake.Lorem().Word(),
+			Currency:          "PLN",
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
+		savedFirst, err := store.SaveConnectionProviderAccount(t.Context(), first)
+		require.NoError(t, err)
+		competing := first
+		competing.ID = "mapping-competing-" + fake.UUID().V4()
+		competing.FinanceAccountID = "finance-account-competing-" + fake.UUID().V4()
+		competing.Name = "account-refreshed-" + fake.Lorem().Word()
+		competing.UpdatedAt = now.Add(time.Minute)
+		savedCompeting, err := store.SaveConnectionProviderAccount(t.Context(), competing)
+		require.NoError(t, err)
+
+		assert.Equal(t, savedFirst.FinanceAccountID, savedCompeting.FinanceAccountID)
+		assert.Equal(t, savedFirst.ID, savedCompeting.ID)
+		assert.Equal(t, competing.Name, savedCompeting.Name)
+		mappings, err := store.ListConnectionProviderAccounts(t.Context(), first.ConnectionID)
+		require.NoError(t, err)
+		assert.Equal(t, []domain.ConnectionProviderAccount{savedCompeting}, mappings)
+	})
+
 	t.Run("orders provider synchronization records by canonical timestamps", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)

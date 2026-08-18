@@ -46,6 +46,7 @@ type stubWindowSyncStore struct {
 	snapshot          ExistingWindowSnapshot
 	loadErr           error
 	applyErr          error
+	applyStats        domain.ProviderSyncStats
 	loadCalls         []domain.ProviderSyncWindow
 	loadConnections   []domain.ProviderConnectionRef
 	appliedDiffPlans  []ProviderDiffPlan
@@ -69,13 +70,13 @@ func (r *stubWindowSyncStore) ApplySync(
 	_ context.Context,
 	diffPlan ProviderDiffPlan,
 	applyPlan ApplyPlan,
-) error {
+) (domain.ProviderSyncStats, error) {
 	r.appliedDiffPlans = append(r.appliedDiffPlans, diffPlan)
 	r.appliedApplyPlans = append(r.appliedApplyPlans, applyPlan)
 	if r.applyErr != nil {
-		return r.applyErr
+		return domain.ProviderSyncStats{}, r.applyErr
 	}
-	return nil
+	return r.applyStats, nil
 }
 
 func TestWindowSyncExecutor(t *testing.T) {
@@ -95,7 +96,8 @@ func TestWindowSyncExecutor(t *testing.T) {
 
 	makeStore := func() *stubWindowSyncStore {
 		return &stubWindowSyncStore{
-			snapshot: ExistingWindowSnapshot{},
+			snapshot:   ExistingWindowSnapshot{},
+			applyStats: domain.ProviderSyncStats{},
 		}
 	}
 
@@ -267,6 +269,11 @@ func TestWindowSyncExecutor(t *testing.T) {
 				snapshot: ExistingWindowSnapshot{
 					Connection:     request.Connection,
 					SnapshotWindow: snapshotWindow,
+				},
+				applyStats: domain.ProviderSyncStats{
+					ObservedAccounts:     1,
+					ObservedTransactions: 1,
+					CreatedTransactions:  1,
 				},
 			}
 

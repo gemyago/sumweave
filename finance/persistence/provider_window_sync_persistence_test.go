@@ -311,6 +311,17 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		providerAccountID := "provider-account-" + fake.UUID().V4()
 		readableName := "provider-name-" + fake.Lorem().Word()
 
+		_, err = store.SaveBankConnection(t.Context(), domain.BankConnection{
+			ID:          connectionID,
+			TenantID:    tenantID,
+			Provider:    string(domain.ProviderIDPKO),
+			ConnectorID: domain.ProviderConnectorIDEnableBanking,
+			State:       domain.BankConnectionStateActive,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		require.NoError(t, err)
+
 		_, err = store.SaveAccount(t.Context(), domain.Account{
 			ID:       financeAccountID,
 			TenantID: tenantID,
@@ -337,7 +348,7 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		err = syncStore.ApplySync(t.Context(), providers.ProviderDiffPlan{
+		_, err = syncStore.ApplySync(t.Context(), providers.ProviderDiffPlan{
 			Connection: domain.ProviderConnectionRef{
 				ConnectionID: connectionID,
 				ProviderID:   domain.ProviderIDPKO,
@@ -357,6 +368,103 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		require.NotNil(t, loadedAccount)
 		assert.Equal(t, readableName, loadedAccount.Name)
 		assert.Equal(t, "EUR", loadedAccount.Currency)
+	})
+
+	t.Run("creates first linked account mapping and transaction from durable connection ownership", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		adapter := NewProviderWindowSyncPersistence(store)
+		now := time.Date(2026, time.August, 18, 12, 0, 0, 0, time.UTC)
+		connection := domain.ProviderConnectionRef{
+			ConnectionID:      "connection-" + fake.UUID().V4(),
+			ProviderID:        domain.ProviderIDPKO,
+			ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+			ProviderReference: "reference-" + fake.UUID().V4(),
+		}
+		tenantID := "tenant-" + fake.UUID().V4()
+		_, err := store.SaveBankConnection(t.Context(), domain.BankConnection{
+			ID:                connection.ConnectionID,
+			TenantID:          tenantID,
+			Provider:          string(connection.ProviderID),
+			ConnectorID:       connection.ConnectorID,
+			ProviderReference: connection.ProviderReference,
+			State:             domain.BankConnectionStateActive,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		})
+		require.NoError(t, err)
+
+		syncStore, err := providers.NewProviderWindowSyncStore(
+			adapter,
+			providers.WithWindowSyncStoreNow(func() time.Time { return now }),
+		)
+		require.NoError(t, err)
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		transactionObservation := domain.ProviderTransactionObservation{
+			Connection:            connection,
+			ProviderAccountID:     providerAccountID,
+			ProviderTransactionID: "provider-transaction-" + fake.UUID().V4(),
+			Status:                domain.TransactionStatusBooked,
+			AmountMinor:           int64(-fake.IntBetween(100, 90000)),
+			Currency:              "pln",
+			Description:           "transaction-" + fake.Lorem().Word(),
+			EffectiveAt:           now.Add(-time.Hour),
+			Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+		}
+		createAction := providers.ProviderTransactionAction{
+			Type:        providers.ProviderTransactionActionTypeCreate,
+			Observation: transactionObservation,
+		}
+		stats, err := syncStore.ApplySync(t.Context(), providers.ProviderDiffPlan{
+			Connection:     connection,
+			SnapshotWindow: domain.ProviderSyncWindow{Start: now.Add(-24 * time.Hour), End: now},
+			AccountObservations: []domain.ProviderAccountObservation{{
+				Connection:        connection,
+				ProviderAccountID: providerAccountID,
+				Name:              "account-" + fake.Lorem().Word(),
+				Currency:          "pln",
+			}},
+			TransactionActions: []providers.ProviderTransactionAction{createAction},
+		}, providers.ApplyPlan{
+			TransactionWrites: []providers.ApplyTransactionWrite{{Action: createAction}},
+			Stats: domain.ProviderSyncStats{
+				ObservedAccounts:     1,
+				ObservedTransactions: 1,
+				CreatedTransactions:  1,
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, domain.ProviderSyncStats{
+			ObservedAccounts:     1,
+			CreatedAccounts:      1,
+			ObservedTransactions: 1,
+			CreatedTransactions:  1,
+		}, stats)
+
+		mappings, err := adapter.ListConnectionProviderAccounts(t.Context(), connection.ConnectionID)
+		require.NoError(t, err)
+		require.Len(t, mappings, 1)
+		financeAccount, err := store.GetAccount(t.Context(), mappings[0].FinanceAccountID)
+		require.NoError(t, err)
+		require.NotNil(t, financeAccount)
+		assert.Equal(t, tenantID, financeAccount.TenantID)
+		assert.Equal(t, domain.AccountKindLinked, financeAccount.Kind)
+		assert.Equal(t, &domain.LinkedAccount{
+			Provider:          string(connection.ProviderID),
+			ProviderAccountID: providerAccountID,
+		}, financeAccount.LinkedAccount)
+
+		transactions, err := store.ListTransactions(
+			t.Context(),
+			tenantID,
+			mappings[0].FinanceAccountID,
+			domain.TransactionSourceProvider,
+			"",
+			false,
+		)
+		require.NoError(t, err)
+		require.Len(t, transactions, 1)
+		assert.Equal(t, tenantID, transactions[0].TenantID)
 	})
 
 	t.Run("commits on success and rolls back on callback error", func(t *testing.T) {

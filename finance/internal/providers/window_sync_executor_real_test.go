@@ -192,10 +192,14 @@ func TestWindowSyncExecutorRealConnectorComposition(t *testing.T) {
 
 		applySync := store.EXPECT().ApplySync(mock.Anything, mock.Anything, mock.Anything)
 		applySync.RunAndReturn(
-			func(_ context.Context, diffPlan providers.ProviderDiffPlan, applyPlan providers.ApplyPlan) error {
+			func(
+				_ context.Context,
+				diffPlan providers.ProviderDiffPlan,
+				applyPlan providers.ApplyPlan,
+			) (domain.ProviderSyncStats, error) {
 				appliedDiffPlans = append(appliedDiffPlans, diffPlan)
 				appliedApplyPlans = append(appliedApplyPlans, applyPlan)
-				return nil
+				return applyPlan.Stats, nil
 			},
 		)
 		applySync.Twice()
