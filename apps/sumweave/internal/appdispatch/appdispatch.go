@@ -132,7 +132,7 @@ func (p *Publisher) Publish(ctx context.Context, message Message) error {
 	if err := p.publisher.Publish(message.Topic, wmMessage); err != nil {
 		return fmt.Errorf("publish message on topic %s: %w", message.Topic, err)
 	}
-	p.logger.DebugContext(ctx, "message published",
+	p.logger.InfoContext(ctx, "message published",
 		slog.String("messageId", message.ID),
 		slog.String("topic", message.Topic),
 	)
@@ -154,7 +154,7 @@ func (p *Publisher) PublishInTx(ctx context.Context, tx *sql.Tx, message Message
 	if err = publisher.Publish(message.Topic, makeWatermillMessage(ctx, message)); err != nil {
 		return fmt.Errorf("publish message in transaction on topic %s: %w", message.Topic, err)
 	}
-	p.logger.DebugContext(ctx, "message published in transaction",
+	p.logger.InfoContext(ctx, "message published in transaction",
 		slog.String("messageId", message.ID),
 		slog.String("topic", message.Topic),
 	)
