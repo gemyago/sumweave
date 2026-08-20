@@ -63,16 +63,24 @@ func (s sqlitePublisherSchema) InsertQuery(params wmsql.InsertQueryParams) (wmsq
 	var query strings.Builder
 	query.WriteString(`INSERT INTO `)
 	query.WriteString(s.MessagesTable(params.Topic))
-	query.WriteString(` (uuid, topic, created_at, payload, metadata) VALUES `)
-	args := make([]any, 0, len(params.Msgs)*5)
+	query.WriteString(` (uuid, topic, created_at, payload, metadata, payload_hash) VALUES `)
+	args := make([]any, 0, len(params.Msgs)*6)
 	placeholders := make([]string, 0, len(params.Msgs))
 	for _, msg := range params.Msgs {
-		placeholders = append(placeholders, `(?,?,?,?,?)`)
-		metadata, err := json.Marshal(msg.Metadata)
+		placeholders = append(placeholders, `(?,?,?,?,?,?)`)
+		metadata, err := json.Marshal(transportMessageMetadata(msg.Metadata))
 		if err != nil {
 			return wmsql.Query{}, fmt.Errorf("encode message %q metadata to JSON: %w", msg.UUID, err)
 		}
-		args = append(args, msg.UUID, params.Topic, time.Now().Format(time.RFC3339), msg.Payload, metadata)
+		args = append(
+			args,
+			msg.UUID,
+			params.Topic,
+			time.Now().Format(time.RFC3339),
+			msg.Payload,
+			metadata,
+			transportMessagePayloadHash(msg),
+		)
 	}
 	query.WriteString(strings.Join(placeholders, ","))
 	return wmsql.Query{Query: query.String(), Args: args}, nil

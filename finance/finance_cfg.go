@@ -32,21 +32,18 @@ type EnableBankingConfig struct {
 }
 
 type Config struct {
-	Database               *persistence.Database
-	Logger                 *slog.Logger
-	Now                    func() time.Time
-	NewID                  func() string
-	HTTPClient             *http.Client
-	ConnectionSecretCipher connectionSecretCipher
-	FXProviders            []FXRatesProvider
-	DefaultFXProvider      string
-	FXJobEnqueuer          FXRefreshJobEnqueuer
-	FXScheduleWriter       FXRefreshScheduleWriter
-	CSVImportJobEnqueuer   CSVImportJobEnqueuer
-	BankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
-	BankSyncScheduleWriter BankConnectionSyncScheduleWriter
-	Monobank               MonobankConfig
-	EnableBanking          EnableBankingConfig
+	Database                  *persistence.Database
+	Logger                    *slog.Logger
+	Now                       func() time.Time
+	NewID                     func() string
+	HTTPClient                *http.Client
+	ConnectionSecretCipher    connectionSecretCipher
+	FXProviders               []FXRatesProvider
+	DefaultFXProvider         string
+	CommandPublisher          SemanticCommandPublisher
+	ScheduledCommandPublisher ScheduledSemanticCommandPublisher
+	Monobank                  MonobankConfig
+	EnableBanking             EnableBankingConfig
 }
 
 func (c *Config) validate() error {

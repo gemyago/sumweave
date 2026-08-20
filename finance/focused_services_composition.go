@@ -20,17 +20,13 @@ type focusedServices struct {
 }
 
 type focusedServicesConfig struct {
-	now                    func() time.Time
-	newID                  func() string
-	fxProviders            []FXRatesProvider
-	defaultFXProvider      string
-	fxJobEnqueuer          FXRefreshJobEnqueuer
-	fxScheduleWriter       FXRefreshScheduleWriter
-	csvImportJobEnqueuer   CSVImportJobEnqueuer
-	bankSyncJobEnqueuer    BankConnectionSyncJobEnqueuer
-	bankSyncScheduleWriter BankConnectionSyncScheduleWriter
-	bankSyncOrchestrator   bankSyncOrchestrator
-	logger                 *slog.Logger
+	now                  func() time.Time
+	newID                func() string
+	fxProviders          []FXRatesProvider
+	defaultFXProvider    string
+	commandPublisher     SemanticCommandPublisher
+	bankSyncOrchestrator bankSyncOrchestrator
+	logger               *slog.Logger
 }
 
 func defaultFocusedServicesConfig() focusedServicesConfig {
@@ -49,11 +45,7 @@ func focusedServicesConfigFromConfig(
 	serviceConfig.now = cfg.Now
 	serviceConfig.newID = cfg.NewID
 	serviceConfig.fxProviders = append(serviceConfig.fxProviders, cfg.FXProviders...)
-	serviceConfig.fxJobEnqueuer = cfg.FXJobEnqueuer
-	serviceConfig.fxScheduleWriter = cfg.FXScheduleWriter
-	serviceConfig.csvImportJobEnqueuer = cfg.CSVImportJobEnqueuer
-	serviceConfig.bankSyncJobEnqueuer = cfg.BankSyncJobEnqueuer
-	serviceConfig.bankSyncScheduleWriter = cfg.BankSyncScheduleWriter
+	serviceConfig.commandPublisher = cfg.CommandPublisher
 	serviceConfig.logger = cfg.Logger
 	serviceConfig.bankSyncOrchestrator = syncOrchestrator
 	if trimmed := strings.TrimSpace(cfg.DefaultFXProvider); trimmed != "" {
@@ -109,11 +101,8 @@ func newFocusedServices(
 		WithFXServiceDefaultProvider(cfg.defaultFXProvider),
 		WithFXServiceProviders(cfg.fxProviders...),
 	}
-	if cfg.fxJobEnqueuer != nil {
-		fxOpts = append(fxOpts, WithFXServiceJobEnqueuer(cfg.fxJobEnqueuer))
-	}
-	if cfg.fxScheduleWriter != nil {
-		fxOpts = append(fxOpts, WithFXServiceScheduleWriter(cfg.fxScheduleWriter))
+	if cfg.commandPublisher != nil {
+		fxOpts = append(fxOpts, WithFXServiceCommandPublisher(cfg.commandPublisher))
 	}
 	tenantService := NewTenantService(store, tenantOpts...)
 	catalogService := NewCatalogService(store, catalogOpts...)
@@ -126,8 +115,8 @@ func newFocusedServices(
 		WithCSVImportServiceIDGenerator(cfg.newID),
 		WithCSVImportServiceRowStore(csvImportStore),
 	}
-	if cfg.csvImportJobEnqueuer != nil {
-		csvImportOpts = append(csvImportOpts, WithCSVImportServiceJobEnqueuer(cfg.csvImportJobEnqueuer))
+	if cfg.commandPublisher != nil {
+		csvImportOpts = append(csvImportOpts, WithCSVImportServiceCommandPublisher(cfg.commandPublisher))
 	}
 	csvImportService := NewCSVImportService(store, catalogService, ledgerService, csvImportOpts...)
 	bankSyncOpts := []BankSyncServiceOption{
@@ -135,11 +124,8 @@ func newFocusedServices(
 		WithBankSyncServiceSnapshotDeleter(providerSnapshotStore),
 		WithBankSyncServiceSyncStateJournalDeleter(persistence.NewProviderSyncStateJournalStore(store)),
 	}
-	if cfg.bankSyncJobEnqueuer != nil {
-		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceJobEnqueuer(cfg.bankSyncJobEnqueuer))
-	}
-	if cfg.bankSyncScheduleWriter != nil {
-		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceScheduleWriter(cfg.bankSyncScheduleWriter))
+	if cfg.commandPublisher != nil {
+		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceCommandPublisher(cfg.commandPublisher))
 	}
 	if cfg.logger != nil {
 		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceLogger(cfg.logger))

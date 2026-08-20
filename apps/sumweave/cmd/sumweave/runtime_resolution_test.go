@@ -72,13 +72,14 @@ func TestRuntimeResolution(t *testing.T) {
 		require.NoError(t, runtime.Run(t.Context()))
 	})
 
-	t.Run("split jobs resolution surfaces typed root validation failures", func(t *testing.T) {
+	t.Run("split jobs resolution accepts test defaults and rejects missing command context", func(t *testing.T) {
 		jobsCommand := newJobsCmd()
 		makeRoot(t, jobsCommand)
 		workerCommand, _, findErr := jobsCommand.Find([]string{jobsWorkerCommandName})
 		require.NoError(t, findErr)
-		_, err := resolveJobsWorker(workerCommand)
-		require.Error(t, err)
+		worker, err := resolveJobsWorker(workerCommand)
+		require.NoError(t, err)
+		require.NoError(t, worker.Close(t.Context()))
 		_, err = resolveJobsScheduler(&cobra.Command{})
 		require.Error(t, err)
 	})

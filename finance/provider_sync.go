@@ -36,27 +36,6 @@ type connectionSecretCipher interface {
 	OpenString(envelope credentials.Envelope) (string, error)
 }
 
-type BankConnectionSyncJobEnqueuer interface {
-	EnqueueBankConnectionSync(
-		ctx context.Context,
-		request BankConnectionSyncJobRequest,
-	) (BankConnectionSyncJobRef, error)
-}
-
-type BankConnectionSyncJobRequest struct {
-	JobType string
-	Input   BankConnectionSyncJobInput
-	Reason  string
-	Actor   string
-}
-
-type BankConnectionSyncJobInput struct {
-	ConnectionID string
-	Reason       string
-	WindowStart  *time.Time
-	WindowEnd    *time.Time
-}
-
 type BankConnectionSyncJobRef struct {
 	ID      string
 	JobType string
@@ -143,13 +122,6 @@ type RunBankConnectionSyncParams struct {
 	ScheduledNextRunAt *time.Time
 }
 
-type RecordBankConnectionSyncScheduledParams struct {
-	ConnectionID string
-	JobID        string
-	ScheduledAt  time.Time
-	NextRunAt    time.Time
-}
-
 type BankConnectionSyncResult struct {
 	ImportedAccounts     int
 	ImportedTransactions int
@@ -200,19 +172,6 @@ type connectionSecretsStoreRef struct {
 	connectionSecretStore
 }
 
-type BankConnectionSyncScheduleWriter interface {
-	UpsertBankConnectionSyncSchedule(context.Context, BankConnectionSyncSchedule) error
-}
-
-type BankConnectionSyncSchedule struct {
-	ScheduleID   string
-	ConnectionID string
-	ActorUserID  string
-	Interval     time.Duration
-	NextRunAt    *time.Time
-	Enabled      bool
-}
-
 type bankSyncStore interface {
 	SaveBankConnection(
 		ctx context.Context,
@@ -250,10 +209,6 @@ type connectionSecretStore interface {
 	) (domain.ConnectionSecret, error)
 	GetConnectionSecret(ctx context.Context, secretID string) (*domain.ConnectionSecret, error)
 	DeleteConnectionSecret(ctx context.Context, secretID string) error
-}
-
-func bankConnectionSyncScheduleID(connectionID string) string {
-	return "finance.bank_connection_sync:" + strings.TrimSpace(connectionID)
 }
 
 func bankProviderNotConfiguredError(providerName string) error {

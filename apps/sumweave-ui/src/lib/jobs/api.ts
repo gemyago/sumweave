@@ -2,7 +2,7 @@ import type { AuthStore } from '../auth/auth-store.svelte'
 import { createAuthFetch } from '../auth/auth-fetch'
 import { ResponseTimestampError, parseRequiredResponseTimestamp } from '../timestamp'
 
-export interface JobRequester { userId: string; source: string; agentSessionId: string; agentRunId: string }
+export interface JobRequester { userId: string; source: string }
 export interface JobExecutionError { code: string; summary: string; details: string }
 export interface JobSummary { id: string; jobType: string; status: string; requester: JobRequester; error?: JobExecutionError; createdAt: Date; updatedAt: Date; startedAt?: Date | null; completedAt?: Date | null; attemptCount: number }
 export interface JobDetail extends JobSummary { workerId: string; lastAttemptAt?: Date | null }
@@ -17,7 +17,7 @@ export function createSignalJobsApi(params: { baseUrl: string; fetch: FetchLike 
   return { async listJobs(queryParams) { const json = await request<RawJobListResponse>('/jobs', buildSearchParams(queryParams)); return { items: (json.items ?? []).map(mapJobSummary), nextCursor: json.nextCursor ?? '' } }, async getJob({ jobId }) { return mapJobDetail(await request<RawJobDetail>(`/jobs/${encodeURIComponent(jobId)}`)) } }
 }
 export function createSignalJobsApiForAuth(params: { baseUrl: string; authStore: AuthStore }): SignalJobsApi { return createSignalJobsApi({ baseUrl: params.baseUrl, fetch: createAuthFetch(params.authStore) }) }
-interface RawJobRequester { userId: string; source: string; agentSessionId: string; agentRunId: string }
+interface RawJobRequester { userId: string; source: string }
 interface RawJobExecutionError { code: string; summary: string; details: string }
 interface RawJobSummary { id: string; jobType: string; status: string; requester: RawJobRequester; error?: RawJobExecutionError; createdAt: string; updatedAt: string; startedAt?: string | null; completedAt?: string | null; attemptCount: number }
 interface RawJobDetail extends RawJobSummary { workerId?: string; lastAttemptAt?: string | null }

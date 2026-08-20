@@ -21,6 +21,7 @@ func TestStartAllRuntime(t *testing.T) {
 		server.EXPECT().
 			StartHTTPServer(mock.Anything, mock.Anything).
 			RunAndReturn(func(ctx context.Context, _ ...startHTTPServerOpt) error { <-ctx.Done(); return nil })
+		server.EXPECT().Close(mock.Anything).Return(nil)
 		worker := newMockjobsWorkerRunner(t)
 		worker.EXPECT().
 			Run(mock.Anything).
@@ -93,6 +94,7 @@ func TestStartAllRuntime(t *testing.T) {
 			server.EXPECT().
 				StartHTTPServer(mock.Anything, mock.Anything).
 				Return(errors.New(fake.Lorem().Sentence(3)))
+			server.EXPECT().Close(mock.Anything).Return(nil)
 			worker := newMockjobsWorkerRunner(t)
 			worker.EXPECT().
 				Run(mock.Anything).

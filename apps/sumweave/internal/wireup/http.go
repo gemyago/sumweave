@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	stdhttp "net/http"
-	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal"
 	apphttp "github.com/gemyago/sumweave/apps/sumweave/internal/api/http"
@@ -14,6 +13,7 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/server"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1controllers"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/financeapp"
@@ -33,17 +33,13 @@ type HTTPOptions struct {
 	LogsFile        *string
 }
 
-// HTTPRoot owns the fully composed API application. Worker construction is
-// deliberate, but worker execution remains command orchestration.
+// HTTPRoot owns the fully composed API application and no durable worker or
+// scheduler resources.
 type HTTPRoot struct {
-	Handler               stdhttp.Handler
-	Server                *server.HTTPServer
-	Runner                *agent.Runner
-	ToolsRegistry         *agent.ToolsRegistry
-	Worker                *jobspkg.Worker
-	Scheduler             *jobspkg.Scheduler
-	schedulerLoopInterval time.Duration
-
+	Handler       stdhttp.Handler
+	Server        *server.HTTPServer
+	Runner        *agent.Runner
+	ToolsRegistry *agent.ToolsRegistry
 	rootLogger    *slog.Logger
 	shutdownHooks *lifecycle.ShutdownHooks
 }
@@ -73,8 +69,12 @@ func BuildHTTP(ctx context.Context, options HTTPOptions) (*HTTPRoot, error) {
 	return buildHTTP(ctx, rootConfig)
 }
 
-//nolint:gocognit,funlen // Construction order is deliberately visible at this root.
-func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRoot, err error) { // coverage-ignore
+//
+//nolint:gocognit,gocyclo,cyclop,funlen // Construction order is deliberately visible at this root.
+func buildHTTP(
+	ctx context.Context,
+	rootConfig config.HTTPRootConfig,
+) (_ *HTTPRoot, err error) { // coverage-ignore
 	var shutdownHooks *lifecycle.ShutdownHooks
 	defer func() {
 		if err == nil || shutdownHooks == nil {
@@ -89,8 +89,13 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 	if err != nil {
 		return nil, err
 	}
-	otelConfig, tracesConfig, metricsConfig, logsConfig := makeTelemetryConfigs(rootConfig.OpenTelemetry)
-	resource, err := telemetry.NewResource(ctx, telemetry.ResourceDeps{Environment: rootConfig.Environment})
+	otelConfig, tracesConfig, metricsConfig, logsConfig := makeTelemetryConfigs(
+		rootConfig.OpenTelemetry,
+	)
+	resource, err := telemetry.NewResource(
+		ctx,
+		telemetry.ResourceDeps{Environment: rootConfig.Environment},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP telemetry resource: %w", err)
 	}
@@ -100,8 +105,10 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP logger provider: %w", err)
 	}
-	rootLoggerOptions := telemetry.NewRootLoggerOpts().WithJSONLogs(rootConfig.JSONLogs != nil && *rootConfig.JSONLogs).
-		WithLogLevel(logLevel).WithOTELConfigs(otelConfig, logsConfig, loggerProvider)
+	rootLoggerOptions := telemetry.NewRootLoggerOpts().
+		WithJSONLogs(rootConfig.JSONLogs != nil && *rootConfig.JSONLogs).
+		WithLogLevel(logLevel).
+		WithOTELConfigs(otelConfig, logsConfig, loggerProvider)
 	if rootConfig.LogsFile != nil {
 		rootLoggerOptions.WithOptionalOutputFile(*rootConfig.LogsFile)
 	}
@@ -148,14 +155,17 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 	if err != nil {
 		return nil, err
 	}
-	var jobsModule *jobspkg.Module
-	shutdownHooks.Register("jobs-messaging-and-application-db", func(shutdownCtx context.Context) error {
-		var messagingErr error
-		if jobsModule != nil {
-			messagingErr = jobsModule.Close(shutdownCtx)
-		}
-		return errors.Join(messagingErr, database.Close())
-	})
+	var publisher *appdispatch.Publisher
+	shutdownHooks.Register(
+		"api-messaging-and-application-db",
+		func(context.Context) error {
+			var messagingErr error
+			if publisher != nil {
+				messagingErr = publisher.Close()
+			}
+			return errors.Join(messagingErr, database.Close())
+		},
+	)
 	ids := ident.NewDefaultGenerator()
 	runtime, err := internal.NewRuntime(internal.RuntimeDeps{
 		RootLogger:                      rootLogger,
@@ -205,39 +215,51 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP user directory: %w", err)
 	}
-	transportFactory := telemetry.NewOtelHTTPTransportFactory(telemetry.OtelHTTPTransportFactoryDeps{
-		MeterProvider:     meterProvider,
-		TracerProvider:    tracerProvider,
-		TextMapPropagator: telemetry.NewTextMapPropagator(),
-		OTELConfig:        otelConfig,
-	})
+	transportFactory := telemetry.NewOtelHTTPTransportFactory(
+		telemetry.OtelHTTPTransportFactoryDeps{
+			MeterProvider:     meterProvider,
+			TracerProvider:    tracerProvider,
+			TextMapPropagator: telemetry.NewTextMapPropagator(),
+			OTELConfig:        otelConfig,
+		},
+	)
 	httpClientFactory := apphttpclient.NewClientFactory(apphttpclient.ClientFactoryDeps{
 		RootLogger: rootLogger, RetryAfterFallbackDelay: rootConfig.HTTPClient.RetryAfterFallbackDelay,
 		OtelHTTPTransportFactory: transportFactory,
 	})
-	jobsModule, err = jobspkg.NewModule(jobspkg.ModuleDeps{
-		SQLDB:               database,
-		DatabaseDSN:         rootConfig.Application.Database.DSN,
-		DatabaseTablePrefix: rootConfig.Application.Database.TablePrefix,
-		Logger:              rootLogger,
-		WorkerConfig: jobspkg.WorkerConfig{
-			Enabled:      rootConfig.Jobs.Worker.Enabled,
-			PollInterval: rootConfig.Jobs.Worker.PollInterval,
-			MaxAttempts:  rootConfig.Jobs.Worker.MaxAttempts,
-			DrainTimeout: rootConfig.GracefulShutdownTimeout,
-		},
-		IDGenerator: ids,
-	})
+	jobsStore, err := jobspkg.NewStore(
+		database,
+		rootConfig.Application.Database.DSN,
+		jobspkg.StoreOpts{TablePrefix: rootConfig.Application.Database.TablePrefix + "jobs_"},
+	)
 	if err != nil {
-		return nil, fmt.Errorf("build HTTP jobs module: %w", err)
+		return nil, fmt.Errorf("build HTTP jobs store: %w", err)
 	}
-	financeDatabase, err := financeapp.NewDatabase(database, rootConfig.Application.Database.DSN, rootLogger)
+	jobsService, err := jobspkg.NewService(jobspkg.ServiceDeps{Store: jobsStore})
+	if err != nil {
+		return nil, fmt.Errorf("build HTTP jobs service: %w", err)
+	}
+	publisher, err = appdispatch.NewPublisher(appdispatch.Config{
+		DatabaseDSN: rootConfig.Application.Database.DSN,
+		TablePrefix: rootConfig.Application.Database.TablePrefix,
+	},
+		database,
+		rootLogger,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("build HTTP dispatch publisher: %w", err)
+	}
+	financeDatabase, err := financeapp.NewDatabase(
+		database,
+		rootConfig.Application.Database.DSN,
+		rootLogger,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build HTTP finance database: %w", err)
 	}
 	financeModule, err := buildFinanceModule(financeModuleBuildDeps{
 		Database:          financeDatabase,
-		Jobs:              jobsModule,
+		CommandPublisher:  publisher,
 		HTTPClientFactory: httpClientFactory,
 		Logger:            rootLogger,
 		JWTSigningKey:     rootConfig.Auth.JWTSigningKey,
@@ -264,7 +286,9 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 		IDGen:           ids,
 	})
 	router := server.NewHTTPRouter(server.HTTPRouterDeps{Middleware: routerMiddleware})
-	rootHandler := server.NewRootHandler(server.RootHandlerDeps{RootLogger: rootLogger, Router: router})
+	rootHandler := server.NewRootHandler(
+		server.RootHandlerDeps{RootLogger: rootLogger, Router: router},
+	)
 	apphttp.SetupV1Routes(apphttp.V1RoutesDeps{
 		HealthController: &v1controllers.HealthController{},
 		AuthController: v1controllers.NewAuthController(v1controllers.AuthControllerDeps{
@@ -272,7 +296,7 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 			AuthMiddleware: authMiddleware,
 		}),
 		JobsController: v1controllers.NewJobsController(v1controllers.JobsControllerDeps{
-			JobsService:    jobsModule.Service,
+			JobsService:    jobsService,
 			AuthMiddleware: authMiddleware,
 		}),
 		FinanceController: v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
@@ -314,15 +338,12 @@ func buildHTTP(ctx context.Context, rootConfig config.HTTPRootConfig) (_ *HTTPRo
 		OTELMiddleware:    otelMiddleware,
 	})
 	return &HTTPRoot{
-		Handler:               router,
-		Server:                httpServer,
-		Runner:                runtime.Runner,
-		ToolsRegistry:         runtime.ToolsRegistry,
-		Worker:                jobsModule.Worker,
-		Scheduler:             jobsModule.Scheduler,
-		schedulerLoopInterval: rootConfig.Jobs.Scheduler.LoopInterval,
-		rootLogger:            rootLogger,
-		shutdownHooks:         shutdownHooks,
+		Handler:       router,
+		Server:        httpServer,
+		Runner:        runtime.Runner,
+		ToolsRegistry: runtime.ToolsRegistry,
+		rootLogger:    rootLogger,
+		shutdownHooks: shutdownHooks,
 	}, nil
 }
 
@@ -372,12 +393,11 @@ func (root *HTTPRoot) StartHTTPServer(ctx context.Context, noop bool) error {
 }
 
 // Close releases resources when a caller builds but does not start this root.
-func (root *HTTPRoot) Close(ctx context.Context) error { // coverage-ignore // normal startup owns this lifecycle path.
+func (root *HTTPRoot) Close(
+	ctx context.Context,
+) error { // coverage-ignore // normal startup owns this lifecycle path.
 	return root.shutdownHooks.PerformShutdown(context.WithoutCancel(ctx))
 }
 
 // Logger returns the root logger for command orchestration.
 func (root *HTTPRoot) Logger() *slog.Logger { return root.rootLogger }
-
-// SchedulerLoopInterval returns the configured start-all scheduler cadence.
-func (root *HTTPRoot) SchedulerLoopInterval() time.Duration { return root.schedulerLoopInterval }

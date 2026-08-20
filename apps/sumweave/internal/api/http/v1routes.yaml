@@ -1659,16 +1659,10 @@ components:
       required:
         - userId
         - source
-        - agentSessionId
-        - agentRunId
       properties:
         userId:
           type: string
         source:
-          type: string
-        agentSessionId:
-          type: string
-        agentRunId:
           type: string
     JobError:
       type: object

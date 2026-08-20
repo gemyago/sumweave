@@ -142,9 +142,9 @@ type JobsScheduler struct {
 }
 
 type JobsWorker struct {
-	Enabled      bool          `mapstructure:"enabled"`
-	PollInterval time.Duration `mapstructure:"pollInterval"`
-	MaxAttempts  int           `mapstructure:"maxAttempts"`
+	PollInterval    time.Duration `mapstructure:"pollInterval"`
+	MaxAttempts     int           `mapstructure:"maxAttempts"`
+	StaleRunningAge time.Duration `mapstructure:"staleRunningAge"`
 }
 
 type Finance struct {
@@ -153,12 +153,17 @@ type Finance struct {
 
 type FinanceProviders struct {
 	Monobank      MonobankProvider      `mapstructure:"monobank"`
+	Frankfurter   FrankfurterProvider   `mapstructure:"frankfurter"`
 	EnableBanking EnableBankingProvider `mapstructure:"enableBanking"`
 }
 
 type MonobankProvider struct {
 	BaseURL                 string        `mapstructure:"baseURL"`
 	RetryAfterFallbackDelay time.Duration `mapstructure:"retryAfterFallbackDelay"`
+}
+
+type FrankfurterProvider struct {
+	BaseURL string `mapstructure:"baseURL"`
 }
 
 type EnableBankingProvider struct {
@@ -210,10 +215,9 @@ type MigrationRootConfig struct {
 	Application             Application
 }
 
-// JobsRootConfig contains only the configuration required by the split jobs
-// worker and scheduler roots. It intentionally excludes HTTP and runtime
-// settings because those commands do not construct routes or an agent runtime.
-type JobsRootConfig struct {
+// WorkerRootConfig contains only the configuration required by the durable
+// worker. It intentionally excludes HTTP, runtime, and scheduler settings.
+type WorkerRootConfig struct {
 	Environment             string
 	DefaultLogLevel         string
 	JSONLogs                *bool
@@ -228,9 +232,26 @@ type JobsRootConfig struct {
 	Finance                 Finance
 }
 
+// SchedulerRootConfig contains only the configuration required by the
+// one-shot scheduler. It intentionally excludes HTTP serving and worker settings.
+type SchedulerRootConfig struct {
+	Environment             string
+	DefaultLogLevel         string
+	JSONLogs                *bool
+	LogsFile                *string
+	PProfListener           PProfListener
+	GracefulShutdownTimeout time.Duration
+	HTTPClient              HTTPClient
+	OpenTelemetry           OpenTelemetry
+	Auth                    Auth
+	Application             Application
+	Finance                 Finance
+	Scheduler               JobsScheduler
+}
+
 // HTTPRootConfig contains the configuration required to build the API-only
-// HTTP application. It includes jobs and finance because finance registration
-// must complete before routes are exposed, but it does not start a worker.
+// HTTP application. It excludes worker and scheduler settings because API
+// construction does not own either process capability.
 type HTTPRootConfig struct {
 	Environment             string
 	DefaultLogLevel         string
@@ -246,7 +267,6 @@ type HTTPRootConfig struct {
 	WorkspaceFS             WorkspaceFS
 	AgentRuntime            AgentRuntime
 	Application             Application
-	Jobs                    Jobs
 	Finance                 Finance
 	Skills                  Skills
 }
@@ -293,10 +313,10 @@ func (values *Values) MigrationRoot(environment string) (MigrationRootConfig, er
 	return root, nil
 }
 
-// JobsRoot projects and validates the configuration required to compose jobs
-// and finance before either split jobs command starts work.
-func (values *Values) JobsRoot(environment string) (JobsRootConfig, error) {
-	root := JobsRootConfig{
+// WorkerRoot projects and validates the configuration required to compose the
+// durable worker and finance command handlers.
+func (values *Values) WorkerRoot(environment string) (WorkerRootConfig, error) {
+	root := WorkerRootConfig{
 		Environment:             environment,
 		DefaultLogLevel:         values.DefaultLogLevel,
 		JSONLogs:                values.JSONLogs,
@@ -311,16 +331,16 @@ func (values *Values) JobsRoot(environment string) (JobsRootConfig, error) {
 		Finance:                 values.Finance,
 	}
 	if strings.TrimSpace(root.Application.Database.DSN) == "" {
-		return JobsRootConfig{}, errors.New("jobs application database dsn is required")
+		return WorkerRootConfig{}, errors.New("worker application database dsn is required")
 	}
 	if strings.TrimSpace(root.Auth.JWTSigningKey) == "" {
-		return JobsRootConfig{}, errors.New("jobs auth JWT signing key is required")
+		return WorkerRootConfig{}, errors.New("worker auth JWT signing key is required")
 	}
 	if strings.TrimSpace(root.Finance.Providers.Monobank.BaseURL) == "" {
-		return JobsRootConfig{}, errors.New("jobs monobank base URL is required")
+		return WorkerRootConfig{}, errors.New("worker monobank base URL is required")
 	}
 	if root.Finance.Providers.Monobank.RetryAfterFallbackDelay <= 0 {
-		return JobsRootConfig{}, errors.New("jobs monobank Retry-After fallback delay must be positive")
+		return WorkerRootConfig{}, errors.New("worker monobank Retry-After fallback delay must be positive")
 	}
 	enableBanking := root.Finance.Providers.EnableBanking
 	for _, required := range []struct {
@@ -335,11 +355,62 @@ func (values *Values) JobsRoot(environment string) (JobsRootConfig, error) {
 		{"PSU type", enableBanking.PSUType},
 	} {
 		if strings.TrimSpace(required.value) == "" {
-			return JobsRootConfig{}, fmt.Errorf("jobs enable banking %s is required", required.name)
+			return WorkerRootConfig{}, fmt.Errorf("worker enable banking %s is required", required.name)
 		}
 	}
 	if enableBanking.ValidDays <= 0 {
-		return JobsRootConfig{}, errors.New("jobs enable banking valid days must be positive")
+		return WorkerRootConfig{}, errors.New("worker enable banking valid days must be positive")
+	}
+	return root, nil
+}
+
+// SchedulerRoot projects and validates the configuration required to compose
+// the one-shot schedule publisher.
+func (values *Values) SchedulerRoot(environment string) (SchedulerRootConfig, error) {
+	root := SchedulerRootConfig{
+		Environment:             environment,
+		DefaultLogLevel:         values.DefaultLogLevel,
+		JSONLogs:                values.JSONLogs,
+		LogsFile:                values.LogsFile,
+		PProfListener:           values.PProfListener,
+		GracefulShutdownTimeout: values.GracefulShutdownTimeout,
+		HTTPClient:              values.HTTPClient,
+		OpenTelemetry:           values.OpenTelemetry,
+		Auth:                    values.Auth,
+		Application:             values.Application,
+		Finance:                 values.Finance,
+		Scheduler:               values.Jobs.Scheduler,
+	}
+	if strings.TrimSpace(root.Application.Database.DSN) == "" {
+		return SchedulerRootConfig{}, errors.New("scheduler application database dsn is required")
+	}
+	if strings.TrimSpace(root.Auth.JWTSigningKey) == "" {
+		return SchedulerRootConfig{}, errors.New("scheduler auth JWT signing key is required")
+	}
+	if strings.TrimSpace(root.Finance.Providers.Monobank.BaseURL) == "" {
+		return SchedulerRootConfig{}, errors.New("scheduler monobank base URL is required")
+	}
+	if root.Finance.Providers.Monobank.RetryAfterFallbackDelay <= 0 {
+		return SchedulerRootConfig{}, errors.New("scheduler monobank Retry-After fallback delay must be positive")
+	}
+	enableBanking := root.Finance.Providers.EnableBanking
+	for _, required := range []struct {
+		name  string
+		value string
+	}{
+		{"base URL", enableBanking.BaseURL},
+		{"app ID", enableBanking.AppID},
+		{"private key path", enableBanking.PrivateKeyPath},
+		{"ASPSP name", enableBanking.ASPSPName},
+		{"country", enableBanking.Country},
+		{"PSU type", enableBanking.PSUType},
+	} {
+		if strings.TrimSpace(required.value) == "" {
+			return SchedulerRootConfig{}, fmt.Errorf("scheduler enable banking %s is required", required.name)
+		}
+	}
+	if enableBanking.ValidDays <= 0 {
+		return SchedulerRootConfig{}, errors.New("scheduler enable banking valid days must be positive")
 	}
 	return root, nil
 }
@@ -352,7 +423,7 @@ func (values *Values) HTTPRoot(environment string) (HTTPRootConfig, error) {
 		GracefulShutdownTimeout: values.GracefulShutdownTimeout, HTTPServer: values.HTTPServer,
 		HTTPClient: values.HTTPClient, OpenTelemetry: values.OpenTelemetry, Auth: values.Auth,
 		WorkspaceFS: values.WorkspaceFS, AgentRuntime: values.AgentRuntime,
-		Application: values.Application, Jobs: values.Jobs, Finance: values.Finance, Skills: values.Skills,
+		Application: values.Application, Finance: values.Finance, Skills: values.Skills,
 	}
 	if strings.TrimSpace(root.Application.Database.DSN) == "" {
 		return HTTPRootConfig{}, errors.New("HTTP application database dsn is required")

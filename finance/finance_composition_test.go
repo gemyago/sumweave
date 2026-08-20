@@ -23,11 +23,7 @@ func TestFinanceComposition(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		now := time.Date(2026, time.July, 3, 12, 0, 0, 0, time.UTC)
-		fxEnqueuer := &capturedFXRefreshJobEnqueuer{}
-		fxWriter := &capturedFXRefreshScheduleWriter{}
-		csvEnqueuer := &recordingCSVJobEnqueuer{}
-		bankEnqueuer := &capturedBankSyncJobEnqueuer{}
-		bankWriter := &capturedBankSyncScheduleWriter{}
+		commandPublisher := NewMockSemanticCommandPublisher(t)
 		cipherKey := sha256.Sum256([]byte("finance-composition-" + fake.UUID().V4()))
 		cipher, err := credentials.NewAESGCMCipher(cipherKey[:], "finance-composition")
 		require.NoError(t, err)
@@ -40,19 +36,13 @@ func TestFinanceComposition(t *testing.T) {
 			ConnectionSecretCipher: cipher,
 			FXProviders:            []FXRatesProvider{NewStaticFXProvider("custom-fx", nil)},
 			DefaultFXProvider:      "custom-fx",
-			FXJobEnqueuer:          fxEnqueuer,
-			FXScheduleWriter:       fxWriter,
-			CSVImportJobEnqueuer:   csvEnqueuer,
-			BankSyncJobEnqueuer:    bankEnqueuer,
-			BankSyncScheduleWriter: bankWriter,
+			CommandPublisher:       commandPublisher,
 		}, newMockbankSyncOrchestrator(t))
 		services := newFocusedServices(store, persistence.NewTransactionTagStore(database), serviceConfig)
 
-		require.Same(t, fxEnqueuer, services.FXService.fxJobEnqueuer)
-		require.Same(t, fxWriter, services.FXService.fxScheduleWriter)
-		require.Same(t, csvEnqueuer, services.CSVImportService.csvImportJobEnqueuer)
-		require.Same(t, bankEnqueuer, services.BankSyncService.bankSyncJobEnqueuer)
-		require.Same(t, bankWriter, services.BankSyncService.bankSyncScheduleWriter)
+		require.Same(t, commandPublisher, services.FXService.commandPublisher)
+		require.Same(t, commandPublisher, services.CSVImportService.commandPublisher)
+		require.Same(t, commandPublisher, services.BankSyncService.commandPublisher)
 		assert.Equal(t, "custom-fx", services.FXService.defaultFXProvider)
 		assert.Contains(t, services.FXService.fxProviders, "custom-fx")
 	})

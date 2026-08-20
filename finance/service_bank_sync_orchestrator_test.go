@@ -1,8 +1,11 @@
 package finance
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"testing"
 	"time"
 
@@ -164,6 +167,31 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		assert.Contains(t, persisted.LastSyncError, orchestrationErr.Error())
 	})
 
+	t.Run("classifies a terminal provider rejection after recording connection diagnostics", func(t *testing.T) {
+		store, service, orchestrator, connection, _, _ := makeFixture(
+			t,
+			domain.ProviderConnectorIDEnableBanking,
+		)
+		providerErr := &ProviderResponseError{
+			Provider: "provider-" + fake.Letter(), Operation: "sync", StatusCode: http.StatusUnauthorized,
+		}
+		orchestrator.EXPECT().Orchestrate(mock.Anything, mock.Anything).Return(
+			internalproviders.SyncOrchestrationResult{}, providerErr,
+		)
+
+		_, err := service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
+			ConnectionID: connection.ID,
+			JobID:        "job-" + fake.UUID().V4(),
+		})
+
+		failure, classified := TerminalFailureFrom(err)
+		require.True(t, classified)
+		assert.Equal(t, "bank_provider_rejected_request", failure.Code)
+		persisted, loadErr := store.GetBankConnection(t.Context(), connection.ID)
+		require.NoError(t, loadErr)
+		assert.Contains(t, persisted.LastSyncError, "status 401")
+	})
+
 	t.Run("keeps schedule diagnostics current when an orchestration retry fails", func(t *testing.T) {
 		store, service, orchestrator, connection, _, now := makeFixture(
 			t,
@@ -228,10 +256,15 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 			CreatedAt: now,
 		})
 		require.NoError(t, err)
-		enqueuer := &capturedBankSyncJobEnqueuer{}
-		writer := &capturedBankSyncScheduleWriter{}
-		WithBankSyncServiceJobEnqueuer(enqueuer)(service)
-		WithBankSyncServiceScheduleWriter(writer)(service)
+		publisher := NewMockSemanticCommandPublisher(t)
+		var published SemanticCommand
+		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, command SemanticCommand) (DispatchReference, error) {
+				published = command
+				return DispatchReference{MessageID: "job-" + fake.UUID().V4()}, nil
+			},
+		).Once()
+		WithBankSyncServiceCommandPublisher(publisher)(service)
 		nextRunAt := now.Add(time.Hour)
 
 		schedule, err := service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
@@ -272,17 +305,28 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, BankConnectionSyncJobType, job.JobType)
-		require.NotNil(t, enqueuer.request)
-		assert.Equal(t, connection.ID, enqueuer.request.Input.ConnectionID)
+		assert.Equal(t, BankConnectionSyncCommandTopic, published.Topic)
+		var publishedPayload BankConnectionSyncCommand
+		require.NoError(t, json.Unmarshal(published.Payload, &publishedPayload))
+		assert.Equal(t, connection.ID, publishedPayload.ConnectionID)
 
-		recorded, err := service.RecordBankConnectionSyncScheduled(t.Context(), RecordBankConnectionSyncScheduledParams{
+		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).Return(
+			DispatchReference{}, assert.AnError,
+		)
+		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
+			ActorUserID:  connection.TenantID,
+			TenantID:     connection.TenantID,
 			ConnectionID: connection.ID,
-			JobID:        job.ID,
-			ScheduledAt:  now,
-			NextRunAt:    nextRunAt,
+			Reason:       BankConnectionSyncReasonManual,
 		})
-		require.NoError(t, err)
-		assert.Equal(t, job.ID, recorded.LastJobID)
+		require.ErrorIs(t, err, assert.AnError)
+		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
+			ActorUserID:  connection.TenantID,
+			TenantID:     connection.TenantID,
+			ConnectionID: "missing-" + fake.UUID().V4(),
+			Reason:       BankConnectionSyncReasonManual,
+		})
+		require.ErrorIs(t, err, ErrBankConnectionNotFound)
 
 		connections, err := service.ListBankConnections(t.Context(), ListBankConnectionsParams{
 			ActorUserID: connection.TenantID,
@@ -299,7 +343,6 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		deleted, err := store.GetBankConnection(t.Context(), connection.ID)
 		require.ErrorIs(t, err, persistence.ErrBankConnectionNotFound)
 		assert.Nil(t, deleted)
-		assert.NotEmpty(t, writer.schedules)
 	})
 
 	t.Run("validates schedule metadata and retains prior schedule projections", func(t *testing.T) {
@@ -308,8 +351,6 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 			TenantID: connection.TenantID, UserID: connection.TenantID, JoinedAt: now, CreatedAt: now,
 		})
 		require.NoError(t, err)
-		writer := &capturedBankSyncScheduleWriter{}
-		WithBankSyncServiceScheduleWriter(writer)(service)
 		nextRunAt := now.Add(time.Hour)
 		first, err := service.UpsertBankConnectionSchedule(t.Context(), UpsertBankConnectionScheduleParams{
 			ActorUserID: connection.TenantID, TenantID: connection.TenantID, ConnectionID: connection.ID,
@@ -324,16 +365,6 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		assert.True(t, first.CreatedAt.Equal(second.CreatedAt))
 
 		zero := time.Time{}
-		for _, params := range []RecordBankConnectionSyncScheduledParams{
-			{},
-			{ConnectionID: connection.ID},
-			{ConnectionID: connection.ID, JobID: "job-" + fake.UUID().V4()},
-			{ConnectionID: connection.ID, JobID: "job-" + fake.UUID().V4(), ScheduledAt: now},
-			{ConnectionID: connection.ID, JobID: "job-" + fake.UUID().V4(), ScheduledAt: now, NextRunAt: now},
-		} {
-			_, recordErr := service.RecordBankConnectionSyncScheduled(t.Context(), params)
-			require.Error(t, recordErr)
-		}
 		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{WindowStart: &zero})
 		require.Error(t, err)
 		for _, params := range []RunBankConnectionSyncParams{
@@ -353,7 +384,7 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 	t.Run("returns explicit lifecycle errors before orchestration", func(t *testing.T) {
 		_, service, _, connection, _, _ := makeFixture(t, domain.ProviderConnectorIDEnableBanking)
 		_, err := service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{})
-		require.ErrorContains(t, err, "bank sync job enqueuer is required")
+		require.ErrorContains(t, err, "bank sync command publisher is required")
 		_, err = service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
 			ConnectionID: "missing-" + fake.UUID().V4(),
 		})

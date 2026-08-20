@@ -11,7 +11,7 @@ vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'tok
 describe('Admin finance providers page', () => {
   beforeEach(() => {
     financeMocks.getFXDiagnostics.mockResolvedValue({ defaultProvider: 'frankfurter', storedRatesCount: 2, providers: [{ name: 'frankfurter', default: true, ready: true }] })
-    jobsMocks.listJobs.mockResolvedValue({ items: [{ id: 'job-1', jobType: 'finance.bank_connection_sync', status: 'failed', requester: { userId: 'user-1', source: 'operator', agentSessionId: '', agentRunId: '' }, createdAt: new Date('2026-06-20T12:00:00Z'), updatedAt: new Date('2026-06-20T12:00:00Z'), startedAt: null, completedAt: null, attemptCount: 1 }], nextCursor: '' })
+    jobsMocks.listJobs.mockResolvedValue({ items: [{ id: 'job-1', jobType: 'finance.bank_connection_sync', status: 'failed', requester: { userId: 'user-1', source: 'operator' }, createdAt: new Date('2026-06-20T12:00:00Z'), updatedAt: new Date('2026-06-20T12:00:00Z'), startedAt: null, completedAt: null, attemptCount: 1 }], nextCursor: '' })
   })
 
   it('renders provider readiness and recent finance jobs', async () => {

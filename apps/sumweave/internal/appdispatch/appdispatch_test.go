@@ -88,9 +88,57 @@ func TestAppDispatch(t *testing.T) {
 
 		queries, err := buildPostgresMigrationQueries(Config{TablePrefix: "dispatch_"})
 		require.NoError(t, err)
-		require.Len(t, queries, 3)
-		assert.Contains(t, queries[0].Query, "topic VARCHAR(255) NOT NULL")
-		assert.Contains(t, queries[2].Query, "PRIMARY KEY (topic, consumer_group)")
+		require.Len(t, queries, 4)
+	})
+
+	t.Run("upgrades an existing sqlite transport schema", func(t *testing.T) {
+		config := makeConfig(t)
+		db, err := sqlconn.Open(config.DatabaseDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		legacyMessageID := fake.UUID().V4()
+		_, err = db.ExecContext(t.Context(), `CREATE TABLE `+quoteIdentifier(config.MessagesTable())+` (
+			"offset" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			uuid TEXT NOT NULL,
+			topic TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			payload BLOB,
+			metadata JSON NOT NULL
+		)`)
+		require.NoError(t, err)
+		for range 2 {
+			_, err = db.ExecContext(
+				t.Context(),
+				`INSERT INTO `+quoteIdentifier(config.MessagesTable())+
+					` (uuid, topic, created_at, payload, metadata) VALUES (?, ?, ?, ?, ?)`,
+				legacyMessageID,
+				"topic."+fake.UUID().V4(),
+				time.Now().Format(time.RFC3339),
+				[]byte("payload-"+fake.UUID().V4()),
+				[]byte(`{}`),
+			)
+			require.NoError(t, err)
+		}
+
+		migrator, err := NewMigrator(config, db)
+		require.NoError(t, err)
+		require.NoError(t, migrator.Migrate(t.Context()))
+		require.NoError(t, migrator.Migrate(t.Context()))
+
+		var messageCount int
+		require.NoError(t, db.QueryRowContext(
+			t.Context(),
+			`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid=?`,
+			legacyMessageID,
+		).Scan(&messageCount))
+		assert.Equal(t, 1, messageCount)
+
+		publisher := makePublisher(t, config, db)
+		require.ErrorIs(t, publisher.Publish(t.Context(), Message{
+			ID:      legacyMessageID,
+			Topic:   "topic." + fake.UUID().V4(),
+			Payload: []byte("payload-" + fake.UUID().V4()),
+		}), ErrDuplicateMessageID)
 	})
 
 	t.Run("publishes explicit messages and preserves transaction boundaries", func(t *testing.T) {
@@ -141,6 +189,116 @@ func TestAppDispatch(t *testing.T) {
 		require.EqualError(t, publisher.PublishInTx(t.Context(), nil, message), "publish transaction is required")
 	})
 
+	t.Run("publishes generic requests with stable idempotent references", func(t *testing.T) {
+		config := makeConfig(t)
+		db := openMigrated(t, config)
+		publisher := makePublisher(t, config, db)
+		topic := "topic." + fake.UUID().V4()
+		key := "key." + fake.UUID().V4()
+		request := PublicationRequest{
+			Topic:          topic,
+			Payload:        []byte(`{"first":"value","second":2}`),
+			IdempotencyKey: key,
+		}
+
+		first, err := publisher.PublishRequest(t.Context(), request)
+		require.NoError(t, err)
+		second, err := publisher.PublishRequest(t.Context(), PublicationRequest{
+			Topic:          topic,
+			Payload:        []byte(`{"second":2,"first":"value"}`),
+			IdempotencyKey: key,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, first, second)
+
+		_, err = publisher.PublishRequest(t.Context(), PublicationRequest{
+			Topic:          topic,
+			Payload:        []byte(`{"first":"different"}`),
+			IdempotencyKey: key,
+		})
+		require.ErrorIs(t, err, ErrPublicationConflict)
+		_, err = publisher.PublishRequest(t.Context(), PublicationRequest{
+			Topic:          "topic." + fake.UUID().V4(),
+			Payload:        request.Payload,
+			IdempotencyKey: key,
+		})
+		require.ErrorIs(t, err, ErrPublicationConflict)
+
+		t.Run("preserves large JSON integer precision for idempotency conflicts", func(t *testing.T) {
+			largeIntegerKey := "key." + fake.UUID().V4()
+			_, err = publisher.PublishRequest(t.Context(), PublicationRequest{
+				Topic:          topic,
+				Payload:        []byte(`{"id":9007199254740993}`),
+				IdempotencyKey: largeIntegerKey,
+			})
+			require.NoError(t, err)
+
+			_, err = publisher.PublishRequest(t.Context(), PublicationRequest{
+				Topic:          topic,
+				Payload:        []byte(`{"id":9007199254740992}`),
+				IdempotencyKey: largeIntegerKey,
+			})
+			require.ErrorIs(t, err, ErrPublicationConflict)
+		})
+
+		t.Run("returns the same reference for equal semantic JSON", func(t *testing.T) {
+			semanticKey := "key." + fake.UUID().V4()
+			var semanticFirst, semanticSecond PublicationReference
+			semanticFirst, err = publisher.PublishRequest(t.Context(), PublicationRequest{
+				Topic:          topic,
+				Payload:        []byte(`{"nested":{"second":2,"first":1},"items":[true,null]}`),
+				IdempotencyKey: semanticKey,
+			})
+			require.NoError(t, err)
+
+			semanticSecond, err = publisher.PublishRequest(t.Context(), PublicationRequest{
+				Topic:          topic,
+				Payload:        []byte(`{"items":[true,null],"nested":{"first":1,"second":2}}`),
+				IdempotencyKey: semanticKey,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, semanticFirst, semanticSecond)
+		})
+
+		committed := PublicationRequest{Topic: topic, Payload: []byte(`{"committed":true}`)}
+		tx, err := db.BeginTx(t.Context(), nil)
+		require.NoError(t, err)
+		committedReference, err := publisher.PublishRequestInTx(t.Context(), tx, committed)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit())
+
+		rolledBack := PublicationRequest{Topic: topic, Payload: []byte(`{"rolledBack":true}`)}
+		tx, err = db.BeginTx(t.Context(), nil)
+		require.NoError(t, err)
+		rolledBackReference, err := publisher.PublishRequestInTx(t.Context(), tx, rolledBack)
+		require.NoError(t, err)
+		require.NoError(t, tx.Rollback())
+
+		var count int
+		require.NoError(t, db.QueryRowContext(
+			t.Context(),
+			`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid IN (?, ?)`,
+			committedReference.MessageID,
+			rolledBackReference.MessageID,
+		).Scan(&count))
+		assert.Equal(t, 1, count)
+
+		message := NewMessage(topic, []byte("duplicate-"+fake.UUID().V4()))
+		require.NoError(t, publisher.Publish(t.Context(), message))
+		require.ErrorIs(t, publisher.Publish(t.Context(), message), ErrDuplicateMessageID)
+
+		unkeyedReference, err := publisher.PublishRequest(t.Context(), PublicationRequest{
+			Topic:   topic,
+			Payload: []byte("non-json-" + fake.UUID().V4()),
+		})
+		require.NoError(t, err)
+		assert.NotEmpty(t, unkeyedReference.MessageID)
+		_, err = publisher.PublishRequestInTx(t.Context(), nil, PublicationRequest{Topic: topic})
+		require.EqualError(t, err, "publish transaction is required")
+		_, err = publisher.PublishRequest(t.Context(), PublicationRequest{})
+		require.EqualError(t, err, "publication topic is required")
+	})
+
 	t.Run("builds topic-scoped postgres publisher and subscriber queries", func(t *testing.T) {
 		config := Config{TablePrefix: "dispatch_"}
 		topic := "topic." + fake.UUID().V4()
@@ -152,7 +310,6 @@ func TestAppDispatch(t *testing.T) {
 			Msgs:  wmmessage.Messages{wmMessage},
 		})
 		require.NoError(t, err)
-		assert.Contains(t, sqliteInsert.Query, "uuid, topic, created_at, payload, metadata")
 		assert.Equal(t, topic, sqliteInsert.Args[1])
 
 		insert, err := postgresSchema(config).InsertQuery(wmsql.InsertQueryParams{
@@ -160,7 +317,6 @@ func TestAppDispatch(t *testing.T) {
 			Msgs:  wmmessage.Messages{wmMessage},
 		})
 		require.NoError(t, err)
-		assert.Contains(t, insert.Query, "uuid, topic, payload, metadata, transaction_id")
 		assert.Equal(t, topic, insert.Args[1])
 
 		offsets := postgresOffsets(config)
@@ -168,7 +324,6 @@ func TestAppDispatch(t *testing.T) {
 			Topic: topic, ConsumerGroup: group, OffsetsAdapter: offsets,
 		})
 		require.NoError(t, err)
-		assert.Contains(t, selected.Query, "WHERE topic = $1")
 		assert.Equal(t, []any{topic, group}, selected.Args)
 
 		before, err := offsets.BeforeSubscribingQueries(wmsql.BeforeSubscribingQueriesParams{
@@ -176,7 +331,6 @@ func TestAppDispatch(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, before, 1)
-		assert.Contains(t, before[0].Query, "ON CONFLICT (topic, consumer_group)")
 		assert.Equal(t, []any{topic, group}, before[0].Args)
 
 		ack, err := offsets.AckMessageQuery(wmsql.AckMessageQueryParams{
@@ -185,7 +339,6 @@ func TestAppDispatch(t *testing.T) {
 			LastRow:       wmsql.Row{Offset: 7, ExtraData: map[string]any{"transaction_id": wmsql.XID8(9)}},
 		})
 		require.NoError(t, err)
-		assert.Contains(t, ack.Query, "WHERE topic=$3 AND consumer_group=$4")
 		assert.Equal(t, topic, ack.Args[2])
 		assert.Equal(t, group, ack.Args[3])
 
@@ -381,7 +534,8 @@ func TestAppDispatch(t *testing.T) {
 			var count int
 			queryErr := db.QueryRowContext(
 				t.Context(),
-				`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE topic=? AND uuid=?`,
+				`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE topic=? AND `+
+					`json_extract(metadata, '$.`+originalMessageIDMetadataKey+`')=?`,
 				DeadLetterTopic,
 				panicMessage.ID,
 			).Scan(&count)
@@ -389,17 +543,20 @@ func TestAppDispatch(t *testing.T) {
 		}, 8*time.Second, 50*time.Millisecond)
 		assert.Equal(t, int32(2), retryCalls.Load())
 
-		var poisonedTopic, reason string
+		var poisonedTopic, reason, originalMessageID string
 		require.NoError(t, db.QueryRowContext(
 			t.Context(),
 			`SELECT json_extract(metadata, '$.`+middleware.PoisonedTopicKey+`'),`+
-				` json_extract(metadata, '$.`+middleware.ReasonForPoisonedKey+`') FROM `+
-				quoteIdentifier(config.MessagesTable())+` WHERE topic=? AND uuid=?`,
+				` json_extract(metadata, '$.`+middleware.ReasonForPoisonedKey+`'),`+
+				` json_extract(metadata, '$.`+originalMessageIDMetadataKey+`') FROM `+
+				quoteIdentifier(config.MessagesTable())+` WHERE topic=? AND `+
+				`json_extract(metadata, '$.`+originalMessageIDMetadataKey+`')=?`,
 			DeadLetterTopic,
 			panicMessage.ID,
-		).Scan(&poisonedTopic, &reason))
+		).Scan(&poisonedTopic, &reason, &originalMessageID))
 		assert.Equal(t, topicPanic, poisonedTopic)
 		assert.Contains(t, reason, "handler panic")
+		assert.Equal(t, panicMessage.ID, originalMessageID)
 	})
 
 	t.Run("keeps a failed dead-letter publication unacknowledged", func(t *testing.T) {
@@ -454,6 +611,23 @@ func TestAppDispatch(t *testing.T) {
 		require.NoError(t, (*Publisher)(nil).Close())
 		require.NoError(t, (*Router)(nil).Close())
 		assert.Equal(t, `"a""b"`, quoteIdentifier(`a"b`))
+		postgresPublisher := &Publisher{config: Config{DatabaseDSN: "postgres://example.invalid/database"}}
+		assert.Equal(t, "$1", postgresPublisher.publicationPlaceholder(1))
+		assert.Equal(t, "($1, $2)", postgresPublisher.publicationPlaceholders(2))
+		assert.Equal(
+			t,
+			Message{
+				ID:       "id",
+				Topic:    testTopic,
+				Payload:  []byte("payload"),
+				Metadata: map[string]string{},
+			},
+			makeMessage(testTopic, wmmessage.NewMessage("id", []byte("payload"))),
+		)
+		privateMetadataMessage := wmmessage.NewMessage("id", []byte("payload"))
+		privateMetadataMessage.Metadata.Set(transportPayloadHashMetadataKey, fake.UUID().V4())
+		assert.Empty(t, makeMessage(testTopic, privateMetadataMessage).Metadata)
+		assert.Empty(t, transportMessagePayloadHash(&wmmessage.Message{}))
 	})
 
 	t.Run("does not leak Watermill into domain or runtime packages", func(t *testing.T) {

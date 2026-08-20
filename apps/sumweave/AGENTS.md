@@ -73,13 +73,18 @@ Durable jobs workflow:
 - `sumweave start-all` is the standard local backend mode; it runs the HTTP server, durable consumer, and scheduler loop together after schemas are prepared.
 - `sumweave start` starts only the API/server path; it must not execute durable jobs inline.
 - `sumweave jobs worker [--once]` is the dedicated split-mode consumer path for production-like or supervised environments. `--once` consumes until two poll intervals pass idle, so it can drain a reused DB backlog; use a reseeded or isolated local DB for a bounded E2E step.
-- `sumweave jobs enqueue-due` performs one scheduler tick and enqueues due scheduled jobs without running them; keep it for split or externally scheduled environments.
+- `sumweave jobs enqueue-due` performs one scheduler tick for finance-owned bank and FX schedules. It publishes semantic appdispatch commands and advances schedule state without running finance work or creating job rows; keep it for split or externally scheduled environments.
+- `APP_FINANCE_PROVIDERS_FRANKFURTER_BASEURL` overrides the Frankfurter provider endpoint for deterministic local fixtures; manual FX E2E must not use the public network.
 - Appdispatch is generic durable pub/sub for commands and domain events.
 - Jobs add API/user visibility only when a product feature requires it.
 - Background processing does not require a job record by default.
 - Observable jobs still use appdispatch as their execution transport.
-- Persist a visible job and its dispatch command atomically.
+- Publication returns the immutable dispatch message ID before consumption; an observed job row is materialized lazily on first delivery with that same ID.
+- A known future job ID may return `404` before delivery; only the initiating UI flow treats that response as pending.
+- Finance bank and FX schedule state is authoritative in `finance/`; publication, schedule advance, and stored future reference commit together.
+- Explicit finance terminal failures become sanitized failed observed jobs and are acknowledged; unclassified service, payload, materialization, claim, panic, and terminal-write failures remain dispatch failures.
 - Message routers use at-least-once delivery and durable dead letters.
+- Startup recovery considers only claims older than `jobs.worker.staleRunningAge` (five minutes by default) and preserves newer or replaced claims.
 - Recreate old local databases before the topic-aware dispatch migration.
 
 ## Lint / test

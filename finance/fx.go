@@ -18,15 +18,15 @@ import (
 )
 
 const (
-	FXProviderFrankfurter    = "frankfurter"
-	FXProviderNBP            = "nbp"
-	FXProviderECB            = "ecb"
-	FXRefreshJobType         = "finance.fx_rates_refresh"
-	FXDailyRefreshScheduleID = "finance.fx_rates_daily_refresh"
+	FXProviderFrankfurter         = "frankfurter"
+	FXProviderNBP                 = "nbp"
+	FXProviderECB                 = "ecb"
+	FXRefreshJobType              = "finance.fx_rates_refresh"
+	FXDailyRefreshScheduleID      = "finance.fx_rates_daily_refresh"
+	FXSyncRequesterSourceOperator = CommandRequesterSourceOperator
+	FXSyncRequesterSourceSystem   = CommandRequesterSourceSystem
 
-	FXSyncRequesterSourceOperator = "operator"
-	FXSyncRequesterSourceSystem   = "system"
-	maxFXErrorBodyBytes           = 2048
+	maxFXErrorBodyBytes = 2048
 )
 
 var ErrFXProviderNotImplemented = errors.New("fx provider not implemented")
@@ -178,11 +178,10 @@ func (p *FrankfurterFXProvider) FetchLatestRates(
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFXErrorBodyBytes))
-		return nil, fmt.Errorf(
-			"fetch frankfurter rates: status %d: %s",
-			resp.StatusCode,
-			strings.TrimSpace(string(body)),
-		)
+		return nil, &ProviderResponseError{
+			Provider: FXProviderFrankfurter, Operation: "fetch rates", StatusCode: resp.StatusCode,
+			Message: strings.TrimSpace(string(body)),
+		}
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -271,38 +270,10 @@ func (p *FrankfurterFXProvider) FetchHistoricalRates(
 	return rates, err
 }
 
-type FXRefreshJobEnqueuer interface {
-	EnqueueFXRefresh(ctx context.Context, request FXRefreshJobRequest) (FXRefreshJobRef, error)
-}
-
-type FXRefreshScheduleWriter interface {
-	UpsertFXRefreshSchedule(ctx context.Context, schedule FXRefreshSchedule) error
-}
-
-type FXRefreshJobRequest struct {
-	JobType   string
-	Requester FXSyncRequester
-	Input     RefreshFXRatesParams
-}
-
 type FXRefreshJobRef struct {
 	ID       string
 	JobType  string
 	Provider string
-}
-
-type FXRefreshSchedule struct {
-	ScheduleID string
-	JobType    string
-	Requester  FXSyncRequester
-	Interval   time.Duration
-	Input      RefreshFXRatesParams
-	Enabled    bool
-}
-
-type FXSyncRequester struct {
-	UserID string
-	Source string
 }
 
 type RefreshFXRatesParams struct{ Provider string }
@@ -316,13 +287,6 @@ type TriggerFXRefreshParams struct {
 	RequestedByUserID string
 	Source            string
 	Provider          string
-}
-
-type EnsureFXRefreshScheduleParams struct {
-	ScheduleID      string
-	Provider        string
-	Interval        time.Duration
-	RequestedByUser string
 }
 
 type FXAdminDiagnosticsParams struct{}

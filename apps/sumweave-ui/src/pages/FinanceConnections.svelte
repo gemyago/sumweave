@@ -650,6 +650,7 @@
                         jobId={jobIdsByConnection[connection.id]}
                         openHref={`/finance/jobs/${encodeURIComponent(jobIdsByConnection[connection.id])}`}
                         label="Sync"
+                        observedDispatch
                       />
                     {/if}
 

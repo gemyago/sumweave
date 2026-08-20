@@ -15,17 +15,19 @@ import (
 )
 
 type Finance struct {
-	TenantService             *TenantService
-	CatalogService            *CatalogService
-	LedgerService             *LedgerService
-	ReportingService          *ReportingService
-	FXService                 *FXService
-	CSVImportService          *CSVImportService
-	BankConnectionService     *BankConnectionService
-	SyntheticLinkStateService *SyntheticLinkStateService
-	BankSyncService           *BankSyncService
-	ProviderSnapshotService   *ProviderSnapshotService
-	TransferDetailService     *TransferDetailService
+	TenantService                 *TenantService
+	CatalogService                *CatalogService
+	LedgerService                 *LedgerService
+	ReportingService              *ReportingService
+	FXService                     *FXService
+	CSVImportService              *CSVImportService
+	BankConnectionService         *BankConnectionService
+	SyntheticLinkStateService     *SyntheticLinkStateService
+	BankSyncService               *BankSyncService
+	BankConnectionScheduleService *BankConnectionScheduleService
+	FXRefreshScheduleService      *FXRefreshScheduleService
+	ProviderSnapshotService       *ProviderSnapshotService
+	TransferDetailService         *TransferDetailService
 }
 
 func New(cfg *Config) (*Finance, error) {
@@ -34,6 +36,8 @@ func New(cfg *Config) (*Finance, error) {
 	}
 
 	store := persistence.NewStore(cfg.Database)
+	bankConnectionScheduleStore := persistence.NewBankConnectionScheduleStore(cfg.Database)
+	fxRefreshScheduleStore := persistence.NewFXRefreshScheduleStore(cfg.Database)
 	currentFXRateStore := persistence.NewCurrentFXRateStore(cfg.Database)
 	fxPairDiscoveryStore := persistence.NewFXPairDiscoveryStore(cfg.Database)
 	transactionStore := persistence.NewTransactionTagStore(cfg.Database)
@@ -108,7 +112,17 @@ func New(cfg *Config) (*Finance, error) {
 			WithSyntheticLinkStateServiceNow(cfg.Now),
 			WithSyntheticLinkStateServiceIDGenerator(cfg.NewID),
 		),
-		BankSyncService:         services.BankSyncService,
+		BankSyncService: services.BankSyncService,
+		BankConnectionScheduleService: NewBankConnectionScheduleService(
+			bankConnectionScheduleStore,
+			WithBankConnectionScheduleServiceNow(cfg.Now),
+			WithBankConnectionScheduleServicePublisher(cfg.ScheduledCommandPublisher),
+		),
+		FXRefreshScheduleService: NewFXRefreshScheduleService(
+			fxRefreshScheduleStore,
+			WithFXRefreshScheduleServiceNow(cfg.Now),
+			WithFXRefreshScheduleServicePublisher(cfg.ScheduledCommandPublisher),
+		),
 		ProviderSnapshotService: NewProviderSnapshotService(providerSnapshotStore),
 		TransferDetailService:   NewTransferDetailService(transferCandidateStore),
 	}, nil

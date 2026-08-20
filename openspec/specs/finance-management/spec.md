@@ -12,9 +12,10 @@ The system SHALL implement finance as a root `finance/` product module that rema
 - **AND** `finance/` MUST NOT import `runtime/`
 - **AND** finance business rules MUST live in `finance/` while auth, process lifecycle, generic jobs runtime, and HTTP route glue remain app-owned
 
-#### Scenario: Finance persistence stays finance-owned and auto-migrated
+#### Scenario: Finance persistence stays finance-owned
 - **WHEN** finance data is persisted
-- **THEN** finance-owned tables MUST use `finance_` prefixes, GORM auto-migrate schema initialization, explicit column names, and UTC-first timestamps
+- **THEN** finance-owned tables MUST use `finance_` prefixes and explicit
+  column names, with schema preparation owned by `sumweave db-migrate`
 - **AND** finance domain models MUST remain separate from GORM persistence models
 - **AND** the storage design MUST stay compatible with SQLite local development and PostgreSQL-oriented production use
 
@@ -122,19 +123,59 @@ The finance module SHALL support secure provider linking plus explicit async syn
 - **AND** it MUST create an active synthetic bank connection whose `ProviderReference` is the synthetic state key
 - **AND** it MUST consume or expire the pending link start so the same state cannot create duplicate connections
 
-#### Scenario: Bank sync remains idempotent and job-backed
+#### Scenario: Bank sync remains idempotent and appdispatch-first
 - **WHEN** a tenant member triggers or schedules a bank sync for a linked monobank, PKO, or synthetic connection
-- **THEN** the system MUST execute the sync through durable finance jobs, persist normalized accounts/transactions, balance snapshots, provider-original identifiers, and current schema-derived provider snapshots, and deduplicate by provider/connection/account/provider-transaction identity plus safe fallback fingerprints when needed
+- **THEN** the system MUST publish a semantic `finance.bank_connection_sync`
+  command through appdispatch and return its stable message ID without inline
+  execution or a job row
+- **AND** the worker MAY observe that command as a job with the same ID,
+  materializing the projection only on first delivery
+- **AND** execution MUST persist normalized accounts/transactions, balance
+  snapshots, provider-original identifiers, and current schema-derived
+  provider snapshots, and deduplicate by provider/connection/account/provider-
+  transaction identity plus safe fallback fingerprints when needed
 
 #### Scenario: Scheduled sync management scope stays explicit
 - **WHEN** finance scheduling features are surfaced
 - **THEN** tenant-facing finance workflows MUST manage per-connection bank sync schedules, schedule state, and next/last sync visibility from finance connection screens
-- **AND** admin/diagnostics workflows MUST provide sanitized cross-cutting visibility plus global FX schedule controls without becoming the primary tenant workflow for bank-connection schedule editing
+- **AND** admin/diagnostics workflows MUST provide sanitized cross-cutting
+  visibility and manual FX refresh diagnostics; finance-owned FX due state is
+  operational scheduler state, not a generic user-configurable schedule
 
-#### Scenario: CSV import uses preview then durable execution
+#### Scenario: Due finance work is published before observation
+
+- **WHEN** a finance-owned bank or FX schedule is due
+- **THEN** the scheduler MUST publish its semantic command through appdispatch
+  and advance the finance schedule state without running provider work inline
+- **AND** the returned message ID MUST be the stable future job reference when
+  that command is job-observed
+- **AND** the scheduler MUST NOT create the observed job row before worker
+  delivery.
+
+#### Scenario: CSV import uses preview then appdispatch execution
 - **WHEN** a tenant member imports account or transaction CSV data
-- **THEN** the system MUST require header detection, mapping confirmation, validation preview, duplicate/would-create visibility, and explicit confirmation before it enqueues `finance.csv_import` or `finance.account_import`
-- **AND** durable import execution MUST expose progress, result summary, and rejected-row visibility
+- **THEN** the system MUST require header detection, mapping confirmation,
+  validation preview, duplicate/would-create visibility, and explicit
+  confirmation before it publishes `finance.csv_import` or
+  `finance.account_import` through appdispatch
+- **AND** publication MUST return the stable future reference without creating a
+  job row or executing inline
+- **AND** import audit/domain state MUST provide lifecycle, result-summary, and
+  rejected-row visibility; generic job progress and result payloads MUST NOT be
+  required
+
+#### Scenario: Finance future reference is lazily observed
+
+- **WHEN** any of `finance.csv_import`, `finance.account_import`,
+  `finance.bank_connection_sync`, or `finance.fx_rates_refresh` is published
+- **THEN** the response MUST return the appdispatch message ID as its stable
+  future reference
+- **AND** no job row MUST exist until the worker receives the message through
+  the single job-observed consumer
+- **AND** `GET /api/v1/jobs/{messageID}` MAY return `404` before that delivery
+- **AND** only the invoking workflow, which already knows the returned ID, MAY
+  treat that `404` as pending; arbitrary or deep-linked IDs remain errors
+- **AND** after first delivery the observed job ID MUST equal the message ID.
 
 ### Requirement: Protected Finance HTTP API
 The backend application SHALL expose finance APIs through the existing app under `/api/v1/finance/...`.
@@ -161,7 +202,9 @@ The backend application SHALL include finance-owned persistence schema initializ
 #### Scenario: Migration creates finance-owned tables
 - **WHEN** a user runs `sumweave db-migrate` with valid backend database configuration
 - **THEN** the command MUST run the finance persistence migration for finance-owned tables before finance API, import, reporting, sync, or finance durable job flows rely on those tables
-- **AND** finance-owned tables MUST keep finance persistence ownership, explicit column names, UTC-first timestamps, and compatibility with SQLite local development and PostgreSQL-oriented production use
+- **AND** finance-owned tables MUST keep finance persistence ownership, explicit
+  column names, and compatibility with SQLite local development and
+  PostgreSQL-oriented production use
 
 #### Scenario: Finance startup relies on prepared schema in standard setup
 - **WHEN** the documented standard setup has run `sumweave db-migrate`
@@ -342,7 +385,9 @@ The finance module SHALL expose public services by focused product responsibilit
 
 #### Scenario: Service dependencies stay narrow
 - **WHEN** a focused finance service is constructed
-- **THEN** it MUST accept only the store interfaces, providers, ciphers, clocks, ID generators, enqueuers, schedulers, and loggers required by that service
+- **THEN** it MUST accept only the store interfaces, providers, ciphers, clocks,
+  ID generators, semantic-command publishers, schedulers, and loggers required
+  by that service
 - **AND** store interfaces MUST be defined by the consuming service boundary
 - **AND** new persistence needs MUST use dedicated responsibility-specific stores or narrow interfaces instead of extending the legacy broad persistence store as a god object
 
@@ -453,7 +498,10 @@ The finance module SHALL retain current, sanitized provider source snapshots rec
 - **AND** the API MUST use provider-snapshot terminology and MUST NOT retain `/evidence` compatibility routes
 
 ### Requirement: Production Bank Sync Uses Provider Sync Orchestration
-The finance module SHALL execute manual and scheduled bank-connection sync jobs through the provider sync orchestrator and requested-window executor as the single production sync path.
+The finance module SHALL execute manual and scheduled bank-connection commands
+through the provider sync orchestrator and requested-window executor as the
+single production sync path. A job-observed sync uses the dispatch message ID as
+its job ID.
 
 #### Scenario: Durable bank sync job enters the orchestrator
 - **WHEN** the durable `finance.bank_connection_sync` handler runs for a linked bank connection
@@ -525,7 +573,8 @@ The provider-owned window sync store SHALL apply the first provider observations
 #### Scenario: Multi-chunk account statistics remain accurate
 - **WHEN** the same provider account is observed in more than one requested window
 - **THEN** aggregate statistics MUST distinguish observed accounts from newly created finance accounts
-- **AND** the existing `ImportedAccounts` job result MUST count created accounts rather than repeated observations
+- **AND** aggregate sync statistics MUST count created accounts rather than
+  repeated observations
 
 ### Requirement: Successful Requested-Window Progress Is Atomic
 The finance module SHALL commit the writes for a successful requested window and its successful provider sync state checkpoint in one database transaction.
@@ -533,7 +582,8 @@ The finance module SHALL commit the writes for a successful requested window and
 #### Scenario: Window writes and checkpoint succeed together
 - **WHEN** connector fetch, diff planning, and apply planning succeed for a requested window
 - **THEN** accounts, balances, transactions, matches, typed provider snapshots, and the successful chunk state MUST commit atomically
-- **AND** the state MUST record the attempted window, success time, run and job identity, and aggregate stats
+- **AND** the state MUST record the attempted window, success time, run and
+  dispatch identity, and aggregate stats
 
 #### Scenario: Successful checkpoint persistence fails
 - **WHEN** the success journal row cannot be persisted during requested-window apply
@@ -543,7 +593,8 @@ The finance module SHALL commit the writes for a successful requested window and
 #### Scenario: Fetch or apply fails
 - **WHEN** provider fetch, diff preparation, or transactional apply fails for a requested window
 - **THEN** no partial finance writes for that window may commit
-- **AND** the orchestrator MUST append a failed attempt state containing the requested window, job identity, and sanitized error summary
+- **AND** the orchestrator MUST append a failed attempt state containing the
+  requested window, dispatch identity, and sanitized error summary
 
 #### Scenario: A later chunk fails after earlier chunks succeeded
 - **WHEN** an oldest-first orchestration commits one or more chunks and a later chunk fails
@@ -551,12 +602,15 @@ The finance module SHALL commit the writes for a successful requested window and
 - **AND** the next automatic target plan MUST derive its checkpoint from the failed window start before applying the existing recent-refresh rule
 
 ### Requirement: Orchestrated Sync Preserves Operational Bank-Connection State
-The focused bank-sync service SHALL preserve existing connection, schedule, job-result, and deletion behavior around orchestrated provider sync execution.
+The focused bank-sync service SHALL preserve existing connection, schedule,
+dispatch-reference, and deletion behavior around orchestrated provider sync
+execution.
 
 #### Scenario: Whole orchestration succeeds
 - **WHEN** every requested window in a bank sync job succeeds
 - **THEN** the service MUST update existing last-started, last-successful, job ID, connection state, and schedule completion projections
-- **AND** it MUST return the existing bank sync job result shape using aggregate orchestrator statistics
+- **AND** it MUST retain the existing finance sync operation response shape
+  using aggregate orchestrator statistics and the stable dispatch reference
 
 #### Scenario: Whole orchestration fails
 - **WHEN** target planning or any requested window fails
@@ -572,4 +626,3 @@ The focused bank-sync service SHALL preserve existing connection, schedule, job-
 #### Scenario: External contracts remain stable
 - **WHEN** production execution moves to the provider sync orchestrator
 - **THEN** existing finance sync HTTP paths, camelCase request and response JSON, durable job type, optional window input, and schedule operations MUST remain unchanged
-

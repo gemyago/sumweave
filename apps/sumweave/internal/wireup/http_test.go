@@ -26,15 +26,14 @@ func TestBuildHTTP(t *testing.T) {
 		return root
 	}
 
-	t.Run("eagerly builds registered production routes without starting a worker", func(t *testing.T) {
+	t.Run("builds API routes without worker polling resources", func(t *testing.T) {
 		root := makeRoot(t)
+		defer func() { require.NoError(t, root.Close(t.Context())) }()
 		request := httptest.NewRequest(http.MethodGet, "/health", nil)
 		response := httptest.NewRecorder()
 		root.Handler.ServeHTTP(response, request)
 		require.Equal(t, http.StatusOK, response.Code)
-		require.NotNil(t, root.Worker)
-		require.NotNil(t, root.Scheduler)
-		require.NoError(t, root.StartHTTPServer(t.Context(), true))
+		require.NotNil(t, root.Server)
 	})
 
 	t.Run("rejects invalid root inputs before wireup", func(t *testing.T) {

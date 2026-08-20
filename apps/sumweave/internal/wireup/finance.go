@@ -3,6 +3,7 @@ package wireup
 import (
 	"log/slog"
 
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/financeapp"
 	apphttpclient "github.com/gemyago/sumweave/apps/sumweave/internal/infrastructure/httpclient"
@@ -14,7 +15,8 @@ import (
 
 type financeModuleBuildDeps struct {
 	Database          *persistence.Database
-	Jobs              *jobspkg.Module
+	CommandPublisher  *appdispatch.Publisher
+	Registry          *jobspkg.Registry
 	HTTPClientFactory *apphttpclient.ClientFactory
 	Logger            *slog.Logger
 	JWTSigningKey     string
@@ -25,14 +27,14 @@ func buildFinanceModule(deps financeModuleBuildDeps) (*financepkg.Finance, error
 	providers := deps.Finance.Providers
 	return financeapp.NewModule(financeapp.ModuleDeps{
 		Database:                        deps.Database,
-		Jobs:                            deps.Jobs.Service,
-		JobsStore:                       deps.Jobs.Store,
-		Registry:                        deps.Jobs.Registry,
+		CommandPublisher:                deps.CommandPublisher,
+		Registry:                        deps.Registry,
 		HTTPClientFactory:               deps.HTTPClientFactory,
 		RootLogger:                      deps.Logger,
 		JWTSigningKey:                   deps.JWTSigningKey,
 		MonobankBaseURL:                 providers.Monobank.BaseURL,
 		MonobankRetryAfterFallbackDelay: providers.Monobank.RetryAfterFallbackDelay,
+		FrankfurterBaseURL:              providers.Frankfurter.BaseURL,
 		EnableBanking: financepkg.EnableBankingConfig{
 			BaseURL: providers.EnableBanking.BaseURL, AppID: providers.EnableBanking.AppID,
 			PrivateKeyPath: providers.EnableBanking.PrivateKeyPath,

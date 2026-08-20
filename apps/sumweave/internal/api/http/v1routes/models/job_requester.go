@@ -16,6 +16,4 @@ var _ = fmt.Sprint
 type JobRequester struct { 
 	UserID string `json:"userId"`
 	Source string `json:"source"`
-	AgentSessionID string `json:"agentSessionId"`
-	AgentRunID string `json:"agentRunId"`
 }

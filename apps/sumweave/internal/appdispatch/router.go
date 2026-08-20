@@ -17,6 +17,8 @@ import (
 const (
 	routerMaxRetries      = 3
 	routerInitialInterval = 100 * time.Millisecond
+
+	originalMessageIDMetadataKey = "originalMessageId"
 )
 
 // Handler binds one raw transport topic to one application callback.
@@ -79,7 +81,7 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 		return nil, fmt.Errorf("create router for consumer group %s: %w", consumerGroup, err)
 	}
 	poisonQueue, err := middleware.PoisonQueueWithFilter(
-		f.publisher.publisher,
+		deadLetterPublisher{publisher: f.publisher.publisher},
 		DeadLetterTopic,
 		func(err error) bool {
 			var nonRetryable NonRetryable
@@ -128,6 +130,31 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 		handlerTopics: make(map[string]struct{}),
 		closeDone:     make(chan struct{}),
 	}, nil
+}
+
+type deadLetterPublisher struct {
+	publisher wmmessage.Publisher
+}
+
+func (p deadLetterPublisher) Publish(topic string, messages ...*wmmessage.Message) error {
+	if topic != DeadLetterTopic {
+		return p.publisher.Publish(topic, messages...)
+	}
+	deadLetters := make(wmmessage.Messages, 0, len(messages))
+	for _, message := range messages {
+		deadLetter := wmmessage.NewMessageWithContext(message.Context(), watermill.NewUUID(), message.Payload)
+		deadLetter.Metadata = make(wmmessage.Metadata, len(message.Metadata)+1)
+		for key, value := range message.Metadata {
+			deadLetter.Metadata.Set(key, value)
+		}
+		deadLetter.Metadata.Set(originalMessageIDMetadataKey, message.UUID)
+		deadLetters = append(deadLetters, deadLetter)
+	}
+	return p.publisher.Publish(topic, deadLetters...)
+}
+
+func (p deadLetterPublisher) Close() error {
+	return p.publisher.Close()
 }
 
 // Router owns one consumer group's subscriptions and failure policy.

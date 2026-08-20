@@ -29,6 +29,11 @@ const (
 	columnFingerprint       = "fingerprint"
 	columnProviderObjectID  = "provider_object_id"
 	columnCapturedAt        = "captured_at"
+	columnIntervalSeconds   = "interval_seconds"
+	columnNextRunAt         = "next_run_at"
+	columnLastScheduledAt   = "last_scheduled_at"
+	columnLastJobID         = "last_job_id"
+	columnEnabled           = "enabled"
 	columnNonce             = "nonce"
 	columnCiphertext        = "ciphertext"
 )

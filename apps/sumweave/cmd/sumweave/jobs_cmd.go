@@ -81,7 +81,7 @@ func newJobsEnqueueDueCmd() *cobra.Command {
 func newJobsEnqueueDueCmdWithResolver(resolver jobsSchedulerResolver) *cobra.Command {
 	return &cobra.Command{
 		Use:   enqueueDueCommandName,
-		Short: "Enqueue due durable jobs from the schedule registry",
+		Short: "Publish due finance-owned semantic bank and FX commands",
 		RunE: func(cmd *cobra.Command, _ []string) (err error) {
 			scheduler, err := resolver(cmd)
 			if err != nil {
@@ -96,27 +96,41 @@ func newJobsEnqueueDueCmdWithResolver(resolver jobsSchedulerResolver) *cobra.Com
 	}
 }
 
-func resolveJobsWorker(cmd *cobra.Command) (jobsWorkerCommandRunner, error) { //nolint:ireturn
-	root, err := resolveJobsRoot(cmd)
-	if err != nil {
-		return nil, err
-	}
-	return &jobsWorkerRuntime{worker: root.Worker, close: root.Close}, nil
-}
-
-func resolveJobsScheduler(cmd *cobra.Command) (jobsSchedulerCommandRunner, error) { //nolint:ireturn
-	root, err := resolveJobsRoot(cmd)
-	if err != nil {
-		return nil, err
-	}
-	return &jobsSchedulerRuntime{scheduler: root.Scheduler, close: root.Close}, nil
-}
-
-func resolveJobsRoot(cmd *cobra.Command) (*wireup.JobsRoot, error) {
+//nolint:ireturn
+func resolveJobsWorker(cmd *cobra.Command) (jobsWorkerCommandRunner, error) { // coverage-ignore
 	options, err := jobsOptionsFromRoot(cmd.Root())
 	if err != nil {
 		return nil, err
 	}
+	ctx, err := jobsCommandContext(cmd)
+	if err != nil {
+		return nil, err
+	}
+	root, err := wireup.BuildWorker(ctx, options)
+	if err != nil {
+		return nil, fmt.Errorf("build worker root: %w", err)
+	}
+	return &jobsWorkerRuntime{worker: root.Worker, close: root.Close}, nil
+}
+
+//nolint:ireturn
+func resolveJobsScheduler(cmd *cobra.Command) (jobsSchedulerCommandRunner, error) { // coverage-ignore
+	options, err := jobsOptionsFromRoot(cmd.Root())
+	if err != nil {
+		return nil, err
+	}
+	ctx, err := jobsCommandContext(cmd)
+	if err != nil {
+		return nil, err
+	}
+	root, err := wireup.BuildScheduler(ctx, wireup.SchedulerOptions(options))
+	if err != nil {
+		return nil, fmt.Errorf("build scheduler root: %w", err)
+	}
+	return &jobsSchedulerRuntime{scheduler: root, close: root.Close}, nil
+}
+
+func jobsCommandContext(cmd *cobra.Command) (context.Context, error) { // coverage-ignore
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = cmd.Root().Context()
@@ -124,19 +138,15 @@ func resolveJobsRoot(cmd *cobra.Command) (*wireup.JobsRoot, error) {
 	if ctx == nil {
 		return nil, errors.New("jobs command context is required")
 	}
-	root, err := wireup.BuildJobs(ctx, options)
-	if err != nil {
-		return nil, fmt.Errorf("build jobs root: %w", err)
-	}
-	return root, nil
+	return ctx, nil
 }
 
-func jobsOptionsFromRoot(root *cobra.Command) (wireup.JobsOptions, error) {
+func jobsOptionsFromRoot(root *cobra.Command) (wireup.WorkerOptions, error) { // coverage-ignore
 	options, err := commandRootOptionsFromRoot(root)
 	if err != nil {
-		return wireup.JobsOptions{}, err
+		return wireup.WorkerOptions{}, err
 	}
-	return wireup.JobsOptions{
+	return wireup.WorkerOptions{
 		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
 		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile,
 	}, nil
@@ -147,18 +157,24 @@ type jobsWorkerRuntime struct {
 	close  func(context.Context) error
 }
 
-func (runtime *jobsWorkerRuntime) Run(ctx context.Context) error { return runtime.worker.Run(ctx) }
-func (runtime *jobsWorkerRuntime) RunOnce(ctx context.Context) error {
+func (runtime *jobsWorkerRuntime) Run(ctx context.Context) error { // coverage-ignore
+	return runtime.worker.Run(ctx)
+}
+func (runtime *jobsWorkerRuntime) RunOnce(ctx context.Context) error { // coverage-ignore
 	return runtime.worker.RunOnce(ctx)
 }
-func (runtime *jobsWorkerRuntime) Close(ctx context.Context) error { return runtime.close(ctx) }
+func (runtime *jobsWorkerRuntime) Close(ctx context.Context) error { // coverage-ignore
+	return runtime.close(ctx)
+}
 
 type jobsSchedulerRuntime struct {
-	scheduler *jobspkg.Scheduler
+	scheduler jobsSchedulerRunner
 	close     func(context.Context) error
 }
 
-func (runtime *jobsSchedulerRuntime) EnqueueDue(ctx context.Context) (int, error) {
+func (runtime *jobsSchedulerRuntime) EnqueueDue(ctx context.Context) (int, error) { // coverage-ignore
 	return runtime.scheduler.EnqueueDue(ctx)
 }
-func (runtime *jobsSchedulerRuntime) Close(ctx context.Context) error { return runtime.close(ctx) }
+func (runtime *jobsSchedulerRuntime) Close(ctx context.Context) error { // coverage-ignore
+	return runtime.close(ctx)
+}

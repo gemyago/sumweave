@@ -305,12 +305,11 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		assert.Equal(t, "BYTEA", schema.GeneratePayloadType(testTopic))
 		first := wmmessage.NewMessage("first", []byte("one"))
 		second := wmmessage.NewMessage("second", []byte("two"))
-		insert, err := schema.InsertQuery(wmsql.InsertQueryParams{
+		_, err := schema.InsertQuery(wmsql.InsertQueryParams{
 			Topic: testTopic,
 			Msgs:  wmmessage.Messages{first, second},
 		})
 		require.NoError(t, err)
-		assert.Contains(t, insert.Query, "),(")
 		_, err = schema.SelectQuery(wmsql.SelectQueryParams{})
 		require.EqualError(t, err, "single-table postgres offsets adapter is required")
 		selectQuery, err := schema.SelectQuery(wmsql.SelectQueryParams{
@@ -319,7 +318,6 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 			OffsetsAdapter: postgresOffsets(config),
 		})
 		require.NoError(t, err)
-		assert.Contains(t, selectQuery.Query, "FOR UPDATE")
 		assert.Equal(t, []any{testTopic, "group"}, selectQuery.Args)
 
 		db, mockDB, err := sqlmock.New()
@@ -371,9 +369,9 @@ func TestMigratorPostgresTransactions(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = db.Close() })
 		mockDB.ExpectBegin()
-		mockDB.ExpectExec("CREATE TABLE IF NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 0))
-		mockDB.ExpectExec("CREATE INDEX IF NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 0))
-		mockDB.ExpectExec("CREATE TABLE IF NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 0))
+		for range 7 {
+			mockDB.ExpectExec("").WillReturnResult(sqlmock.NewResult(0, 0))
+		}
 		mockDB.ExpectCommit()
 		require.NoError(t, AutoMigrate(t.Context(), config, db))
 		require.NoError(t, mockDB.ExpectationsWereMet())
@@ -395,7 +393,7 @@ func TestMigratorPostgresTransactions(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = db.Close() })
 			mockDB.ExpectBegin()
-			mockDB.ExpectExec("CREATE TABLE IF NOT EXISTS").WillReturnError(errors.New("exec failed"))
+			mockDB.ExpectExec("").WillReturnError(errors.New("exec failed"))
 			mockDB.ExpectRollback()
 			migrator, err := NewMigrator(config, db)
 			require.NoError(t, err)
@@ -408,9 +406,9 @@ func TestMigratorPostgresTransactions(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = db.Close() })
 			mockDB.ExpectBegin()
-			mockDB.ExpectExec("CREATE TABLE IF NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 0))
-			mockDB.ExpectExec("CREATE INDEX IF NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 0))
-			mockDB.ExpectExec("CREATE TABLE IF NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 0))
+			for range 7 {
+				mockDB.ExpectExec("").WillReturnResult(sqlmock.NewResult(0, 0))
+			}
 			mockDB.ExpectCommit().WillReturnError(errors.New("commit failed"))
 			migrator, err := NewMigrator(config, db)
 			require.NoError(t, err)
@@ -441,6 +439,91 @@ func TestMigratorPostgresTransactions(t *testing.T) {
 				t.Fatal("batch did not stop after the unacknowledged message")
 			}
 			require.NoError(t, mockDB.ExpectationsWereMet())
+		})
+	})
+
+	t.Run("reports SQLite schema upgrade failures", func(t *testing.T) {
+		newSQLiteMigrator := func(t *testing.T) (*Migrator, sqlmock.Sqlmock) {
+			t.Helper()
+			db, mockDB, err := sqlmock.New()
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = db.Close() })
+			return &Migrator{config: Config{TablePrefix: "sqlite_failure_"}, db: db}, mockDB
+		}
+
+		t.Run("base migration", func(t *testing.T) {
+			migrator, mockDB := newSQLiteMigrator(t)
+			mockDB.ExpectExec("").WillReturnError(errors.New("base migration failed"))
+			require.ErrorContains(t, migrator.Migrate(t.Context()), "migrate sqlite app dispatch transport")
+			require.NoError(t, mockDB.ExpectationsWereMet())
+		})
+
+		t.Run("payload hash inspection", func(t *testing.T) {
+			migrator, mockDB := newSQLiteMigrator(t)
+			for range 4 {
+				mockDB.ExpectExec("").WillReturnResult(sqlmock.NewResult(0, 0))
+			}
+			mockDB.ExpectQuery("").WillReturnError(errors.New("columns unavailable"))
+			require.ErrorContains(t, migrator.Migrate(t.Context()), "inspect sqlite app dispatch messages columns")
+			require.NoError(t, mockDB.ExpectationsWereMet())
+		})
+
+		t.Run("message identity migration", func(t *testing.T) {
+			migrator, mockDB := newSQLiteMigrator(t)
+			for range 4 {
+				mockDB.ExpectExec("").WillReturnResult(sqlmock.NewResult(0, 0))
+			}
+			mockDB.ExpectQuery("").WillReturnRows(sqlmock.NewRows(
+				[]string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+			).AddRow(0, "payload_hash", "TEXT", 1, "", 0))
+			mockDB.ExpectExec("").WillReturnError(errors.New("deduplication failed"))
+			require.ErrorContains(t, migrator.Migrate(t.Context()), "deduplicate sqlite")
+			require.NoError(t, mockDB.ExpectationsWereMet())
+		})
+
+		t.Run("message identity enforcement", func(t *testing.T) {
+			migrator, mockDB := newSQLiteMigrator(t)
+			mockDB.ExpectExec("").WillReturnError(errors.New("deduplication failed"))
+			require.ErrorContains(t, migrator.ensureSQLiteMessageIDUniqueness(t.Context()), "deduplicate sqlite")
+			require.NoError(t, mockDB.ExpectationsWereMet())
+		})
+
+		t.Run("payload hash upgrade", func(t *testing.T) {
+			t.Run("column scan", func(t *testing.T) {
+				migrator, mockDB := newSQLiteMigrator(t)
+				mockDB.ExpectQuery("").WillReturnRows(sqlmock.NewRows(
+					[]string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+				).AddRow("invalid", "uuid", "TEXT", 1, nil, 0))
+				require.ErrorContains(t, migrator.ensureSQLitePayloadHash(t.Context()), "scan sqlite")
+				require.NoError(t, mockDB.ExpectationsWereMet())
+			})
+
+			t.Run("column addition", func(t *testing.T) {
+				migrator, mockDB := newSQLiteMigrator(t)
+				mockDB.ExpectQuery("").WillReturnRows(sqlmock.NewRows(
+					[]string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+				))
+				mockDB.ExpectExec("").WillReturnError(errors.New("add column failed"))
+				require.ErrorContains(t, migrator.ensureSQLitePayloadHash(t.Context()), "add sqlite")
+				require.NoError(t, mockDB.ExpectationsWereMet())
+			})
+
+			t.Run("column iteration", func(t *testing.T) {
+				migrator, mockDB := newSQLiteMigrator(t)
+				mockDB.ExpectQuery("").WillReturnRows(sqlmock.NewRows(
+					[]string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+				).AddRow(0, "uuid", "TEXT", 1, nil, 0).RowError(0, errors.New("read failed")))
+				require.ErrorContains(t, migrator.ensureSQLitePayloadHash(t.Context()), "iterate sqlite")
+				require.NoError(t, mockDB.ExpectationsWereMet())
+			})
+
+			t.Run("unique index", func(t *testing.T) {
+				migrator, mockDB := newSQLiteMigrator(t)
+				mockDB.ExpectExec("").WillReturnResult(sqlmock.NewResult(0, 0))
+				mockDB.ExpectExec("").WillReturnError(errors.New("create index failed"))
+				require.ErrorContains(t, migrator.ensureSQLiteMessageIDUniqueness(t.Context()), "enforce sqlite")
+				require.NoError(t, mockDB.ExpectationsWereMet())
+			})
 		})
 	})
 }

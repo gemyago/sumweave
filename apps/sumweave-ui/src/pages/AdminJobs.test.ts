@@ -12,7 +12,7 @@ vi.mock('../lib/jobs/api', async (importOriginal) => ({
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
 
 function jobFixture() {
-  return { id: 'job-1', jobType: 'finance.csv_import', status: 'queued', requester: { userId: 'user-1', source: 'operator', agentSessionId: '', agentRunId: '' }, createdAt: new Date(), updatedAt: new Date(), attemptCount: 0 }
+  return { id: 'job-1', jobType: 'finance.csv_import', status: 'queued', requester: { userId: 'user-1', source: 'operator' }, createdAt: new Date(), updatedAt: new Date(), attemptCount: 0 }
 }
 
 describe('Admin jobs page', () => {

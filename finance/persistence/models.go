@@ -258,6 +258,20 @@ type bankConnectionScheduleModel struct {
 
 func (bankConnectionScheduleModel) TableName() string { return "finance_bank_connection_schedules" }
 
+type fxRefreshScheduleModel struct {
+	ScheduleID      string     `gorm:"column:schedule_id;size:255;not null;primaryKey"`
+	Provider        string     `gorm:"column:provider;size:255;not null"`
+	IntervalSeconds int64      `gorm:"column:interval_seconds;not null"`
+	NextRunAt       *time.Time `gorm:"column:next_run_at;index:idx_finance_fx_refresh_schedules_due"`
+	LastScheduledAt *time.Time `gorm:"column:last_scheduled_at"`
+	LastJobID       string     `gorm:"column:last_job_id;size:255;not null;default:''"`
+	Enabled         bool       `gorm:"column:enabled;not null;index:idx_finance_fx_refresh_schedules_due"`
+	CreatedAt       time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;not null"`
+}
+
+func (fxRefreshScheduleModel) TableName() string { return "finance_fx_refresh_schedules" }
+
 type connectionProviderAccountModel struct {
 	ID                   string     `gorm:"column:id;size:255;not null;primaryKey"`
 	ConnectionID         string     `gorm:"column:connection_id;size:255;not null;index:idx_finance_connection_provider_accounts_unique,unique,priority:1;index:idx_finance_connection_provider_accounts_created_order,priority:1"`
@@ -908,6 +922,24 @@ func bankConnectionScheduleFromModel(
 		Enabled:         model.Enabled,
 		CreatedAt:       model.CreatedAt,
 		UpdatedAt:       model.UpdatedAt,
+	}
+}
+
+func newFXRefreshScheduleModel(schedule domain.FXRefreshSchedule) fxRefreshScheduleModel {
+	return fxRefreshScheduleModel{
+		ScheduleID: schedule.ScheduleID, Provider: schedule.Provider,
+		IntervalSeconds: int64(schedule.Interval / time.Second), NextRunAt: schedule.NextRunAt,
+		LastScheduledAt: schedule.LastScheduledAt, LastJobID: schedule.LastJobID,
+		Enabled: schedule.Enabled, CreatedAt: schedule.CreatedAt, UpdatedAt: schedule.UpdatedAt,
+	}
+}
+
+func fxRefreshScheduleFromModel(model fxRefreshScheduleModel) domain.FXRefreshSchedule {
+	return domain.FXRefreshSchedule{
+		ScheduleID: model.ScheduleID, Provider: model.Provider,
+		Interval: time.Duration(model.IntervalSeconds) * time.Second, NextRunAt: model.NextRunAt,
+		LastScheduledAt: model.LastScheduledAt, LastJobID: model.LastJobID,
+		Enabled: model.Enabled, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
 	}
 }
 

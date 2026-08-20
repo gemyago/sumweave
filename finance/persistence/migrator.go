@@ -34,6 +34,7 @@ func financeSchemaModels() []any {
 		&bankConnectionModel{},
 		&pendingBankConnectionLinkStartModel{},
 		&bankConnectionScheduleModel{},
+		&fxRefreshScheduleModel{},
 		&connectionProviderAccountModel{},
 		&balanceSnapshotModel{},
 		&providerSyncStateJournalModel{},

@@ -33,7 +33,7 @@ func TestProviderLinkRoutingHelpers(t *testing.T) {
 		require.ErrorContains(t, err, bankProviderMonobank)
 	})
 
-	t.Run("keeps linking defaults and schedule IDs explicit", func(t *testing.T) {
+	t.Run("keeps linking defaults explicit", func(t *testing.T) {
 		provider, err := configuredBankProviderName(bankProviderMonobank, bankLinkMethodToken)
 		require.NoError(t, err)
 		require.Equal(t, bankProviderMonobank, provider)
@@ -42,7 +42,6 @@ func TestProviderLinkRoutingHelpers(t *testing.T) {
 		require.Equal(t, bankConnectorEnableBanking, provider)
 		_, err = configuredBankProviderName("unsupported", bankLinkMethodToken)
 		require.ErrorIs(t, err, ErrUnsupportedBankProvider)
-		require.Equal(t, "finance.bank_connection_sync:connection", bankConnectionSyncScheduleID(" connection "))
 		require.Nil(t, timePtrOrNil(time.Time{}))
 		require.NotNil(t, timePtrOrNil(time.Now()))
 	})

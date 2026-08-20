@@ -21,7 +21,7 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 ## Root package (engine.go)
 
 - **`Engine`** (`engine.go`, package **`sumweave`**) owns a typed `wireup.HTTPRoot`; it has no container or Viper state. It is the embeddable API-only entrypoint when you do not run **`cmd/sumweave`**.
-- **`NewEngine`** applies optional **`EngineOpt`** then eagerly builds the validated HTTP root: telemetry, runtime, auth, jobs (without execution), finance registration, routes, and server.
+- **`NewEngine`** applies optional **`EngineOpt`** then eagerly builds the validated HTTP root: telemetry, runtime, auth, jobs reads, finance registration, routes, and server. It does not construct or start a worker or scheduler.
 - **`Close(context.Context)`** releases resources owned by eager construction when the embedder does not start the server. It is idempotent and is also safe after **`StartHTTPServer`** completes, whose lifecycle already closes the root.
 - **`StartHTTPServer`** is blocking until shutdown and delegates to the root lifecycle. **`EngineStartServerOpt`** supports **`noop`**, which performs normal composition and shutdown without listening.
 - **Typed accessors** return the root's existing **`GetToolsRegistry`** and **`GetAgentRunner`** instances directly.
@@ -32,9 +32,9 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 
 - **`main.go`** / **`cli.go`** — Cobra commands, process lifecycle, and command-local explicit root resolution.
 - **`db-migrate`** — loads typed configuration and eagerly builds only logging/lifecycle/telemetry, SQL/auth stores, runtime migration inputs, and `DatabaseMigrator`; it does not build finance services, jobs worker/service, JWT, routes, or HTTP. It migrates the finance schema itself and remains the standard local backend workflow before **`start-all`**.
-- **`start-all`** — standard local backend workflow entrypoint; runs the HTTP server, durable jobs consumer, and non-overlapping scheduler loop in one process using the same components as the split commands.
+- **`start-all`** — standard local backend workflow entrypoint; runs the HTTP server, appdispatch worker, and non-overlapping scheduler loop in one process using the same components as the split commands.
 - **`start`** — API-only HTTP server mode for split or production-like environments.
-- **`sumweave jobs worker`** / **`sumweave jobs enqueue-due`** — dedicated split-environment consumer and one-shot scheduler commands. Each uses the typed jobs root, which constructs jobs and completes finance schedule/handler registration before command orchestration starts a worker or scheduler operation; it builds no HTTP routes or server.
+- **`sumweave jobs worker`** / **`sumweave jobs enqueue-due`** — dedicated split-environment appdispatch consumer and one-shot scheduler commands. The worker registers ordinary and job-observed finance consumers; the scheduler reads finance-owned bank and FX schedules, publishes due semantic commands, advances schedule state atomically with the publication, and does not run finance work or create job rows. Neither builds HTTP routes or a server.
 - **`internal/wireup/`** — command-specific eager roots and explicit application wiring. HTTP, `start-all`, `db-migrate`, split jobs, user administration, and finance fixtures use direct construction.
 - **`internal/agent_runtime.go`** — constructs **`agent.Runner`** (LLM provider, **`workspacefs`** tools, filesystem storage under configurable data dir, and a required persisted agent profile service for runner-owned profile execution) and exposes **`httpapi`** as **`HTTPHandler`**.
 - **`internal/api/http/`** — HTTP composition: **`server/`** (router, HTTPServer, middleware chain), **`v1routes/`** (generated routes + handlers, e.g. health), **`v1controllers/`**, **`middleware/`**, plus embedded UI staging under **`embeddedui/`** (tracked placeholder + generated ignored `dist/`).
@@ -45,41 +45,65 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 ## Messaging model
 
 - **`internal/appdispatch/`** is a low-level, multi-topic SQL transport. One
-  message table stores topic, identity, opaque payload, and metadata; one
-  offsets table is keyed by topic and consumer group. SQLite and PostgreSQL
-  follow the same delivery contract. It is generic internal pub/sub for both
-  imperative commands and factual domain events and does not create a
-  user-facing execution model.
+  message table stores topic, immutable unique identity, opaque payload, and
+  metadata; one offsets table is keyed by topic and consumer group. SQLite and
+  PostgreSQL follow the same delivery contract. Semantic packages publish
+  commands and events through it and receive the message ID before consumption.
+  It is the only durable publication, scheduling, and delivery path for
+  background work; the transport does not create a user-facing execution model.
 - **`internal/appevents/`** publishes typed facts and creates typed handlers.
   A named router can react to several event topics, and separate groups each
-  receive the same event independently.
+  receive the same event independently. This adapter remains intentionally
+  retained while jobs are simplified.
 - **`internal/jobs/`** adds opt-in product visibility to selected background
-  commands through durable identity, lifecycle, attempts, sanitized outcomes,
-  and list/detail APIs. Its currently visible commands use the
-  `jobs.execution.v1` envelope and `jobs.workers.v1` consumer group, but
-  `appdispatch` remains their execution transport. Background processing may
-  use `appdispatch` directly when no product or operational contract needs a
-  job record.
-- A job record and its dispatch command are persisted atomically. A dispatch
-  message is not necessarily a job, and jobs do not form a separate queue.
+  commands through an observed-consumer lifecycle decorator, durable identity,
+  attempts, sanitized outcomes, and list/detail APIs. A job row is created
+  lazily on first delivery, before domain work, and its ID equals the message
+  ID. Direct appdispatch consumers have no jobs dependency or row.
+- The jobs package has no generic schedule registry or `job_schedules` table in
+  the active path. Bank schedule rows and the daily FX due state are owned by
+  `finance/`; `jobs enqueue-due` is retained as the operational command name.
+- At most one observed consumer may own job visibility for a message. An event
+  reaction that needs separate visible execution publishes a distinct semantic
+  command rather than creating competing job projections.
 - Delivery is **at least once**. A router acknowledges only after successful
   handling or successful publication to `app.dispatch.dead-letter.v1`.
-  Handlers therefore own idempotency. A duplicate command for any non-queued
-  job is acknowledged without another execution.
-- Handler errors and panics receive three bounded retries. Exhausted deliveries
+  Handlers therefore own idempotency. A duplicate delivery for a terminal
+  observed job is acknowledged without another execution; an already-running
+  projection remains subject to the worker recovery policy.
+- Handler errors and panics receive the configured bounded dispatch retries. Exhausted deliveries
   preserve the original message identity, topic, payload, and diagnostic
   metadata in the dead-letter topic. A dead-letter publication failure leaves
   the source offset unchanged.
-- Transient transport or infrastructure failures follow the dispatch retry and
-  dead-letter policy. A handled business failure for observable work persists a
-  failed job and acknowledges the command. Non-observable work records no job
+- Dispatch retention is separate from completed-job retention. Normal message
+  rows become eligible after 7 days only after every existing consumer-group
+  offset for the topic has advanced beyond the row; unacknowledged rows stay
+  available for retry and operator attention. Idempotency claims use at least
+  the same retention window. Dead-letter rows are retained for 30 days for
+  diagnostics and then may be removed by offset-safe internal maintenance.
+  Workers do not perform cleanup, and raw transport rows are never exposed by
+  jobs APIs.
+- Transient transport, infrastructure, and unclassified finance-service failures
+  follow the dispatch retry and dead-letter policy. Only a finance-owned typed
+  terminal outcome is mapped by the finance adapter to a handled business failure;
+  observable work persists its sanitized code, summary, and details as failed job
+  state before acknowledging the command. Non-observable work records no job
   outcome and relies on dispatch diagnostics and logs.
+- Failure to materialize, claim, or persist the terminal observed-job state
+  leaves the source message unacknowledged. Only claims whose durable
+  `started_at` is at least the worker `staleRunningAge` old are requeued or
+  terminally failed. Recovery conditionally retains that claim's owner and
+  timestamp, and one worker-level attempt policy applies; handlers and rows do
+  not override it.
+- A known future observed-job ID may return `404` until first delivery. Only a
+  client that recently received that ID may treat the response as pending;
+  unknown or deep-linked IDs remain errors.
 - Publishers and routers never create tables implicitly. **`db-migrate`**
   creates the topic-aware schema. Existing early-alpha local databases using
   the old single-topic layout must be recreated or reseeded first.
 - Router construction does not start consumption. The split jobs command or
-  `start-all` explicitly runs the worker router; API-only `start` only exposes
-  enqueue paths. HTTP and jobs roots stop messaging before closing their shared
+  `start-all` explicitly runs the worker router; API-only `start` only publishes
+  dispatch messages. HTTP and jobs roots stop messaging before closing their shared
   SQL database, while the migration root constructs no runtime messaging.
 
 ## Configuration and env

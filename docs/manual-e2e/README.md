@@ -5,13 +5,22 @@ Manual guides:
 - [finance-tenants-management-e2e.md](./finance-tenants-management-e2e.md) — create, list, get by id, archive, then verify archived tenants disappear from active list and get-by-id.
 - [finance-account-balances-e2e.md](./finance-account-balances-e2e.md) — create a tenant and accounts, record mixed booked/pending transactions, then verify account balances.
 - [finance-report-transaction-ui-e2e.md](./finance-report-transaction-ui-e2e.md) — create a tenant and manual account in the UI, report a transaction through the dedicated editor, then verify the new ledger row.
-- [finance-transaction-csv-import-e2e.md](./finance-transaction-csv-import-e2e.md) — preview, confirm, and observe a fixed-contract Finance transaction CSV import.
+- [finance-transaction-csv-import-e2e.md](./finance-transaction-csv-import-e2e.md) — isolated API-only preview, confirm, expected `404`, bounded worker, terminal audit, and repeat-safe fixed-contract transaction import.
+- [finance-account-csv-import-e2e.md](./finance-account-csv-import-e2e.md) — isolated API-only preview, confirm, expected `404`, bounded worker, terminal audit, and repeat-safe account CSV import.
+- [finance-fx-refresh-e2e.md](./finance-fx-refresh-e2e.md) — local/static-provider manual and scheduled FX refresh, controlled provider failure, due-state checks, and lazy job observation.
 - [finance-ui-shell-smoke-e2e.md](./finance-ui-shell-smoke-e2e.md) — smoke canonical Bootstrap login, default Finance landing, Finance shell/dashboard and route groups, responsive behavior, and a quick non-finance regression path.
 - [bank-linking-e2e.md](./bank-linking-e2e.md) — bank-linking API e2e guide.
 - [enable-banking-mock-aspsp-ui-e2e.md](./enable-banking-mock-aspsp-ui-e2e.md) — headed-browser PKO linking through Enable Banking Mock ASPSP, including mock accounts, transactions, authorization, and sync.
-- [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) — start synthetic redirect linking over HTTP, save pending configured accounts, finish the link, trigger sync, then verify linked accounts and provider transactions.
+- [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) — isolated synthetic redirect linking, stable pending-account keys, API-only sync publication, expected `404`, bounded worker, terminal job, and provider transaction assertions.
 - [synthetic-provider-ui-e2e.md](./synthetic-provider-ui-e2e.md) — sign in to the UI, start synthetic setup from Finance connections, save duplicate configured accounts, reload pending state, finish the link, and confirm the new connection card appears.
-- [finance-scheduled-sync-lifecycle-e2e.md](./finance-scheduled-sync-lifecycle-e2e.md) — scheduled sync lifecycle runbook with app-root backend commands, isolated local persistence, local Monobank mock, enqueue-due, bounded worker-once, public connection/jobs assertions, and PM2 restore.
+- [finance-scheduled-sync-lifecycle-e2e.md](./finance-scheduled-sync-lifecycle-e2e.md) — isolated scheduled bank/FX publication with local Monobank and static FX fixtures, due-state checks, expected `404`s, bounded worker-once, terminal jobs, and repeat no-op assertions.
+
+For job-observation checks, use an API-only `start` process before publishing,
+then query the returned ID before starting `jobs worker --once`. A `404` is
+expected in that window because publication creates only the appdispatch message;
+the worker creates the job projection on first delivery. The normal PM2
+`start-all` shape may materialize the row immediately and therefore does not test
+that window.
 
 Optional local verification helpers:
 
@@ -52,6 +61,11 @@ and backend CLI commands from `apps/sumweave`.
    - `curl -i http://127.0.0.1:4501/health`
    - `curl -I http://127.0.0.1:5173/`
 7. If backend startup reports `bind: address already in use`, stop the stray process already listening on `127.0.0.1:4501` before retrying. A common cause is an older direct `go run ./cmd/sumweave start ...` process launched from the app root.
+
+The four-workload API-only gate guides create their own isolated database and
+write evidence below `tmp/jobs-system-simplification-028-e2e/`. The FX guides
+set `APP_FINANCE_PROVIDERS_FRANKFURTER_BASEURL` to a local static
+Frankfurter-compatible fixture; they do not call public FX endpoints.
 
 **Note**: Always use repo scoped data/users and other dirs as if you just started all services using documented pm2 instruction. Do not try to use other dirs (like system temp or similar). If some data feels incorrect or missing - it's dev env, not production so you can drop local sqlite DB and recreate it using standard approach.
 

@@ -40,6 +40,8 @@ func TestMigrate(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, NewMigrator(database).Migrate(t.Context()))
 		require.True(t, database.db.Migrator().HasTable(&providerSnapshotModel{}))
+		require.True(t, database.db.Migrator().HasTable(&bankConnectionScheduleModel{}))
+		require.True(t, database.db.Migrator().HasTable(&fxRefreshScheduleModel{}))
 		require.False(t, database.db.Migrator().HasTable("finance_provider_evidence"))
 		require.False(t, database.db.Migrator().HasTable("finance_raw_payloads"))
 	})

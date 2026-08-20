@@ -2,9 +2,10 @@
 
 ## Purpose
 
-Define the generic durable application pub/sub transport used by imperative
-commands and factual domain events, together with the typed domain-event layer
-built on that transport.
+Define the generic durable application pub/sub transport used by semantic
+imperative commands and factual domain events, together with the typed
+domain-event layer built on that transport. Appdispatch is the publication and
+execution path; optional job observation is a consumer concern.
 ## Requirements
 ### Requirement: Generic durable application dispatch
 
@@ -17,8 +18,26 @@ those messages.
 - **WHEN** an application component publishes an imperative background command
 - **THEN** the transport MUST durably deliver it according to its topic and
   consumer-group policy
+- **AND** publication MUST return one immutable, stable message ID
 - **AND** the command MUST NOT require a user-visible job record unless a
   separate product requirement requests execution visibility.
+
+#### Scenario: Publication is appdispatch-first
+
+- **WHEN** a producer starts background work
+- **THEN** it MUST publish a semantic command through appdispatch rather than a
+  jobs-specific enqueue API
+- **AND** publication MUST create no job row and MUST NOT execute the command
+  inline.
+
+#### Scenario: Idempotent publication preserves message identity
+
+- **WHEN** a producer repeats a publication with the same idempotency key and
+  canonical topic/payload
+- **THEN** appdispatch MUST return the original immutable message ID without
+  creating a second message
+- **AND** reusing the key with a different topic or canonical payload MUST
+  return a publication conflict.
 
 #### Scenario: Dispatch a factual domain event
 
@@ -32,7 +51,16 @@ those messages.
 - **THEN** a higher-level jobs capability MAY persist execution identity and
   lifecycle state
 - **AND** appdispatch MUST remain the execution transport rather than the job
-  record becoming a separate queue.
+  record becoming a separate queue
+- **AND** the observed job ID MUST equal the dispatch message ID.
+
+#### Scenario: Job observation is optional and singular
+
+- **WHEN** a consumer registration needs product-visible lifecycle state
+- **THEN** it MAY add one jobs observation decorator that materializes a
+  projection on first delivery
+- **AND** at most one consumer registration MAY observe a given message
+- **AND** an independently visible reaction MUST publish a distinct command.
 
 ### Requirement: Typed domain-event publication
 
@@ -43,6 +71,7 @@ each event declares its non-empty topic and is serialized for durable delivery.
 
 - **WHEN** an application component publishes a typed event with a valid topic
 - **THEN** the system MUST durably store the serialized event on that topic
+- **AND** the caller MUST receive its stable message ID
 - **AND** the caller MUST receive an error when serialization or persistence
   fails.
 
@@ -134,6 +163,45 @@ dead-letter topic.
 - **WHEN** one event exhausts its retries and is dead-lettered
 - **THEN** the router MUST continue processing later messages and other
   registered topics.
+
+### Requirement: Bounded dispatch storage policy
+
+Appdispatch storage SHALL have an operational retention policy that is
+independent from completed-job retention and does not expose raw transport
+entities through product APIs.
+
+#### Scenario: Retain dispatch messages until consumers advance
+
+- **WHEN** an operator runs transport maintenance
+- **THEN** a normal message MAY be removed only after it is at least 7 days old
+  and every existing consumer-group offset for its topic has advanced beyond
+  that message
+- **AND** idempotency claims MUST be retained for at least the same period so a
+  repeated publication can return its original message identity.
+
+#### Scenario: Retain dead letters for diagnostics
+
+- **WHEN** a dead-letter message is at least 30 days old
+- **THEN** internal transport maintenance MAY remove it after applying the same
+  offset-safety check
+- **AND** workers MUST NOT perform cleanup during message delivery
+- **AND** jobs APIs MUST NOT expose the raw message or dead-letter row.
+
+#### Scenario: Handled business failure is terminal
+
+- **WHEN** a consumer returns a typed handled business failure
+- **THEN** the message MUST be acknowledged rather than retried or
+  dead-lettered
+- **AND** a job-observed consumer MUST persist its sanitized failed projection
+  before acknowledgement
+- **AND** an ordinary consumer MUST create no job state.
+
+#### Scenario: Visibility persistence failure is transport failure
+
+- **WHEN** an observed consumer cannot materialize, claim, or persist terminal
+  job state
+- **THEN** it MUST return an error and leave the source message unacknowledged
+- **AND** appdispatch MUST apply its normal retry and dead-letter policy.
 
 ### Requirement: Transaction-bound event publication
 

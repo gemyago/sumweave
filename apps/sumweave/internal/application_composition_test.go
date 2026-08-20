@@ -80,7 +80,7 @@ func TestApplicationComposition(t *testing.T) {
 			migrator := NewDatabaseMigrator(deps)
 			require.NoError(t, migrator.Migrate(t.Context()))
 			require.NoError(t, migrator.Migrate(t.Context()))
-			for _, table := range []string{"app_auth_auth_users", "app_auth_auth_refresh_tokens", appdispatch.Config{TablePrefix: "app_"}.MessagesTable(), "app_jobs_jobs", "app_jobs_job_schedules", "finance_tenants"} {
+			for _, table := range []string{"app_auth_auth_users", "app_auth_auth_refresh_tokens", appdispatch.Config{TablePrefix: "app_"}.MessagesTable(), "app_jobs_jobs", "finance_tenants"} {
 				var name string
 				require.NoError(
 					t,

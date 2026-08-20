@@ -2,12 +2,14 @@
   import { onDestroy } from 'svelte'
   import { link } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
-  import { createSignalJobsApiForAuth, type JobDetail } from '../lib/jobs/api'
+  import { createSignalJobsApiForAuth, JobsApiError, type JobDetail } from '../lib/jobs/api'
+  import { rememberObservedDispatch } from '../lib/jobs/observed-dispatch'
 
-  let { jobId, openHref, label = 'Job' } = $props<{
+  let { jobId, openHref, label = 'Job', observedDispatch = false } = $props<{
     jobId: string
     openHref: string
     label?: string
+    observedDispatch?: boolean
   }>()
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
@@ -17,6 +19,7 @@
 
   let job = $state<JobDetail | null>(null)
   let refreshing = $state(false)
+  let waitingForMaterialization = $state(false)
   let error = $state<string | null>(null)
   let requestToken = 0
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -25,8 +28,10 @@
     const activeJobId = jobId
     job = null
     error = null
+    waitingForMaterialization = false
     clearRefreshTimer()
     if (activeJobId) {
+      if (observedDispatch) rememberObservedDispatch(activeJobId)
       void loadJob(activeJobId)
     }
   })
@@ -41,6 +46,7 @@
     clearRefreshTimer()
     refreshing = true
     error = null
+    waitingForMaterialization = false
 
     try {
       const loaded = await jobsApi.getJob({ jobId: activeJobId })
@@ -52,6 +58,11 @@
       }
     } catch (loadError) {
       if (token !== requestToken || activeJobId !== jobId) return
+      if (observedDispatch && loadError instanceof JobsApiError && loadError.status === 404) {
+        waitingForMaterialization = true
+        refreshTimer = setTimeout(() => void loadJob(activeJobId), pollingIntervalMs)
+        return
+      }
       error = loadError instanceof Error ? loadError.message : `Could not load ${label.toLowerCase()} status.`
     } finally {
       if (token === requestToken) refreshing = false
@@ -86,6 +97,8 @@
     {#if job}
       <span class={`badge ${statusBadgeClass(job.status)}`}>{job.status}</span>
       <span>{statusMessage(job)}</span>
+    {:else if waitingForMaterialization}
+      <span class="text-body-secondary">Waiting for a worker to receive this {label.toLowerCase()}…</span>
     {:else if refreshing}
       <span class="text-body-secondary">Checking {label.toLowerCase()} status…</span>
     {:else if error}
