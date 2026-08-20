@@ -2,20 +2,35 @@
 
 ## Purpose
 
-Define the app-owned durable jobs substrate used by finance workflows.
+Define the app-owned, opt-in product visibility layer for finance background
+work whose execution identity and lifecycle must be exposed through an API or
+user interface.
 ## Requirements
 ### Requirement: Finance durable job records
 
 The backend application SHALL persist durable job records for finance background
-work and operational visibility.
+work only when a product or operational requirement needs execution visibility.
 
 #### Scenario: A finance workflow creates a job
 
-- **WHEN** a finance workflow dispatches background work
+- **WHEN** a finance workflow dispatches background work that requires
+  product-visible execution state
 - **THEN** the stored job MUST include its identifier, job type, status,
   requester/source metadata, timestamps, attempt metadata, worker identifier,
   correlation metadata, and sanitized error fields when applicable
 - **AND** the job type MUST be a finance job type.
+
+#### Scenario: Background processing needs no job visibility
+
+- **WHEN** an internal background command or event reaction has no product or
+  operational requirement for execution identity, status, or history
+- **THEN** it MUST be allowed to use appdispatch without creating a job record.
+
+#### Scenario: Job visibility does not replace transport
+
+- **WHEN** a visible finance job is created
+- **THEN** its execution command MUST still be delivered through appdispatch
+- **AND** the persisted job and dispatch command MUST be committed atomically.
 
 #### Scenario: Job state survives restart
 
@@ -50,14 +65,16 @@ The backend application SHALL expose authenticated `GET /api/v1/jobs` and
 
 ### Requirement: Durable job execution and scheduling
 
-The backend application SHALL dispatch finance background work as commands on a
-dedicated topic and consumer group of the app-owned durable pub/sub transport,
-and execute it through the dedicated jobs consumer mode.
+The backend application SHALL dispatch observable finance background work as
+commands on a dedicated topic and consumer group of the app-owned durable
+pub/sub transport and execute it through the dedicated jobs consumer mode.
 
 #### Scenario: API and scheduler dispatch without inline execution
 
 - **WHEN** a finance API operation or scheduler tick starts background work
-- **THEN** it MUST publish a job command without executing it inline.
+- **AND** that work requires job visibility
+- **THEN** it MUST atomically persist the job record and publish its command
+  without executing it inline.
 
 #### Scenario: Job transport remains distinct from domain events
 
@@ -110,4 +127,3 @@ and schedule storage using the configured application database.
 
 - **WHEN** the jobs worker or scheduler runs after `sumweave db-migrate`
 - **THEN** it MUST use the prepared schema and MUST NOT migrate it implicitly.
-

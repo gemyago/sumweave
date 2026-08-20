@@ -103,6 +103,22 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 			},
 		}.Middleware,
 		middleware.Recoverer,
+		func(h wmmessage.HandlerFunc) wmmessage.HandlerFunc {
+			return func(msg *wmmessage.Message) ([]*wmmessage.Message, error) {
+				logger.InfoContext(
+					msg.Context(),
+					"received message",
+					slog.String("id", msg.UUID),
+					slog.Any("metadata", msg.Metadata),
+				)
+				var res []*wmmessage.Message
+				res, err = h(msg)
+				if err != nil {
+					logger.ErrorContext(msg.Context(), "error handling message", "error", err)
+				}
+				return res, err
+			}
+		},
 	)
 	return &Router{
 		consumerGroup: consumerGroup,

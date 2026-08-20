@@ -13,10 +13,16 @@ provider snapshots, balances, reports, and FX.
   migrations, telemetry, and embedded UI delivery.
 - `apps/sumweave/internal/appdispatch` is the app-owned durable SQL pub/sub
   transport. It stores multiple topics in one message table and tracks offsets
-  independently by topic and consumer group for SQLite and PostgreSQL.
-- `apps/sumweave/internal/appevents` is the typed domain-event API. Durable
-  jobs remain imperative commands with observable job state and use their own
-  execution topic and worker consumer group on the same transport.
+  independently by topic and consumer group for SQLite and PostgreSQL. It is the
+  generic internal delivery mechanism for both imperative commands and factual
+  domain events; it provides no user-facing execution model by itself.
+- `apps/sumweave/internal/appevents` is the typed domain-event API over
+  `appdispatch`.
+- `apps/sumweave/internal/jobs` adds opt-in product and API visibility to
+  selected background commands. A visible job records identity, lifecycle,
+  attempts, and a sanitized outcome while its command still travels through
+  `appdispatch`. Background processing that needs no product or operational
+  visibility may use `appdispatch` without creating a job record.
 - Its application config is app-internal at `internal/config`; `internal/wireup`
   owns explicit command roots. Command and Engine entrypoints pass typed startup
   options, while components receive native values or constructed collaborators.
@@ -42,6 +48,12 @@ delivery. Routers recover panics, retry failures three times with bounded
 backoff, and then publish the original message to
 `app.dispatch.dead-letter.v1` with failure and source-topic metadata. A failed
 dead-letter publication leaves the original message unacknowledged.
+
+Transport failure and job failure are separate concerns. Transient delivery or
+infrastructure failures follow the `appdispatch` retry and dead-letter policy.
+A handled business failure for observable work is persisted as a failed job and
+the command is acknowledged. Non-observable background work has no job state;
+its failure remains visible through logs and the dispatch failure policy.
 
 The topic-aware dispatch schema intentionally replaces the earlier alpha
 single-topic schema. Recreate or reseed an old local application database, then

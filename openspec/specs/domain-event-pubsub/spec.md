@@ -1,8 +1,39 @@
 # domain-event-pubsub Specification
 
 ## Purpose
-TBD - created by archiving change add-domain-event-pubsub. Update Purpose after archive.
+
+Define the generic durable application pub/sub transport used by imperative
+commands and factual domain events, together with the typed domain-event layer
+built on that transport.
 ## Requirements
+### Requirement: Generic durable application dispatch
+
+The application SHALL provide a durable, topic-aware pub/sub transport for
+opaque internal messages without assigning product or user-facing meaning to
+those messages.
+
+#### Scenario: Dispatch an imperative command
+
+- **WHEN** an application component publishes an imperative background command
+- **THEN** the transport MUST durably deliver it according to its topic and
+  consumer-group policy
+- **AND** the command MUST NOT require a user-visible job record unless a
+  separate product requirement requests execution visibility.
+
+#### Scenario: Dispatch a factual domain event
+
+- **WHEN** an application component publishes a factual domain event
+- **THEN** the same transport MUST durably deliver it without treating the fact
+  as an imperative job.
+
+#### Scenario: Transport remains separate from observability
+
+- **WHEN** background processing requires product or API visibility
+- **THEN** a higher-level jobs capability MAY persist execution identity and
+  lifecycle state
+- **AND** appdispatch MUST remain the execution transport rather than the job
+  record becoming a separate queue.
+
 ### Requirement: Typed domain-event publication
 
 The application SHALL provide a typed domain-event publishing contract in which
@@ -153,4 +184,3 @@ database.
   consumer group
 - **AND** later publisher and router startup MUST NOT create or alter those
   tables implicitly.
-

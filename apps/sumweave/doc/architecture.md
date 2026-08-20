@@ -47,13 +47,21 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 - **`internal/appdispatch/`** is a low-level, multi-topic SQL transport. One
   message table stores topic, identity, opaque payload, and metadata; one
   offsets table is keyed by topic and consumer group. SQLite and PostgreSQL
-  follow the same delivery contract.
+  follow the same delivery contract. It is generic internal pub/sub for both
+  imperative commands and factual domain events and does not create a
+  user-facing execution model.
 - **`internal/appevents/`** publishes typed facts and creates typed handlers.
   A named router can react to several event topics, and separate groups each
   receive the same event independently.
-- **`internal/jobs/`** owns the `jobs.execution.v1` command envelope and the
-  `jobs.workers.v1` consumer group. A job message asks one logical worker group
-  to execute persisted work; it is not a domain event.
+- **`internal/jobs/`** adds opt-in product visibility to selected background
+  commands through durable identity, lifecycle, attempts, sanitized outcomes,
+  and list/detail APIs. Its currently visible commands use the
+  `jobs.execution.v1` envelope and `jobs.workers.v1` consumer group, but
+  `appdispatch` remains their execution transport. Background processing may
+  use `appdispatch` directly when no product or operational contract needs a
+  job record.
+- A job record and its dispatch command are persisted atomically. A dispatch
+  message is not necessarily a job, and jobs do not form a separate queue.
 - Delivery is **at least once**. A router acknowledges only after successful
   handling or successful publication to `app.dispatch.dead-letter.v1`.
   Handlers therefore own idempotency. A duplicate command for any non-queued
@@ -62,6 +70,10 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
   preserve the original message identity, topic, payload, and diagnostic
   metadata in the dead-letter topic. A dead-letter publication failure leaves
   the source offset unchanged.
+- Transient transport or infrastructure failures follow the dispatch retry and
+  dead-letter policy. A handled business failure for observable work persists a
+  failed job and acknowledges the command. Non-observable work records no job
+  outcome and relies on dispatch diagnostics and logs.
 - Publishers and routers never create tables implicitly. **`db-migrate`**
   creates the topic-aware schema. Existing early-alpha local databases using
   the old single-topic layout must be recreated or reseeded first.

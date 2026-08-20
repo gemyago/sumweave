@@ -148,6 +148,10 @@ The rules are:
 - Allow obvious local-only placeholder keys in committed local config.
 - Use environment-specific config values, not runtime environment labels.
 - Log ordinary provider errors; avoid generic provider-error redaction.
+- Appdispatch carries generic durable commands and domain events.
+- Jobs add opt-in product visibility to background processing.
+- Do not create job records for invisible background processing.
+- Jobs never replace appdispatch as the execution transport.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 
