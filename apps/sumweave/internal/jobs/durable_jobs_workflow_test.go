@@ -433,6 +433,33 @@ func TestObservedSubscriptions(t *testing.T) {
 		assert.Equal(t, JobStatusFailed, exhausted.Status)
 		assert.Equal(t, "stale_running_attempts_exhausted", exhausted.Error.Code)
 
+		scannedLease := makeStale(defaultWorkerMaxAttempts - 1)
+		require.NoError(t, store.createWithDB(t.Context(), store.db, scannedLease))
+		var scannedModel jobModel
+		require.NoError(
+			t,
+			store.db.WithContext(t.Context()).Table(store.tableName).
+				Where("id = ?", scannedLease.ID).
+				First(&scannedModel).
+				Error,
+		)
+		require.NoError(
+			t,
+			store.RenewRunning(t.Context(), jobFromModel(scannedModel), now),
+		)
+		require.NoError(
+			t,
+			store.recoverStaleRunningModel(
+				t.Context(),
+				scannedModel,
+				now,
+				defaultWorkerMaxAttempts,
+			),
+		)
+		renewed, err := store.Get(t.Context(), scannedLease.ID)
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusRunning, renewed.Status)
+
 		conditional := Job{
 			ID: fake.UUID().V4(), JobType: "finance.test", Status: JobStatusQueued,
 			Requester: Requester{Source: RequesterSourceOperator},

@@ -463,35 +463,48 @@ func (s *Store) RecoverStaleRunning(
 		return fmt.Errorf("list stale running jobs: %w", err)
 	}
 	for _, model := range models {
-		updates := map[string]any{
-			columnStatus: string(JobStatusQueued), columnUpdatedAt: now, columnQueuedAt: now,
-			columnStartedAt: nil, columnWorkerID: "", columnErrorCode: "stale_running_requeued",
-			columnErrorSummary: "stale running job requeued",
-			columnErrorDetails: "startup recovery requeued a stale running job",
+		if err := s.recoverStaleRunningModel(ctx, model, now, maxAttempts); err != nil {
+			return err
 		}
-		if model.AttemptCount >= maxAttempts {
-			updates = map[string]any{
-				columnStatus: string(JobStatusFailed), columnUpdatedAt: now, columnCompletedAt: now,
-				columnErrorCode:    "stale_running_attempts_exhausted",
-				columnErrorSummary: "stale running job attempts exhausted",
-				columnErrorDetails: "startup recovery marked job failed after attempts were exhausted",
-			}
+	}
+	return nil
+}
+
+func (s *Store) recoverStaleRunningModel(
+	ctx context.Context,
+	model jobModel,
+	now time.Time,
+	maxAttempts int,
+) error {
+	updates := map[string]any{
+		columnStatus: string(JobStatusQueued), columnUpdatedAt: now, columnQueuedAt: now,
+		columnStartedAt: nil, columnWorkerID: "", columnErrorCode: "stale_running_requeued",
+		columnErrorSummary: "stale running job requeued",
+		columnErrorDetails: "startup recovery requeued a stale running job",
+	}
+	if model.AttemptCount >= maxAttempts {
+		updates = map[string]any{
+			columnStatus: string(JobStatusFailed), columnUpdatedAt: now, columnCompletedAt: now,
+			columnErrorCode:    "stale_running_attempts_exhausted",
+			columnErrorSummary: "stale running job attempts exhausted",
+			columnErrorDetails: "startup recovery marked job failed after attempts were exhausted",
 		}
-		// Driver recovery write failure propagation.
-		result := s.db.WithContext(ctx).
-			Table(s.tableName).
-			Model(&jobModel{}).
-			Where(
-				"id = ? AND status = ? AND worker_id = ? AND started_at = ?",
-				model.ID,
-				JobStatusRunning,
-				model.WorkerID,
-				model.StartedAt,
-			).
-			Updates(updates)
-		if result.Error != nil {
-			return fmt.Errorf("recover stale running job %s: %w", model.ID, result.Error)
-		}
+	}
+	// Driver recovery write failure propagation.
+	result := s.db.WithContext(ctx).
+		Table(s.tableName).
+		Model(&jobModel{}).
+		Where(
+			"id = ? AND status = ? AND worker_id = ? AND started_at = ? AND updated_at = ?",
+			model.ID,
+			JobStatusRunning,
+			model.WorkerID,
+			model.StartedAt,
+			model.UpdatedAt,
+		).
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("recover stale running job %s: %w", model.ID, result.Error)
 	}
 	return nil
 }
