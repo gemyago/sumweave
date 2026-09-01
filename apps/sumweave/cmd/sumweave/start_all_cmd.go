@@ -93,17 +93,11 @@ func resolveStartAllRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("build start-all HTTP root: %w", err)
 	}
-	workerRoot, err := wireup.BuildWorker(ctx, wireup.WorkerOptions{
-		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
-		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile,
-	})
+	workerRoot, err := wireup.BuildWorker(ctx, startAllWorkerOptions(options))
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("build start-all worker root: %w", err), httpRoot.Close(ctx))
 	}
-	schedulerRoot, err := wireup.BuildScheduler(ctx, wireup.SchedulerOptions{
-		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
-		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile,
-	})
+	schedulerRoot, err := wireup.BuildScheduler(ctx, startAllSchedulerOptions(options))
 	if err != nil {
 		return nil, errors.Join(
 			fmt.Errorf("build start-all scheduler root: %w", err),
@@ -129,6 +123,20 @@ func resolveStartAllRuntime(
 			sumweave.WithStartHTTPServerNoop(params.noop),
 		},
 	}, nil
+}
+
+func startAllWorkerOptions(options commandRootOptions) wireup.WorkerOptions {
+	return wireup.WorkerOptions{
+		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
+		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile, DisablePProf: true,
+	}
+}
+
+func startAllSchedulerOptions(options commandRootOptions) wireup.SchedulerOptions {
+	return wireup.SchedulerOptions{
+		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
+		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile, DisablePProf: true,
+	}
 }
 
 type startAllHTTPRoot struct {

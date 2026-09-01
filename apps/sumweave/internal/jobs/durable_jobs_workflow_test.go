@@ -181,6 +181,92 @@ func TestObservedSubscriptions(t *testing.T) {
 		},
 	)
 
+	t.Run("one-shot worker waits for active delivery and persists exhausted retries", func(t *testing.T) {
+		store, factory, publisher, _, _ := makeTransport(t)
+		registry := NewRegistry()
+		topic := "one-shot." + fake.UUID().V4()
+		started := make(chan struct{})
+		release := make(chan struct{})
+		register(t, registry, topic, func(context.Context, Job, command) error {
+			close(started)
+			<-release
+			return nil
+		})
+		worker, err := NewWorker(WorkerDeps{
+			Store: store, Registry: registry, RouterFactory: factory,
+			Logger: slog.New(slog.DiscardHandler), Config: WorkerConfig{PollInterval: time.Millisecond},
+		})
+		require.NoError(t, err)
+		message := appdispatch.NewMessage(
+			topic,
+			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
+		)
+		require.NoError(t, publisher.Publish(t.Context(), message))
+		runDone := make(chan error, 1)
+		go func() { runDone <- worker.RunOnce(t.Context()) }()
+		<-started
+		time.Sleep(3 * time.Millisecond)
+		select {
+		case resultErr := <-runDone:
+			require.NoError(t, resultErr)
+			t.Fatal("one-shot worker stopped while a handler was running")
+		default:
+		}
+		close(release)
+		require.NoError(t, <-runDone)
+		persisted, err := store.Get(t.Context(), message.ID)
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusSucceeded, persisted.Status)
+
+		retryStore, retryFactory, retryPublisher, _, _ := makeTransport(t)
+		retryRegistry := NewRegistry()
+		retryTopic := "retry." + fake.UUID().V4()
+		register(t, retryRegistry, retryTopic, func(context.Context, Job, command) error {
+			return errors.New("transient " + fake.UUID().V4())
+		})
+		retryWorker, err := NewWorker(WorkerDeps{
+			Store: retryStore, Registry: retryRegistry, RouterFactory: retryFactory,
+			Logger: slog.New(slog.DiscardHandler), Config: WorkerConfig{PollInterval: time.Millisecond},
+		})
+		require.NoError(t, err)
+		retryMessage := appdispatch.NewMessage(
+			retryTopic,
+			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
+		)
+		require.NoError(t, retryPublisher.Publish(t.Context(), retryMessage))
+		require.NoError(t, retryWorker.RunOnce(t.Context()))
+		retried, err := retryStore.Get(t.Context(), retryMessage.ID)
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusFailed, retried.Status)
+		assert.Equal(t, "job_execution_failed", retried.Error.Code)
+	})
+
+	t.Run("periodic recovery invokes stale claim recovery", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		recovered := make(chan struct{})
+		store.EXPECT().
+			RecoverStaleRunning(mock.Anything, mock.Anything, time.Millisecond, defaultWorkerMaxAttempts).
+			Run(func(context.Context, time.Time, time.Duration, int) { close(recovered) }).
+			Return(nil).
+			Once()
+		worker := &Worker{
+			store: store, logger: slog.New(slog.DiscardHandler), clock: time.Now,
+			config: WorkerConfig{
+				PollInterval: time.Millisecond, StaleRunningAge: time.Millisecond,
+				MaxAttempts: defaultWorkerMaxAttempts,
+			},
+		}
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			worker.recoverStaleRunningPeriodically(t.Context(), stop)
+		}()
+		<-recovered
+		close(stop)
+		<-done
+	})
+
 	t.Run("second worker startup recovery does not requeue a live claim", func(t *testing.T) {
 		store, _, _, _, _ := makeTransport(t)
 		registry := NewRegistry()

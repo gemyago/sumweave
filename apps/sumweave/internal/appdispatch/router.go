@@ -34,6 +34,13 @@ type NonRetryable interface {
 	NonRetryable()
 }
 
+// RetryExhaustionAware marks a delivery error that needs a final action before
+// the router dead-letters a message after its retry budget is exhausted.
+type RetryExhaustionAware interface {
+	error
+	OnRetriesExhausted() error
+}
+
 func NewHandler(topic string, run func(context.Context, Message) error) (Handler, error) {
 	if topic == "" {
 		return Handler{}, errors.New("handler topic is required")
@@ -99,6 +106,15 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 			MaxRetries:      routerMaxRetries,
 			InitialInterval: routerInitialInterval,
 			Logger:          wmLogger,
+			OnRetriesExhausted: func(params middleware.RetriesExhaustedParams) {
+				var aware RetryExhaustionAware
+				if !errors.As(params.Err, &aware) {
+					return
+				}
+				if finalizeErr := aware.OnRetriesExhausted(); finalizeErr != nil {
+					logger.Error("finalize exhausted message retries failed", "error", finalizeErr)
+				}
+			},
 			ShouldRetry: func(params middleware.RetryParams) bool {
 				var nonRetryable NonRetryable
 				return !errors.As(params.Err, &nonRetryable)

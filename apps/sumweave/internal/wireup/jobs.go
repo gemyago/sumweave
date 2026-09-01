@@ -25,6 +25,7 @@ type WorkerOptions struct {
 	DefaultLogLevel *string
 	JSONLogs        *bool
 	LogsFile        *string
+	DisablePProf    bool
 }
 
 // SchedulerOptions are command inputs used to load the one-shot scheduler root.
@@ -33,6 +34,7 @@ type SchedulerOptions struct {
 	DefaultLogLevel *string
 	JSONLogs        *bool
 	LogsFile        *string
+	DisablePProf    bool
 }
 
 // WorkerRoot owns the message router, observed lifecycle store, and finance
@@ -69,6 +71,9 @@ func BuildWorker(ctx context.Context, options WorkerOptions) (*WorkerRoot, error
 	if err != nil {
 		return nil, err
 	}
+	if options.DisablePProf {
+		rootConfig.PProfListener.Enabled = false
+	}
 	return buildWorker(ctx, rootConfig)
 }
 
@@ -86,6 +91,9 @@ func BuildScheduler(ctx context.Context, options SchedulerOptions) (*SchedulerRo
 	rootConfig, err := values.SchedulerRoot(environment)
 	if err != nil {
 		return nil, err
+	}
+	if options.DisablePProf {
+		rootConfig.PProfListener.Enabled = false
 	}
 	return buildScheduler(ctx, rootConfig)
 }

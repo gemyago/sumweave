@@ -44,6 +44,7 @@ type Worker struct {
 	router    *appdispatch.Router
 	mu        sync.Mutex
 	installed bool
+	runOnce   *runOnceTracker
 }
 
 func NewWorker(deps WorkerDeps) (*Worker, error) {
@@ -81,32 +82,64 @@ func (w *Worker) Run(
 	if err := w.installHandlers(); err != nil { // coverage-ignore // Registration validation is unit-tested before worker composition.
 		return err
 	}
-	if err := w.store.RecoverStaleRunning(
-		ctx,
-		w.clock(),
-		w.config.StaleRunningAge,
-		w.config.MaxAttempts,
-	); err != nil { // coverage-ignore
+	if err := w.recoverStaleRunning(ctx); err != nil { // coverage-ignore
 		return err
 	}
-	return w.router.Run(ctx)
+	stopRecovery := make(chan struct{})
+	recoveryDone := make(chan struct{})
+	go func() {
+		defer close(recoveryDone)
+		w.recoverStaleRunningPeriodically(ctx, stopRecovery)
+	}()
+	err := w.router.Run(ctx)
+	close(stopRecovery)
+	<-recoveryDone
+	return err
 }
 
 func (w *Worker) RunOnce(ctx context.Context) error {
-	runCtx, cancel := context.WithTimeout(ctx, 2*w.config.PollInterval)
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if err := w.installHandlers(); err != nil { // coverage-ignore // Registration validation is unit-tested before worker composition.
 		return err
 	}
-	if err := w.store.RecoverStaleRunning(
-		runCtx,
-		w.clock(),
-		w.config.StaleRunningAge,
-		w.config.MaxAttempts,
-	); err != nil { // coverage-ignore
+	if err := w.recoverStaleRunning(runCtx); err != nil { // coverage-ignore
 		return err
 	}
-	err := w.router.Run(runCtx)
+	tracker := &runOnceTracker{}
+	w.mu.Lock()
+	w.runOnce = tracker
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		w.runOnce = nil
+		w.mu.Unlock()
+	}()
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.router.Run(runCtx) }()
+	ticker := time.NewTicker(w.config.PollInterval)
+	defer ticker.Stop()
+	idlePolls := 0
+	for {
+		select {
+		case err := <-runDone:
+			return w.runOnceResult(err)
+		case <-ticker.C:
+			if !tracker.isIdle() {
+				idlePolls = 0
+				continue
+			}
+			idlePolls++
+			if idlePolls < 2 {
+				continue
+			}
+			cancel()
+			return w.runOnceResult(<-runDone)
+		}
+	}
+}
+
+func (w *Worker) runOnceResult(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return nil
 	}
@@ -153,6 +186,11 @@ func (e runningJobDeliveryError) Error() string {
 func (runningJobDeliveryError) NonRetryable() {}
 
 func (w *Worker) processObserved(ctx context.Context, handler observedHandler, message appdispatch.Message) error {
+	tracker := w.runOnceTracker()
+	if tracker != nil {
+		tracker.startDelivery()
+		defer tracker.finishDelivery()
+	}
 	metadata, err := handler.metadata(message.Payload)
 	if err != nil { // coverage-ignore // Invalid observed payload uses the transport retry policy.
 		return err
@@ -189,6 +227,16 @@ func (w *Worker) processObserved(ctx context.Context, handler observedHandler, m
 	if err != nil { // coverage-ignore // Claim failures are asserted through the generated store mock.
 		return fmt.Errorf("claim observed job: %w", err)
 	}
+	return w.executeClaimedObserved(ctx, handler, message, claimed, tracker)
+}
+
+func (w *Worker) executeClaimedObserved(
+	ctx context.Context,
+	handler observedHandler,
+	message appdispatch.Message,
+	claimed *Job,
+	tracker *runOnceTracker,
+) error {
 	defer func() {
 		if panicValue := recover(); panicValue != nil { // coverage-ignore // Router Recoverer handles panics after the requeue attempt.
 			if requeueErr := w.store.RequeueRunning(ctx, claimed.ID, w.clock()); requeueErr != nil { // coverage-ignore
@@ -197,7 +245,7 @@ func (w *Worker) processObserved(ctx context.Context, handler observedHandler, m
 			panic(panicValue)
 		}
 	}()
-	if err = handler.execute(ctx, *claimed, message.Payload); err != nil {
+	if err := handler.execute(ctx, *claimed, message.Payload); err != nil {
 		if failure, ok := appdispatch.BusinessFailureFrom(err); ok {
 			return w.persistTerminalState(ctx, claimed.ID, newFailedTerminalJobState(
 				w.workerID, jobErrorFromBusinessFailure(failure), w.clock(),
@@ -206,13 +254,115 @@ func (w *Worker) processObserved(ctx context.Context, handler observedHandler, m
 		if requeueErr := w.store.RequeueRunning(ctx, claimed.ID, w.clock()); requeueErr != nil {
 			return fmt.Errorf("requeue transient observed job: %w", requeueErr)
 		}
-		return err
+		if tracker != nil {
+			tracker.startRetry()
+		}
+		return exhaustedRetryError{
+			err: err,
+			finalize: func() error {
+				if tracker != nil {
+					tracker.finishRetry()
+				}
+				return w.persistTerminalState(ctx, claimed.ID, newFailedTerminalJobState(
+					w.workerID, jobErrorFromExecution(err), w.clock(),
+				))
+			},
+		}
 	}
 	return w.persistTerminalState(
 		ctx,
 		claimed.ID,
 		newSucceededTerminalJobState(w.workerID, w.clock()),
 	)
+}
+
+type exhaustedRetryError struct {
+	err      error
+	finalize func() error
+}
+
+func (e exhaustedRetryError) Error() string { return e.err.Error() }
+
+func (e exhaustedRetryError) Unwrap() error { return e.err }
+
+func (e exhaustedRetryError) OnRetriesExhausted() error {
+	if e.finalize == nil {
+		return nil
+	}
+	return e.finalize()
+}
+
+type runOnceTracker struct {
+	mu             sync.Mutex
+	active         int
+	pendingRetries int
+}
+
+func (t *runOnceTracker) startDelivery() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.active++
+	if t.pendingRetries > 0 {
+		t.pendingRetries--
+	}
+}
+
+func (t *runOnceTracker) finishDelivery() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.active--
+}
+
+func (t *runOnceTracker) startRetry() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pendingRetries++
+}
+
+func (t *runOnceTracker) finishRetry() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.pendingRetries > 0 {
+		t.pendingRetries--
+	}
+}
+
+func (t *runOnceTracker) isIdle() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.active == 0 && t.pendingRetries == 0
+}
+
+func (w *Worker) runOnceTracker() *runOnceTracker {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.runOnce
+}
+
+func (w *Worker) recoverStaleRunning(ctx context.Context) error {
+	return w.store.RecoverStaleRunning(
+		ctx,
+		w.clock(),
+		w.config.StaleRunningAge,
+		w.config.MaxAttempts,
+	)
+}
+
+func (w *Worker) recoverStaleRunningPeriodically(ctx context.Context, stop <-chan struct{}) {
+	ticker := time.NewTicker(w.config.PollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
+			if err := w.recoverStaleRunning(ctx); err != nil {
+				w.logger.ErrorContext(ctx, "recover stale running jobs failed", "error", err)
+			}
+		}
+	}
 }
 
 func (w *Worker) persistTerminalState(
