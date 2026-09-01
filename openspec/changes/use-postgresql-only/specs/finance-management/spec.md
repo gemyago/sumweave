@@ -11,7 +11,7 @@ The system SHALL implement finance as a root `finance/` product module that rema
 
 #### Scenario: Finance persistence stays finance-owned and auto-migrated
 - **WHEN** finance data is persisted
-- **THEN** finance-owned tables MUST use `finance_` prefixes, GORM auto-migrate schema initialization, explicit column names, and UTC-first timestamps
+- **THEN** finance-owned tables MUST use `finance_` prefixes, GORM auto-migrate schema initialization, and explicit column names
 - **AND** finance domain models MUST remain separate from GORM persistence models
 - **AND** the storage design MUST use PostgreSQL only
 
@@ -21,7 +21,7 @@ The backend application SHALL include finance-owned PostgreSQL schema initializa
 #### Scenario: Migration creates finance-owned tables
 - **WHEN** a user runs `sumweave db-migrate` with valid PostgreSQL backend database configuration
 - **THEN** the command MUST run the finance persistence migration for finance-owned tables before finance API, import, reporting, sync, or finance durable job flows rely on those tables
-- **AND** finance-owned tables MUST keep finance persistence ownership, explicit column names, UTC-first timestamps, and PostgreSQL-only behavior
+- **AND** finance-owned tables MUST keep finance persistence ownership, explicit column names, and PostgreSQL-only behavior
 
 #### Scenario: Finance startup relies on prepared schema in standard setup
 - **WHEN** the documented standard setup has run `sumweave db-migrate`
