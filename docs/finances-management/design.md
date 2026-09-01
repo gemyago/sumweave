@@ -80,57 +80,57 @@ product modules under a broader `domains/` folder, this module can move then.
 
 ### System Jobs Architecture
 
-Finance needs background work, but jobs are a system-level concern rather than a
-finance-only concept. The repository has a durable jobs foundation under
-`apps/sumweave/internal/jobs`:
+Finance needs background work, but jobs are a system-level visibility concern
+rather than a finance-owned queue. The durable execution transport is
+`apps/sumweave/internal/appdispatch`; `apps/sumweave/internal/jobs` decorates
+selected consumers with an optional metadata/lifecycle projection.
 
-- persisted job records with status, input, result, errors, requester, attempts,
-  worker ID, timestamps, and idempotency key
-- a polling/wakeable worker
-- startup recovery for stale running jobs
-- retry limits
-- HTTP endpoints for create/list/get
-- app-level DI/configuration and shutdown integration
+The current model is:
 
-The foundation is a generic app-level jobs substrate. Its `Job` model stores
-generic persisted payloads for handler execution, while HTTP responses expose
-only safe metadata. Registered typed handlers dispatch finance work.
+- producers publish finance-owned semantic commands through appdispatch and
+  receive an immutable message ID before consumption
+- publication creates no job row and performs no finance work inline
+- a job-observed worker materializes a metadata-only row on first delivery with
+  `job.id == message.id`, then claims it before domain execution
+- rows contain status, requester/source, lifecycle timestamps, worker/attempt
+  metadata, schedule-occurrence metadata where needed, and sanitized errors
+- jobs do not store command input, generic progress, generic results, or
+  job-owned idempotency/cancellation/retry state
+- ordinary consumers use appdispatch without creating job rows
+- a known future job ID may return `404` before first delivery; only the
+  initiating UI flow treats that response as pending
 
 Recommended system shape:
 
 - `apps/sumweave` owns the jobs runtime because it owns the process,
   configuration, HTTP API, lifecycle, and worker binary modes.
-- The API process enqueues jobs and exposes job status, but does not execute
-  durable jobs inline.
+- The API process publishes semantic commands and exposes job reads, but does
+  not execute durable work inline.
 - Durable jobs execute in a separate worker process mode using the same Go
-  binary, for example a future `sumweave jobs worker` command.
+  binary through `sumweave jobs worker`.
 - Local development may run API and worker under the same PM2 ecosystem, but
   production should run them as separate processes/pods.
-- Product modules expose services and, where useful, typed job input/result
-  contracts; `apps/sumweave` registers app-level job handlers that call
-  those product services. Product modules must not import the app jobs runtime.
+- Product modules expose services and semantic command contracts;
+  `apps/sumweave` registers observed handlers that call those product services.
+  Product modules must not import the app jobs runtime.
 - The jobs table remains system-level, table-prefixed with the app's jobs prefix,
   not finance-prefixed.
 - Job types are namespaced by product, for example
-  `finance.bank_connection_sync`, `finance.fx_rates_sync`,
+  `finance.bank_connection_sync`, `finance.fx_rates_refresh`,
   `finance.csv_import`.
-- The job store uses generic `input_json`, `result_json`, and optional
-  `progress_json`, while typed handlers validate and decode their own payloads.
-- Job records include status, timestamps, worker ID, attempts, max attempts,
-  requester, source, idempotency key, correlation ID, and a sanitized error.
-- Supported statuses should be at least `queued`, `running`, `succeeded`,
-  `failed`, and `canceled`. `scheduled` can stay separate as schedule metadata
-  rather than a job status.
-- Workers claim jobs transactionally, execute handlers, persist result/error,
-  and recover stale `running` jobs on startup.
-- Manual and scheduled jobs both create durable job records. Scheduled work
-  should not run as hidden goroutines with no visible job history.
+- Supported statuses are `queued`, `running`, `succeeded`, and `failed`.
+- Workers materialize and claim projections before execution, persist sanitized
+  terminal state, and recover stale `running` rows under one worker-level
+  attempt policy.
+- Manual and scheduled commands publish first; scheduled work becomes visible
+  only when the observed worker receives it.
 - Kubernetes CronJobs should provide the production scheduling tick. A CronJob
-  runs a short-lived command that scans schedules and enqueues due durable jobs;
-  it should not perform the long-running product work itself.
-- A lightweight schedule registry in the database stores recurring definitions,
-  due times, and last enqueue state. The Kubernetes CronJob is only the external
-  timer, while the database remains the source of truth for dynamic schedules.
+  runs the short-lived `sumweave jobs enqueue-due` command that publishes due
+  semantic commands; it does not perform long-running finance work.
+- Finance-owned bank and FX schedule state stores recurring definitions, due
+  times, and the last dispatch reference. Publication, occurrence advance, and
+  reference storage commit together. The CronJob is only the external timer,
+  while finance remains the source of truth.
 - The UI should expose a generic jobs/status surface that product screens can
   deep-link to for sync/import diagnostics.
 
@@ -158,8 +158,9 @@ Scheduling decisions:
 - CSV imports are explicit user-triggered jobs after preview/confirmation.
 - Account imports are explicit user-triggered jobs after preview/confirmation.
 
-Finance job handlers use the generic jobs substrate directly. Because this is
-early alpha, no compatibility layer is required for removed product workflows.
+Finance handlers are registered by the app against semantic command topics.
+Finance remains independent from the app jobs runtime. Because this is early
+alpha, no compatibility layer is required for removed product workflows.
 
 ### Backend API
 
@@ -214,8 +215,8 @@ Recommended finance routes:
 - `#/admin`: minimal admin/diagnostics landing page
 - `#/admin/jobs`: generic jobs list with filters by status, type, source, and
   created time
-- `#/admin/jobs/:jobId`: generic job detail with sanitized input, progress,
-  result, error, attempts, and worker metadata
+- `#/admin/jobs/:jobId`: generic job detail with lifecycle, requester, attempt,
+  worker, schedule-occurrence, and sanitized error metadata
 - `#/admin/finance/fx`: FX-rate coverage, last sync, missing rates, provider
   selection/status, and manual FX sync trigger
 - `#/admin/finance/providers`: bank provider status, connection health summary,
@@ -238,10 +239,10 @@ Minimal admin UI scope:
 - The admin UI can be simple and utilitarian for the first implementation.
 - There are no tenant roles yet, so it can be visible to authenticated users in
   early alpha unless a separate admin role is introduced later.
-- Admin screens must not display decrypted secrets or raw provider payloads by
+- Admin screens must not display decrypted secrets or raw provider documents by
   default.
 - Admin screens should focus on operational clarity: failed jobs, missing FX
-  rates, stale schedules, re-authentication needs, and manual retry/sync actions.
+  rates, stale schedules, re-authentication needs, and manual sync actions.
 
 ### Persistence
 
@@ -251,15 +252,17 @@ Use the same persistence approach as the rest of the product direction:
 - GORM auto-migrate for finance-owned tables
 - SQLite for local development
 - PostgreSQL for production when needed
-- UTC-first timestamps
+- Preserve timestamps as produced by the application/provider contracts; do not
+  impose a separate UTC-normalization rule in the finance persistence design.
 
 Use `finance_` table prefixes for the first implementation. This keeps table
 ownership obvious and works consistently across SQLite and PostgreSQL. A future
 PostgreSQL-only deployment may additionally schema-scope finance tables, but the
 portable baseline is table prefixes.
 
-Persistence models must stay separate from domain models. Provider raw payloads
-must be stored for audit, debugging, and future connector bugfixes.
+Persistence models must stay separate from domain models. Current provider source
+data is stored as sanitized, schema-derived typed snapshots; successful raw HTTP
+response envelopes are not the persistence contract.
 
 ### Secrets And Sensitive Data
 
@@ -279,7 +282,7 @@ Required rules:
 - store encrypted provider credentials in dedicated fields/tables
 - retain enough metadata to know whether a link needs re-authentication
 - design the encryption boundary so per-tenant key wrapping can be added later
-- treat raw provider payloads as sensitive personal data even when not secret
+- treat provider source snapshots as sensitive personal data even when not secret
 
 ## Development And Test Data
 
@@ -324,8 +327,8 @@ Required fixture behavior:
 - create enough volume to exercise pagination, filtering, charts, and dashboard
   performance without making local testing slow
 - create FX-rate records for the generated currencies and period
-- optionally create job records for succeeded, running, queued, failed, and
-  canceled finance jobs so jobs/admin UI states are easy to test
+- optionally create job projections for succeeded, running, queued, and failed
+  finance work so jobs/admin UI states are easy to test
 
 The fixture generator should expose reusable scenario functions from `finance/`
 so automated tests can construct the same shapes without shelling out to the CLI.
@@ -433,7 +436,8 @@ Core concepts:
 - tenant display-currency amount for reporting, derived from stored FX rates
 - category: zero or one category
 - tags: zero or more tags
-- raw provider/import payload where applicable
+- provider-original values, typed provider snapshots, and sanitized import audit
+  rows where applicable
 
 Users may edit transaction fields without artificial product limits. For synced
 transactions, keep the provider-original values and raw payload separately from
@@ -622,7 +626,8 @@ Required sync modes:
 
 - on-demand sync from the UI
 - scheduled background sync
-- retryable sync jobs with visible status
+- sync commands with optional visible status; delivery retry is owned by
+  appdispatch and stale-running recovery uses one worker policy
 - last successful sync timestamp per connection/account
 
 Sync must be idempotent. The system should deduplicate using provider,
@@ -635,7 +640,7 @@ The sync layer must preserve:
 - normalized transaction records
 - pending vs booked status
 - provider balance snapshots
-- raw provider payloads
+- sanitized typed provider snapshots
 - provider IDs and account identifiers needed for future sync
 
 Provider rate limits and range limits must be respected. monobank range chunking
@@ -661,7 +666,8 @@ Required behavior:
 - create missing categories/tags only when the user confirms
 - create or update missing accounts only when the user confirms
 - deduplicate repeat imports where possible
-- store import run metadata and raw row payloads for audit/debugging
+- store import run metadata, source CSV, and row outcomes in the finance import
+  audit; this source data is not duplicated into the generic job projection
 
 Import flow:
 
@@ -673,8 +679,9 @@ Import flow:
 5. System previews rows, validation errors, duplicate candidates, and accounts,
    categories, or tags that would be created.
 6. User confirms import.
-7. System enqueues a durable import job.
-8. UI shows import job progress, result summary, and any rejected rows.
+7. System publishes a semantic import command through appdispatch.
+8. The observed worker materializes the optional job projection; the UI shows
+   import-audit lifecycle, result summary, and rejected rows.
 
 Account import must be available even without transactions. This supports
 migrating an existing account list before importing historical ledger data.
@@ -696,8 +703,8 @@ cover these areas:
 - FX rates: sync status and diagnostics
 - CSV imports: account import preview/confirm/status, transaction import
   preview/confirm/status, combined import preview/confirm/status
-- jobs: generic list/get/cancel/retry where supported, with finance-specific
-  filters/deep links
+- jobs: authenticated metadata list/get with finance-specific filters/deep links;
+  appdispatch owns delivery retry and jobs do not expose command payloads
 - fixture generation: local/dev-only command path for realistic finance demo
   data; no public HTTP API is required for fixture generation
 
@@ -705,8 +712,8 @@ cover these areas:
 
 Recommended implementation order:
 
-1. Refactor the existing app jobs package into the generic durable jobs
-   substrate and register finance job handlers against it.
+1. Publish finance semantic commands through appdispatch and register ordinary
+   or job-observed finance handlers against the transport.
 2. Create `finance/` module skeleton, domain types, persistence setup, and
    migrations.
 3. Add finance fixture generator services and the app CLI command so UI/API
@@ -728,12 +735,12 @@ Recommended implementation order:
 - Users create or join tenants.
 - Tenant members are equal; roles may come later.
 - Accounts belong to exactly one tenant.
-- Jobs are a generic app-level system; the app registers handlers that call
-  finance services.
+- Appdispatch is the generic app-level transport; the app registers ordinary or
+  job-observed handlers that call finance services.
 - Jobs execute in separate worker process mode, not inline in the API process.
-- Kubernetes CronJobs provide the production scheduler tick for enqueueing due
-  durable jobs.
-- Scheduled work creates visible durable job records.
+- Kubernetes CronJobs provide the production scheduler tick for publishing due
+  semantic commands.
+- Scheduled work creates a visible job projection only after worker delivery.
 - Early alpha means implementation may break APIs and migrations freely to reach
   the clean target design.
 - Provider-synced transaction deletion means hide/exclude, not hard delete.
@@ -751,7 +758,8 @@ Recommended implementation order:
 - Frankfurter is the default FX-rate source; NBP and ECB are supported source
   options/fallbacks.
 - `finance/` is a root Go module, independent from `runtime/`.
-- Provider raw payloads are stored for audit and debugging.
+- Typed provider snapshots are stored for current source-data diagnostics; raw
+  successful provider response envelopes are not retained as the contract.
 - Provider secrets use one system symmetric key for the first implementation.
 - Bank sync supports both manual and scheduled sync from day one.
 - Enable Banking uses redirect/SCA linking; monobank uses token entry.

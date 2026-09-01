@@ -27,8 +27,7 @@ type FXService struct {
 	now               func() time.Time
 	fxProviders       map[string]FXRatesProvider
 	defaultFXProvider string
-	fxJobEnqueuer     FXRefreshJobEnqueuer
-	fxScheduleWriter  FXRefreshScheduleWriter
+	commandPublisher  SemanticCommandPublisher
 	requiredPairs     requiredFXPairLister
 }
 
@@ -61,15 +60,9 @@ func WithFXServiceDefaultProvider(name string) FXServiceOption {
 	}
 }
 
-func WithFXServiceJobEnqueuer(enqueuer FXRefreshJobEnqueuer) FXServiceOption {
+func WithFXServiceCommandPublisher(publisher SemanticCommandPublisher) FXServiceOption {
 	return func(service *FXService) {
-		service.fxJobEnqueuer = enqueuer
-	}
-}
-
-func WithFXServiceScheduleWriter(writer FXRefreshScheduleWriter) FXServiceOption {
-	return func(service *FXService) {
-		service.fxScheduleWriter = writer
+		service.commandPublisher = publisher
 	}
 }
 
@@ -99,7 +92,12 @@ func (s *FXService) RefreshRequiredFXRates(
 	}
 	providerName, err := s.resolveFXProviderName(params.Provider)
 	if err != nil {
-		return RefreshFXRatesResult{}, err
+		return RefreshFXRatesResult{}, NewTerminalFailure(
+			err,
+			"fx_provider_not_configured",
+			"FX provider is not configured",
+			"The requested FX provider is not available.",
+		)
 	}
 	pairs, err := s.requiredPairs.ListRequiredFXPairs(ctx)
 	if err != nil {
@@ -113,11 +111,18 @@ func (s *FXService) RefreshRequiredFXRates(
 			BaseCurrency: pair.BaseCurrency, QuoteCurrencies: []string{pair.QuoteCurrency},
 		})
 		if fetchErr != nil {
-			return RefreshFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", fetchErr)
+			return RefreshFXRatesResult{}, terminalFXRefreshFailure(
+				fmt.Errorf("refresh required fx rates: %w", fetchErr),
+			)
 		}
 		rate, validationErr := validateProviderFXRates(providerName, pair.BaseCurrency, pair.QuoteCurrency, rates)
 		if validationErr != nil {
-			return RefreshFXRatesResult{}, fmt.Errorf("refresh required fx rates: %w", validationErr)
+			return RefreshFXRatesResult{}, NewTerminalFailure(
+				fmt.Errorf("refresh required fx rates: %w", validationErr),
+				"fx_provider_response_invalid",
+				"FX provider response is invalid",
+				"The FX provider returned invalid rate data.",
+			)
 		}
 		rate.LastSuccessfulRefreshAt = refreshAt
 		items = append(items, rate)
@@ -128,30 +133,53 @@ func (s *FXService) RefreshRequiredFXRates(
 	return RefreshFXRatesResult{Provider: providerName, ImportedCount: len(items)}, nil
 }
 
+func terminalFXRefreshFailure(err error) error {
+	if errors.Is(err, ErrFXProviderNotImplemented) {
+		return NewTerminalFailure(
+			err,
+			"fx_provider_not_supported",
+			"FX provider is not supported",
+			"The requested FX provider cannot refresh rates.",
+		)
+	}
+	var providerErr *ProviderResponseError
+	if errors.As(err, &providerErr) && providerErr.IsTerminal() {
+		return NewTerminalFailure(
+			err,
+			"fx_provider_rejected_request",
+			"FX provider rejected the refresh request",
+			"The FX provider rejected the rate refresh request.",
+		)
+	}
+	return err
+}
+
 func (s *FXService) TriggerFXRefresh(
 	ctx context.Context,
 	params TriggerFXRefreshParams,
 ) (FXRefreshJobRef, error) {
-	if s.fxJobEnqueuer == nil {
-		return FXRefreshJobRef{}, errors.New("fx refresh job enqueuer is required")
+	if s.commandPublisher == nil {
+		return FXRefreshJobRef{}, errors.New("fx refresh command publisher is required")
 	}
 	providerName, err := s.resolveFXProviderName(params.Provider)
 	if err != nil {
 		return FXRefreshJobRef{}, err
 	}
-	jobRef, err := s.fxJobEnqueuer.EnqueueFXRefresh(ctx, FXRefreshJobRequest{
-		JobType: FXRefreshJobType,
-		Requester: FXSyncRequester{
+	command, commandErr := newSemanticCommand(FXRatesRefreshCommandTopic, FXRatesRefreshCommand{
+		Provider: providerName,
+		Requester: CommandRequester{
 			UserID: strings.TrimSpace(params.RequestedByUserID),
 			Source: strings.TrimSpace(params.Source),
 		},
-		Input: RefreshFXRatesParams{Provider: providerName},
-	})
+	}, "")
+	if commandErr != nil {
+		return FXRefreshJobRef{}, commandErr
+	}
+	reference, err := s.commandPublisher.PublishSemanticCommand(ctx, command)
 	if err != nil {
 		return FXRefreshJobRef{}, fmt.Errorf("trigger required fx refresh: %w", err)
 	}
-	jobRef.Provider = providerName
-	return jobRef, nil
+	return FXRefreshJobRef{ID: reference.MessageID, JobType: FXRefreshJobType, Provider: providerName}, nil
 }
 
 func validateProviderFXRates(
@@ -185,34 +213,6 @@ func validateProviderFXRates(
 	}
 	rate.Provider = providerName
 	return rate, nil
-}
-
-func (s *FXService) EnsureFXRefreshSchedule(
-	ctx context.Context,
-	params EnsureFXRefreshScheduleParams,
-) (FXRefreshSchedule, error) {
-	if s.fxScheduleWriter == nil {
-		return FXRefreshSchedule{}, errors.New("fx refresh schedule writer is required")
-	}
-	providerName, err := s.resolveFXProviderName(params.Provider)
-	if err != nil {
-		return FXRefreshSchedule{}, err
-	}
-	schedule := FXRefreshSchedule{
-		ScheduleID: strings.TrimSpace(params.ScheduleID),
-		JobType:    FXRefreshJobType,
-		Requester: FXSyncRequester{
-			UserID: strings.TrimSpace(params.RequestedByUser),
-			Source: FXSyncRequesterSourceSystem,
-		},
-		Interval: params.Interval,
-		Input:    RefreshFXRatesParams{Provider: providerName},
-		Enabled:  true,
-	}
-	if upsertErr := s.fxScheduleWriter.UpsertFXRefreshSchedule(ctx, schedule); upsertErr != nil {
-		return FXRefreshSchedule{}, fmt.Errorf("ensure fx refresh schedule: %w", upsertErr)
-	}
-	return schedule, nil
 }
 
 func (s *FXService) GetFXAdminDiagnostics(

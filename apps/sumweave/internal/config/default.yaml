@@ -115,15 +115,18 @@ jobs:
   scheduler:
     loopInterval: 30s
   worker:
-    enabled: true
     pollInterval: 2s
     maxAttempts: 3
+    # Recover only claims older than this age; set above the longest expected job execution.
+    staleRunningAge: 5m
 
 finance:
   providers:
     monobank:
       baseURL: "https://api.monobank.ua"
       retryAfterFallbackDelay: 61s
+    frankfurter:
+      baseURL: "https://api.frankfurter.dev"
     enableBanking:
       # Enable Banking sandbox apps use the same API host; sandbox/live is selected by the app registration.
       baseURL: "https://api.enablebanking.com"

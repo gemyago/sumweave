@@ -1,7 +1,6 @@
 package finance
 
 import (
-	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -77,12 +76,6 @@ type CSVImportAccountOption = domain.CSVImportAccountOption
 
 var ErrInvalidCSVImport = errors.New("invalid csv import")
 
-type CSVImportJobEnqueuer interface {
-	EnqueueCSVImport(context.Context, CSVImportJobRequest) (CSVImportJobRef, error)
-}
-
-type CSVImportJobRequest struct{ JobType, ImportID, TenantID, ActorID, IdempotencyKey string }
-type CSVImportJobRef struct{ ID, JobType string }
 type PreviewCSVImportParams struct {
 	ActorUserID, TenantID string
 	ImportType            CSVImportType

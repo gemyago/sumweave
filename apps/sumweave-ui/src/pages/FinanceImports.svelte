@@ -7,6 +7,7 @@
   import { createSignalFinanceApiForAuth, FinanceApiError, type FinanceCSVImportAudit, type FinanceCSVImportPreview, type FinanceCSVRejectedRow } from '../lib/finance/api'
   import { formatFinanceDateTime } from '../lib/finance/format'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
+  import { rememberObservedDispatch } from '../lib/jobs/observed-dispatch'
 
   const requiredHeaders = ['Date', 'Account', 'Category', 'Tags', 'Expense amount', 'Income amount', 'Currency']
   const supportedHeaders = [...requiredHeaders, 'Description']
@@ -228,6 +229,7 @@
     error = null
     try {
       const confirmation = await financeApi.confirmCSVImport({ tenantId: financeShell.selectedTenantId, importId: preview.importId })
+      rememberObservedDispatch(confirmation.jobId)
       await refreshAudit(confirmation.importId, true)
       await loadRecentImports()
     } catch (confirmError) {

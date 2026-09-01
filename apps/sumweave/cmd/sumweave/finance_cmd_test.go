@@ -350,38 +350,4 @@ func TestFinanceCommand(t *testing.T) {
 			require.ErrorContains(t, err, "unsupported finance fixture connection provider")
 		},
 	)
-
-	t.Run("fixture schedule writer stores generic due schedule rows", func(t *testing.T) {
-		dsn := filepath.Join(t.TempDir(), "jobs.db")
-		sqlDB, err := sqlconn.Open(dsn)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, sqlDB.Close()) }()
-		store, err := jobspkg.NewStore(
-			sqlDB,
-			dsn,
-			jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"},
-		)
-		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
-		writer := fixturesScheduleWriter{store: store}
-		nextRunAt := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)
-		require.NoError(
-			t,
-			writer.UpsertBankConnectionSyncSchedule(
-				t.Context(),
-				financepkg.BankConnectionSyncSchedule{
-					ScheduleID:   "schedule-1",
-					ConnectionID: "connection-1",
-					ActorUserID:  "user-1",
-					Interval:     time.Hour,
-					NextRunAt:    &nextRunAt,
-					Enabled:      true,
-				},
-			),
-		)
-		schedules, err := store.ListDueSchedules(t.Context(), nextRunAt.Add(time.Minute))
-		require.NoError(t, err)
-		require.Len(t, schedules, 1)
-		assert.Equal(t, jobspkg.JobType(financepkg.BankConnectionSyncJobType), schedules[0].JobType)
-	})
 }

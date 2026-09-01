@@ -16,6 +16,7 @@ var (
 	ErrBankConnectionNotFound                 = errors.New("bank connection not found")
 	ErrPendingBankConnectionLinkStartNotFound = errors.New("pending bank connection link start not found")
 	ErrBankConnectionScheduleNotFound         = errors.New("bank connection schedule not found")
+	ErrFXRefreshScheduleNotFound              = errors.New("fx refresh schedule not found")
 	ErrProviderTransactionMatchNotFound       = errors.New("provider transaction match not found")
 )
 
@@ -244,13 +245,13 @@ func (s *Store) SaveBankConnectionSchedule(
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: columnConnectionID}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"interval_seconds",
-				"next_run_at",
-				"last_scheduled_at",
+				columnIntervalSeconds,
+				columnNextRunAt,
+				columnLastScheduledAt,
 				"last_started_at",
 				"last_completed_at",
-				"last_job_id",
-				"enabled",
+				columnLastJobID,
+				columnEnabled,
 				columnUpdatedAt,
 			}),
 		}).

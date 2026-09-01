@@ -10,28 +10,29 @@ import (
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-type recordingCSVJobEnqueuer struct {
-	requests []CSVImportJobRequest
-	jobType  string
-	jobID    string
-	err      error
-}
-
-func (r *recordingCSVJobEnqueuer) EnqueueCSVImport(
-	_ context.Context,
-	request CSVImportJobRequest,
-) (CSVImportJobRef, error) {
-	r.requests = append(r.requests, request)
-	if r.err != nil {
-		return CSVImportJobRef{}, r.err
-	}
-	return CSVImportJobRef{ID: r.jobID, JobType: r.jobType}, nil
-}
-
 func TestCSVImport(t *testing.T) {
+	makeCommandPublisher := func(
+		t *testing.T,
+		messageID string,
+		publishErr error,
+		received *SemanticCommand,
+	) *MockSemanticCommandPublisher {
+		t.Helper()
+		publisher := NewMockSemanticCommandPublisher(t)
+		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, command SemanticCommand) (DispatchReference, error) {
+				if received != nil {
+					*received = command
+				}
+				return DispatchReference{MessageID: messageID}, publishErr
+			},
+		)
+		return publisher
+	}
 	makeImportService := func(t *testing.T) (*CSVImportService, *TenantService, *CatalogService, *LedgerService) {
 		t.Helper()
 		database := openTestDatabase(t)
@@ -71,11 +72,8 @@ func TestCSVImport(t *testing.T) {
 		csv string,
 	) (CSVImportPreview, CSVImportRunResult) {
 		t.Helper()
-		enqueuer := &recordingCSVJobEnqueuer{
-			jobID:   "job-" + faker.New().UUID().V4(),
-			jobType: CSVImportJobTypeTransactions,
-		}
-		service.csvImportJobEnqueuer = enqueuer
+		var command SemanticCommand
+		service.commandPublisher = makeCommandPublisher(t, "job-"+faker.New().UUID().V4(), nil, &command)
 		preview, err := service.PreviewCSVImport(t.Context(), PreviewCSVImportParams{
 			ActorUserID: actorUserID,
 			TenantID:    tenantID,
@@ -95,7 +93,7 @@ func TestCSVImport(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, confirmed, repeated)
-		require.Equal(t, "finance.csv-import:"+preview.ImportID, enqueuer.requests[0].IdempotencyKey)
+		require.Equal(t, "finance.csv-import:"+preview.ImportID, command.IdempotencyKey)
 		result, err := service.RunCSVImportJob(t.Context(), RunCSVImportJobParams{
 			ImportID: preview.ImportID,
 			JobID:    confirmed.JobID,
@@ -343,10 +341,7 @@ func TestCSVImport(t *testing.T) {
 		assert.Empty(t, nonePreview.RejectedRows)
 		assert.Empty(t, nonePreview.WouldCreateAccounts)
 
-		service.csvImportJobEnqueuer = &recordingCSVJobEnqueuer{
-			jobID:   "job-" + fake.UUID().V4(),
-			jobType: CSVImportJobTypeTransactions,
-		}
+		service.commandPublisher = makeCommandPublisher(t, "job-"+fake.UUID().V4(), nil, nil)
 		confirmation, err := service.ConfirmCSVImport(t.Context(), ConfirmCSVImportParams{
 			ActorUserID: actorUserID,
 			ImportID:    includedPreview.ImportID,
@@ -411,9 +406,7 @@ func TestCSVImport(t *testing.T) {
 			assert.Equal(t, []string{categoryName}, preview.WouldCreateCategories)
 			assert.Equal(t, []string{"first-tag"}, preview.WouldCreateTags)
 
-			service.csvImportJobEnqueuer = &recordingCSVJobEnqueuer{
-				jobID: "job-" + fake.UUID().V4(), jobType: CSVImportJobTypeTransactions,
-			}
+			service.commandPublisher = makeCommandPublisher(t, "job-"+fake.UUID().V4(), nil, nil)
 			confirmation, err := service.ConfirmCSVImport(t.Context(), ConfirmCSVImportParams{
 				ActorUserID: actorUserID, ImportID: preview.ImportID,
 			})
@@ -739,10 +732,7 @@ func TestCSVImport(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"wallet"}, preview.WouldCreateAccounts)
 		assert.Len(t, preview.RejectedRows, 1)
-		service.csvImportJobEnqueuer = &recordingCSVJobEnqueuer{
-			jobID:   "job-" + fake.UUID().V4(),
-			jobType: CSVImportJobTypeAccounts,
-		}
+		service.commandPublisher = makeCommandPublisher(t, "job-"+fake.UUID().V4(), nil, nil)
 		confirmed, err := service.ConfirmCSVImport(t.Context(), ConfirmCSVImportParams{
 			ActorUserID: actorUserID,
 			ImportID:    preview.ImportID,
@@ -797,14 +787,22 @@ func TestCSVImport(t *testing.T) {
 			ActorUserID: actorUserID,
 			ImportID:    preview.ImportID,
 		})
-		require.EqualError(t, err, "csv import job enqueuer is required")
+		require.EqualError(t, err, "csv import command publisher is required")
 		_, err = service.RunCSVImportJob(t.Context(), RunCSVImportJobParams{ImportID: preview.ImportID})
 		require.ErrorContains(t, err, "not runnable")
-		service.csvImportJobEnqueuer = &recordingCSVJobEnqueuer{err: assert.AnError}
+		service.commandPublisher = makeCommandPublisher(t, "", assert.AnError, nil)
 		_, err = service.ConfirmCSVImport(t.Context(), ConfirmCSVImportParams{
 			ActorUserID: actorUserID,
 			ImportID:    preview.ImportID,
 		})
 		require.ErrorIs(t, err, assert.AnError)
+		messageID := "message-" + fake.UUID().V4()
+		service.commandPublisher = makeCommandPublisher(t, messageID, nil, nil)
+		confirmed, err := service.ConfirmCSVImport(t.Context(), ConfirmCSVImportParams{
+			ActorUserID: actorUserID,
+			ImportID:    preview.ImportID,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, messageID, confirmed.JobID)
 	})
 }

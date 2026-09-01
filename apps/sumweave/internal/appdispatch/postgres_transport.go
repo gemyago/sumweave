@@ -10,14 +10,16 @@ import (
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
 )
 
-const postgresMessageColumnCount = 4
+const postgresMessageColumnCount = 5
 
 type singleTablePostgresSchema struct {
 	wmsql.DefaultPostgreSQLSchema
+
+	config Config
 }
 
 func postgresSchema(config Config) singleTablePostgresSchema {
-	return singleTablePostgresSchema{DefaultPostgreSQLSchema: wmsql.DefaultPostgreSQLSchema{
+	return singleTablePostgresSchema{config: config, DefaultPostgreSQLSchema: wmsql.DefaultPostgreSQLSchema{
 		//nolint:gocritic // Every topic intentionally uses the configured shared table.
 		GenerateMessagesTableName: func(string) string { return quoteIdentifier(config.MessagesTable()) },
 		GeneratePayloadType:       func(string) string { return "BYTEA" },
@@ -36,11 +38,18 @@ func (s singleTablePostgresSchema) SchemaInitializingQueries(
 			created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			payload BYTEA DEFAULT NULL,
 			metadata JSON DEFAULT NULL,
+			payload_hash VARCHAR(64) NOT NULL DEFAULT '',
 			transaction_id xid8 NOT NULL,
 			PRIMARY KEY (transaction_id, "offset")
 		)`},
 		{Query: `CREATE INDEX IF NOT EXISTS ` + quoteIdentifier(strings.Trim(table, `"`)+"_topic_order_idx") +
 			` ON ` + table + ` (topic, transaction_id, "offset")`},
+		{Query: `CREATE TABLE IF NOT EXISTS ` + quoteIdentifier(s.config.PublicationsTable()) + ` (
+			idempotency_key VARCHAR(255) NOT NULL PRIMARY KEY,
+			message_id VARCHAR(36) NOT NULL UNIQUE,
+			topic VARCHAR(255) NOT NULL,
+			payload_hash VARCHAR(64) NOT NULL
+		)`},
 	}, nil
 }
 
@@ -54,22 +63,23 @@ func (s singleTablePostgresSchema) InsertQuery(params wmsql.InsertQueryParams) (
 		}
 		fmt.Fprintf(
 			&markers,
-			"($%d,$%d,$%d,$%d,pg_current_xact_id())",
+			"($%d,$%d,$%d,$%d,$%d,pg_current_xact_id())",
 			parameter,
 			parameter+1,
 			parameter+2,
 			parameter+3,
+			parameter+4,
 		)
 		parameter += postgresMessageColumnCount
-		metadata, err := json.Marshal(message.Metadata)
+		metadata, err := json.Marshal(transportMessageMetadata(message.Metadata))
 		if err != nil {
 			return wmsql.Query{}, fmt.Errorf("marshal message %s metadata: %w", message.UUID, err)
 		}
-		args = append(args, message.UUID, params.Topic, message.Payload, metadata)
+		args = append(args, message.UUID, params.Topic, message.Payload, metadata, transportMessagePayloadHash(message))
 	}
 	return wmsql.Query{
 		Query: `INSERT INTO ` + s.MessagesTable(params.Topic) +
-			` (uuid, topic, payload, metadata, transaction_id) VALUES ` + markers.String(),
+			` (uuid, topic, payload, metadata, payload_hash, transaction_id) VALUES ` + markers.String(),
 		Args: args,
 	}, nil
 }

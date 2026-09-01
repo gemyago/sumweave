@@ -143,10 +143,8 @@ func mapJobDetail(job jobspkg.Job) models.JobDetailResponse {
 }
 func mapJobRequester(requester jobspkg.Requester) models.JobRequester {
 	return models.JobRequester{
-		UserID:         requester.UserID,
-		Source:         string(requester.Source),
-		AgentSessionID: requester.AgentSessionID,
-		AgentRunID:     requester.AgentRunID,
+		UserID: requester.UserID,
+		Source: string(requester.Source),
 	}
 }
 func mapJobError(jobErr jobspkg.JobError) models.JobError {

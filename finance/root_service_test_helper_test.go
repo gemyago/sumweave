@@ -34,11 +34,9 @@ type Service struct {
 	csvImports             *CSVImportService
 	fxProviders            map[string]FXRatesProvider
 	defaultFXProvider      string
-	fxJobEnqueuer          FXRefreshJobEnqueuer
-	fxScheduleWriter       FXRefreshScheduleWriter
+	commandPublisher       SemanticCommandPublisher
 	connectionSecretCipher connectionSecretCipher
 	bankProviders          map[string]BankConnectionProvider
-	csvImportJobEnqueuer   CSVImportJobEnqueuer
 	logger                 *slog.Logger
 }
 
@@ -73,16 +71,8 @@ func WithDefaultFXProvider(name string) ServiceOption {
 	}
 }
 
-func WithFXJobEnqueuer(enqueuer FXRefreshJobEnqueuer) ServiceOption {
-	return func(service *Service) { service.fxJobEnqueuer = enqueuer }
-}
-
-func WithFXScheduleWriter(writer FXRefreshScheduleWriter) ServiceOption {
-	return func(service *Service) { service.fxScheduleWriter = writer }
-}
-
-func WithCSVImportJobEnqueuer(enqueuer CSVImportJobEnqueuer) ServiceOption {
-	return func(service *Service) { service.csvImportJobEnqueuer = enqueuer }
+func WithCommandPublisher(publisher SemanticCommandPublisher) ServiceOption {
+	return func(service *Service) { service.commandPublisher = publisher }
 }
 
 func WithConnectionSecretCipher(cipher connectionSecretCipher) ServiceOption {
@@ -148,8 +138,7 @@ func (s *Service) bindServices() {
 		WithFXServiceNow(s.now),
 		WithFXServiceProviders(mapFXProviders(s.fxProviders)...),
 		WithFXServiceDefaultProvider(s.defaultFXProvider),
-		WithFXServiceJobEnqueuer(s.fxJobEnqueuer),
-		WithFXServiceScheduleWriter(s.fxScheduleWriter),
+		WithFXServiceCommandPublisher(s.commandPublisher),
 	)
 	s.csvImports = NewCSVImportService(
 		s.store,
@@ -157,7 +146,7 @@ func (s *Service) bindServices() {
 		s.ledger,
 		WithCSVImportServiceNow(s.now),
 		WithCSVImportServiceIDGenerator(s.newID),
-		WithCSVImportServiceJobEnqueuer(s.csvImportJobEnqueuer),
+		WithCSVImportServiceCommandPublisher(s.commandPublisher),
 	)
 }
 
@@ -407,13 +396,6 @@ func (s *Service) TriggerFXRefresh(
 	params TriggerFXRefreshParams,
 ) (FXRefreshJobRef, error) {
 	return s.fx.TriggerFXRefresh(ctx, params)
-}
-
-func (s *Service) EnsureFXRefreshSchedule(
-	ctx context.Context,
-	params EnsureFXRefreshScheduleParams,
-) (FXRefreshSchedule, error) {
-	return s.fx.EnsureFXRefreshSchedule(ctx, params)
 }
 
 func (s *Service) GetFXAdminDiagnostics(

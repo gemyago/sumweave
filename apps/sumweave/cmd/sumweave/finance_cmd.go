@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"time"
 
@@ -189,7 +188,6 @@ func runFinanceFixturesGenerate(
 	defer monobankServer.Close()
 	financeModule, err := newFinanceFixturesModule(
 		runtimeConfig.Database,
-		runtimeConfig.JobsStore,
 		params,
 		cipher,
 		monobankServer.Client(),
@@ -223,7 +221,6 @@ func runFinanceFixturesGenerate(
 
 func newFinanceFixturesModule(
 	database *persistence.Database,
-	jobsStore *jobspkg.Store,
 	params financeFixturesGenerateParams,
 	cipher interface {
 		SealString(string) (credentials.Envelope, error)
@@ -243,8 +240,7 @@ func newFinanceFixturesModule(
 			financepkg.FXProviderFrankfurter,
 			financefixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, params.Now),
 		)},
-		DefaultFXProvider:      financepkg.FXProviderFrankfurter,
-		BankSyncScheduleWriter: fixturesScheduleWriter{store: jobsStore},
+		DefaultFXProvider: financepkg.FXProviderFrankfurter,
 		Monobank: financepkg.MonobankConfig{
 			BaseURL: monobankBaseURL,
 		},
@@ -404,41 +400,6 @@ func closeFinanceFixturesRuntimeConfig(commandErr error, runtimeConfig financeFi
 		return errors.Join(commandErr, fmt.Errorf("close finance fixtures root: %w", closeErr))
 	}
 	return commandErr
-}
-
-type fixturesScheduleWriter struct{ store *jobspkg.Store }
-
-func (w fixturesScheduleWriter) UpsertBankConnectionSyncSchedule(
-	ctx context.Context,
-	schedule financepkg.BankConnectionSyncSchedule,
-) error {
-	inputJSON := []byte(
-		fmt.Sprintf(
-			`{"connectionId":%s,"reason":%s}`,
-			strconv.Quote(strings.TrimSpace(schedule.ConnectionID)),
-			strconv.Quote(financepkg.BankConnectionSyncReasonScheduled),
-		),
-	)
-	var nextRunAt *time.Time
-	if schedule.Enabled {
-		now := time.Now()
-		nextRunAt = &now
-	}
-	if schedule.NextRunAt != nil {
-		nextRunAt = schedule.NextRunAt
-	}
-	return w.store.UpsertSchedule(ctx, jobspkg.Schedule{
-		ID:      strings.TrimSpace(schedule.ScheduleID),
-		JobType: jobspkg.JobType(financepkg.BankConnectionSyncJobType),
-		Requester: jobspkg.Requester{
-			UserID: strings.TrimSpace(schedule.ActorUserID),
-			Source: jobspkg.RequesterSourceOperator,
-		},
-		InputJSON: inputJSON,
-		Interval:  schedule.Interval,
-		NextRunAt: nextRunAt,
-		Enabled:   schedule.Enabled,
-	})
 }
 
 type financeFixturesProvider struct{}

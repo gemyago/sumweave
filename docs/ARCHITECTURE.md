@@ -13,10 +13,20 @@ provider snapshots, balances, reports, and FX.
   migrations, telemetry, and embedded UI delivery.
 - `apps/sumweave/internal/appdispatch` is the app-owned durable SQL pub/sub
   transport. It stores multiple topics in one message table and tracks offsets
-  independently by topic and consumer group for SQLite and PostgreSQL.
-- `apps/sumweave/internal/appevents` is the typed domain-event API. Durable
-  jobs remain imperative commands with observable job state and use their own
-  execution topic and worker consumer group on the same transport.
+  independently by topic and consumer group for SQLite and PostgreSQL. It is the
+  generic internal delivery mechanism for semantic imperative commands and
+  factual domain events. Publication assigns and returns one immutable, stable
+  message ID and creates no job record. It is the only durable publication,
+  scheduling, and delivery path for background commands and events; producers
+  do not choose a jobs queue.
+- `apps/sumweave/internal/appevents` is the typed domain-event API over
+  `appdispatch` and is intentionally retained as a separate typed adapter.
+- `apps/sumweave/internal/jobs` adds opt-in product and API visibility to
+  selected background commands at consumer registration. A job-observed
+  consumer lazily creates a metadata-only lifecycle projection on first
+  delivery; its job ID is the dispatch message ID. Background processing that
+  needs no product or operational visibility uses `appdispatch` without a job
+  record.
 - Its application config is app-internal at `internal/config`; `internal/wireup`
   owns explicit command roots. Command and Engine entrypoints pass typed startup
   options, while components receive native values or constructed collaborators.
@@ -34,14 +44,65 @@ override `APP_APPLICATION_DATABASE_DSN`). Local default storage is
 `data/application.db`; SQLite is local development only. `db-migrate` prepares
 agent, auth, topic-aware dispatch, jobs, and finance schemas. `start-all` runs
 the API, worker, and scheduler together; split worker and scheduler commands
-remain for deployment. API-only `start` constructs enqueue capabilities but
-does not start a message router.
+remain for deployment. API-only `start` can publish dispatch messages but does
+not start a message router or execute background work.
+
+The retained process modes are `start` for API-only serving, `jobs worker` for
+the durable appdispatch consumer, and `jobs enqueue-due` for one scheduler tick.
+`start-all` explicitly combines those three capabilities for local operation;
+the worker and scheduler remain separate deployment processes.
+
+The scheduler reads finance-owned bank-connection schedules and the finance-owned
+daily FX refresh schedule. It publishes one semantic command per due occurrence,
+advances the schedule, and stores the returned message ID as the future reference
+in one application-database transaction. It does not use a generic schedule
+registry, execute provider work, or create a job row.
 
 Message delivery is at least once. Consumer handlers must tolerate duplicate
-delivery. Routers recover panics, retry failures three times with bounded
-backoff, and then publish the original message to
+delivery. Routers recover panics, retry failures with the configured bounded
+dispatch policy, and then publish the original message to
 `app.dispatch.dead-letter.v1` with failure and source-topic metadata. A failed
 dead-letter publication leaves the original message unacknowledged.
+
+Dispatch retention is operational transport maintenance, not job retention.
+Normal message rows are eligible for deletion after 7 days only when every
+existing consumer-group offset for that topic has advanced beyond the row;
+unacknowledged rows remain available for retry and are surfaced for operator
+attention. Idempotency claims are retained for at least the same window so a
+retry within the window returns the original message identity. Dead-letter
+rows are retained for 30 days for diagnostics, then may be removed by the same
+offset-safe maintenance process. This policy is internal to appdispatch: no
+raw message or dead-letter entity is exposed through the jobs API, and it does
+not define completed-job retention. No runtime cleanup is performed until an
+operator maintenance command is required; workers never delete dispatch data
+as part of delivery.
+
+Each message may have at most one job-observed consumer registration. Other
+consumers are ordinary appdispatch consumers; an event reaction that needs an
+independent visible execution publishes a distinct semantic command. A job
+projection is materialized lazily on first delivery, before the handler runs,
+and uses the message ID as its job ID. Until that delivery, a request for the
+known future job ID may return `404`; the UI treats that response as pending
+only for an ID it just received from a dispatching workflow. Unknown or deep
+linked IDs remain ordinary `404` errors.
+
+Transport failure and job failure are separate concerns. A finance service must
+explicitly return a finance-owned terminal failure for a terminal domain or
+provider outcome. Only the finance adapter maps that typed outcome to a handled
+failure, preserving its sanitized code, summary, and details for a failed
+observed job before acknowledgement. Unclassified service, malformed payload,
+materialization/claim, handler-panic, and terminal-state persistence failures
+follow the `appdispatch` retry/dead-letter policy; terminal-state persistence is
+retried with backoff while the delivery context remains alive, and shutdown leaves
+the message unacknowledged. Ordinary consumers log explicit terminal failures and
+create no job state.
+
+Only running projections whose durable claim timestamp is at least the
+worker-level `staleRunningAge` old are requeued or terminally failed (the
+default age is five minutes). Recovery conditionally matches the claim owner
+and timestamp, so it cannot overwrite a newer claim or terminal transition.
+The uniform attempt policy defaults to three attempts; handlers and individual
+rows do not define competing retry limits.
 
 The topic-aware dispatch schema intentionally replaces the earlier alpha
 single-topic schema. Recreate or reseed an old local application database, then

@@ -46,7 +46,7 @@ The Finance area SHALL expose the first end-user workflows required by the finan
 - **AND** bank-linking flows MUST expose monobank token entry, PKO via Enable Banking redirect/SCA, and synthetic local configured setup as distinct supported choices
 - **AND** bank-linking flows MUST NOT allow free-text bank provider entry
 - **AND** the monobank flow MUST submit tokens only for the monobank provider option
-- **AND** the PKO flow MUST start the Enable Banking redirect/SCA flow, handle the return state/code, and surface success or recoverable failure without exposing decrypted secrets or raw provider payloads
+- **AND** the PKO flow MUST start the Enable Banking redirect/SCA flow, handle the return state/code, and surface success or recoverable failure without exposing decrypted secrets or raw provider documents
 - **AND** the synthetic flow MUST start local redirect setup, let the operator configure one or more synthetic accounts, save pending configuration, finish the link, and return to the connection list
 - **AND** bank-linking flows MUST retain attach-to-existing-account selection, re-authentication handling, and connection-detail schedule/sync visibility
 
@@ -60,14 +60,17 @@ The Finance area SHALL expose the first end-user workflows required by the finan
 The UI SHALL provide utilitarian admin diagnostics and connect finance workflows to generic jobs visibility.
 
 #### Scenario: Finance screens deep-link to relevant job detail
-- **WHEN** a finance sync, FX refresh, or import creates a durable job
+- **WHEN** a finance sync, FX refresh, or import publishes job-observed work
 - **THEN** the finance workflow MUST expose job status plus a route link to a finance-focused job detail or the generic admin job detail without losing operator context
+- **AND** the returned dispatch ID MAY return `404` until worker delivery, which the
+  initiating workflow MUST render as pending while arbitrary/deep-linked `404`
+  responses remain errors
 
 #### Scenario: Admin diagnostics expose sanitized operational state
 - **WHEN** an authenticated operator opens `#/admin`, `#/admin/finance/fx`, or `#/admin/finance/providers`
-- **THEN** the UI MUST show operational diagnostics such as failed jobs, missing FX coverage, stale connections, provider health, and manual sync/retry affordances where supported
+- **THEN** the UI MUST show operational diagnostics such as failed jobs, missing FX coverage, stale connections, provider health, and manual sync affordances where supported
 - **AND** admin diagnostics MUST make scheduler state and recent scheduled-run visibility observable without replacing tenant-facing bank-connection schedule management
-- **AND** it MUST NOT display decrypted secrets or raw provider payloads by default
+- **AND** it MUST NOT display decrypted secrets or raw provider documents by default
 
 ### Requirement: Active Tenant Workspace Context
 The Finance area SHALL keep one active tenant workspace context across tenant-scoped finance routes and finance-context deep links.
@@ -146,4 +149,3 @@ The Finance UI SHALL expose current schema-derived provider snapshots as provide
 - **THEN** the UI MUST preserve its collapsed-by-default disclosure behavior and show bounded loading, empty, or recoverable error feedback
 - **AND** it MUST NOT expose a provider snapshot history timeline
 - **AND** it MUST NOT display decrypted credentials, authorization material, or other provider secrets
-

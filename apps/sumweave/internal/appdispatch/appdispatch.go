@@ -1,10 +1,15 @@
 package appdispatch
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -18,6 +23,17 @@ import (
 
 const (
 	DeadLetterTopic = "app.dispatch.dead-letter.v1"
+
+	transportPayloadHashMetadataKey = "_appdispatchPayloadHash"
+)
+
+var (
+	// ErrDuplicateMessageID reports an attempt to store an existing immutable
+	// transport message identity.
+	ErrDuplicateMessageID = errors.New("duplicate app dispatch message id")
+	// ErrPublicationConflict reports reuse of an idempotency key for a different
+	// semantic publication.
+	ErrPublicationConflict = errors.New("app dispatch publication conflict")
 )
 
 type TransportDriver string
@@ -88,6 +104,31 @@ func (c Config) OffsetsTable() string {
 	return c.TablePrefix + "app_dispatch_offsets"
 }
 
+// PublicationsTable returns the durable idempotent-publication table name.
+func (c Config) PublicationsTable() string {
+	return c.TablePrefix + "app_dispatch_publications"
+}
+
+// PublicationRequest describes a semantic message publication. IdempotencyKey
+// is optional; when present, it identifies exactly one topic and payload.
+type PublicationRequest struct {
+	Topic          string
+	Payload        []byte
+	IdempotencyKey string
+}
+
+func (r PublicationRequest) validate() error {
+	if r.Topic == "" {
+		return errors.New("publication topic is required")
+	}
+	return nil
+}
+
+// PublicationReference identifies a durably published semantic message.
+type PublicationReference struct {
+	MessageID string
+}
+
 type Publisher struct {
 	config    Config
 	db        *sql.DB
@@ -130,9 +171,12 @@ func (p *Publisher) Publish(ctx context.Context, message Message) error {
 	}
 	wmMessage := makeWatermillMessage(ctx, message)
 	if err := p.publisher.Publish(message.Topic, wmMessage); err != nil {
+		if isDuplicateMessageIDError(err) {
+			return fmt.Errorf("publish message on topic %s: %w", message.Topic, ErrDuplicateMessageID)
+		}
 		return fmt.Errorf("publish message on topic %s: %w", message.Topic, err)
 	}
-	p.logger.DebugContext(ctx, "message published",
+	p.logger.InfoContext(ctx, "message published",
 		slog.String("messageId", message.ID),
 		slog.String("topic", message.Topic),
 	)
@@ -152,13 +196,177 @@ func (p *Publisher) PublishInTx(ctx context.Context, tx *sql.Tx, message Message
 	}
 	defer func() { _ = closeIfPresent(publisher) }()
 	if err = publisher.Publish(message.Topic, makeWatermillMessage(ctx, message)); err != nil {
+		if isDuplicateMessageIDError(err) {
+			return fmt.Errorf("publish message in transaction on topic %s: %w", message.Topic, ErrDuplicateMessageID)
+		}
 		return fmt.Errorf("publish message in transaction on topic %s: %w", message.Topic, err)
 	}
-	p.logger.DebugContext(ctx, "message published in transaction",
+	p.logger.InfoContext(ctx, "message published in transaction",
 		slog.String("messageId", message.ID),
 		slog.String("topic", message.Topic),
 	)
 	return nil
+}
+
+// PublishRequest publishes a semantic message and returns its durable identity.
+// With an idempotency key, state and message publication are committed together.
+func (p *Publisher) PublishRequest(ctx context.Context, request PublicationRequest) (PublicationReference, error) {
+	if err := request.validate(); err != nil {
+		return PublicationReference{}, err
+	}
+	if request.IdempotencyKey == "" {
+		message := publicationMessage(request)
+		if err := p.Publish(ctx, message); err != nil {
+			return PublicationReference{}, err
+		}
+		return PublicationReference{MessageID: message.ID}, nil
+	}
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return PublicationReference{}, fmt.Errorf("begin publication transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	reference, err := p.PublishRequestInTx(ctx, tx, request)
+	if err != nil {
+		return PublicationReference{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return PublicationReference{}, fmt.Errorf("commit publication transaction: %w", err)
+	}
+	return reference, nil
+}
+
+// PublishRequestInTx publishes a semantic message in the supplied transaction.
+// A repeated idempotency key returns the original reference without publication.
+func (p *Publisher) PublishRequestInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	request PublicationRequest,
+) (PublicationReference, error) {
+	if tx == nil {
+		return PublicationReference{}, errors.New("publish transaction is required")
+	}
+	if err := request.validate(); err != nil {
+		return PublicationReference{}, err
+	}
+
+	message := publicationMessage(request)
+	if request.IdempotencyKey == "" {
+		if err := p.PublishInTx(ctx, tx, message); err != nil {
+			return PublicationReference{}, err
+		}
+		return PublicationReference{MessageID: message.ID}, nil
+	}
+
+	claimed, err := p.claimPublication(ctx, tx, request, message.ID)
+	if err != nil {
+		return PublicationReference{}, err
+	}
+	if !claimed {
+		return p.existingPublication(ctx, tx, request)
+	}
+	if err = p.PublishInTx(ctx, tx, message); err != nil {
+		return PublicationReference{}, err
+	}
+	return PublicationReference{MessageID: message.ID}, nil
+}
+
+func publicationMessage(request PublicationRequest) Message {
+	message := NewMessage(request.Topic, request.Payload)
+	message.Metadata = map[string]string{transportPayloadHashMetadataKey: canonicalPayloadHash(request.Payload)}
+	return message
+}
+
+func canonicalPayloadHash(payload []byte) string {
+	canonical := payload
+	var decoded any
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	if decoder.Decode(&decoded) == nil {
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			return hashPayload(canonical)
+		}
+		if encoded, err := json.Marshal(decoded); err == nil {
+			canonical = encoded
+		}
+	}
+	return hashPayload(canonical)
+}
+
+func hashPayload(payload []byte) string {
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+func (p *Publisher) claimPublication(
+	ctx context.Context,
+	tx *sql.Tx,
+	request PublicationRequest,
+	messageID string,
+) (bool, error) {
+	//nolint:gosec // Table names derive from trusted application configuration.
+	query := `INSERT INTO ` + quoteIdentifier(p.config.PublicationsTable()) +
+		` (idempotency_key, message_id, topic, payload_hash) VALUES ` + p.publicationPlaceholders(4) +
+		` ON CONFLICT(idempotency_key) DO NOTHING`
+	result, err := tx.ExecContext(
+		ctx,
+		query,
+		request.IdempotencyKey,
+		messageID,
+		request.Topic,
+		canonicalPayloadHash(request.Payload),
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim idempotent publication: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("inspect idempotent publication claim: %w", err)
+	}
+	return rows == 1, nil
+}
+
+func (p *Publisher) existingPublication(
+	ctx context.Context,
+	tx *sql.Tx,
+	request PublicationRequest,
+) (PublicationReference, error) {
+	query := `SELECT message_id, topic, payload_hash FROM ` + quoteIdentifier(p.config.PublicationsTable()) +
+		` WHERE idempotency_key=` + p.publicationPlaceholder(1)
+	var messageID, topic, payloadHash string
+	if err := tx.QueryRowContext(ctx, query, request.IdempotencyKey).Scan(
+		&messageID,
+		&topic,
+		&payloadHash,
+	); err != nil {
+		return PublicationReference{}, fmt.Errorf("read idempotent publication: %w", err)
+	}
+	if topic != request.Topic || payloadHash != canonicalPayloadHash(request.Payload) {
+		return PublicationReference{}, fmt.Errorf(
+			"idempotency key %q: %w",
+			request.IdempotencyKey,
+			ErrPublicationConflict,
+		)
+	}
+	return PublicationReference{MessageID: messageID}, nil
+}
+
+func (p *Publisher) publicationPlaceholders(count int) string {
+	placeholders := make([]string, 0, count)
+	for index := 1; index <= count; index++ {
+		placeholders = append(placeholders, p.publicationPlaceholder(index))
+	}
+	return `(` + strings.Join(placeholders, `, `) + `)`
+}
+
+func (p *Publisher) publicationPlaceholder(index int) string {
+	if p.config.Driver() == TransportDriverPostgres {
+		return fmt.Sprintf("$%d", index)
+	}
+	return "?"
 }
 
 func makeWatermillMessage(ctx context.Context, message Message) *wmmessage.Message {
@@ -172,9 +380,34 @@ func makeWatermillMessage(ctx context.Context, message Message) *wmmessage.Messa
 func makeMessage(topic string, message *wmmessage.Message) Message {
 	metadata := make(map[string]string, len(message.Metadata))
 	for key, value := range message.Metadata {
+		if key == transportPayloadHashMetadataKey {
+			continue
+		}
 		metadata[key] = value
 	}
 	return Message{ID: message.UUID, Topic: topic, Payload: message.Payload, Metadata: metadata}
+}
+
+func transportMessageMetadata(metadata wmmessage.Metadata) wmmessage.Metadata {
+	result := make(wmmessage.Metadata, len(metadata))
+	for key, value := range metadata {
+		if key == transportPayloadHashMetadataKey {
+			continue
+		}
+		result[key] = value
+	}
+	return result
+}
+
+func transportMessagePayloadHash(message *wmmessage.Message) string {
+	if message.Metadata == nil {
+		return ""
+	}
+	return message.Metadata.Get(transportPayloadHashMetadataKey)
+}
+
+func isDuplicateMessageIDError(err error) bool {
+	return strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "duplicate key")
 }
 
 //nolint:ireturn // Watermill publisher is defined by the library interface.
@@ -228,7 +461,8 @@ func buildSQLiteMigrationQueries(config Config) []string {
 			topic TEXT NOT NULL,
 			created_at TEXT NOT NULL,
 			payload BLOB,
-			metadata JSON NOT NULL
+			metadata JSON NOT NULL,
+			payload_hash TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS ` + quoteIdentifier(config.MessagesTable()+"_topic_offset_idx") +
 			` ON ` + quoteIdentifier(config.MessagesTable()) + ` (topic, "offset")`,
@@ -239,6 +473,12 @@ func buildSQLiteMigrationQueries(config Config) []string {
 			locked_until INTEGER NOT NULL,
 			lease_id TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY(topic, consumer_group)
+		)`,
+		`CREATE TABLE IF NOT EXISTS ` + quoteIdentifier(config.PublicationsTable()) + ` (
+			idempotency_key TEXT NOT NULL PRIMARY KEY,
+			message_id TEXT NOT NULL UNIQUE,
+			topic TEXT NOT NULL,
+			payload_hash TEXT NOT NULL
 		)`,
 	}
 }

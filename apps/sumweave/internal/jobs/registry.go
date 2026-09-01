@@ -10,157 +10,103 @@ import (
 
 var ErrHandlerNotRegistered = errors.New("job handler not registered")
 
-type typedHandler interface {
+type observedHandler interface {
+	topic() string
 	jobType() JobType
-	dispatchKind() executionKind
-	maxAttempts() int
-	supportsCancel() bool
-	supportsRetry() bool
-	onScheduled(context.Context, Job) error
-	execute(context.Context, Job, func(json.RawMessage) error) (any, error)
+	metadata(json.RawMessage) (JobMetadata, error)
+	execute(context.Context, Job, json.RawMessage) error
 }
-
 type Registry struct {
-	mu               sync.RWMutex
-	handlers         map[JobType]typedHandler
-	dispatchHandlers map[executionKind]typedHandler
+	mu       sync.RWMutex
+	handlers map[string]observedHandler
 }
 
 func NewRegistry() *Registry {
-	return &Registry{
-		handlers:         map[JobType]typedHandler{},
-		dispatchHandlers: map[executionKind]typedHandler{},
-	}
+	return &Registry{handlers: map[string]observedHandler{}}
 }
-
-func (r *Registry) Register(handler typedHandler) error {
+func (r *Registry) Register(handler observedHandler) error {
 	if handler == nil {
 		return errors.New("job handler is required")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.handlers[handler.jobType()]; exists {
-		return fmt.Errorf("job handler already registered: %s", handler.jobType())
+	if _, exists := r.handlers[handler.topic()]; exists {
+		return fmt.Errorf("observed job handler already registered for topic: %s", handler.topic())
 	}
-	if _, exists := r.dispatchHandlers[handler.dispatchKind()]; exists {
-		return fmt.Errorf("job dispatch handler already registered: %s", handler.dispatchKind())
-	}
-	r.handlers[handler.jobType()] = handler
-	r.dispatchHandlers[handler.dispatchKind()] = handler
+	r.handlers[handler.topic()] = handler
 	return nil
 }
-
-func (r *Registry) Handler(jobType JobType) (typedHandler, error) { //nolint:ireturn
+func (r *Registry) Handler(topic string) (observedHandler, error) { //nolint:ireturn
 	if r == nil {
 		return nil, ErrHandlerNotRegistered
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	handler, ok := r.handlers[jobType]
+	handler, ok := r.handlers[topic]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrHandlerNotRegistered, jobType)
+		return nil, fmt.Errorf("%w: %s", ErrHandlerNotRegistered, topic)
 	}
 	return handler, nil
 }
-
-func (r *Registry) handlerByExecutionKind(kind executionKind) (typedHandler, error) { //nolint:ireturn
+func (r *Registry) Handlers() []observedHandler {
 	if r == nil {
-		return nil, ErrHandlerNotRegistered
+		return nil
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	handler, ok := r.dispatchHandlers[kind]
-	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrHandlerNotRegistered, kind)
+	handlers := make([]observedHandler, 0, len(r.handlers))
+	for _, handler := range r.handlers {
+		handlers = append(handlers, handler)
 	}
-	return handler, nil
+	return handlers
 }
 
-type TypedHandlerSpec[Input any, Result any, Progress any] struct {
-	JobType        JobType
-	DispatchKind   string
-	MaxAttempts    int
-	SupportsCancel bool
-	SupportsRetry  bool
-	Run            func(context.Context, Input, func(Progress) error) (Result, error)
-	RunJob         func(context.Context, Job, Input, func(Progress) error) (Result, error)
-	OnScheduled    func(context.Context, Job) error
+type TypedHandlerSpec[Input any] struct {
+	JobType  JobType
+	Topic    string
+	Metadata func(Input) (JobMetadata, error)
+	Run      func(context.Context, Job, Input) error
 }
 
-func RegisterTypedHandler[Input any, Result any, Progress any](
-	registry *Registry,
-	spec TypedHandlerSpec[Input, Result, Progress],
-) error {
+func RegisterTypedHandler[Input any](registry *Registry, spec TypedHandlerSpec[Input]) error {
 	if registry == nil {
 		return errors.New("job registry is required")
 	}
-	if spec.Run == nil && spec.RunJob == nil {
+	if spec.Topic == "" {
+		return errors.New("observed job handler topic is required")
+	}
+	if spec.JobType == "" {
+		return errors.New("observed job type is required")
+	}
+	if spec.Metadata == nil {
+		return errors.New("observed job metadata mapper is required")
+	}
+	if spec.Run == nil {
 		return errors.New("job handler run func is required")
 	}
-	return registry.Register(&registeredTypedHandler[Input, Result, Progress]{spec: spec})
+	return registry.Register(&registeredTypedHandler[Input]{spec: spec})
 }
 
-type registeredTypedHandler[Input any, Result any, Progress any] struct {
-	spec TypedHandlerSpec[Input, Result, Progress]
-}
+type registeredTypedHandler[Input any] struct{ spec TypedHandlerSpec[Input] }
 
-func (h *registeredTypedHandler[Input, Result, Progress]) jobType() JobType {
-	return h.spec.JobType
-}
-
-func (h *registeredTypedHandler[Input, Result, Progress]) dispatchKind() executionKind {
-	if h.spec.DispatchKind != "" {
-		return executionKind(h.spec.DispatchKind)
+func (h *registeredTypedHandler[Input]) topic() string    { return h.spec.Topic }
+func (h *registeredTypedHandler[Input]) jobType() JobType { return h.spec.JobType }
+func (h *registeredTypedHandler[Input]) metadata(payload json.RawMessage) (JobMetadata, error) {
+	var input Input
+	if err := json.Unmarshal(payload, &input); err != nil {
+		return JobMetadata{}, fmt.Errorf("decode observed job payload: %w", err)
 	}
-	return executionKind(h.spec.JobType)
+	return h.spec.Metadata(input)
 }
 
-func (h *registeredTypedHandler[Input, Result, Progress]) maxAttempts() int {
-	if h.spec.MaxAttempts > 0 {
-		return h.spec.MaxAttempts
-	}
-	return defaultWorkerMaxAttempts
-}
-
-func (h *registeredTypedHandler[Input, Result, Progress]) supportsCancel() bool {
-	return h.spec.SupportsCancel
-}
-
-func (h *registeredTypedHandler[Input, Result, Progress]) supportsRetry() bool {
-	return h.spec.SupportsRetry
-}
-
-func (h *registeredTypedHandler[Input, Result, Progress]) onScheduled(ctx context.Context, job Job) error {
-	if h.spec.OnScheduled == nil {
-		return nil
-	}
-	return h.spec.OnScheduled(ctx, job)
-}
-
-func (h *registeredTypedHandler[Input, Result, Progress]) execute(
+func (h *registeredTypedHandler[Input]) execute(
 	ctx context.Context,
 	job Job,
-	setProgressJSON func(json.RawMessage) error,
-) (any, error) {
-	input, err := DecodeJobInput[Input](job)
-	if err != nil {
-		return nil, err
+	payload json.RawMessage,
+) error {
+	var input Input
+	if err := json.Unmarshal(payload, &input); err != nil {
+		return fmt.Errorf("decode job payload: %w", err)
 	}
-	setProgress := func(progress Progress) error {
-		payload, marshalErr := json.Marshal(progress)
-		if marshalErr != nil {
-			return fmt.Errorf("marshal job progress: %w", marshalErr)
-		}
-		return setProgressJSON(payload)
-	}
-	var result Result
-	if h.spec.RunJob != nil {
-		result, err = h.spec.RunJob(ctx, job, input, setProgress)
-	} else {
-		result, err = h.spec.Run(ctx, input, setProgress)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
+	return h.spec.Run(ctx, job, input)
 }

@@ -199,14 +199,15 @@ func TestFocusedPublicServices(t *testing.T) {
 			RateDate:      time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC),
 			Rate:          4.1,
 		}})
-		enqueuer := &capturedFXRefreshJobEnqueuer{}
-		scheduleWriter := &capturedFXRefreshScheduleWriter{}
+		publisher := NewMockSemanticCommandPublisher(t)
+		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).Return(
+			DispatchReference{MessageID: "message-" + fake.UUID().V4()}, nil,
+		)
 		service := NewFXService(
 			store,
 			WithFXServiceProviders(provider),
 			WithFXServiceDefaultProvider(provider.Name()),
-			WithFXServiceJobEnqueuer(enqueuer),
-			WithFXServiceScheduleWriter(scheduleWriter),
+			WithFXServiceCommandPublisher(publisher),
 		)
 
 		err := store.SaveCurrentFXRates(t.Context(), []domain.FXRate{{
@@ -217,14 +218,7 @@ func TestFocusedPublicServices(t *testing.T) {
 
 		_, err = service.TriggerFXRefresh(t.Context(), TriggerFXRefreshParams{
 			RequestedByUserID: "admin-" + fake.UUID().V4(),
-			Source:            FXSyncRequesterSourceOperator,
-		})
-		require.NoError(t, err)
-
-		_, err = service.EnsureFXRefreshSchedule(t.Context(), EnsureFXRefreshScheduleParams{
-			ScheduleID:      "schedule-" + fake.UUID().V4(),
-			Interval:        time.Hour,
-			RequestedByUser: "system",
+			Source:            CommandRequesterSourceOperator,
 		})
 		require.NoError(t, err)
 
@@ -238,12 +232,15 @@ func TestFocusedPublicServices(t *testing.T) {
 		tenantService := NewTenantService(store)
 		catalogService := NewCatalogService(store)
 		ledgerService := NewLedgerService(store)
-		enqueuer := &recordingCSVJobEnqueuer{jobID: "job-1", jobType: CSVImportJobTypeAccounts}
+		publisher := NewMockSemanticCommandPublisher(t)
+		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).Return(
+			DispatchReference{MessageID: "job-1"}, nil,
+		)
 		service := NewCSVImportService(
 			store,
 			catalogService,
 			ledgerService,
-			WithCSVImportServiceJobEnqueuer(enqueuer),
+			WithCSVImportServiceCommandPublisher(publisher),
 		)
 		fake := faker.New()
 

@@ -59,6 +59,7 @@ func TestBuildMigration(t *testing.T) {
 			`PRAGMA table_info("migration_app_dispatch_offsets")`,
 		)
 		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, rows.Close()) })
 		for rows.Next() {
 			var cid, notNull, primaryKey int
 			var name, columnType string
@@ -71,7 +72,7 @@ func TestBuildMigration(t *testing.T) {
 				consumerGroupPrimaryKey = primaryKey
 			}
 		}
-		require.NoError(t, rows.Close())
+		require.NoError(t, rows.Err())
 		require.Equal(t, 1, topicPrimaryKey)
 		require.Equal(t, 2, consumerGroupPrimaryKey)
 	})

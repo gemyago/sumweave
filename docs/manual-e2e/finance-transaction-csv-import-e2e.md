@@ -1,47 +1,172 @@
 # Finance transaction CSV import E2E
 
-## Purpose
+This is the deterministic API-only gate for `finance.csv_import`. It verifies
+the fixed seven-column contract, confirmation publication, lazy job observation,
+audit completion, and repeat safety. Use an isolated SQLite database under
+`tmp/`; do not use PM2 `start-all` for this gate because it can consume the
+message before the expected `404`.
 
-Verify the fixed transaction CSV preview, confirmation, durable progress, and results.
+## Isolated setup
 
-## Setup
+Run from the repository root and use the first `.local-users` entry.
 
-1. Follow the setup in [README.md](./README.md).
-2. Sign in with the first `.local-users` entry.
-3. Create or select an isolated Finance tenant.
-4. Open `#/finance/imports`.
+```bash
+set -euo pipefail
+REPO_ROOT="$PWD"
+E2E_ROOT="$REPO_ROOT/tmp/jobs-system-simplification-028-e2e/transaction-csv"
+rm -rf "$E2E_ROOT"
+mkdir -p "$E2E_ROOT"
+export APP_DATADIR="$E2E_ROOT/data"
+export APP_APPLICATION_DATABASE_DSN="$E2E_ROOT/application.db"
 
-## Preview
-
-1. Confirm the page lists these seven required headers:
-   `Date,Account,Category,Tags,Expense amount,Income amount,Currency`, plus optional
-   `Description`.
-2. Download or copy the sample, then preview this CSV:
-
-```csv
-Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description
-29.05.26,CSV checking,Groceries,"home, food","8 300,00",,PLN,"Monthly groceries"
-30.05.26,CSV checking,Salary,"work, income",,"12 500,50",PLN,"May salary"
+cd "$REPO_ROOT/apps/sumweave"
+go run ./cmd/sumweave db-migrate --env local
+IFS=: read -r USER PASS < "$REPO_ROOT/.local-users"
+go run ./cmd/sumweave --env local user add \
+  --username "$USER" --password "$PASS" --if-not-exists
+go run ./cmd/sumweave start --env local >"$E2E_ROOT/api.log" 2>&1 &
+API_PID=$!
+trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+until curl --fail --silent http://127.0.0.1:4501/health >/dev/null; do sleep 1; done
+LOGIN_JSON=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  --data "{\"username\":\"$USER\",\"password\":\"$PASS\"}")
+ACCESS_TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])' <<<"$LOGIN_JSON")
+TENANT_ID=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/finance/tenants \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"name":"transaction-import-022","displayCurrency":"USD","seedDefaults":false}' |
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 ```
 
-3. Verify the page explains the 250,000-data-row (header excluded), 64 MiB CSV limit; strict `dd.MM.yy` dates, `00`–`99` mapping to 2000–2099, USD/EUR/PLN/UAH support, quoted tags, and localized quoted amounts. Verify the seven required headers and optional Description may be in any order, blank/missing descriptions become `n/a`, and unsupported extra columns are ignored.
-4. Verify the preview shows `Transactions to import: 2` along with account, category, and tag creation summaries. It must not show import-type or mapping controls. Verify the Step 2 **Accounts to include** checkbox group lists both detected textual accounts, source-row counts, and has every account checked initially.
-5. Click **Preview transactions** and immediately verify its pending label is visible, the button is disabled against a duplicate request, and the active Step 2 workspace directly below Step 1 is brought into view/focus before the result appears.
-6. Add rows with an invalid date, both amount columns populated, and an unsupported currency. Preview again and verify each rejected row includes its row number, source field when available, and reason.
-7. Uncheck one account and verify `Updating preview…` appears without moving focus, then the replacement preview excludes that account's rows, diagnostics, duplicate checks, and account/category/tag creation summaries. Re-check it and verify the source-row count remains stable. Uncheck every account and verify the replacement preview reports `Transactions to import: 0` and disables **Confirm valid rows**; it must not silently restore all accounts.
-8. Add an invalid row under one detected account and verify its diagnostic appears while that account is selected but disappears when that account is unchecked. Blank/unassignable account rows may remain diagnostics.
-9. If a duplicate row is reported, verify it also shows row/field/reason, the preview count excludes rejected/duplicate rows, and the page says they are excluded from confirmation. Preview only invalid/duplicate rows and verify `Transactions to import: 0`.
+## Preview and confirm
 
-## Confirm and audit
+The seven required headers are `Date,Account,Category,Tags,Expense amount,
+Income amount,Currency`; `Description` is optional. Dates are strict
+`dd.MM.yy`, and amounts may use the documented localized quoted format.
 
-1. Confirm valid rows. In browser network tools, verify the initial preview sends only `fileName` and `csv`, replacement previews send the same source plus `selectedAccountNames`, and confirm has no request body. Verify confirmation imports only checked-account rows and does not create accounts, categories, or tags for unchecked accounts.
-2. Verify the audit initially reports running/confirmed progress when the job has not completed, then refreshes automatically or with **Refresh audit**.
-3. Verify the audit reaches `completed` or shows a recoverable `failed` state, lists final rejected rows and row outcomes, and links to `#/finance/jobs/:jobId`.
-4. Open the job detail link and verify its status agrees with the import audit.
-5. At a completed audit, verify **Confirm valid rows** is no longer available. Reopen the same audit from **Recent imports**, including after visiting the job detail and returning to Imports; verify it remains scoped to the selected tenant and retains its job/outcomes.
-6. When **Open audit** is clicked, verify only the selected history item becomes visibly loading/disabled, then the active workspace above Recent imports is scrolled/focused and shows the selected audit. Leave a running audit open long enough to confirm background refresh does not steal focus.
-7. Open Finance accounts, transactions, and categories/tags. Verify imported transactions use the expected PLN values, account currency, categories, and readable tags.
+```bash
+cat >"$E2E_ROOT/transactions.csv" <<'CSV'
+Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description
+29.05.26,CSV checking,Groceries,"home, food","8 300,00",,PLN,Monthly groceries
+30.05.26,CSV checking,Salary,"work, income",,"12 500,50",PLN,May salary
+CSV
+python3 - "$E2E_ROOT/transactions.csv" >"$E2E_ROOT/preview-request.json" <<'PY'
+import json, sys
+print(json.dumps({"fileName": "transactions.csv", "csv": open(sys.argv[1]).read()}))
+PY
+curl -sS -X POST \
+  "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/imports/preview" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  --data @"$E2E_ROOT/preview-request.json" >"$E2E_ROOT/preview.json"
+python3 - "$E2E_ROOT/preview.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["importableCount"] == 2
+assert data["rejectedRows"] == [] and data["duplicateRows"] == []
+assert set(data["headers"]) == {"Date", "Account", "Category", "Tags", "Expense amount", "Income amount", "Currency", "Description"}
+assert data["accountOptions"][0]["selected"]
+print("preview-ok")
+PY
+IMPORT_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["importId"])' "$E2E_ROOT/preview.json")
 
-## Narrow-screen check
+# Confirmation has no request body: the preview owns the import payload.
+curl -sS -X POST \
+  "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/imports/$IMPORT_ID/confirm" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/confirm.json"
+JOB_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["jobId"])' "$E2E_ROOT/confirm.json")
+JOB_TYPE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["jobType"])' "$E2E_ROOT/confirm.json")
+test "$JOB_TYPE" = finance.csv_import
+JOB_STATUS=$(curl -sS -o "$E2E_ROOT/job-before-delivery.json" -w '%{http_code}' \
+  "http://127.0.0.1:4501/api/v1/jobs/$JOB_ID" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+test "$JOB_STATUS" = 404
+```
 
-At a 390×844 viewport, verify file selection, sample actions, textarea, account checkboxes, preview diagnostics, audit outcomes, and job link remain readable without horizontal page overflow.
+The returned ID is the appdispatch message ID and future observed job ID. The
+pre-worker `404` is required: publication does not create a job row.
+
+## Worker, terminal state, and repeat safety
+
+```bash
+go run ./cmd/sumweave jobs worker --once --env local
+curl -sS "http://127.0.0.1:4501/api/v1/jobs/$JOB_ID" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/job.json"
+curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/imports/$IMPORT_ID" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/audit.json"
+python3 - "$E2E_ROOT/job.json" "$E2E_ROOT/audit.json" <<'PY'
+import json, sys
+job, audit = (json.load(open(path)) for path in sys.argv[1:])
+assert job["id"] == audit["jobId"]
+assert job["status"] == "succeeded"
+assert audit["status"] == "completed"
+assert "input" not in job and "result" not in job
+PY
+
+# The domain confirmation is idempotent: repeat confirmation returns the same
+# reference with 200 and does not publish a second command or duplicate rows.
+REPEAT_STATUS=$(curl -sS -o "$E2E_ROOT/repeat-confirm.json" -w '%{http_code}' -X POST \
+  "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/imports/$IMPORT_ID/confirm" \
+  -H "Authorization: Bearer $ACCESS_TOKEN")
+test "$REPEAT_STATUS" = 200
+python3 - "$E2E_ROOT/confirm.json" "$E2E_ROOT/repeat-confirm.json" <<'PY'
+import json, sys
+first, repeat = (json.load(open(path)) for path in sys.argv[1:])
+assert repeat == first
+PY
+curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/imports/$IMPORT_ID" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/audit-repeat.json"
+python3 - "$E2E_ROOT/audit.json" "$E2E_ROOT/audit-repeat.json" <<'PY'
+import json, sys
+first, repeat = (json.load(open(path)) for path in sys.argv[1:])
+assert repeat["jobId"] == first["jobId"]
+assert repeat["importedCount"] == first["importedCount"]
+PY
+```
+
+Inspect the audit row outcomes and verify the imported PLN transactions, account,
+category, tags, and optional descriptions. Job detail is lifecycle/requester/
+worker/attempt metadata plus sanitized error fields only.
+
+## Controlled validation fixture
+
+Preview a second CSV containing an invalid date, both amount columns populated,
+and an unsupported currency. Expect a `200` preview with deterministic row
+number/reason diagnostics and `importableCount=0`; do not confirm it. This is the
+supported business-validation branch and must not be reported as a transport
+failure.
+
+```bash
+cat >"$E2E_ROOT/transactions-invalid.csv" <<'CSV'
+Date,Account,Category,Tags,Expense amount,Income amount,Currency,Description
+31.02.26,CSV checking,Invalid,,1.00,2.00,PLN,invalid date and amounts
+01.06.26,CSV checking,Invalid,,1.00,,GBP,unsupported currency
+CSV
+python3 - "$E2E_ROOT/transactions-invalid.csv" >"$E2E_ROOT/invalid-preview-request.json" <<'PY'
+import json, sys
+print(json.dumps({"fileName": "transactions-invalid.csv", "csv": open(sys.argv[1]).read()}))
+PY
+curl -sS -X POST \
+  "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/imports/preview" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  --data @"$E2E_ROOT/invalid-preview-request.json" >"$E2E_ROOT/invalid-preview.json"
+python3 - "$E2E_ROOT/invalid-preview.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+assert data["importableCount"] == 0
+assert len(data["rejectedRows"]) == 2
+PY
+```
+
+## Narrow-screen UI spot check
+
+After the API gate, the same tenant/import may be opened at `390×844` in
+`#/finance/imports` to verify readable preview diagnostics, audit outcomes, and
+the job link. This is optional for the API-only gate and must use the normal UI
+manual-E2E setup, not the isolated API process.
+
+## Cleanup
+
+```bash
+kill "$API_PID" 2>/dev/null || true
+wait "$API_PID" 2>/dev/null || true
+```

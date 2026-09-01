@@ -5,7 +5,8 @@ import JobStatus from './JobStatus.svelte'
 const mocks = vi.hoisted(() => ({ getJob: vi.fn() }))
 
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
-vi.mock('../lib/jobs/api', () => ({
+vi.mock('../lib/jobs/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/jobs/api')>()),
   createSignalJobsApiForAuth: vi.fn(() => ({ getJob: mocks.getJob })),
 }))
 
@@ -65,5 +66,30 @@ describe('JobStatus', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Retry status' }))
     await vi.advanceTimersByTimeAsync(0)
     expect(screen.getByText('Provider rejected sync.')).toBeInTheDocument()
+  })
+
+  it('keeps polling a pre-materialization 404 for its observed dispatch', async () => {
+    const { JobsApiError } = await import('../lib/jobs/api')
+    mocks.getJob
+      .mockRejectedValueOnce(new JobsApiError({ status: 404, method: 'GET', path: '/jobs/job-404', message: 'Not Found' }))
+      .mockResolvedValueOnce(job('succeeded'))
+
+    render(JobStatus, { jobId: 'job-404', openHref: '/finance/jobs/job-404', observedDispatch: true })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByText('Waiting for a worker to receive this job…')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(screen.getByText('Completed.')).toBeInTheDocument()
+  })
+
+  it('shows an arbitrary 404 as a recoverable error', async () => {
+    const { JobsApiError } = await import('../lib/jobs/api')
+    mocks.getJob.mockRejectedValue(new JobsApiError({ status: 404, method: 'GET', path: '/jobs/job-404', message: 'Not Found' }))
+
+    render(JobStatus, { jobId: 'job-404', openHref: '/finance/jobs/job-404' })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByText(/Jobs API GET \/jobs\/job-404 failed: Not Found/)).toBeInTheDocument()
+    expect(mocks.getJob).toHaveBeenCalledTimes(1)
   })
 })

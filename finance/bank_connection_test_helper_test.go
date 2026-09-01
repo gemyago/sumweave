@@ -6,35 +6,6 @@ import (
 	"sync"
 )
 
-type capturedBankSyncJobEnqueuer struct {
-	request *BankConnectionSyncJobRequest
-	jobRef  BankConnectionSyncJobRef
-}
-
-func (e *capturedBankSyncJobEnqueuer) EnqueueBankConnectionSync(
-	_ context.Context,
-	request BankConnectionSyncJobRequest,
-) (BankConnectionSyncJobRef, error) {
-	e.request = &request
-	if e.jobRef.JobType == "" {
-		e.jobRef = BankConnectionSyncJobRef{ID: "job-sync-1", JobType: request.JobType}
-	}
-	return e.jobRef, nil
-}
-
-type capturedBankSyncScheduleWriter struct {
-	schedules []BankConnectionSyncSchedule
-	err       error
-}
-
-func (w *capturedBankSyncScheduleWriter) UpsertBankConnectionSyncSchedule(
-	_ context.Context,
-	schedule BankConnectionSyncSchedule,
-) error {
-	w.schedules = append(w.schedules, schedule)
-	return w.err
-}
-
 type stubBankProvider struct {
 	name         string
 	startResult  ProviderLinkStart

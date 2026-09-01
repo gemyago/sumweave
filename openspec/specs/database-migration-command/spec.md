@@ -8,7 +8,13 @@ The backend application SHALL provide an explicit `sumweave db-migrate` command 
 
 #### Scenario: Command migrates all configured app schemas
 - **WHEN** a user runs `sumweave db-migrate` with a valid environment configuration
-- **THEN** the command MUST run all configured schema initialization steps for agent runtime storage, application database-backed auth and dispatch state, durable jobs persistence, and finance persistence
+- **THEN** the command MUST run all configured schema initialization steps for
+  agent runtime storage, application database-backed auth and dispatch state,
+  job-projection persistence used by observed consumers, and finance persistence
+- **AND** dispatch storage MUST support immutable unique message IDs and the
+  topic/consumer-group offsets required for durable delivery
+- **AND** finance persistence MUST include the authoritative bank-connection
+  schedule and daily FX refresh due-state tables used by `jobs enqueue-due`
 - **AND** it MUST complete without starting the HTTP server, jobs consumer mode, scheduler loop, provider sync, or AI/runtime request execution
 
 ### Requirement: Standard Environment Setup Uses Explicit Migration
@@ -17,6 +23,15 @@ The repository SHALL document explicit database migration as a standard setup st
 #### Scenario: Local setup documents migration before local all-in-one startup
 - **WHEN** a developer follows documented local backend setup instructions
 - **THEN** the instructions MUST direct them to run `sumweave db-migrate` before starting `sumweave start-all` or other backend processes that depend on persisted tables
+
+#### Scenario: Split process modes use the same prepared schemas
+
+- **WHEN** a developer runs `sumweave start`, `sumweave jobs worker`, or
+  `sumweave jobs enqueue-due` after migration
+- **THEN** each mode MUST use the same prepared dispatch, job-projection, and
+  finance schemas
+- **AND** scheduler publication MUST not create an observed job row before
+  worker delivery.
 
 ### Requirement: Startup Does Not Run Schema Migrations
 Backend process startup SHALL rely on schemas prepared by the explicit migration command instead of creating or updating schemas implicitly.

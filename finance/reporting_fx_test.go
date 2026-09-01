@@ -19,34 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type capturedFXRefreshJobEnqueuer struct {
-	request *FXRefreshJobRequest
-	jobRef  FXRefreshJobRef
-}
-
-func (e *capturedFXRefreshJobEnqueuer) EnqueueFXRefresh(
-	_ context.Context,
-	request FXRefreshJobRequest,
-) (FXRefreshJobRef, error) {
-	e.request = &request
-	if e.jobRef.JobType == "" {
-		e.jobRef = FXRefreshJobRef{ID: "job-id", JobType: request.JobType}
-	}
-	return e.jobRef, nil
-}
-
-type capturedFXRefreshScheduleWriter struct {
-	schedule FXRefreshSchedule
-}
-
-func (s *capturedFXRefreshScheduleWriter) UpsertFXRefreshSchedule(
-	_ context.Context,
-	schedule FXRefreshSchedule,
-) error {
-	s.schedule = schedule
-	return nil
-}
-
 func TestReportingAndFX(t *testing.T) {
 	makeStore := func(t *testing.T) *persistence.Store {
 		t.Helper()
@@ -526,18 +498,20 @@ func TestReportingAndFX(t *testing.T) {
 					Rate:          4.12,
 				}},
 			)
-			enqueuer := &capturedFXRefreshJobEnqueuer{jobRef: FXRefreshJobRef{
-				ID:      fmt.Sprintf("job-%s", fake.Lorem().Word()),
-				JobType: FXRefreshJobType,
-			}}
-			scheduler := &capturedFXRefreshScheduleWriter{}
+			publisher := NewMockSemanticCommandPublisher(t)
+			var published SemanticCommand
+			publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).RunAndReturn(
+				func(_ context.Context, command SemanticCommand) (DispatchReference, error) {
+					published = command
+					return DispatchReference{MessageID: fmt.Sprintf("job-%s", fake.Lorem().Word())}, nil
+				},
+			)
 			service := NewService(
 				store,
 				WithNow(func() time.Time { return now }),
 				WithFXProviders(provider, NewNBPFXProvider(nil, ""), NewECBFXProvider(nil, "")),
 				WithDefaultFXProvider(provider.Name()),
-				WithFXJobEnqueuer(enqueuer),
-				WithFXScheduleWriter(scheduler),
+				WithCommandPublisher(publisher),
 			)
 
 			err := store.SaveCurrentFXRates(t.Context(), []domain.FXRate{{
@@ -557,26 +531,16 @@ func TestReportingAndFX(t *testing.T) {
 
 			jobRef, err := service.TriggerFXRefresh(t.Context(), TriggerFXRefreshParams{
 				RequestedByUserID: fmt.Sprintf("admin-%s", fake.Lorem().Word()),
-				Source:            FXSyncRequesterSourceOperator,
+				Source:            CommandRequesterSourceOperator,
 				Provider:          provider.Name(),
 			})
 			require.NoError(t, err)
 			assert.Equal(t, FXRefreshJobType, jobRef.JobType)
 			assert.Equal(t, provider.Name(), jobRef.Provider)
-			require.NotNil(t, enqueuer.request)
-			assert.Equal(t, FXRefreshJobType, enqueuer.request.JobType)
-			assert.Equal(t, provider.Name(), enqueuer.request.Input.Provider)
-
-			schedule, err := service.EnsureFXRefreshSchedule(t.Context(), EnsureFXRefreshScheduleParams{
-				ScheduleID:      fmt.Sprintf("fx-daily-%s", fake.Lorem().Word()),
-				Provider:        provider.Name(),
-				Interval:        24 * time.Hour,
-				RequestedByUser: "system",
-			})
-			require.NoError(t, err)
-			assert.Equal(t, FXRefreshJobType, schedule.JobType)
-			assert.Equal(t, FXRefreshJobType, scheduler.schedule.JobType)
-			assert.Equal(t, provider.Name(), scheduler.schedule.Input.Provider)
+			assert.Equal(t, FXRatesRefreshCommandTopic, published.Topic)
+			var publishedPayload FXRatesRefreshCommand
+			require.NoError(t, json.Unmarshal(published.Payload, &publishedPayload))
+			assert.Equal(t, provider.Name(), publishedPayload.Provider)
 
 			diagnostics, err := service.GetFXAdminDiagnostics(
 				t.Context(),
@@ -715,6 +679,8 @@ func TestReportingAndFX(t *testing.T) {
 
 			_, err = service.RefreshRequiredFXRates(t.Context(), RefreshFXRatesParams{})
 			require.Error(t, err)
+			_, classified := TerminalFailureFrom(err)
+			assert.False(t, classified)
 			rates, listErr := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
 				Provider: providerName,
 			})
@@ -770,6 +736,9 @@ func TestReportingAndFX(t *testing.T) {
 
 					_, err := service.RefreshRequiredFXRates(t.Context(), RefreshFXRatesParams{})
 					require.Error(t, err)
+					failure, classified := TerminalFailureFrom(err)
+					require.True(t, classified)
+					assert.Equal(t, "fx_provider_response_invalid", failure.Code)
 					rates, listErr := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
 						Provider: providerName,
 					})

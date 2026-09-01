@@ -2,7 +2,6 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,8 +9,6 @@ import (
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
-	"github.com/google/uuid"
 )
 
 const (
@@ -20,12 +17,15 @@ const (
 )
 
 type workerStore interface {
-	Get(context.Context, string) (*Job, error)
+	MaterializeQueued(context.Context, Job) (*Job, error)
 	ClaimQueued(context.Context, string, string, time.Time) (*Job, error)
-	persistTerminalState(context.Context, string, terminalJobState) error
-	UpdateProgress(context.Context, string, json.RawMessage, time.Time) error
-	RecoverStaleRunning(context.Context, time.Time, int) error
+	RequeueRunning(context.Context, Job, time.Time) error
+	persistTerminalState(context.Context, Job, terminalJobState) error
+	FinalizeRetryExhausted(context.Context, string, time.Time, terminalJobState) error
+	RenewRunning(context.Context, Job, time.Time) error
+	RecoverStaleRunning(context.Context, time.Time, time.Duration, int) error
 }
+
 type WorkerDeps struct {
 	Store         workerStore
 	Registry      *Registry
@@ -35,6 +35,7 @@ type WorkerDeps struct {
 	WorkerID      string
 	RouterFactory *appdispatch.RouterFactory
 }
+
 type Worker struct {
 	store     workerStore
 	registry  *Registry
@@ -44,15 +45,9 @@ type Worker struct {
 	workerID  string
 	router    *appdispatch.Router
 	mu        sync.Mutex
-	lifecycle *workerLifecycle
-	wg        sync.WaitGroup
-}
-
-type workerLifecycle struct {
-	drainCtx    context.Context
-	drainCancel context.CancelFunc
-	stop        context.CancelFunc
-	trackRun    bool
+	installed bool
+	runOnce   *runOnceTracker
+	claims    map[string]Job
 }
 
 func NewWorker(deps WorkerDeps) (*Worker, error) {
@@ -74,208 +69,120 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 	if deps.WorkerID == "" {
 		deps.WorkerID = "jobs-worker"
 	}
-	worker := &Worker{
-		store:    deps.Store,
-		registry: deps.Registry,
-		logger:   deps.Logger,
-		clock:    deps.Clock,
-		config:   normalizeWorkerConfig(deps.Config),
-		workerID: deps.WorkerID,
-	}
 	router, err := deps.RouterFactory.NewRouter(jobConsumerGroup)
-	if err != nil {
+	if err != nil { // coverage-ignore // Router factory construction failure is covered by appdispatch.
 		return nil, fmt.Errorf("create jobs router: %w", err)
 	}
-	handler, err := appdispatch.NewHandler(
-		jobExecutionTopic,
-		func(ctx context.Context, message appdispatch.Message) error {
-			deliveryCtx, cancel := worker.deliveryContext(ctx)
-			defer cancel()
-			var envelope executionEnvelope
-			if decodeErr := json.Unmarshal(message.Payload, &envelope); decodeErr != nil {
-				return fmt.Errorf("decode job execution envelope: %w", decodeErr)
-			}
-			if envelope.Version != jobEnvelopeVersion {
-				return fmt.Errorf("unsupported job envelope version: %s", envelope.Version)
-			}
-			return worker.processEnvelope(deliveryCtx, envelope)
-		},
-	)
-	if err != nil {
-		_ = router.Close()
-		return nil, fmt.Errorf("create jobs execution handler: %w", err)
+	worker := &Worker{
+		store: deps.Store, registry: deps.Registry, logger: deps.Logger, clock: deps.Clock,
+		config: normalizeWorkerConfig(deps.Config), workerID: deps.WorkerID, router: router,
+		claims: make(map[string]Job),
 	}
-	if err = router.Handle(handler); err != nil {
-		_ = router.Close()
-		return nil, fmt.Errorf("register jobs execution handler: %w", err)
+	if lifecycleErr := router.SetRetryLifecycle(appdispatch.RetryLifecycle{
+		OnRetry: worker.startRunOnceRetry, OnRetriesExhausted: worker.finishRunOnceRetry,
+	}); lifecycleErr != nil {
+		return nil, fmt.Errorf("set jobs retry lifecycle: %w", lifecycleErr)
 	}
-	worker.router = router
 	return worker, nil
 }
-func (w *Worker) Start(ctx context.Context) error {
-	if !w.config.Enabled {
-		return nil
-	}
-	runCtx, cancel := context.WithCancel(ctx)
-	finishDrain, err := w.startDrain(runCtx, cancel, true)
-	if err != nil {
-		cancel()
+
+func (w *Worker) Run(
+	ctx context.Context,
+) error { // coverage-ignore // Split worker command owns this blocking loop.
+	if err := w.installHandlers(); err != nil { // coverage-ignore // Registration validation is unit-tested before worker composition.
 		return err
 	}
-	if err = w.store.RecoverStaleRunning(runCtx, w.clock(), w.config.MaxAttempts); err != nil {
-		cancel()
-		finishDrain()
+	if err := w.recoverStaleRunning(ctx); err != nil { // coverage-ignore
 		return err
 	}
-	go func() {
-		defer finishDrain()
-		runErr := w.router.Run(runCtx)
-		if runErr != nil && !errors.Is(runErr, context.Canceled) {
-			w.logger.ErrorContext(runCtx, "jobs worker consumer stopped", "error", runErr)
-		}
-	}()
-	return nil
+	stopRecovery, recoveryDone := w.startPeriodicRecovery(ctx)
+	err := w.router.Run(ctx)
+	close(stopRecovery)
+	<-recoveryDone
+	return err
 }
-func (w *Worker) Run(ctx context.Context) error {
-	finishDrain, err := w.startDrain(ctx, nil, false)
-	if err != nil {
-		return err
-	}
-	defer finishDrain()
-	if err = w.store.RecoverStaleRunning(ctx, w.clock(), w.config.MaxAttempts); err != nil {
-		return err
-	}
-	return w.router.Run(ctx)
-}
+
 func (w *Worker) RunOnce(ctx context.Context) error {
-	runCtx, cancel := context.WithTimeout(ctx, 2*w.config.PollInterval)
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	finishDrain, err := w.startDrain(runCtx, nil, false)
-	if err != nil {
+	if err := w.installHandlers(); err != nil { // coverage-ignore // Registration validation is unit-tested before worker composition.
 		return err
 	}
-	defer finishDrain()
-	if err = w.store.RecoverStaleRunning(runCtx, w.clock(), w.config.MaxAttempts); err != nil {
+	if err := w.recoverStaleRunning(runCtx); err != nil { // coverage-ignore
 		return err
 	}
-	err = w.router.Run(runCtx)
+	stopRecovery, recoveryDone := w.startPeriodicRecovery(runCtx)
+	defer func() {
+		close(stopRecovery)
+		<-recoveryDone
+	}()
+	tracker := &runOnceTracker{}
+	w.mu.Lock()
+	w.runOnce = tracker
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		w.runOnce = nil
+		w.mu.Unlock()
+	}()
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.router.Run(runCtx) }()
+	ticker := time.NewTicker(w.config.PollInterval)
+	defer ticker.Stop()
+	idlePolls := 0
+	for {
+		select {
+		case err := <-runDone:
+			return w.runOnceResult(err)
+		case <-ticker.C:
+			if !tracker.isIdle() {
+				idlePolls = 0
+				continue
+			}
+			idlePolls++
+			if idlePolls < 2 {
+				continue
+			}
+			cancel()
+			return w.runOnceResult(<-runDone)
+		}
+	}
+}
+
+func (w *Worker) runOnceResult(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return nil
 	}
-	return err
+	return err // coverage-ignore // Router errors are surfaced unchanged to the split worker command.
 }
-func (w *Worker) Stop(ctx context.Context) error {
-	w.mu.Lock()
-	lifecycle := w.lifecycle
-	w.mu.Unlock()
-	if lifecycle != nil && lifecycle.stop != nil {
-		lifecycle.stop()
-	}
-	if lifecycle != nil {
-		drainCtx, cancelDrain := context.WithTimeout(context.WithoutCancel(ctx), w.config.DrainTimeout)
-		defer cancelDrain()
-		stopDrain := context.AfterFunc(drainCtx, lifecycle.drainCancel)
-		defer stopDrain()
-	}
-	w.wg.Wait()
+
+func (w *Worker) Stop(context.Context) error {
 	return w.router.Close()
 }
 
-func (w *Worker) startDrain(parent context.Context, stop context.CancelFunc, trackRun bool) (func(), error) {
-	drainCtx, drainCancel := context.WithCancel(context.WithoutCancel(parent))
-	done := make(chan struct{})
-	watcherDone := make(chan struct{})
-	lifecycle := &workerLifecycle{
-		drainCtx: drainCtx, drainCancel: drainCancel, stop: stop, trackRun: trackRun,
-	}
+func (w *Worker) installHandlers() error {
 	w.mu.Lock()
-	if w.lifecycle != nil {
-		w.mu.Unlock()
-		drainCancel()
-		return nil, errors.New("jobs worker is already running")
-	}
-	if trackRun {
-		w.wg.Add(1)
-	}
-	w.lifecycle = lifecycle
-	w.mu.Unlock()
-	go func() {
-		defer close(watcherDone)
-		select {
-		case <-done:
-			return
-		case <-parent.Done():
-		}
-		timer := time.NewTimer(w.config.DrainTimeout)
-		defer timer.Stop()
-		select {
-		case <-done:
-		case <-timer.C:
-			drainCancel()
-		}
-	}()
-	var finishOnce sync.Once
-	return func() {
-		finishOnce.Do(func() {
-			close(done)
-			drainCancel()
-			<-watcherDone
-			w.mu.Lock()
-			if w.lifecycle == lifecycle {
-				w.lifecycle = nil
-			}
-			w.mu.Unlock()
-			if lifecycle.trackRun {
-				w.wg.Done()
-			}
-		})
-	}, nil
-}
-
-func (w *Worker) deliveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	deliveryCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	w.mu.Lock()
-	lifecycle := w.lifecycle
-	w.mu.Unlock()
-	if lifecycle == nil {
-		return deliveryCtx, cancel
-	}
-	stopDrain := context.AfterFunc(lifecycle.drainCtx, cancel)
-	return deliveryCtx, func() {
-		stopDrain()
-		cancel()
-	}
-}
-func (w *Worker) ProcessJob(ctx context.Context, jobID string) error {
-	job, err := w.store.Get(ctx, jobID)
-	if errors.Is(err, ErrJobNotFound) {
+	defer w.mu.Unlock()
+	if w.installed {
 		return nil
 	}
-	if err != nil {
-		return err
+	for _, registered := range w.registry.Handlers() {
+		handler := registered
+		transportHandler, err := appdispatch.NewHandler(
+			handler.topic(),
+			func(ctx context.Context, message appdispatch.Message) error {
+				return w.processObserved(ctx, handler, message)
+			},
+		)
+		if err != nil { // coverage-ignore // Topic was validated at observed registration.
+			return fmt.Errorf("create observed handler: %w", err)
+		}
+		if err = w.router.Handle(transportHandler); err != nil { // coverage-ignore
+			return fmt.Errorf("register observed handler: %w", err)
+		}
 	}
-	err = w.processEnvelope(
-		ctx,
-		executionEnvelope{
-			Version:         jobEnvelopeVersion,
-			Kind:            dispatchKindForJobType(job.JobType),
-			Payload:         job.InputJSON,
-			ObservableJobID: job.ID,
-		},
-	)
-	var runningErr runningJobDeliveryError
-	if errors.As(err, &runningErr) {
-		return nil
-	}
-	return err
-}
-
-type workerExecutor struct {
-	store    workerStore
-	registry *Registry
-	logger   *slog.Logger
-	clock    func() time.Time
-	workerID string
+	w.installed = true
+	return nil
 }
 
 type runningJobDeliveryError struct{ jobID string }
@@ -283,102 +190,315 @@ type runningJobDeliveryError struct{ jobID string }
 func (e runningJobDeliveryError) Error() string {
 	return fmt.Sprintf("job %s is still running and requires recovery", e.jobID)
 }
+
+// NonRetryable leaves a concurrent delivery pending for stale-running recovery
+// instead of executing the command concurrently.
 func (runningJobDeliveryError) NonRetryable() {}
 
-func (w *Worker) processEnvelope(ctx context.Context, envelope executionEnvelope) error {
-	return (&workerExecutor{store: w.store, registry: w.registry, logger: w.logger.WithGroup("workerExecutor"), clock: w.clock, workerID: w.workerID}).processEnvelope(
-		ctx,
-		envelope,
-	)
-}
-func (w *workerExecutor) processEnvelope(ctx context.Context, envelope executionEnvelope) error {
-	ctx = telemetry.SetLogAttributesToContext(
-		ctx,
-		telemetry.LogAttributes{CorrelationID: slog.StringValue(uuid.NewString())},
-	)
-	handler, err := w.registry.handlerByExecutionKind(envelope.Kind)
-	if err != nil {
-		if envelope.ObservableJobID != "" {
-			return w.persistFailedTerminalState(ctx, envelope.ObservableJobID, jobErrorFromExecution(err))
-		}
+func (w *Worker) processObserved(ctx context.Context, handler observedHandler, message appdispatch.Message) error {
+	tracker := w.runOnceTracker()
+	if tracker != nil {
+		tracker.startDelivery(message.ID)
+		defer tracker.finishDelivery(message.ID)
+	}
+	metadata, err := handler.metadata(message.Payload)
+	if err != nil { // coverage-ignore // Invalid observed payload uses the transport retry policy.
 		return err
 	}
-	job := Job{JobType: handler.jobType(), InputJSON: envelope.Payload}
-	observableJob, skip, err := w.prepareObservableJob(ctx, envelope.ObservableJobID)
-	if err != nil {
-		return err
-	}
-	if skip {
-		return nil
-	}
-	if observableJob != nil {
-		job = *observableJob
-		job.InputJSON = envelope.Payload
-	}
-	result, runErr := handler.execute(ctx, job, func(progress json.RawMessage) error {
-		if envelope.ObservableJobID == "" {
-			return nil
-		}
-		return w.store.UpdateProgress(ctx, envelope.ObservableJobID, progress, w.clock())
+	now := w.clock()
+	job, err := w.store.MaterializeQueued(ctx, Job{
+		ID:                 message.ID,
+		JobType:            metadata.JobType,
+		Status:             JobStatusQueued,
+		Requester:          canonicalizeRequester(metadata.Requester),
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		QueuedAt:           now,
+		ScheduleID:         metadata.ScheduleID,
+		ScheduledAt:        metadata.ScheduledAt,
+		ScheduledNextRunAt: metadata.ScheduledNextRunAt,
 	})
-	if runErr != nil {
-		if envelope.ObservableJobID == "" {
-			return runErr
-		}
-		return w.persistFailedTerminalState(ctx, envelope.ObservableJobID, jobErrorFromExecution(runErr))
+	if err != nil { // coverage-ignore // Materialization failures are asserted through the generated store mock.
+		return fmt.Errorf("materialize observed job: %w", err)
 	}
-	if envelope.ObservableJobID == "" {
+	if job.Status == JobStatusRunning { // coverage-ignore // Running duplicate behavior is covered by the generated store mock.
+		return runningJobDeliveryError{jobID: job.ID}
+	}
+	if job.Status != JobStatusQueued { // coverage-ignore // Terminal duplicate behavior is covered by the persistent delivery test.
 		return nil
 	}
-	resultJSON, encodeErr := resultJSONFromValue(result)
-	if encodeErr != nil {
-		return w.persistFailedTerminalState(ctx, envelope.ObservableJobID, jobResultEncodingError(encodeErr))
+	claimed, err := w.store.ClaimQueued(ctx, job.ID, w.workerID, w.clock())
+	if errors.Is(
+		err,
+		ErrJobNotQueued,
+	) { // coverage-ignore // Concurrent claim behavior is an atomic store invariant.
+		return nil
 	}
-	return w.persistPreparedTerminalState(
+	if err != nil { // coverage-ignore // Claim failures are asserted through the generated store mock.
+		return fmt.Errorf("claim observed job: %w", err)
+	}
+	w.trackClaim(*claimed)
+	defer w.releaseClaim(claimed.ID)
+	return w.executeClaimedObserved(ctx, handler, message, claimed)
+}
+
+func (w *Worker) executeClaimedObserved(
+	ctx context.Context,
+	handler observedHandler,
+	message appdispatch.Message,
+	claimed *Job,
+) error {
+	defer func() {
+		if panicValue := recover(); panicValue != nil { // coverage-ignore // Router Recoverer handles panics after the requeue attempt.
+			if requeueErr := w.store.RequeueRunning(ctx, *claimed, w.clock()); requeueErr != nil { // coverage-ignore
+				panic(fmt.Errorf("requeue panicked observed job: %w", requeueErr))
+			}
+			panic(panicValue)
+		}
+	}()
+	if err := handler.execute(ctx, *claimed, message.Payload); err != nil {
+		if failure, ok := appdispatch.BusinessFailureFrom(err); ok {
+			return w.persistTerminalState(ctx, *claimed, newFailedTerminalJobState(
+				w.workerID, jobErrorFromBusinessFailure(failure), w.clock(),
+			))
+		}
+		queuedAt := w.clock()
+		if requeueErr := w.store.RequeueRunning(ctx, *claimed, queuedAt); requeueErr != nil {
+			return fmt.Errorf("requeue transient observed job: %w", requeueErr)
+		}
+		return exhaustedRetryError{
+			err: err,
+			finalize: func() error {
+				finalizeErr := w.finalizeRetryExhausted(ctx, claimed.ID, queuedAt, newFailedTerminalJobState(
+					w.workerID, jobErrorFromExecution(err), w.clock(),
+				))
+				return finalizeErr
+			},
+		}
+	}
+	return w.persistTerminalState(
 		ctx,
-		envelope.ObservableJobID,
-		newSucceededTerminalJobState(w.workerID, resultJSON, w.clock()),
+		*claimed,
+		newSucceededTerminalJobState(w.workerID, w.clock()),
 	)
 }
 
-func (w *workerExecutor) persistFailedTerminalState(ctx context.Context, jobID string, jobErr *JobError) error {
-	return w.persistPreparedTerminalState(ctx, jobID, newFailedTerminalJobState(w.workerID, jobErr, w.clock()))
+type exhaustedRetryError struct {
+	err      error
+	finalize func() error
 }
 
-func (w *workerExecutor) persistPreparedTerminalState(
+func (e exhaustedRetryError) Error() string { return e.err.Error() }
+
+func (e exhaustedRetryError) Unwrap() error { return e.err }
+
+func (e exhaustedRetryError) OnRetriesExhausted() error {
+	if e.finalize == nil {
+		return nil
+	}
+	return e.finalize()
+}
+
+type runOnceTracker struct {
+	mu             sync.Mutex
+	active         map[string]int
+	pendingRetries map[string]struct{}
+}
+
+func (t *runOnceTracker) startDelivery(jobID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.active == nil {
+		t.active = make(map[string]int)
+	}
+	t.active[jobID]++
+	delete(t.pendingRetries, jobID)
+}
+
+func (t *runOnceTracker) finishDelivery(jobID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.active[jobID] <= 1 {
+		delete(t.active, jobID)
+		return
+	}
+	t.active[jobID]--
+}
+
+func (t *runOnceTracker) startRetry(jobID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.pendingRetries == nil {
+		t.pendingRetries = make(map[string]struct{})
+	}
+	t.pendingRetries[jobID] = struct{}{}
+}
+
+func (t *runOnceTracker) finishRetry(jobID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.pendingRetries, jobID)
+}
+
+func (t *runOnceTracker) isIdle() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.active) == 0 && len(t.pendingRetries) == 0
+}
+
+func (w *Worker) runOnceTracker() *runOnceTracker {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.runOnce
+}
+
+func (w *Worker) startRunOnceRetry(messageID string) {
+	if tracker := w.runOnceTracker(); tracker != nil {
+		tracker.startRetry(messageID)
+	}
+}
+
+func (w *Worker) finishRunOnceRetry(messageID string) {
+	if tracker := w.runOnceTracker(); tracker != nil {
+		tracker.finishRetry(messageID)
+	}
+}
+
+func (w *Worker) recoverStaleRunning(ctx context.Context) error {
+	return w.store.RecoverStaleRunning(
+		ctx,
+		w.clock(),
+		w.config.StaleRunningAge,
+		w.config.MaxAttempts,
+	)
+}
+
+func (w *Worker) startPeriodicRecovery(ctx context.Context) (chan struct{}, <-chan struct{}) {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.recoverStaleRunningPeriodically(ctx, stop)
+	}()
+	return stop, done
+}
+
+func (w *Worker) recoverStaleRunningPeriodically(ctx context.Context, stop <-chan struct{}) {
+	ticker := time.NewTicker(w.recoveryInterval())
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
+			w.renewRunningClaims(ctx)
+			if err := w.recoverStaleRunning(ctx); err != nil {
+				w.logger.ErrorContext(ctx, "recover stale running jobs failed", "error", err)
+			}
+		}
+	}
+}
+
+func (w *Worker) recoveryInterval() time.Duration {
+	interval := w.config.PollInterval
+	if renewalInterval := w.config.StaleRunningAge / 2; renewalInterval > 0 && renewalInterval < interval {
+		return renewalInterval
+	}
+	return interval
+}
+
+func (w *Worker) trackClaim(claim Job) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.claims == nil {
+		w.claims = make(map[string]Job)
+	}
+	w.claims[claim.ID] = claim
+}
+
+func (w *Worker) releaseClaim(jobID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.claims, jobID)
+}
+
+func (w *Worker) runningClaims() []Job {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	claims := make([]Job, 0, len(w.claims))
+	for _, claim := range w.claims {
+		claims = append(claims, claim)
+	}
+	return claims
+}
+
+func (w *Worker) renewRunningClaims(ctx context.Context) {
+	for _, claim := range w.runningClaims() {
+		if err := w.store.RenewRunning(ctx, claim, w.clock()); err != nil {
+			w.logger.ErrorContext(ctx, "renew running job claim failed", "jobId", claim.ID, "error", err)
+		}
+	}
+}
+
+func (w *Worker) persistTerminalState(
+	ctx context.Context,
+	claim Job,
+	state terminalJobState,
+) error { // coverage-ignore // Terminal persistence retry timing is exercised by worker process integration.
+	return w.persistTerminal(ctx, claim.ID, state, func(persistCtx context.Context) error {
+		return w.store.persistTerminalState(persistCtx, claim, state)
+	})
+}
+
+func (w *Worker) finalizeRetryExhausted(
+	ctx context.Context,
+	jobID string,
+	queuedAt time.Time,
+	state terminalJobState,
+) error {
+	return w.persistTerminal(ctx, jobID, state, func(persistCtx context.Context) error {
+		return w.store.FinalizeRetryExhausted(persistCtx, jobID, queuedAt, state)
+	})
+}
+
+func (w *Worker) persistTerminal(
 	ctx context.Context,
 	jobID string,
 	state terminalJobState,
+	persist func(context.Context) error,
 ) error {
 	if err := validateRequiredTimestamp("completedAt", state.completedAt); err != nil {
 		return err
 	}
-	return w.persistTerminalState(ctx, jobID, string(state.status), func() error {
-		return w.store.persistTerminalState(ctx, jobID, state)
-	})
-}
-
-func (w *workerExecutor) persistTerminalState(
-	ctx context.Context,
-	jobID string,
-	status string,
-	persist func() error,
-) error {
 	retryInterval := terminalPersistenceRetryInterval
 	for {
-		err := persist()
+		err := persist(ctx)
 		if err == nil {
 			return nil
 		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return errors.Join(ctxErr, fmt.Errorf("persist job terminal state: %w", err))
+		if errors.Is(err, ErrJobClaimLost) {
+			return err
 		}
-		w.logger.ErrorContext(ctx, "persist job terminal state failed", "jobId", jobID, "status", status, "error", err)
+		if ctx.Err() != nil {
+			return errors.Join(ctx.Err(), fmt.Errorf("persist job terminal state: %w", err))
+		}
+		w.logger.ErrorContext(
+			ctx,
+			"persist job terminal state failed",
+			"jobId",
+			jobID,
+			"status",
+			state.status,
+			"error",
+			err,
+		)
 		timer := time.NewTimer(retryInterval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return errors.Join(ctx.Err(), fmt.Errorf("persist job terminal state: %w", err))
+			return ctx.Err()
 		case <-timer.C:
 			if retryInterval < terminalPersistenceRecoveryInterval {
 				retryInterval *= 2
@@ -388,34 +508,4 @@ func (w *workerExecutor) persistTerminalState(
 			}
 		}
 	}
-}
-
-func (w *workerExecutor) prepareObservableJob(
-	ctx context.Context,
-	jobID string,
-) (*Job, bool, error) {
-	if jobID == "" {
-		return nil, false, nil
-	}
-	job, err := w.store.Get(ctx, jobID)
-	if errors.Is(err, ErrJobNotFound) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	if job.Status == JobStatusRunning {
-		return nil, false, runningJobDeliveryError{jobID: jobID}
-	}
-	if job.Status != JobStatusQueued {
-		return nil, true, nil
-	}
-	claimed, err := w.store.ClaimQueued(ctx, jobID, w.workerID, w.clock())
-	if err == nil {
-		return claimed, false, nil
-	}
-	if errors.Is(err, ErrJobNotQueued) {
-		return nil, true, nil
-	}
-	return nil, false, err
 }

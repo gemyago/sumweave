@@ -11,6 +11,8 @@ packages:
       bankConnectionMetadataStore:
       providerSnapshotConnectionDeleter:
       bankSyncOrchestrator:
+      SemanticCommandPublisher:
+      ScheduledSemanticCommandPublisher:
       FXRatesProvider:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:

@@ -42,6 +42,64 @@ func (m *Migrator) migrateSQLite(ctx context.Context) error {
 			return fmt.Errorf("migrate sqlite app dispatch transport: %w", execErr)
 		}
 	}
+	if err := m.ensureSQLitePayloadHash(ctx); err != nil {
+		return err
+	}
+	if err := m.ensureSQLiteMessageIDUniqueness(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Migrator) ensureSQLitePayloadHash(ctx context.Context) error {
+	rows, err := m.db.QueryContext(ctx, `PRAGMA table_info(`+quoteIdentifier(m.config.MessagesTable())+`)`)
+	if err != nil {
+		return fmt.Errorf("inspect sqlite app dispatch messages columns: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var (
+			columnID, notNull, primaryKey int
+			name, columnType              string
+			defaultValue                  sql.NullString
+		)
+		if err = rows.Scan(&columnID, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("scan sqlite app dispatch messages column: %w", err)
+		}
+		if name == "payload_hash" {
+			return nil
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("iterate sqlite app dispatch messages columns: %w", err)
+	}
+	if _, err = m.db.ExecContext(
+		ctx,
+		`ALTER TABLE `+quoteIdentifier(m.config.MessagesTable())+` ADD COLUMN payload_hash TEXT NOT NULL DEFAULT ''`,
+	); err != nil {
+		return fmt.Errorf("add sqlite app dispatch payload hash: %w", err)
+	}
+	return nil
+}
+
+func (m *Migrator) ensureSQLiteMessageIDUniqueness(ctx context.Context) error {
+	messagesTable := quoteIdentifier(m.config.MessagesTable())
+	//nolint:gosec // Table names derive from trusted application configuration.
+	if _, err := m.db.ExecContext(
+		ctx,
+		`DELETE FROM `+messagesTable+` WHERE "offset" NOT IN (`+
+			`SELECT earliest_offset FROM (SELECT MIN("offset") AS earliest_offset FROM `+messagesTable+` GROUP BY uuid))`,
+	); err != nil {
+		return fmt.Errorf("deduplicate sqlite app dispatch message ids: %w", err)
+	}
+	if _, err := m.db.ExecContext(
+		ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS `+quoteIdentifier(m.config.MessagesTable()+"_uuid_uidx")+
+			` ON `+messagesTable+` (uuid)`,
+	); err != nil {
+		return fmt.Errorf("enforce sqlite app dispatch message ids: %w", err)
+	}
 	return nil
 }
 
@@ -61,8 +119,45 @@ func (m *Migrator) migratePostgres(ctx context.Context) error {
 			return fmt.Errorf("exec postgres transport migration query: %w", err)
 		}
 	}
+	if err = m.ensurePostgresPayloadHash(ctx, tx); err != nil {
+		return err
+	}
+	if err = m.ensurePostgresMessageIDUniqueness(ctx, tx); err != nil {
+		return err
+	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit postgres transport migration: %w", err)
+	}
+	return nil
+}
+
+func (m *Migrator) ensurePostgresPayloadHash(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(
+		ctx,
+		`ALTER TABLE `+quoteIdentifier(m.config.MessagesTable())+
+			` ADD COLUMN IF NOT EXISTS payload_hash VARCHAR(64) NOT NULL DEFAULT ''`,
+	); err != nil {
+		return fmt.Errorf("add postgres app dispatch payload hash: %w", err)
+	}
+	return nil
+}
+
+func (m *Migrator) ensurePostgresMessageIDUniqueness(ctx context.Context, tx *sql.Tx) error {
+	messagesTable := quoteIdentifier(m.config.MessagesTable())
+	//nolint:gosec // Table names derive from trusted application configuration.
+	if _, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM `+messagesTable+` AS duplicate USING `+messagesTable+
+			` AS original WHERE duplicate.uuid = original.uuid AND duplicate.ctid > original.ctid`,
+	); err != nil {
+		return fmt.Errorf("deduplicate postgres app dispatch message ids: %w", err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS `+quoteIdentifier(m.config.MessagesTable()+"_uuid_uidx")+
+			` ON `+messagesTable+` (uuid)`,
+	); err != nil {
+		return fmt.Errorf("enforce postgres app dispatch message ids: %w", err)
 	}
 	return nil
 }

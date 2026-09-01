@@ -41,8 +41,7 @@ type BankSyncService struct {
 	access                  *accessGuard
 	now                     func() time.Time
 	syncOrchestrator        bankSyncOrchestrator
-	bankSyncJobEnqueuer     BankConnectionSyncJobEnqueuer
-	bankSyncScheduleWriter  BankConnectionSyncScheduleWriter
+	commandPublisher        SemanticCommandPublisher
 	logger                  *slog.Logger
 	snapshotDeleter         providerSnapshotConnectionDeleter
 	syncStateJournalDeleter providerSyncStateJournalConnectionDeleter
@@ -54,12 +53,8 @@ func WithBankSyncServiceNow(now func() time.Time) BankSyncServiceOption {
 	return func(service *BankSyncService) { service.now = now }
 }
 
-func WithBankSyncServiceJobEnqueuer(enqueuer BankConnectionSyncJobEnqueuer) BankSyncServiceOption {
-	return func(service *BankSyncService) { service.bankSyncJobEnqueuer = enqueuer }
-}
-
-func WithBankSyncServiceScheduleWriter(writer BankConnectionSyncScheduleWriter) BankSyncServiceOption {
-	return func(service *BankSyncService) { service.bankSyncScheduleWriter = writer }
+func WithBankSyncServiceCommandPublisher(publisher SemanticCommandPublisher) BankSyncServiceOption {
+	return func(service *BankSyncService) { service.commandPublisher = publisher }
 }
 
 func WithBankSyncServiceLogger(logger *slog.Logger) BankSyncServiceOption {
@@ -136,16 +131,6 @@ func (s *BankSyncService) UpsertBankConnectionSchedule(
 	if err != nil { // coverage-ignore // Store errors are covered by persistence tests.
 		return domain.BankConnectionSchedule{}, err
 	}
-	if writeErr := s.writeBankConnectionSyncSchedule(ctx, BankConnectionSyncSchedule{
-		ScheduleID:   bankConnectionSyncScheduleID(connection.ID),
-		ConnectionID: connection.ID,
-		ActorUserID:  params.ActorUserID,
-		Interval:     persisted.Interval,
-		NextRunAt:    persisted.NextRunAt,
-		Enabled:      persisted.Enabled,
-	}); writeErr != nil { // coverage-ignore // Schedule-writer failures are covered by app jobs tests.
-		return domain.BankConnectionSchedule{}, writeErr
-	}
 	return persisted, nil
 }
 
@@ -167,16 +152,6 @@ func (s *BankSyncService) PauseBankConnectionSchedule(
 	persisted, err := s.store.SaveBankConnectionSchedule(ctx, *schedule)
 	if err != nil { // coverage-ignore // Store errors are covered by persistence tests.
 		return domain.BankConnectionSchedule{}, err
-	}
-	if writeErr := s.writeBankConnectionSyncSchedule(ctx, BankConnectionSyncSchedule{
-		ScheduleID:   bankConnectionSyncScheduleID(connection.ID),
-		ConnectionID: connection.ID,
-		ActorUserID:  params.ActorUserID,
-		Interval:     persisted.Interval,
-		NextRunAt:    persisted.NextRunAt,
-		Enabled:      persisted.Enabled,
-	}); writeErr != nil { // coverage-ignore // Schedule-writer failures are covered by app jobs tests.
-		return domain.BankConnectionSchedule{}, writeErr
 	}
 	return persisted, nil
 }
@@ -200,16 +175,6 @@ func (s *BankSyncService) ResumeBankConnectionSchedule(
 	if err != nil { // coverage-ignore // Store errors are covered by persistence tests.
 		return domain.BankConnectionSchedule{}, err
 	}
-	if writeErr := s.writeBankConnectionSyncSchedule(ctx, BankConnectionSyncSchedule{
-		ScheduleID:   bankConnectionSyncScheduleID(connection.ID),
-		ConnectionID: connection.ID,
-		ActorUserID:  params.ActorUserID,
-		Interval:     persisted.Interval,
-		NextRunAt:    persisted.NextRunAt,
-		Enabled:      persisted.Enabled,
-	}); writeErr != nil { // coverage-ignore // Schedule-writer failures are covered by app jobs tests.
-		return domain.BankConnectionSchedule{}, writeErr
-	}
 	return persisted, nil
 }
 
@@ -220,32 +185,36 @@ func (s *BankSyncService) TriggerBankConnectionSync(
 	if err := validateBankConnectionSyncWindows(params.WindowStart, params.WindowEnd); err != nil {
 		return BankConnectionSyncJobRef{}, err
 	}
-	if s.bankSyncJobEnqueuer == nil {
-		return BankConnectionSyncJobRef{}, errors.New("bank sync job enqueuer is required")
+	if s.commandPublisher == nil {
+		return BankConnectionSyncJobRef{}, errors.New("bank sync command publisher is required")
 	}
 	connection, err := s.requireTenantBankConnection(ctx, params.TenantID, params.ActorUserID, params.ConnectionID)
 	if err != nil {
 		return BankConnectionSyncJobRef{}, err
 	}
-	request := BankConnectionSyncJobRequest{
-		JobType: BankConnectionSyncJobType,
-		Reason:  strings.TrimSpace(params.Reason),
-		Actor:   strings.TrimSpace(params.ActorUserID),
-		Input: BankConnectionSyncJobInput{
-			ConnectionID: connection.ID,
-			Reason:       strings.TrimSpace(params.Reason),
-			WindowStart:  params.WindowStart,
-			WindowEnd:    params.WindowEnd,
+	command, commandErr := newSemanticCommand(BankConnectionSyncCommandTopic, BankConnectionSyncCommand{
+		ConnectionID: connection.ID,
+		Reason:       strings.TrimSpace(params.Reason),
+		WindowStart:  params.WindowStart,
+		WindowEnd:    params.WindowEnd,
+		Requester: CommandRequester{
+			UserID: strings.TrimSpace(params.ActorUserID),
+			Source: CommandRequesterSourceOperator,
 		},
+	}, "")
+	if commandErr != nil { // coverage-ignore // JSON encoding of this concrete finance command cannot fail.
+		return BankConnectionSyncJobRef{}, commandErr
 	}
-	job, err := s.bankSyncJobEnqueuer.EnqueueBankConnectionSync(ctx, request)
-	s.logger.InfoContext(ctx, "bank connection sync job enqueued",
-		slog.String("jobId", job.ID),
-		slog.String("jobType", job.JobType),
+	reference, err := s.commandPublisher.PublishSemanticCommand(ctx, command)
+	if err != nil {
+		return BankConnectionSyncJobRef{}, fmt.Errorf("publish bank connection sync command: %w", err)
+	}
+	s.logger.InfoContext(ctx, "bank connection sync command published",
+		slog.String("messageId", reference.MessageID),
 		slog.String("connectionId", connection.ID),
 		slog.String("reason", params.Reason),
 	)
-	return job, err
+	return BankConnectionSyncJobRef{ID: reference.MessageID, JobType: BankConnectionSyncJobType}, nil
 }
 
 func (s *BankSyncService) DeleteBankConnection(
@@ -255,10 +224,6 @@ func (s *BankSyncService) DeleteBankConnection(
 	connection, err := s.requireTenantBankConnection(ctx, params.TenantID, params.ActorUserID, params.ConnectionID)
 	if err != nil { // coverage-ignore // Tenant access validation is covered by access-guard tests.
 		return err
-	}
-	disableErr := s.disableBankConnectionSyncSchedule(ctx, connection, params.ActorUserID)
-	if disableErr != nil { // coverage-ignore // Schedule writer failures are covered by jobs tests.
-		return disableErr
 	}
 	deleteConnection := func(service *BankSyncService) error {
 		return service.deleteBankConnectionOwnedMetadata(ctx, connection)
@@ -279,7 +244,7 @@ func (s *BankSyncService) DeleteBankConnection(
 		}
 		return nil
 	}
-	return deleteConnection(s)
+	return deleteConnection(s) // coverage-ignore // Production persistence always uses its transaction-capable store.
 }
 
 func (s *BankSyncService) RunBankConnectionSync(
@@ -288,15 +253,22 @@ func (s *BankSyncService) RunBankConnectionSync(
 ) (BankConnectionSyncResult, error) {
 	validationErr := validateBankConnectionSyncWindows(params.WindowStart, params.WindowEnd)
 	if validationErr != nil { // coverage-ignore // Request validation is covered by focused service tests.
-		return BankConnectionSyncResult{}, validationErr
+		return BankConnectionSyncResult{}, NewTerminalFailure(
+			validationErr,
+			"bank_sync_invalid_request",
+			"Bank sync request is invalid",
+			"The bank sync command contains an invalid time window.",
+		)
 	}
 	connection, err := s.store.GetBankConnection(ctx, strings.TrimSpace(params.ConnectionID))
 	if err != nil { // coverage-ignore // Connection lookup errors are covered by persistence tests.
-		return BankConnectionSyncResult{}, ErrBankConnectionNotFound
+		return BankConnectionSyncResult{}, terminalBankConnectionSyncFailure(err)
 	}
 	secret, err := s.store.GetConnectionSecret(ctx, connection.SecretID)
 	if err != nil { // coverage-ignore // Secret-store errors are covered by persistence tests.
-		return BankConnectionSyncResult{}, fmt.Errorf("get connection secret: %w", err)
+		return BankConnectionSyncResult{}, terminalBankConnectionSyncFailure(
+			fmt.Errorf("get connection secret: %w", err),
+		)
 	}
 	now := s.now()
 	scheduledRun, hasScheduledRun, err := s.makeScheduledRunMetadata(ctx, *connection, params, now)
@@ -321,7 +293,7 @@ func (s *BankSyncService) RunBankConnectionSync(
 		WindowEnd:   params.WindowEnd,
 	})
 	if err != nil {
-		return BankConnectionSyncResult{}, s.recordBankConnectionSyncFailure(
+		failureErr := s.recordBankConnectionSyncFailure(
 			ctx,
 			connection,
 			params,
@@ -329,13 +301,14 @@ func (s *BankSyncService) RunBankConnectionSync(
 			scheduledRun,
 			err,
 		)
+		return BankConnectionSyncResult{}, terminalBankConnectionSyncFailure(failureErr)
 	}
 	if !hasScheduledRun {
 		scheduledRun = nil
 	}
 	err = s.completeBankConnectionSync(ctx, connection, params.JobID, scheduledRun, now)
 	if err != nil { // coverage-ignore // Completion projection errors are covered by persistence tests.
-		return BankConnectionSyncResult{}, s.recordBankConnectionSyncFailure(
+		failureErr := s.recordBankConnectionSyncFailure(
 			ctx,
 			connection,
 			params,
@@ -343,6 +316,7 @@ func (s *BankSyncService) RunBankConnectionSync(
 			scheduledRun,
 			err,
 		)
+		return BankConnectionSyncResult{}, terminalBankConnectionSyncFailure(failureErr)
 	}
 	return BankConnectionSyncResult{
 		ImportedAccounts:     result.Stats.CreatedAccounts,
@@ -351,38 +325,53 @@ func (s *BankSyncService) RunBankConnectionSync(
 	}, nil
 }
 
-func (s *BankSyncService) RecordBankConnectionSyncScheduled(
-	ctx context.Context,
-	params RecordBankConnectionSyncScheduledParams,
-) (domain.BankConnectionSchedule, error) {
-	if strings.TrimSpace(params.ConnectionID) == "" {
-		return domain.BankConnectionSchedule{}, errors.New("connection id is required")
+func terminalBankConnectionSyncFailure(err error) error {
+	if errors.Is(err, persistence.ErrBankConnectionNotFound) {
+		return NewTerminalFailure(
+			fmt.Errorf("%w: %w", ErrBankConnectionNotFound, err),
+			"bank_connection_not_found",
+			"Bank connection not found",
+			"The bank connection no longer exists.",
+		)
 	}
-	if strings.TrimSpace(params.JobID) == "" {
-		return domain.BankConnectionSchedule{}, errors.New("job id is required")
+	if errors.Is(err, ErrBankConnectionNotFound) {
+		return NewTerminalFailure(
+			err,
+			"bank_connection_not_found",
+			"Bank connection not found",
+			"The bank connection no longer exists.",
+		)
 	}
-	if params.ScheduledAt.IsZero() {
-		return domain.BankConnectionSchedule{}, errors.New("scheduled at must be a non-zero timestamp")
+	if errors.Is(err, persistence.ErrConnectionSecretNotFound) {
+		return NewTerminalFailure(
+			err,
+			"bank_connection_credentials_missing",
+			"Bank connection credentials are unavailable",
+			"The bank connection credentials are no longer available.",
+		)
 	}
-	if params.NextRunAt.IsZero() {
-		return domain.BankConnectionSchedule{}, errors.New("next run at must be a non-zero timestamp")
+	if errors.Is(err, internalproviders.ErrConnectorIDRequired) ||
+		errors.Is(err, internalproviders.ErrConnectorNotConfigured) ||
+		errors.Is(err, internalproviders.ErrInvalidRequestedWindow) ||
+		errors.Is(err, internalproviders.ErrInvalidProviderSyncStateWindow) ||
+		errors.Is(err, internalproviders.ErrInvalidProviderSyncTargetWindow) {
+		return NewTerminalFailure(
+			err,
+			"bank_sync_configuration_invalid",
+			"Bank sync configuration is invalid",
+			"The bank connection configuration cannot be synchronized.",
+		)
 	}
-	if !params.NextRunAt.After(params.ScheduledAt) {
-		return domain.BankConnectionSchedule{}, errors.New("next run at must be after scheduled at")
+	var providerErr *ProviderResponseError
+	if errors.As(err, &providerErr) && providerErr.IsTerminal() {
+		return NewTerminalFailure(
+			err,
+			"bank_provider_rejected_request",
+			"Bank provider rejected the sync request",
+			"The bank provider rejected the synchronization request.",
+		)
 	}
-	schedule, err := s.store.GetBankConnectionSchedule(ctx, strings.TrimSpace(params.ConnectionID))
-	if err != nil { // coverage-ignore // Store errors are covered by persistence tests.
-		return domain.BankConnectionSchedule{}, fmt.Errorf("get bank connection schedule: %w", err)
-	}
-	schedule.LastScheduledAt = &params.ScheduledAt
-	schedule.NextRunAt = &params.NextRunAt
-	schedule.LastJobID = strings.TrimSpace(params.JobID)
-	schedule.UpdatedAt = s.now()
-	persisted, err := s.store.SaveBankConnectionSchedule(ctx, *schedule)
-	if err != nil { // coverage-ignore // Store errors are covered by persistence tests.
-		return domain.BankConnectionSchedule{}, fmt.Errorf("save bank connection schedule: %w", err)
-	}
-	return persisted, nil
+	return err
 }
 
 func validateBankConnectionSyncWindows(windowStart, windowEnd *time.Time) error {
@@ -454,41 +443,6 @@ func (s *BankSyncService) ListBankConnectionSyncedAccounts(
 		})
 	}
 	return items, nil
-}
-
-func (s *BankSyncService) writeBankConnectionSyncSchedule(
-	ctx context.Context,
-	schedule BankConnectionSyncSchedule,
-) error {
-	if s.bankSyncScheduleWriter == nil {
-		return nil
-	}
-	if err := s.bankSyncScheduleWriter.UpsertBankConnectionSyncSchedule(ctx, schedule); err != nil {
-		return fmt.Errorf("write bank connection sync schedule: %w", err)
-	}
-	return nil
-}
-
-func (s *BankSyncService) disableBankConnectionSyncSchedule(
-	ctx context.Context,
-	connection domain.BankConnection,
-	actorUserID string,
-) error {
-	schedule, err := s.store.GetBankConnectionSchedule(ctx, connection.ID)
-	if err != nil && !errors.Is(err, persistence.ErrBankConnectionScheduleNotFound) {
-		return fmt.Errorf("disable bank connection sync schedule: %w", err)
-	}
-	interval := time.Duration(0)
-	if schedule != nil {
-		interval = schedule.Interval
-	}
-	return s.writeBankConnectionSyncSchedule(ctx, BankConnectionSyncSchedule{
-		ScheduleID:   bankConnectionSyncScheduleID(connection.ID),
-		ConnectionID: connection.ID,
-		ActorUserID:  actorUserID,
-		Interval:     interval,
-		Enabled:      false,
-	})
 }
 
 func (s *BankSyncService) requireTenantBankConnection(

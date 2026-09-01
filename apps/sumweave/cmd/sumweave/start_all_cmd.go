@@ -41,6 +41,7 @@ type startAllRuntime struct {
 	schedulerLoopInterval time.Duration
 	startServerOpts       []startHTTPServerOpt
 	noop                  bool
+	close                 func(context.Context) error
 }
 
 func newStartAllCmd() *cobra.Command {
@@ -85,22 +86,57 @@ func resolveStartAllRuntime(
 	if ctx == nil {
 		return nil, errors.New("start-all command context is required")
 	}
-	root, err := wireup.BuildHTTP(ctx, wireup.HTTPOptions{
+	httpRoot, err := wireup.BuildHTTP(ctx, wireup.HTTPOptions{
 		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
 		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build start-all HTTP root: %w", err)
 	}
+	workerRoot, err := wireup.BuildWorker(ctx, startAllWorkerOptions(options))
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("build start-all worker root: %w", err), httpRoot.Close(ctx))
+	}
+	schedulerRoot, err := wireup.BuildScheduler(ctx, startAllSchedulerOptions(options))
+	if err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("build start-all scheduler root: %w", err),
+			workerRoot.Close(ctx),
+			httpRoot.Close(ctx),
+		)
+	}
 
 	return &startAllRuntime{
-		logger: root.Logger(), engine: startAllHTTPRoot{root: root, noop: params.noop}, worker: root.Worker,
-		scheduler: root.Scheduler, schedulerLoopInterval: root.SchedulerLoopInterval(),
+		logger:    httpRoot.Logger(),
+		engine:    startAllHTTPRoot{root: httpRoot, noop: params.noop},
+		worker:    workerRoot.Worker,
+		scheduler: schedulerRoot, schedulerLoopInterval: schedulerRoot.SchedulerLoopInterval,
 		noop: params.noop,
+		close: func(shutdownCtx context.Context) error {
+			return errors.Join(
+				workerRoot.Close(shutdownCtx),
+				schedulerRoot.Close(shutdownCtx),
+				httpRoot.Close(shutdownCtx),
+			)
+		},
 		startServerOpts: []startHTTPServerOpt{
 			sumweave.WithStartHTTPServerNoop(params.noop),
 		},
 	}, nil
+}
+
+func startAllWorkerOptions(options commandRootOptions) wireup.WorkerOptions {
+	return wireup.WorkerOptions{
+		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
+		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile, DisablePProf: true,
+	}
+}
+
+func startAllSchedulerOptions(options commandRootOptions) wireup.SchedulerOptions {
+	return wireup.SchedulerOptions{
+		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
+		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile, DisablePProf: true,
+	}
 }
 
 type startAllHTTPRoot struct {
@@ -116,12 +152,12 @@ func (server startAllHTTPRoot) Close(ctx context.Context) error {
 	return server.root.Close(ctx)
 }
 
-func (r *startAllRuntime) Run(ctx context.Context) error {
-	if err := r.validate(); err != nil {
-		return err
+func (r *startAllRuntime) Run(ctx context.Context) (err error) {
+	if validateErr := r.validate(); validateErr != nil {
+		return validateErr
 	}
 	if r.noop {
-		return r.engine.Close(context.WithoutCancel(ctx))
+		return r.closeResources(context.WithoutCancel(ctx))
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -135,6 +171,9 @@ func (r *startAllRuntime) Run(ctx context.Context) error {
 	r.startComponent(runCtx, &wg, results, "jobs worker", r.worker.Run)
 	r.startComponent(runCtx, &wg, results, "scheduler loop", r.runSchedulerLoop)
 
+	defer func() {
+		err = errors.Join(err, r.closeResources(context.WithoutCancel(ctx)))
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -147,6 +186,13 @@ func (r *startAllRuntime) Run(ctx context.Context) error {
 			return stopStartAll(cancel, &wg, resultErr)
 		}
 	}
+}
+
+func (r *startAllRuntime) closeResources(ctx context.Context) error {
+	if r.close != nil {
+		return r.close(ctx)
+	}
+	return r.engine.Close(ctx)
 }
 
 func (r *startAllRuntime) runSchedulerLoop(ctx context.Context) error {

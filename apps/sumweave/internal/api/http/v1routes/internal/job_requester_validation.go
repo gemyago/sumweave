@@ -17,17 +17,9 @@ func NewJobRequesterValidator() FieldValidator[*JobRequester] {
 	validateSource := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
-	validateAgentSessionID := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
-	)
-	validateAgentRunID := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
-	)
 	
 	return func(bindingCtx *BindingContext, value *JobRequester) {
 		validateUserID(bindingCtx.Fork("userId"), value.UserID)
 		validateSource(bindingCtx.Fork("source"), value.Source)
-		validateAgentSessionID(bindingCtx.Fork("agentSessionId"), value.AgentSessionID)
-		validateAgentRunID(bindingCtx.Fork("agentRunId"), value.AgentRunID)
 	}
 }

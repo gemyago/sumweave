@@ -85,6 +85,15 @@ PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from
 
 For optional local HTTPS backend and Vite development, follow [docs/local-https.md](./docs/local-https.md). The documented workflow generates ignored local certificates and does not change the normal PM2 HTTP workflow.
 
+Durable jobs workflow:
+- Run `sumweave db-migrate` from `apps/sumweave` before any process that uses persisted application tables.
+- `sumweave start` is API-only: it publishes appdispatch messages but does not run a worker or execute finance work inline.
+- `sumweave start-all` explicitly combines HTTP, the appdispatch worker, and the finance scheduler loop for local operation.
+- `sumweave jobs worker [--once]` is the split consumer; `--once` drains a bounded isolated/reseeded database and materializes observed jobs on delivery.
+- `sumweave jobs enqueue-due` publishes due bank and FX semantic commands and advances finance-owned schedule state; it does not execute work or create job rows.
+- Producers publish through appdispatch first and receive a message ID; observed job rows are created lazily with that same ID on first delivery.
+- A known future job ID may return `404` before delivery; only the initiating UI flow treats that response as pending.
+
 ## Nx (monorepo tasks)
 
 This monorepo is managed by Nx. Most typical tasks are:
@@ -148,6 +157,10 @@ The rules are:
 - Allow obvious local-only placeholder keys in committed local config.
 - Use environment-specific config values, not runtime environment labels.
 - Log ordinary provider errors; avoid generic provider-error redaction.
+- Appdispatch carries generic durable commands and domain events.
+- Jobs add opt-in product visibility to background processing.
+- Do not create job records for invisible background processing.
+- Jobs never replace appdispatch as the execution transport.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

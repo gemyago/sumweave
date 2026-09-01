@@ -42,8 +42,12 @@ packages:
       AuthUserLookup:
   github.com/gemyago/sumweave/apps/sumweave/internal/jobs:
     interfaces:
-      dispatchPublisher:
       workerStore:
+  github.com/gemyago/sumweave/apps/sumweave/internal/financeapp:
+    interfaces:
+      fxRefreshJobService:
+      csvImportJobService:
+      bankSyncJobService:
   github.com/ThreeDotsLabs/watermill/message:
     interfaces:
       Subscriber:

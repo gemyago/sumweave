@@ -91,7 +91,7 @@
             </div>
             {#if lastJobId}
               <div class="mt-3">
-                <JobStatus jobId={lastJobId} openHref={`/admin/jobs/${encodeURIComponent(lastJobId)}`} label="FX refresh" />
+                <JobStatus jobId={lastJobId} openHref={`/admin/jobs/${encodeURIComponent(lastJobId)}`} label="FX refresh" observedDispatch />
               </div>
             {/if}
           </div>

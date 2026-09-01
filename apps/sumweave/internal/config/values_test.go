@@ -17,6 +17,7 @@ func TestValues(t *testing.T) {
 			require.Equal(t, "data/application.db", values.Application.Database.DSN)
 			require.Equal(t, "local-secret-key", values.Auth.JWTSigningKey)
 			require.Equal(t, time.Minute, values.HTTPServer.IdleTimeout)
+			require.Equal(t, 5*time.Minute, values.Jobs.Worker.StaleRunningAge)
 			require.Equal(t, []string{"../../.platform-agents/skills"}, values.Skills.Paths)
 		})
 
@@ -42,7 +43,6 @@ func TestValues(t *testing.T) {
 
 	t.Run("uses APP automatic environment values for declared base keys", func(t *testing.T) {
 		t.Setenv("APP_APPLICATION_DATABASE_DSN", "postgres://app:secret@db.example/sumweave")
-		t.Setenv("APP_JOBS_WORKER_ENABLED", "false")
 		t.Setenv("APP_JOBS_WORKER_MAXATTEMPTS", "7")
 		t.Setenv("APP_HTTPSERVER_WRITETIMEOUT", "45s")
 		t.Setenv("APP_HTTPSERVER_TLS_CERTFILE", "certs/app.pem")
@@ -52,7 +52,6 @@ func TestValues(t *testing.T) {
 		values, err := LoadValues(ValuesLoadInput{Environment: "test"})
 		require.NoError(t, err)
 		require.Equal(t, "postgres://app:secret@db.example/sumweave", values.Application.Database.DSN)
-		require.False(t, values.Jobs.Worker.Enabled)
 		require.Equal(t, 7, values.Jobs.Worker.MaxAttempts)
 		require.Equal(t, 45*time.Second, values.HTTPServer.WriteTimeout)
 		require.Equal(t, "certs/app.pem", values.HTTPServer.TLS.CertFile)
@@ -101,7 +100,6 @@ func TestValues(t *testing.T) {
 			key   string
 			value string
 		}{
-			{name: "bool", key: "APP_JOBS_WORKER_ENABLED", value: "not-a-bool"},
 			{name: "int", key: "APP_JOBS_WORKER_MAXATTEMPTS", value: "not-an-int"},
 			{name: "duration", key: "APP_HTTPSERVER_WRITETIMEOUT", value: "not-a-duration"},
 		} {
@@ -146,22 +144,45 @@ func TestValues(t *testing.T) {
 				},
 			}},
 		}
-		root, err := values.JobsRoot("test")
+		root, err := values.WorkerRoot("test")
 		require.NoError(t, err)
 		require.Equal(t, "test", root.Environment)
 		require.Equal(t, values.Jobs, root.Jobs)
 
 		values.Auth.JWTSigningKey = ""
-		_, err = values.JobsRoot("test")
+		_, err = values.WorkerRoot("test")
 		require.ErrorContains(t, err, "JWT signing key")
 		values.Auth.JWTSigningKey = "test-signing-key"
 		values.Finance.Providers.EnableBanking.AppID = ""
-		_, err = values.JobsRoot("test")
+		_, err = values.WorkerRoot("test")
 		require.ErrorContains(t, err, "enable banking app ID")
 		values.Finance.Providers.EnableBanking.AppID = "test-app"
 		values.Finance.Providers.EnableBanking.ValidDays = 0
-		_, err = values.JobsRoot("test")
+		_, err = values.WorkerRoot("test")
 		require.ErrorContains(t, err, "valid days")
+	})
+
+	t.Run("projects scheduler finance settings and rejects incomplete values", func(t *testing.T) {
+		values, err := LoadValues(ValuesLoadInput{Environment: "test"})
+		require.NoError(t, err)
+		root, err := values.SchedulerRoot("test")
+		require.NoError(t, err)
+		require.Equal(t, values.Finance, root.Finance)
+		require.Equal(t, values.Auth, root.Auth)
+
+		for _, mutate := range []func(*Values){
+			func(value *Values) { value.Auth.JWTSigningKey = "" },
+			func(value *Values) { value.Finance.Providers.Monobank.BaseURL = "" },
+			func(value *Values) { value.Finance.Providers.Monobank.RetryAfterFallbackDelay = 0 },
+			func(value *Values) { value.Finance.Providers.EnableBanking.ASPSPName = "" },
+			func(value *Values) { value.Finance.Providers.EnableBanking.ValidDays = 0 },
+		} {
+			candidate, loadErr := LoadValues(ValuesLoadInput{Environment: "test"})
+			require.NoError(t, loadErr)
+			mutate(&candidate)
+			_, rootErr := candidate.SchedulerRoot("test")
+			require.Error(t, rootErr)
+		}
 	})
 
 	t.Run("projects HTTP settings and validates API-only requirements", func(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,13 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 	apphttpclient "github.com/gemyago/sumweave/apps/sumweave/internal/infrastructure/httpclient"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 type disabledFinanceCipher struct{}
@@ -35,20 +34,39 @@ func (disabledFinanceCipher) OpenString(credentials.Envelope) (string, error) {
 // collaborators needed by the finance application adapter.
 type ModuleDeps struct {
 	Database                        *persistence.Database
-	Jobs                            *jobspkg.Service
-	JobsStore                       *jobspkg.Store
+	CommandPublisher                *appdispatch.Publisher
 	Registry                        *jobspkg.Registry
 	HTTPClientFactory               *apphttpclient.ClientFactory
 	RootLogger                      *slog.Logger
 	JWTSigningKey                   string
 	MonobankBaseURL                 string
 	MonobankRetryAfterFallbackDelay time.Duration
+	FrankfurterBaseURL              string
 	EnableBanking                   financepkg.EnableBankingConfig
+}
+
+type fxRefreshJobService interface {
+	RefreshRequiredFXRates(context.Context, financepkg.RefreshFXRatesParams) (financepkg.RefreshFXRatesResult, error)
+}
+
+type csvImportJobService interface {
+	RunCSVImportJob(context.Context, financepkg.RunCSVImportJobParams) (financepkg.CSVImportRunResult, error)
+}
+
+type bankSyncJobService interface {
+	RunBankConnectionSync(
+		context.Context,
+		financepkg.RunBankConnectionSyncParams,
+	) (financepkg.BankConnectionSyncResult, error)
 }
 
 // NewDatabase opens the finance persistence adapter over the application SQL
 // database. The application currently shares this database with jobs.
-func NewDatabase(sqlDB *sql.DB, databaseDSN string, logger *slog.Logger) (*persistence.Database, error) {
+func NewDatabase(
+	sqlDB *sql.DB,
+	databaseDSN string,
+	logger *slog.Logger,
+) (*persistence.Database, error) {
 	// TODO: We should make the DSN finance module specific.
 	database, err := persistence.NewDatabase(sqlDB, databaseDSN, persistence.WithLogger(logger))
 	if err != nil { // coverage-ignore // Persistence construction errors are covered by its package.
@@ -57,8 +75,9 @@ func NewDatabase(sqlDB *sql.DB, databaseDSN string, logger *slog.Logger) (*persi
 	return database, nil
 }
 
-// NewModule constructs finance and completes its durable schedule and handler
-// registration. It does not start worker or scheduler loops.
+// NewModule constructs finance for one explicit process root. Command
+// publication and observed handler registration are optional root responsibilities;
+// it never starts worker or scheduler loops.
 func NewModule(deps ModuleDeps) (*financepkg.Finance, error) {
 	cipher, err := makeFinanceCipher(deps.JWTSigningKey)
 	if err != nil { // coverage-ignore // AES-GCM construction has no controllable failure after SHA-256 sizing.
@@ -68,46 +87,49 @@ func NewModule(deps ModuleDeps) (*financepkg.Finance, error) {
 	if err != nil {
 		return nil, err
 	}
-	monobankHTTPClient, err := newMonobankHTTPClient(deps.HTTPClientFactory, deps.MonobankRetryAfterFallbackDelay)
+	monobankHTTPClient, err := newMonobankHTTPClient(
+		deps.HTTPClientFactory,
+		deps.MonobankRetryAfterFallbackDelay,
+	)
 	if err != nil {
 		return nil, err
 	}
-	financeModule, err := financepkg.New(&financepkg.Config{
+	financeConfig := &financepkg.Config{
 		Database:               deps.Database,
 		Logger:                 resolveFinanceLogger(deps.RootLogger),
 		Now:                    time.Now,
 		NewID:                  uuid.NewString,
 		HTTPClient:             httpClient,
 		ConnectionSecretCipher: cipher,
-		CSVImportJobEnqueuer:   csvImportJobEnqueuer{jobs: deps.Jobs},
-		BankSyncJobEnqueuer:    bankConnectionSyncJobEnqueuer{jobs: deps.Jobs},
-		BankSyncScheduleWriter: bankConnectionSyncScheduleWriter{store: deps.JobsStore},
-		FXJobEnqueuer:          fxRefreshJobEnqueuer{jobs: deps.Jobs},
-		FXScheduleWriter:       fxRefreshScheduleWriter{store: deps.JobsStore},
 		Monobank: financepkg.MonobankConfig{
 			BaseURL:    resolveMonobankBaseURL(deps.MonobankBaseURL),
 			HTTPClient: monobankHTTPClient,
 		},
-		EnableBanking: deps.EnableBanking,
-	})
+		FXProviders: []financepkg.FXRatesProvider{
+			financepkg.NewFrankfurterFXProvider(httpClient, deps.FrankfurterBaseURL),
+		},
+		DefaultFXProvider: financepkg.FXProviderFrankfurter,
+		EnableBanking:     deps.EnableBanking,
+	}
+	if deps.CommandPublisher != nil {
+		publisher := appdispatchSemanticCommandPublisher{publisher: deps.CommandPublisher}
+		financeConfig.CommandPublisher = publisher
+		financeConfig.ScheduledCommandPublisher = publisher
+	}
+	financeModule, err := financepkg.New(financeConfig)
 	if err != nil {
 		return nil, err
 	}
-	fxScheduleParams := financepkg.EnsureFXRefreshScheduleParams{
-		ScheduleID: financepkg.FXDailyRefreshScheduleID,
-		Interval:   24 * time.Hour,
-	}
-	if _, err = financeModule.FXService.EnsureFXRefreshSchedule(context.Background(), fxScheduleParams); err != nil {
-		return nil, fmt.Errorf("ensure daily fx refresh schedule: %w", err)
-	}
-	registerErr := registerFinanceJobHandlers(
-		deps.Registry,
-		financeModule.FXService,
-		financeModule.CSVImportService,
-		financeModule.BankSyncService,
-	)
-	if registerErr != nil { // coverage-ignore // Registry behavior is exercised through the jobs roots.
-		return nil, registerErr
+	if deps.Registry != nil {
+		registerErr := registerFinanceJobHandlers(
+			deps.Registry,
+			financeModule.FXService,
+			financeModule.CSVImportService,
+			financeModule.BankSyncService,
+		)
+		if registerErr != nil { // coverage-ignore // Registry behavior is exercised through the worker root.
+			return nil, registerErr
+		}
 	}
 	return financeModule, nil
 }
@@ -119,7 +141,10 @@ func newFinanceHTTPClient(factory *apphttpclient.ClientFactory) (*http.Client, e
 	return factory.CreateClient(), nil
 }
 
-func newMonobankHTTPClient(factory *apphttpclient.ClientFactory, fallbackDelay time.Duration) (*http.Client, error) {
+func newMonobankHTTPClient(
+	factory *apphttpclient.ClientFactory,
+	fallbackDelay time.Duration,
+) (*http.Client, error) {
 	if factory == nil {
 		return nil, errors.New("finance HTTP client factory is required")
 	}
@@ -165,22 +190,11 @@ func makeFinanceCipher(jwtKey string) (
 	return cipher, nil
 }
 
-type csvImportJobInput struct {
-	ImportID string `json:"importId"`
-}
-
-type bankConnectionSyncJobInput struct {
-	ConnectionID string     `json:"connectionId"`
-	Reason       string     `json:"reason"`
-	WindowStart  *time.Time `json:"windowStart,omitempty"`
-	WindowEnd    *time.Time `json:"windowEnd,omitempty"`
-}
-
 func registerFinanceJobHandlers(
 	registry *jobspkg.Registry,
-	fxService *financepkg.FXService,
-	csvImportService *financepkg.CSVImportService,
-	bankSyncService *financepkg.BankSyncService,
+	fxService fxRefreshJobService,
+	csvImportService csvImportJobService,
+	bankSyncService bankSyncJobService,
 ) error {
 	if registry == nil {
 		return nil
@@ -188,12 +202,12 @@ func registerFinanceJobHandlers(
 	return errors.Join(
 		registerCSVImportJobHandler(
 			registry,
-			jobspkg.JobType(financepkg.CSVImportJobTypeTransactions),
+			financepkg.TransactionCSVImportCommandTopic,
 			csvImportService,
 		),
 		registerCSVImportJobHandler(
 			registry,
-			jobspkg.JobType(financepkg.CSVImportJobTypeAccounts),
+			financepkg.AccountCSVImportCommandTopic,
 			csvImportService,
 		),
 		registerBankSyncJobHandler(registry, bankSyncService),
@@ -201,18 +215,24 @@ func registerFinanceJobHandlers(
 	)
 }
 
-func registerFXRefreshJobHandler(registry *jobspkg.Registry, service *financepkg.FXService) error {
+func registerFXRefreshJobHandler(registry *jobspkg.Registry, service fxRefreshJobService) error {
 	if service == nil {
 		return nil
 	}
-	return registerFinanceJobHandler(registry, jobspkg.JobType(financepkg.FXRefreshJobType), func() error {
+	return registerFinanceJobHandler(registry, financepkg.FXRatesRefreshCommandTopic, func() error {
 		return jobspkg.RegisterTypedHandler(
 			registry,
-			jobspkg.TypedHandlerSpec[financepkg.RefreshFXRatesParams, financepkg.RefreshFXRatesResult, struct{}]{
-				JobType:       jobspkg.JobType(financepkg.FXRefreshJobType),
-				SupportsRetry: true,
-				Run: func(ctx context.Context, input financepkg.RefreshFXRatesParams, _ func(struct{}) error) (financepkg.RefreshFXRatesResult, error) {
-					return service.RefreshRequiredFXRates(ctx, input)
+			jobspkg.TypedHandlerSpec[financepkg.FXRatesRefreshCommand]{
+				JobType: jobspkg.JobType(financepkg.FXRefreshJobType),
+				Topic:   financepkg.FXRatesRefreshCommandTopic,
+				Metadata: func(input financepkg.FXRatesRefreshCommand) (jobspkg.JobMetadata, error) { // coverage-ignore // Invoked through worker integration after finance composition.
+					return jobMetadata(
+						jobspkg.JobType(financepkg.FXRefreshJobType),
+						input.Requester,
+					)
+				},
+				Run: func(ctx context.Context, _ jobspkg.Job, input financepkg.FXRatesRefreshCommand) error { // coverage-ignore // Invoked through worker integration after finance composition.
+					return runFXRefreshJob(ctx, service, input)
 				},
 			},
 		)
@@ -221,77 +241,100 @@ func registerFXRefreshJobHandler(registry *jobspkg.Registry, service *financepkg
 
 func registerCSVImportJobHandler(
 	registry *jobspkg.Registry,
-	jobType jobspkg.JobType,
-	service *financepkg.CSVImportService,
+	topic string,
+	service csvImportJobService,
 ) error {
 	if service == nil {
 		return nil
 	}
-	return registerFinanceJobHandler(registry, jobType, func() error {
+	jobType := jobspkg.JobType(financepkg.CSVImportJobTypeTransactions)
+	if topic == financepkg.AccountCSVImportCommandTopic {
+		jobType = jobspkg.JobType(financepkg.CSVImportJobTypeAccounts)
+	}
+	return registerFinanceJobHandler(registry, topic, func() error {
 		return jobspkg.RegisterTypedHandler(
 			registry,
-			jobspkg.TypedHandlerSpec[csvImportJobInput, financepkg.CSVImportRunResult, struct{}]{
-				JobType:       jobType,
-				SupportsRetry: true,
-				RunJob: func(
+			jobspkg.TypedHandlerSpec[financepkg.CSVImportCommand]{
+				JobType: jobType,
+				Topic:   topic,
+				Metadata: func(input financepkg.CSVImportCommand) (jobspkg.JobMetadata, error) { // coverage-ignore // Invoked through worker integration after finance composition.
+					return jobMetadata(jobType, input.Requester)
+				},
+				Run: func( // coverage-ignore // Invoked through worker integration after finance composition.
 					ctx context.Context,
 					job jobspkg.Job,
-					input csvImportJobInput,
-					_ func(struct{}) error,
-				) (financepkg.CSVImportRunResult, error) {
-					return service.RunCSVImportJob(ctx, financepkg.RunCSVImportJobParams{
-						ImportID: input.ImportID,
-						JobID:    job.ID,
-					})
+					input financepkg.CSVImportCommand,
+				) error {
+					return runCSVImportJob(ctx, service, job, input)
 				},
 			},
 		)
 	})
 }
 
-func registerBankSyncJobHandler(
-	registry *jobspkg.Registry,
-	service *financepkg.BankSyncService,
-) error {
+func registerBankSyncJobHandler(registry *jobspkg.Registry, service bankSyncJobService) error {
 	if service == nil {
 		return nil
 	}
-	return registerFinanceJobHandler(registry, jobspkg.JobType(financepkg.BankConnectionSyncJobType), func() error {
-		return jobspkg.RegisterTypedHandler(
-			registry,
-			jobspkg.TypedHandlerSpec[bankConnectionSyncJobInput, financepkg.BankConnectionSyncResult, struct{}]{
-				JobType:       jobspkg.JobType(financepkg.BankConnectionSyncJobType),
-				SupportsRetry: true,
-				RunJob: func(ctx context.Context, job jobspkg.Job, input bankConnectionSyncJobInput, _ func(struct{}) error) (financepkg.BankConnectionSyncResult, error) {
-					return service.RunBankConnectionSync(ctx, makeRunBankConnectionSyncParams(job, input))
+	return registerFinanceJobHandler(
+		registry,
+		financepkg.BankConnectionSyncCommandTopic,
+		func() error {
+			return jobspkg.RegisterTypedHandler(
+				registry,
+				jobspkg.TypedHandlerSpec[financepkg.BankConnectionSyncCommand]{
+					JobType: jobspkg.JobType(financepkg.BankConnectionSyncJobType),
+					Topic:   financepkg.BankConnectionSyncCommandTopic,
+					Metadata: func(input financepkg.BankConnectionSyncCommand) (jobspkg.JobMetadata, error) { // coverage-ignore // Invoked through worker integration after finance composition.
+						metadata, err := jobMetadata(
+							jobspkg.JobType(financepkg.BankConnectionSyncJobType),
+							input.Requester,
+						)
+						metadata.ScheduledAt = input.ScheduledAt
+						metadata.ScheduledNextRunAt = input.ScheduledNextRunAt
+						return metadata, err
+					},
+					Run: func(ctx context.Context, job jobspkg.Job, input financepkg.BankConnectionSyncCommand) error { // coverage-ignore // Invoked through worker integration after finance composition.
+						return runBankSyncJob(ctx, service, job, input)
+					},
 				},
-				OnScheduled: func(ctx context.Context, job jobspkg.Job) error {
-					input, err := jobspkg.DecodeJobInput[bankConnectionSyncJobInput](job)
-					if err != nil {
-						return fmt.Errorf("decode scheduled bank sync input: %w", err)
-					}
-					if job.ScheduledAt == nil || job.ScheduledNextRunAt == nil {
-						return errors.New("scheduled bank sync occurrence timestamps are required")
-					}
-					_, err = service.RecordBankConnectionSyncScheduled(
-						ctx,
-						financepkg.RecordBankConnectionSyncScheduledParams{
-							ConnectionID: input.ConnectionID,
-							JobID:        job.ID,
-							ScheduledAt:  *job.ScheduledAt,
-							NextRunAt:    *job.ScheduledNextRunAt,
-						},
-					)
-					return err
-				},
-			},
-		)
-	})
+			)
+		},
+	)
+}
+
+func runFXRefreshJob(
+	ctx context.Context,
+	service fxRefreshJobService,
+	input financepkg.FXRatesRefreshCommand,
+) error {
+	_, err := service.RefreshRequiredFXRates(ctx, financepkg.RefreshFXRatesParams{Provider: input.Provider})
+	return handledFinanceFailure(err)
+}
+
+func runCSVImportJob(
+	ctx context.Context,
+	service csvImportJobService,
+	job jobspkg.Job,
+	input financepkg.CSVImportCommand,
+) error {
+	_, err := service.RunCSVImportJob(ctx, financepkg.RunCSVImportJobParams{ImportID: input.ImportID, JobID: job.ID})
+	return handledFinanceFailure(err)
+}
+
+func runBankSyncJob(
+	ctx context.Context,
+	service bankSyncJobService,
+	job jobspkg.Job,
+	input financepkg.BankConnectionSyncCommand,
+) error {
+	_, err := service.RunBankConnectionSync(ctx, makeRunBankConnectionSyncParams(job, input))
+	return handledFinanceFailure(err)
 }
 
 func makeRunBankConnectionSyncParams(
 	job jobspkg.Job,
-	input bankConnectionSyncJobInput,
+	input financepkg.BankConnectionSyncCommand,
 ) financepkg.RunBankConnectionSyncParams {
 	return financepkg.RunBankConnectionSyncParams{
 		ConnectionID:       input.ConnectionID,
@@ -306,155 +349,69 @@ func makeRunBankConnectionSyncParams(
 
 func registerFinanceJobHandler(
 	registry *jobspkg.Registry,
-	jobType jobspkg.JobType,
+	topic string,
 	register func() error,
 ) error {
-	if _, err := registry.Handler(jobType); err == nil {
+	if _, err := registry.Handler(topic); err == nil {
 		return nil
-	} else if !errors.Is(err, jobspkg.ErrHandlerNotRegistered) {
+	} else if !errors.Is(err, jobspkg.ErrHandlerNotRegistered) { // coverage-ignore // Registry returns only its documented not-registered error here.
 		return err
 	}
 	return register()
 }
 
-type csvImportJobEnqueuer struct{ jobs *jobspkg.Service }
-
-func (e csvImportJobEnqueuer) EnqueueCSVImport(
-	ctx context.Context,
-	request financepkg.CSVImportJobRequest,
-) (financepkg.CSVImportJobRef, error) {
-	job, err := e.jobs.Enqueue(ctx, jobspkg.EnqueueParams{
-		JobType: jobspkg.JobType(request.JobType),
-		Requester: jobspkg.Requester{
-			UserID: strings.TrimSpace(request.ActorID),
-			Source: jobspkg.RequesterSourceOperator,
-		},
-		Input:          csvImportJobInput{ImportID: strings.TrimSpace(request.ImportID)},
-		IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
-	})
-	if err != nil { // coverage-ignore // Jobs service owns enqueue error behavior.
-		return financepkg.CSVImportJobRef{}, err
+func jobMetadata(
+	jobType jobspkg.JobType,
+	requester financepkg.CommandRequester,
+) (jobspkg.JobMetadata, error) {
+	if strings.TrimSpace(requester.Source) == "" {
+		return jobspkg.JobMetadata{}, errors.New("finance command requester source is required")
 	}
-	return financepkg.CSVImportJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
+	return jobspkg.JobMetadata{
+		JobType: jobType,
+		Requester: jobspkg.Requester{
+			UserID: requester.UserID,
+			Source: jobspkg.RequesterSource(requester.Source),
+		},
+	}, nil
 }
 
-type bankConnectionSyncJobEnqueuer struct{ jobs *jobspkg.Service }
-
-func (e bankConnectionSyncJobEnqueuer) EnqueueBankConnectionSync(
-	ctx context.Context,
-	request financepkg.BankConnectionSyncJobRequest,
-) (financepkg.BankConnectionSyncJobRef, error) {
-	job, err := e.jobs.Enqueue(ctx, jobspkg.EnqueueParams{
-		JobType: jobspkg.JobType(request.JobType),
-		Requester: jobspkg.Requester{
-			UserID: strings.TrimSpace(request.Actor),
-			Source: jobspkg.RequesterSourceOperator,
-		},
-		Input: bankConnectionSyncJobInput{
-			ConnectionID: strings.TrimSpace(request.Input.ConnectionID),
-			Reason:       strings.TrimSpace(request.Input.Reason),
-			WindowStart:  request.Input.WindowStart,
-			WindowEnd:    request.Input.WindowEnd,
-		},
-	})
-	if err != nil { // coverage-ignore // Jobs service owns enqueue error behavior.
-		return financepkg.BankConnectionSyncJobRef{}, err
+func handledFinanceFailure(err error) error {
+	failure, ok := financepkg.TerminalFailureFrom(err)
+	if !ok {
+		return err
 	}
-	return financepkg.BankConnectionSyncJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
+	return appdispatch.NewBusinessFailure(err, failure.Code, failure.Summary, failure.Details)
 }
 
-type fxRefreshJobEnqueuer struct{ jobs *jobspkg.Service }
+type appdispatchSemanticCommandPublisher struct{ publisher *appdispatch.Publisher }
 
-type fxRefreshScheduleWriter struct{ store *jobspkg.Store }
-
-type bankConnectionSyncScheduleWriter struct{ store *jobspkg.Store }
-
-func (w bankConnectionSyncScheduleWriter) UpsertBankConnectionSyncSchedule(
+func (p appdispatchSemanticCommandPublisher) PublishSemanticCommand(
 	ctx context.Context,
-	schedule financepkg.BankConnectionSyncSchedule,
-) error {
-	if w.store == nil {
-		return nil
-	}
-	inputJSON, err := json.Marshal(bankConnectionSyncJobInput{
-		ConnectionID: strings.TrimSpace(schedule.ConnectionID),
-		Reason:       financepkg.BankConnectionSyncReasonScheduled,
+	command financepkg.SemanticCommand,
+) (financepkg.DispatchReference, error) {
+	reference, err := p.publisher.PublishRequest(ctx, appdispatch.PublicationRequest{
+		Topic: command.Topic, Payload: command.Payload, IdempotencyKey: command.IdempotencyKey,
 	})
-	if err != nil { // coverage-ignore // JSON encoding of this concrete struct cannot fail.
-		return fmt.Errorf("encode bank connection sync schedule: %w", err)
+	if err != nil {
+		return financepkg.DispatchReference{}, fmt.Errorf(
+			"publish finance semantic command: %w",
+			err,
+		)
 	}
-	var nextRunAt *time.Time
-	if schedule.Enabled {
-		now := time.Now()
-		nextRunAt = &now
-	}
-	if schedule.NextRunAt != nil {
-		nextRunAt = schedule.NextRunAt
-	}
-	return w.store.UpsertSchedule(ctx, jobspkg.Schedule{
-		ID:      strings.TrimSpace(schedule.ScheduleID),
-		JobType: jobspkg.JobType(financepkg.BankConnectionSyncJobType),
-		Requester: jobspkg.Requester{
-			UserID: strings.TrimSpace(schedule.ActorUserID),
-			Source: jobspkg.RequesterSourceOperator,
-		},
-		InputJSON: inputJSON,
-		Interval:  schedule.Interval,
-		NextRunAt: nextRunAt,
-		Enabled:   schedule.Enabled,
-	})
+	return financepkg.DispatchReference{MessageID: reference.MessageID}, nil
 }
 
-func (e fxRefreshJobEnqueuer) EnqueueFXRefresh(
+func (p appdispatchSemanticCommandPublisher) PublishScheduledSemanticCommand(
 	ctx context.Context,
-	request financepkg.FXRefreshJobRequest,
-) (financepkg.FXRefreshJobRef, error) {
-	job, err := e.jobs.Enqueue(ctx, jobspkg.EnqueueParams{
-		JobType: jobspkg.JobType(request.JobType),
-		Requester: jobspkg.Requester{
-			UserID: strings.TrimSpace(request.Requester.UserID),
-			Source: jobspkg.RequesterSource(strings.TrimSpace(request.Requester.Source)),
-		},
-		Input: request.Input,
+	tx *sql.Tx,
+	command financepkg.SemanticCommand,
+) (financepkg.DispatchReference, error) {
+	reference, err := p.publisher.PublishRequestInTx(ctx, tx, appdispatch.PublicationRequest{
+		Topic: command.Topic, Payload: command.Payload, IdempotencyKey: command.IdempotencyKey,
 	})
-	if err != nil { // coverage-ignore // Jobs service owns enqueue error behavior.
-		return financepkg.FXRefreshJobRef{}, err
+	if err != nil {
+		return financepkg.DispatchReference{}, fmt.Errorf("publish scheduled finance semantic command: %w", err)
 	}
-	return financepkg.FXRefreshJobRef{ID: job.ID, JobType: string(job.JobType)}, nil
-}
-
-func (w fxRefreshScheduleWriter) UpsertFXRefreshSchedule(
-	ctx context.Context,
-	schedule financepkg.FXRefreshSchedule,
-) error {
-	if w.store == nil {
-		return nil
-	}
-	inputJSON, err := json.Marshal(schedule.Input)
-	if err != nil { // coverage-ignore // JSON encoding of the finance input is covered by its model tests.
-		return fmt.Errorf("encode fx refresh schedule: %w", err)
-	}
-	var nextRunAt *time.Time
-	if schedule.Enabled {
-		now := time.Now()
-		nextRunAt = &now
-		existing, getErr := w.store.GetSchedule(ctx, schedule.ScheduleID)
-		if getErr == nil && existing.Enabled && existing.NextRunAt != nil {
-			nextRunAt = existing.NextRunAt
-		} else if getErr != nil && !errors.Is(getErr, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("get fx refresh schedule: %w", getErr)
-		}
-	}
-	return w.store.UpsertSchedule(ctx, jobspkg.Schedule{
-		ID:      strings.TrimSpace(schedule.ScheduleID),
-		JobType: jobspkg.JobType(schedule.JobType),
-		Requester: jobspkg.Requester{
-			UserID: strings.TrimSpace(schedule.Requester.UserID),
-			Source: jobspkg.RequesterSource(strings.TrimSpace(schedule.Requester.Source)),
-		},
-		InputJSON: inputJSON,
-		Interval:  schedule.Interval,
-		NextRunAt: nextRunAt,
-		Enabled:   schedule.Enabled,
-	})
+	return financepkg.DispatchReference{MessageID: reference.MessageID}, nil
 }

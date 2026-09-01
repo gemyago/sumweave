@@ -9,6 +9,7 @@ import (
 
 	"github.com/jaswdr/faker/v2"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -21,6 +22,7 @@ func TestStartAllRuntime(t *testing.T) {
 		server.EXPECT().
 			StartHTTPServer(mock.Anything, mock.Anything).
 			RunAndReturn(func(ctx context.Context, _ ...startHTTPServerOpt) error { <-ctx.Done(); return nil })
+		server.EXPECT().Close(mock.Anything).Return(nil)
 		worker := newMockjobsWorkerRunner(t)
 		worker.EXPECT().
 			Run(mock.Anything).
@@ -73,6 +75,11 @@ func TestStartAllRuntime(t *testing.T) {
 
 		require.NoError(t, runtime.Run(t.Context()))
 	})
+	t.Run("start-all reserves the pprof listener for the HTTP root", func(t *testing.T) {
+		options := commandRootOptions{Environment: fake.UUID().V4()}
+		assert.True(t, startAllWorkerOptions(options).DisablePProf)
+		assert.True(t, startAllSchedulerOptions(options).DisablePProf)
+	})
 	t.Run(
 		"runtime reports component failures and validates all required dependencies",
 		func(t *testing.T) {
@@ -93,6 +100,7 @@ func TestStartAllRuntime(t *testing.T) {
 			server.EXPECT().
 				StartHTTPServer(mock.Anything, mock.Anything).
 				Return(errors.New(fake.Lorem().Sentence(3)))
+			server.EXPECT().Close(mock.Anything).Return(nil)
 			worker := newMockjobsWorkerRunner(t)
 			worker.EXPECT().
 				Run(mock.Anything).

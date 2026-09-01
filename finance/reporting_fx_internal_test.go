@@ -139,9 +139,6 @@ func TestReportingAndFXInternals(t *testing.T) {
 		service := NewService(stubStore{})
 		_, err = service.TriggerFXRefresh(t.Context(), TriggerFXRefreshParams{})
 		require.Error(t, err)
-		_, err = service.EnsureFXRefreshSchedule(t.Context(), EnsureFXRefreshScheduleParams{})
-		require.Error(t, err)
-
 		service = NewService(stubStore{listCurrentFXRatesFn: func(
 			_ context.Context,
 			_ persistence.ListCurrentFXRatesParams,

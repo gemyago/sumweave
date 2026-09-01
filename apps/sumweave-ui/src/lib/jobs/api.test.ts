@@ -15,7 +15,7 @@ function jobFixture() {
     id: 'job-1',
     jobType: 'finance.csv_import',
     status: 'completed',
-    requester: { userId: 'user-1', source: 'operator', agentSessionId: '', agentRunId: '' },
+    requester: { userId: 'user-1', source: 'operator' },
     createdAt: '2026-07-27T12:00:00Z',
     updatedAt: '2026-07-27T12:01:00Z',
     startedAt: null,
@@ -92,6 +92,15 @@ describe('jobs api', () => {
 
     const invalidBodyError = createSignalJobsApi({ baseUrl: '/api/v1', fetch: vi.fn(async () => ({ ok: false, status: 502, statusText: 'Gateway', json: async () => { throw new Error('invalid JSON') } }) as unknown as Response) }).getJob({ jobId: 'job-1' })
     await expect(invalidBodyError).rejects.toThrow('502 Gateway')
+  })
+
+  it('preserves a job-detail 404 for the invoking UI flow to classify', async () => {
+    const result = createSignalJobsApi({
+      baseUrl: '/api/v1',
+      fetch: vi.fn(async () => ({ ok: false, status: 404, statusText: 'Not Found', json: async () => ({ message: 'Job not materialized' }) }) as Response),
+    }).getJob({ jobId: 'dispatch-1' })
+
+    await expect(result).rejects.toMatchObject({ status: 404, path: '/jobs/dispatch-1' } satisfies Partial<JobsApiError>)
   })
 
   it('rejects malformed required job timestamps', async () => {

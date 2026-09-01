@@ -51,14 +51,14 @@ type csvImportPreviewData struct {
 }
 
 type CSVImportService struct {
-	store                csvImportFocusedStore
-	rowStore             csvImportRowStore
-	catalog              csvImportCatalogService
-	ledger               csvImportLedgerService
-	access               *accessGuard
-	now                  func() time.Time
-	newID                func() string
-	csvImportJobEnqueuer CSVImportJobEnqueuer
+	store            csvImportFocusedStore
+	rowStore         csvImportRowStore
+	catalog          csvImportCatalogService
+	ledger           csvImportLedgerService
+	access           *accessGuard
+	now              func() time.Time
+	newID            func() string
+	commandPublisher SemanticCommandPublisher
 }
 
 type CSVImportServiceOption func(*CSVImportService)
@@ -69,8 +69,8 @@ func WithCSVImportServiceNow(now func() time.Time) CSVImportServiceOption {
 func WithCSVImportServiceIDGenerator(newID func() string) CSVImportServiceOption {
 	return func(s *CSVImportService) { s.newID = newID }
 }
-func WithCSVImportServiceJobEnqueuer(enqueuer CSVImportJobEnqueuer) CSVImportServiceOption {
-	return func(s *CSVImportService) { s.csvImportJobEnqueuer = enqueuer }
+func WithCSVImportServiceCommandPublisher(publisher SemanticCommandPublisher) CSVImportServiceOption {
+	return func(s *CSVImportService) { s.commandPublisher = publisher }
 }
 func WithCSVImportServiceRowStore(store csvImportRowStore) CSVImportServiceOption {
 	return func(s *CSVImportService) { s.rowStore = store }
@@ -352,54 +352,74 @@ func (s *CSVImportService) ConfirmCSVImport(
 	if params.ExpectedImportType != "" && record.Type != params.ExpectedImportType {
 		return CSVImportConfirmation{}, ErrCSVImportTypeMismatch
 	}
-	if record.Status == domain.CSVImportStatusCompleted {
-		return csvImportConfirmationFromRecord(record), nil
+	existing, needsPublication, stateErr := csvImportConfirmationState(record)
+	if stateErr != nil {
+		return CSVImportConfirmation{}, stateErr
 	}
-	if record.Status == domain.CSVImportStatusConfirmed || record.Status == domain.CSVImportStatusRunning {
-		if record.Type == CSVImportTypeAccounts {
-			return CSVImportConfirmation{}, ErrCSVImportAlreadyConfirmed
+	if !needsPublication {
+		return *existing, nil
+	}
+	if s.commandPublisher == nil {
+		return CSVImportConfirmation{}, errors.New("csv import command publisher is required")
+	}
+	if record.Status == domain.CSVImportStatusPreviewed {
+		now := s.now()
+		record.Status = domain.CSVImportStatusConfirmed
+		record.ConfirmedByUserID = strings.TrimSpace(params.ActorUserID)
+		record.ConfirmedAt = &now
+		record.UpdatedAt = now
+		if _, err = s.store.SaveCSVImport(ctx, *record); err != nil {
+			return CSVImportConfirmation{}, fmt.Errorf("persist confirmed csv import: %w", err)
 		}
-		return csvImportConfirmationFromRecord(record), nil
-	}
-	if record.Status != domain.CSVImportStatusPreviewed {
-		return CSVImportConfirmation{}, fmt.Errorf("csv import is not confirmable from status %q", record.Status)
-	}
-	if s.csvImportJobEnqueuer == nil {
-		return CSVImportConfirmation{}, errors.New("csv import job enqueuer is required")
-	}
-	now := s.now()
-	record.Status = domain.CSVImportStatusConfirmed
-	record.ConfirmedByUserID = strings.TrimSpace(params.ActorUserID)
-	record.ConfirmedAt = &now
-	record.UpdatedAt = now
-	if _, err = s.store.SaveCSVImport(ctx, *record); err != nil {
-		return CSVImportConfirmation{}, fmt.Errorf("persist confirmed csv import: %w", err)
 	}
 	jobType := CSVImportJobTypeTransactions
+	topic := TransactionCSVImportCommandTopic
 	if record.Type == CSVImportTypeAccounts {
 		jobType = CSVImportJobTypeAccounts
+		topic = AccountCSVImportCommandTopic
 	}
-	job, err := s.csvImportJobEnqueuer.EnqueueCSVImport(
-		ctx,
-		CSVImportJobRequest{
-			JobType:        jobType,
-			ImportID:       record.ID,
-			TenantID:       record.TenantID,
-			ActorID:        record.ConfirmedByUserID,
-			IdempotencyKey: "finance.csv-import:" + record.ID,
-		},
-	)
+	command, commandErr := newSemanticCommand(topic, CSVImportCommand{
+		ImportID:  record.ID,
+		Requester: CommandRequester{UserID: record.ConfirmedByUserID, Source: CommandRequesterSourceOperator},
+	}, "finance.csv-import:"+record.ID)
+	if commandErr != nil {
+		return CSVImportConfirmation{}, commandErr
+	}
+	reference, err := s.commandPublisher.PublishSemanticCommand(ctx, command)
 	if err != nil {
-		return CSVImportConfirmation{}, fmt.Errorf("enqueue confirmed csv import: %w", err)
+		return CSVImportConfirmation{}, fmt.Errorf("publish confirmed csv import command: %w", err)
 	}
 	if record.JobID == "" {
-		record.JobID = job.ID
+		record.JobID = reference.MessageID
 		record.UpdatedAt = s.now()
 		if _, err = s.store.SaveCSVImport(ctx, *record); err != nil {
 			return CSVImportConfirmation{}, fmt.Errorf("save csv import job reference: %w", err)
 		}
 	}
-	return CSVImportConfirmation{ImportID: record.ID, JobID: job.ID, JobType: job.JobType}, nil
+	return CSVImportConfirmation{ImportID: record.ID, JobID: reference.MessageID, JobType: jobType}, nil
+}
+
+func csvImportConfirmationState(
+	record *domain.CSVImportRecord,
+) (*CSVImportConfirmation, bool, error) {
+	switch record.Status {
+	case domain.CSVImportStatusCompleted:
+		confirmation := csvImportConfirmationFromRecord(record)
+		return &confirmation, false, nil
+	case domain.CSVImportStatusConfirmed, domain.CSVImportStatusRunning:
+		if record.JobID == "" {
+			return nil, true, nil
+		}
+		if record.Type == CSVImportTypeAccounts {
+			return nil, false, ErrCSVImportAlreadyConfirmed
+		}
+		confirmation := csvImportConfirmationFromRecord(record)
+		return &confirmation, false, nil
+	case domain.CSVImportStatusPreviewed:
+		return nil, true, nil
+	default:
+		return nil, false, fmt.Errorf("csv import is not confirmable from status %q", record.Status)
+	}
 }
 
 func csvImportConfirmationFromRecord(record *domain.CSVImportRecord) CSVImportConfirmation {
@@ -416,13 +436,18 @@ func (s *CSVImportService) RunCSVImportJob(
 ) (CSVImportRunResult, error) {
 	record, err := s.store.GetCSVImport(ctx, strings.TrimSpace(params.ImportID))
 	if err != nil {
-		return CSVImportRunResult{}, err
+		return CSVImportRunResult{}, terminalCSVImportJobFailure(err)
 	}
 	if record.Status == domain.CSVImportStatusCompleted {
 		return s.runResultFromRecord(record)
 	}
 	if record.Status != domain.CSVImportStatusConfirmed && record.Status != domain.CSVImportStatusRunning {
-		return CSVImportRunResult{}, fmt.Errorf("csv import is not runnable from status %q", record.Status)
+		return CSVImportRunResult{}, NewTerminalFailure(
+			fmt.Errorf("csv import is not runnable from status %q", record.Status),
+			"csv_import_not_runnable",
+			"CSV import cannot run",
+			"The CSV import is not confirmed.",
+		)
 	}
 	record.Status = domain.CSVImportStatusRunning
 	record.UpdatedAt = s.now()
@@ -434,7 +459,7 @@ func (s *CSVImportService) RunCSVImportJob(
 	}
 	parsed, err := parseFixedCSVWithAccountOptions(record.RawCSV)
 	if err != nil {
-		return CSVImportRunResult{}, err
+		return CSVImportRunResult{}, terminalCSVImportJobFailure(err)
 	}
 	selectedAccountNames := selectedAccountNameSet(record.SelectedAccountNames)
 	if record.SelectedAccountNames == nil {
@@ -504,7 +529,12 @@ func (s *CSVImportService) runLegacyAccountImport(
 ) (CSVImportRunResult, error) {
 	rows, err := readCSVRows(record.RawCSV)
 	if err != nil {
-		return CSVImportRunResult{}, err
+		return CSVImportRunResult{}, NewTerminalFailure(
+			err,
+			"csv_import_invalid",
+			"CSV import is invalid",
+			"The stored CSV import data is invalid.",
+		)
 	}
 	result := CSVImportRunResult{RejectedRows: append([]CSVImportRejectedRow{}, record.RejectedRows...)}
 	for index, row := range rows[1:] {
@@ -544,6 +574,26 @@ func (s *CSVImportService) runLegacyAccountImport(
 	record.UpdatedAt = now
 	_, err = s.store.SaveCSVImport(ctx, *record)
 	return result, err
+}
+
+func terminalCSVImportJobFailure(err error) error {
+	if errors.Is(err, persistence.ErrCSVImportNotFound) {
+		return NewTerminalFailure(
+			err,
+			"csv_import_not_found",
+			"CSV import not found",
+			"The CSV import no longer exists.",
+		)
+	}
+	if errors.Is(err, ErrInvalidCSVImport) {
+		return NewTerminalFailure(
+			err,
+			"csv_import_invalid",
+			"CSV import is invalid",
+			"The stored CSV import data is invalid.",
+		)
+	}
+	return err
 }
 
 func (s *CSVImportService) runResultFromRecord(record *domain.CSVImportRecord) (CSVImportRunResult, error) {

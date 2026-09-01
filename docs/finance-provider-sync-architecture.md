@@ -41,9 +41,11 @@ durable connection -> BankSyncService -> SyncOrchestrator
   -> connector fetch -> load existing window -> diff plan -> atomic apply
 ```
 
-`BankSyncService` owns job lifecycle projections: it loads the connection and
-encrypted secret, records start/success/failure and schedule diagnostics, and
-maps aggregate orchestration statistics to the existing job result. The
+`BankSyncService` loads the connection and encrypted secret, records
+start/success/failure and schedule diagnostics, and maps aggregate orchestration
+statistics to the existing finance sync response and connection diagnostics.
+The app worker owns the optional job projection; it exposes lifecycle and
+sanitized error metadata only, not a generic job result or raw provider payload. The
 orchestrator and executor own coverage, connector fetching, planning, and
 requested-window persistence.
 

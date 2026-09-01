@@ -1,67 +1,58 @@
 package jobs
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 )
 
 const (
-	JobStatusQueued           JobStatus       = "queued"
-	JobStatusRunning          JobStatus       = "running"
-	JobStatusSucceeded        JobStatus       = "succeeded"
-	JobStatusFailed           JobStatus       = "failed"
-	JobStatusCanceled         JobStatus       = "canceled"
-	RequesterSourceOperator   RequesterSource = "operator"
-	RequesterSourceAgent      RequesterSource = "agent"
-	defaultListLimit                          = 25
-	maxListLimit                              = 100
-	defaultWorkerPollInterval                 = 2 * time.Second
-	defaultWorkerMaxAttempts                  = 3
-	defaultWorkerDrainTimeout                 = 10 * time.Second
-	maxErrorSummaryLength                     = 240
-	maxErrorDetailsLength                     = 1024
-	jobExecutionTopic                         = "jobs.execution.v1"
-	jobConsumerGroup                          = "jobs.workers.v1"
-	jobEnvelopeVersion                        = "v1"
+	JobStatusQueued              JobStatus       = "queued"
+	JobStatusRunning             JobStatus       = "running"
+	JobStatusSucceeded           JobStatus       = "succeeded"
+	JobStatusFailed              JobStatus       = "failed"
+	RequesterSourceOperator      RequesterSource = "operator"
+	defaultListLimit                             = 25
+	maxListLimit                                 = 100
+	defaultWorkerPollInterval                    = 2 * time.Second
+	defaultWorkerMaxAttempts                     = 3
+	defaultWorkerStaleRunningAge                 = 5 * time.Minute
+	maxErrorSummaryLength                        = 240
+	maxErrorDetailsLength                        = 1024
+	jobConsumerGroup                             = "jobs.workers.v1"
 )
 
 type JobType string
 type JobStatus string
 type RequesterSource string
-type executionKind string
-type executionEnvelope struct {
-	Version         string          `json:"version"`
-	Kind            executionKind   `json:"kind"`
-	Payload         json.RawMessage `json:"payload"`
-	ObservableJobID string          `json:"observableJobId,omitempty"`
-	CorrelationID   string          `json:"correlationId,omitempty"`
-	RequesterID     string          `json:"requesterId,omitempty"`
-	RequesterSource string          `json:"requesterSource,omitempty"`
-}
 type Requester struct {
-	UserID         string
-	Source         RequesterSource
-	AgentSessionID string
-	AgentRunID     string
+	UserID string
+	Source RequesterSource
 }
+
+// JobMetadata is the safe visibility projection selected by an observed
+// consumer. It must not contain the command payload or provider credentials.
+type JobMetadata struct {
+	JobType            JobType
+	Requester          Requester
+	ScheduleID         string
+	ScheduledAt        *time.Time
+	ScheduledNextRunAt *time.Time
+}
+
 type JobError struct {
 	Code    string
 	Summary string
 	Details string
 }
+
 type Job struct {
 	ID                 string
 	JobType            JobType
 	Status             JobStatus
 	Requester          Requester
-	IdempotencyKey     string
-	InputHash          string
-	InputJSON          json.RawMessage
-	ResultJSON         json.RawMessage
-	ProgressJSON       json.RawMessage
 	Error              *JobError
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
@@ -70,71 +61,31 @@ type Job struct {
 	CompletedAt        *time.Time
 	WorkerID           string
 	AttemptCount       int
-	MaxAttempts        int
 	LastAttemptAt      *time.Time
-	CorrelationID      string
 	ScheduleID         string
 	ScheduledAt        *time.Time
 	ScheduledNextRunAt *time.Time
 }
+
 type ListParams struct {
-	Statuses   []JobStatus
-	JobTypes   []JobType
-	Sources    []RequesterSource
-	Limit      int
-	Cursor     string
-	JobIDsOnly bool
+	Statuses []JobStatus
+	JobTypes []JobType
+	Sources  []RequesterSource
+	Limit    int
+	Cursor   string
 }
+
 type ListResult struct {
 	Items      []Job
 	NextCursor string
 }
-type EnqueueParams struct {
-	JobType        JobType
-	Requester      Requester
-	IdempotencyKey string
-	CorrelationID  string
-	ScheduleID     string
-	Input          any
-}
-type EnqueueJSONParams struct {
-	JobType            JobType
-	Requester          Requester
-	IdempotencyKey     string
-	CorrelationID      string
-	ScheduleID         string
-	ScheduledAt        *time.Time
-	ScheduledNextRunAt *time.Time
-	InputHash          string
-	InputJSON          json.RawMessage
-}
-type Schedule struct {
-	ID             string
-	JobType        JobType
-	Requester      Requester
-	InputJSON      json.RawMessage
-	Interval       time.Duration
-	NextRunAt      *time.Time
-	LastEnqueuedAt *time.Time
-	CorrelationID  string
-	Enabled        bool
-}
-type WorkerConfig struct {
-	Enabled      bool
-	PollInterval time.Duration
-	MaxAttempts  int
-	DrainTimeout time.Duration
-}
-type idempotencyConflictError struct{ key string }
 
-func (e *idempotencyConflictError) Error() string {
-	return fmt.Sprintf("idempotency key conflict: %s", e.key)
+type WorkerConfig struct {
+	PollInterval    time.Duration
+	MaxAttempts     int
+	StaleRunningAge time.Duration
 }
-func (e *idempotencyConflictError) Code() string { return "idempotency_key_conflict" }
-func IsIdempotencyConflict(err error) bool {
-	var target *idempotencyConflictError
-	return errors.As(err, &target)
-}
+
 func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = defaultWorkerPollInterval
@@ -142,45 +93,12 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	if cfg.MaxAttempts <= 0 {
 		cfg.MaxAttempts = defaultWorkerMaxAttempts
 	}
-	if cfg.DrainTimeout <= 0 {
-		cfg.DrainTimeout = defaultWorkerDrainTimeout
+	if cfg.StaleRunningAge <= 0 {
+		cfg.StaleRunningAge = defaultWorkerStaleRunningAge
 	}
 	return cfg
 }
-func EncodeJobPayload[T any](payload T) (json.RawMessage, error) {
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	return json.RawMessage(encoded), nil
-}
 
-//nolint:ireturn // Typed job payload decoding returns the requested concrete value.
-func DecodeJobInput[T any](job Job) (T, error) {
-	return decodeJobPayload[T](job.InputJSON)
-}
-
-//nolint:ireturn // Typed job payload decoding returns the requested concrete value.
-func DecodeJobResult[T any](job Job) (T, error) {
-	return decodeJobPayload[T](job.ResultJSON)
-}
-
-//nolint:ireturn // Typed job payload decoding returns the requested concrete value.
-func DecodeJobProgress[T any](job Job) (T, error) {
-	return decodeJobPayload[T](job.ProgressJSON)
-}
-
-//nolint:ireturn // Typed job payload decoding returns the requested concrete value.
-func decodeJobPayload[T any](payload json.RawMessage) (T, error) {
-	var decoded T
-	if len(payload) == 0 {
-		return decoded, nil
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return decoded, err
-	}
-	return decoded, nil
-}
 func normalizeListParams(params ListParams) ListParams {
 	if params.Limit <= 0 {
 		params.Limit = defaultListLimit
@@ -190,14 +108,14 @@ func normalizeListParams(params ListParams) ListParams {
 	}
 	return params
 }
+
 func canonicalizeRequester(requester Requester) Requester {
 	return Requester{
-		UserID:         strings.TrimSpace(requester.UserID),
-		Source:         RequesterSource(strings.TrimSpace(string(requester.Source))),
-		AgentSessionID: strings.TrimSpace(requester.AgentSessionID),
-		AgentRunID:     strings.TrimSpace(requester.AgentRunID),
+		UserID: strings.TrimSpace(requester.UserID),
+		Source: RequesterSource(strings.TrimSpace(string(requester.Source))),
 	}
 }
+
 func jobErrorFromExecution(err error) *JobError {
 	if err == nil {
 		return nil
@@ -206,27 +124,34 @@ func jobErrorFromExecution(err error) *JobError {
 	summary := "job execution failed"
 	details := message
 	lower := strings.ToLower(message)
-	if strings.Contains(lower, "gorm") ||
-		strings.Contains(lower, "sql") ||
-		strings.Contains(lower, "select ") ||
-		strings.Contains(lower, "insert ") ||
-		strings.Contains(lower, "update ") ||
-		strings.Contains(lower, "delete ") {
+	if strings.Contains(lower, "gorm") || strings.Contains(lower, "sql") ||
+		strings.Contains(lower, "select ") || strings.Contains(lower, "insert ") ||
+		strings.Contains(lower, "update ") || strings.Contains(lower, "delete ") {
 		details = summary
 	}
 	return &JobError{
-		Code:    "job_execution_failed",
-		Summary: truncateBounded(summary, maxErrorSummaryLength),
+		Code: "job_execution_failed", Summary: truncateBounded(summary, maxErrorSummaryLength),
 		Details: truncateBounded(details, maxErrorDetailsLength),
 	}
 }
-func jobResultEncodingError(err error) *JobError {
-	return &JobError{
-		Code:    "job_result_encoding_failed",
-		Summary: "job result encoding failed",
-		Details: truncateBounded(err.Error(), maxErrorDetailsLength),
+
+func jobErrorFromBusinessFailure(failure *appdispatch.BusinessFailureError) *JobError {
+	if failure == nil {
+		return nil
 	}
+	jobErr := jobErrorFromExecution(failure)
+	if failure.Code != "" {
+		jobErr.Code = truncateBounded(failure.Code, 128)
+	}
+	if failure.Summary != "" {
+		jobErr.Summary = truncateBounded(failure.Summary, maxErrorSummaryLength)
+	}
+	if failure.Details != "" {
+		jobErr.Details = truncateBounded(failure.Details, maxErrorDetailsLength)
+	}
+	return jobErr
 }
+
 func truncateBounded(value string, maxLen int) string {
 	trimmed := strings.TrimSpace(value)
 	if len(trimmed) <= maxLen {
@@ -241,6 +166,10 @@ func truncateBounded(value string, maxLen int) string {
 	}
 	return trimmed[:maxLen-len(ellipsis)] + ellipsis
 }
-func dispatchKindForJobType(jobType JobType) executionKind {
-	return executionKind(jobType)
+
+func validateRequiredTimestamp(field string, value time.Time) error {
+	if value.IsZero() {
+		return fmt.Errorf("%s must be a non-zero timestamp", field)
+	}
+	return nil
 }

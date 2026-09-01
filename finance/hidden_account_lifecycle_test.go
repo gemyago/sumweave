@@ -9,6 +9,7 @@ import (
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -184,9 +185,11 @@ func TestHiddenAccountLifecycle(t *testing.T) {
 		require.NoError(t, catalog.HideAccount(t.Context(), HideAccountParams{
 			ActorUserID: ownerID, TenantID: tenant.ID, AccountID: account.ID,
 		}))
-		imports.csvImportJobEnqueuer = &recordingCSVJobEnqueuer{
-			jobID: "job-" + faker.New().UUID().V4(), jobType: CSVImportJobTypeTransactions,
-		}
+		publisher := NewMockSemanticCommandPublisher(t)
+		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).Return(
+			DispatchReference{MessageID: "job-" + faker.New().UUID().V4()}, nil,
+		)
+		imports.commandPublisher = publisher
 		confirmed, err := imports.ConfirmCSVImport(t.Context(), ConfirmCSVImportParams{
 			ActorUserID: ownerID, ImportID: preview.ImportID,
 		})
