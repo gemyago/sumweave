@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	sumweave "github.com/gemyago/sumweave/apps/sumweave"
 	"github.com/spf13/cobra"
@@ -98,7 +101,10 @@ func newStartServerCmd() *cobra.Command {
 
 func main() { // coverage-ignore
 	rootCmd := setupCommands()
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := rootCmd.ExecuteContext(ctx)
+	stop()
+	if err != nil {
 		os.Exit(1)
 	}
 }

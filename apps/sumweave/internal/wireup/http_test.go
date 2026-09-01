@@ -1,10 +1,15 @@
 package wireup
 
 import (
+	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
 	"github.com/jaswdr/faker/v2"
@@ -34,6 +39,76 @@ func TestBuildHTTP(t *testing.T) {
 		root.Handler.ServeHTTP(response, request)
 		require.Equal(t, http.StatusOK, response.Code)
 		require.NotNil(t, root.Server)
+	})
+
+	t.Run("closes the root when noop completes", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(tempDir, fake.UUID().V4()+".sqlite"))
+		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", filepath.Join(tempDir, fake.UUID().V4()+".sqlite"))
+		t.Setenv("APP_DATADIR", tempDir)
+		root, err := BuildHTTP(t.Context(), HTTPOptions{})
+		require.NoError(t, err)
+		expectedErr := errors.New("noop shutdown")
+		root.shutdownHooks.Register("noop-test", func(context.Context) error {
+			return expectedErr
+		})
+
+		require.ErrorIs(t, root.StartHTTPServer(t.Context(), true), expectedErr)
+	})
+
+	t.Run("closes the root and joins the server after caller cancellation", func(t *testing.T) {
+		listener, err := net.Listen("tcp", "localhost:0")
+		require.NoError(t, err)
+		port := listener.Addr().(*net.TCPAddr).Port
+		require.NoError(t, listener.Close())
+		t.Setenv("APP_HTTPSERVER_PORT", strconv.Itoa(port))
+		root := makeRoot(t)
+		root.shutdownHooks.Register("cancellation-test", func(ctx context.Context) error {
+			return ctx.Err()
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		serverErr := make(chan error, 1)
+		go func() {
+			serverErr <- root.StartHTTPServer(ctx, false)
+		}()
+		client := &http.Client{Timeout: time.Second}
+		require.Eventually(t, func() bool {
+			response, requestErr := client.Get("http://localhost:" + strconv.Itoa(port) + "/health")
+			if requestErr != nil {
+				return false
+			}
+			defer response.Body.Close()
+			return response.StatusCode == http.StatusOK
+		}, time.Second, 10*time.Millisecond)
+
+		cancel()
+		select {
+		case startErr := <-serverErr:
+			require.NoError(t, startErr)
+		case <-time.After(time.Second):
+			t.Fatal("HTTP server did not stop after caller cancellation")
+		}
+	})
+
+	t.Run("returns server startup errors", func(t *testing.T) {
+		listener, err := net.Listen("tcp", "localhost:0")
+		require.NoError(t, err)
+		defer func() { require.NoError(t, listener.Close()) }()
+		port := listener.Addr().(*net.TCPAddr).Port
+		t.Setenv("APP_HTTPSERVER_PORT", strconv.Itoa(port))
+		root := makeRoot(t)
+		expectedCleanupErr := errors.New("startup cleanup")
+		root.shutdownHooks.Register("startup-error-test", func(ctx context.Context) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return expectedCleanupErr
+		})
+
+		startErr := root.StartHTTPServer(t.Context(), false)
+		require.Error(t, startErr)
+		require.ErrorIs(t, startErr, expectedCleanupErr)
 	})
 
 	t.Run("rejects invalid root inputs before wireup", func(t *testing.T) {

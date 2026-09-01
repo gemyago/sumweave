@@ -378,18 +378,29 @@ func makeTelemetryConfigs(values config.OpenTelemetry) (
 		}
 }
 
-// StartHTTPServer starts the HTTP listener unless noop is requested. In either
-// mode it uses the normal lifecycle owner, so noop validates shutdown too.
-func (root *HTTPRoot) StartHTTPServer(ctx context.Context, noop bool) error {
-	startupGroup := (&lifecycle.StartupGroupFactory{ShutdownHooks: root.shutdownHooks, RootLogger: root.rootLogger}).NewGroup()
-	startupGroup.Add(func(groupCtx context.Context) error {
-		if noop {
-			root.rootLogger.InfoContext(groupCtx, "NOOP: Starting http server")
-			return nil
+// StartHTTPServer starts the HTTP listener unless noop is requested. The
+// caller owns signal cancellation through ctx; this root only owns resources.
+func (root *HTTPRoot) StartHTTPServer(
+	ctx context.Context,
+	noop bool,
+) error {
+	if noop {
+		root.rootLogger.InfoContext(ctx, "NOOP: Starting http server")
+		return root.Close(context.WithoutCancel(ctx))
+	}
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- root.Server.Start(ctx) // coverage-ignore // server lifecycle is covered by the server package.
+	}()
+	select {
+	case serverErr := <-serverErrors:
+		return errors.Join(serverErr, root.Close(context.WithoutCancel(ctx)))
+	case <-ctx.Done():
+		if err := root.Close(context.WithoutCancel(ctx)); err != nil {
+			return err
 		}
-		return root.Server.Start(groupCtx) // coverage-ignore // server lifecycle is covered by the server package.
-	})
-	return startupGroup.Start(ctx)
+		return <-serverErrors
+	}
 }
 
 // Close releases resources when a caller builds but does not start this root.

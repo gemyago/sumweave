@@ -67,6 +67,9 @@ func newJobsWorkerCmdWithResolver(resolver jobsWorkerResolver) *cobra.Command {
 				return err
 			}
 			err = worker.Run(cmd.Context())
+			if errors.Is(err, context.Canceled) && cmd.Context().Err() != nil {
+				return nil
+			}
 			return err
 		},
 	}

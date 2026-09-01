@@ -285,7 +285,6 @@ func buildWorker(
 		Config: jobspkg.WorkerConfig{
 			PollInterval: rootConfig.Jobs.Worker.PollInterval, MaxAttempts: rootConfig.Jobs.Worker.MaxAttempts,
 			StaleRunningAge: rootConfig.Jobs.Worker.StaleRunningAge,
-			DrainTimeout:    rootConfig.GracefulShutdownTimeout,
 		},
 		RouterFactory: routerFactory,
 	})

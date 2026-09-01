@@ -19,7 +19,6 @@ const (
 	defaultWorkerPollInterval                    = 2 * time.Second
 	defaultWorkerMaxAttempts                     = 3
 	defaultWorkerStaleRunningAge                 = 5 * time.Minute
-	defaultWorkerDrainTimeout                    = 10 * time.Second
 	maxErrorSummaryLength                        = 240
 	maxErrorDetailsLength                        = 1024
 	jobConsumerGroup                             = "jobs.workers.v1"
@@ -85,7 +84,6 @@ type WorkerConfig struct {
 	PollInterval    time.Duration
 	MaxAttempts     int
 	StaleRunningAge time.Duration
-	DrainTimeout    time.Duration
 }
 
 func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
@@ -97,9 +95,6 @@ func normalizeWorkerConfig(cfg WorkerConfig) WorkerConfig {
 	}
 	if cfg.StaleRunningAge <= 0 {
 		cfg.StaleRunningAge = defaultWorkerStaleRunningAge
-	}
-	if cfg.DrainTimeout <= 0 {
-		cfg.DrainTimeout = defaultWorkerDrainTimeout
 	}
 	return cfg
 }

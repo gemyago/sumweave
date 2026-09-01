@@ -43,13 +43,7 @@ type Worker struct {
 	workerID  string
 	router    *appdispatch.Router
 	mu        sync.Mutex
-	lifecycle *workerLifecycle
 	installed bool
-}
-
-type workerLifecycle struct {
-	drainCtx    context.Context
-	drainCancel context.CancelFunc
 }
 
 func NewWorker(deps WorkerDeps) (*Worker, error) {
@@ -84,15 +78,10 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 func (w *Worker) Run(
 	ctx context.Context,
 ) error { // coverage-ignore // Split worker command owns this blocking loop.
-	finish, err := w.startDrain(ctx)
-	if err != nil { // coverage-ignore // Concurrent Run is guarded by the worker root lifecycle.
+	if err := w.installHandlers(); err != nil { // coverage-ignore // Registration validation is unit-tested before worker composition.
 		return err
 	}
-	defer finish()
-	if err = w.installHandlers(); err != nil { // coverage-ignore // Registration validation is unit-tested before worker composition.
-		return err
-	}
-	if err = w.store.RecoverStaleRunning(
+	if err := w.store.RecoverStaleRunning(
 		ctx,
 		w.clock(),
 		w.config.StaleRunningAge,
@@ -106,15 +95,10 @@ func (w *Worker) Run(
 func (w *Worker) RunOnce(ctx context.Context) error {
 	runCtx, cancel := context.WithTimeout(ctx, 2*w.config.PollInterval)
 	defer cancel()
-	finish, err := w.startDrain(runCtx)
-	if err != nil { // coverage-ignore // Concurrent RunOnce is guarded by the worker root lifecycle.
+	if err := w.installHandlers(); err != nil { // coverage-ignore // Registration validation is unit-tested before worker composition.
 		return err
 	}
-	defer finish()
-	if err = w.installHandlers(); err != nil { // coverage-ignore // Registration validation is unit-tested before worker composition.
-		return err
-	}
-	if err = w.store.RecoverStaleRunning(
+	if err := w.store.RecoverStaleRunning(
 		runCtx,
 		w.clock(),
 		w.config.StaleRunningAge,
@@ -122,20 +106,14 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	); err != nil { // coverage-ignore
 		return err
 	}
-	err = w.router.Run(runCtx)
+	err := w.router.Run(runCtx)
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return nil
 	}
 	return err // coverage-ignore // Router errors are surfaced unchanged to the split worker command.
 }
 
-func (w *Worker) Stop(_ context.Context) error {
-	w.mu.Lock()
-	lifecycle := w.lifecycle
-	w.mu.Unlock()
-	if lifecycle != nil { // coverage-ignore // Stop while draining is coordinated by command shutdown.
-		lifecycle.drainCancel()
-	}
+func (w *Worker) Stop(context.Context) error {
 	return w.router.Close()
 }
 
@@ -150,9 +128,7 @@ func (w *Worker) installHandlers() error {
 		transportHandler, err := appdispatch.NewHandler(
 			handler.topic(),
 			func(ctx context.Context, message appdispatch.Message) error {
-				deliveryCtx, cancel := w.deliveryContext(ctx)
-				defer cancel()
-				return w.processObserved(deliveryCtx, handler, message)
+				return w.processObserved(ctx, handler, message)
 			},
 		)
 		if err != nil { // coverage-ignore // Topic was validated at observed registration.
@@ -164,42 +140,6 @@ func (w *Worker) installHandlers() error {
 	}
 	w.installed = true
 	return nil
-}
-
-func (w *Worker) startDrain(parent context.Context) (func(), error) {
-	drainCtx, drainCancel := context.WithCancel(context.WithoutCancel(parent))
-	lifecycle := &workerLifecycle{drainCtx: drainCtx, drainCancel: drainCancel}
-	w.mu.Lock()
-	if w.lifecycle != nil {
-		w.mu.Unlock()
-		drainCancel()
-		return nil, errors.New("jobs worker is already running")
-	}
-	w.lifecycle = lifecycle
-	w.mu.Unlock()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			drainCancel()
-			w.mu.Lock()
-			if w.lifecycle == lifecycle {
-				w.lifecycle = nil
-			}
-			w.mu.Unlock()
-		})
-	}, nil
-}
-
-func (w *Worker) deliveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	deliveryCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	w.mu.Lock()
-	lifecycle := w.lifecycle
-	w.mu.Unlock()
-	if lifecycle == nil { // coverage-ignore // Direct delivery without a worker run is test-only.
-		return deliveryCtx, cancel
-	}
-	stop := context.AfterFunc(lifecycle.drainCtx, cancel)
-	return deliveryCtx, func() { stop(); cancel() }
 }
 
 type runningJobDeliveryError struct{ jobID string }

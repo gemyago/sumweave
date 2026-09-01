@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -88,5 +89,18 @@ func TestJobsCommandErrorHandling(t *testing.T) {
 		})
 
 		require.ErrorIs(t, cmd.ExecuteContext(t.Context()), resolverErr)
+	})
+	t.Run("canceled worker exit is clean and closes the root", func(t *testing.T) {
+		worker := newMockjobsWorkerCommandRunner(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		worker.EXPECT().Run(mock.Anything).Return(context.Canceled)
+		worker.EXPECT().Close(mock.Anything).Return(nil)
+
+		cmd := newJobsWorkerCmdWithResolver(func(*cobra.Command) (jobsWorkerCommandRunner, error) {
+			return worker, nil
+		})
+
+		require.NoError(t, cmd.ExecuteContext(ctx))
 	})
 }

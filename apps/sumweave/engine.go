@@ -51,7 +51,7 @@ func (e *Engine) Close(ctx context.Context) error {
 // StartHTTPServer starts the HTTP server.
 // Note: this method is blocking until the HTTP server is stopped.
 // Note: this method is supposed to be called only once.
-// It will also handle system signals and shutdown the HTTP server gracefully.
+// Callers cancel ctx to shut down the HTTP server gracefully.
 func (e *Engine) StartHTTPServer(ctx context.Context, opts ...EngineStartServerOpt) error {
 	o := &engineStartServerCfg{
 		noop: false,
