@@ -10,6 +10,9 @@ import (
 
 func TestRuntimeResolution(t *testing.T) {
 	t.Chdir("../..")
+	tempDir := t.TempDir()
+	t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(tempDir, "application.sqlite"))
+	t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", filepath.Join(tempDir, "agent-runtime.sqlite"))
 	makeRoot := func(t *testing.T, command *cobra.Command) *cobra.Command {
 		t.Helper()
 		root := newRootCmd()

@@ -23,6 +23,7 @@ func TestBuildHTTP(t *testing.T) {
 		t.Helper()
 		dsn := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
 		t.Setenv("APP_APPLICATION_DATABASE_DSN", dsn)
+		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
 		migration, err := BuildMigration(t.Context(), MigrationOptions{Environment: "test"})
 		require.NoError(t, err)
 		require.NoError(t, migration.Migrate(t.Context()))

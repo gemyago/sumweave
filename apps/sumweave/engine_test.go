@@ -15,7 +15,9 @@ import (
 func TestEngine(t *testing.T) {
 	makeEngine := func(t *testing.T) *sumweave.Engine {
 		t.Helper()
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
+		tempDir := t.TempDir()
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(tempDir, "application.sqlite"))
+		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", filepath.Join(tempDir, "agent-runtime.sqlite"))
 		migration, err := wireup.BuildMigration(t.Context(), wireup.MigrationOptions{Environment: "test"})
 		require.NoError(t, err)
 		require.NoError(t, migration.Migrate(t.Context()))

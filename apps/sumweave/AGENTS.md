@@ -53,9 +53,9 @@ Invoke repo-scoped PM2 commands from the repo root:
 
 `pm2 start ecosystem.config.js` creates the API and UI development processes.
 
-Before starting or restarting backend processes that rely on persisted tables, change to `apps/sumweave` and run `go run ./cmd/sumweave db-migrate --env local`.
+Before starting or restarting backend processes that rely on persisted tables, run `make postgres-bootstrap` from the repository root.
 
-The standard local workflow migrates from `apps/sumweave`, then returns to the repository root to run `pm2 start ecosystem.config.js`. Use direct `go run ./cmd/sumweave start-all --env local` only to diagnose a local startup problem. Local filesystem paths are app-root-relative; arbitrary working directories are unsupported.
+The standard local workflow runs `make postgres-bootstrap`, then `pm2 start ecosystem.config.js` from the repository root. Use direct `go run ./cmd/sumweave start-all --env local` only to diagnose a local startup problem. Local filesystem paths are app-root-relative; arbitrary working directories are unsupported.
 
 For the optional HTTPS backend and Vite development workflow, follow [../../docs/local-https.md](../../docs/local-https.md). It uses ignored local certificate files and `APP_HTTPSERVER_TLS_CERTFILE` / `APP_HTTPSERVER_TLS_KEYFILE`.
 
@@ -67,7 +67,7 @@ PM2 remains repo-scoped, but `ecosystem.config.js` sets the backend process work
 If the PM2 command shape changed (for example from `start` to `start-all`) or you need to guarantee the current ecosystem config is applied, recreate the backend app with `pm2 delete sumweave-api && pm2 start ecosystem.config.js` from the repo root; PM2 can otherwise keep an older command definition.
 
 Durable jobs workflow:
-- `sumweave db-migrate` is the standard schema setup path for local/dev and PM2-backed environments.
+- `make postgres-bootstrap` is the standard schema setup path for local/dev and PM2-backed environments.
 - `sumweave user add --if-not-exists` supports retry-safe bootstrap hooks
   without resetting an existing password.
 - `sumweave start-all` is the standard local backend mode; it runs the HTTP server, durable consumer, and scheduler loop together after schemas are prepared.

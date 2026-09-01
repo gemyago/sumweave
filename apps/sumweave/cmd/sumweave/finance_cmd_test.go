@@ -173,9 +173,10 @@ func TestFinanceCommand(t *testing.T) {
 	})
 
 	t.Run(
-		"resolve finance fixtures runtime config preserves default config values",
+		"resolve finance fixtures runtime config preserves other default config values",
 		func(t *testing.T) {
 			t.Chdir(t.TempDir())
+			t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.db"))
 			rootCmd := newRootCmd()
 			require.NoError(t, rootCmd.PersistentFlags().Set("env", "test"))
 

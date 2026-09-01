@@ -14,7 +14,14 @@ func TestValues(t *testing.T) {
 			values, err := LoadValues(ValuesLoadInput{Environment: "local"})
 			require.NoError(t, err)
 			require.Equal(t, "DEBUG", values.DefaultLogLevel)
-			require.Equal(t, "data/application.db", values.Application.Database.DSN)
+			require.Equal(
+				t,
+				"postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_local?sslmode=disable",
+				values.Application.Database.DSN,
+			)
+			require.Equal(t, values.Application.Database.DSN, values.AgentRuntime.Database.DSN)
+			require.Equal(t, "sumweave_", values.Application.Database.TablePrefix)
+			require.Equal(t, "sumweave_runtime_", values.AgentRuntime.Database.TablePrefix)
 			require.Equal(t, "local-secret-key", values.Auth.JWTSigningKey)
 			require.Equal(t, time.Minute, values.HTTPServer.IdleTimeout)
 			require.Equal(t, 5*time.Minute, values.Jobs.Worker.StaleRunningAge)
@@ -24,7 +31,14 @@ func TestValues(t *testing.T) {
 		t.Run("test", func(t *testing.T) {
 			values, err := LoadValues(ValuesLoadInput{Environment: "test"})
 			require.NoError(t, err)
-			require.Equal(t, ":memory:", values.Application.Database.DSN)
+			require.Equal(
+				t,
+				"postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_test?sslmode=disable",
+				values.Application.Database.DSN,
+			)
+			require.Equal(t, values.Application.Database.DSN, values.AgentRuntime.Database.DSN)
+			require.Equal(t, "sumweave_", values.Application.Database.TablePrefix)
+			require.Equal(t, "sumweave_runtime_", values.AgentRuntime.Database.TablePrefix)
 			require.Equal(t, "test-secret-key", values.Auth.JWTSigningKey)
 			require.Equal(t, "https://enable-banking.test", values.Finance.Providers.EnableBanking.BaseURL)
 			require.Equal(t, 90, values.Finance.Providers.EnableBanking.ValidDays)

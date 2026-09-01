@@ -11,7 +11,9 @@ import (
 func TestMain(t *testing.T) {
 	t.Run("db-migrate then noop startup commands initialize and close production dependencies", func(t *testing.T) {
 		t.Chdir("../..")
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
+		tempDir := t.TempDir()
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(tempDir, "application.sqlite"))
+		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", filepath.Join(tempDir, "agent-runtime.sqlite"))
 
 		migrateCmd := setupCommands()
 		migrateCmd.SetArgs([]string{"--env", "test", "db-migrate"})

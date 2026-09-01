@@ -16,6 +16,7 @@ func TestBuildProcessRoots(t *testing.T) {
 		t.Helper()
 		applicationDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
 		t.Setenv("APP_APPLICATION_DATABASE_DSN", applicationDSN)
+		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
 		migration, err := BuildMigration(t.Context(), MigrationOptions{Environment: "test"})
 		require.NoError(t, err)
 		require.NoError(t, migration.Migrate(t.Context()))

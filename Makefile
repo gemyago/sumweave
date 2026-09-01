@@ -5,6 +5,29 @@ cover_profile=$(cover_dir)/profile.out
 
 go-test-coverage=go run github.com/vladopajic/go-test-coverage/v2
 
+POSTGRES_HOST ?= 127.0.0.1
+POSTGRES_PORT ?= 55432
+POSTGRES_MANAGED_EXTERNALLY ?=
+
+ifeq ($(POSTGRES_MANAGED_EXTERNALLY),1)
+POSTGRES_BOOTSTRAP_DSN ?=
+else
+POSTGRES_BOOTSTRAP_DSN ?= postgres://postgres:sumweave_postgres_local@127.0.0.1:55432/postgres?sslmode=disable
+endif
+
+.PHONY: postgres-bootstrap postgres-bootstrap-contract-test
+postgres-bootstrap:
+	@if [ "$(POSTGRES_MANAGED_EXTERNALLY)" != "1" ]; then \
+		docker compose -f compose.yaml up --detach --wait postgres; \
+	fi
+	@POSTGRES_HOST="$(POSTGRES_HOST)" POSTGRES_PORT="$(POSTGRES_PORT)" \
+		POSTGRES_MANAGED_EXTERNALLY="$(POSTGRES_MANAGED_EXTERNALLY)" \
+		POSTGRES_BOOTSTRAP_DSN="$(POSTGRES_BOOTSTRAP_DSN)" \
+		./scripts/postgres/bootstrap.sh
+
+postgres-bootstrap-contract-test:
+	./scripts/postgres/bootstrap-contract-test.sh
+
 $(cover_dir):
 	mkdir -p $(cover_dir)
 

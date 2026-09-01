@@ -26,19 +26,22 @@ func TestStartAllDocumentation(t *testing.T) {
 		return string(content)
 	}
 
-	t.Run("root AGENTS documents db-migrate plus start-all as standard local backend workflow", func(t *testing.T) {
-		doc := readFile(resolvePath("..", "..", "..", "..", "AGENTS.md"))
+	t.Run(
+		"root AGENTS documents PostgreSQL bootstrap and standard local backend workflow",
+		func(t *testing.T) {
+			doc := readFile(resolvePath("..", "..", "..", "..", "AGENTS.md"))
 
-		assert.Contains(t, doc, "db-migrate")
-		assert.Contains(t, doc, "start-all")
-		assert.Contains(t, doc, "pm2 start ecosystem.config.js")
-	})
+			assert.Contains(t, doc, "make postgres-bootstrap")
+			assert.Contains(t, doc, "start-all")
+			assert.Contains(t, doc, "pm2 start ecosystem.config.js")
+		},
+	)
 
-	t.Run("backend AGENTS keeps local start-all guidance and split commands", func(t *testing.T) {
+	t.Run("backend AGENTS keeps local PostgreSQL bootstrap guidance and split commands", func(t *testing.T) {
 		doc := readFile(resolvePath("..", "..", "AGENTS.md"))
 
 		assert.Contains(t, doc, "sumweave start-all")
-		assert.Contains(t, doc, "sumweave db-migrate")
+		assert.Contains(t, doc, "make postgres-bootstrap")
 		assert.Contains(t, doc, "sumweave start")
 		assert.Contains(t, doc, "sumweave jobs worker")
 		assert.Contains(t, doc, "sumweave jobs enqueue-due")

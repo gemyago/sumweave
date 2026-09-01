@@ -7,11 +7,11 @@ dataDir: data
 
 application:
   database:
-    dsn: data/application.db
+    dsn: postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_local?sslmode=disable
 
 agentRuntime:
   database:
-    dsn: data/agent-runtime.db
+    dsn: postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_local?sslmode=disable
 
 auth:
   jwtSigningKey: local-secret-key
