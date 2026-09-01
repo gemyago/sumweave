@@ -73,11 +73,17 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 	if err != nil { // coverage-ignore // Router factory construction failure is covered by appdispatch.
 		return nil, fmt.Errorf("create jobs router: %w", err)
 	}
-	return &Worker{
+	worker := &Worker{
 		store: deps.Store, registry: deps.Registry, logger: deps.Logger, clock: deps.Clock,
 		config: normalizeWorkerConfig(deps.Config), workerID: deps.WorkerID, router: router,
 		claims: make(map[string]Job),
-	}, nil
+	}
+	if lifecycleErr := router.SetRetryLifecycle(appdispatch.RetryLifecycle{
+		OnRetry: worker.startRunOnceRetry, OnRetriesExhausted: worker.finishRunOnceRetry,
+	}); lifecycleErr != nil {
+		return nil, fmt.Errorf("set jobs retry lifecycle: %w", lifecycleErr)
+	}
+	return worker, nil
 }
 
 func (w *Worker) Run(
@@ -233,7 +239,7 @@ func (w *Worker) processObserved(ctx context.Context, handler observedHandler, m
 	}
 	w.trackClaim(*claimed)
 	defer w.releaseClaim(claimed.ID)
-	return w.executeClaimedObserved(ctx, handler, message, claimed, tracker)
+	return w.executeClaimedObserved(ctx, handler, message, claimed)
 }
 
 func (w *Worker) executeClaimedObserved(
@@ -241,7 +247,6 @@ func (w *Worker) executeClaimedObserved(
 	handler observedHandler,
 	message appdispatch.Message,
 	claimed *Job,
-	tracker *runOnceTracker,
 ) error {
 	defer func() {
 		if panicValue := recover(); panicValue != nil { // coverage-ignore // Router Recoverer handles panics after the requeue attempt.
@@ -261,18 +266,12 @@ func (w *Worker) executeClaimedObserved(
 		if requeueErr := w.store.RequeueRunning(ctx, *claimed, queuedAt); requeueErr != nil {
 			return fmt.Errorf("requeue transient observed job: %w", requeueErr)
 		}
-		if tracker != nil {
-			tracker.startRetry(claimed.ID)
-		}
 		return exhaustedRetryError{
 			err: err,
 			finalize: func() error {
 				finalizeErr := w.finalizeRetryExhausted(ctx, claimed.ID, queuedAt, newFailedTerminalJobState(
 					w.workerID, jobErrorFromExecution(err), w.clock(),
 				))
-				if tracker != nil {
-					tracker.finishRetry(claimed.ID)
-				}
 				return finalizeErr
 			},
 		}
@@ -351,6 +350,18 @@ func (w *Worker) runOnceTracker() *runOnceTracker {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.runOnce
+}
+
+func (w *Worker) startRunOnceRetry(messageID string) {
+	if tracker := w.runOnceTracker(); tracker != nil {
+		tracker.startRetry(messageID)
+	}
+}
+
+func (w *Worker) finishRunOnceRetry(messageID string) {
+	if tracker := w.runOnceTracker(); tracker != nil {
+		tracker.finishRetry(messageID)
+	}
 }
 
 func (w *Worker) recoverStaleRunning(ctx context.Context) error {

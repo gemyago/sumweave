@@ -241,9 +241,34 @@ func TestObservedSubscriptions(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusFailed, retried.Status)
 		assert.Equal(t, "job_execution_failed", retried.Error.Code)
+
+		metadataRetryStore, metadataRetryFactory, metadataRetryPublisher, _, _ := makeTransport(t)
+		metadataRetryRegistry := NewRegistry()
+		metadataRetryTopic := "metadata-retry." + fake.UUID().V4()
+		var metadataCalls atomic.Int32
+		require.NoError(t, RegisterTypedHandler(metadataRetryRegistry, TypedHandlerSpec[command]{
+			JobType: "finance.test", Topic: metadataRetryTopic,
+			Metadata: func(command) (JobMetadata, error) {
+				metadataCalls.Add(1)
+				return JobMetadata{}, errors.New("metadata failure " + fake.UUID().V4())
+			},
+			Run: func(context.Context, Job, command) error { return nil },
+		}))
+		metadataRetryWorker, err := NewWorker(WorkerDeps{
+			Store: metadataRetryStore, Registry: metadataRetryRegistry, RouterFactory: metadataRetryFactory,
+			Logger: slog.New(slog.DiscardHandler), Config: WorkerConfig{PollInterval: time.Millisecond},
+		})
+		require.NoError(t, err)
+		metadataRetryMessage := appdispatch.NewMessage(
+			metadataRetryTopic,
+			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
+		)
+		require.NoError(t, metadataRetryPublisher.Publish(t.Context(), metadataRetryMessage))
+		require.NoError(t, metadataRetryWorker.RunOnce(t.Context()))
+		assert.Equal(t, int32(4), metadataCalls.Load())
 	})
 
-	t.Run("one-shot retry tracking keeps final persistence and topics isolated", func(t *testing.T) {
+	t.Run("one-shot retry lifecycle keeps final persistence and topics isolated", func(t *testing.T) {
 		store := newMockworkerStore(t)
 		registry := NewRegistry()
 		topic := "retry-tracker." + fake.UUID().V4()
@@ -280,6 +305,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		err := worker.processObserved(t.Context(), registry.Handlers()[0], message)
 		var exhausted exhaustedRetryError
 		require.ErrorAs(t, err, &exhausted)
+		worker.startRunOnceRetry(message.ID)
 		assert.False(t, tracker.isIdle())
 		finalized := make(chan error, 1)
 		go func() { finalized <- exhausted.OnRetriesExhausted() }()
@@ -287,6 +313,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		assert.False(t, tracker.isIdle())
 		close(releasePersist)
 		require.NoError(t, <-finalized)
+		worker.finishRunOnceRetry(message.ID)
 		assert.True(t, tracker.isIdle())
 
 		pendingJobID := fake.UUID().V4()

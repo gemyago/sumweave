@@ -41,6 +41,13 @@ type RetryExhaustionAware interface {
 	OnRetriesExhausted() error
 }
 
+// RetryLifecycle observes retryable delivery failures and their final outcome.
+// Callbacks run synchronously on the router's delivery path.
+type RetryLifecycle struct {
+	OnRetry            func(messageID string)
+	OnRetriesExhausted func(messageID string)
+}
+
 func NewHandler(topic string, run func(context.Context, Message) error) (Handler, error) {
 	if topic == "" {
 		return Handler{}, errors.New("handler topic is required")
@@ -82,6 +89,7 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 		return nil, fmt.Errorf("create subscriber for consumer group %s: %w", consumerGroup, err)
 	}
 	wmLogger := watermill.NewSlogLogger(logger)
+	lifecycle := &retryLifecycleState{}
 	router, err := wmmessage.NewRouter(wmmessage.RouterConfig{}, wmLogger)
 	if err != nil {
 		_ = subscriber.Close()
@@ -120,6 +128,7 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 				return !errors.As(params.Err, &nonRetryable)
 			},
 		}.Middleware,
+		retryLifecycleMiddleware(lifecycle),
 		middleware.Recoverer,
 		func(h wmmessage.HandlerFunc) wmmessage.HandlerFunc {
 			return func(msg *wmmessage.Message) ([]*wmmessage.Message, error) {
@@ -129,23 +138,88 @@ func (f *RouterFactory) NewRouter(consumerGroup string) (*Router, error) {
 					slog.String("id", msg.UUID),
 					slog.Any("metadata", msg.Metadata),
 				)
-				var res []*wmmessage.Message
-				res, err = h(msg)
-				if err != nil {
-					logger.ErrorContext(msg.Context(), "error handling message", "error", err)
+				res, handlerErr := h(msg)
+				if handlerErr != nil {
+					logger.ErrorContext(msg.Context(), "error handling message", "error", handlerErr)
 				}
-				return res, err
+				return res, handlerErr
 			}
 		},
 	)
 	return &Router{
-		consumerGroup: consumerGroup,
-		router:        router,
-		subscriber:    newLifecycleSubscriber(subscriber),
-		logger:        logger,
-		handlerTopics: make(map[string]struct{}),
-		closeDone:     make(chan struct{}),
+		consumerGroup:  consumerGroup,
+		router:         router,
+		subscriber:     newLifecycleSubscriber(subscriber),
+		logger:         logger,
+		handlerTopics:  make(map[string]struct{}),
+		closeDone:      make(chan struct{}),
+		retryLifecycle: lifecycle,
 	}, nil
+}
+
+type retryLifecycleState struct {
+	mu        sync.Mutex
+	lifecycle RetryLifecycle
+}
+
+func (s *retryLifecycleState) set(lifecycle RetryLifecycle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lifecycle = lifecycle
+}
+
+func (s *retryLifecycleState) retry(messageID string) {
+	s.mu.Lock()
+	onRetry := s.lifecycle.OnRetry
+	s.mu.Unlock()
+	if onRetry != nil {
+		onRetry(messageID)
+	}
+}
+
+func (s *retryLifecycleState) retriesExhausted(messageID string) {
+	s.mu.Lock()
+	onRetriesExhausted := s.lifecycle.OnRetriesExhausted
+	s.mu.Unlock()
+	if onRetriesExhausted != nil {
+		onRetriesExhausted(messageID)
+	}
+}
+
+func retryLifecycleMiddleware(state *retryLifecycleState) wmmessage.HandlerMiddleware {
+	return func(handler wmmessage.HandlerFunc) wmmessage.HandlerFunc {
+		return func(message *wmmessage.Message) ([]*wmmessage.Message, error) {
+			produced, err := handler(message)
+			if err == nil {
+				return produced, nil
+			}
+			var nonRetryable NonRetryable
+			if errors.As(err, &nonRetryable) {
+				return produced, err
+			}
+			state.retry(message.UUID)
+			return produced, retryLifecycleError{err: err, messageID: message.UUID, state: state}
+		}
+	}
+}
+
+type retryLifecycleError struct {
+	err       error
+	messageID string
+	state     *retryLifecycleState
+}
+
+func (e retryLifecycleError) Error() string { return e.err.Error() }
+
+func (e retryLifecycleError) Unwrap() error { return e.err }
+
+func (e retryLifecycleError) OnRetriesExhausted() error {
+	defer e.state.retriesExhausted(e.messageID)
+	var aware RetryExhaustionAware
+	if errors.As(e.err, &aware) {
+		return aware.OnRetriesExhausted()
+	}
+	return nil
 }
 
 type deadLetterPublisher struct {
@@ -188,6 +262,19 @@ type Router struct {
 	closeDone       chan struct{}
 	finishCloseOnce sync.Once
 	closeErr        error
+	retryLifecycle  *retryLifecycleState
+}
+
+// SetRetryLifecycle sets callbacks for retryable delivery failures. It must be
+// called before Run.
+func (r *Router) SetRetryLifecycle(lifecycle RetryLifecycle) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.started {
+		return errors.New("cannot set retry lifecycle after router starts")
+	}
+	r.retryLifecycle.set(lifecycle)
+	return nil
 }
 
 func (r *Router) Handle(handler Handler) error {
