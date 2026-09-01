@@ -19,8 +19,10 @@ const (
 type workerStore interface {
 	MaterializeQueued(context.Context, Job) (*Job, error)
 	ClaimQueued(context.Context, string, string, time.Time) (*Job, error)
-	RequeueRunning(context.Context, string, time.Time) error
-	persistTerminalState(context.Context, string, terminalJobState) error
+	RequeueRunning(context.Context, Job, time.Time) error
+	persistTerminalState(context.Context, Job, terminalJobState) error
+	FinalizeRetryExhausted(context.Context, string, time.Time, terminalJobState) error
+	RenewRunning(context.Context, Job, time.Time) error
 	RecoverStaleRunning(context.Context, time.Time, time.Duration, int) error
 }
 
@@ -45,6 +47,7 @@ type Worker struct {
 	mu        sync.Mutex
 	installed bool
 	runOnce   *runOnceTracker
+	claims    map[string]Job
 }
 
 func NewWorker(deps WorkerDeps) (*Worker, error) {
@@ -73,6 +76,7 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 	return &Worker{
 		store: deps.Store, registry: deps.Registry, logger: deps.Logger, clock: deps.Clock,
 		config: normalizeWorkerConfig(deps.Config), workerID: deps.WorkerID, router: router,
+		claims: make(map[string]Job),
 	}, nil
 }
 
@@ -85,12 +89,7 @@ func (w *Worker) Run(
 	if err := w.recoverStaleRunning(ctx); err != nil { // coverage-ignore
 		return err
 	}
-	stopRecovery := make(chan struct{})
-	recoveryDone := make(chan struct{})
-	go func() {
-		defer close(recoveryDone)
-		w.recoverStaleRunningPeriodically(ctx, stopRecovery)
-	}()
+	stopRecovery, recoveryDone := w.startPeriodicRecovery(ctx)
 	err := w.router.Run(ctx)
 	close(stopRecovery)
 	<-recoveryDone
@@ -106,6 +105,11 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	if err := w.recoverStaleRunning(runCtx); err != nil { // coverage-ignore
 		return err
 	}
+	stopRecovery, recoveryDone := w.startPeriodicRecovery(runCtx)
+	defer func() {
+		close(stopRecovery)
+		<-recoveryDone
+	}()
 	tracker := &runOnceTracker{}
 	w.mu.Lock()
 	w.runOnce = tracker
@@ -188,8 +192,8 @@ func (runningJobDeliveryError) NonRetryable() {}
 func (w *Worker) processObserved(ctx context.Context, handler observedHandler, message appdispatch.Message) error {
 	tracker := w.runOnceTracker()
 	if tracker != nil {
-		tracker.startDelivery()
-		defer tracker.finishDelivery()
+		tracker.startDelivery(message.ID)
+		defer tracker.finishDelivery(message.ID)
 	}
 	metadata, err := handler.metadata(message.Payload)
 	if err != nil { // coverage-ignore // Invalid observed payload uses the transport retry policy.
@@ -227,6 +231,8 @@ func (w *Worker) processObserved(ctx context.Context, handler observedHandler, m
 	if err != nil { // coverage-ignore // Claim failures are asserted through the generated store mock.
 		return fmt.Errorf("claim observed job: %w", err)
 	}
+	w.trackClaim(*claimed)
+	defer w.releaseClaim(claimed.ID)
 	return w.executeClaimedObserved(ctx, handler, message, claimed, tracker)
 }
 
@@ -239,7 +245,7 @@ func (w *Worker) executeClaimedObserved(
 ) error {
 	defer func() {
 		if panicValue := recover(); panicValue != nil { // coverage-ignore // Router Recoverer handles panics after the requeue attempt.
-			if requeueErr := w.store.RequeueRunning(ctx, claimed.ID, w.clock()); requeueErr != nil { // coverage-ignore
+			if requeueErr := w.store.RequeueRunning(ctx, *claimed, w.clock()); requeueErr != nil { // coverage-ignore
 				panic(fmt.Errorf("requeue panicked observed job: %w", requeueErr))
 			}
 			panic(panicValue)
@@ -247,31 +253,33 @@ func (w *Worker) executeClaimedObserved(
 	}()
 	if err := handler.execute(ctx, *claimed, message.Payload); err != nil {
 		if failure, ok := appdispatch.BusinessFailureFrom(err); ok {
-			return w.persistTerminalState(ctx, claimed.ID, newFailedTerminalJobState(
+			return w.persistTerminalState(ctx, *claimed, newFailedTerminalJobState(
 				w.workerID, jobErrorFromBusinessFailure(failure), w.clock(),
 			))
 		}
-		if requeueErr := w.store.RequeueRunning(ctx, claimed.ID, w.clock()); requeueErr != nil {
+		queuedAt := w.clock()
+		if requeueErr := w.store.RequeueRunning(ctx, *claimed, queuedAt); requeueErr != nil {
 			return fmt.Errorf("requeue transient observed job: %w", requeueErr)
 		}
 		if tracker != nil {
-			tracker.startRetry()
+			tracker.startRetry(claimed.ID)
 		}
 		return exhaustedRetryError{
 			err: err,
 			finalize: func() error {
-				if tracker != nil {
-					tracker.finishRetry()
-				}
-				return w.persistTerminalState(ctx, claimed.ID, newFailedTerminalJobState(
+				finalizeErr := w.finalizeRetryExhausted(ctx, claimed.ID, queuedAt, newFailedTerminalJobState(
 					w.workerID, jobErrorFromExecution(err), w.clock(),
 				))
+				if tracker != nil {
+					tracker.finishRetry(claimed.ID)
+				}
+				return finalizeErr
 			},
 		}
 	}
 	return w.persistTerminalState(
 		ctx,
-		claimed.ID,
+		*claimed,
 		newSucceededTerminalJobState(w.workerID, w.clock()),
 	)
 }
@@ -294,43 +302,49 @@ func (e exhaustedRetryError) OnRetriesExhausted() error {
 
 type runOnceTracker struct {
 	mu             sync.Mutex
-	active         int
-	pendingRetries int
+	active         map[string]int
+	pendingRetries map[string]struct{}
 }
 
-func (t *runOnceTracker) startDelivery() {
+func (t *runOnceTracker) startDelivery(jobID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.active++
-	if t.pendingRetries > 0 {
-		t.pendingRetries--
+	if t.active == nil {
+		t.active = make(map[string]int)
 	}
+	t.active[jobID]++
+	delete(t.pendingRetries, jobID)
 }
 
-func (t *runOnceTracker) finishDelivery() {
+func (t *runOnceTracker) finishDelivery(jobID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.active--
-}
-
-func (t *runOnceTracker) startRetry() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.pendingRetries++
-}
-
-func (t *runOnceTracker) finishRetry() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.pendingRetries > 0 {
-		t.pendingRetries--
+	if t.active[jobID] <= 1 {
+		delete(t.active, jobID)
+		return
 	}
+	t.active[jobID]--
+}
+
+func (t *runOnceTracker) startRetry(jobID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.pendingRetries == nil {
+		t.pendingRetries = make(map[string]struct{})
+	}
+	t.pendingRetries[jobID] = struct{}{}
+}
+
+func (t *runOnceTracker) finishRetry(jobID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.pendingRetries, jobID)
 }
 
 func (t *runOnceTracker) isIdle() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.active == 0 && t.pendingRetries == 0
+	return len(t.active) == 0 && len(t.pendingRetries) == 0
 }
 
 func (w *Worker) runOnceTracker() *runOnceTracker {
@@ -348,8 +362,18 @@ func (w *Worker) recoverStaleRunning(ctx context.Context) error {
 	)
 }
 
+func (w *Worker) startPeriodicRecovery(ctx context.Context) (chan struct{}, <-chan struct{}) {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.recoverStaleRunningPeriodically(ctx, stop)
+	}()
+	return stop, done
+}
+
 func (w *Worker) recoverStaleRunningPeriodically(ctx context.Context, stop <-chan struct{}) {
-	ticker := time.NewTicker(w.config.PollInterval)
+	ticker := time.NewTicker(w.recoveryInterval())
 	defer ticker.Stop()
 	for {
 		select {
@@ -358,6 +382,7 @@ func (w *Worker) recoverStaleRunningPeriodically(ctx context.Context, stop <-cha
 		case <-stop:
 			return
 		case <-ticker.C:
+			w.renewRunningClaims(ctx)
 			if err := w.recoverStaleRunning(ctx); err != nil {
 				w.logger.ErrorContext(ctx, "recover stale running jobs failed", "error", err)
 			}
@@ -365,19 +390,85 @@ func (w *Worker) recoverStaleRunningPeriodically(ctx context.Context, stop <-cha
 	}
 }
 
+func (w *Worker) recoveryInterval() time.Duration {
+	interval := w.config.PollInterval
+	if renewalInterval := w.config.StaleRunningAge / 2; renewalInterval > 0 && renewalInterval < interval {
+		return renewalInterval
+	}
+	return interval
+}
+
+func (w *Worker) trackClaim(claim Job) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.claims == nil {
+		w.claims = make(map[string]Job)
+	}
+	w.claims[claim.ID] = claim
+}
+
+func (w *Worker) releaseClaim(jobID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.claims, jobID)
+}
+
+func (w *Worker) runningClaims() []Job {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	claims := make([]Job, 0, len(w.claims))
+	for _, claim := range w.claims {
+		claims = append(claims, claim)
+	}
+	return claims
+}
+
+func (w *Worker) renewRunningClaims(ctx context.Context) {
+	for _, claim := range w.runningClaims() {
+		if err := w.store.RenewRunning(ctx, claim, w.clock()); err != nil {
+			w.logger.ErrorContext(ctx, "renew running job claim failed", "jobId", claim.ID, "error", err)
+		}
+	}
+}
+
 func (w *Worker) persistTerminalState(
+	ctx context.Context,
+	claim Job,
+	state terminalJobState,
+) error { // coverage-ignore // Terminal persistence retry timing is exercised by worker process integration.
+	return w.persistTerminal(ctx, claim.ID, state, func(persistCtx context.Context) error {
+		return w.store.persistTerminalState(persistCtx, claim, state)
+	})
+}
+
+func (w *Worker) finalizeRetryExhausted(
+	ctx context.Context,
+	jobID string,
+	queuedAt time.Time,
+	state terminalJobState,
+) error {
+	return w.persistTerminal(ctx, jobID, state, func(persistCtx context.Context) error {
+		return w.store.FinalizeRetryExhausted(persistCtx, jobID, queuedAt, state)
+	})
+}
+
+func (w *Worker) persistTerminal(
 	ctx context.Context,
 	jobID string,
 	state terminalJobState,
-) error { // coverage-ignore // Terminal persistence retry timing is exercised by worker process integration.
+	persist func(context.Context) error,
+) error {
 	if err := validateRequiredTimestamp("completedAt", state.completedAt); err != nil {
 		return err
 	}
 	retryInterval := terminalPersistenceRetryInterval
 	for {
-		err := w.store.persistTerminalState(ctx, jobID, state)
+		err := persist(ctx)
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, ErrJobClaimLost) {
+			return err
 		}
 		if ctx.Err() != nil {
 			return errors.Join(ctx.Err(), fmt.Errorf("persist job terminal state: %w", err))

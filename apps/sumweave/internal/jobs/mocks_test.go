@@ -120,6 +120,75 @@ func (_c *mockworkerStore_ClaimQueued_Call) RunAndReturn(run func(context1 conte
 	return _c
 }
 
+// FinalizeRetryExhausted provides a mock function for the type mockworkerStore
+func (_mock *mockworkerStore) FinalizeRetryExhausted(context1 context.Context, s string, time1 time.Time, terminalJobStateMoqParam terminalJobState) error {
+	ret := _mock.Called(context1, s, time1, terminalJobStateMoqParam)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FinalizeRetryExhausted")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Time, terminalJobState) error); ok {
+		r0 = returnFunc(context1, s, time1, terminalJobStateMoqParam)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// mockworkerStore_FinalizeRetryExhausted_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinalizeRetryExhausted'
+type mockworkerStore_FinalizeRetryExhausted_Call struct {
+	*mock.Call
+}
+
+// FinalizeRetryExhausted is a helper method to define mock.On call
+//   - context1 context.Context
+//   - s string
+//   - time1 time.Time
+//   - terminalJobStateMoqParam terminalJobState
+func (_e *mockworkerStore_Expecter) FinalizeRetryExhausted(context1 interface{}, s interface{}, time1 interface{}, terminalJobStateMoqParam interface{}) *mockworkerStore_FinalizeRetryExhausted_Call {
+	return &mockworkerStore_FinalizeRetryExhausted_Call{Call: _e.mock.On("FinalizeRetryExhausted", context1, s, time1, terminalJobStateMoqParam)}
+}
+
+func (_c *mockworkerStore_FinalizeRetryExhausted_Call) Run(run func(context1 context.Context, s string, time1 time.Time, terminalJobStateMoqParam terminalJobState)) *mockworkerStore_FinalizeRetryExhausted_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 time.Time
+		if args[2] != nil {
+			arg2 = args[2].(time.Time)
+		}
+		var arg3 terminalJobState
+		if args[3] != nil {
+			arg3 = args[3].(terminalJobState)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *mockworkerStore_FinalizeRetryExhausted_Call) Return(err error) *mockworkerStore_FinalizeRetryExhausted_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *mockworkerStore_FinalizeRetryExhausted_Call) RunAndReturn(run func(context1 context.Context, s string, time1 time.Time, terminalJobStateMoqParam terminalJobState) error) *mockworkerStore_FinalizeRetryExhausted_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MaterializeQueued provides a mock function for the type mockworkerStore
 func (_mock *mockworkerStore) MaterializeQueued(context1 context.Context, job Job) (*Job, error) {
 	ret := _mock.Called(context1, job)
@@ -257,17 +326,80 @@ func (_c *mockworkerStore_RecoverStaleRunning_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// RenewRunning provides a mock function for the type mockworkerStore
+func (_mock *mockworkerStore) RenewRunning(context1 context.Context, job Job, time1 time.Time) error {
+	ret := _mock.Called(context1, job, time1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RenewRunning")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, Job, time.Time) error); ok {
+		r0 = returnFunc(context1, job, time1)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// mockworkerStore_RenewRunning_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RenewRunning'
+type mockworkerStore_RenewRunning_Call struct {
+	*mock.Call
+}
+
+// RenewRunning is a helper method to define mock.On call
+//   - context1 context.Context
+//   - job Job
+//   - time1 time.Time
+func (_e *mockworkerStore_Expecter) RenewRunning(context1 interface{}, job interface{}, time1 interface{}) *mockworkerStore_RenewRunning_Call {
+	return &mockworkerStore_RenewRunning_Call{Call: _e.mock.On("RenewRunning", context1, job, time1)}
+}
+
+func (_c *mockworkerStore_RenewRunning_Call) Run(run func(context1 context.Context, job Job, time1 time.Time)) *mockworkerStore_RenewRunning_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 Job
+		if args[1] != nil {
+			arg1 = args[1].(Job)
+		}
+		var arg2 time.Time
+		if args[2] != nil {
+			arg2 = args[2].(time.Time)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *mockworkerStore_RenewRunning_Call) Return(err error) *mockworkerStore_RenewRunning_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *mockworkerStore_RenewRunning_Call) RunAndReturn(run func(context1 context.Context, job Job, time1 time.Time) error) *mockworkerStore_RenewRunning_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RequeueRunning provides a mock function for the type mockworkerStore
-func (_mock *mockworkerStore) RequeueRunning(context1 context.Context, s string, time1 time.Time) error {
-	ret := _mock.Called(context1, s, time1)
+func (_mock *mockworkerStore) RequeueRunning(context1 context.Context, job Job, time1 time.Time) error {
+	ret := _mock.Called(context1, job, time1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RequeueRunning")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Time) error); ok {
-		r0 = returnFunc(context1, s, time1)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, Job, time.Time) error); ok {
+		r0 = returnFunc(context1, job, time1)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -281,21 +413,21 @@ type mockworkerStore_RequeueRunning_Call struct {
 
 // RequeueRunning is a helper method to define mock.On call
 //   - context1 context.Context
-//   - s string
+//   - job Job
 //   - time1 time.Time
-func (_e *mockworkerStore_Expecter) RequeueRunning(context1 interface{}, s interface{}, time1 interface{}) *mockworkerStore_RequeueRunning_Call {
-	return &mockworkerStore_RequeueRunning_Call{Call: _e.mock.On("RequeueRunning", context1, s, time1)}
+func (_e *mockworkerStore_Expecter) RequeueRunning(context1 interface{}, job interface{}, time1 interface{}) *mockworkerStore_RequeueRunning_Call {
+	return &mockworkerStore_RequeueRunning_Call{Call: _e.mock.On("RequeueRunning", context1, job, time1)}
 }
 
-func (_c *mockworkerStore_RequeueRunning_Call) Run(run func(context1 context.Context, s string, time1 time.Time)) *mockworkerStore_RequeueRunning_Call {
+func (_c *mockworkerStore_RequeueRunning_Call) Run(run func(context1 context.Context, job Job, time1 time.Time)) *mockworkerStore_RequeueRunning_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 Job
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(Job)
 		}
 		var arg2 time.Time
 		if args[2] != nil {
@@ -315,22 +447,22 @@ func (_c *mockworkerStore_RequeueRunning_Call) Return(err error) *mockworkerStor
 	return _c
 }
 
-func (_c *mockworkerStore_RequeueRunning_Call) RunAndReturn(run func(context1 context.Context, s string, time1 time.Time) error) *mockworkerStore_RequeueRunning_Call {
+func (_c *mockworkerStore_RequeueRunning_Call) RunAndReturn(run func(context1 context.Context, job Job, time1 time.Time) error) *mockworkerStore_RequeueRunning_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // persistTerminalState provides a mock function for the type mockworkerStore
-func (_mock *mockworkerStore) persistTerminalState(context1 context.Context, s string, terminalJobStateMoqParam terminalJobState) error {
-	ret := _mock.Called(context1, s, terminalJobStateMoqParam)
+func (_mock *mockworkerStore) persistTerminalState(context1 context.Context, job Job, terminalJobStateMoqParam terminalJobState) error {
+	ret := _mock.Called(context1, job, terminalJobStateMoqParam)
 
 	if len(ret) == 0 {
 		panic("no return value specified for persistTerminalState")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, terminalJobState) error); ok {
-		r0 = returnFunc(context1, s, terminalJobStateMoqParam)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, Job, terminalJobState) error); ok {
+		r0 = returnFunc(context1, job, terminalJobStateMoqParam)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -344,21 +476,21 @@ type mockworkerStore_persistTerminalState_Call struct {
 
 // persistTerminalState is a helper method to define mock.On call
 //   - context1 context.Context
-//   - s string
+//   - job Job
 //   - terminalJobStateMoqParam terminalJobState
-func (_e *mockworkerStore_Expecter) persistTerminalState(context1 interface{}, s interface{}, terminalJobStateMoqParam interface{}) *mockworkerStore_persistTerminalState_Call {
-	return &mockworkerStore_persistTerminalState_Call{Call: _e.mock.On("persistTerminalState", context1, s, terminalJobStateMoqParam)}
+func (_e *mockworkerStore_Expecter) persistTerminalState(context1 interface{}, job interface{}, terminalJobStateMoqParam interface{}) *mockworkerStore_persistTerminalState_Call {
+	return &mockworkerStore_persistTerminalState_Call{Call: _e.mock.On("persistTerminalState", context1, job, terminalJobStateMoqParam)}
 }
 
-func (_c *mockworkerStore_persistTerminalState_Call) Run(run func(context1 context.Context, s string, terminalJobStateMoqParam terminalJobState)) *mockworkerStore_persistTerminalState_Call {
+func (_c *mockworkerStore_persistTerminalState_Call) Run(run func(context1 context.Context, job Job, terminalJobStateMoqParam terminalJobState)) *mockworkerStore_persistTerminalState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 Job
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(Job)
 		}
 		var arg2 terminalJobState
 		if args[2] != nil {
@@ -378,7 +510,7 @@ func (_c *mockworkerStore_persistTerminalState_Call) Return(err error) *mockwork
 	return _c
 }
 
-func (_c *mockworkerStore_persistTerminalState_Call) RunAndReturn(run func(context1 context.Context, s string, terminalJobStateMoqParam terminalJobState) error) *mockworkerStore_persistTerminalState_Call {
+func (_c *mockworkerStore_persistTerminalState_Call) RunAndReturn(run func(context1 context.Context, job Job, terminalJobStateMoqParam terminalJobState) error) *mockworkerStore_persistTerminalState_Call {
 	_c.Call.Return(run)
 	return _c
 }

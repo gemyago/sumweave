@@ -19,6 +19,7 @@ import (
 var (
 	ErrJobNotFound  = errors.New("job not found")
 	ErrJobNotQueued = errors.New("job is not queued")
+	ErrJobClaimLost = errors.New("job claim is no longer active")
 )
 
 const (
@@ -299,9 +300,57 @@ func (s *Store) ClaimQueued(
 
 func (s *Store) persistTerminalState(
 	ctx context.Context,
-	jobID string,
+	claim Job,
 	state terminalJobState,
 ) error {
+	updates := terminalStateUpdates(state)
+	result := s.db.WithContext(ctx).
+		Table(s.tableName).
+		Model(&jobModel{}).
+		Where(
+			"id = ? AND status = ? AND worker_id = ? AND started_at = ?",
+			strings.TrimSpace(claim.ID),
+			JobStatusRunning,
+			strings.TrimSpace(claim.WorkerID),
+			claim.StartedAt,
+		).
+		Updates(updates)
+	if result.Error != nil { // coverage-ignore
+		return fmt.Errorf("persist terminal job state: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrJobClaimLost
+	}
+	return nil
+}
+
+func (s *Store) FinalizeRetryExhausted(
+	ctx context.Context,
+	jobID string,
+	queuedAt time.Time,
+	state terminalJobState,
+) error {
+	updates := terminalStateUpdates(state)
+	result := s.db.WithContext(ctx).
+		Table(s.tableName).
+		Model(&jobModel{}).
+		Where(
+			"id = ? AND status = ? AND queued_at = ?",
+			strings.TrimSpace(jobID),
+			JobStatusQueued,
+			queuedAt,
+		).
+		Updates(updates)
+	if result.Error != nil { // coverage-ignore
+		return fmt.Errorf("finalize exhausted job retries: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrJobClaimLost
+	}
+	return nil
+}
+
+func terminalStateUpdates(state terminalJobState) map[string]any {
 	updates := map[string]any{
 		columnStatus: string(state.status), columnWorkerID: strings.TrimSpace(state.workerID),
 		columnErrorCode: "", columnErrorSummary: "", columnErrorDetails: "",
@@ -312,24 +361,22 @@ func (s *Store) persistTerminalState(
 		updates[columnErrorSummary] = truncateBounded(state.jobError.Summary, maxErrorSummaryLength)
 		updates[columnErrorDetails] = truncateBounded(state.jobError.Details, maxErrorDetailsLength)
 	}
-	// Terminal write failure is covered at the lifecycle decorator boundary.
-	if err := s.db.WithContext(ctx).
-		Table(s.tableName).
-		Model(&jobModel{}).
-		Where("id = ?", strings.TrimSpace(jobID)).
-		Updates(updates).Error; err != nil { // coverage-ignore
-		return fmt.Errorf("persist terminal job state: %w", err)
-	}
-	return nil
+	return updates
 }
 
-func (s *Store) RequeueRunning(ctx context.Context, jobID string, queuedAt time.Time) error {
+func (s *Store) RequeueRunning(ctx context.Context, claim Job, queuedAt time.Time) error {
 	// Input validation is unit-tested at the worker boundary.
 	if err := validateRequiredTimestamp("queuedAt", queuedAt); err != nil { // coverage-ignore
 		return err
 	}
 	result := s.db.WithContext(ctx).Table(s.tableName).Model(&jobModel{}).
-		Where("id = ? AND status = ?", strings.TrimSpace(jobID), JobStatusRunning).
+		Where(
+			"id = ? AND status = ? AND worker_id = ? AND started_at = ?",
+			strings.TrimSpace(claim.ID),
+			JobStatusRunning,
+			strings.TrimSpace(claim.WorkerID),
+			claim.StartedAt,
+		).
 		Updates(map[string]any{
 			columnStatus: string(JobStatusQueued), columnWorkerID: "", columnStartedAt: nil,
 			columnQueuedAt: queuedAt, columnUpdatedAt: queuedAt,
@@ -338,9 +385,31 @@ func (s *Store) RequeueRunning(ctx context.Context, jobID string, queuedAt time.
 	if result.Error != nil { // coverage-ignore
 		return fmt.Errorf("requeue running job: %w", result.Error)
 	}
-	// Concurrent requeue conflict is handled as a transport failure.
+	// A claim that has already been recovered cannot be requeued by its former owner.
 	if result.RowsAffected == 0 { // coverage-ignore
-		return ErrJobNotQueued
+		return ErrJobClaimLost
+	}
+	return nil
+}
+
+func (s *Store) RenewRunning(ctx context.Context, claim Job, renewedAt time.Time) error {
+	if err := validateRequiredTimestamp("renewedAt", renewedAt); err != nil {
+		return err
+	}
+	result := s.db.WithContext(ctx).Table(s.tableName).Model(&jobModel{}).
+		Where(
+			"id = ? AND status = ? AND worker_id = ? AND started_at = ?",
+			strings.TrimSpace(claim.ID),
+			JobStatusRunning,
+			strings.TrimSpace(claim.WorkerID),
+			claim.StartedAt,
+		).
+		Update(columnUpdatedAt, renewedAt)
+	if result.Error != nil { // coverage-ignore
+		return fmt.Errorf("renew running job claim: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrJobClaimLost
 	}
 	return nil
 }
@@ -385,7 +454,7 @@ func (s *Store) RecoverStaleRunning(
 	if err := s.db.WithContext(ctx).
 		Table(s.tableName).
 		Where(
-			"status = ? AND started_at <= ?",
+			"status = ? AND updated_at <= ?",
 			JobStatusRunning,
 			staleBefore,
 		).

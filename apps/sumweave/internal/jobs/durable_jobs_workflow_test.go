@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -164,6 +165,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			}
 			staleStartedAt := time.Now().Add(-2 * defaultWorkerStaleRunningAge)
 			stale.StartedAt = &staleStartedAt
+			stale.UpdatedAt = staleStartedAt
 			err = store.createWithDB(t.Context(), store.db, stale)
 			require.NoError(t, err)
 			require.NoError(
@@ -241,14 +243,74 @@ func TestObservedSubscriptions(t *testing.T) {
 		assert.Equal(t, "job_execution_failed", retried.Error.Code)
 	})
 
-	t.Run("periodic recovery invokes stale claim recovery", func(t *testing.T) {
+	t.Run("one-shot retry tracking keeps final persistence and topics isolated", func(t *testing.T) {
 		store := newMockworkerStore(t)
-		recovered := make(chan struct{})
+		registry := NewRegistry()
+		topic := "retry-tracker." + fake.UUID().V4()
+		register(t, registry, topic, func(context.Context, Job, command) error {
+			return errors.New("transient " + fake.UUID().V4())
+		})
+		now := time.Now()
+		worker := &Worker{
+			store: store, registry: registry, logger: slog.New(slog.DiscardHandler),
+			clock: func() time.Time { return now }, workerID: fake.UUID().V4(),
+		}
+		tracker := &runOnceTracker{}
+		worker.runOnce = tracker
+		message := appdispatch.Message{
+			ID:      fake.UUID().V4(),
+			Payload: []byte(`{"value":"` + fake.UUID().V4() + `","requester":"` + fake.UUID().V4() + `"}`),
+		}
+		queued := Job{ID: message.ID, JobType: "finance.test", Status: JobStatusQueued}
+		claimed := queued
+		claimed.Status = JobStatusRunning
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&queued, nil).Once()
+		store.EXPECT().ClaimQueued(mock.Anything, message.ID, worker.workerID, now).Return(&claimed, nil).Once()
+		store.EXPECT().RequeueRunning(mock.Anything, claimed, now).Return(nil).Once()
+		persistStarted := make(chan struct{})
+		releasePersist := make(chan struct{})
 		store.EXPECT().
-			RecoverStaleRunning(mock.Anything, mock.Anything, time.Millisecond, defaultWorkerMaxAttempts).
-			Run(func(context.Context, time.Time, time.Duration, int) { close(recovered) }).
+			FinalizeRetryExhausted(mock.Anything, message.ID, now, mock.Anything).
+			Run(func(context.Context, string, time.Time, terminalJobState) {
+				close(persistStarted)
+				<-releasePersist
+			}).
 			Return(nil).
 			Once()
+		err := worker.processObserved(t.Context(), registry.Handlers()[0], message)
+		var exhausted exhaustedRetryError
+		require.ErrorAs(t, err, &exhausted)
+		assert.False(t, tracker.isIdle())
+		finalized := make(chan error, 1)
+		go func() { finalized <- exhausted.OnRetriesExhausted() }()
+		<-persistStarted
+		assert.False(t, tracker.isIdle())
+		close(releasePersist)
+		require.NoError(t, <-finalized)
+		assert.True(t, tracker.isIdle())
+
+		pendingJobID := fake.UUID().V4()
+		otherJobID := fake.UUID().V4()
+		tracker.startRetry(pendingJobID)
+		tracker.startDelivery(otherJobID)
+		tracker.finishDelivery(otherJobID)
+		assert.False(t, tracker.isIdle())
+		tracker.finishRetry(pendingJobID)
+		assert.True(t, tracker.isIdle())
+	})
+
+	t.Run("periodic recovery invokes stale claim recovery", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		recovered := make(chan struct{}, 1)
+		store.EXPECT().
+			RecoverStaleRunning(mock.Anything, mock.Anything, time.Millisecond, defaultWorkerMaxAttempts).
+			Run(func(context.Context, time.Time, time.Duration, int) {
+				select {
+				case recovered <- struct{}{}:
+				default:
+				}
+			}).
+			Return(nil)
 		worker := &Worker{
 			store: store, logger: slog.New(slog.DiscardHandler), clock: time.Now,
 			config: WorkerConfig{
@@ -289,13 +351,25 @@ func TestObservedSubscriptions(t *testing.T) {
 			return nil
 		})
 		now := time.Now()
+		var clockMu sync.Mutex
+		clockNow := now
+		clock := func() time.Time {
+			clockMu.Lock()
+			defer clockMu.Unlock()
+			return clockNow
+		}
+		advanceClock := func(value time.Time) {
+			clockMu.Lock()
+			defer clockMu.Unlock()
+			clockNow = value
+		}
 		firstWorker := &Worker{
 			store: store, registry: registry, logger: slog.New(slog.DiscardHandler),
-			clock: func() time.Time { return now }, workerID: firstWorkerID,
+			clock: clock, workerID: firstWorkerID,
 		}
 		secondWorker := &Worker{
 			store: store, registry: registry, logger: slog.New(slog.DiscardHandler),
-			clock: func() time.Time { return now }, workerID: secondWorkerID,
+			clock: clock, workerID: secondWorkerID,
 		}
 		firstResult := make(chan error, 1)
 		go func() {
@@ -303,11 +377,13 @@ func TestObservedSubscriptions(t *testing.T) {
 		}()
 		<-claimed
 
+		advanceClock(now.Add(2 * defaultWorkerStaleRunningAge))
+		firstWorker.renewRunningClaims(t.Context())
 		require.NoError(
 			t,
 			store.RecoverStaleRunning(
 				t.Context(),
-				now,
+				clock(),
 				defaultWorkerStaleRunningAge,
 				defaultWorkerMaxAttempts,
 			),
@@ -356,6 +432,32 @@ func TestObservedSubscriptions(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusFailed, exhausted.Status)
 		assert.Equal(t, "stale_running_attempts_exhausted", exhausted.Error.Code)
+
+		conditional := Job{
+			ID: fake.UUID().V4(), JobType: "finance.test", Status: JobStatusQueued,
+			Requester: Requester{Source: RequesterSourceOperator},
+			CreatedAt: now, UpdatedAt: now, QueuedAt: now,
+		}
+		require.NoError(t, store.createWithDB(t.Context(), store.db, conditional))
+		firstClaim, err := store.ClaimQueued(t.Context(), conditional.ID, firstWorkerID, now)
+		require.NoError(t, err)
+		requeuedAt := now.Add(time.Second)
+		require.NoError(t, store.RequeueRunning(t.Context(), *firstClaim, requeuedAt))
+		secondClaim, err := store.ClaimQueued(t.Context(), conditional.ID, secondWorkerID, now.Add(2*time.Second))
+		require.NoError(t, err)
+		require.ErrorIs(
+			t,
+			store.persistTerminalState(
+				t.Context(),
+				*firstClaim,
+				newSucceededTerminalJobState(firstWorkerID, now.Add(3*time.Second)),
+			),
+			ErrJobClaimLost,
+		)
+		persisted, err := store.Get(t.Context(), conditional.ID)
+		require.NoError(t, err)
+		assert.Equal(t, JobStatusRunning, persisted.Status)
+		assert.Equal(t, secondClaim.WorkerID, persisted.WorkerID)
 	})
 
 	t.Run("business failures are sanitized and transport failures requeue", func(t *testing.T) {
@@ -394,7 +496,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			Return(&claimed, nil).
 			Once()
 		store.EXPECT().
-			persistTerminalState(mock.Anything, business.ID, mock.MatchedBy(func(state terminalJobState) bool {
+			persistTerminalState(mock.Anything, mock.Anything, mock.MatchedBy(func(state terminalJobState) bool {
 				return state.status == JobStatusFailed && state.jobError.Code == "business" &&
 					state.jobError.Details == "safe details"
 			})).
@@ -413,7 +515,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			ClaimQueued(mock.Anything, transient.ID, worker.workerID, now).
 			Return(&claimed, nil).
 			Once()
-		store.EXPECT().RequeueRunning(mock.Anything, transient.ID, now).Return(nil).Once()
+		store.EXPECT().RequeueRunning(mock.Anything, mock.Anything, now).Return(nil).Once()
 		require.Error(t, worker.processObserved(t.Context(), registry.Handlers()[0], transient))
 	})
 
@@ -470,7 +572,7 @@ func TestObservedSubscriptions(t *testing.T) {
 				Return(&claimed, nil).
 				Once()
 			store.EXPECT().
-				persistTerminalState(mock.Anything, message.ID, mock.Anything).
+				persistTerminalState(mock.Anything, mock.Anything, mock.Anything).
 				Return(errors.New(fake.Letter())).
 				Once()
 			cancelled, cancel := context.WithCancel(t.Context())
@@ -502,14 +604,14 @@ func TestObservedSubscriptions(t *testing.T) {
 			duplicate, err := store.MaterializeQueued(t.Context(), job)
 			require.NoError(t, err)
 			assert.Equal(t, job.ID, duplicate.ID)
-			_, err = store.ClaimQueued(t.Context(), job.ID, fake.UUID().V4(), now.Add(time.Second))
+			claimed, err := store.ClaimQueued(t.Context(), job.ID, fake.UUID().V4(), now.Add(time.Second))
 			require.NoError(t, err)
 			require.ErrorIs(t, func() error {
 				_, claimErr := store.ClaimQueued(t.Context(), job.ID, fake.UUID().V4(), now)
 				return claimErr
 			}(), ErrJobNotQueued)
-			require.NoError(t, store.RequeueRunning(t.Context(), job.ID, now.Add(2*time.Second)))
-			claimed, err := store.ClaimQueued(
+			require.NoError(t, store.RequeueRunning(t.Context(), *claimed, now.Add(2*time.Second)))
+			claimed, err = store.ClaimQueued(
 				t.Context(),
 				job.ID,
 				fake.UUID().V4(),
@@ -520,7 +622,7 @@ func TestObservedSubscriptions(t *testing.T) {
 				t,
 				store.persistTerminalState(
 					t.Context(),
-					job.ID,
+					*claimed,
 					newSucceededTerminalJobState(claimed.WorkerID, now.Add(4*time.Second)),
 				),
 			)
@@ -543,7 +645,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			require.Error(t, err)
 			_, err = store.List(t.Context(), ListParams{Cursor: "%"})
 			require.Error(t, err)
-			require.Error(t, store.RequeueRunning(t.Context(), job.ID, time.Time{}))
+			require.Error(t, store.RequeueRunning(t.Context(), *claimed, time.Time{}))
 
 			running := job
 			running.ID, running.Status, running.AttemptCount = fake.UUID().
@@ -551,6 +653,7 @@ func TestObservedSubscriptions(t *testing.T) {
 				JobStatusRunning, defaultWorkerMaxAttempts
 			staleStartedAt := now.Add(-2 * defaultWorkerStaleRunningAge)
 			running.StartedAt = &staleStartedAt
+			running.UpdatedAt = staleStartedAt
 			err = store.createWithDB(t.Context(), store.db, running)
 			require.NoError(t, err)
 			require.NoError(
