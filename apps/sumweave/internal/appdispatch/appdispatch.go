@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -35,13 +34,6 @@ var (
 	// ErrPublicationConflict reports reuse of an idempotency key for a different
 	// semantic publication.
 	ErrPublicationConflict = errors.New("app dispatch publication conflict")
-)
-
-type TransportDriver string
-
-const (
-	TransportDriverSQLite   TransportDriver = "sqlite"
-	TransportDriverPostgres TransportDriver = "postgres"
 )
 
 // Message is the app-owned durable transport contract. Payload and metadata
@@ -79,22 +71,6 @@ func (c Config) normalize() Config {
 		c.PollInterval = 100 * time.Millisecond
 	}
 	return c
-}
-
-func (c Config) Driver() TransportDriver {
-	parsed, err := url.Parse(c.DatabaseDSN)
-	if err == nil {
-		switch parsed.Scheme {
-		case "postgres", "postgresql":
-			return TransportDriverPostgres
-		case "file", "sqlite":
-			return TransportDriverSQLite
-		}
-	}
-	if strings.HasPrefix(c.DatabaseDSN, "postgres://") || strings.HasPrefix(c.DatabaseDSN, "postgresql://") {
-		return TransportDriverPostgres
-	}
-	return TransportDriverSQLite
 }
 
 func (c Config) MessagesTable() string {
@@ -364,10 +340,7 @@ func (p *Publisher) publicationPlaceholders(count int) string {
 }
 
 func (p *Publisher) publicationPlaceholder(index int) string {
-	if p.config.Driver() == TransportDriverPostgres {
-		return fmt.Sprintf("$%d", index)
-	}
-	return "?"
+	return fmt.Sprintf("$%d", index)
 }
 
 func makeWatermillMessage(ctx context.Context, message Message) *wmmessage.Message {
@@ -408,18 +381,14 @@ func transportMessagePayloadHash(message *wmmessage.Message) string {
 }
 
 func isDuplicateMessageIDError(err error) bool {
-	return strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "duplicate key")
+	return strings.Contains(err.Error(), "duplicate key")
 }
 
 //nolint:ireturn // Watermill publisher is defined by the library interface.
 func newMessagePublisher(config Config, db any, logger *slog.Logger) (wmmessage.Publisher, error) {
 	wmLogger := watermill.NewSlogLogger(logger)
-	schema := wmsql.SchemaAdapter(makeSQLitePublisherSchema(config))
-	if config.Driver() == TransportDriverPostgres {
-		schema = postgresSchema(config)
-	}
 	return wmsql.NewPublisher(asContextExecutor(db), wmsql.PublisherConfig{
-		SchemaAdapter:        schema,
+		SchemaAdapter:        postgresSchema(config),
 		AutoInitializeSchema: false,
 	}, wmLogger)
 }
@@ -435,53 +404,13 @@ func newMessageSubscriber(
 		return nil, errors.New("consumer group is required")
 	}
 	wmLogger := watermill.NewSlogLogger(logger)
-	if config.Driver() == TransportDriverPostgres {
-		return wmsql.NewSubscriber(wmsql.BeginnerFromStdSQL(db), wmsql.SubscriberConfig{
-			ConsumerGroup:    consumerGroup,
-			PollInterval:     config.PollInterval,
-			SchemaAdapter:    postgresSchema(config),
-			OffsetsAdapter:   postgresOffsets(config),
-			InitializeSchema: false,
-		}, wmLogger)
-	}
-	return newSQLiteTransportSubscriber(config, db, consumerGroup, wmLogger)
-}
-
-func sqliteTableNameGenerators(config Config) sqliteTableGenerators {
-	return sqliteTableGenerators{
-		Messages: config.MessagesTable,
-		Offsets:  config.OffsetsTable,
-	}
-}
-
-func buildSQLiteMigrationQueries(config Config) []string {
-	return []string{
-		`CREATE TABLE IF NOT EXISTS ` + quoteIdentifier(config.MessagesTable()) + ` (
-			"offset" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-			uuid TEXT NOT NULL,
-			topic TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			payload BLOB,
-			metadata JSON NOT NULL,
-			payload_hash TEXT NOT NULL DEFAULT ''
-		)`,
-		`CREATE INDEX IF NOT EXISTS ` + quoteIdentifier(config.MessagesTable()+"_topic_offset_idx") +
-			` ON ` + quoteIdentifier(config.MessagesTable()) + ` (topic, "offset")`,
-		`CREATE TABLE IF NOT EXISTS ` + quoteIdentifier(config.OffsetsTable()) + ` (
-			topic TEXT NOT NULL,
-			consumer_group TEXT NOT NULL,
-			offset_acked INTEGER NOT NULL,
-			locked_until INTEGER NOT NULL,
-			lease_id TEXT NOT NULL DEFAULT '',
-			PRIMARY KEY(topic, consumer_group)
-		)`,
-		`CREATE TABLE IF NOT EXISTS ` + quoteIdentifier(config.PublicationsTable()) + ` (
-			idempotency_key TEXT NOT NULL PRIMARY KEY,
-			message_id TEXT NOT NULL UNIQUE,
-			topic TEXT NOT NULL,
-			payload_hash TEXT NOT NULL
-		)`,
-	}
+	return wmsql.NewSubscriber(wmsql.BeginnerFromStdSQL(db), wmsql.SubscriberConfig{
+		ConsumerGroup:    consumerGroup,
+		PollInterval:     config.PollInterval,
+		SchemaAdapter:    postgresSchema(config),
+		OffsetsAdapter:   postgresOffsets(config),
+		InitializeSchema: false,
+	}, wmLogger)
 }
 
 func buildPostgresMigrationQueries(

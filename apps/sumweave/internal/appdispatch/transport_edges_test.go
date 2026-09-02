@@ -19,29 +19,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testTopic = "topic"
+const transportTestTopic = "topic"
 
 func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
-	wmLogger := watermill.NewSlogLogger(logger)
 
 	t.Run("covers message helpers and constructor validation", func(t *testing.T) {
-		assert.Equal(
-			t,
-			TransportDriverPostgres,
-			Config{DatabaseDSN: "postgres://%"}.Driver(),
-		)
 		message := wmmessage.NewMessage("message-id", []byte("payload"))
 		message.Metadata.Set("traceId", "trace-id")
-		converted := makeMessage(testTopic, message)
+		converted := makeMessage(transportTestTopic, message)
 		assert.Equal(t, map[string]string{"traceId": "trace-id"}, converted.Metadata)
-		assert.Empty(t, makeWatermillMessage(t.Context(), NewMessage(testTopic, nil)).Metadata)
+		assert.Empty(t, makeWatermillMessage(t.Context(), NewMessage(transportTestTopic, nil)).Metadata)
 		require.NoError(t, closeIfPresent(nil))
 
 		_, err := newMessagePublisher(Config{}, struct{}{}, logger)
 		require.EqualError(t, err, "db is nil")
-		_, err = newSQLiteTransportSubscriber(Config{}, nil, "group", wmLogger)
-		require.EqualError(t, err, "sqlite subscriber database is required")
 		_, err = newMessageSubscriber(Config{}, &sql.DB{}, "", logger)
 		require.EqualError(t, err, "consumer group is required")
 		db, mockDB, err := sqlmock.New()
@@ -54,21 +46,17 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		assert.NotNil(t, asContextExecutor(tx))
 		mockDB.ExpectRollback()
 		require.NoError(t, tx.Rollback())
-		require.NoError(t, rollbackSQLiteTx(nil))
 	})
 
 	t.Run("validates publication requests and transport-only message behavior", func(t *testing.T) {
 		fake := faker.New()
-		assert.Equal(t, TransportDriverPostgres, Config{DatabaseDSN: "postgresql://example.invalid"}.Driver())
-		assert.Equal(t, TransportDriverSQLite, Config{DatabaseDSN: "file:dispatch.db"}.Driver())
-		assert.Equal(t, TransportDriverSQLite, Config{DatabaseDSN: "sqlite:dispatch.db"}.Driver())
 		assert.Equal(t, "prefix_app_dispatch_messages", Config{TablePrefix: "prefix_"}.MessagesTable())
 		assert.Equal(t, "prefix_app_dispatch_offsets", Config{TablePrefix: "prefix_"}.OffsetsTable())
 		assert.Equal(t, "prefix_app_dispatch_publications", Config{TablePrefix: "prefix_"}.PublicationsTable())
-		require.EqualError(t, Message{Topic: testTopic}.validate(), "message id is required")
+		require.EqualError(t, Message{Topic: transportTestTopic}.validate(), "message id is required")
 		require.EqualError(t, Message{ID: fake.UUID().V4()}.validate(), "message topic is required")
 		require.EqualError(t, PublicationRequest{}.validate(), "publication topic is required")
-		message := publicationMessage(PublicationRequest{Topic: testTopic, Payload: []byte(`{"b":2,"a":1}`)})
+		message := publicationMessage(PublicationRequest{Topic: transportTestTopic, Payload: []byte(`{"b":2,"a":1}`)})
 		assert.NotEmpty(t, message.ID)
 		assert.Equal(
 			t,
@@ -81,7 +69,6 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 			canonicalPayloadHash([]byte(`{"id":9007199254740993}`)),
 			canonicalPayloadHash([]byte(`{"id":9007199254740992}`)),
 		)
-		assert.True(t, isDuplicateMessageIDError(errors.New("UNIQUE constraint failed: messages.uuid")))
 		assert.True(t, isDuplicateMessageIDError(errors.New("duplicate key value violates unique constraint")))
 		assert.False(t, isDuplicateMessageIDError(errors.New("temporary transport error")))
 	})
@@ -105,7 +92,7 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 			databaseMock.ExpectExec("INSERT INTO").WillReturnError(writeErr)
 			require.ErrorIs(
 				t,
-				publisher.Publish(t.Context(), NewMessage(testTopic, []byte(fake.UUID().V4()))),
+				publisher.Publish(t.Context(), NewMessage(transportTestTopic, []byte(fake.UUID().V4()))),
 				writeErr,
 			)
 			databaseMock.ExpectExec("INSERT INTO").WillReturnError(
@@ -113,7 +100,7 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 			)
 			require.ErrorIs(
 				t,
-				publisher.Publish(t.Context(), NewMessage(testTopic, []byte(fake.UUID().V4()))),
+				publisher.Publish(t.Context(), NewMessage(transportTestTopic, []byte(fake.UUID().V4()))),
 				ErrDuplicateMessageID,
 			)
 			require.EqualError(t, publisher.Publish(t.Context(), Message{}), "message id is required")
@@ -122,14 +109,14 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 
 		t.Run("publishes unkeyed and idempotent requests", func(t *testing.T) {
 			publisher, databaseMock := newPublisher(t)
-			unkeyed := PublicationRequest{Topic: testTopic, Payload: []byte(fake.UUID().V4())}
+			unkeyed := PublicationRequest{Topic: transportTestTopic, Payload: []byte(fake.UUID().V4())}
 			databaseMock.ExpectExec("INSERT INTO").WillReturnResult(sqlmock.NewResult(1, 1))
 			reference, err := publisher.PublishRequest(t.Context(), unkeyed)
 			require.NoError(t, err)
 			assert.NotEmpty(t, reference.MessageID)
 
 			request := PublicationRequest{
-				Topic:          testTopic,
+				Topic:          transportTestTopic,
 				Payload:        []byte(`{"value":"` + fake.UUID().V4() + `"}`),
 				IdempotencyKey: fake.UUID().V4(),
 			}
@@ -146,7 +133,7 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		t.Run("returns transactional publication boundary errors", func(t *testing.T) {
 			publisher, databaseMock := newPublisher(t)
 			request := PublicationRequest{
-				Topic:          testTopic,
+				Topic:          transportTestTopic,
 				Payload:        []byte(fake.UUID().V4()),
 				IdempotencyKey: fake.UUID().V4(),
 			}
@@ -162,7 +149,7 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 			_, err = publisher.PublishRequestInTx(
 				t.Context(),
 				tx,
-				PublicationRequest{Topic: testTopic, Payload: []byte(fake.UUID().V4())},
+				PublicationRequest{Topic: transportTestTopic, Payload: []byte(fake.UUID().V4())},
 			)
 			require.NoError(t, err)
 			databaseMock.ExpectRollback()
@@ -183,14 +170,14 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 			databaseMock.ExpectExec("INSERT INTO").WillReturnError(writeErr)
 			require.ErrorIs(
 				t,
-				publisher.PublishInTx(t.Context(), tx, NewMessage(testTopic, []byte(fake.UUID().V4()))),
+				publisher.PublishInTx(t.Context(), tx, NewMessage(transportTestTopic, []byte(fake.UUID().V4()))),
 				writeErr,
 			)
 			databaseMock.ExpectRollback()
 			require.NoError(t, tx.Rollback())
 
 			request := PublicationRequest{
-				Topic:          testTopic,
+				Topic:          transportTestTopic,
 				Payload:        []byte(fake.UUID().V4()),
 				IdempotencyKey: fake.UUID().V4(),
 			}
@@ -207,7 +194,7 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		t.Run("returns existing references and semantic conflicts", func(t *testing.T) {
 			publisher, databaseMock := newPublisher(t)
 			request := PublicationRequest{
-				Topic:          testTopic,
+				Topic:          transportTestTopic,
 				Payload:        []byte(`{"value":"` + fake.UUID().V4() + `"}`),
 				IdempotencyKey: fake.UUID().V4(),
 			}
@@ -244,7 +231,7 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		t.Run("returns idempotency storage errors", func(t *testing.T) {
 			publisher, databaseMock := newPublisher(t)
 			request := PublicationRequest{
-				Topic:          testTopic,
+				Topic:          transportTestTopic,
 				Payload:        []byte(fake.UUID().V4()),
 				IdempotencyKey: fake.UUID().V4(),
 			}
@@ -303,7 +290,7 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 			publisher := &Publisher{publisher: transport}
 			require.ErrorIs(t, publisher.Close(), closeErr)
 			require.ErrorIs(t, publisher.Close(), closeErr)
-			assert.Equal(t, "?", (&Publisher{config: Config{}}).publicationPlaceholder(1))
+			assert.Equal(t, "$1", (&Publisher{config: Config{}}).publicationPlaceholder(1))
 
 			db, subscriberMock, err := sqlmock.New()
 			require.NoError(t, err)
@@ -320,428 +307,26 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		})
 	})
 
-	t.Run("covers sqlite publisher boundary errors", func(t *testing.T) {
-		db, mockDB, err := sqlmock.New()
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = db.Close() })
-		publisherValue, err := newMessagePublisher(Config{}, db, logger)
-		require.NoError(t, err)
-		publisher := publisherValue.(*wmsql.Publisher)
-
-		writeErr := errors.New("write failed")
-		mockDB.ExpectExec("INSERT INTO").WillReturnError(writeErr)
-		require.ErrorIs(t, publisher.Publish(testTopic, wmmessage.NewMessage("id", nil)), writeErr)
-		mockDB.ExpectBegin()
-		tx, err := db.BeginTx(t.Context(), nil)
-		require.NoError(t, err)
-		wrapper := &Publisher{config: Config{}, publisher: publisher, logger: logger}
-		require.EqualError(t, wrapper.PublishInTx(t.Context(), tx, Message{Topic: testTopic}), "message id is required")
-		mockDB.ExpectRollback()
-		require.NoError(t, tx.Rollback())
-		require.NoError(t, publisher.Close())
-		require.ErrorIs(t, publisher.Publish(testTopic, wmmessage.NewMessage("id", nil)), wmsql.ErrPublisherClosed)
-		require.NoError(t, mockDB.ExpectationsWereMet())
-	})
-
-	t.Run("covers sqlite subscriber setup and batch decoding errors", func(t *testing.T) {
-		db, mockDB, err := sqlmock.New()
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = db.Close() })
-		config := Config{PollInterval: time.Millisecond}
-		subscriberValue, err := newSQLiteTransportSubscriber(config, db, "group", wmLogger)
-		require.NoError(t, err)
-		subscriber := subscriberValue.(*sqliteTransportSubscriber)
-		setupErr := errors.New("offset setup failed")
-		mockDB.ExpectExec("INSERT INTO").WillReturnError(setupErr)
-		_, err = subscriber.Subscribe(t.Context(), testTopic)
-		require.ErrorIs(t, err, setupErr)
-		require.NoError(t, subscriber.Close())
-		_, err = subscriber.Subscribe(t.Context(), testTopic)
-		require.EqualError(t, err, "sqlite subscriber is closed")
-
-		mockDB.ExpectQuery("SELECT valid").WillReturnRows(
-			sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}).
-				AddRow(1, "id", nil, []byte(`{"traceId":"trace-id"}`)),
-		)
-		rows, err := db.QueryContext(t.Context(), "SELECT valid")
-		require.NoError(t, err)
-		batch, err := buildSQLiteBatch(rows)
-		require.NoError(t, err)
-		require.Len(t, batch, 1)
-		assert.Empty(t, batch[0].Payload)
-
-		mockDB.ExpectQuery("SELECT invalid_metadata").WillReturnRows(
-			sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}).
-				AddRow(1, "id", []byte("payload"), []byte("not-json")),
-		)
-		rows, err = db.QueryContext(t.Context(), "SELECT invalid_metadata")
-		require.NoError(t, err)
-		_, err = buildSQLiteBatch(rows)
-		require.ErrorContains(t, err, "unable to parse metadata JSON")
-
-		mockDB.ExpectQuery("SELECT invalid_offset").WillReturnRows(
-			sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}).
-				AddRow("invalid", "id", []byte("payload"), []byte(`{}`)),
-		)
-		rows, err = db.QueryContext(t.Context(), "SELECT invalid_offset")
-		require.NoError(t, err)
-		_, err = buildSQLiteBatch(rows)
-		require.Error(t, err)
-		require.NoError(t, mockDB.ExpectationsWereMet())
-	})
-
-	t.Run("keeps the SQLite compatibility subscriber lifecycle database-free", func(t *testing.T) {
-		db, mockDB, err := sqlmock.New()
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = db.Close() })
-		config := Config{TablePrefix: "compat_", PollInterval: time.Millisecond}
-		subscriberValue, err := newSQLiteTransportSubscriber(config, db, "group", wmLogger)
-		require.NoError(t, err)
-		subscriber := subscriberValue.(*sqliteTransportSubscriber)
-
-		mockDB.ExpectExec("INSERT INTO").WithArgs(testTopic, "group").WillReturnResult(sqlmock.NewResult(0, 1))
-		messages, err := subscriber.Subscribe(t.Context(), testTopic)
-		require.NoError(t, err)
-		require.NotNil(t, messages)
-		require.NoError(t, subscriber.Close())
-		require.NoError(t, mockDB.ExpectationsWereMet())
-	})
-
-	t.Run("builds SQLite subscription defaults and handles transactional outcomes", func(t *testing.T) {
-		db, mockDB, err := sqlmock.New()
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = db.Close() })
-		config := Config{TablePrefix: "compat_", PollInterval: time.Millisecond}
-		subscription := newSQLiteSubscription(config, db, "group", testTopic, wmLogger)
-		t.Cleanup(func() {
-			subscription.pollTicker.Stop()
-			subscription.lockTicker.Stop()
-		})
-		assert.Equal(t, testTopic, subscription.topic)
-		assert.Equal(t, "group", subscription.consumerGroup)
-
-		mockDB.ExpectBegin()
-		mockDB.ExpectQuery("UPDATE.*compat_").WillReturnError(errors.New("lock failed"))
-		mockDB.ExpectRollback()
-		_, err = subscription.NextBatch(t.Context())
-		require.ErrorContains(t, err, "unable to acquire row lock")
-
-		mockDB.ExpectBegin()
-		mockDB.ExpectQuery("UPDATE.*compat_").WillReturnRows(sqlmock.NewRows([]string{"offset_acked"}).AddRow(0))
-		mockDB.ExpectQuery("SELECT").WillReturnRows(
-			sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}).
-				AddRow("bad", "id", []byte("payload"), []byte(`{}`)),
-		)
-		mockDB.ExpectRollback()
-		_, err = subscription.NextBatch(t.Context())
-		require.Error(t, err)
-
-		mockDB.ExpectBegin()
-		mockDB.ExpectQuery("UPDATE.*compat_").WillReturnRows(sqlmock.NewRows([]string{"offset_acked"}).AddRow(0))
-		mockDB.ExpectQuery("SELECT").WillReturnRows(
-			sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}).
-				AddRow(1, "id", []byte("payload"), []byte(`{}`)).
-				RowError(0, errors.New("read failed")),
-		)
-		mockDB.ExpectRollback()
-		_, err = subscription.NextBatch(t.Context())
-		require.ErrorContains(t, err, "read failed")
-
-		mockDB.ExpectBegin()
-		mockDB.ExpectQuery("UPDATE.*compat_").WillReturnRows(sqlmock.NewRows([]string{"offset_acked"}).AddRow(0))
-		mockDB.ExpectQuery("SELECT").WillReturnRows(
-			sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}).
-				AddRow(1, "id", []byte("payload"), []byte(`{}`)),
-		)
-		mockDB.ExpectCommit()
-		batch, err := subscription.NextBatch(t.Context())
-		require.NoError(t, err)
-		require.Len(t, batch, 1)
-		require.NoError(t, mockDB.ExpectationsWereMet())
-	})
-
-	t.Run("covers sqlite subscription database outcomes", func(t *testing.T) {
-		t.Run("begin failure", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			beginErr := errors.New("begin failed")
-			mockDB.ExpectBegin().WillReturnError(beginErr)
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			_, err = subscription.NextBatch(t.Context())
-			require.ErrorIs(t, err, beginErr)
-		})
-
-		t.Run("unavailable lock", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			mockDB.ExpectBegin()
-			mockDB.ExpectQuery("UPDATE offsets").WillReturnRows(sqlmock.NewRows([]string{"offset_acked"}))
-			mockDB.ExpectRollback()
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			batch, err := subscription.NextBatch(t.Context())
-			require.NoError(t, err)
-			assert.Empty(t, batch)
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("query failure", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			queryErr := errors.New("query failed")
-			mockDB.ExpectBegin()
-			mockDB.ExpectQuery("UPDATE offsets").WillReturnRows(
-				sqlmock.NewRows([]string{"offset_acked"}).AddRow(0),
-			)
-			mockDB.ExpectQuery("SELECT messages").WillReturnError(queryErr)
-			mockDB.ExpectRollback()
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			_, err = subscription.NextBatch(t.Context())
-			require.ErrorIs(t, err, queryErr)
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("invalid lock offset", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			mockDB.ExpectBegin()
-			mockDB.ExpectQuery("UPDATE offsets").WillReturnRows(
-				sqlmock.NewRows([]string{"offset_acked"}).AddRow("invalid"),
-			)
-			mockDB.ExpectRollback()
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			_, err = subscription.NextBatch(t.Context())
-			require.ErrorContains(t, err, "unable to scan offset_acked value")
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("commit failure", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			commitErr := errors.New("commit failed")
-			mockDB.ExpectBegin()
-			mockDB.ExpectQuery("UPDATE offsets").WillReturnRows(
-				sqlmock.NewRows([]string{"offset_acked"}).AddRow(0),
-			)
-			mockDB.ExpectQuery("SELECT messages").WillReturnRows(
-				sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}).
-					AddRow(1, "id", []byte("payload"), []byte(`{}`)),
-			)
-			mockDB.ExpectCommit().WillReturnError(commitErr)
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			_, err = subscription.NextBatch(t.Context())
-			require.ErrorIs(t, err, commitErr)
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("empty batch", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			mockDB.ExpectBegin()
-			mockDB.ExpectQuery("UPDATE offsets").WillReturnRows(
-				sqlmock.NewRows([]string{"offset_acked"}).AddRow(0),
-			)
-			mockDB.ExpectQuery("SELECT messages").WillReturnRows(
-				sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}),
-			)
-			mockDB.ExpectRollback()
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			batch, err := subscription.NextBatch(t.Context())
-			require.NoError(t, err)
-			assert.Empty(t, batch)
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("extend release and send", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			extendErr := errors.New("extend failed")
-			mockDB.ExpectQuery("UPDATE extend").WillReturnError(extendErr)
-			require.ErrorIs(t, subscription.ExtendLock(t.Context()), extendErr)
-			mockDB.ExpectQuery("UPDATE extend").WillReturnRows(
-				sqlmock.NewRows([]string{"locked_until"}).AddRow(10),
-			)
-			require.NoError(t, subscription.ExtendLock(t.Context()))
-			mockDB.ExpectQuery("UPDATE extend").WillReturnRows(sqlmock.NewRows([]string{"locked_until"}))
-			require.ErrorIs(t, subscription.ExtendLock(t.Context()), errSQLiteDeliveryLeaseLost)
-			mockDB.ExpectExec("UPDATE acknowledge").WillReturnResult(sqlmock.NewResult(0, 1))
-			require.NoError(t, subscription.ReleaseLock(t.Context()))
-			rowsAffectedErr := errors.New("rows affected failed")
-			mockDB.ExpectExec("UPDATE acknowledge").WillReturnResult(sqlmock.NewErrorResult(rowsAffectedErr))
-			require.ErrorIs(t, subscription.ReleaseLock(t.Context()), rowsAffectedErr)
-
-			done := make(chan error, 1)
-			go func() {
-				done <- subscription.Send(t.Context(), sqliteRawMessage{Offset: 4, UUID: "id", Payload: []byte("payload")})
-			}()
-			message := <-subscription.destination
-			message.Ack()
-			require.NoError(t, <-done)
-			assert.Equal(t, int64(4), subscription.lastAckedOffset)
-			nacked := make(chan error, 1)
-			go func() {
-				nacked <- subscription.Send(t.Context(), sqliteRawMessage{UUID: "nacked", Payload: []byte("payload")})
-			}()
-			(<-subscription.destination).Nack()
-			require.ErrorIs(t, <-nacked, errSQLiteMessageNacked)
-			canceledCtx, cancel := context.WithCancel(t.Context())
-			cancel()
-			require.NoError(t, subscription.Send(canceledCtx, sqliteRawMessage{}))
-			assert.True(t, subscription.runCycle(canceledCtx))
-			subscription.Run(canceledCtx)
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("expires a pre-delivery lease without advancing the batch offset", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			lockTicks := make(chan time.Time)
-			subscription.lockTick = lockTicks
-			mockDB.ExpectExec("UPDATE acknowledge").
-				WithArgs(int64(0), testTopic, "group", int64(0), "lease").
-				WillReturnResult(sqlmock.NewResult(0, 1))
-			mockDB.ExpectExec("UPDATE acknowledge").
-				WithArgs(int64(0), testTopic, "group", int64(0), "lease").
-				WillReturnResult(sqlmock.NewResult(0, 1))
-
-			done := make(chan struct{})
-			go func() {
-				subscription.processBatch(t.Context(), []sqliteRawMessage{
-					{Offset: 1, UUID: "first"},
-					{Offset: 2, UUID: "second"},
-				})
-				close(done)
-			}()
-			lockTicks <- time.Time{}
-			<-done
-			assert.Zero(t, subscription.lastAckedOffset)
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("rejects a stale lease release", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			mockDB.ExpectExec("UPDATE acknowledge").
-				WithArgs(int64(0), testTopic, "group", int64(0), "lease").
-				WillReturnResult(sqlmock.NewResult(0, 0))
-			require.ErrorIs(t, subscription.ReleaseLock(t.Context()), errSQLiteDeliveryLeaseLost)
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("extends a delivery lease while awaiting acknowledgement", func(t *testing.T) {
-			db, mockDB, err := sqlmock.New()
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = db.Close() })
-			subscription := makeTestSQLiteSubscription(db, wmLogger)
-			lockTicks := make(chan time.Time)
-			subscription.lockTick = lockTicks
-			mockDB.ExpectQuery("UPDATE extend").WillReturnRows(
-				sqlmock.NewRows([]string{"locked_until"}).AddRow(10),
-			)
-
-			done := make(chan error, 1)
-			go func() {
-				done <- subscription.Send(t.Context(), sqliteRawMessage{Offset: 4, UUID: "id"})
-			}()
-			message := <-subscription.destination
-			lockTicks <- time.Time{}
-			message.Ack()
-			require.NoError(t, <-done)
-			require.NoError(t, mockDB.ExpectationsWereMet())
-		})
-
-		t.Run("runs batch and poll branches from injected ticks", func(t *testing.T) {
-			t.Run("continues after database errors and empty batches", func(t *testing.T) {
-				db, mockDB, err := sqlmock.New()
-				require.NoError(t, err)
-				t.Cleanup(func() { _ = db.Close() })
-				subscription := makeTestSQLiteSubscription(db, wmLogger)
-
-				mockDB.ExpectBegin().WillReturnError(errors.New("begin failed"))
-				require.False(t, subscription.runCycle(t.Context()))
-				mockDB.ExpectBegin()
-				mockDB.ExpectQuery("UPDATE offsets").WillReturnRows(
-					sqlmock.NewRows([]string{"offset_acked"}).AddRow(0),
-				)
-				mockDB.ExpectQuery("SELECT messages").WillReturnRows(
-					sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}),
-				)
-				mockDB.ExpectRollback()
-				require.False(t, subscription.runCycle(t.Context()))
-				require.NoError(t, mockDB.ExpectationsWereMet())
-			})
-
-			t.Run("processes a batch and wakes a running poll loop", func(t *testing.T) {
-				db, mockDB, err := sqlmock.New()
-				require.NoError(t, err)
-				t.Cleanup(func() { _ = db.Close() })
-				subscription := makeTestSQLiteSubscription(db, wmLogger)
-				mockDB.ExpectBegin()
-				mockDB.ExpectQuery("UPDATE offsets").WillReturnRows(
-					sqlmock.NewRows([]string{"offset_acked"}).AddRow(0),
-				)
-				mockDB.ExpectQuery("SELECT messages").WillReturnRows(
-					sqlmock.NewRows([]string{"offset", "uuid", "payload", "metadata"}).
-						AddRow(4, "id", []byte("payload"), []byte(`{}`)),
-				)
-				mockDB.ExpectCommit()
-				mockDB.ExpectExec("UPDATE acknowledge").
-					WithArgs(int64(4), testTopic, "group", int64(0), sqlmock.AnyArg()).
-					WillReturnResult(sqlmock.NewResult(0, 1))
-
-				cycleDone := make(chan bool, 1)
-				go func() { cycleDone <- subscription.runCycle(t.Context()) }()
-				(<-subscription.destination).Ack()
-				require.False(t, <-cycleDone)
-				assert.Equal(t, int64(4), subscription.lastAckedOffset)
-
-				pollTicks := make(chan time.Time)
-				subscription.pollTick = pollTicks
-				runCtx, cancelRun := context.WithCancel(t.Context())
-				runDone := make(chan struct{})
-				go func() {
-					subscription.Run(runCtx)
-					close(runDone)
-				}()
-				pollTicks <- time.Time{}
-				cancelRun()
-				<-runDone
-				require.NoError(t, mockDB.ExpectationsWereMet())
-			})
-		})
-	})
-
 	t.Run("covers postgres schema and row adapters", func(t *testing.T) {
 		config := Config{TablePrefix: "edge_"}
 		schema := postgresSchema(config)
-		assert.Equal(t, "BYTEA", schema.GeneratePayloadType(testTopic))
+		assert.Equal(t, "BYTEA", schema.GeneratePayloadType(transportTestTopic))
 		first := wmmessage.NewMessage("first", []byte("one"))
 		second := wmmessage.NewMessage("second", []byte("two"))
 		_, err := schema.InsertQuery(wmsql.InsertQueryParams{
-			Topic: testTopic,
+			Topic: transportTestTopic,
 			Msgs:  wmmessage.Messages{first, second},
 		})
 		require.NoError(t, err)
 		_, err = schema.SelectQuery(wmsql.SelectQueryParams{})
 		require.EqualError(t, err, "single-table postgres offsets adapter is required")
 		selectQuery, err := schema.SelectQuery(wmsql.SelectQueryParams{
-			Topic:          testTopic,
+			Topic:          transportTestTopic,
 			ConsumerGroup:  "group",
 			OffsetsAdapter: postgresOffsets(config),
 		})
 		require.NoError(t, err)
-		assert.Equal(t, []any{testTopic, "group"}, selectQuery.Args)
+		assert.Equal(t, []any{transportTestTopic, "group"}, selectQuery.Args)
 
 		db, mockDB, err := sqlmock.New()
 		require.NoError(t, err)
@@ -773,9 +358,11 @@ func TestTransportAdaptersCoverErrorAndLifecycleEdges(t *testing.T) {
 		require.ErrorContains(t, err, "scan postgres message row")
 
 		offsets := postgresOffsets(config)
-		next, err := offsets.NextOffsetQuery(wmsql.NextOffsetQueryParams{Topic: testTopic, ConsumerGroup: "group"})
+		next, err := offsets.NextOffsetQuery(wmsql.NextOffsetQueryParams{
+			Topic: transportTestTopic, ConsumerGroup: "group",
+		})
 		require.NoError(t, err)
-		assert.Equal(t, []any{testTopic, "group"}, next.Args)
+		assert.Equal(t, []any{transportTestTopic, "group"}, next.Args)
 		require.NoError(t, mockDB.ExpectationsWereMet())
 	})
 }
@@ -906,7 +493,7 @@ func TestRouterValidationAndClosedLifecycle(t *testing.T) {
 		subscriber := NewMockSubscriber(t)
 		messages := make(chan *wmmessage.Message)
 		var closeMessages sync.Once
-		subscriber.EXPECT().Subscribe(mock.Anything, testTopic).Run(func(ctx context.Context, _ string) {
+		subscriber.EXPECT().Subscribe(mock.Anything, transportTestTopic).Run(func(ctx context.Context, _ string) {
 			go func() {
 				<-ctx.Done()
 				closeMessages.Do(func() { close(messages) })
@@ -917,7 +504,7 @@ func TestRouterValidationAndClosedLifecycle(t *testing.T) {
 		}).Return(nil).Once()
 		router.subscriber = newLifecycleSubscriber(subscriber)
 		processed := make(chan struct{})
-		handler, err := NewHandler(testTopic, func(context.Context, Message) error {
+		handler, err := NewHandler(transportTestTopic, func(context.Context, Message) error {
 			close(processed)
 			return nil
 		})
@@ -939,7 +526,7 @@ func TestRouterValidationAndClosedLifecycle(t *testing.T) {
 		return err
 	}(), "handler topic is required")
 	require.NoError(t, (*Router)(nil).Close())
-	_, err := NewHandler(testTopic, nil)
+	_, err := NewHandler(transportTestTopic, nil)
 	require.EqualError(t, err, "handler run func is required")
 	_, err = NewRouterFactory(Config{}, &sql.DB{}, nil, logger)
 	require.EqualError(t, err, "publisher is required")
@@ -963,7 +550,7 @@ func TestRouterValidationAndClosedLifecycle(t *testing.T) {
 	router, err := factory.NewRouter("group")
 	require.NoError(t, err)
 	require.EqualError(t, router.Handle(Handler{}), "valid handler is required")
-	handler, err := NewHandler(testTopic, func(context.Context, Message) error { return nil })
+	handler, err := NewHandler(transportTestTopic, func(context.Context, Message) error { return nil })
 	require.NoError(t, err)
 	require.NoError(t, router.Handle(handler))
 	require.EqualError(t, router.Handle(handler), "handler already registered for topic: topic")
@@ -1261,29 +848,6 @@ func TestRouterValidationAndClosedLifecycle(t *testing.T) {
 		require.ErrorIs(t, runErr, closeErr)
 		require.NotContains(t, runErr.Error(), "router close timeout")
 	})
-}
-
-func makeTestSQLiteSubscription(db sqliteDatabase, logger watermill.LoggerAdapter) *sqliteSubscription {
-	pollTicker := time.NewTicker(time.Hour)
-	lockTicker := time.NewTicker(time.Hour)
-	return &sqliteSubscription{
-		db:                     db,
-		pollTicker:             pollTicker,
-		lockTicker:             lockTicker,
-		pollTick:               pollTicker.C,
-		lockTick:               lockTicker.C,
-		lockDuration:           time.Hour,
-		lockTimeoutSeconds:     1,
-		topic:                  testTopic,
-		consumerGroup:          "group",
-		leaseID:                "lease",
-		sqlLockConsumerGroup:   "UPDATE offsets",
-		sqlExtendLock:          "UPDATE extend",
-		sqlNextMessageBatch:    "SELECT messages",
-		sqlAcknowledgeMessages: "UPDATE acknowledge",
-		destination:            make(chan *wmmessage.Message),
-		logger:                 logger,
-	}
 }
 
 func mockQueryRow(t *testing.T, db *sql.DB, query string) *sql.Row {

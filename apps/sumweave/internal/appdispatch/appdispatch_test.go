@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testTopic = "topic"
+
 func TestAppDispatch(t *testing.T) {
 	fake := faker.New()
 	logger := slog.New(slog.DiscardHandler)
@@ -225,13 +227,6 @@ func TestAppDispatch(t *testing.T) {
 		group := "group." + fake.UUID().V4()
 		wmMessage := wmmessage.NewMessage(fake.UUID().V4(), []byte("payload"))
 		wmMessage.Metadata.Set("traceId", fake.UUID().V4())
-		sqliteInsert, err := makeSQLitePublisherSchema(config).InsertQuery(wmsql.InsertQueryParams{
-			Topic: topic,
-			Msgs:  wmmessage.Messages{wmMessage},
-		})
-		require.NoError(t, err)
-		assert.Equal(t, topic, sqliteInsert.Args[1])
-
 		insert, err := postgresSchema(config).InsertQuery(wmsql.InsertQueryParams{
 			Topic: topic,
 			Msgs:  wmmessage.Messages{wmMessage},
@@ -469,8 +464,6 @@ func TestAppDispatch(t *testing.T) {
 	})
 
 	t.Run("validates constructors and driver selection", func(t *testing.T) {
-		assert.Equal(t, TransportDriverSQLite, Config{DatabaseDSN: ":memory:"}.Driver())
-		assert.Equal(t, TransportDriverPostgres, Config{DatabaseDSN: "postgres://example.invalid/db"}.Driver())
 		_, err := NewPublisher(Config{}, nil, logger)
 		require.EqualError(t, err, "sql database is required")
 		_, err = NewPublisher(Config{}, &sql.DB{}, nil)
@@ -480,9 +473,9 @@ func TestAppDispatch(t *testing.T) {
 		require.NoError(t, (*Publisher)(nil).Close())
 		require.NoError(t, (*Router)(nil).Close())
 		assert.Equal(t, `"a""b"`, quoteIdentifier(`a"b`))
-		postgresPublisher := &Publisher{config: Config{DatabaseDSN: "postgres://example.invalid/database"}}
-		assert.Equal(t, "$1", postgresPublisher.publicationPlaceholder(1))
-		assert.Equal(t, "($1, $2)", postgresPublisher.publicationPlaceholders(2))
+		publisher := &Publisher{}
+		assert.Equal(t, "$1", publisher.publicationPlaceholder(1))
+		assert.Equal(t, "($1, $2)", publisher.publicationPlaceholders(2))
 		assert.Equal(
 			t,
 			Message{
