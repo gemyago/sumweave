@@ -1,3 +1,5 @@
+override repository_makefile_dir := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))
+
 include build/make/golangci-lint.mk
 
 cover_dir=.cover
@@ -44,12 +46,14 @@ postgres-workflow-contract-test:
 postgres-test-runtime: postgres-bootstrap
 	SUMWEAVE_POSTGRES_TEST_DSN="$(postgres_test_dsn)" $(MAKE) -C runtime test-postgres
 
+postgres-test-finance: export SUMWEAVE_FINANCE_MIGRATION_COVER_DIR=$(repository_makefile_dir)/finance/.cover/postgres-migration
 postgres-test-finance: postgres-bootstrap
 	SUMWEAVE_POSTGRES_TEST_DSN="$(postgres_test_dsn)" $(MAKE) -C finance test-postgres
 
 postgres-test-sumweave: postgres-bootstrap
 	SUMWEAVE_POSTGRES_TEST_DSN="$(postgres_test_dsn)" $(postgres_test_app_env) $(MAKE) -C apps/sumweave test-postgres
 
+postgres-verify: export SUMWEAVE_FINANCE_MIGRATION_COVER_DIR=$(repository_makefile_dir)/finance/.cover/postgres-migration
 postgres-verify: postgres-test-runtime postgres-test-finance postgres-test-sumweave
 
 $(cover_dir):
