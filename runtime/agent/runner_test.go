@@ -103,34 +103,11 @@ func TestRunner(t *testing.T) {
 			require.ErrorContains(t, err, "session storage")
 		})
 
-		t.Run("succeeds with database storage", func(t *testing.T) {
-			runner, err := NewRunner(RunnerArgs{
-				ProvidersConfigService: lp.NewMockProvidersConfigService(t),
-				AgentProfilesService:   newTestProfilesService(t),
-			}, WithLogger(rootTestLogger), WithDatabaseStorage(":memory:"))
-			require.NoError(t, err)
-			require.NotNil(t, runner)
-		})
-
-		t.Run("succeeds with database storage and custom table prefix", func(t *testing.T) {
-			prefix := fake.Lexify("?????_")
-			runner, err := NewRunner(RunnerArgs{
-				ProvidersConfigService: lp.NewMockProvidersConfigService(t),
-				AgentProfilesService:   newTestProfilesService(t),
-			},
-				WithLogger(rootTestLogger),
-				WithDatabaseStorage(":memory:"),
-				WithDatabaseTablePrefix(prefix),
-			)
-			require.NoError(t, err)
-			require.NotNil(t, runner)
-		})
-
-		t.Run("returns error when database DSN is invalid", func(t *testing.T) {
+		t.Run("returns error when database DSN is empty", func(t *testing.T) {
 			_, err := NewRunner(RunnerArgs{
 				ProvidersConfigService: lp.NewMockProvidersConfigService(t),
 				AgentProfilesService:   newTestProfilesService(t),
-			}, WithLogger(rootTestLogger), WithDatabaseStorage("host=bad port=0 dbname=none"))
+			}, WithLogger(rootTestLogger), WithDatabaseStorage(""))
 			require.Error(t, err)
 			require.ErrorContains(t, err, "session storage")
 		})
@@ -138,14 +115,14 @@ func TestRunner(t *testing.T) {
 		t.Run("WithDatabaseStorage clears file storage flag", func(t *testing.T) {
 			opts := &runnerOpts{}
 			WithFileSystemStorage(t.TempDir())(opts)
-			WithDatabaseStorage(":memory:")(opts)
+			WithDatabaseStorage(fake.UUID().V4())(opts)
 			assert.False(t, opts.useFileStorage)
 			assert.True(t, opts.useDatabaseStorage)
 		})
 
 		t.Run("WithFileSystemStorage clears database storage flag", func(t *testing.T) {
 			opts := &runnerOpts{}
-			WithDatabaseStorage(":memory:")(opts)
+			WithDatabaseStorage(fake.UUID().V4())(opts)
 			WithFileSystemStorage(t.TempDir())(opts)
 			assert.True(t, opts.useFileStorage)
 			assert.False(t, opts.useDatabaseStorage)
@@ -168,15 +145,6 @@ func TestRunner(t *testing.T) {
 				ProvidersConfigService: lp.NewMockProvidersConfigService(t),
 				AgentProfilesService:   newTestProfilesService(t),
 			}, WithLogger(rootTestLogger), WithFileSystemStorage(dir))
-			require.NoError(t, err)
-			require.NoError(t, runner.AutoMigrate())
-		})
-
-		t.Run("succeeds when using database storage", func(t *testing.T) {
-			runner, err := NewRunner(RunnerArgs{
-				ProvidersConfigService: lp.NewMockProvidersConfigService(t),
-				AgentProfilesService:   newTestProfilesService(t),
-			}, WithLogger(rootTestLogger), WithDatabaseStorage(":memory:"))
 			require.NoError(t, err)
 			require.NoError(t, runner.AutoMigrate())
 		})

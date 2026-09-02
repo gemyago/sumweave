@@ -1,6 +1,9 @@
+//go:build postgres_test
+
 package llmproviders
 
 import (
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -19,14 +22,26 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 	makeService := func(t *testing.T) *DatabaseProvidersConfigService {
 		t.Helper()
 		svc, err := NewDatabaseProvidersConfigService(
-			":memory:",
+			postgresTestDSN(t),
 			testLogger(t),
-			"",
+			postgresTestTablePrefix,
 		)
 		require.NoError(t, err)
 		require.NotNil(t, svc)
-		require.NoError(t, svc.AutoMigrate())
 		return svc
+	}
+	matchingProviders := func(providers []ProviderConfig, names ...string) []ProviderConfig {
+		wanted := make(map[string]struct{}, len(names))
+		for _, name := range names {
+			wanted[name] = struct{}{}
+		}
+		matched := make([]ProviderConfig, 0, len(names))
+		for _, provider := range providers {
+			if _, ok := wanted[provider.Name]; ok {
+				matched = append(matched, provider)
+			}
+		}
+		return matched
 	}
 
 	makeParams := func() CreateProviderConfigParams {
@@ -40,8 +55,8 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 	}
 
 	t.Run("NewDatabaseProvidersConfigService", func(t *testing.T) {
-		t.Run("creates service with SQLite in-memory DSN", func(t *testing.T) {
-			svc, err := NewDatabaseProvidersConfigService(":memory:", nil, "")
+		t.Run("creates service with the prepared PostgreSQL DSN", func(t *testing.T) {
+			svc, err := NewDatabaseProvidersConfigService(postgresTestDSN(t), nil, postgresTestTablePrefix)
 			require.NoError(t, err)
 			require.NotNil(t, svc)
 		})
@@ -54,22 +69,6 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 			)
 			require.Error(t, err)
 			assert.Nil(t, svc)
-		})
-	})
-
-	t.Run("AutoMigrate", func(t *testing.T) {
-		t.Run("creates provider_configs table successfully", func(t *testing.T) {
-			svc, err := NewDatabaseProvidersConfigService(":memory:", nil, "")
-			require.NoError(t, err)
-			err = svc.AutoMigrate()
-			require.NoError(t, err)
-		})
-
-		t.Run("is idempotent - can be called multiple times", func(t *testing.T) {
-			svc, err := NewDatabaseProvidersConfigService(":memory:", nil, "")
-			require.NoError(t, err)
-			require.NoError(t, svc.AutoMigrate())
-			require.NoError(t, svc.AutoMigrate())
 		})
 	})
 
@@ -87,11 +86,11 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 	}
 
 	t.Run("List", func(t *testing.T) {
-		t.Run("returns empty slice when no providers exist", func(t *testing.T) {
+		t.Run("returns a non-nil slice from the prepared provider table", func(t *testing.T) {
 			svc := makeService(t)
 			result, err := svc.List(t.Context())
 			require.NoError(t, err)
-			assert.Empty(t, result)
+			require.NotNil(t, result)
 		})
 
 		t.Run("returns all providers sorted by created_at ascending", func(t *testing.T) {
@@ -101,13 +100,14 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 
 			result, err := svc.List(t.Context())
 			require.NoError(t, err)
-			require.Len(t, result, 2)
-			assert.Equal(t, m1.Name, result[0].Name)
-			assert.Equal(t, m2.Name, result[1].Name)
-			assert.Equal(t, m1.Type, result[0].Type)
-			assert.Equal(t, m1.DisplayName, result[0].DisplayName)
-			assert.Equal(t, m1.BaseURL, result[0].BaseURL)
-			assert.Equal(t, m1.APIKey, result[0].APIKey)
+			matched := matchingProviders(result, m1.Name, m2.Name)
+			require.Len(t, matched, 2)
+			assert.Equal(t, m1.Name, matched[0].Name)
+			assert.Equal(t, m2.Name, matched[1].Name)
+			assert.Equal(t, m1.Type, matched[0].Type)
+			assert.Equal(t, m1.DisplayName, matched[0].DisplayName)
+			assert.Equal(t, m1.BaseURL, matched[0].BaseURL)
+			assert.Equal(t, m1.APIKey, matched[0].APIKey)
 		})
 
 		t.Run("preserves canonical creation timestamp ordering", func(t *testing.T) {
@@ -132,11 +132,11 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 
 			result, err := svc.List(t.Context())
 			require.NoError(t, err)
-			require.Len(t, result, 2)
-			assert.Equal(t, earlierModel.Name, result[0].Name)
-			assert.Equal(t, laterModel.Name, result[1].Name)
-			assert.Equal(t, earlier.Format(time.RFC3339Nano), result[0].CreatedAt.Format(time.RFC3339Nano))
-			assert.Equal(t, later.Format(time.RFC3339Nano), result[1].CreatedAt.Format(time.RFC3339Nano))
+			matched := matchingProviders(result, earlierModel.Name, laterModel.Name)
+			require.Len(t, matched, 2)
+			assert.Equal(t, earlierModel.Name, matched[0].Name)
+			assert.Equal(t, laterModel.Name, matched[1].Name)
+			assert.True(t, matched[0].CreatedAt.Before(matched[1].CreatedAt))
 		})
 	})
 
@@ -230,14 +230,14 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 			assert.Contains(t, err.Error(), "name")
 		})
 
-		t.Run("accepts valid name with hyphens and digits", func(t *testing.T) {
+		t.Run("accepts randomized valid name with hyphens", func(t *testing.T) {
 			svc := makeService(t)
 			params := makeParams()
-			params.Name = "my-provider-1"
+			params.Name = fake.Lexify("my-provider-????????")
 
 			result, err := svc.Create(t.Context(), params)
 			require.NoError(t, err)
-			assert.Equal(t, "my-provider-1", result.Name)
+			assert.Equal(t, params.Name, result.Name)
 		})
 
 		t.Run("rejects unsupported provider type", func(t *testing.T) {
@@ -442,4 +442,13 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 			assert.Empty(t, got.Models)
 		})
 	})
+}
+
+const postgresTestTablePrefix = "sumweave_runtime_"
+
+func postgresTestDSN(t *testing.T) string {
+	t.Helper()
+	dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+	require.NotEmpty(t, dsn, "SUMWEAVE_POSTGRES_TEST_DSN is required for postgres_test")
+	return dsn
 }

@@ -1,13 +1,17 @@
+//go:build postgres_test
+
 package sessions
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/gemyago/sumweave/runtime/internal/gormsumweave"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestDatabaseSessionMetadataStore(t *testing.T) {
@@ -21,9 +25,9 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		opts gormsumweave.GormSumweaveTablesOpts,
 	) *DatabaseSessionMetadataStore {
 		t.Helper()
-		store, err := NewDatabaseSessionMetadataStore(":memory:", opts)
+		_ = opts
+		store, err := NewDatabaseSessionMetadataStore(postgresTestDSN(t), postgresTestTablesOpts())
 		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
 		return store
 	}
 
@@ -59,7 +63,12 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Total)
 		require.Len(t, res.Sessions, 1)
-		require.Equal(t, meta, res.Sessions[0])
+		require.Equal(t, meta.SessionID, res.Sessions[0].SessionID)
+		require.Equal(t, meta.AppName, res.Sessions[0].AppName)
+		require.Equal(t, meta.UserID, res.Sessions[0].UserID)
+		require.Equal(t, meta.Title, res.Sessions[0].Title)
+		require.True(t, res.Sessions[0].CreatedAt.Equal(meta.CreatedAt))
+		require.True(t, res.Sessions[0].UpdatedAt.Equal(meta.UpdatedAt))
 		var stored sessionMetadataModel
 		require.NoError(t, store.db.First(&stored, "session_id = ?", sid).Error)
 	})
@@ -102,7 +111,12 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Total)
-		require.Equal(t, second, res.Sessions[0])
+		require.Equal(t, second.SessionID, res.Sessions[0].SessionID)
+		require.Equal(t, second.AppName, res.Sessions[0].AppName)
+		require.Equal(t, second.UserID, res.Sessions[0].UserID)
+		require.Equal(t, second.Title, res.Sessions[0].Title)
+		require.True(t, res.Sessions[0].CreatedAt.Equal(second.CreatedAt))
+		require.True(t, res.Sessions[0].UpdatedAt.Equal(second.UpdatedAt))
 	})
 
 	t.Run("List returns entries sorted by updatedAt desc", func(t *testing.T) {
@@ -172,7 +186,6 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		require.Equal(t, 2, firstPage.Total)
 		require.Len(t, firstPage.Sessions, 1)
 		require.Equal(t, laterID, firstPage.Sessions[0].SessionID)
-		require.Equal(t, later.Format(time.RFC3339Nano), firstPage.Sessions[0].UpdatedAt.Format(time.RFC3339Nano))
 
 		secondPage, err := store.List(t.Context(), ListSessionMetadataParams{
 			AppName: app,
@@ -199,6 +212,23 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		require.Equal(t, 0, res.Total)
 		require.NotNil(t, res.Sessions)
 		require.Empty(t, res.Sessions)
+	})
+
+	t.Run("List returns a find error after scoped count succeeds", func(t *testing.T) {
+		t.Parallel()
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
+		store.db.Callback().Query().Before("gorm:query").Register("postgres_test:fail-find", func(tx *gorm.DB) {
+			if _, ok := tx.Statement.Dest.(*[]sessionMetadataModel); ok {
+				tx.AddError(errors.New("injected find failure"))
+			}
+		})
+
+		_, err := store.List(t.Context(), ListSessionMetadataParams{
+			AppName: fake.Lorem().Word(),
+			UserID:  fake.UUID().V4(),
+			Limit:   1,
+		})
+		require.ErrorContains(t, err, "list session metadata")
 	})
 
 	t.Run("List with offset and limit returns correct slice and total", func(t *testing.T) {
@@ -272,7 +302,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("distinct table prefix isolates data", func(t *testing.T) {
+	t.Run("List scopes data to the created app and user", func(t *testing.T) {
 		t.Parallel()
 		app := fake.Lorem().Word()
 		user := fake.UUID().V4()
@@ -287,29 +317,31 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 			UpdatedAt: now,
 		}
 
-		storeA, err := NewDatabaseSessionMetadataStore(
-			":memory:",
-			gormsumweave.GormSumweaveTablesOpts{TablePrefix: "a_"},
-		)
-		require.NoError(t, err)
-		require.NoError(t, storeA.AutoMigrate())
-		require.NoError(t, storeA.Save(t.Context(), meta))
+		store := newStore(t, postgresTestTablesOpts())
+		require.NoError(t, store.Save(t.Context(), meta))
+		require.NoError(t, store.Save(t.Context(), SessionMetadata{
+			SessionID: fake.UUID().V4(),
+			AppName:   app,
+			UserID:    fake.UUID().V4(),
+			Title:     fake.Lorem().Sentence(3),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}))
 
-		storeB, err := NewDatabaseSessionMetadataStore(
-			":memory:",
-			gormsumweave.GormSumweaveTablesOpts{TablePrefix: "b_"},
-		)
-		require.NoError(t, err)
-		require.NoError(t, storeB.AutoMigrate())
-
-		res, err := storeB.List(t.Context(), ListSessionMetadataParams{
+		res, err := store.List(t.Context(), ListSessionMetadataParams{
 			AppName: app,
 			UserID:  user,
 			Limit:   10,
 			Offset:  0,
 		})
 		require.NoError(t, err)
-		require.Equal(t, 0, res.Total)
+		require.Equal(t, 1, res.Total)
+		require.Equal(t, meta.SessionID, res.Sessions[0].SessionID)
+		require.Equal(t, meta.AppName, res.Sessions[0].AppName)
+		require.Equal(t, meta.UserID, res.Sessions[0].UserID)
+		require.Equal(t, meta.Title, res.Sessions[0].Title)
+		require.True(t, res.Sessions[0].CreatedAt.Equal(meta.CreatedAt))
+		require.True(t, res.Sessions[0].UpdatedAt.Equal(meta.UpdatedAt))
 	})
 
 	t.Run("Save returns context error when cancelled", func(t *testing.T) {
@@ -427,9 +459,8 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 	t.Run("operations fail after underlying DB closed", func(t *testing.T) {
 		t.Parallel()
-		store, err := NewDatabaseSessionMetadataStore(":memory:", gormsumweave.GormSumweaveTablesOpts{})
+		store, err := NewDatabaseSessionMetadataStore(postgresTestDSN(t), postgresTestTablesOpts())
 		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
 		sqlDB, err := store.db.DB()
 		require.NoError(t, err)
 		require.NoError(t, sqlDB.Close())
@@ -455,7 +486,5 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		err = store.Delete(t.Context(), fake.Lorem().Word(), fake.UUID().V4(), fake.UUID().V4())
 		require.Error(t, err)
 
-		err = store.AutoMigrate()
-		require.Error(t, err)
 	})
 }

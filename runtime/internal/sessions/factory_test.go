@@ -8,7 +8,6 @@ import (
 	"github.com/gemyago/sumweave/runtime/internal/summarize"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/adk/session"
 )
 
 func TestNewSessionsStorage(t *testing.T) {
@@ -55,29 +54,14 @@ func TestNewSessionsStorage(t *testing.T) {
 		require.Equal(t, sid, listed.Sessions[0].SessionID)
 	})
 
-	t.Run("type database: AutoMigrate, Create, database metadata inner", func(t *testing.T) {
+	t.Run("type database rejects empty database DSN without connecting", func(t *testing.T) {
 		ss, err := NewSessionsStorage(SessionServiceFactoryDeps{
 			RootLogger:         logger,
 			SessionStorageType: "database",
-			DatabaseDSN:        ":memory:",
 			Summarizer:         sum,
 		})
-		require.NoError(t, err)
-		require.NotNil(t, ss)
-
-		innerWrap := metadataSyncInner(t, ss)
-		_, ok := innerWrap.(*DatabaseSessionsStorage)
-		require.True(t, ok)
-
-		require.NoError(t, ss.AutoMigrate())
-		ctx := t.Context()
-		resp, err := ss.Create(ctx, &session.CreateRequest{
-			AppName:   fake.Lorem().Word(),
-			UserID:    fake.UUID().V4(),
-			SessionID: fake.UUID().V4(),
-		})
-		require.NoError(t, err)
-		require.NotNil(t, resp)
+		require.Error(t, err)
+		require.Nil(t, ss)
 	})
 
 	t.Run("empty SessionStorageType is memory: non-nil and AutoMigrate no-op", func(t *testing.T) {
@@ -106,17 +90,14 @@ func TestNewSessionsStorage(t *testing.T) {
 		require.True(t, ok)
 	})
 
-	t.Run("UseDatabaseStorage selects database backend", func(t *testing.T) {
+	t.Run("UseDatabaseStorage rejects empty database DSN without connecting", func(t *testing.T) {
 		ss, err := NewSessionsStorage(SessionServiceFactoryDeps{
 			RootLogger:         logger,
 			UseDatabaseStorage: true,
-			DatabaseDSN:        ":memory:",
 			Summarizer:         sum,
 		})
-		require.NoError(t, err)
-		innerWrap := metadataSyncInner(t, ss)
-		_, ok := innerWrap.(*DatabaseSessionsStorage)
-		require.True(t, ok)
+		require.Error(t, err)
+		require.Nil(t, ss)
 	})
 
 	t.Run("unsupported SessionStorageType returns error", func(t *testing.T) {

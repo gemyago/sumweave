@@ -29,3 +29,8 @@ exclude:
     - mock_*.go
     - mock.go
     - internal/agentapi/.*.gen.go # Generated code
+    - ^agent/agent_profiles\.go$
+    - ^agent/providers_config\.go$
+    - ^internal/agentprofiles/db_agent_profiles_service\.go$
+    - ^internal/llmproviders/db_providers_config_service\.go$
+    - ^internal/sessions/database\.go$

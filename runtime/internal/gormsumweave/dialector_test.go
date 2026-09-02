@@ -53,8 +53,15 @@ func TestNewGormDialectorWithConn(t *testing.T) {
 }
 
 func TestDialectorTranslate(t *testing.T) {
-	dialector := NewGormDialector(":memory:")
 	err := errors.New("dialect error")
 
-	require.Same(t, err, dialector.Translate(err))
+	t.Run("postgres dialector forwards translation", func(t *testing.T) {
+		dialector := NewGormDialector("postgres://sumweave:secret@example.invalid:5432/sumweave?sslmode=disable")
+		require.Same(t, err, dialector.Translate(err))
+	})
+
+	t.Run("missing translator preserves the original error", func(t *testing.T) {
+		dialector := Dialector{}
+		require.Same(t, err, dialector.Translate(err))
+	})
 }
