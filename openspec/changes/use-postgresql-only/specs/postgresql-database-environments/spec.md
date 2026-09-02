@@ -88,8 +88,28 @@ tests.
 - **AND** when its `make test-postgres` target runs, it MUST pass
   `-tags=postgres_test`, write `.cover/postgres.out`, and enforce 90% per-file
   and total coverage through the module's full `.testcoverage.yaml`
+- **AND** only root `postgres-test-finance` and `postgres-verify` MUST export
+  the target-specific `SUMWEAVE_FINANCE_MIGRATION_COVER_DIR` value
+  `$(CURDIR)/finance/.cover/postgres-migration` to their shared
+  `postgres-bootstrap` prerequisite; ordinary `make postgres-bootstrap` MUST
+  remain uninstrumented
+- **AND** the finance profile MUST compose ordinary tagged-test coverage with
+  coverage emitted by bootstrap's single test-environment migration command
 - **AND** the tagged profile MUST include untagged plus tagged tests and every
   non-excluded production file
+- **AND** bootstrap MUST remove and recreate
+  `$(SUMWEAVE_FINANCE_MIGRATION_COVER_DIR)/raw`, set `GOCOVERDIR` only for the
+  one instrumented migration command, and write a fresh
+  `$(SUMWEAVE_FINANCE_MIGRATION_COVER_DIR)/ready` marker only after non-empty
+  finance raw data is present
+- **AND** finance tests MUST use a separate `finance/.cover/postgres-test-raw`
+  directory through `-test.gocoverdir`, not `GOCOVERDIR`
+- **AND** `go tool covdata textfmt` MUST read exactly those two raw directories,
+  restrict packages to `github.com/gemyago/sumweave/finance/...`, and write
+  `finance/.cover/postgres.out`, merging matching source blocks
+- **AND** missing, stale, empty, or bootstrap-not-recreated input MUST fail
+  before finance tests or profile checking, and composition MUST NOT exclude the
+  finance migrator or run a second migration smoke
 - **AND** routine-only omissions MUST be exact anchored source-file paths paired
   with tagged ownership and full-profile coverage; package, directory, wildcard,
   lowered-threshold, and broad coverage-ignore exceptions MUST NOT be added
@@ -178,5 +198,22 @@ each test.
 - **WHEN** the PostgreSQL bootstrap prepares `sumweave_test`
 - **THEN** its single serialized `sumweave db-migrate --env test` invocation
   MUST be the shallow migration smoke check for the test lane
+- **AND** that same invocation MAY be coverage-instrumented, only when the
+  target-specific finance coverage variable is supplied, and contribute its
+  finance-package execution to the finance full-coverage profile
 - **AND** application table definitions MUST NOT be duplicated in cluster
   bootstrap SQL or ordinary test fixtures
+
+#### Scenario: Finance target contracts preserve coverage ownership
+
+- **WHEN** `scripts/postgres/targets-contract-test.sh` validates the finance
+  coverage targets
+- **THEN** it MUST assert both 90/90 thresholds, unchanged full-config
+  exclusions, exact anchored routine-only paths, and one tagged/full-profile
+  owner for each routine omission
+- **AND** it MUST assert target-variable propagation, bootstrap cleanup and
+  readiness, the two distinct coverage transports, separate raw directories,
+  covdata restriction/output, absent/stale-input failure, and exactly one
+  `db-migrate --env test` command
+- **AND** it MUST NOT rely on byte-for-byte equality between routine and full
+  coverage configurations

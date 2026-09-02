@@ -41,3 +41,24 @@ The repository SHALL provide and document PostgreSQL provisioning followed by ex
   grants, and migrator default privileges on a fresh service
 - **AND** it MUST then run both explicit migrations and apply runtime grants
 - **AND** cluster setup MUST NOT create or alter application tables outside the explicit migration command
+
+#### Scenario: Finance verification attributes migration coverage to bootstrap
+
+- **WHEN** bootstrap prepares the test environment for finance PostgreSQL
+  verification
+- **THEN** the single `sumweave db-migrate --env test` command MUST execute
+  exactly once with the migrator role, using the same configuration, and MUST
+  emit finance-package raw coverage only when the target-specific exported
+  `SUMWEAVE_FINANCE_MIGRATION_COVER_DIR` variable is supplied by
+  `postgres-test-finance` or `postgres-verify`
+- **AND** bootstrap MUST remove and recreate the raw directory, set
+  `GOCOVERDIR` only on that instrumented command, and write a fresh readiness
+  marker after requiring non-empty raw data
+- **AND** finance tests MUST use their separate raw directory via
+  `-test.gocoverdir`, while the finance full profile MUST use
+  `go tool covdata textfmt` over exactly both raw directories, restricted to
+  `github.com/gemyago/sumweave/finance/...`, to write `.cover/postgres.out`
+- **AND** missing, stale, empty, or unrecreated bootstrap input MUST fail before
+  finance tests or profile checking
+- **AND** coverage collection MUST NOT add a second migration invocation or
+  move schema mutation into an ordinary test

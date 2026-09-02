@@ -200,6 +200,49 @@ the non-routine verification path. Ordinary persistence tests MUST NOT call
 AutoMigrate or otherwise modify schema; they use the schema prepared before the
 tagged suites begin.
 
+The finance full-coverage lane reuses that same successful test-environment
+command instead of adding a migration test. Only the root
+`postgres-test-finance` and `postgres-verify` targets set and export the
+target-specific `SUMWEAVE_FINANCE_MIGRATION_COVER_DIR` variable, with the value
+`$(CURDIR)/finance/.cover/postgres-migration`; target-specific inheritance
+passes it to their shared `postgres-bootstrap` prerequisite. Ordinary
+`make postgres-bootstrap` leaves that variable unset and remains an
+uninstrumented local-setup command.
+
+When that variable is set, bootstrap removes and recreates its
+`raw/` subdirectory at the start of the invocation and does not retain a
+readiness marker from an earlier run. It runs the existing one
+`db-migrate --env test` command, with the same migrator-role DSNs and
+configuration, from `apps/sumweave` as `go run -covermode=atomic` with
+`-coverpkg=github.com/gemyago/sumweave/apps/sumweave/cmd/sumweave,github.com/gemyago/sumweave/finance/...` and sets `GOCOVERDIR` only on that command. On success it requires non-empty finance raw data in
+`$(SUMWEAVE_FINANCE_MIGRATION_COVER_DIR)/raw` and writes the fresh
+`$(SUMWEAVE_FINANCE_MIGRATION_COVER_DIR)/ready` marker. A missing variable,
+failed migration, missing marker, empty raw input, or input not recreated by
+this bootstrap fails before finance tests or profile checking. Instrumentation
+changes neither the command configuration nor its migrator-role ownership, and
+MUST NOT cause another `db-migrate --env test` invocation.
+
+Finance `test-postgres` removes and recreates the separate ignored
+`finance/.cover/postgres-test-raw` directory, requires the bootstrap `ready`
+marker, and runs its current package list with `-coverpkg=./...` and
+`-covermode=atomic`, passing `-test.gocoverdir=finance/.cover/postgres-test-raw`
+through `go test ... -args`. `GOCOVERDIR` is not used for this test binary:
+`-test.gocoverdir` is the required test-binary transport. Before the full
+coverage check, `go tool covdata textfmt` reads exactly the bootstrap raw
+directory and this raw-test directory, restricted to
+`github.com/gemyago/sumweave/finance/...`, and writes the sole
+`finance/.cover/postgres.out` profile. It merges matching source blocks rather
+than duplicating their denominator.
+
+The finance migrator remains responsible for applying the current model set,
+but this early-alpha change does not preserve retired-schema compatibility
+cleanup solely to retain detailed migration tests. Obsolete bank-connection
+identity cleanup is removed rather than recreating legacy columns or indexes in
+a test fixture. Error orchestration that still needs branch coverage is tested
+database-free through the smallest consumer-defined seam and generated mocks;
+those tests do not invoke GORM AutoMigrate or touch a schema. The successful
+GORM executor path is owned by the bootstrap smoke.
+
 No repository-owned replacement migration script or checked-in SQL schema dump
 will create application tables. The existing command remains the single entry
 point over agent runtime migrations, auth, appdispatch, durable jobs, and
@@ -254,14 +297,24 @@ The executable coverage contract is identical in `runtime/`, `finance/`, and
   `.testcoverage-routine.yaml`;
 - non-routine `make test-postgres` runs `go test -tags=postgres_test` over the
   same package list and `-coverpkg` scope as that module's routine target,
-  writes `.cover/postgres.out`, and checks that profile with the existing
-  `.testcoverage.yaml`;
+  and checks `.cover/postgres.out` with the existing `.testcoverage.yaml`;
+- runtime and app write `.cover/postgres.out` directly. Finance collects
+  ordinary tagged-test raw data separately, then composes it with the fresh
+  finance raw data emitted by bootstrap's single test migration into
+  `.cover/postgres.out`;
+- finance composition uses Go coverage data/profile tooling with one compatible
+  coverage mode, exactly the two fresh raw directories above, and the
+  `github.com/gemyago/sumweave/finance/...` package restriction; it fails before
+  tests or profile checking if the bootstrap input is absent, stale, empty, or
+  was not recreated by the current bootstrap;
 - both configurations set `threshold.file: 90` and `threshold.total: 90`;
   neither may lower a threshold or add a package/directory/glob exclusion;
 - `.testcoverage.yaml` remains the full production-file gate with only the
   module's already-approved generated/glue exclusions. Because untagged tests
   are included by a tagged `go test`, `.cover/postgres.out` combines routine
-  and PostgreSQL behavior and MUST cover every non-excluded production file;
+  and PostgreSQL behavior and MUST cover every non-excluded production file.
+  Finance additionally includes the bootstrap migration execution in this same
+  final profile; it does not exclude the migrator from the gate;
 - `.testcoverage-routine.yaml` starts from those same thresholds and existing
   exclusions. It may additionally omit only exact, anchored individual source
   paths whose executable behavior necessarily requires PostgreSQL and whose
@@ -270,8 +323,19 @@ The executable coverage contract is identical in `runtime/`, `finance/`, and
   expressions, directories, packages, lowered overrides, and new generic
   coverage-ignore annotations are forbidden.
 
-Target-contract tests MUST assert the exact commands, profile paths, config
-paths, thresholds, and the one-to-one routine omission/tagged ownership rule.
+The replacement target-contract assertions MUST independently assert both
+90/90 thresholds, unchanged full-configuration exclusions, exact anchored
+routine-only paths, and one tagged/full-profile owner for every routine
+omission; they MUST NOT compare routine and full YAML files byte-for-byte.
+They MUST also assert target-scoped propagation of
+`SUMWEAVE_FINANCE_MIGRATION_COVER_DIR`, bootstrap cleanup and readiness,
+`GOCOVERDIR` only on the one instrumented test migration,
+`-test.gocoverdir` on finance tests, separate raw directories, the exact
+`covdata` package restriction and output, absent/stale-input failure, and
+exactly one `db-migrate --env test` command. These assertions retain the exact
+commands, profile paths, config paths, and one-to-one routine
+omission/tagged-ownership rule while proving coverage capture does not add a
+second migration invocation.
 Implementers first keep or add database-free unit coverage where a generated
 mock or pure boundary is legitimate; the exact routine omission list is only
 for irreducibly PostgreSQL-backed source files. Thus routine CI retains a 90%
