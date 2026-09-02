@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -25,7 +26,7 @@ func TestWorkerUnit(t *testing.T) {
 		t.Helper()
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		db, err := sqlconn.Open(dsn)
+		db, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		config := appdispatch.Config{

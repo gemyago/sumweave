@@ -9,8 +9,6 @@ require (
 	github.com/gemyago/sumweave/runtime v0.0.0-20260406074131-aa6097596cbc
 	github.com/gemyago/sumweave/tools/skills v0.0.0-20260406074131-aa6097596cbc
 	github.com/gemyago/sumweave/tools/workspacefs v0.0.0-20260406074131-aa6097596cbc
-	github.com/glebarez/go-sqlite v1.22.0
-	github.com/glebarez/sqlite v1.11.0
 	github.com/go-logr/logr v1.4.3
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/golang-jwt/jwt/v5 v5.3.1

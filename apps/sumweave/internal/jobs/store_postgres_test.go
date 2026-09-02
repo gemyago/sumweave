@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -10,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,7 +25,7 @@ func TestStorePostgres(t *testing.T) {
 		t.Helper()
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		db, err := sqlconn.Open(dsn)
+		db, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		store, err := NewStore(db, dsn, StoreOpts{TablePrefix: "sumweave_jobs_"})
@@ -191,7 +192,7 @@ func TestStorePostgres(t *testing.T) {
 	t.Run("returns storage errors without treating them as lifecycle states", func(t *testing.T) {
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		db, err := sqlconn.Open(dsn)
+		db, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		store, err := NewStore(db, dsn, StoreOpts{TablePrefix: "sumweave_jobs_"})
 		require.NoError(t, err)
@@ -245,7 +246,6 @@ func TestStorePostgres(t *testing.T) {
 		require.NoError(t, migrator.DropColumnIfExists(store.tableName, fake.Lorem().Word()))
 		require.NoError(t, migrator.DropColumnIfExists(tableName, fake.Lorem().Word()))
 		require.NoError(t, migrator.DropTableIfExists(tableName))
-		require.NoError(t, migrator.dropSQLiteIndexesUsingColumn(tableName, fake.Lorem().Word()))
 		assert.Equal(t, `"jobs""store"`, quoteIdentifier(`jobs"store`))
 		require.Error(t, store.RenewRunning(t.Context(), Job{}, time.Time{}))
 	})

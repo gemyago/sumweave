@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebarez/sqlite"
+	"github.com/jackc/pgx/v5"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -90,11 +90,10 @@ func NewStore(sqlDB *sql.DB, dsn string, opts StoreOpts) (*Store, error) {
 	if strings.TrimSpace(dsn) == "" {
 		return nil, errors.New("database dsn is required")
 	}
-	dialector := postgres.New(postgres.Config{DSN: dsn, Conn: sqlDB})
-	if isSQLiteDSN(dsn) {
-		dialector = sqlite.Dialector{DriverName: sqlite.DriverName, DSN: dsn, Conn: sqlDB}
+	if _, err := pgx.ParseConfig(dsn); err != nil {
+		return nil, fmt.Errorf("parse jobs database dsn: %w", err)
 	}
-	db, err := gorm.Open(dialector, &gorm.Config{
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: dsn, Conn: sqlDB}), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{TablePrefix: opts.TablePrefix}, TranslateError: true,
 	})
 	if err != nil {
@@ -109,13 +108,6 @@ func NewStore(sqlDB *sql.DB, dsn string, opts StoreOpts) (*Store, error) {
 		tableName: tableName,
 		migration: gormSchemaMigrator{db: db},
 	}, nil
-}
-
-func isSQLiteDSN(dsn string) bool {
-	trimmed := strings.TrimSpace(dsn)
-	return trimmed == ":memory:" || strings.HasPrefix(trimmed, "file:") ||
-		strings.Contains(trimmed, "sqlite") || strings.HasSuffix(trimmed, ".db") ||
-		strings.HasSuffix(trimmed, ".sqlite")
 }
 
 // AutoMigrate explicitly removes alpha-only fields because GORM does not do so.
@@ -163,12 +155,6 @@ func (m gormSchemaMigrator) DropColumnIfExists(
 	if !migrator.HasColumn(tableName, column) {
 		return nil
 	}
-	if err := m.dropSQLiteIndexesUsingColumn(
-		tableName,
-		column,
-	); err != nil {
-		return err
-	}
 	statement := fmt.Sprintf(
 		"ALTER TABLE %s DROP COLUMN %s",
 		quoteIdentifier(tableName),
@@ -176,34 +162,6 @@ func (m gormSchemaMigrator) DropColumnIfExists(
 	)
 	if err := m.db.Exec(statement).Error; err != nil {
 		return fmt.Errorf("drop obsolete %s column %s: %w", tableName, column, err)
-	}
-	return nil
-}
-
-func (m gormSchemaMigrator) dropSQLiteIndexesUsingColumn(
-	tableName, column string,
-) error {
-	if m.db.Dialector.Name() != "sqlite" {
-		return nil
-	}
-	migrator := m.db.Table(tableName).Migrator()
-	indexes, err := migrator.GetIndexes(tableName)
-	if err != nil {
-		return fmt.Errorf("inspect SQLite indexes for obsolete %s column: %w", column, err)
-	}
-	for _, index := range indexes {
-		for _, indexedColumn := range index.Columns() {
-			if indexedColumn != column {
-				continue
-			}
-			if dropErr := migrator.DropIndex(
-				tableName,
-				index.Name(),
-			); dropErr != nil {
-				return fmt.Errorf("drop SQLite index %s for obsolete %s column: %w", index.Name(), column, dropErr)
-			}
-			break
-		}
 	}
 	return nil
 }

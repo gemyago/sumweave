@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,7 +49,7 @@ func TestEvents(t *testing.T) {
 		PollInterval: 10 * time.Millisecond,
 	}
 	require.NotEmpty(t, config.DatabaseDSN)
-	db, err := sqlconn.Open(config.DatabaseDSN)
+	db, err := sql.Open("pgx", config.DatabaseDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	rawPublisher, err := appdispatch.NewPublisher(config, db, logger)

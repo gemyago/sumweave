@@ -144,4 +144,9 @@ func TestApplicationComposition(t *testing.T) {
 		_, err := NewApplicationSQLDB("", nil)
 		require.Error(t, err)
 	})
+
+	t.Run("application database rejects SQLite configuration", func(t *testing.T) {
+		_, err := OpenApplicationSQLDB(":memory:")
+		require.Error(t, err)
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"encoding/pem"
 	"log/slog"
@@ -20,12 +21,12 @@ import (
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/server"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
 	financepersistence "github.com/gemyago/sumweave/finance/persistence"
 	"github.com/gemyago/sumweave/runtime/httpapi"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,7 +88,7 @@ func TestFinanceSyntheticLinkStateControllerPostgres(t *testing.T) {
 
 	dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 	require.NotEmpty(t, dsn)
-	sqlDB, err := sqlconn.Open(dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	database, err := financepersistence.NewDatabase(sqlDB, dsn)

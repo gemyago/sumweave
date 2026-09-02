@@ -17,7 +17,7 @@ import (
 	wmsql "github.com/ThreeDotsLabs/watermill-sql/v4/pkg/sql"
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,7 +38,7 @@ func TestAppDispatch(t *testing.T) {
 	}
 	openPrepared := func(t *testing.T, config Config) *sql.DB {
 		t.Helper()
-		db, err := sqlconn.Open(config.DatabaseDSN)
+		db, err := sql.Open("pgx", config.DatabaseDSN)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		return db

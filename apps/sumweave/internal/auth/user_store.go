@@ -9,9 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
-	"github.com/glebarez/sqlite"
+	"github.com/jackc/pgx/v5"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -165,13 +164,10 @@ func openAuthDatabase(sqlDB *sql.DB, dsn, tablePrefix string) (*gorm.DB, error) 
 		return nil, err
 	}
 
-	var dialector gorm.Dialector
-	if sqlconn.IsSQLiteDSN(dsn) {
-		dialector = sqlite.Dialector{Conn: sqlDB}
-	} else {
-		dialector = postgres.New(postgres.Config{Conn: sqlDB})
+	if _, err := pgx.ParseConfig(dsn); err != nil {
+		return nil, fmt.Errorf("parse auth database dsn: %w", err)
 	}
-	db, err := gorm.Open(dialector, &gorm.Config{
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{TablePrefix: tablePrefix},
 		TranslateError: true,
 		NowFunc:        time.Now,

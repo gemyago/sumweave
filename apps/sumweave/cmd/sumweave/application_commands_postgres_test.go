@@ -4,14 +4,15 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"os"
 	"testing"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,7 @@ func TestApplicationCommandsPostgres(t *testing.T) {
 		t.Helper()
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		db, err := sqlconn.Open(dsn)
+		db, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		store, err := auth.NewUserStore(auth.UserStoreDeps{

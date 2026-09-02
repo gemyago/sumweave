@@ -59,7 +59,6 @@ func TestStoreMigrationUnit(t *testing.T) {
 		require.ErrorContains(t, store.RequeueRunning(t.Context(), Job{}, time.Time{}), "queuedAt")
 		require.ErrorContains(t, store.RecoverStaleRunning(t.Context(), time.Time{}, time.Second, 1), "now")
 	})
-
 	t.Run("attaches the GORM schema adapter to a SQLMock-compatible database", func(t *testing.T) {
 		db, databaseMock, err := sqlmock.New()
 		require.NoError(t, err)

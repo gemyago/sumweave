@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +15,10 @@ import (
 	"time"
 
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	financepkg "github.com/gemyago/sumweave/finance"
 	financefixtures "github.com/gemyago/sumweave/finance/fixtures"
 	"github.com/gemyago/sumweave/finance/persistence"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +30,7 @@ func TestFinanceCommandPostgres(t *testing.T) {
 		t.Helper()
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		sqlDB, err := sqlconn.Open(dsn)
+		sqlDB, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		database, err := persistence.NewDatabase(sqlDB, dsn)

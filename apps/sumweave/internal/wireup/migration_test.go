@@ -49,7 +49,7 @@ func TestBuildMigration(t *testing.T) {
 			Environment:     fake.UUID().V4(),
 			DefaultLogLevel: "info",
 			Application: config.Application{Database: config.Database{
-				DSN: "postgres://localhost:invalid/" + fake.UUID().V4(), TablePrefix: fake.Letter(),
+				DSN: "postgres://localhost:1/" + fake.UUID().V4(), TablePrefix: fake.Letter(),
 			}},
 		})
 		require.ErrorContains(t, err, "create migration auth user store")

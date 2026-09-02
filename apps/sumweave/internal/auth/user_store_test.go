@@ -3,13 +3,14 @@
 package auth
 
 import (
+	"database/sql"
 	"os"
 	"sync"
 	"testing"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +21,7 @@ func TestUserStore(t *testing.T) {
 		t.Helper()
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		sqlDB, err := sqlconn.Open(dsn)
+		sqlDB, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		store, err := NewUserStore(UserStoreDeps{

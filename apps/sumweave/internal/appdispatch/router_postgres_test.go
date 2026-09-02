@@ -4,12 +4,13 @@ package appdispatch
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ func TestRouterRejectsConcurrentRunOnPreparedPostgresTransport(t *testing.T) {
 	dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 	require.NotEmpty(t, dsn)
 	config := Config{DatabaseDSN: dsn, TablePrefix: "sumweave_", PollInterval: time.Millisecond}
-	db, err := sqlconn.Open(dsn)
+	db, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	logger := slog.New(slog.DiscardHandler)
