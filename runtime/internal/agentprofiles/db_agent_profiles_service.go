@@ -62,9 +62,6 @@ func NewDatabaseAgentProfilesService(
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	if err = gormsumweave.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
-		return nil, err
-	}
 
 	return &DatabaseAgentProfilesService{
 		db:     db,

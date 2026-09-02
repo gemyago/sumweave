@@ -2,9 +2,7 @@ package gormsumweave
 
 import (
 	"database/sql"
-	"strings"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -14,33 +12,15 @@ type Dialector struct {
 	gorm.Dialector
 }
 
-// isSQLiteDSN returns true if the DSN refers to a SQLite database.
-func isSQLiteDSN(dsn string) bool {
-	dsn = strings.TrimSpace(dsn)
-	return dsn == ":memory:" ||
-		strings.HasPrefix(dsn, "file:") ||
-		strings.Contains(dsn, "sqlite") ||
-		strings.HasSuffix(dsn, ".db") ||
-		strings.HasSuffix(dsn, ".sqlite")
-}
-
-// NewGormDialector returns the appropriate GORM dialector for the given DSN.
-// SQLite DSNs (":memory:", "file:...", etc.) use the pure-Go SQLite driver.
-// All other DSNs are treated as PostgreSQL.
+// NewGormDialector returns the PostgreSQL GORM dialector for the given DSN.
 func NewGormDialector(dsn string) Dialector {
-	if isSQLiteDSN(dsn) {
-		return Dialector{Dialector: sqlite.Open(dsn)}
-	}
 	return Dialector{Dialector: postgres.Open(dsn)}
 }
 
-// NewGormDialectorWithConn returns the appropriate GORM dialector for the given DSN and connection pool.
+// NewGormDialectorWithConn returns the PostgreSQL GORM dialector for the given DSN and connection pool.
 func NewGormDialectorWithConn(dsn string, conn *sql.DB) Dialector {
 	if conn == nil {
 		return NewGormDialector(dsn)
-	}
-	if isSQLiteDSN(dsn) {
-		return Dialector{Dialector: sqlite.Dialector{DriverName: sqlite.DriverName, DSN: dsn, Conn: conn}}
 	}
 	return Dialector{Dialector: postgres.New(postgres.Config{DSN: dsn, Conn: conn})}
 }

@@ -43,8 +43,7 @@ type DatabaseProvidersConfigService struct {
 // Ensure DatabaseProvidersConfigService implements ProvidersConfigService.
 var _ ProvidersConfigService = (*DatabaseProvidersConfigService)(nil)
 
-// NewDatabaseProvidersConfigService creates a ProvidersConfigService backed by a database.
-// Uses the same DSN detection logic as the session service (SQLite or PostgreSQL).
+// NewDatabaseProvidersConfigService creates a ProvidersConfigService backed by a PostgreSQL database.
 // tablePrefix is applied as GORM NamingStrategy.TablePrefix; empty means no prefix.
 func NewDatabaseProvidersConfigService(
 	dsn string,
@@ -59,9 +58,6 @@ func NewDatabaseProvidersConfigService(
 	db, err := gorm.Open(gormsumweave.NewGormDialector(dsn), cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
-	}
-	if err = gormsumweave.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
-		return nil, err
 	}
 	return &DatabaseProvidersConfigService{
 		db:     db,
