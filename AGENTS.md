@@ -87,6 +87,8 @@ For optional local HTTPS backend and Vite development, follow [docs/local-https.
 
 Durable jobs workflow:
 - Run `make postgres-bootstrap` from the repository root before any process that uses persisted application tables.
+- Routine tests remain PostgreSQL-independent; `make postgres-verify` runs the
+  explicit serial tagged PostgreSQL lane after bootstrap.
 - `sumweave start` is API-only: it publishes appdispatch messages but does not run a worker or execute finance work inline.
 - `sumweave start-all` explicitly combines HTTP, the appdispatch worker, and the finance scheduler loop for local operation.
 - `sumweave jobs worker [--once]` is the split consumer; `--once` drains a bounded isolated/reseeded database and materializes observed jobs on delivery.

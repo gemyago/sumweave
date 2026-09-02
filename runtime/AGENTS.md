@@ -79,4 +79,8 @@ The rules are:
 
 Repository level task completion protocol **MUST ALWAYS** be followed. If you didn't follow it, this means task is not complete.
 
+Routine `make test` remains database-independent. Run non-routine
+`make test-postgres` only after root `make postgres-bootstrap` prepares the
+PostgreSQL test environment.
+
 After **any** code or config change in this module (including `internal/llmproviders/`), from the **repository root** run `make affected-lint-test` and fix failures before reporting the task done. Also follow the **Coding Task Completion Protocol** in [../AGENTS.md](../AGENTS.md) (lint/test + AGENTS updates when commands or architecture change).

@@ -35,6 +35,7 @@ Root Go module for the finance product slice.
 ## Commands
 
 - `make test`
+- `make test-postgres` (after `make postgres-bootstrap` from the repository root)
 - `make lint`
 
 To fix lint errors, attempt: `golangci-lint run --fix` and then manually fix the remaining errors (if still present).

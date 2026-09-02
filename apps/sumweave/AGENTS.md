@@ -89,7 +89,9 @@ Durable jobs workflow:
 
 ## Lint / test
 
-- **This module:** `make lint`, `make test` from `apps/sumweave` (uses repo-root pinned `golangci-lint` from `bin/` unless `CI=true`).
+- **This module:** `make lint`, `make test`, and non-routine `make test-postgres`
+  from `apps/sumweave` (uses repo-root pinned `golangci-lint` from `bin/` unless
+  `CI=true`); run root `make postgres-bootstrap` before the tagged target.
 - **Release build:** `make -C build dist` from the repository root produces `build/dist/linux/{amd64,arm64}/sumweave` with embedded UI assets and stages `build/dist/platform-agents/skills`.
 - **Whole repo:** from the repository root, `make lint` and `make test` include this module via `$(MAKE) -C apps/sumweave …`.
 

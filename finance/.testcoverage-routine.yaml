@@ -1,0 +1,9 @@
+threshold:
+  file: 90
+  total: 90
+
+exclude:
+  paths:
+    - mock_.*.go
+    - mock_*.go
+    - mock.go
