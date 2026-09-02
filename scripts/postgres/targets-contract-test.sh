@@ -543,14 +543,22 @@ for module in runtime finance apps/sumweave; do
   fi
   require_contains "${module_makefile}" 'go test -timeout=${DEFAULT_TESTS_TIMEOUT}'
   require_contains "${module_makefile}" '-coverprofile=$(routine_cover_profile)'
-  require_contains "${module_makefile}" 'SUMWEAVE_POSTGRES_TEST_DSN="$(SUMWEAVE_POSTGRES_TEST_DSN)" go test -tags=postgres_test'
+  if [[ "${module}" == 'finance' ]]; then
+    require_contains "${module_makefile}" 'SUMWEAVE_POSTGRES_TEST_DSN="$(SUMWEAVE_POSTGRES_TEST_DSN)" go test -p 1 -tags=postgres_test'
+  else
+    require_contains "${module_makefile}" 'SUMWEAVE_POSTGRES_TEST_DSN="$(SUMWEAVE_POSTGRES_TEST_DSN)" go test -tags=postgres_test'
+  fi
   require_contains "${module_makefile}" '$(go-test-coverage) --config .testcoverage-routine.yaml --profile $(routine_cover_profile)'
   if [[ "${module}" == 'finance' ]]; then
     require_contains "${module_makefile}" '$(go-test-coverage) --config .testcoverage.yaml --profile "$${postgres_cover_profile}"'
   else
     require_contains "${module_makefile}" '$(go-test-coverage) --config .testcoverage.yaml --profile $(postgres_cover_profile)'
   fi
-  require_contains "${module_makefile}" 'go test -tags=postgres_test'
+  if [[ "${module}" == 'finance' ]]; then
+    require_contains "${module_makefile}" 'go test -p 1 -tags=postgres_test'
+  else
+    require_contains "${module_makefile}" 'go test -tags=postgres_test'
+  fi
   if [[ "${module}" != 'finance' ]]; then
     require_contains "${module_makefile}" '-coverprofile=$(postgres_cover_profile)'
   fi

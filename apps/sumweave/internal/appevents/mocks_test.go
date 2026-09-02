@@ -66,7 +66,7 @@ type mockmessagePublisher_Publish_Call struct {
 // Publish is a helper method to define mock.On call
 //   - context1 context.Context
 //   - message appdispatch.Message
-func (_e *mockmessagePublisher_Expecter) Publish(context1 any, message any) *mockmessagePublisher_Publish_Call {
+func (_e *mockmessagePublisher_Expecter) Publish(context1 interface{}, message interface{}) *mockmessagePublisher_Publish_Call {
 	return &mockmessagePublisher_Publish_Call{Call: _e.mock.On("Publish", context1, message)}
 }
 
@@ -124,7 +124,7 @@ type mockmessagePublisher_PublishInTx_Call struct {
 //   - context1 context.Context
 //   - tx *sql.Tx
 //   - message appdispatch.Message
-func (_e *mockmessagePublisher_Expecter) PublishInTx(context1 any, tx any, message any) *mockmessagePublisher_PublishInTx_Call {
+func (_e *mockmessagePublisher_Expecter) PublishInTx(context1 interface{}, tx interface{}, message interface{}) *mockmessagePublisher_PublishInTx_Call {
 	return &mockmessagePublisher_PublishInTx_Call{Call: _e.mock.On("PublishInTx", context1, tx, message)}
 }
 

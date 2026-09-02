@@ -73,7 +73,7 @@ type mockjwtValidator_ValidateAccessToken_Call struct {
 
 // ValidateAccessToken is a helper method to define mock.On call
 //   - tokenStr string
-func (_e *mockjwtValidator_Expecter) ValidateAccessToken(tokenStr any) *mockjwtValidator_ValidateAccessToken_Call {
+func (_e *mockjwtValidator_Expecter) ValidateAccessToken(tokenStr interface{}) *mockjwtValidator_ValidateAccessToken_Call {
 	return &mockjwtValidator_ValidateAccessToken_Call{Call: _e.mock.On("ValidateAccessToken", tokenStr)}
 }
 

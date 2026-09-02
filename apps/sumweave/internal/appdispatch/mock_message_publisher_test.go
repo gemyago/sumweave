@@ -85,11 +85,11 @@ func (_c *mockmessagePublisher_Close_Call) RunAndReturn(run func() error) *mockm
 // Publish provides a mock function for the type mockmessagePublisher
 func (_mock *mockmessagePublisher) Publish(s string, messages ...*message.Message) error {
 	// *message.Message
-	_va := make([]any, len(messages))
+	_va := make([]interface{}, len(messages))
 	for _i := range messages {
 		_va[_i] = messages[_i]
 	}
-	var _ca []any
+	var _ca []interface{}
 	_ca = append(_ca, s)
 	_ca = append(_ca, _va...)
 	ret := _mock.Called(_ca...)
@@ -115,9 +115,9 @@ type mockmessagePublisher_Publish_Call struct {
 // Publish is a helper method to define mock.On call
 //   - s string
 //   - messages ...*message.Message
-func (_e *mockmessagePublisher_Expecter) Publish(s any, messages ...any) *mockmessagePublisher_Publish_Call {
+func (_e *mockmessagePublisher_Expecter) Publish(s interface{}, messages ...interface{}) *mockmessagePublisher_Publish_Call {
 	return &mockmessagePublisher_Publish_Call{Call: _e.mock.On("Publish",
-		append([]any{s}, messages...)...)}
+		append([]interface{}{s}, messages...)...)}
 }
 
 func (_c *mockmessagePublisher_Publish_Call) Run(run func(s string, messages ...*message.Message)) *mockmessagePublisher_Publish_Call {

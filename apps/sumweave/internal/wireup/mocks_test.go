@@ -73,7 +73,7 @@ type mockscheduleEnqueuer_EnqueueDue_Call struct {
 
 // EnqueueDue is a helper method to define mock.On call
 //   - context1 context.Context
-func (_e *mockscheduleEnqueuer_Expecter) EnqueueDue(context1 any) *mockscheduleEnqueuer_EnqueueDue_Call {
+func (_e *mockscheduleEnqueuer_Expecter) EnqueueDue(context1 interface{}) *mockscheduleEnqueuer_EnqueueDue_Call {
 	return &mockscheduleEnqueuer_EnqueueDue_Call{Call: _e.mock.On("EnqueueDue", context1)}
 }
 
@@ -151,7 +151,7 @@ type mockmigrationRunner_Migrate_Call struct {
 
 // Migrate is a helper method to define mock.On call
 //   - context1 context.Context
-func (_e *mockmigrationRunner_Expecter) Migrate(context1 any) *mockmigrationRunner_Migrate_Call {
+func (_e *mockmigrationRunner_Expecter) Migrate(context1 interface{}) *mockmigrationRunner_Migrate_Call {
 	return &mockmigrationRunner_Migrate_Call{Call: _e.mock.On("Migrate", context1)}
 }
 
@@ -239,7 +239,7 @@ type mockmigrationConfigLoader_Load_Call struct {
 // Load is a helper method to define mock.On call
 //   - migrationOptions MigrationOptions
 //   - s string
-func (_e *mockmigrationConfigLoader_Expecter) Load(migrationOptions any, s any) *mockmigrationConfigLoader_Load_Call {
+func (_e *mockmigrationConfigLoader_Expecter) Load(migrationOptions interface{}, s interface{}) *mockmigrationConfigLoader_Load_Call {
 	return &mockmigrationConfigLoader_Load_Call{Call: _e.mock.On("Load", migrationOptions, s)}
 }
 

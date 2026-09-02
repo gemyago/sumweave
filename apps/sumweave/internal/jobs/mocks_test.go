@@ -77,7 +77,7 @@ type mockjobReader_Get_Call struct {
 // Get is a helper method to define mock.On call
 //   - context1 context.Context
 //   - s string
-func (_e *mockjobReader_Expecter) Get(context1 any, s any) *mockjobReader_Get_Call {
+func (_e *mockjobReader_Expecter) Get(context1 interface{}, s interface{}) *mockjobReader_Get_Call {
 	return &mockjobReader_Get_Call{Call: _e.mock.On("Get", context1, s)}
 }
 
@@ -143,7 +143,7 @@ type mockjobReader_List_Call struct {
 // List is a helper method to define mock.On call
 //   - context1 context.Context
 //   - listParams ListParams
-func (_e *mockjobReader_Expecter) List(context1 any, listParams any) *mockjobReader_List_Call {
+func (_e *mockjobReader_Expecter) List(context1 interface{}, listParams interface{}) *mockjobReader_List_Call {
 	return &mockjobReader_List_Call{Call: _e.mock.On("List", context1, listParams)}
 }
 
@@ -240,7 +240,7 @@ type mockworkerStore_ClaimQueued_Call struct {
 //   - s string
 //   - s1 string
 //   - time1 time.Time
-func (_e *mockworkerStore_Expecter) ClaimQueued(context1 any, s any, s1 any, time1 any) *mockworkerStore_ClaimQueued_Call {
+func (_e *mockworkerStore_Expecter) ClaimQueued(context1 interface{}, s interface{}, s1 interface{}, time1 interface{}) *mockworkerStore_ClaimQueued_Call {
 	return &mockworkerStore_ClaimQueued_Call{Call: _e.mock.On("ClaimQueued", context1, s, s1, time1)}
 }
 
@@ -309,7 +309,7 @@ type mockworkerStore_FinalizeRetryExhausted_Call struct {
 //   - s string
 //   - time1 time.Time
 //   - terminalJobStateMoqParam terminalJobState
-func (_e *mockworkerStore_Expecter) FinalizeRetryExhausted(context1 any, s any, time1 any, terminalJobStateMoqParam any) *mockworkerStore_FinalizeRetryExhausted_Call {
+func (_e *mockworkerStore_Expecter) FinalizeRetryExhausted(context1 interface{}, s interface{}, time1 interface{}, terminalJobStateMoqParam interface{}) *mockworkerStore_FinalizeRetryExhausted_Call {
 	return &mockworkerStore_FinalizeRetryExhausted_Call{Call: _e.mock.On("FinalizeRetryExhausted", context1, s, time1, terminalJobStateMoqParam)}
 }
 
@@ -387,7 +387,7 @@ type mockworkerStore_MaterializeQueued_Call struct {
 // MaterializeQueued is a helper method to define mock.On call
 //   - context1 context.Context
 //   - job Job
-func (_e *mockworkerStore_Expecter) MaterializeQueued(context1 any, job any) *mockworkerStore_MaterializeQueued_Call {
+func (_e *mockworkerStore_Expecter) MaterializeQueued(context1 interface{}, job interface{}) *mockworkerStore_MaterializeQueued_Call {
 	return &mockworkerStore_MaterializeQueued_Call{Call: _e.mock.On("MaterializeQueued", context1, job)}
 }
 
@@ -446,7 +446,7 @@ type mockworkerStore_RecoverStaleRunning_Call struct {
 //   - time1 time.Time
 //   - duration time.Duration
 //   - n int
-func (_e *mockworkerStore_Expecter) RecoverStaleRunning(context1 any, time1 any, duration any, n any) *mockworkerStore_RecoverStaleRunning_Call {
+func (_e *mockworkerStore_Expecter) RecoverStaleRunning(context1 interface{}, time1 interface{}, duration interface{}, n interface{}) *mockworkerStore_RecoverStaleRunning_Call {
 	return &mockworkerStore_RecoverStaleRunning_Call{Call: _e.mock.On("RecoverStaleRunning", context1, time1, duration, n)}
 }
 
@@ -514,7 +514,7 @@ type mockworkerStore_RenewRunning_Call struct {
 //   - context1 context.Context
 //   - job Job
 //   - time1 time.Time
-func (_e *mockworkerStore_Expecter) RenewRunning(context1 any, job any, time1 any) *mockworkerStore_RenewRunning_Call {
+func (_e *mockworkerStore_Expecter) RenewRunning(context1 interface{}, job interface{}, time1 interface{}) *mockworkerStore_RenewRunning_Call {
 	return &mockworkerStore_RenewRunning_Call{Call: _e.mock.On("RenewRunning", context1, job, time1)}
 }
 
@@ -577,7 +577,7 @@ type mockworkerStore_RequeueRunning_Call struct {
 //   - context1 context.Context
 //   - job Job
 //   - time1 time.Time
-func (_e *mockworkerStore_Expecter) RequeueRunning(context1 any, job any, time1 any) *mockworkerStore_RequeueRunning_Call {
+func (_e *mockworkerStore_Expecter) RequeueRunning(context1 interface{}, job interface{}, time1 interface{}) *mockworkerStore_RequeueRunning_Call {
 	return &mockworkerStore_RequeueRunning_Call{Call: _e.mock.On("RequeueRunning", context1, job, time1)}
 }
 
@@ -640,7 +640,7 @@ type mockworkerStore_persistTerminalState_Call struct {
 //   - context1 context.Context
 //   - job Job
 //   - terminalJobStateMoqParam terminalJobState
-func (_e *mockworkerStore_Expecter) persistTerminalState(context1 any, job any, terminalJobStateMoqParam any) *mockworkerStore_persistTerminalState_Call {
+func (_e *mockworkerStore_Expecter) persistTerminalState(context1 interface{}, job interface{}, terminalJobStateMoqParam interface{}) *mockworkerStore_persistTerminalState_Call {
 	return &mockworkerStore_persistTerminalState_Call{Call: _e.mock.On("persistTerminalState", context1, job, terminalJobStateMoqParam)}
 }
 
@@ -772,7 +772,7 @@ type mockworkerRouter_Handle_Call struct {
 
 // Handle is a helper method to define mock.On call
 //   - handler appdispatch.Handler
-func (_e *mockworkerRouter_Expecter) Handle(handler any) *mockworkerRouter_Handle_Call {
+func (_e *mockworkerRouter_Expecter) Handle(handler interface{}) *mockworkerRouter_Handle_Call {
 	return &mockworkerRouter_Handle_Call{Call: _e.mock.On("Handle", handler)}
 }
 
@@ -823,7 +823,7 @@ type mockworkerRouter_Run_Call struct {
 
 // Run is a helper method to define mock.On call
 //   - context1 context.Context
-func (_e *mockworkerRouter_Expecter) Run(context1 any) *mockworkerRouter_Run_Call {
+func (_e *mockworkerRouter_Expecter) Run(context1 interface{}) *mockworkerRouter_Run_Call {
 	return &mockworkerRouter_Run_Call{Call: _e.mock.On("Run", context1)}
 }
 
@@ -874,7 +874,7 @@ type mockworkerRouter_SetRetryLifecycle_Call struct {
 
 // SetRetryLifecycle is a helper method to define mock.On call
 //   - retryLifecycle appdispatch.RetryLifecycle
-func (_e *mockworkerRouter_Expecter) SetRetryLifecycle(retryLifecycle any) *mockworkerRouter_SetRetryLifecycle_Call {
+func (_e *mockworkerRouter_Expecter) SetRetryLifecycle(retryLifecycle interface{}) *mockworkerRouter_SetRetryLifecycle_Call {
 	return &mockworkerRouter_SetRetryLifecycle_Call{Call: _e.mock.On("SetRetryLifecycle", retryLifecycle)}
 }
 
@@ -961,7 +961,7 @@ type mockworkerRouterFactory_NewRouter_Call struct {
 
 // NewRouter is a helper method to define mock.On call
 //   - s string
-func (_e *mockworkerRouterFactory_Expecter) NewRouter(s any) *mockworkerRouterFactory_NewRouter_Call {
+func (_e *mockworkerRouterFactory_Expecter) NewRouter(s interface{}) *mockworkerRouterFactory_NewRouter_Call {
 	return &mockworkerRouterFactory_NewRouter_Call{Call: _e.mock.On("NewRouter", s)}
 }
 

@@ -76,7 +76,7 @@ type MockAuthUserLookup_CurrentUser_Call struct {
 // CurrentUser is a helper method to define mock.On call
 //   - context1 context.Context
 //   - s string
-func (_e *MockAuthUserLookup_Expecter) CurrentUser(context1 any, s any) *MockAuthUserLookup_CurrentUser_Call {
+func (_e *MockAuthUserLookup_Expecter) CurrentUser(context1 interface{}, s interface{}) *MockAuthUserLookup_CurrentUser_Call {
 	return &MockAuthUserLookup_CurrentUser_Call{Call: _e.mock.On("CurrentUser", context1, s)}
 }
 

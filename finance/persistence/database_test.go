@@ -5,12 +5,13 @@ package persistence
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"log/slog"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/gemyago/sumweave/finance/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -25,7 +26,7 @@ func TestNewDatabase(t *testing.T) {
 	t.Run("opens postgres database", func(t *testing.T) {
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		sqlDB, err := sqlconn.Open(dsn)
+		sqlDB, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, sqlDB.Close()) }()
 		database, err := NewDatabase(sqlDB, dsn)
@@ -44,7 +45,7 @@ func TestNewDatabase(t *testing.T) {
 		logger := slog.New(slog.NewJSONHandler(&logs, nil))
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		sqlDB, err := sqlconn.Open(dsn)
+		sqlDB, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, sqlDB.Close()) }()
 		database, err := NewDatabase(sqlDB, dsn, WithLogger(logger))
@@ -72,10 +73,10 @@ func TestNewDatabase(t *testing.T) {
 
 		now := time.Now()
 		query := db.Table("events").
-			Where(instantRangePredicate(db, "event_time"), now, now.Add(time.Hour))
+			Where(instantRangePredicate("event_time"), now, now.Add(time.Hour))
 		query = applyInstantAtOrAfter(query, "start_at", now)
 		query = applyInstantAtOrBefore(query, "end_at", now.Add(time.Hour))
-		query = query.Where(expiresAfterPredicate(db), now).Find(&[]struct{}{})
+		query = query.Where(expiresAfterPredicate(), now).Find(&[]struct{}{})
 		require.NoError(t, query.Error)
 	})
 }

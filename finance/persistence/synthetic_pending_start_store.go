@@ -38,7 +38,7 @@ func (s *SyntheticPendingStartStore) GetPendingSyntheticStart(
 		Table(model.TableName()).
 		Where(
 			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND connector_id = ? AND "+
-				"state = ? AND consumed_at IS NULL AND "+expiresAfterPredicate(s.db),
+				"state = ? AND consumed_at IS NULL AND "+expiresAfterPredicate(),
 			strings.TrimSpace(tenantID),
 			strings.TrimSpace(actorUserID),
 			string(domain.ProviderIDSynthetic),

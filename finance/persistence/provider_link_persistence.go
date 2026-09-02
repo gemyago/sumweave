@@ -39,7 +39,7 @@ func (p *ProviderLinkPersistence) ConsumePendingStart(
 		Table(lookup.TableName()).
 		Where(
 			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND connector_id = ? AND state = ? AND "+
-				columnConsumedAt+" IS NULL AND "+expiresAfterPredicate(p.Store.db),
+				columnConsumedAt+" IS NULL AND "+expiresAfterPredicate(),
 			strings.TrimSpace(request.TenantID),
 			strings.TrimSpace(request.ActorUserID),
 			provider,

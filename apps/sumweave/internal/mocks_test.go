@@ -78,7 +78,7 @@ type mockdatabaseRuntimeServiceFactory_NewAgentProfilesService_Call struct {
 //   - s string
 //   - logger *slog.Logger
 //   - s1 string
-func (_e *mockdatabaseRuntimeServiceFactory_Expecter) NewAgentProfilesService(s any, logger any, s1 any) *mockdatabaseRuntimeServiceFactory_NewAgentProfilesService_Call {
+func (_e *mockdatabaseRuntimeServiceFactory_Expecter) NewAgentProfilesService(s interface{}, logger interface{}, s1 interface{}) *mockdatabaseRuntimeServiceFactory_NewAgentProfilesService_Call {
 	return &mockdatabaseRuntimeServiceFactory_NewAgentProfilesService_Call{Call: _e.mock.On("NewAgentProfilesService", s, logger, s1)}
 }
 
@@ -152,7 +152,7 @@ type mockdatabaseRuntimeServiceFactory_NewProvidersConfigService_Call struct {
 //   - s string
 //   - logger *slog.Logger
 //   - s1 string
-func (_e *mockdatabaseRuntimeServiceFactory_Expecter) NewProvidersConfigService(s any, logger any, s1 any) *mockdatabaseRuntimeServiceFactory_NewProvidersConfigService_Call {
+func (_e *mockdatabaseRuntimeServiceFactory_Expecter) NewProvidersConfigService(s interface{}, logger interface{}, s1 interface{}) *mockdatabaseRuntimeServiceFactory_NewProvidersConfigService_Call {
 	return &mockdatabaseRuntimeServiceFactory_NewProvidersConfigService_Call{Call: _e.mock.On("NewProvidersConfigService", s, logger, s1)}
 }
 
@@ -311,7 +311,7 @@ type mockcomponentMigrator_Migrate_Call struct {
 
 // Migrate is a helper method to define mock.On call
 //   - context1 context.Context
-func (_e *mockcomponentMigrator_Expecter) Migrate(context1 any) *mockcomponentMigrator_Migrate_Call {
+func (_e *mockcomponentMigrator_Expecter) Migrate(context1 interface{}) *mockcomponentMigrator_Migrate_Call {
 	return &mockcomponentMigrator_Migrate_Call{Call: _e.mock.On("Migrate", context1)}
 }
 

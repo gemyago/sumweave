@@ -62,7 +62,7 @@ type mockhandlerRegistrar_Handle_Call struct {
 
 // Handle is a helper method to define mock.On call
 //   - handler appdispatch.Handler
-func (_e *mockhandlerRegistrar_Expecter) Handle(handler any) *mockhandlerRegistrar_Handle_Call {
+func (_e *mockhandlerRegistrar_Expecter) Handle(handler interface{}) *mockhandlerRegistrar_Handle_Call {
 	return &mockhandlerRegistrar_Handle_Call{Call: _e.mock.On("Handle", handler)}
 }
 

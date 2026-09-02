@@ -53,6 +53,6 @@ test-postgres:
 	rm -rf -- "$${postgres_test_raw_dir}"; \
 	mkdir -p -- "$${postgres_test_raw_dir}"; \
 	rm -f -- "$${postgres_cover_profile}"; \
-	TZ=US/Alaska SUMWEAVE_POSTGRES_TEST_DSN="$(SUMWEAVE_POSTGRES_TEST_DSN)" go test -tags=postgres_test -timeout=${DEFAULT_TESTS_TIMEOUT} -shuffle=on -failfast -coverpkg=./... -covermode=atomic ./... -args -test.gocoverdir="$${postgres_test_raw_dir}"; \
+	TZ=US/Alaska SUMWEAVE_POSTGRES_TEST_DSN="$(SUMWEAVE_POSTGRES_TEST_DSN)" go test -p 1 -tags=postgres_test -timeout=${DEFAULT_TESTS_TIMEOUT} -shuffle=on -failfast -coverpkg=./... -covermode=atomic ./... -args -test.gocoverdir="$${postgres_test_raw_dir}"; \
 	go tool covdata textfmt -i="$${migration_cover_raw_dir},$${postgres_test_raw_dir}" -pkg=github.com/gemyago/sumweave/finance/... -o="$${postgres_cover_profile}"; \
 	$(go-test-coverage) --config .testcoverage.yaml --profile "$${postgres_cover_profile}"

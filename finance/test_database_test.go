@@ -3,11 +3,12 @@
 package finance
 
 import (
+	"database/sql"
 	"os"
 	"testing"
 
-	"github.com/gemyago/sumweave/finance/internal/sqlconn"
 	"github.com/gemyago/sumweave/finance/persistence"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func openTestDatabase(t *testing.T) *persistence.Database {
@@ -17,7 +18,7 @@ func openTestDatabase(t *testing.T) *persistence.Database {
 	if dsn == "" {
 		t.Fatal("SUMWEAVE_POSTGRES_TEST_DSN is required for postgres_test")
 	}
-	sqlDB, err := sqlconn.Open(dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open finance test sql database: %v", err)
 	}

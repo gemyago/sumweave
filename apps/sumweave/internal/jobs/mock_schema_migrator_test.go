@@ -61,7 +61,7 @@ type mockschemaMigrator_AutoMigrate_Call struct {
 
 // AutoMigrate is a helper method to define mock.On call
 //   - s string
-func (_e *mockschemaMigrator_Expecter) AutoMigrate(s any) *mockschemaMigrator_AutoMigrate_Call {
+func (_e *mockschemaMigrator_Expecter) AutoMigrate(s interface{}) *mockschemaMigrator_AutoMigrate_Call {
 	return &mockschemaMigrator_AutoMigrate_Call{Call: _e.mock.On("AutoMigrate", s)}
 }
 
@@ -113,7 +113,7 @@ type mockschemaMigrator_DropColumnIfExists_Call struct {
 // DropColumnIfExists is a helper method to define mock.On call
 //   - s string
 //   - s1 string
-func (_e *mockschemaMigrator_Expecter) DropColumnIfExists(s any, s1 any) *mockschemaMigrator_DropColumnIfExists_Call {
+func (_e *mockschemaMigrator_Expecter) DropColumnIfExists(s interface{}, s1 interface{}) *mockschemaMigrator_DropColumnIfExists_Call {
 	return &mockschemaMigrator_DropColumnIfExists_Call{Call: _e.mock.On("DropColumnIfExists", s, s1)}
 }
 
@@ -169,7 +169,7 @@ type mockschemaMigrator_DropTableIfExists_Call struct {
 
 // DropTableIfExists is a helper method to define mock.On call
 //   - s string
-func (_e *mockschemaMigrator_Expecter) DropTableIfExists(s any) *mockschemaMigrator_DropTableIfExists_Call {
+func (_e *mockschemaMigrator_Expecter) DropTableIfExists(s interface{}) *mockschemaMigrator_DropTableIfExists_Call {
 	return &mockschemaMigrator_DropTableIfExists_Call{Call: _e.mock.On("DropTableIfExists", s)}
 }
 

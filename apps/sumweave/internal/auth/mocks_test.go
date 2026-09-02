@@ -76,7 +76,7 @@ type mockuserStore_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - params CreateUserParams
-func (_e *mockuserStore_Expecter) Create(ctx any, params any) *mockuserStore_Create_Call {
+func (_e *mockuserStore_Expecter) Create(ctx interface{}, params interface{}) *mockuserStore_Create_Call {
 	return &mockuserStore_Create_Call{Call: _e.mock.On("Create", ctx, params)}
 }
 
@@ -144,7 +144,7 @@ type mockuserStore_GetByID_Call struct {
 // GetByID is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-func (_e *mockuserStore_Expecter) GetByID(ctx any, id any) *mockuserStore_GetByID_Call {
+func (_e *mockuserStore_Expecter) GetByID(ctx interface{}, id interface{}) *mockuserStore_GetByID_Call {
 	return &mockuserStore_GetByID_Call{Call: _e.mock.On("GetByID", ctx, id)}
 }
 
@@ -212,7 +212,7 @@ type mockuserStore_GetByUsername_Call struct {
 // GetByUsername is a helper method to define mock.On call
 //   - ctx context.Context
 //   - username string
-func (_e *mockuserStore_Expecter) GetByUsername(ctx any, username any) *mockuserStore_GetByUsername_Call {
+func (_e *mockuserStore_Expecter) GetByUsername(ctx interface{}, username interface{}) *mockuserStore_GetByUsername_Call {
 	return &mockuserStore_GetByUsername_Call{Call: _e.mock.On("GetByUsername", ctx, username)}
 }
 
@@ -279,7 +279,7 @@ type mockuserStore_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *mockuserStore_Expecter) List(ctx any) *mockuserStore_List_Call {
+func (_e *mockuserStore_Expecter) List(ctx interface{}) *mockuserStore_List_Call {
 	return &mockuserStore_List_Call{Call: _e.mock.On("List", ctx)}
 }
 
@@ -332,7 +332,7 @@ type mockuserStore_UpdatePassword_Call struct {
 //   - ctx context.Context
 //   - id string
 //   - newHash string
-func (_e *mockuserStore_Expecter) UpdatePassword(ctx any, id any, newHash any) *mockuserStore_UpdatePassword_Call {
+func (_e *mockuserStore_Expecter) UpdatePassword(ctx interface{}, id interface{}, newHash interface{}) *mockuserStore_UpdatePassword_Call {
 	return &mockuserStore_UpdatePassword_Call{Call: _e.mock.On("UpdatePassword", ctx, id, newHash)}
 }
 
@@ -430,7 +430,7 @@ type mockjwtService_GenerateAccessToken_Call struct {
 // GenerateAccessToken is a helper method to define mock.On call
 //   - userID string
 //   - username string
-func (_e *mockjwtService_Expecter) GenerateAccessToken(userID any, username any) *mockjwtService_GenerateAccessToken_Call {
+func (_e *mockjwtService_Expecter) GenerateAccessToken(userID interface{}, username interface{}) *mockjwtService_GenerateAccessToken_Call {
 	return &mockjwtService_GenerateAccessToken_Call{Call: _e.mock.On("GenerateAccessToken", userID, username)}
 }
 
@@ -497,7 +497,7 @@ type mockjwtService_ValidateAccessToken_Call struct {
 
 // ValidateAccessToken is a helper method to define mock.On call
 //   - tokenStr string
-func (_e *mockjwtService_Expecter) ValidateAccessToken(tokenStr any) *mockjwtService_ValidateAccessToken_Call {
+func (_e *mockjwtService_Expecter) ValidateAccessToken(tokenStr interface{}) *mockjwtService_ValidateAccessToken_Call {
 	return &mockjwtService_ValidateAccessToken_Call{Call: _e.mock.On("ValidateAccessToken", tokenStr)}
 }
 
@@ -585,7 +585,7 @@ type mockrefreshTokenStore_Consume_Call struct {
 // Consume is a helper method to define mock.On call
 //   - ctx context.Context
 //   - opaqueToken string
-func (_e *mockrefreshTokenStore_Expecter) Consume(ctx any, opaqueToken any) *mockrefreshTokenStore_Consume_Call {
+func (_e *mockrefreshTokenStore_Expecter) Consume(ctx interface{}, opaqueToken interface{}) *mockrefreshTokenStore_Consume_Call {
 	return &mockrefreshTokenStore_Consume_Call{Call: _e.mock.On("Consume", ctx, opaqueToken)}
 }
 
@@ -652,7 +652,7 @@ type mockrefreshTokenStore_Create_Call struct {
 //   - ctx context.Context
 //   - userID string
 //   - ttl time.Duration
-func (_e *mockrefreshTokenStore_Expecter) Create(ctx any, userID any, ttl any) *mockrefreshTokenStore_Create_Call {
+func (_e *mockrefreshTokenStore_Expecter) Create(ctx interface{}, userID interface{}, ttl interface{}) *mockrefreshTokenStore_Create_Call {
 	return &mockrefreshTokenStore_Create_Call{Call: _e.mock.On("Create", ctx, userID, ttl)}
 }
 
@@ -714,7 +714,7 @@ type mockrefreshTokenStore_DeleteAllForUser_Call struct {
 // DeleteAllForUser is a helper method to define mock.On call
 //   - ctx context.Context
 //   - userID string
-func (_e *mockrefreshTokenStore_Expecter) DeleteAllForUser(ctx any, userID any) *mockrefreshTokenStore_DeleteAllForUser_Call {
+func (_e *mockrefreshTokenStore_Expecter) DeleteAllForUser(ctx interface{}, userID interface{}) *mockrefreshTokenStore_DeleteAllForUser_Call {
 	return &mockrefreshTokenStore_DeleteAllForUser_Call{Call: _e.mock.On("DeleteAllForUser", ctx, userID)}
 }
 
@@ -806,7 +806,7 @@ type mockpasswordHasher_Hash_Call struct {
 
 // Hash is a helper method to define mock.On call
 //   - password string
-func (_e *mockpasswordHasher_Expecter) Hash(password any) *mockpasswordHasher_Hash_Call {
+func (_e *mockpasswordHasher_Expecter) Hash(password interface{}) *mockpasswordHasher_Hash_Call {
 	return &mockpasswordHasher_Hash_Call{Call: _e.mock.On("Hash", password)}
 }
 
@@ -867,7 +867,7 @@ type mockpasswordHasher_Verify_Call struct {
 // Verify is a helper method to define mock.On call
 //   - password string
 //   - hash string
-func (_e *mockpasswordHasher_Expecter) Verify(password any, hash any) *mockpasswordHasher_Verify_Call {
+func (_e *mockpasswordHasher_Expecter) Verify(password interface{}, hash interface{}) *mockpasswordHasher_Verify_Call {
 	return &mockpasswordHasher_Verify_Call{Call: _e.mock.On("Verify", password, hash)}
 }
 

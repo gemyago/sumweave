@@ -76,7 +76,7 @@ type mockfxRefreshJobService_RefreshRequiredFXRates_Call struct {
 // RefreshRequiredFXRates is a helper method to define mock.On call
 //   - context1 context.Context
 //   - refreshFXRatesParams finance.RefreshFXRatesParams
-func (_e *mockfxRefreshJobService_Expecter) RefreshRequiredFXRates(context1 any, refreshFXRatesParams any) *mockfxRefreshJobService_RefreshRequiredFXRates_Call {
+func (_e *mockfxRefreshJobService_Expecter) RefreshRequiredFXRates(context1 interface{}, refreshFXRatesParams interface{}) *mockfxRefreshJobService_RefreshRequiredFXRates_Call {
 	return &mockfxRefreshJobService_RefreshRequiredFXRates_Call{Call: _e.mock.On("RefreshRequiredFXRates", context1, refreshFXRatesParams)}
 }
 
@@ -169,7 +169,7 @@ type mockcsvImportJobService_RunCSVImportJob_Call struct {
 // RunCSVImportJob is a helper method to define mock.On call
 //   - context1 context.Context
 //   - runCSVImportJobParams finance.RunCSVImportJobParams
-func (_e *mockcsvImportJobService_Expecter) RunCSVImportJob(context1 any, runCSVImportJobParams any) *mockcsvImportJobService_RunCSVImportJob_Call {
+func (_e *mockcsvImportJobService_Expecter) RunCSVImportJob(context1 interface{}, runCSVImportJobParams interface{}) *mockcsvImportJobService_RunCSVImportJob_Call {
 	return &mockcsvImportJobService_RunCSVImportJob_Call{Call: _e.mock.On("RunCSVImportJob", context1, runCSVImportJobParams)}
 }
 
@@ -262,7 +262,7 @@ type mockbankSyncJobService_RunBankConnectionSync_Call struct {
 // RunBankConnectionSync is a helper method to define mock.On call
 //   - context1 context.Context
 //   - runBankConnectionSyncParams finance.RunBankConnectionSyncParams
-func (_e *mockbankSyncJobService_Expecter) RunBankConnectionSync(context1 any, runBankConnectionSyncParams any) *mockbankSyncJobService_RunBankConnectionSync_Call {
+func (_e *mockbankSyncJobService_Expecter) RunBankConnectionSync(context1 interface{}, runBankConnectionSyncParams interface{}) *mockbankSyncJobService_RunBankConnectionSync_Call {
 	return &mockbankSyncJobService_RunBankConnectionSync_Call{Call: _e.mock.On("RunBankConnectionSync", context1, runBankConnectionSyncParams)}
 }
 
@@ -355,7 +355,7 @@ type mockappdispatchPublisher_PublishRequest_Call struct {
 // PublishRequest is a helper method to define mock.On call
 //   - context1 context.Context
 //   - publicationRequest appdispatch.PublicationRequest
-func (_e *mockappdispatchPublisher_Expecter) PublishRequest(context1 any, publicationRequest any) *mockappdispatchPublisher_PublishRequest_Call {
+func (_e *mockappdispatchPublisher_Expecter) PublishRequest(context1 interface{}, publicationRequest interface{}) *mockappdispatchPublisher_PublishRequest_Call {
 	return &mockappdispatchPublisher_PublishRequest_Call{Call: _e.mock.On("PublishRequest", context1, publicationRequest)}
 }
 
@@ -422,7 +422,7 @@ type mockappdispatchPublisher_PublishRequestInTx_Call struct {
 //   - context1 context.Context
 //   - tx *sql.Tx
 //   - publicationRequest appdispatch.PublicationRequest
-func (_e *mockappdispatchPublisher_Expecter) PublishRequestInTx(context1 any, tx any, publicationRequest any) *mockappdispatchPublisher_PublishRequestInTx_Call {
+func (_e *mockappdispatchPublisher_Expecter) PublishRequestInTx(context1 interface{}, tx interface{}, publicationRequest interface{}) *mockappdispatchPublisher_PublishRequestInTx_Call {
 	return &mockappdispatchPublisher_PublishRequestInTx_Call{Call: _e.mock.On("PublishRequestInTx", context1, tx, publicationRequest)}
 }
 

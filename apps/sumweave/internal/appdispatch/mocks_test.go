@@ -120,7 +120,7 @@ type MockSubscriber_Subscribe_Call struct {
 // Subscribe is a helper method to define mock.On call
 //   - ctx context.Context
 //   - topic string
-func (_e *MockSubscriber_Expecter) Subscribe(ctx any, topic any) *MockSubscriber_Subscribe_Call {
+func (_e *MockSubscriber_Expecter) Subscribe(ctx interface{}, topic interface{}) *MockSubscriber_Subscribe_Call {
 	return &MockSubscriber_Subscribe_Call{Call: _e.mock.On("Subscribe", ctx, topic)}
 }
 

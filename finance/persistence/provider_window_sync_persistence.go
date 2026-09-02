@@ -34,7 +34,7 @@ func (s *ProviderWindowSyncPersistence) ListProviderTransactionsInWindow(
 		Table((transactionModel{}).TableName()).
 		Where("account_id IN ?", accountIDs).
 		Where("source = ?", string(domain.TransactionSourceProvider)).
-		Where(instantRangePredicate(s.Store.db, columnEffectiveAt), window.Start, window.End).
+		Where(instantRangePredicate(columnEffectiveAt), window.Start, window.End).
 		Order("effective_at DESC, created_at DESC, id DESC").
 		Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list provider transactions in window: %w", err)

@@ -142,7 +142,7 @@ func (s *Store) ConsumePendingBankConnectionLinkStart(
 		Table(lookup.TableName()).
 		Where(
 			"tenant_id = ? AND actor_user_id = ? AND provider = ? AND state = ? AND consumed_at IS NULL AND "+
-				expiresAfterPredicate(s.db),
+				expiresAfterPredicate(),
 			trimmedTenantID,
 			trimmedActorUserID,
 			trimmedProvider,

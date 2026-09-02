@@ -64,7 +64,7 @@ func (s *TransferCandidateStore) ListCandidates(
 		Where("id <> ?", strings.TrimSpace(sourceTransactionID)).
 		Where("account_id <> ?", strings.TrimSpace(sourceAccountID)).
 		Where("hidden_at IS NULL").
-		Where(instantRangePredicate(s.db, "effective_at"), effectiveFrom, effectiveBefore).
+		Where(instantRangePredicate("effective_at"), effectiveFrom, effectiveBefore).
 		Order("effective_at DESC, created_at DESC, id DESC").
 		Limit(dbPageInt(limit))
 	if offset > 0 {
