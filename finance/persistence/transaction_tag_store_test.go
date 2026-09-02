@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package persistence
 
 import (

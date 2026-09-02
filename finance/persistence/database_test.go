@@ -1,15 +1,16 @@
+//go:build postgres_test
+
 package persistence
 
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/gemyago/sumweave/finance/internal/sqlconn"
-	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -21,8 +22,9 @@ func TestNewDatabase(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("opens sqlite database", func(t *testing.T) {
-		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "database-"+faker.New().UUID().V4())
+	t.Run("opens postgres database", func(t *testing.T) {
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
 		sqlDB, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, sqlDB.Close()) }()
@@ -33,14 +35,15 @@ func TestNewDatabase(t *testing.T) {
 	})
 
 	t.Run("requires sql database", func(t *testing.T) {
-		_, err := NewDatabase(nil, fmt.Sprintf("file:%s?mode=memory&cache=shared", "database-"+faker.New().UUID().V4()))
+		_, err := NewDatabase(nil, os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN"))
 		require.Error(t, err)
 	})
 
 	t.Run("configures slog-backed gorm logger when requested", func(t *testing.T) {
 		var logs bytes.Buffer
 		logger := slog.New(slog.NewJSONHandler(&logs, nil))
-		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "database-"+faker.New().UUID().V4())
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
 		sqlDB, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		defer func() { require.NoError(t, sqlDB.Close()) }()

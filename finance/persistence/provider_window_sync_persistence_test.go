@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package persistence
 
 import (
@@ -158,7 +160,10 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			window,
 		)
 		require.NoError(t, err)
-		assert.Equal(t, []domain.Transaction{insideLater, insideEarlier}, transactions)
+		require.Len(t, transactions, 2)
+		assert.Equal(t, []string{insideLater.ID, insideEarlier.ID}, []string{transactions[0].ID, transactions[1].ID})
+		assert.True(t, insideLater.EffectiveAt.Equal(transactions[0].EffectiveAt))
+		assert.True(t, insideEarlier.EffectiveAt.Equal(transactions[1].EffectiveAt))
 	})
 
 	t.Run("filters and orders provider transactions by canonical timestamp", func(t *testing.T) {
@@ -166,8 +171,8 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		store := makeStore(t)
 		adapter := NewProviderWindowSyncPersistence(store)
 		accountID := "finance-account-" + fake.UUID().V4()
-		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 		require.True(t, earlier.Before(later))
 
 		earlierTransaction, err := store.SaveTransaction(
@@ -191,8 +196,8 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			transactions[0].ID,
 			transactions[1].ID,
 		})
-		assert.Equal(t, later.Format(time.RFC3339Nano), transactions[0].EffectiveAt.Format(time.RFC3339Nano))
-		assert.Equal(t, earlier.Format(time.RFC3339Nano), transactions[1].EffectiveAt.Format(time.RFC3339Nano))
+		assert.True(t, later.Equal(transactions[0].EffectiveAt))
+		assert.True(t, earlier.Equal(transactions[1].EffectiveAt))
 
 		boundaryTransactions, err := adapter.ListProviderTransactionsInWindow(
 			t.Context(),
@@ -203,7 +208,7 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		require.Len(t, boundaryTransactions, 1)
 		assert.Equal(t, earlierTransaction.ID, boundaryTransactions[0].ID)
 
-		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789, time.FixedZone("east", 2*60*60))
+		mixedOffsetAt := time.Date(2026, time.January, 1, 0, 0, 0, 789000, time.FixedZone("east", 2*60*60))
 		mixedTransaction, err := store.SaveTransaction(
 			t.Context(),
 			makeTransaction(fake, accountID, domain.TransactionSourceProvider, mixedOffsetAt),
@@ -225,8 +230,8 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
 		adapter := NewProviderWindowSyncPersistence(store)
-		now := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		now := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 		require.True(t, now.Before(later))
 		connectionID := "connection-" + fake.UUID().V4()
 		otherConnectionID := "other-connection-" + fake.UUID().V4()
@@ -264,8 +269,8 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, matches, 2)
 		assert.Equal(t, []string{firstMatch.ID, secondMatch.ID}, []string{matches[0].ID, matches[1].ID})
-		assert.Equal(t, now.Format(time.RFC3339Nano), matches[0].CreatedAt.Format(time.RFC3339Nano))
-		assert.Equal(t, later.Format(time.RFC3339Nano), matches[1].CreatedAt.Format(time.RFC3339Nano))
+		assert.True(t, now.Equal(matches[0].CreatedAt))
+		assert.True(t, later.Equal(matches[1].CreatedAt))
 	})
 
 	t.Run("lists provider transaction identity matches without effective time filtering", func(t *testing.T) {
@@ -333,10 +338,22 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			}},
 		)
 		require.NoError(t, err)
-		assert.Equal(t, []providers.ProviderTransactionIdentityMatch{{
+		require.Len(t, items, 1)
+		assert.True(t, outsideTransaction.EffectiveAt.Equal(items[0].Transaction.EffectiveAt))
+		assert.True(t, outsideTransaction.CreatedAt.Equal(items[0].Transaction.CreatedAt))
+		assert.True(t, outsideTransaction.UpdatedAt.Equal(items[0].Transaction.UpdatedAt))
+		assert.True(t, matchingRow.CreatedAt.Equal(items[0].Match.CreatedAt))
+		assert.True(t, matchingRow.UpdatedAt.Equal(items[0].Match.UpdatedAt))
+		expected := []providers.ProviderTransactionIdentityMatch{{
 			Transaction: outsideTransaction,
 			Match:       matchingRow,
-		}}, items)
+		}}
+		expected[0].Transaction.EffectiveAt = items[0].Transaction.EffectiveAt
+		expected[0].Transaction.CreatedAt = items[0].Transaction.CreatedAt
+		expected[0].Transaction.UpdatedAt = items[0].Transaction.UpdatedAt
+		expected[0].Match.CreatedAt = items[0].Match.CreatedAt
+		expected[0].Match.UpdatedAt = items[0].Match.UpdatedAt
+		assert.Equal(t, expected, items)
 	})
 
 	t.Run("returns empty results when snapshot query inputs are empty", func(t *testing.T) {
@@ -677,7 +694,14 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			loadedTransaction, err := store.GetTransaction(t.Context(), existingTransaction.ID)
 			require.NoError(t, err)
 			require.NotNil(t, loadedTransaction)
-			assert.Equal(t, mergedTransaction, *loadedTransaction)
+			assert.True(t, mergedTransaction.EffectiveAt.Equal(loadedTransaction.EffectiveAt))
+			assert.True(t, mergedTransaction.CreatedAt.Equal(loadedTransaction.CreatedAt))
+			assert.True(t, mergedTransaction.UpdatedAt.Equal(loadedTransaction.UpdatedAt))
+			expectedTransaction := mergedTransaction
+			expectedTransaction.EffectiveAt = loadedTransaction.EffectiveAt
+			expectedTransaction.CreatedAt = loadedTransaction.CreatedAt
+			expectedTransaction.UpdatedAt = loadedTransaction.UpdatedAt
+			assert.Equal(t, expectedTransaction, *loadedTransaction)
 			matches, err := adapter.ListProviderTransactionMatchesByTransactionIDs(
 				t.Context(),
 				connection.ConnectionID,
@@ -758,16 +782,46 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 
 			accounts, err := adapter.ListConnectionProviderAccounts(t.Context(), connectionID)
 			require.NoError(t, err)
-			assert.Equal(t, []domain.ConnectionProviderAccount{account}, accounts)
+			require.Len(t, accounts, 1)
+			assert.Equal(t, account.ID, accounts[0].ID)
+			assert.Equal(t, account.ConnectionID, accounts[0].ConnectionID)
+			assert.Equal(t, account.ProviderAccountID, accounts[0].ProviderAccountID)
+			assert.Equal(t, account.FinanceAccountID, accounts[0].FinanceAccountID)
+			assert.Equal(t, account.Name, accounts[0].Name)
+			assert.Equal(t, account.Currency, accounts[0].Currency)
+			assert.Equal(t, account.IBAN, accounts[0].IBAN)
+			assert.Equal(t, account.MaskedPAN, accounts[0].MaskedPAN)
+			assert.True(t, account.CreatedAt.Equal(accounts[0].CreatedAt))
+			assert.True(t, account.UpdatedAt.Equal(accounts[0].UpdatedAt))
+			if account.LastSuccessfulSyncAt == nil || accounts[0].LastSuccessfulSyncAt == nil {
+				assert.Equal(t, account.LastSuccessfulSyncAt, accounts[0].LastSuccessfulSyncAt)
+			} else {
+				assert.True(t, account.LastSuccessfulSyncAt.Equal(*accounts[0].LastSuccessfulSyncAt))
+			}
 
 			snapshots, err := store.ListBalanceSnapshots(t.Context(), connectionID)
 			require.NoError(t, err)
-			assert.Equal(t, []domain.BalanceSnapshot{snapshot}, snapshots)
+			require.Len(t, snapshots, 1)
+			assert.Equal(t, snapshot.ID, snapshots[0].ID)
+			assert.Equal(t, snapshot.ConnectionID, snapshots[0].ConnectionID)
+			assert.Equal(t, snapshot.ProviderAccountID, snapshots[0].ProviderAccountID)
+			assert.Equal(t, snapshot.FinanceAccountID, snapshots[0].FinanceAccountID)
+			assert.Equal(t, snapshot.Currency, snapshots[0].Currency)
+			assert.Equal(t, snapshot.CurrentBalanceMinor, snapshots[0].CurrentBalanceMinor)
+			assert.Equal(t, snapshot.AvailableBalanceMinor, snapshots[0].AvailableBalanceMinor)
+			assert.True(t, snapshot.CapturedAt.Equal(snapshots[0].CapturedAt))
 
 			loadedTransaction, err := store.GetTransaction(t.Context(), transaction.ID)
 			require.NoError(t, err)
 			require.NotNil(t, loadedTransaction)
-			assert.Equal(t, transaction, *loadedTransaction)
+			assert.True(t, transaction.EffectiveAt.Equal(loadedTransaction.EffectiveAt))
+			assert.True(t, transaction.CreatedAt.Equal(loadedTransaction.CreatedAt))
+			assert.True(t, transaction.UpdatedAt.Equal(loadedTransaction.UpdatedAt))
+			expectedTransaction := transaction
+			expectedTransaction.EffectiveAt = loadedTransaction.EffectiveAt
+			expectedTransaction.CreatedAt = loadedTransaction.CreatedAt
+			expectedTransaction.UpdatedAt = loadedTransaction.UpdatedAt
+			assert.Equal(t, expectedTransaction, *loadedTransaction)
 
 			matches, err := adapter.ListProviderTransactionMatchesByTransactionIDs(
 				t.Context(),
@@ -775,7 +829,16 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 				[]string{transaction.ID},
 			)
 			require.NoError(t, err)
-			assert.Equal(t, []domain.ProviderTransactionMatch{match}, matches)
+			require.Len(t, matches, 1)
+			assert.Equal(t, match.ID, matches[0].ID)
+			assert.Equal(t, match.ConnectionID, matches[0].ConnectionID)
+			assert.Equal(t, match.ProviderAccountID, matches[0].ProviderAccountID)
+			assert.Equal(t, match.ProviderTransactionID, matches[0].ProviderTransactionID)
+			assert.Equal(t, match.Fingerprint, matches[0].Fingerprint)
+			assert.Equal(t, match.TransactionID, matches[0].TransactionID)
+			assert.Equal(t, match.Status, matches[0].Status)
+			assert.True(t, match.CreatedAt.Equal(matches[0].CreatedAt))
+			assert.True(t, match.UpdatedAt.Equal(matches[0].UpdatedAt))
 			journalState, err := NewProviderSyncStateJournalStore(store).LoadLastState(
 				t.Context(),
 				state.Connection,

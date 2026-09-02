@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package finance
 
 import (
@@ -62,15 +64,17 @@ func TestBankSyncServiceListBankConnectionSyncedAccounts(t *testing.T) {
 			ActorUserID: ownerID, TenantID: tenant.ID, ConnectionID: connection.ID,
 		})
 		require.NoError(t, err)
-		assert.Equal(t, []BankConnectionSyncedAccount{
-			{
-				FinanceAccountID:     first.FinanceAccountID,
-				Name:                 first.Name,
-				Currency:             first.Currency,
-				LastSuccessfulSyncAt: first.LastSuccessfulSyncAt,
-			},
-			{FinanceAccountID: second.FinanceAccountID, Name: second.Name, Currency: second.Currency},
-		}, actual)
+		require.Len(t, actual, 2)
+		assert.Equal(t, first.FinanceAccountID, actual[0].FinanceAccountID)
+		assert.Equal(t, first.Name, actual[0].Name)
+		assert.Equal(t, first.Currency, actual[0].Currency)
+		assert.Equal(t, second.FinanceAccountID, actual[1].FinanceAccountID)
+		assert.Equal(t, second.Name, actual[1].Name)
+		assert.Equal(t, second.Currency, actual[1].Currency)
+		assert.Nil(t, actual[1].LastSuccessfulSyncAt)
+		require.NotNil(t, actual[0].LastSuccessfulSyncAt)
+		require.NotNil(t, first.LastSuccessfulSyncAt)
+		assert.True(t, first.LastSuccessfulSyncAt.Equal(*actual[0].LastSuccessfulSyncAt))
 	})
 
 	t.Run("enforces membership tenant ownership and not found semantics", func(t *testing.T) {

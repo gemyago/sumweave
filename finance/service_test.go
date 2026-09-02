@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package finance
 
 import (
@@ -151,26 +153,38 @@ func TestService(t *testing.T) {
 		})
 		require.NoError(t, err)
 
+		updatedCategoryName := fmt.Sprintf("category-updated-%s", fake.Lorem().Word())
 		updatedCategory, err := service.UpdateCategory(t.Context(), UpdateCategoryParams{
 			ActorUserID: ownerUserID,
 			TenantID:    tenant.ID,
 			CategoryID:  category.ID,
-			Name:        fmt.Sprintf("category-updated-%s", fake.Lorem().Word()),
+			Name:        updatedCategoryName,
 			Kind:        domain.CategoryKindIncome,
 		})
 		require.NoError(t, err)
-		expectedCategory := category
-		expectedCategory.Name = updatedCategory.Name
-		expectedCategory.Kind = domain.CategoryKindIncome
-		expectedCategory.UpdatedAt = updatedCategory.UpdatedAt
-		assert.Equal(t, expectedCategory, updatedCategory)
+		assert.Equal(t, category.ID, updatedCategory.ID)
+		assert.Equal(t, category.TenantID, updatedCategory.TenantID)
+		assert.Equal(t, updatedCategoryName, updatedCategory.Name)
+		assert.Equal(t, domain.CategoryKindIncome, updatedCategory.Kind)
+		assert.True(t, category.CreatedAt.Equal(updatedCategory.CreatedAt))
+		assert.True(t, updatedCategory.UpdatedAt.After(category.UpdatedAt))
 
 		categories, err = service.ListCategories(t.Context(), ListCategoriesParams{
 			ActorUserID: ownerUserID,
 			TenantID:    tenant.ID,
 		})
 		require.NoError(t, err)
-		assert.Contains(t, categories, expectedCategory)
+		var listedCategory *domain.Category
+		for index := range categories {
+			if categories[index].ID == updatedCategory.ID {
+				listedCategory = &categories[index]
+			}
+		}
+		require.NotNil(t, listedCategory)
+		assert.Equal(t, updatedCategory.Name, listedCategory.Name)
+		assert.Equal(t, updatedCategory.Kind, listedCategory.Kind)
+		assert.True(t, updatedCategory.CreatedAt.Equal(listedCategory.CreatedAt))
+		assert.True(t, updatedCategory.UpdatedAt.Equal(listedCategory.UpdatedAt))
 
 		tag, err := service.CreateTag(t.Context(), CreateTagParams{
 			ActorUserID: ownerUserID,
@@ -216,14 +230,18 @@ func TestService(t *testing.T) {
 			TenantID:    tenant.ID,
 		})
 		require.NoError(t, err)
-		assert.NotContains(t, visibleCategories, updatedCategory)
+		for _, item := range visibleCategories {
+			assert.NotEqual(t, updatedCategory.ID, item.ID)
+		}
 
 		visibleTags, err := service.ListTags(t.Context(), ListTagsParams{
 			ActorUserID: ownerUserID,
 			TenantID:    tenant.ID,
 		})
 		require.NoError(t, err)
-		assert.NotContains(t, visibleTags, updatedTag)
+		for _, item := range visibleTags {
+			assert.NotEqual(t, updatedTag.ID, item.ID)
+		}
 		assert.NotEmpty(t, visibleTags)
 
 		_, err = service.ListAccounts(t.Context(), ListAccountsParams{
@@ -325,14 +343,18 @@ func TestService(t *testing.T) {
 		assert.Equal(t, tenant.ID, updatedTenant.ID)
 		assert.Equal(t, updatedName, updatedTenant.Name)
 		assert.Equal(t, "PLN", updatedTenant.DisplayCurrency)
-		assert.Equal(t, tenant.CreatedAt, updatedTenant.CreatedAt)
-		assert.Equal(t, currentTime, updatedTenant.UpdatedAt)
+		assert.True(t, tenant.CreatedAt.Equal(updatedTenant.CreatedAt))
+		assert.True(t, currentTime.Equal(updatedTenant.UpdatedAt))
 		assert.True(t, updatedTenant.UpdatedAt.After(tenant.UpdatedAt))
 
 		storedTenant, err := service.store.GetTenant(t.Context(), tenant.ID)
 		require.NoError(t, err)
 		require.NotNil(t, storedTenant)
-		assert.Equal(t, updatedTenant, *storedTenant)
+		assert.Equal(t, updatedTenant.ID, storedTenant.ID)
+		assert.Equal(t, updatedTenant.Name, storedTenant.Name)
+		assert.Equal(t, updatedTenant.DisplayCurrency, storedTenant.DisplayCurrency)
+		assert.True(t, updatedTenant.CreatedAt.Equal(storedTenant.CreatedAt))
+		assert.True(t, updatedTenant.UpdatedAt.Equal(storedTenant.UpdatedAt))
 
 		memberTenants, err := service.ListTenantsForUser(t.Context(), memberUserID)
 		require.NoError(t, err)
@@ -372,7 +394,12 @@ func TestService(t *testing.T) {
 		storedTenantAfterInvalidUpdate, err := service.store.GetTenant(t.Context(), tenant.ID)
 		require.NoError(t, err)
 		require.NotNil(t, storedTenantAfterInvalidUpdate)
-		assert.Equal(t, updatedTenant, *storedTenantAfterInvalidUpdate)
+		assert.Equal(t, updatedTenant.ID, storedTenantAfterInvalidUpdate.ID)
+		assert.Equal(t, updatedTenant.Name, storedTenantAfterInvalidUpdate.Name)
+		assert.Equal(t, updatedTenant.DisplayCurrency, storedTenantAfterInvalidUpdate.DisplayCurrency)
+		assert.Equal(t, updatedTenant.ArchivedAt, storedTenantAfterInvalidUpdate.ArchivedAt)
+		assert.True(t, updatedTenant.CreatedAt.Equal(storedTenantAfterInvalidUpdate.CreatedAt))
+		assert.True(t, updatedTenant.UpdatedAt.Equal(storedTenantAfterInvalidUpdate.UpdatedAt))
 	})
 
 	t.Run("manages ledger driven transaction behavior", func(t *testing.T) {
@@ -587,7 +614,7 @@ func TestService(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, preservedCategoryTransaction.CategoryID)
 		assert.Equal(t, category.ID, *preservedCategoryTransaction.CategoryID)
-		assert.Equal(t, updatedProviderTransaction.EffectiveAt, preservedCategoryTransaction.EffectiveAt)
+		assert.True(t, updatedProviderTransaction.EffectiveAt.Equal(preservedCategoryTransaction.EffectiveAt))
 
 		clearedCategoryTransaction, err := service.UpdateTransaction(
 			t.Context(),
@@ -616,7 +643,14 @@ func TestService(t *testing.T) {
 			TransactionID: providerTransaction.ID,
 		})
 		require.NoError(t, err)
-		assert.Equal(t, clearedCategoryTransaction, loadedTransaction)
+		assert.True(t, clearedCategoryTransaction.EffectiveAt.Equal(loadedTransaction.EffectiveAt))
+		assert.True(t, clearedCategoryTransaction.CreatedAt.Equal(loadedTransaction.CreatedAt))
+		assert.True(t, clearedCategoryTransaction.UpdatedAt.Equal(loadedTransaction.UpdatedAt))
+		expectedLoadedTransaction := clearedCategoryTransaction
+		expectedLoadedTransaction.EffectiveAt = loadedTransaction.EffectiveAt
+		expectedLoadedTransaction.CreatedAt = loadedTransaction.CreatedAt
+		expectedLoadedTransaction.UpdatedAt = loadedTransaction.UpdatedAt
+		assert.Equal(t, expectedLoadedTransaction, loadedTransaction)
 
 		balance, err := service.GetAccountBalance(t.Context(), GetAccountBalanceParams{
 			ActorUserID: ownerUserID,
@@ -794,17 +828,18 @@ func TestService(t *testing.T) {
 		func(t *testing.T) {
 			fake := faker.New()
 			now := time.Date(2026, time.June, 20, 17, 0, 0, 0, time.UTC)
+			newID := func(prefix string) string { return prefix + "-" + fake.UUID().V4() }
 			ids := []string{
-				"tenant-id",
-				"category-1",
-				"category-2",
-				"category-3",
-				"category-4",
-				"account-id",
-				"transaction-out",
-				"transaction-in",
-				"transfer-group-linked",
-				"transaction-unmatched",
+				newID("tenant"),
+				newID("category"),
+				newID("category"),
+				newID("category"),
+				newID("category"),
+				newID("account"),
+				newID("transaction"),
+				newID("transaction"),
+				newID("transfer-group"),
+				newID("transaction"),
 			}
 			service := NewService(
 				func() *persistence.Store {
@@ -930,8 +965,8 @@ func TestService(t *testing.T) {
 			require.NotNil(t, linkedIncoming.TransferMatchedAt)
 			assert.NotEmpty(t, *linkedOutgoing.TransferGroupID)
 			assert.Equal(t, *linkedOutgoing.TransferGroupID, *linkedIncoming.TransferGroupID)
-			assert.Equal(t, now, *linkedOutgoing.TransferMatchedAt)
-			assert.Equal(t, now, *linkedIncoming.TransferMatchedAt)
+			assert.True(t, now.Equal(*linkedOutgoing.TransferMatchedAt))
+			assert.True(t, now.Equal(*linkedIncoming.TransferMatchedAt))
 			assert.Equal(t, domain.TransactionKindTransfer, linkedOutgoing.Kind)
 			assert.Equal(t, domain.TransactionKindTransfer, linkedIncoming.Kind)
 			outgoingBalanceAfterLink, err := service.GetAccountBalance(t.Context(), GetAccountBalanceParams{
@@ -1052,8 +1087,8 @@ func TestService(t *testing.T) {
 			require.NotNil(t, savedPairs[0][0].TransferMatchedAt)
 			require.NotNil(t, savedPairs[0][1].TransferMatchedAt)
 			assert.Equal(t, *savedPairs[0][0].TransferGroupID, *savedPairs[0][1].TransferGroupID)
-			assert.Equal(t, now, *savedPairs[0][0].TransferMatchedAt)
-			assert.Equal(t, now, *savedPairs[0][1].TransferMatchedAt)
+			assert.True(t, now.Equal(*savedPairs[0][0].TransferMatchedAt))
+			assert.True(t, now.Equal(*savedPairs[0][1].TransferMatchedAt))
 		},
 	)
 
@@ -1268,7 +1303,7 @@ func TestService(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, "tenant-id", tenant.ID)
-		assert.Equal(t, now, tenant.CreatedAt)
+		assert.True(t, now.Equal(tenant.CreatedAt))
 		assert.Equal(t, "EUR", tenant.DisplayCurrency)
 
 		_, err = service.AcceptTenantInvite(t.Context(), AcceptTenantInviteParams{

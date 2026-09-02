@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package persistence
 
 import (
@@ -117,7 +119,9 @@ func TestSyntheticProviderStateStore(t *testing.T) {
 			loaded, err := store.GetSyntheticProviderState(t.Context(), providerReference)
 			require.NoError(t, err)
 			require.NotNil(t, loaded)
-			assert.Equal(t, updated, *loaded)
+			assert.Equal(t, updated.Envelope, loaded.Envelope)
+			assert.True(t, updated.CreatedAt.Equal(loaded.CreatedAt))
+			assert.True(t, updated.UpdatedAt.Equal(loaded.UpdatedAt))
 
 			require.NoError(t, store.DeleteSyntheticProviderState(t.Context(), providerReference))
 

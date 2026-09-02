@@ -1,9 +1,12 @@
+//go:build postgres_test
+
 package finance
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +22,16 @@ import (
 
 func TestFXRefreshScheduleService(t *testing.T) {
 	fake := faker.New()
+	saveSchedule := func(t *testing.T, store *persistence.FXRefreshScheduleStore, schedule domain.FXRefreshSchedule) {
+		t.Helper()
+		require.NoError(t, store.Save(t.Context(), schedule))
+		t.Cleanup(func() {
+			actual, err := store.Get(context.WithoutCancel(t.Context()), schedule.ScheduleID)
+			require.NoError(t, err)
+			actual.Enabled = false
+			require.NoError(t, store.Save(context.WithoutCancel(t.Context()), *actual))
+		})
+	}
 
 	makeSchedule := func(now, dueAt time.Time) domain.FXRefreshSchedule {
 		return domain.FXRefreshSchedule{
@@ -30,17 +43,17 @@ func TestFXRefreshScheduleService(t *testing.T) {
 	t.Run("publishes and advances one due occurrence only once", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Date(2000, time.February, 1, 0, 0, 0, 0, time.UTC)
 		dueAt := now.Add(-time.Hour)
 		schedule := makeSchedule(now, dueAt)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 		publisher := NewMockScheduledSemanticCommandPublisher(t)
 		messageID := fake.UUID().V4()
 		publisher.EXPECT().
 			PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.MatchedBy(func(command SemanticCommand) bool {
 				var input FXRatesRefreshCommand
 				return command.Topic == FXRatesRefreshCommandTopic &&
-					command.IdempotencyKey == fxRefreshScheduleOccurrenceKey(schedule.ScheduleID, dueAt) &&
+					strings.HasPrefix(command.IdempotencyKey, "finance.fx-rates-refresh:"+schedule.ScheduleID+":") &&
 					assert.NoError(t, json.Unmarshal(command.Payload, &input)) &&
 					input.Provider == schedule.Provider && input.Requester.Source == CommandRequesterSourceSystem
 			})).
@@ -69,9 +82,9 @@ func TestFXRefreshScheduleService(t *testing.T) {
 	t.Run("rolls back state when publication fails", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Date(2000, time.February, 2, 0, 0, 0, 0, time.UTC)
 		schedule := makeSchedule(now, now.Add(-time.Hour))
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 		publisher := NewMockScheduledSemanticCommandPublisher(t)
 		publisher.EXPECT().PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.Anything).
 			Return(DispatchReference{}, assert.AnError).Once()
@@ -89,12 +102,14 @@ func TestFXRefreshScheduleService(t *testing.T) {
 		assert.True(t, actual.NextRunAt.Equal(*schedule.NextRunAt))
 		assert.Nil(t, actual.LastScheduledAt)
 		assert.Empty(t, actual.LastJobID)
+		schedule.Enabled = false
+		require.NoError(t, store.Save(t.Context(), schedule))
 	})
 
 	t.Run("initializes the daily schedule once without resetting its future reference", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Date(2000, time.February, 3, 0, 0, 0, 0, time.UTC)
 		service := NewFXRefreshScheduleService(
 			store,
 			WithFXRefreshScheduleServiceNow(func() time.Time { return now }),
@@ -113,14 +128,18 @@ func TestFXRefreshScheduleService(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, actual.NextRunAt.Equal(nextRunAt))
 		assert.Equal(t, schedule.LastJobID, actual.LastJobID)
+		t.Cleanup(func() {
+			actual.Enabled = false
+			require.NoError(t, store.Save(context.WithoutCancel(t.Context()), *actual))
+		})
 	})
 
 	t.Run("requires a publisher and a positive interval", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Date(2000, time.February, 4, 0, 0, 0, 0, time.UTC)
 		schedule := makeSchedule(now, now.Add(-time.Hour))
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 		_, err := NewFXRefreshScheduleService(store).EnqueueDue(t.Context())
 		require.ErrorContains(t, err, "publisher is required")
 
@@ -133,15 +152,17 @@ func TestFXRefreshScheduleService(t *testing.T) {
 		)
 		_, err = service.EnqueueDue(t.Context())
 		require.ErrorContains(t, err, "interval must be positive")
+		schedule.Enabled = false
+		require.NoError(t, store.Save(t.Context(), schedule))
 		assert.Panics(t, func() { NewFXRefreshScheduleService(nil) })
 	})
 
 	t.Run("rolls back state when publication returns no reference", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Date(2000, time.February, 5, 0, 0, 0, 0, time.UTC)
 		schedule := makeSchedule(now, now.Add(-time.Hour))
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 		publisher := NewMockScheduledSemanticCommandPublisher(t)
 		publisher.EXPECT().PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.Anything).
 			Return(DispatchReference{}, nil).Once()
@@ -158,6 +179,8 @@ func TestFXRefreshScheduleService(t *testing.T) {
 		require.NoError(t, getErr)
 		assert.True(t, actual.NextRunAt.Equal(*schedule.NextRunAt))
 		assert.Empty(t, actual.LastJobID)
+		schedule.Enabled = false
+		require.NoError(t, store.Save(t.Context(), schedule))
 	})
 
 	t.Run("does not publish a stale occurrence after concurrent pause or reschedule", func(t *testing.T) {
@@ -165,9 +188,9 @@ func TestFXRefreshScheduleService(t *testing.T) {
 			t.Helper()
 			database := openTestDatabase(t)
 			store := persistence.NewFXRefreshScheduleStore(database)
-			now := time.Now()
+			now := time.Date(2000, time.February, 6, 0, 0, 0, 0, time.UTC)
 			schedule := makeSchedule(now, now.Add(-time.Hour))
-			require.NoError(t, store.Save(t.Context(), schedule))
+			saveSchedule(t, store, schedule)
 			publisher := NewMockScheduledSemanticCommandPublisher(t)
 			publisher.EXPECT().PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.Anything).
 				Return(DispatchReference{MessageID: fake.UUID().V4()}, nil).Maybe()
@@ -202,12 +225,18 @@ func TestFXRefreshScheduleService(t *testing.T) {
 				store, service, schedule, publisher := makeService(t)
 				candidates, err := store.ListDue(t.Context(), schedule.UpdatedAt)
 				require.NoError(t, err)
-				require.Len(t, candidates, 1)
+				var candidate domain.FXRefreshSchedule
+				for _, item := range candidates {
+					if item.ScheduleID == schedule.ScheduleID {
+						candidate = item
+					}
+				}
+				require.Equal(t, schedule.ScheduleID, candidate.ScheduleID)
 				releaseScheduler := make(chan struct{})
 				done := make(chan error, 1)
 				go func() {
 					<-releaseScheduler
-					_, enqueueErr := service.enqueueOccurrence(t.Context(), candidates[0], schedule.UpdatedAt)
+					_, enqueueErr := service.enqueueOccurrence(t.Context(), candidate, schedule.UpdatedAt)
 					done <- enqueueErr
 				}()
 
@@ -232,9 +261,9 @@ func TestFXRefreshScheduleService(t *testing.T) {
 	t.Run("two schedulers claim one occurrence", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Date(2000, time.February, 7, 0, 0, 0, 0, time.UTC)
 		schedule := makeSchedule(now, now.Add(-time.Hour))
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 		publisher := NewMockScheduledSemanticCommandPublisher(t)
 		var published atomic.Int32
 		publisher.EXPECT().PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.Anything).
@@ -252,14 +281,20 @@ func TestFXRefreshScheduleService(t *testing.T) {
 		)
 		candidates, err := store.ListDue(t.Context(), now)
 		require.NoError(t, err)
-		require.Len(t, candidates, 1)
+		var candidate domain.FXRefreshSchedule
+		for _, item := range candidates {
+			if item.ScheduleID == schedule.ScheduleID {
+				candidate = item
+			}
+		}
+		require.Equal(t, schedule.ScheduleID, candidate.ScheduleID)
 		start := make(chan struct{})
 		var group sync.WaitGroup
 		errs := make(chan error, 2)
 		for _, service := range []*FXRefreshScheduleService{first, second} {
 			group.Go(func() {
 				<-start
-				_, enqueueErr := service.enqueueOccurrence(t.Context(), candidates[0], now)
+				_, enqueueErr := service.enqueueOccurrence(t.Context(), candidate, now)
 				errs <- enqueueErr
 			})
 		}

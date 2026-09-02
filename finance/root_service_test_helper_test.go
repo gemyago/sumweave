@@ -383,14 +383,6 @@ func (s *Service) GetDashboard(
 	return s.reporting.GetDashboard(ctx, params)
 }
 
-func (s *Service) loadDashboardData(
-	ctx context.Context,
-	tenantID string,
-	params DashboardParams,
-) (dashboardData, error) {
-	return s.reporting.loadDashboardData(ctx, tenantID, params)
-}
-
 func (s *Service) TriggerFXRefresh(
 	ctx context.Context,
 	params TriggerFXRefreshParams,

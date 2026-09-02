@@ -1,19 +1,22 @@
+//go:build postgres_test
+
 package finance
 
 import (
-	"fmt"
+	"os"
 	"testing"
 
 	"github.com/gemyago/sumweave/finance/internal/sqlconn"
 	"github.com/gemyago/sumweave/finance/persistence"
-	"github.com/jaswdr/faker/v2"
 )
 
 func openTestDatabase(t *testing.T) *persistence.Database {
 	t.Helper()
 
-	fake := faker.New()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "finance-"+fake.UUID().V4())
+	dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+	if dsn == "" {
+		t.Fatal("SUMWEAVE_POSTGRES_TEST_DSN is required for postgres_test")
+	}
 	sqlDB, err := sqlconn.Open(dsn)
 	if err != nil {
 		t.Fatalf("open finance test sql database: %v", err)
@@ -27,10 +30,5 @@ func openTestDatabase(t *testing.T) *persistence.Database {
 	if err != nil {
 		t.Fatalf("open finance test database: %v", err)
 	}
-	migrateErr := persistence.NewMigrator(database).Migrate(t.Context())
-	if migrateErr != nil {
-		t.Fatalf("migrate finance test database: %v", migrateErr)
-	}
-
 	return database
 }

@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package persistence
 
 import (
@@ -17,6 +19,18 @@ import (
 
 func TestProviderLinkPersistence(t *testing.T) {
 	t.Run("atomically saves final connection snapshots and rolls back an invalid one", func(t *testing.T) {
+		assertSnapshotEqual := func(expected, actual domain.ProviderSnapshot) {
+			t.Helper()
+			assert.Equal(t, expected.ID, actual.ID)
+			assert.Equal(t, expected.TenantID, actual.TenantID)
+			assert.Equal(t, expected.ConnectionID, actual.ConnectionID)
+			assert.Equal(t, expected.Subject, actual.Subject)
+			assert.Equal(t, expected.Kind, actual.Kind)
+			assert.Equal(t, expected.ProviderObjectID, actual.ProviderObjectID)
+			assert.Equal(t, expected.DocumentJSON, actual.DocumentJSON)
+			assert.True(t, expected.CapturedAt.Equal(actual.CapturedAt))
+		}
+
 		fake := faker.New()
 		store := NewStore(openTestDatabase(t))
 		linkPersistence := NewProviderLinkPersistence(store)
@@ -29,7 +43,8 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.NoError(t, err)
 		items, err := NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(t.Context(), saved.ID)
 		require.NoError(t, err)
-		assert.Equal(t, []domain.ProviderSnapshot{*snapshot}, items)
+		require.Len(t, items, 1)
+		assertSnapshotEqual(*snapshot, items[0])
 		latestSnapshot := *snapshot
 		latestSnapshot.ID = "snapshot-" + fake.UUID().V4()
 		latestSnapshot.DocumentJSON = []byte(`{"session":"updated"}`)
@@ -43,7 +58,8 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.NoError(t, err)
 		expectedLatestSnapshot := latestSnapshot
 		expectedLatestSnapshot.ID = snapshot.ID
-		assert.Equal(t, []domain.ProviderSnapshot{expectedLatestSnapshot}, items)
+		require.Len(t, items, 1)
+		assertSnapshotEqual(expectedLatestSnapshot, items[0])
 
 		failedRepeatedSnapshot := latestSnapshot
 		failedRepeatedSnapshot.ID = "snapshot-" + fake.UUID().V4()
@@ -54,7 +70,8 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.ErrorContains(t, err, "save linked connection provider snapshot")
 		items, err = NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(t.Context(), saved.ID)
 		require.NoError(t, err)
-		assert.Equal(t, []domain.ProviderSnapshot{expectedLatestSnapshot}, items)
+		require.Len(t, items, 1)
+		assertSnapshotEqual(expectedLatestSnapshot, items[0])
 
 		connectionWithoutSnapshot := connection
 		connectionWithoutSnapshot.ID = "connection-" + fake.UUID().V4()
@@ -190,10 +207,14 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.Len(t, saved, 2)
 		assert.Equal(t, saved[0].ID, saved[1].ID)
 		var connectionCount int64
-		require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).Count(&connectionCount).Error)
+		require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).
+			Where("tenant_id = ? AND provider_reference = ?", tenantID, reference).
+			Count(&connectionCount).Error)
 		assert.Equal(t, int64(1), connectionCount)
 		var secretCount int64
-		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).Count(&secretCount).Error)
+		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).
+			Where("provider = ? AND reference = ?", string(domain.ProviderIDPKO), reference).
+			Count(&secretCount).Error)
 		assert.Equal(t, int64(1), secretCount)
 		snapshots, err := NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(
 			t.Context(), saved[0].ID,
@@ -295,10 +316,14 @@ func TestProviderLinkPersistence(t *testing.T) {
 		require.True(t, callbackCalled)
 		assert.Equal(t, savedWinner.ID, recovered.ID)
 		var connectionCount int64
-		require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).Count(&connectionCount).Error)
+		require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).
+			Where("tenant_id = ? AND provider_reference = ?", tenantID, reference).
+			Count(&connectionCount).Error)
 		assert.Equal(t, int64(1), connectionCount)
 		var secretCount int64
-		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).Count(&secretCount).Error)
+		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).
+			Where("provider = ? AND reference = ?", string(domain.ProviderIDPKO), reference).
+			Count(&secretCount).Error)
 		assert.Equal(t, int64(1), secretCount)
 		snapshots, err := NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(
 			t.Context(), recovered.ID,
@@ -337,19 +362,24 @@ func TestProviderLinkPersistence(t *testing.T) {
 			CreatedAt: time.Time{},
 			UpdatedAt: time.Time{},
 		}
-		triggerName := "fail_link_connection"
-		require.NoError(t, store.DB().Exec(
-			"CREATE TRIGGER "+triggerName+" BEFORE INSERT ON finance_bank_connections "+
-				"WHEN NEW.id = '"+connection.ID+"' BEGIN SELECT RAISE(ABORT, 'connection insertion failed'); END",
-		).Error)
+		callbackName := "fail-link-connection-" + fake.UUID().V4()
+		require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register(
+			callbackName,
+			func(tx *gorm.DB) {
+				if tx.Statement.Table == (bankConnectionModel{}).TableName() {
+					tx.AddError(fmt.Errorf("connection insertion failed"))
+				}
+			},
+		))
 		t.Cleanup(func() {
-			require.NoError(t, store.DB().Exec("DROP TRIGGER "+triggerName).Error)
+			require.NoError(t, store.DB().Callback().Create().Remove(callbackName))
 		})
 
 		_, err := linkPersistence.SaveLinkedConnection(t.Context(), connection, secret)
 		require.ErrorContains(t, err, "create bank connection")
 		var secretCount int64
-		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).Count(&secretCount).Error)
+		require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).
+			Where("id = ?", secret.ID).Count(&secretCount).Error)
 		assert.Zero(t, secretCount)
 	})
 
@@ -707,13 +737,12 @@ func TestProviderLinkPersistence(t *testing.T) {
 	t.Run("returns persistence errors when tables are unavailable", func(t *testing.T) {
 		fake := faker.New()
 		database := openTestDatabase(t)
-		require.NoError(t, database.db.WithContext(t.Context()).Migrator().DropTable(
-			&bankConnectionModel{},
-			&pendingBankConnectionLinkStartModel{},
-		))
+		sqlDB, err := database.db.DB()
+		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
 		persistence := NewProviderLinkPersistence(NewStore(database))
 
-		_, err := persistence.ConsumePendingStart(t.Context(), providers.ConsumePendingStartRequest{
+		_, err = persistence.ConsumePendingStart(t.Context(), providers.ConsumePendingStartRequest{
 			TenantID:    "tenant-" + fake.UUID().V4(),
 			ActorUserID: "actor-" + fake.UUID().V4(),
 			ProviderID:  domain.ProviderIDPKO,

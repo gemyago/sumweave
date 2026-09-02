@@ -1,13 +1,13 @@
+//go:build postgres_test
+
 package persistence
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/internal/providers"
-	"github.com/gemyago/sumweave/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,18 +19,11 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 	makeStore := func(t *testing.T, now func() time.Time) *Store {
 		t.Helper()
 
-		fake := faker.New()
-		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "journal-"+fake.UUID().V4())
-		sqlDB, err := sqlconn.Open(dsn)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
-		database, err := NewDatabase(sqlDB, dsn)
-		require.NoError(t, err)
+		database := openTestDatabase(t)
 		store := NewStore(database)
 		if now != nil {
 			store.now = now
 		}
-		require.NoError(t, NewMigrator(database).Migrate(t.Context()))
 		return store
 	}
 
@@ -115,6 +108,25 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 			End:   state.Window.End,
 		}
 		return expected
+	}
+
+	assertStateEqual := func(t *testing.T, expected, actual domain.ProviderSyncState) {
+		t.Helper()
+		assert.Equal(t, expected.Connection, actual.Connection)
+		assert.Equal(t, expected.RunID, actual.RunID)
+		assert.Equal(t, expected.JobID, actual.JobID)
+		assert.Equal(t, expected.ErrorSummary, actual.ErrorSummary)
+		assert.Equal(t, expected.AggregateStats, actual.AggregateStats)
+		require.NotNil(t, expected.AttemptedAt)
+		require.NotNil(t, actual.AttemptedAt)
+		assert.True(t, expected.AttemptedAt.Equal(*actual.AttemptedAt))
+		if expected.SucceededAt == nil || actual.SucceededAt == nil {
+			assert.Equal(t, expected.SucceededAt, actual.SucceededAt)
+		} else {
+			assert.True(t, expected.SucceededAt.Equal(*actual.SucceededAt))
+		}
+		assert.True(t, expected.Window.Start.Equal(actual.Window.Start))
+		assert.True(t, expected.Window.End.Equal(actual.Window.End))
 	}
 
 	t.Run("returns nil when connection has no state", func(t *testing.T) {
@@ -313,18 +325,18 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 		loadedOne, err := journalStore.LoadLastState(t.Context(), connectionOne)
 		require.NoError(t, err)
 		require.NotNil(t, loadedOne)
-		assert.Equal(t, makeExpectedState(thirdState, connectionOne), *loadedOne)
+		assertStateEqual(t, makeExpectedState(thirdState, connectionOne), *loadedOne)
 
 		loadedTwo, err := journalStore.LoadLastState(t.Context(), connectionTwo)
 		require.NoError(t, err)
 		require.NotNil(t, loadedTwo)
-		assert.Equal(t, makeExpectedState(secondState, connectionTwo), *loadedTwo)
+		assertStateEqual(t, makeExpectedState(secondState, connectionTwo), *loadedTwo)
 	})
 
 	t.Run("loads the newest canonical journal record", func(t *testing.T) {
 		fake := faker.New()
-		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 		require.True(t, earlier.Before(later))
 		appendTimes := []time.Time{earlier, later}
 		appendIndex := 0
@@ -348,7 +360,7 @@ func TestProviderSyncStateJournalStore(t *testing.T) {
 		require.NotNil(t, loaded)
 		require.Equal(t, laterState.JobID, loaded.JobID)
 		require.NotNil(t, loaded.SucceededAt)
-		require.Equal(t, later.Format(time.RFC3339Nano), loaded.SucceededAt.Format(time.RFC3339Nano))
+		require.True(t, later.Equal(*loaded.SucceededAt))
 	})
 
 	t.Run("round-trips all sync state fields without loss", func(t *testing.T) {

@@ -1,14 +1,17 @@
+//go:build postgres_test
+
 package persistence
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
-	"github.com/gemyago/sumweave/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,8 +44,8 @@ func TestStore(t *testing.T) {
 	t.Run("orders core entity canonical timestamps", func(t *testing.T) {
 		store := makeStore(t)
 		fake := faker.New()
-		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 		require.True(t, earlier.Before(later))
 
 		userID := "user-" + fake.UUID().V4()
@@ -177,7 +180,7 @@ func TestStore(t *testing.T) {
 			[]string{laterTransaction.ID, earlierTransaction.ID},
 			[]string{transactions[0].ID, transactions[1].ID},
 		)
-		require.Equal(t, later.Format(time.RFC3339Nano), transactions[0].EffectiveAt.Format(time.RFC3339Nano))
+		require.True(t, later.Equal(transactions[0].EffectiveAt))
 	})
 
 	t.Run("enforces invite code uniqueness", func(t *testing.T) {
@@ -260,7 +263,12 @@ func TestStore(t *testing.T) {
 		loaded, err := store.GetCSVImport(t.Context(), record.ID)
 		require.NoError(t, err)
 		require.NotNil(t, loaded)
-		assert.Equal(t, record, *loaded)
+		expectedLoaded := *loaded
+		expectedLoaded.CreatedAt = record.CreatedAt
+		expectedLoaded.UpdatedAt = record.UpdatedAt
+		assert.Equal(t, record, expectedLoaded)
+		assert.True(t, record.CreatedAt.Equal(loaded.CreatedAt))
+		assert.True(t, record.UpdatedAt.Equal(loaded.UpdatedAt))
 
 		loaded, err = store.GetCSVImport(t.Context(), "missing-"+fake.UUID().V4())
 		require.ErrorIs(t, err, ErrCSVImportNotFound)
@@ -763,8 +771,8 @@ func TestStore(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			assert.Equal(t, createdAt, secret.CreatedAt)
-			assert.Equal(t, createdAt, secret.UpdatedAt)
+			assert.True(t, createdAt.Equal(secret.CreatedAt))
+			assert.True(t, createdAt.Equal(secret.UpdatedAt))
 
 			sqlDB, err := store.db.DB()
 			require.NoError(t, err)
@@ -772,7 +780,7 @@ func TestStore(t *testing.T) {
 			var ciphertext string
 			err = sqlDB.QueryRowContext(
 				t.Context(),
-				"SELECT ciphertext FROM finance_connection_secrets WHERE id = ?",
+				"SELECT ciphertext FROM finance_connection_secrets WHERE id = $1",
 				secret.ID,
 			).Scan(&ciphertext)
 			require.NoError(t, err)
@@ -867,7 +875,7 @@ func TestStore(t *testing.T) {
 			var startedAt time.Time
 			err = sqlDB.QueryRowContext(
 				t.Context(),
-				"SELECT started_at FROM finance_fixture_bootstrap_runs WHERE id = ?",
+				"SELECT started_at FROM finance_fixture_bootstrap_runs WHERE id = $1",
 				runID,
 			).Scan(&startedAt)
 			require.NoError(t, err)
@@ -887,7 +895,7 @@ func TestStore(t *testing.T) {
 			var occurredAt time.Time
 			err = sqlDB.QueryRowContext(
 				t.Context(),
-				"SELECT id, occurred_at FROM finance_fixture_scenario_records WHERE run_id = ? AND stable_id = ?",
+				"SELECT id, occurred_at FROM finance_fixture_scenario_records WHERE run_id = $1 AND stable_id = $2",
 				runID,
 				firstStableID,
 			).Scan(&recordID, &occurredAt)
@@ -938,11 +946,15 @@ func TestStore(t *testing.T) {
 				var recordID string
 				err = sqlDB.QueryRowContext(
 					t.Context(),
-					"SELECT id FROM finance_fixture_scenario_records WHERE run_id = ? AND stable_id = ?",
+					"SELECT id FROM finance_fixture_scenario_records WHERE run_id = $1 AND stable_id = $2",
 					runID,
 					record.StableID,
 				).Scan(&recordID)
 				require.NoError(t, err)
+				require.NoError(t, store.DB().Table((fixtureScenarioRecordModel{}).TableName()).
+					Where("run_id = ?", runID).Delete(&fixtureScenarioRecordModel{}).Error)
+				require.NoError(t, store.DB().Table((fixtureBootstrapRunModel{}).TableName()).
+					Where("id = ?", runID).Delete(&fixtureBootstrapRunModel{}).Error)
 				return recordID
 			}
 
@@ -1031,8 +1043,8 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, storedMatchedFirst.TransferMatchedAt)
 		require.NotNil(t, storedMatchedSecond.TransferMatchedAt)
-		assert.Equal(t, now, *storedMatchedFirst.TransferMatchedAt)
-		assert.Equal(t, now, *storedMatchedSecond.TransferMatchedAt)
+		assert.True(t, now.Equal(*storedMatchedFirst.TransferMatchedAt))
+		assert.True(t, now.Equal(*storedMatchedSecond.TransferMatchedAt))
 
 		firstTransfer.TransferMatchedAt = nil
 		secondTransfer.TransferMatchedAt = nil
@@ -1080,13 +1092,10 @@ func TestStore(t *testing.T) {
 
 	t.Run("returns persistence errors when tables are missing", func(t *testing.T) {
 		fake := faker.New()
-		dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", "missing-tables-"+fake.UUID().V4())
-		sqlDB, err := sqlconn.Open(dsn)
+		store := makeStore(t)
+		sqlDB, err := store.db.DB()
 		require.NoError(t, err)
-		defer func() { require.NoError(t, sqlDB.Close()) }()
-		fakeDatabase, err := NewDatabase(sqlDB, dsn)
-		require.NoError(t, err)
-		store := NewStore(fakeDatabase)
+		require.NoError(t, sqlDB.Close())
 
 		cipher, err := credentials.NewAESGCMCipher(
 			[]byte("0123456789abcdef0123456789abcdef"),
@@ -1235,26 +1244,29 @@ func TestStore(t *testing.T) {
 
 	t.Run("persists one current fx rate per provider pair", func(t *testing.T) {
 		store := makeStore(t)
+		fake := faker.New()
+		frankfurterProvider := "frankfurter-" + fake.UUID().V4()
+		ecbProvider := "ecb-" + fake.UUID().V4()
 		firstDate := time.Date(2026, time.June, 20, 0, 0, 0, 0, time.UTC)
 		secondDate := time.Date(2026, time.June, 21, 0, 0, 0, 0, time.UTC)
 
 		require.NoError(t, store.SaveFXRates(t.Context(), []domain.FXRate{
 			{
-				Provider:      "frankfurter",
+				Provider:      frankfurterProvider,
 				BaseCurrency:  "USD",
 				QuoteCurrency: "PLN",
 				RateDate:      firstDate,
 				Rate:          4.10,
 			},
 			{
-				Provider:      "frankfurter",
+				Provider:      frankfurterProvider,
 				BaseCurrency:  "USD",
 				QuoteCurrency: "PLN",
 				RateDate:      secondDate,
 				Rate:          4.12,
 			},
 			{
-				Provider:      "ecb",
+				Provider:      ecbProvider,
 				BaseCurrency:  "USD",
 				QuoteCurrency: "PLN",
 				RateDate:      firstDate,
@@ -1263,7 +1275,7 @@ func TestStore(t *testing.T) {
 		}))
 
 		require.NoError(t, store.SaveFXRates(t.Context(), []domain.FXRate{{
-			Provider:      "frankfurter",
+			Provider:      frankfurterProvider,
 			BaseCurrency:  "USD",
 			QuoteCurrency: "PLN",
 			RateDate:      firstDate,
@@ -1271,14 +1283,14 @@ func TestStore(t *testing.T) {
 		}}))
 
 		frankfurterRates, err := store.ListFXRates(t.Context(), ListFXRatesParams{
-			Provider:      "frankfurter",
+			Provider:      frankfurterProvider,
 			BaseCurrency:  "USD",
 			QuoteCurrency: "PLN",
 		})
 		require.NoError(t, err)
 		require.Len(t, frankfurterRates, 1)
 		assert.InDelta(t, 4.15, frankfurterRates[0].Rate, 0.00001)
-		assert.Equal(t, firstDate, frankfurterRates[0].RateDate)
+		assert.True(t, firstDate.Equal(frankfurterRates[0].RateDate))
 
 		windowRates, err := store.ListFXRates(t.Context(), ListFXRatesParams{
 			BaseCurrency:  "USD",
@@ -1287,11 +1299,15 @@ func TestStore(t *testing.T) {
 			EndDate:       secondDate,
 		})
 		require.NoError(t, err)
-		require.Len(t, windowRates, 2)
-		assert.Equal(t, "ecb", windowRates[0].Provider)
-		assert.InDelta(t, 4.11, windowRates[0].Rate, 0.00001)
-		assert.Equal(t, "frankfurter", windowRates[1].Provider)
-		assert.InDelta(t, 4.15, windowRates[1].Rate, 0.00001)
+		ratesByProvider := make(map[string]domain.FXRate, 2)
+		for _, rate := range windowRates {
+			if rate.Provider == frankfurterProvider || rate.Provider == ecbProvider {
+				ratesByProvider[rate.Provider] = rate
+			}
+		}
+		require.Len(t, ratesByProvider, 2)
+		assert.InDelta(t, 4.11, ratesByProvider[ecbProvider].Rate, 0.00001)
+		assert.InDelta(t, 4.15, ratesByProvider[frankfurterProvider].Rate, 0.00001)
 
 		_, err = store.ListFXRates(t.Context(), ListFXRatesParams{
 			StartDate: secondDate,
@@ -1300,7 +1316,7 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 
 		err = store.SaveFXRates(t.Context(), []domain.FXRate{{
-			Provider:      "frankfurter",
+			Provider:      frankfurterProvider,
 			BaseCurrency:  "USD",
 			QuoteCurrency: "PLN",
 			Rate:          4.15,
@@ -1312,17 +1328,23 @@ func TestStore(t *testing.T) {
 		store := makeStore(t)
 		fake := faker.New()
 		now := time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC)
+		currency := func(prefix string) string { return strings.ToUpper(prefix + fake.UUID().V4()[:8]) }
+		initialQuoteCurrency := currency("q")
+		updatedQuoteCurrency := currency("r")
+		accountCurrency := currency("a")
+		transactionCurrency := currency("t")
+		secondTenantCurrency := currency("s")
 		activeTenant := domain.Tenant{
 			ID:              "tenant-active-" + fake.UUID().V4(),
 			Name:            "tenant-" + fake.Company().Name(),
-			DisplayCurrency: "PLN",
+			DisplayCurrency: initialQuoteCurrency,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
 		secondActiveTenant := domain.Tenant{
 			ID:              "tenant-second-active-" + fake.UUID().V4(),
 			Name:            "tenant-" + fake.Company().Name(),
-			DisplayCurrency: "PLN",
+			DisplayCurrency: initialQuoteCurrency,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -1347,6 +1369,15 @@ func TestStore(t *testing.T) {
 			_, err := store.SaveTenant(t.Context(), secondActiveTenant)
 			return err
 		}())
+		t.Cleanup(func() {
+			cleanupAt := now.Add(3 * time.Minute)
+			for _, tenant := range []domain.Tenant{activeTenant, secondActiveTenant} {
+				tenant.ArchivedAt = &cleanupAt
+				tenant.UpdatedAt = cleanupAt
+				_, cleanupErr := store.SaveTenant(context.WithoutCancel(t.Context()), tenant)
+				require.NoError(t, cleanupErr)
+			}
+		})
 		saveAccount := func(tenantID string, currency string) string {
 			t.Helper()
 			account := domain.Account{
@@ -1362,10 +1393,10 @@ func TestStore(t *testing.T) {
 			require.NoError(t, err)
 			return account.ID
 		}
-		accountID := saveAccount(activeTenant.ID, "EUR")
-		_ = saveAccount(activeTenant.ID, "PLN")
-		_ = saveAccount(archivedTenant.ID, "USD")
-		_ = saveAccount(secondActiveTenant.ID, "USD")
+		accountID := saveAccount(activeTenant.ID, accountCurrency)
+		_ = saveAccount(activeTenant.ID, initialQuoteCurrency)
+		_ = saveAccount(archivedTenant.ID, currency("x"))
+		_ = saveAccount(secondActiveTenant.ID, secondTenantCurrency)
 		saveTransaction := func(currency string) {
 			t.Helper()
 			_, err := store.SaveTransaction(t.Context(), domain.Transaction{
@@ -1384,28 +1415,40 @@ func TestStore(t *testing.T) {
 			})
 			require.NoError(t, err)
 		}
-		saveTransaction("GBP")
-		saveTransaction("GBP")
+		saveTransaction(transactionCurrency)
+		saveTransaction(transactionCurrency)
 
 		discovery := NewFXPairDiscoveryStore(&Database{db: store.db})
 		pairs, err := discovery.ListRequiredFXPairs(t.Context())
 		require.NoError(t, err)
+		initialPairs := make([]RequiredFXPair, 0, len(pairs))
+		for _, pair := range pairs {
+			if pair.QuoteCurrency == initialQuoteCurrency {
+				initialPairs = append(initialPairs, pair)
+			}
+		}
 		assert.Equal(t, []RequiredFXPair{
-			{BaseCurrency: "EUR", QuoteCurrency: "PLN"},
-			{BaseCurrency: "GBP", QuoteCurrency: "PLN"},
-			{BaseCurrency: "USD", QuoteCurrency: "PLN"},
-		}, pairs)
+			{BaseCurrency: accountCurrency, QuoteCurrency: initialQuoteCurrency},
+			{BaseCurrency: secondTenantCurrency, QuoteCurrency: initialQuoteCurrency},
+			{BaseCurrency: transactionCurrency, QuoteCurrency: initialQuoteCurrency},
+		}, initialPairs)
 
-		activeTenant.DisplayCurrency = "EUR"
+		activeTenant.DisplayCurrency = updatedQuoteCurrency
 		activeTenant.UpdatedAt = now.Add(2 * time.Minute)
 		_, err = store.SaveTenant(t.Context(), activeTenant)
 		require.NoError(t, err)
 		pairs, err = discovery.ListRequiredFXPairs(t.Context())
 		require.NoError(t, err)
+		updatedPairs := make([]RequiredFXPair, 0, len(pairs))
+		for _, pair := range pairs {
+			if pair.QuoteCurrency == updatedQuoteCurrency {
+				updatedPairs = append(updatedPairs, pair)
+			}
+		}
 		assert.Equal(t, []RequiredFXPair{
-			{BaseCurrency: "GBP", QuoteCurrency: "EUR"},
-			{BaseCurrency: "PLN", QuoteCurrency: "EUR"},
-			{BaseCurrency: "USD", QuoteCurrency: "PLN"},
-		}, pairs)
+			{BaseCurrency: accountCurrency, QuoteCurrency: updatedQuoteCurrency},
+			{BaseCurrency: initialQuoteCurrency, QuoteCurrency: updatedQuoteCurrency},
+			{BaseCurrency: transactionCurrency, QuoteCurrency: updatedQuoteCurrency},
+		}, updatedPairs)
 	})
 }
