@@ -307,6 +307,25 @@ suite-level standard `APP_` overrides when host or port inputs differ. All
 ordinary tagged tests use the prepared fixed prefixes and runtime role; only
 bootstrap has migration privileges.
 
+The app fixtures that construct runtime database storage are an explicit
+compatibility prerequisite to removing runtime SQLite support. Before the
+runtime production cutover, the Engine, `cmd/sumweave` main and
+runtime-resolution, application-composition database-runtime, and wireup
+migration/jobs/HTTP cases move together to the tagged app lane. They use the
+bootstrap-prepared application and `sumweave_runtime_` schemas and MUST NOT run
+their own migration. Detailed schema-shape or repeat-migration assertions that
+duplicate the task 1.1 bootstrap migration smoke are retired; database-free
+configuration, validation, lifecycle, and file-storage cases stay routine. The
+tagged app target and PostgreSQL-unavailable repository completion protocol must
+both pass, with unchanged coverage gates, before runtime SQLite production code
+is removed.
+
+This early compatibility slice does not complete the app test parent task. The
+later app test chunk owns every other database-backed command/config, auth,
+jobs, finance-registration, controller, Engine, and wireup persistence or
+composition case not included in the listed runtime-database fixture set. It
+must not repeat or claim the prerequisite fixture conversion a second time.
+
 All database-backed tests use the prepared test database, never the regular
 local database. They create randomized IDs and fresh users, tenants, sessions,
 jobs, provider records, and other domain state for each case. Reads and
@@ -412,19 +431,25 @@ not create an intermediate supported release.
 2. Preserve database-free routine targets and their lane-specific 90% coverage
    gate, add full tagged 90% coverage profiles, and move core database
    persistence and composition cases behind the explicit `postgres_test` tag.
-3. Convert runtime, finance, and app tagged fixtures to the prepared shared test
-   database with runtime-role credentials, fixed prefixes, randomized identities,
-   scoped reads, and no per-test migrations.
-4. Simplify runtime, finance, auth, jobs, and appdispatch to PostgreSQL-only
+3. Convert runtime tagged fixtures, then convert the app fixtures that construct
+   runtime database storage as an independently reviewed prerequisite, to the
+   prepared shared test database with runtime-role credentials, fixed prefixes,
+   randomized identities, scoped reads, and no per-test migrations.
+4. Simplify runtime to PostgreSQL-only only after that app compatibility
+   prerequisite passes both the tagged app target and the PostgreSQL-unavailable
+   repository completion protocol.
+5. Convert finance tagged fixtures and the remaining app tagged persistence and
+   composition fixtures without repeating the prerequisite app fixture slice.
+6. Simplify finance, auth, jobs, and appdispatch to PostgreSQL-only
    implementations and delete SQLite-specific branches and files without
    changing timestamp normalization.
-5. Add the manual-dispatch PostgreSQL workflow while leaving reusable routine CI
+7. Add the manual-dispatch PostgreSQL workflow while leaving reusable routine CI
    free of PostgreSQL setup or dependencies.
-6. Tidy the three core Go modules and synchronize workspace sums only as needed;
+8. Tidy the three core Go modules and synchronize workspace sums only as needed;
    verify those core dependency graphs contain no SQLite packages.
-7. Update local defaults, PM2/setup guidance, active specs, architecture, manual
+9. Update local defaults, PM2/setup guidance, active specs, architecture, manual
    E2E docs, and agent rules to describe the routine and non-routine paths.
-8. Run the mandatory repository completion protocol without PostgreSQL, then run
+10. Run the mandatory repository completion protocol without PostgreSQL, then run
    `make postgres-verify` as the additional database-surface check. Production
    runs the existing
    `db-migrate` command against its current PostgreSQL database before process
