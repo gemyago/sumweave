@@ -11,8 +11,20 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	"github.com/gemyago/sumweave/finance/persistence"
-	"github.com/gemyago/sumweave/runtime/agent"
 )
+
+// AgentRuntimeMigrator applies agent-runtime schema migrations.
+type AgentRuntimeMigrator interface {
+	Migrate() error
+}
+
+// AgentRuntimeMigratorFunc adapts a migration function for wireup.
+type AgentRuntimeMigratorFunc func() error
+
+// Migrate applies the configured agent-runtime migration.
+func (f AgentRuntimeMigratorFunc) Migrate() error {
+	return f()
+}
 
 type DatabaseMigrationDeps struct {
 	RootLogger                      *slog.Logger
@@ -24,6 +36,7 @@ type DatabaseMigrationDeps struct {
 	ApplicationSQLDB                *sql.DB
 	AuthUsers                       *auth.UserStore
 	AuthRefreshTokens               *auth.RefreshTokenStore
+	AgentRuntimeMigrator            AgentRuntimeMigrator
 }
 
 // DatabaseMigrator runs the explicit schema setup flow for application subsystems.
@@ -37,6 +50,7 @@ type DatabaseMigrator struct {
 	applicationSQLDB                *sql.DB
 	authUsers                       *auth.UserStore
 	authRefreshTokens               *auth.RefreshTokenStore
+	agentRuntimeMigrator            AgentRuntimeMigrator
 }
 
 // NewDatabaseMigrator constructs the migration runner from direct dependencies.
@@ -51,6 +65,7 @@ func NewDatabaseMigrator(deps DatabaseMigrationDeps) *DatabaseMigrator {
 		applicationSQLDB:                deps.ApplicationSQLDB,
 		authUsers:                       deps.AuthUsers,
 		authRefreshTokens:               deps.AuthRefreshTokens,
+		agentRuntimeMigrator:            deps.AgentRuntimeMigrator,
 	}
 }
 
@@ -92,43 +107,11 @@ func (m *DatabaseMigrator) migrateAgentRuntime(_ context.Context) error {
 	if m.agentRuntimeStorageType != storageTypeDatabase {
 		return nil
 	}
-	providers, err := agent.NewDatabaseProvidersConfigService(
-		m.agentRuntimeDatabaseDSN,
-		m.rootLogger,
-		m.agentRuntimeDatabaseTablePrefix,
-	)
-	if err != nil {
-		return fmt.Errorf("create providers config service: %w", err)
+	if m.agentRuntimeMigrator == nil {
+		return errors.New("agent runtime migrator is required")
 	}
-	profiles, err := agent.NewDatabaseAgentProfilesService(
-		m.agentRuntimeDatabaseDSN,
-		m.rootLogger,
-		m.agentRuntimeDatabaseTablePrefix,
-	)
-	if err != nil {
-		return fmt.Errorf("create database agent profiles service: %w", err)
-	}
-	runner, err := agent.NewRunner(
-		agent.RunnerArgs{ProvidersConfigService: providers, AgentProfilesService: profiles},
-		agent.WithLogger(m.rootLogger),
-		agent.WithDatabaseStorage(m.agentRuntimeDatabaseDSN),
-		agent.WithDatabaseTablePrefix(m.agentRuntimeDatabaseTablePrefix),
-	)
-	if err != nil {
-		return fmt.Errorf("create agent runner: %w", err)
-	}
-	if err = runner.AutoMigrate(); err != nil {
-		return fmt.Errorf("auto migrate sessions database: %w", err)
-	}
-	if err = profiles.AutoMigrate(); err != nil {
-		return fmt.Errorf("auto migrate agent profiles database: %w", err)
-	}
-	migrator, ok := providers.(interface{ AutoMigrate() error })
-	if !ok {
-		return errors.New("database providers config service does not support auto migration")
-	}
-	if err = migrator.AutoMigrate(); err != nil {
-		return fmt.Errorf("auto migrate providers config database: %w", err)
+	if err := m.agentRuntimeMigrator.Migrate(); err != nil {
+		return fmt.Errorf("migrate agent runtime: %w", err)
 	}
 	return nil
 }

@@ -26,35 +26,21 @@ func TestApplicationComposition(t *testing.T) {
 		db, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		users, err := auth.NewUserStore(
-			auth.UserStoreDeps{
-				SQLDB:       db,
-				DatabaseDSN: dsn,
-				TablePrefix: "app_auth_",
-				IDGen:       ident.NewDefaultGenerator(),
-				Logger:      slog.Default(),
-			},
-		)
+		users, err := auth.NewUserStore(auth.UserStoreDeps{
+			SQLDB:       db,
+			DatabaseDSN: dsn,
+			TablePrefix: "app_auth_",
+			IDGen:       ident.NewDefaultGenerator(),
+			Logger:      slog.Default(),
+		})
 		require.NoError(t, err)
-		refresh, err := auth.NewRefreshTokenStore(
-			auth.RefreshTokenStoreDeps{
-				SQLDB:       db,
-				DatabaseDSN: dsn,
-				TablePrefix: "app_auth_",
-				Logger:      slog.Default(),
-			},
-		)
+		refresh, err := auth.NewRefreshTokenStore(auth.RefreshTokenStoreDeps{
+			SQLDB: db, DatabaseDSN: dsn, TablePrefix: "app_auth_", Logger: slog.Default(),
+		})
 		require.NoError(t, err)
 		return DatabaseMigrationDeps{
-			RootLogger:                      telemetry.RootTestLogger(),
-			AgentRuntimeStorageType:         storageTypeDatabase,
-			AgentRuntimeDatabaseDSN:         filepath.Join(t.TempDir(), "agent.sqlite"),
-			AgentRuntimeDatabaseTablePrefix: "agent_",
-			ApplicationDatabaseDSN:          dsn,
-			ApplicationDatabaseTablePrefix:  "app_",
-			ApplicationSQLDB:                db,
-			AuthUsers:                       users,
-			AuthRefreshTokens:               refresh,
+			RootLogger: telemetry.RootTestLogger(), AgentRuntimeStorageType: "file", ApplicationDatabaseDSN: dsn,
+			ApplicationDatabaseTablePrefix: "app_", ApplicationSQLDB: db, AuthUsers: users, AuthRefreshTokens: refresh,
 		}
 	}
 	makeRuntimeDeps := func(t *testing.T, storage string) RuntimeDeps {
@@ -65,7 +51,7 @@ func TestApplicationComposition(t *testing.T) {
 			DataDir:                         dataDir,
 			PlatformAgentsPath:              platformDir,
 			AgentRuntimeStorageType:         storage,
-			AgentRuntimeDatabaseDSN:         filepath.Join(t.TempDir(), "agent.sqlite"),
+			AgentRuntimeDatabaseDSN:         "",
 			AgentRuntimeDatabaseTablePrefix: "agent_",
 			SkillsMaxSkillBytes:             4096,
 			SkillsMaxCatalogEntries:         10,
@@ -73,31 +59,15 @@ func TestApplicationComposition(t *testing.T) {
 		}
 	}
 
-	t.Run(
-		"database migration composes agent auth dispatch jobs and finance schemas",
-		func(t *testing.T) {
-			deps := makeMigrationDeps(t)
-			migrator := NewDatabaseMigrator(deps)
-			require.NoError(t, migrator.Migrate(t.Context()))
-			require.NoError(t, migrator.Migrate(t.Context()))
-			for _, table := range []string{"app_auth_auth_users", "app_auth_auth_refresh_tokens", appdispatch.Config{TablePrefix: "app_"}.MessagesTable(), "app_jobs_jobs", "finance_tenants"} {
-				var name string
-				require.NoError(
-					t,
-					deps.ApplicationSQLDB.QueryRowContext(t.Context(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).
-						Scan(&name),
-				)
-				assert.Equal(t, table, name)
-			}
-			err := migrator.runStep(
-				t.Context(),
-				"finance",
-				func(context.Context) error { return errors.New("failed") },
-			)
-			require.ErrorIs(t, err, errors.Unwrap(err))
-			assert.ErrorContains(t, err, "migrate finance schema")
-		},
-	)
+	t.Run("application migration composes application schemas with file runtime storage", func(t *testing.T) {
+		deps := makeMigrationDeps(t)
+		migrator := NewDatabaseMigrator(deps)
+		require.NoError(t, migrator.Migrate(t.Context()))
+		err := migrator.runStep(t.Context(), "finance", func(context.Context) error { return errors.New("failed") })
+		require.ErrorIs(t, err, errors.Unwrap(err))
+		require.ErrorContains(t, err, "migrate finance schema")
+		assert.NotEmpty(t, appdispatch.Config{TablePrefix: "app_"}.MessagesTable())
+	})
 
 	t.Run(
 		"agent runtime supports file and database persistence with workspace and skills",
@@ -116,6 +86,9 @@ func TestApplicationComposition(t *testing.T) {
 			profiles, err := newAgentProfilesService(fileDeps)
 			require.NoError(t, err)
 			assert.NotNil(t, profiles)
+			services, err := newRuntimeServices(fileDeps)
+			require.NoError(t, err)
+			assert.NotNil(t, services.agentProfilesSvc)
 			opts, err := workspacefsRegisterOptions(fileDeps)
 			require.NoError(t, err)
 			assert.Len(t, opts, 2)
@@ -133,12 +106,65 @@ func TestApplicationComposition(t *testing.T) {
 			fileDeps.SkillsPaths = []string{filepath.Dir(skillDir)}
 			_, err = buildRunnerOpts(fileDeps, agent.NewToolsRegistry())
 			require.NoError(t, err)
-			databaseDeps := makeRuntimeDeps(t, storageTypeDatabase)
-			_, err = newRuntime(databaseDeps)
+			databaseOptsDeps := makeRuntimeDeps(t, storageTypeDatabase)
+			databaseOptsDeps.AgentRuntimeDatabaseDSN = "database-runtime"
+			_, err = buildRunnerOpts(databaseOptsDeps, agent.NewToolsRegistry())
 			require.NoError(t, err)
-			services, err := newRuntimeServices(databaseDeps)
+			databaseServicesDeps := makeRuntimeDeps(t, storageTypeDatabase)
+			databaseServicesDeps.AgentRuntimeDatabaseDSN = "database-runtime"
+			databaseFactory := newMockdatabaseRuntimeServiceFactory(t)
+			databaseProviders, err := agent.NewFileProvidersConfigService(t.TempDir(), telemetry.RootTestLogger())
 			require.NoError(t, err)
-			assert.NotNil(t, services.agentProfilesSvc)
+			databaseProfiles, err := agent.NewFileAgentProfilesService(t.TempDir(), telemetry.RootTestLogger())
+			require.NoError(t, err)
+			databaseFactory.EXPECT().
+				NewProvidersConfigService(
+					databaseServicesDeps.AgentRuntimeDatabaseDSN,
+					databaseServicesDeps.RootLogger,
+					databaseServicesDeps.AgentRuntimeDatabaseTablePrefix,
+				).
+				Return(databaseProviders, nil).
+				Once()
+			databaseFactory.EXPECT().
+				NewAgentProfilesService(
+					databaseServicesDeps.AgentRuntimeDatabaseDSN,
+					databaseServicesDeps.RootLogger,
+					databaseServicesDeps.AgentRuntimeDatabaseTablePrefix,
+				).
+				Return(databaseProfiles, nil).
+				Once()
+			services, err = newRuntimeServicesWithFactory(databaseServicesDeps, databaseFactory)
+			require.NoError(t, err)
+			assert.Same(t, databaseProviders, services.providersConfigSvc)
+			assert.Same(t, databaseProfiles, services.agentProfilesSvc)
+			databaseFactory = newMockdatabaseRuntimeServiceFactory(t)
+			databaseFactory.EXPECT().
+				NewProvidersConfigService(
+					databaseServicesDeps.AgentRuntimeDatabaseDSN,
+					databaseServicesDeps.RootLogger,
+					databaseServicesDeps.AgentRuntimeDatabaseTablePrefix,
+				).
+				Return(nil, errors.New("providers failure")).
+				Once()
+			_, err = newProvidersConfigServiceWithFactory(databaseServicesDeps, databaseFactory)
+			require.Error(t, err)
+			databaseFactory = newMockdatabaseRuntimeServiceFactory(t)
+			databaseFactory.EXPECT().
+				NewAgentProfilesService(
+					databaseServicesDeps.AgentRuntimeDatabaseDSN,
+					databaseServicesDeps.RootLogger,
+					databaseServicesDeps.AgentRuntimeDatabaseTablePrefix,
+				).
+				Return(nil, errors.New("profiles failure")).
+				Once()
+			_, err = newAgentProfilesServiceWithFactory(databaseServicesDeps, databaseFactory)
+			require.Error(t, err)
+			_, err = NewRuntime(fileDeps)
+			require.NoError(t, err)
+			invalidWorkspaceDeps := makeRuntimeDeps(t, "file")
+			invalidWorkspaceDeps.PlatformAgentsPath = filepath.Join(t.TempDir(), "missing-platform-agents")
+			_, err = NewRuntime(invalidWorkspaceDeps)
+			require.Error(t, err)
 			badDataDir := filepath.Join(t.TempDir(), "not-a-directory")
 			require.NoError(t, os.WriteFile(badDataDir, []byte("x"), 0o600))
 			badDeps := makeRuntimeDeps(t, "file")

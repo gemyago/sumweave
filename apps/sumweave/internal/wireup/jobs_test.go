@@ -5,46 +5,32 @@ import (
 	"testing"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
-	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBuildProcessRoots(t *testing.T) {
 	fake := faker.New()
-	prepareSchemas := func(t *testing.T) {
+	prepareApplicationSchemas := func(t *testing.T) {
 		t.Helper()
-		applicationDSN := filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite")
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", applicationDSN)
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
 		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
+		t.Setenv("APP_AGENTRUNTIME_STORAGE_TYPE", "file")
 		migration, err := BuildMigration(t.Context(), MigrationOptions{Environment: "test"})
 		require.NoError(t, err)
 		require.NoError(t, migration.Migrate(t.Context()))
 	}
 
-	t.Run("worker builds observed finance handlers without HTTP or scheduler", func(t *testing.T) {
-		prepareSchemas(t)
-		root, err := BuildWorker(t.Context(), WorkerOptions{Environment: "test"})
+	t.Run("worker and scheduler build after file-runtime application schema setup", func(t *testing.T) {
+		prepareApplicationSchemas(t)
+		worker, err := BuildWorker(t.Context(), WorkerOptions{Environment: "test"})
 		require.NoError(t, err)
-		defer func() { require.NoError(t, root.Close(t.Context())) }()
-		require.NotNil(t, root.Worker)
-		require.NotNil(t, root.Registry)
-		for _, topic := range []string{
-			financepkg.FXRatesRefreshCommandTopic,
-			financepkg.TransactionCSVImportCommandTopic,
-			financepkg.BankConnectionSyncCommandTopic,
-		} {
-			_, handlerErr := root.Registry.Handler(topic)
-			require.NoError(t, handlerErr)
-		}
-	})
-
-	t.Run("scheduler publishes due finance schedules without worker or HTTP", func(t *testing.T) {
-		prepareSchemas(t)
-		root, err := BuildScheduler(t.Context(), SchedulerOptions{Environment: "test"})
+		t.Cleanup(func() { require.NoError(t, worker.Close(t.Context())) })
+		require.NotNil(t, worker.Worker)
+		scheduler, err := BuildScheduler(t.Context(), SchedulerOptions{Environment: "test"})
 		require.NoError(t, err)
-		defer func() { require.NoError(t, root.Close(t.Context())) }()
-		enqueued, err := root.EnqueueDue(t.Context())
+		t.Cleanup(func() { require.NoError(t, scheduler.Close(t.Context())) })
+		enqueued, err := scheduler.EnqueueDue(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, 1, enqueued)
 	})

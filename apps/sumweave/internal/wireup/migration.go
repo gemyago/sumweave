@@ -13,6 +13,7 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
+	"github.com/gemyago/sumweave/runtime/agent"
 )
 
 const localEnvironment = "local"
@@ -216,6 +217,47 @@ func buildMigration(
 			ApplicationSQLDB:                database,
 			AuthUsers:                       userStore,
 			AuthRefreshTokens:               refreshTokenStore,
+			AgentRuntimeMigrator: internal.AgentRuntimeMigratorFunc(func() error {
+				providers, providersErr := agent.NewDatabaseProvidersConfigService(
+					rootConfig.AgentRuntime.Database.DSN,
+					rootLogger,
+					rootConfig.AgentRuntime.Database.TablePrefix,
+				)
+				if providersErr != nil {
+					return fmt.Errorf("create providers config service: %w", providersErr)
+				}
+				profiles, profilesErr := agent.NewDatabaseAgentProfilesService(
+					rootConfig.AgentRuntime.Database.DSN,
+					rootLogger,
+					rootConfig.AgentRuntime.Database.TablePrefix,
+				)
+				if profilesErr != nil {
+					return fmt.Errorf("create database agent profiles service: %w", profilesErr)
+				}
+				runner, runnerErr := agent.NewRunner(
+					agent.RunnerArgs{ProvidersConfigService: providers, AgentProfilesService: profiles},
+					agent.WithLogger(rootLogger),
+					agent.WithDatabaseStorage(rootConfig.AgentRuntime.Database.DSN),
+					agent.WithDatabaseTablePrefix(rootConfig.AgentRuntime.Database.TablePrefix),
+				)
+				if runnerErr != nil {
+					return fmt.Errorf("create agent runner: %w", runnerErr)
+				}
+				if migrateErr := runner.AutoMigrate(); migrateErr != nil {
+					return fmt.Errorf("auto migrate sessions database: %w", migrateErr)
+				}
+				if migrateErr := profiles.AutoMigrate(); migrateErr != nil {
+					return fmt.Errorf("auto migrate agent profiles database: %w", migrateErr)
+				}
+				migrator, ok := providers.(interface{ AutoMigrate() error })
+				if !ok {
+					return errors.New("database providers config service does not support auto migration")
+				}
+				if migrateErr := migrator.AutoMigrate(); migrateErr != nil {
+					return fmt.Errorf("auto migrate providers config database: %w", migrateErr)
+				}
+				return nil
+			}),
 		}),
 		shutdownHooks: shutdownHooks,
 	}, nil

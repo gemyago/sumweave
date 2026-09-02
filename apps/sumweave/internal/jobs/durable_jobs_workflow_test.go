@@ -640,6 +640,70 @@ func TestObservedSubscriptions(t *testing.T) {
 		},
 	)
 
+	t.Run("covers worker error and recovery branches without transport timing", func(t *testing.T) {
+		jobID := fake.UUID().V4()
+		deliveryErr := runningJobDeliveryError{jobID: jobID}
+		assert.Contains(t, deliveryErr.Error(), jobID)
+		deliveryErr.NonRetryable()
+
+		exhausted := exhaustedRetryError{err: errors.New(fake.UUID().V4())}
+		require.Error(t, exhausted)
+		require.NoError(t, exhausted.OnRetriesExhausted())
+
+		tracker := &runOnceTracker{}
+		tracker.startDelivery(jobID)
+		tracker.startDelivery(jobID)
+		tracker.finishDelivery(jobID)
+		assert.False(t, tracker.isIdle())
+		tracker.finishDelivery(jobID)
+		assert.True(t, tracker.isIdle())
+
+		now := time.Now()
+		store := newMockworkerStore(t)
+		worker := &Worker{
+			store: store, logger: slog.New(slog.DiscardHandler), clock: func() time.Time { return now },
+			claims: map[string]Job{jobID: {ID: jobID}},
+		}
+		store.EXPECT().RenewRunning(mock.Anything, Job{ID: jobID}, now).Return(errors.New(fake.UUID().V4())).Once()
+		worker.renewRunningClaims(t.Context())
+
+		terminalStore := newMockworkerStore(t)
+		terminalWorker := &Worker{store: terminalStore, logger: slog.New(slog.DiscardHandler)}
+		require.Error(t, terminalWorker.persistTerminal(t.Context(), jobID, terminalJobState{}, nil))
+		state := newSucceededTerminalJobState(fake.UUID().V4(), now)
+		terminalStore.EXPECT().persistTerminalState(mock.Anything, Job{ID: jobID}, state).Return(ErrJobClaimLost).Once()
+		require.ErrorIs(t, terminalWorker.persistTerminalState(t.Context(), Job{ID: jobID}, state), ErrJobClaimLost)
+
+		registry := NewRegistry()
+		topic := "requeue-error." + fake.UUID().V4()
+		register(t, registry, topic, func(context.Context, Job, command) error {
+			return errors.New(fake.UUID().V4())
+		})
+		queued := Job{ID: jobID, JobType: "finance.test", Status: JobStatusQueued}
+		claimed := queued
+		claimed.Status = JobStatusRunning
+		requeueStore := newMockworkerStore(t)
+		requeueWorker := &Worker{
+			store: requeueStore, registry: registry, logger: slog.New(slog.DiscardHandler),
+			clock: func() time.Time { return now }, workerID: fake.UUID().V4(),
+		}
+		requeueStore.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&queued, nil).Once()
+		requeueStore.EXPECT().
+			ClaimQueued(mock.Anything, jobID, requeueWorker.workerID, now).
+			Return(&claimed, nil).
+			Once()
+		requeueStore.EXPECT().
+			RequeueRunning(mock.Anything, claimed, now).
+			Return(errors.New(fake.UUID().V4())).
+			Once()
+		require.Error(t, requeueWorker.processObserved(
+			t.Context(), registry.Handlers()[0], appdispatch.Message{
+				ID:      jobID,
+				Payload: []byte(`{"value":"` + fake.UUID().V4() + `","requester":"` + fake.UUID().V4() + `"}`),
+			},
+		))
+	})
+
 	t.Run(
 		"keeps registry, read service, and lifecycle storage boundaries explicit",
 		func(t *testing.T) {

@@ -43,6 +43,10 @@ packages:
   github.com/gemyago/sumweave/apps/sumweave/internal/jobs:
     interfaces:
       workerStore:
+  github.com/gemyago/sumweave/apps/sumweave/internal:
+    interfaces:
+      AgentRuntimeMigrator:
+      databaseRuntimeServiceFactory:
   github.com/gemyago/sumweave/apps/sumweave/internal/financeapp:
     interfaces:
       fxRefreshJobService:

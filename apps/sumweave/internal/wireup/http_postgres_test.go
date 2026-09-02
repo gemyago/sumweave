@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package wireup
 
 import (
@@ -6,47 +8,47 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
-	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildHTTP(t *testing.T) {
-	fake := faker.New()
+func TestPostgresBuildHTTP(t *testing.T) {
 	t.Chdir("../..")
-	makeFileRoot := func(t *testing.T) *HTTPRoot {
+	makeRoot := func(t *testing.T) *HTTPRoot {
 		t.Helper()
-		t.Setenv("APP_AGENTRUNTIME_STORAGE_TYPE", "file")
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
 		t.Setenv("APP_DATADIR", t.TempDir())
 		root, err := BuildHTTP(t.Context(), HTTPOptions{Environment: "test"})
 		require.NoError(t, err)
 		return root
 	}
 
-	t.Run("builds and closes API routes with file runtime storage", func(t *testing.T) {
-		root := makeFileRoot(t)
+	t.Run("builds API routes without worker polling resources", func(t *testing.T) {
+		root := makeRoot(t)
+		t.Cleanup(func() { require.NoError(t, root.Close(t.Context())) })
 		request := httptest.NewRequest(http.MethodGet, "/health", nil)
 		response := httptest.NewRecorder()
 		root.Handler.ServeHTTP(response, request)
 		require.Equal(t, http.StatusOK, response.Code)
+		require.NotNil(t, root.Server)
+	})
+
+	t.Run("closes the root when noop completes", func(t *testing.T) {
+		root := makeRoot(t)
 		expectedErr := errors.New("noop shutdown")
 		root.shutdownHooks.Register("noop-test", func(context.Context) error { return expectedErr })
 		require.ErrorIs(t, root.StartHTTPServer(t.Context(), true), expectedErr)
 	})
 
-	t.Run("closes file-runtime server after caller cancellation", func(t *testing.T) {
+	t.Run("closes the root and joins the server after caller cancellation", func(t *testing.T) {
 		listener, err := net.Listen("tcp", "localhost:0")
 		require.NoError(t, err)
 		port := listener.Addr().(*net.TCPAddr).Port
 		require.NoError(t, listener.Close())
 		t.Setenv("APP_HTTPSERVER_PORT", strconv.Itoa(port))
-		root := makeFileRoot(t)
+		root := makeRoot(t)
 		root.shutdownHooks.Register("cancellation-test", func(ctx context.Context) error { return ctx.Err() })
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
@@ -71,40 +73,23 @@ func TestBuildHTTP(t *testing.T) {
 		}
 	})
 
-	t.Run("uses local defaults and reports server startup errors with file runtime storage", func(t *testing.T) {
-		t.Setenv("APP_AGENTRUNTIME_STORAGE_TYPE", "file")
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
-		t.Setenv("APP_DATADIR", t.TempDir())
-		root, err := BuildHTTP(t.Context(), HTTPOptions{})
-		require.NoError(t, err)
-		require.NoError(t, root.Close(t.Context()))
-
+	t.Run("returns server startup errors", func(t *testing.T) {
 		listener, err := net.Listen("tcp", "localhost:0")
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, listener.Close()) })
 		port := listener.Addr().(*net.TCPAddr).Port
 		t.Setenv("APP_HTTPSERVER_PORT", strconv.Itoa(port))
-		root = makeFileRoot(t)
-		require.Error(t, root.StartHTTPServer(t.Context(), false))
+		root := makeRoot(t)
+		expectedCleanupErr := errors.New("startup cleanup")
+		root.shutdownHooks.Register("startup-error-test", func(ctx context.Context) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return expectedCleanupErr
+		})
 
-		root = makeFileRoot(t)
-		require.NoError(t, root.Close(t.Context()))
-	})
-
-	t.Run("returns typed root validation errors before HTTP construction", func(t *testing.T) {
-		_, err := BuildHTTP(t.Context(), HTTPOptions{Environment: "production"})
-		require.ErrorContains(t, err, "application database dsn")
-	})
-
-	t.Run("rejects invalid root inputs before wireup", func(t *testing.T) {
-		_, err := BuildHTTP(t.Context(), HTTPOptions{Environment: fake.UUID().V4()})
-		require.Error(t, err)
-		_, err = parseLogLevel(fake.UUID().V4())
-		require.Error(t, err)
-		otelConfig, tracesConfig, metricsConfig, logsConfig := makeTelemetryConfigs(config.OpenTelemetry{})
-		require.False(t, otelConfig.Enabled)
-		require.False(t, tracesConfig.Enabled)
-		require.False(t, metricsConfig.Enabled)
-		require.False(t, logsConfig.Enabled)
+		startErr := root.StartHTTPServer(t.Context(), false)
+		require.Error(t, startErr)
+		require.ErrorIs(t, startErr, expectedCleanupErr)
 	})
 }

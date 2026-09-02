@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -103,22 +104,39 @@ func TestFinalDatabaseMigratorCoverage(t *testing.T) {
 		require.ErrorContains(t, err, "migrate authentication schema")
 	})
 
-	t.Run("reports unavailable database agent persistence", func(t *testing.T) {
+	t.Run("reports an unavailable database runtime migrator", func(t *testing.T) {
 		migrator := &DatabaseMigrator{rootLogger: slog.Default(), agentRuntimeStorageType: storageTypeDatabase}
 		require.Error(t, migrator.migrateAgentRuntime(t.Context()))
 	})
 
-	t.Run("wraps agent session migration failures on readonly persistence", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "agent-readonly.sqlite")
-		require.NoError(t, os.WriteFile(path, nil, 0o600))
+	t.Run("delegates database runtime migration", func(t *testing.T) {
+		agentRuntimeMigrator := NewMockAgentRuntimeMigrator(t)
 		migrator := &DatabaseMigrator{
-			rootLogger:                      slog.Default(),
-			agentRuntimeStorageType:         storageTypeDatabase,
-			agentRuntimeDatabaseDSN:         "file:" + path + "?mode=ro",
-			agentRuntimeDatabaseTablePrefix: "agent_",
+			rootLogger:              slog.Default(),
+			agentRuntimeStorageType: storageTypeDatabase,
+			agentRuntimeMigrator:    agentRuntimeMigrator,
 		}
-		require.Error(t, migrator.migrateAgentRuntime(t.Context()))
+		agentRuntimeMigrator.EXPECT().Migrate().Return(nil).Once()
+		require.NoError(t, migrator.migrateAgentRuntime(t.Context()))
 	})
+
+	t.Run("wraps database runtime migration failures", func(t *testing.T) {
+		migrationErr := errors.New(fake.UUID().V4())
+		agentRuntimeMigrator := NewMockAgentRuntimeMigrator(t)
+		migrator := &DatabaseMigrator{
+			rootLogger:              slog.Default(),
+			agentRuntimeStorageType: storageTypeDatabase,
+			agentRuntimeMigrator:    agentRuntimeMigrator,
+		}
+		agentRuntimeMigrator.EXPECT().Migrate().Return(migrationErr).Once()
+		require.ErrorIs(t, migrator.migrateAgentRuntime(t.Context()), migrationErr)
+	})
+
+	t.Run("adapts runtime migration functions", func(t *testing.T) {
+		migrationErr := errors.New(fake.UUID().V4())
+		require.ErrorIs(t, AgentRuntimeMigratorFunc(func() error { return migrationErr }).Migrate(), migrationErr)
+	})
+
 	t.Run("wraps app dispatch and jobs construction errors", func(t *testing.T) {
 		migrator := &DatabaseMigrator{}
 		migrator.rootLogger = slog.Default()
