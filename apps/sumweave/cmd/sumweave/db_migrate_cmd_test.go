@@ -81,6 +81,7 @@ func TestMigrationOptionsFromRoot(t *testing.T) {
 		_, err := resolveDatabaseMigrator(&cobra.Command{})
 		require.Error(t, err)
 
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", "")
 		root := makeRoot(t)
 		require.NoError(t, root.PersistentFlags().Set("env", "production"))
 		_, err = resolveDatabaseMigrator(root)

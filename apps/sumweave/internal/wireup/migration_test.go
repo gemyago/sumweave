@@ -127,6 +127,8 @@ func TestBuildMigration(t *testing.T) {
 		_, err := BuildMigration(t.Context(), MigrationOptions{Environment: fake.UUID().V4()})
 		require.Error(t, err)
 
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", "")
+		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", "")
 		_, err = BuildMigration(t.Context(), MigrationOptions{Environment: "production"})
 		require.ErrorContains(t, err, "application database dsn")
 	})

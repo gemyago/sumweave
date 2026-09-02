@@ -9,6 +9,9 @@ import (
 )
 
 func TestValues(t *testing.T) {
+	t.Setenv("APP_APPLICATION_DATABASE_DSN", "")
+	t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", "")
+
 	t.Run("exact-decodes every committed environment", func(t *testing.T) {
 		t.Run("local", func(t *testing.T) {
 			values, err := LoadValues(ValuesLoadInput{Environment: "local"})

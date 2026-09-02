@@ -1,0 +1,36 @@
+name: PostgreSQL verification
+
+on:
+  workflow_dispatch:
+
+jobs:
+  postgres-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+          cache-dependency-path: |
+            go.work.sum
+            runtime/go.sum
+            apps/**/go.sum
+            tools/**/go.sum
+
+      - name: Start PostgreSQL service
+        run: |
+          sudo systemctl start postgresql.service
+          pg_isready --host=127.0.0.1 --port=5432 --dbname=postgres
+
+      - name: Configure ephemeral PostgreSQL administrator
+        run: |
+          sudo -u postgres psql --set ON_ERROR_STOP=1 --dbname postgres --command "ALTER ROLE postgres PASSWORD 'sumweave_postgres_ci'"
+          echo "POSTGRES_BOOTSTRAP_DSN=postgres://postgres:sumweave_postgres_ci@127.0.0.1:5432/postgres?sslmode=disable" >> "$GITHUB_ENV"
+
+      - name: Run PostgreSQL verification
+        run: |
+          POSTGRES_MANAGED_EXTERNALLY=1 \
+          POSTGRES_HOST=127.0.0.1 \
+          POSTGRES_PORT=5432 \
+          make postgres-verify

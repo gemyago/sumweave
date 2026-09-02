@@ -55,6 +55,8 @@ func TestBuildProcessRoots(t *testing.T) {
 		_, err = BuildScheduler(t.Context(), SchedulerOptions{Environment: fake.UUID().V4()})
 		require.Error(t, err)
 
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", "")
+		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", "")
 		values, err := config.LoadValues(config.ValuesLoadInput{Environment: "production"})
 		require.NoError(t, err)
 		_, err = values.WorkerRoot("production")
