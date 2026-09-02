@@ -384,11 +384,25 @@ tagged app target and PostgreSQL-unavailable repository completion protocol must
 both pass, with unchanged coverage gates, before runtime SQLite production code
 is removed.
 
-This early compatibility slice does not complete the app test parent task. The
-later app test chunk owns every other database-backed command/config, auth,
-jobs, finance-registration, controller, Engine, and wireup persistence or
-composition case not included in the listed runtime-database fixture set. It
-must not repeat or claim the prerequisite fixture conversion a second time.
+The residual app database-fixture conversion is an explicit compatibility
+prerequisite to finance production cutover. After finance tagged fixtures are
+converted and before finance SQLite production support is removed, task 3.1B
+moves every still-routine database-backed command/config, auth, jobs,
+finance-registration, controller, Engine, and wireup persistence or composition
+case to the tagged app lane. It uses checked-in `test.yaml`, the
+bootstrap-prepared application, `sumweave_runtime_`, and `finance_` schemas,
+fixed prefixes, runtime-role suite DSNs, randomized and scoped identities and
+reads, and no test-owned migration. Database-free command/config and unit
+behavior remains routine, while only detailed migration assertions already
+owned by the task 1.1 bootstrap smoke are retired. Both unchanged 90% coverage
+gates must pass through routine `make test` and full tagged
+`make postgres-test-sumweave` before finance production cutover proceeds.
+
+Task 3.1B owns only the residual fixture set. It excludes and MUST NOT repeat or
+claim the task 2.1A Engine, `cmd/sumweave` main and runtime-resolution,
+application-composition database-runtime, or wireup migration/jobs/HTTP fixture
+cases. Those cases remain credited only to the completed runtime compatibility
+prerequisite.
 
 All database-backed tests use the prepared test database, never the regular
 local database. They create randomized IDs and fresh users, tenants, sessions,
@@ -490,30 +504,36 @@ This is one source and deployment cutover; the ordered implementation steps do
 not create an intermediate supported release.
 
 1. Add the canonical local Compose environment, portable privileged
-   `POSTGRES_BOOTSTRAP_DSN` contract, root `postgres-*` targets, and checked-in
-   local/test DSNs.
+   `POSTGRES_BOOTSTRAP_DSN` contract, root `postgres-*` targets, checked-in
+   local/test DSNs, and manual-dispatch PostgreSQL workflow while leaving
+   reusable routine CI free of PostgreSQL setup or dependencies.
 2. Preserve database-free routine targets and their lane-specific 90% coverage
    gate, add full tagged 90% coverage profiles, and move core database
    persistence and composition cases behind the explicit `postgres_test` tag.
-3. Convert runtime tagged fixtures, then convert the app fixtures that construct
-   runtime database storage as an independently reviewed prerequisite, to the
-   prepared shared test database with runtime-role credentials, fixed prefixes,
-   randomized identities, scoped reads, and no per-test migrations.
+3. Convert runtime tagged fixtures, then convert the task 2.1A app fixtures that
+   construct runtime database storage as an independently reviewed prerequisite,
+   to the prepared shared test database with runtime-role credentials, fixed
+   prefixes, randomized identities, scoped reads, and no per-test migrations.
 4. Simplify runtime to PostgreSQL-only only after that app compatibility
    prerequisite passes both the tagged app target and the PostgreSQL-unavailable
    repository completion protocol.
-5. Convert finance tagged fixtures and the remaining app tagged persistence and
-   composition fixtures without repeating the prerequisite app fixture slice.
-6. Simplify finance, auth, jobs, and appdispatch to PostgreSQL-only
-   implementations and delete SQLite-specific branches and files without
-   changing timestamp normalization.
-7. Add the manual-dispatch PostgreSQL workflow while leaving reusable routine CI
-   free of PostgreSQL setup or dependencies.
-8. Tidy the three core Go modules and synchronize workspace sums only as needed;
-   verify those core dependency graphs contain no SQLite packages.
-9. Update local defaults, PM2/setup guidance, active specs, architecture, manual
-   E2E docs, and agent rules to describe the routine and non-routine paths.
-10. Run the mandatory repository completion protocol without PostgreSQL, then run
+5. Convert finance tagged fixtures to the prepared `finance_` schema through the
+   runtime role, with randomized tenant-scoped data and no test-owned migration.
+6. Convert all residual app database fixtures in task 3.1B, excluding the
+   completed task 2.1A slice, to the prepared application, `sumweave_runtime_`,
+   and `finance_` schemas before finance production cutover.
+7. Simplify finance SQL/GORM construction and predicates to PostgreSQL-only in
+   task 3.2 without changing date or timestamp normalization.
+8. Simplify app SQL connections, auth, jobs, finance wiring, and predicates to
+   PostgreSQL-only in task 4.1, using the fixtures already converted by task
+   3.1B rather than repeating that work.
+9. Simplify appdispatch publication, subscription, offsets, and explicit schema
+   migration to the existing PostgreSQL Watermill implementation in task 4.2.
+10. Tidy the three core Go modules and synchronize workspace sums only as needed;
+    verify those core dependency graphs contain no SQLite packages.
+11. Update local defaults, PM2/setup guidance, active specs, architecture, manual
+    E2E docs, and agent rules to describe the routine and non-routine paths.
+12. Run the mandatory repository completion protocol without PostgreSQL, then run
    `make postgres-verify` as the additional database-surface check. Production
    runs the existing
    `db-migrate` command against its current PostgreSQL database before process
