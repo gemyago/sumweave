@@ -58,6 +58,180 @@ require_tagged_owner() {
 	fi
 }
 
+finance_routine_baseline_exclusions=(
+	'mock_.*.go'
+	'mock_*.go'
+	'mock.go'
+)
+
+finance_routine_allowlisted_paths=(
+	'^bank_connection_schedule_service.go$'
+	'^bank_connection_service.go$'
+	'^finance.go$'
+	'^finance_cfg.go$'
+	'^fixtures/realistic.go$'
+	'^focused_services_composition.go$'
+	'^fx.go$'
+	'^fx_refresh_schedule_service.go$'
+	'^imports.go$'
+	'^persistence/account_balance_store.go$'
+	'^persistence/bank_connection_schedule_store.go$'
+	'^persistence/core_store.go$'
+	'^persistence/csv_import_store.go$'
+	'^persistence/database.go$'
+	'^persistence/fx_refresh_schedule_store.go$'
+	'^persistence/fx_store.go$'
+	'^persistence/instant_predicate.go$'
+	'^persistence/migrator.go$'
+	'^persistence/models.go$'
+	'^persistence/provider_link_persistence.go$'
+	'^persistence/provider_snapshot_store.go$'
+	'^persistence/provider_sync_state_journal_store.go$'
+	'^persistence/provider_sync_store.go$'
+	'^persistence/provider_window_sync_persistence.go$'
+	'^persistence/store.go$'
+	'^persistence/synthetic_pending_start_store.go$'
+	'^persistence/synthetic_provider_store.go$'
+	'^persistence/transaction_tag_store.go$'
+	'^persistence/transfer_candidate_store.go$'
+	'^provider_snapshot_service.go$'
+	'^provider_sync.go$'
+	'^reporting.go$'
+	'^service_account_balances.go$'
+	'^service_bank_sync.go$'
+	'^service_catalog.go$'
+	'^service_csv_import.go$'
+	'^service_fx.go$'
+	'^service_ledger.go$'
+	'^service_ledger_contract.go$'
+	'^service_reporting.go$'
+	'^service_tenant_contract.go$'
+	'^service_tenants.go$'
+	'^synthetic_link_state_service.go$'
+	'^terminal_failure.go$'
+	'^timestamp.go$'
+	'^transfer_detail_service.go$'
+)
+
+finance_routine_owner_sources=(
+	'finance/bank_connection_schedule_service_test.go'
+	'finance/bank_connection_service_test.go'
+	'finance/finance_test.go'
+	'finance/finance_cfg_test.go'
+	'finance/fixtures/realistic_test.go'
+	'finance/focused_public_services_test.go'
+	'finance/reporting_fx_test.go'
+	'finance/fx_refresh_schedule_service_test.go'
+	'finance/imports_test.go'
+	'finance/service_account_balances_test.go'
+	'finance/persistence/bank_connection_schedule_store_test.go'
+	'finance/persistence/store_test.go'
+	'finance/persistence/csv_import_store_test.go'
+	'finance/persistence/database_test.go'
+	'finance/persistence/fx_refresh_schedule_store_test.go'
+	'finance/reporting_fx_test.go'
+	'finance/persistence/database_test.go'
+	'bootstrap'
+	'finance/persistence/fixtures_test.go'
+	'finance/persistence/provider_link_persistence_test.go'
+	'finance/persistence/provider_snapshot_store_test.go'
+	'finance/persistence/provider_sync_state_journal_store_test.go'
+	'finance/persistence/provider_sync_store_test.go'
+	'finance/persistence/provider_window_sync_persistence_test.go'
+	'finance/persistence/store_test.go'
+	'finance/persistence/synthetic_pending_start_store_test.go'
+	'finance/persistence/synthetic_provider_store_test.go'
+	'finance/persistence/transaction_tag_store_test.go'
+	'finance/persistence/transfer_candidate_store_test.go'
+	'finance/provider_snapshot_service_test.go'
+	'finance/service_bank_sync_orchestrator_test.go'
+	'finance/reporting_fx_test.go'
+	'finance/service_account_balances_test.go'
+	'finance/service_bank_sync_orchestrator_test.go'
+	'finance/service_test.go'
+	'finance/imports_test.go'
+	'finance/reporting_fx_test.go'
+	'finance/service_test.go'
+	'finance/service_test.go'
+	'finance/service_test.go'
+	'finance/service_test.go'
+	'finance/service_test.go'
+	'finance/synthetic_link_state_service_test.go'
+	'finance/terminal_failure_test.go'
+	'finance/reporting_fx_test.go'
+	'finance/transfer_detail_service_test.go'
+)
+
+if [[ "${#finance_routine_allowlisted_paths[@]}" -ne "${#finance_routine_owner_sources[@]}" ]]; then
+	printf '%s\n' 'finance routine allowlist and owner mapping must have equal lengths' >&2
+	exit 1
+fi
+
+require_finance_routine_owner() {
+	local path="$1"
+	local index
+	local source
+
+	for index in "${!finance_routine_allowlisted_paths[@]}"; do
+		if [[ "${finance_routine_allowlisted_paths[${index}]}" == "${path}" ]]; then
+			source="finance/${path#^}"
+			source="${source%\$}"
+			require_tagged_owner "${source}" "${finance_routine_owner_sources[${index}]}"
+			return
+		fi
+	done
+
+	printf 'unexpected finance routine exclusion: %s\n' "${path}" >&2
+	exit 1
+}
+
+require_finance_routine_exclusions() {
+	local file="$1"
+	local -a actual=()
+	local line
+	local baseline
+	local count
+	local i
+	local j
+	local is_baseline
+
+	mapfile -t actual < <(sed -E -n 's/^[[:space:]]*-[[:space:]]*([^#[:space:]]+).*/\1/p' "${file}")
+	for ((i = 0; i < ${#actual[@]}; i++)); do
+		for ((j = i + 1; j < ${#actual[@]}; j++)); do
+			if [[ "${actual[${i}]}" == "${actual[${j}]}" ]]; then
+				printf 'duplicate finance routine exclusion in %s: %s\n' "${file}" "${actual[${i}]}" >&2
+				exit 1
+			fi
+		done
+	done
+
+	for baseline in "${finance_routine_baseline_exclusions[@]}"; do
+		count=0
+		for line in "${actual[@]}"; do
+			if [[ "${line}" == "${baseline}" ]]; then
+				count=$((count + 1))
+			fi
+		done
+		if [[ "${count}" -ne 1 ]]; then
+			printf 'finance baseline exclusion must occur exactly once in %s: %s\n' "${file}" "${baseline}" >&2
+			exit 1
+		fi
+	done
+
+	for line in "${actual[@]}"; do
+		is_baseline=0
+		for baseline in "${finance_routine_baseline_exclusions[@]}"; do
+			if [[ "${line}" == "${baseline}" ]]; then
+				is_baseline=1
+				break
+			fi
+		done
+		if [[ "${is_baseline}" -eq 0 ]]; then
+			require_finance_routine_owner "${line}"
+		fi
+	done
+}
+
 readonly root_makefile="${repository_root}/Makefile"
 require_line "${root_makefile}" 'override repository_makefile_dir := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))'
 require_line "${root_makefile}" '.NOTPARALLEL: postgres-verify'
@@ -300,11 +474,42 @@ require_exact_exclusions "${repository_root}/apps/sumweave/.testcoverage.yaml" \
 require_exact_exclusions "${repository_root}/runtime/.testcoverage-routine.yaml" \
 	'testing.go' 'mock_.*.go' 'mocks_.*.go' 'mock_*.go' 'mock.go' 'internal/agentapi/.*.gen.go' \
 	'^agent/agent_profiles\.go$' '^agent/providers_config\.go$' '^internal/agentprofiles/db_agent_profiles_service\.go$' '^internal/llmproviders/db_providers_config_service\.go$' '^internal/sessions/database\.go$'
-require_exact_exclusions "${repository_root}/finance/.testcoverage-routine.yaml" \
-	'mock_.*.go' 'mock_*.go' 'mock.go' \
-	'^bank_connection_schedule_service.go$' '^bank_connection_service.go$' '^finance.go$' '^finance_cfg.go$' '^fixtures/realistic.go$' '^focused_services_composition.go$' '^fx.go$' '^fx_refresh_schedule_service.go$' '^imports.go$' \
-	'^persistence/account_balance_store.go$' '^persistence/bank_connection_schedule_store.go$' '^persistence/core_store.go$' '^persistence/csv_import_store.go$' '^persistence/database.go$' '^persistence/fx_refresh_schedule_store.go$' '^persistence/fx_store.go$' '^persistence/instant_predicate.go$' '^persistence/migrator.go$' '^persistence/models.go$' '^persistence/provider_link_persistence.go$' '^persistence/provider_snapshot_store.go$' '^persistence/provider_sync_state_journal_store.go$' '^persistence/provider_sync_store.go$' '^persistence/provider_window_sync_persistence.go$' '^persistence/store.go$' '^persistence/synthetic_pending_start_store.go$' '^persistence/synthetic_provider_store.go$' '^persistence/transaction_tag_store.go$' '^persistence/transfer_candidate_store.go$' \
-	'^provider_snapshot_service.go$' '^provider_sync.go$' '^reporting.go$' '^service_account_balances.go$' '^service_bank_sync.go$' '^service_catalog.go$' '^service_csv_import.go$' '^service_fx.go$' '^service_ledger.go$' '^service_ledger_contract.go$' '^service_reporting.go$' '^service_tenant_contract.go$' '^service_tenants.go$' '^synthetic_link_state_service.go$' '^terminal_failure.go$' '^timestamp.go$' '^transfer_detail_service.go$'
+assert_finance_routine_contracts() {
+	local name="$1"
+	local output="${cover_dir_override_test_dir}/${name}.out"
+	local fixture="${cover_dir_override_test_dir}/${name}.yaml"
+	shift
+	{
+		printf '%s\n' 'exclude:' '  paths:'
+		printf '    - %s\n' "${finance_routine_baseline_exclusions[@]}"
+		printf '    - %s\n' "$@"
+	} > "${fixture}"
+	if (require_finance_routine_exclusions "${fixture}") >"${output}" 2>&1; then
+		printf 'expected finance routine contract case to fail: %s\n' "${name}" >&2
+		exit 1
+	fi
+}
+
+assert_finance_routine_contract_accepts_baseline_only() {
+	local fixture="${cover_dir_override_test_dir}/baseline-only.yaml"
+	{
+		printf '%s\n' 'exclude:' '  paths:'
+		printf '    - %s\n' "${finance_routine_baseline_exclusions[@]}"
+	} > "${fixture}"
+	if ! require_finance_routine_exclusions "${fixture}" >"${fixture}.out" 2>&1; then
+		printf '%s\n' 'expected finance routine baseline-only contract case to pass' >&2
+		exit 1
+	fi
+}
+
+assert_finance_routine_contract_accepts_baseline_only
+assert_finance_routine_contracts duplicate-baseline 'mock.go'
+assert_finance_routine_contracts duplicate-allowlisted '^finance.go$' '^finance.go$'
+assert_finance_routine_contracts unknown-anchored '^unknown.go$'
+assert_finance_routine_contracts broad-anchored '^internal/.*$'
+assert_finance_routine_contracts unanchored 'finance.go'
+assert_finance_routine_contracts directory '^persistence/$'
+require_finance_routine_exclusions "${repository_root}/finance/.testcoverage-routine.yaml"
 require_exact_exclusions "${repository_root}/apps/sumweave/.testcoverage-routine.yaml" \
 	'testing.go' 'mock_.*.go' 'mock_*.go' 'mock.go' 'internal/telemetry/otel.go' 'internal/telemetry/otel_logger.go' 'internal/telemetry/otel_meter.go' 'internal/telemetry/otel_tracer.go' 'cmd/sumweave/engine_cmd.go' 'internal/runtime.go' 'internal/api/http/v1routes/.*' 'internal/app/models/.*'
 
@@ -313,52 +518,6 @@ require_tagged_owner 'runtime/agent/providers_config.go' 'runtime/agent/database
 require_tagged_owner 'runtime/internal/agentprofiles/db_agent_profiles_service.go' 'runtime/internal/agentprofiles/db_agent_profiles_service_postgres_test.go'
 require_tagged_owner 'runtime/internal/llmproviders/db_providers_config_service.go' 'runtime/internal/llmproviders/db_providers_config_service_postgres_test.go'
 require_tagged_owner 'runtime/internal/sessions/database.go' 'runtime/internal/sessions/database_service_postgres_test.go'
-require_tagged_owner 'finance/bank_connection_schedule_service.go' 'finance/bank_connection_schedule_service_test.go'
-require_tagged_owner 'finance/bank_connection_service.go' 'finance/bank_connection_service_test.go'
-require_tagged_owner 'finance/finance.go' 'finance/finance_test.go'
-require_tagged_owner 'finance/finance_cfg.go' 'finance/finance_cfg_test.go'
-require_tagged_owner 'finance/fixtures/realistic.go' 'finance/fixtures/realistic_test.go'
-require_tagged_owner 'finance/focused_services_composition.go' 'finance/focused_public_services_test.go'
-require_tagged_owner 'finance/fx.go' 'finance/reporting_fx_test.go'
-require_tagged_owner 'finance/fx_refresh_schedule_service.go' 'finance/fx_refresh_schedule_service_test.go'
-require_tagged_owner 'finance/imports.go' 'finance/imports_test.go'
-require_tagged_owner 'finance/persistence/account_balance_store.go' 'finance/service_account_balances_test.go'
-require_tagged_owner 'finance/persistence/bank_connection_schedule_store.go' 'finance/persistence/bank_connection_schedule_store_test.go'
-require_tagged_owner 'finance/persistence/core_store.go' 'finance/persistence/store_test.go'
-require_tagged_owner 'finance/persistence/csv_import_store.go' 'finance/persistence/csv_import_store_test.go'
-require_tagged_owner 'finance/persistence/database.go' 'finance/persistence/database_test.go'
-require_tagged_owner 'finance/persistence/fx_refresh_schedule_store.go' 'finance/persistence/fx_refresh_schedule_store_test.go'
-require_tagged_owner 'finance/persistence/fx_store.go' 'finance/reporting_fx_test.go'
-require_tagged_owner 'finance/persistence/instant_predicate.go' 'finance/persistence/database_test.go'
-require_tagged_owner 'finance/persistence/migrator.go' 'bootstrap'
-require_tagged_owner 'finance/persistence/models.go' 'finance/persistence/fixtures_test.go'
-require_tagged_owner 'finance/persistence/provider_link_persistence.go' 'finance/persistence/provider_link_persistence_test.go'
-require_tagged_owner 'finance/persistence/provider_snapshot_store.go' 'finance/persistence/provider_snapshot_store_test.go'
-require_tagged_owner 'finance/persistence/provider_sync_state_journal_store.go' 'finance/persistence/provider_sync_state_journal_store_test.go'
-require_tagged_owner 'finance/persistence/provider_sync_store.go' 'finance/persistence/provider_sync_store_test.go'
-require_tagged_owner 'finance/persistence/provider_window_sync_persistence.go' 'finance/persistence/provider_window_sync_persistence_test.go'
-require_tagged_owner 'finance/persistence/store.go' 'finance/persistence/store_test.go'
-require_tagged_owner 'finance/persistence/synthetic_pending_start_store.go' 'finance/persistence/synthetic_pending_start_store_test.go'
-require_tagged_owner 'finance/persistence/synthetic_provider_store.go' 'finance/persistence/synthetic_provider_store_test.go'
-require_tagged_owner 'finance/persistence/transaction_tag_store.go' 'finance/persistence/transaction_tag_store_test.go'
-require_tagged_owner 'finance/persistence/transfer_candidate_store.go' 'finance/persistence/transfer_candidate_store_test.go'
-require_tagged_owner 'finance/provider_snapshot_service.go' 'finance/provider_snapshot_service_test.go'
-require_tagged_owner 'finance/provider_sync.go' 'finance/service_bank_sync_orchestrator_test.go'
-require_tagged_owner 'finance/reporting.go' 'finance/reporting_fx_test.go'
-require_tagged_owner 'finance/service_account_balances.go' 'finance/service_account_balances_test.go'
-require_tagged_owner 'finance/service_bank_sync.go' 'finance/service_bank_sync_orchestrator_test.go'
-require_tagged_owner 'finance/service_catalog.go' 'finance/service_test.go'
-require_tagged_owner 'finance/service_csv_import.go' 'finance/imports_test.go'
-require_tagged_owner 'finance/service_fx.go' 'finance/reporting_fx_test.go'
-require_tagged_owner 'finance/service_ledger.go' 'finance/service_test.go'
-require_tagged_owner 'finance/service_ledger_contract.go' 'finance/service_test.go'
-require_tagged_owner 'finance/service_reporting.go' 'finance/reporting_fx_test.go'
-require_tagged_owner 'finance/service_tenant_contract.go' 'finance/service_test.go'
-require_tagged_owner 'finance/service_tenants.go' 'finance/service_test.go'
-require_tagged_owner 'finance/synthetic_link_state_service.go' 'finance/synthetic_link_state_service_test.go'
-require_tagged_owner 'finance/terminal_failure.go' 'finance/terminal_failure_test.go'
-require_tagged_owner 'finance/timestamp.go' 'finance/reporting_fx_test.go'
-require_tagged_owner 'finance/transfer_detail_service.go' 'finance/transfer_detail_service_test.go'
 
 for module in runtime finance apps/sumweave; do
   module_makefile="${repository_root}/${module}/Makefile"
