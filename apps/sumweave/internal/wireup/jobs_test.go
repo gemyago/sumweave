@@ -1,7 +1,7 @@
 package wireup
 
 import (
-	"path/filepath"
+	"errors"
 	"testing"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
@@ -11,28 +11,28 @@ import (
 
 func TestBuildProcessRoots(t *testing.T) {
 	fake := faker.New()
-	prepareApplicationSchemas := func(t *testing.T) {
-		t.Helper()
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
-		t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
-		t.Setenv("APP_AGENTRUNTIME_STORAGE_TYPE", "file")
-		migration, err := BuildMigration(t.Context(), MigrationOptions{Environment: "test"})
-		require.NoError(t, err)
-		require.NoError(t, migration.Migrate(t.Context()))
-	}
 
-	t.Run("worker and scheduler build after file-runtime application schema setup", func(t *testing.T) {
-		prepareApplicationSchemas(t)
-		worker, err := BuildWorker(t.Context(), WorkerOptions{Environment: "test"})
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, worker.Close(t.Context())) })
-		require.NotNil(t, worker.Worker)
-		scheduler, err := BuildScheduler(t.Context(), SchedulerOptions{Environment: "test"})
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, scheduler.Close(t.Context())) })
+	t.Run("scheduler delegates due commands without persistence", func(t *testing.T) {
+		bankSchedules := newMockscheduleEnqueuer(t)
+		fxSchedules := newMockscheduleEnqueuer(t)
+		bankSchedules.EXPECT().EnqueueDue(t.Context()).Return(2, nil).Once()
+		fxSchedules.EXPECT().EnqueueDue(t.Context()).Return(3, nil).Once()
+		scheduler := &SchedulerRoot{bankSchedules: bankSchedules, fxSchedules: fxSchedules}
 		enqueued, err := scheduler.EnqueueDue(t.Context())
 		require.NoError(t, err)
-		require.Equal(t, 1, enqueued)
+		require.Equal(t, 5, enqueued)
+	})
+
+	t.Run("scheduler returns the command count before a failed due service", func(t *testing.T) {
+		bankSchedules := newMockscheduleEnqueuer(t)
+		fxSchedules := newMockscheduleEnqueuer(t)
+		expectedErr := errors.New(fake.Lorem().Sentence(3))
+		bankSchedules.EXPECT().EnqueueDue(t.Context()).Return(2, nil).Once()
+		fxSchedules.EXPECT().EnqueueDue(t.Context()).Return(0, expectedErr).Once()
+		scheduler := &SchedulerRoot{bankSchedules: bankSchedules, fxSchedules: fxSchedules}
+		enqueued, err := scheduler.EnqueueDue(t.Context())
+		require.ErrorIs(t, err, expectedErr)
+		require.Equal(t, 2, enqueued)
 	})
 
 	t.Run("rejects root settings before opening process resources", func(t *testing.T) {

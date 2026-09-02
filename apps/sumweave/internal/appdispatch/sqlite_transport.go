@@ -19,6 +19,7 @@ import (
 const (
 	sqliteSubscriberBatchSize   = 100
 	sqliteSubscriberLockTimeout = time.Second
+	sqliteSubscriberLockMargin  = 300 * time.Millisecond
 )
 
 var (
@@ -163,11 +164,15 @@ func newSQLiteSubscription(
 	logger watermill.LoggerAdapter,
 ) *sqliteSubscription {
 	tables := sqliteTableNameGenerators(config)
+	pollTicker := time.NewTicker(config.PollInterval)
+	lockTicker := time.NewTicker(sqliteSubscriberLockTimeout - sqliteSubscriberLockMargin)
 	return &sqliteSubscription{
 		db:                 db,
-		pollTicker:         time.NewTicker(config.PollInterval),
-		lockTicker:         time.NewTicker(sqliteSubscriberLockTimeout - 300*time.Millisecond),
-		lockDuration:       sqliteSubscriberLockTimeout - 300*time.Millisecond,
+		pollTicker:         pollTicker,
+		lockTicker:         lockTicker,
+		pollTick:           pollTicker.C,
+		lockTick:           lockTicker.C,
+		lockDuration:       sqliteSubscriberLockTimeout - sqliteSubscriberLockMargin,
 		lockTimeoutSeconds: int64(sqliteSubscriberLockTimeout / time.Second),
 		topic:              topic,
 		consumerGroup:      consumerGroup,
@@ -183,8 +188,8 @@ func newSQLiteSubscription(
 			` SET offset_acked=?, locked_until=0, lease_id='' WHERE topic=? AND consumer_group=? AND offset_acked=? AND lease_id=?`,
 		destination: make(chan *wmmessage.Message),
 		logger: logger.With(watermill.LogFields{
-			"topic":          topic,
-			"consumer_group": consumerGroup,
+			appDispatchTopicLogKey: topic,
+			"consumer_group":       consumerGroup,
 		}),
 	}
 }
@@ -204,6 +209,8 @@ type sqliteSubscription struct {
 	db                 sqliteDatabase
 	pollTicker         *time.Ticker
 	lockTicker         *time.Ticker
+	pollTick           <-chan time.Time
+	lockTick           <-chan time.Time
 	lockDuration       time.Duration
 	lockTimeoutSeconds int64
 	topic              string
@@ -345,7 +352,10 @@ func (s *sqliteSubscription) ReleaseLock(ctx context.Context) error {
 	return nil
 }
 
-func (s *sqliteSubscription) Send(parent context.Context, next sqliteRawMessage) error {
+func (s *sqliteSubscription) Send(
+	parent context.Context,
+	next sqliteRawMessage,
+) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
@@ -358,7 +368,7 @@ func (s *sqliteSubscription) Send(parent context.Context, next sqliteRawMessage)
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-s.lockTicker.C:
+		case <-s.lockTick:
 			if err := s.ReleaseLock(ctx); err != nil {
 				return fmt.Errorf("release expired sqlite message delivery lease: %w", err)
 			}
@@ -371,7 +381,7 @@ func (s *sqliteSubscription) Send(parent context.Context, next sqliteRawMessage)
 		case <-ctx.Done():
 			msg.Nack()
 			return nil
-		case <-s.lockTicker.C:
+		case <-s.lockTick:
 			if err := s.ExtendLock(ctx); err != nil {
 				return err
 			}
@@ -385,7 +395,9 @@ func (s *sqliteSubscription) Send(parent context.Context, next sqliteRawMessage)
 	}
 }
 
-func (s *sqliteSubscription) Run(ctx context.Context) {
+func (s *sqliteSubscription) Run(
+	ctx context.Context,
+) {
 	defer s.pollTicker.Stop()
 	defer s.lockTicker.Stop()
 
@@ -397,12 +409,14 @@ func (s *sqliteSubscription) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.pollTicker.C:
+		case <-s.pollTick:
 		}
 	}
 }
 
-func (s *sqliteSubscription) runCycle(ctx context.Context) bool {
+func (s *sqliteSubscription) runCycle(
+	ctx context.Context,
+) bool {
 	if ctx.Err() != nil {
 		return true
 	}

@@ -18,6 +18,13 @@ type userAddParams struct {
 	IfNotExists bool
 }
 
+type userCommandStore interface {
+	Create(context.Context, auth.CreateUserParams) (*auth.User, error)
+	GetByUsername(context.Context, string) (*auth.User, error)
+	List(context.Context) ([]auth.User, error)
+	UpdatePassword(context.Context, string, string) error
+}
+
 type userChangePasswordParams struct {
 	Username string
 	Password string
@@ -26,16 +33,16 @@ type userChangePasswordParams struct {
 const userCommandName = "user"
 
 type userAddCmdDeps struct {
-	Store  *auth.UserStore
+	Store  userCommandStore
 	Hasher *auth.Argon2idHasher
 }
 
 type userListCmdDeps struct {
-	Store *auth.UserStore
+	Store userCommandStore
 }
 
 type userChangePasswordCmdDeps struct {
-	Store  *auth.UserStore
+	Store  userCommandStore
 	Hasher *auth.Argon2idHasher
 }
 

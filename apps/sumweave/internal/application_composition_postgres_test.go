@@ -3,9 +3,11 @@
 package internal
 
 import (
+	"os"
 	"testing"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	"github.com/gemyago/sumweave/runtime/agent"
 	"github.com/stretchr/testify/assert"
@@ -36,4 +38,14 @@ func TestApplicationDatabaseRuntimeComposition(t *testing.T) {
 	services, err := newRuntimeServices(deps)
 	require.NoError(t, err)
 	assert.NotNil(t, services.agentProfilesSvc)
+
+	t.Run("application database opens the prepared runtime-role schema and registers cleanup", func(t *testing.T) {
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
+		hooks := lifecycle.NewTestShutdownHooks()
+		database, openErr := NewApplicationSQLDB(dsn, hooks)
+		require.NoError(t, openErr)
+		require.NotNil(t, database)
+		require.NoError(t, hooks.PerformShutdown(t.Context()))
+	})
 }

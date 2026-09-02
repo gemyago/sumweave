@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"os"
@@ -8,12 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	"github.com/gemyago/sumweave/runtime/agent"
 	"github.com/jaswdr/faker/v2"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -67,130 +67,181 @@ func TestFinalAgentRuntimeCoverage(t *testing.T) {
 	)
 }
 
-func TestFinalDatabaseMigratorCoverage(t *testing.T) {
+func TestDatabaseMigrationOrchestration(t *testing.T) {
 	fake := faker.New()
-	makeMigrator := func(t *testing.T) *DatabaseMigrator {
-		t.Helper()
-		dsn := filepath.Join(t.TempDir(), "application.sqlite")
-		db, err := sqlconn.Open(dsn)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		users, err := auth.NewUserStore(auth.UserStoreDeps{
-			SQLDB: db, DatabaseDSN: dsn, IDGen: ident.NewDefaultGenerator(), Logger: slog.Default(),
-		})
-		require.NoError(t, err)
-		refresh, err := auth.NewRefreshTokenStore(auth.RefreshTokenStoreDeps{
-			SQLDB: db, DatabaseDSN: dsn, Logger: slog.Default(),
-		})
-		require.NoError(t, err)
-		return NewDatabaseMigrator(DatabaseMigrationDeps{
-			RootLogger:                     slog.Default(),
-			AgentRuntimeStorageType:        "file",
-			ApplicationDatabaseDSN:         dsn,
-			ApplicationDatabaseTablePrefix: "final_",
-			ApplicationSQLDB:               db,
-			AuthUsers:                      users,
-			AuthRefreshTokens:              refresh,
-		})
-	}
-	t.Run("skips file agent schema and reports component errors", func(t *testing.T) {
-		migrator := makeMigrator(t)
-		require.NoError(t, migrator.migrateAgentRuntime(t.Context()))
-		migrator.authUsers = nil
-		require.Error(t, migrator.migrateAuthentication(t.Context()))
-		migrator.authUsers, migrator.authRefreshTokens = nil, nil
-		err := migrator.Migrate(t.Context())
-		require.Error(t, err)
-		require.ErrorContains(t, err, "migrate authentication schema")
-	})
 
-	t.Run("reports an unavailable database runtime migrator", func(t *testing.T) {
-		migrator := &DatabaseMigrator{rootLogger: slog.Default(), agentRuntimeStorageType: storageTypeDatabase}
+	t.Run("reports missing component dependencies before database work", func(t *testing.T) {
+		migrator := &DatabaseMigrator{rootLogger: slog.Default()}
+		require.NoError(t, migrator.migrateAgentRuntime(t.Context()))
+		require.Error(t, migrator.migrateAuthentication(t.Context()))
+		require.Error(t, migrator.migrateAppDispatch(t.Context()))
+		require.Error(t, migrator.migrateJobs(t.Context()))
+		require.Error(t, migrator.migrateFinance(t.Context()))
+		migrator.agentRuntimeStorageType = storageTypeDatabase
 		require.Error(t, migrator.migrateAgentRuntime(t.Context()))
 	})
 
-	t.Run("delegates database runtime migration", func(t *testing.T) {
+	t.Run("adapts component migration functions", func(t *testing.T) {
+		expectedErr := errors.New(fake.UUID().V4())
+		migrator := componentMigratorFunc(func(context.Context) error { return expectedErr })
+		require.ErrorIs(t, migrator.Migrate(t.Context()), expectedErr)
+		created, err := componentMigratorFactory(func() (componentMigrator, error) {
+			return migrator, nil
+		})()
+		require.NoError(t, err)
+		require.IsType(t, migrator, created)
+		defaultMigrator := NewDatabaseMigrator(DatabaseMigrationDeps{RootLogger: slog.Default()})
+		require.NotNil(t, defaultMigrator)
+		err = newAuthenticationMigrator(nil, nil).Migrate(t.Context())
+		require.Error(t, err)
+	})
+
+	t.Run("runs prepared concrete migration adapters without a database", func(t *testing.T) {
+		for _, adapter := range []struct {
+			name string
+			new  func(componentMigratorFactory) componentMigrator
+		}{
+			{"app dispatch", func(factory componentMigratorFactory) componentMigrator { return newAppDispatchMigrator(factory) }},
+			{"jobs", func(factory componentMigratorFactory) componentMigrator { return newJobsMigrator(factory) }},
+			{"finance", func(factory componentMigratorFactory) componentMigrator { return newFinanceMigrator(factory) }},
+		} {
+			t.Run(adapter.name, func(t *testing.T) {
+				prepared := newMockcomponentMigrator(t)
+				factory := componentMigratorFactory(func() (componentMigrator, error) {
+					return prepared, nil
+				})
+				prepared.EXPECT().Migrate(t.Context()).Return(nil).Once()
+				require.NoError(t, adapter.new(factory).Migrate(t.Context()))
+
+				createErr := errors.New(fake.UUID().V4())
+				factory = func() (componentMigrator, error) { return nil, createErr }
+				require.ErrorIs(t, adapter.new(factory).Migrate(t.Context()), createErr)
+
+				migrateErr := errors.New(fake.UUID().V4())
+				prepared = newMockcomponentMigrator(t)
+				factory = func() (componentMigrator, error) { return prepared, nil }
+				prepared.EXPECT().Migrate(t.Context()).Return(migrateErr).Once()
+				require.ErrorIs(t, adapter.new(factory).Migrate(t.Context()), migrateErr)
+			})
+		}
+	})
+
+	t.Run("prepares concrete migration factories without schema DDL", func(t *testing.T) {
+		db, databaseMock, err := sqlmock.New()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = db.Close() })
+		dsn := "postgres://" + fake.UUID().V4()
+
+		appDispatch, err := newAppDispatchMigratorFactory(dsn, fake.Lorem().Word(), db)()
+		require.NoError(t, err)
+		require.NotNil(t, appDispatch)
+
+		jobs, err := newJobsMigratorFactory(dsn, fake.Lorem().Word(), db)()
+		require.NoError(t, err)
+		require.NotNil(t, jobs)
+
+		finance, err := newFinanceMigratorFactory(dsn, db, slog.Default())()
+		require.NoError(t, err)
+		require.NotNil(t, finance)
+		require.NoError(t, databaseMock.ExpectationsWereMet())
+	})
+
+	t.Run("returns concrete migration factory construction errors without schema DDL", func(t *testing.T) {
+		_, err := newAppDispatchMigratorFactory(fake.UUID().V4(), fake.Lorem().Word(), nil)()
+		require.Error(t, err)
+		_, err = newJobsMigratorFactory(fake.UUID().V4(), fake.Lorem().Word(), nil)()
+		require.Error(t, err)
+		_, err = newFinanceMigratorFactory(fake.UUID().V4(), nil, slog.Default())()
+		require.Error(t, err)
+	})
+
+	t.Run("runs prepared authentication schema adapters in order", func(t *testing.T) {
+		users := newMockautoMigrator(t)
+		refreshTokens := newMockautoMigrator(t)
+		calls := []*mock.Call{
+			users.EXPECT().AutoMigrate().Return(nil).Once(),
+			refreshTokens.EXPECT().AutoMigrate().Return(nil).Once(),
+		}
+		mock.InOrder(calls...)
+		require.NoError(t, newAuthenticationMigrator(users, refreshTokens).Migrate(t.Context()))
+
+		expectedErr := errors.New(fake.UUID().V4())
+		users = newMockautoMigrator(t)
+		refreshTokens = newMockautoMigrator(t)
+		users.EXPECT().AutoMigrate().Return(expectedErr).Once()
+		require.ErrorIs(t, newAuthenticationMigrator(users, refreshTokens).Migrate(t.Context()), expectedErr)
+
+		users = newMockautoMigrator(t)
+		refreshTokens = newMockautoMigrator(t)
+		users.EXPECT().AutoMigrate().Return(nil).Once()
+		refreshTokens.EXPECT().AutoMigrate().Return(expectedErr).Once()
+		require.ErrorIs(t, newAuthenticationMigrator(users, refreshTokens).Migrate(t.Context()), expectedErr)
+	})
+
+	t.Run("delegates and wraps agent runtime migration", func(t *testing.T) {
+		expectedErr := errors.New(fake.UUID().V4())
 		agentRuntimeMigrator := NewMockAgentRuntimeMigrator(t)
 		migrator := &DatabaseMigrator{
-			rootLogger:              slog.Default(),
-			agentRuntimeStorageType: storageTypeDatabase,
-			agentRuntimeMigrator:    agentRuntimeMigrator,
+			rootLogger: slog.Default(), agentRuntimeStorageType: storageTypeDatabase,
+			agentRuntimeMigrator: agentRuntimeMigrator,
 		}
-		agentRuntimeMigrator.EXPECT().Migrate().Return(nil).Once()
+		agentRuntimeMigrator.EXPECT().Migrate().Return(expectedErr).Once()
+		require.ErrorIs(t, migrator.migrateAgentRuntime(t.Context()), expectedErr)
+		require.ErrorIs(t, AgentRuntimeMigratorFunc(func() error { return expectedErr }).Migrate(), expectedErr)
+		successfulMigrator := NewMockAgentRuntimeMigrator(t)
+		successfulMigrator.EXPECT().Migrate().Return(nil).Once()
+		migrator.agentRuntimeMigrator = successfulMigrator
 		require.NoError(t, migrator.migrateAgentRuntime(t.Context()))
 	})
 
-	t.Run("wraps database runtime migration failures", func(t *testing.T) {
-		migrationErr := errors.New(fake.UUID().V4())
-		agentRuntimeMigrator := NewMockAgentRuntimeMigrator(t)
-		migrator := &DatabaseMigrator{
-			rootLogger:              slog.Default(),
-			agentRuntimeStorageType: storageTypeDatabase,
-			agentRuntimeMigrator:    agentRuntimeMigrator,
+	t.Run("runs component migrators in order without opening a database", func(t *testing.T) {
+		authentication := newMockcomponentMigrator(t)
+		appDispatch := newMockcomponentMigrator(t)
+		jobs := newMockcomponentMigrator(t)
+		finance := newMockcomponentMigrator(t)
+		calls := []*mock.Call{
+			authentication.EXPECT().Migrate(mock.Anything).Return(nil).Once(),
+			appDispatch.EXPECT().Migrate(mock.Anything).Return(nil).Once(),
+			jobs.EXPECT().Migrate(mock.Anything).Return(nil).Once(),
+			finance.EXPECT().Migrate(mock.Anything).Return(nil).Once(),
 		}
-		agentRuntimeMigrator.EXPECT().Migrate().Return(migrationErr).Once()
-		require.ErrorIs(t, migrator.migrateAgentRuntime(t.Context()), migrationErr)
-	})
+		mock.InOrder(calls...)
 
-	t.Run("adapts runtime migration functions", func(t *testing.T) {
-		migrationErr := errors.New(fake.UUID().V4())
-		require.ErrorIs(t, AgentRuntimeMigratorFunc(func() error { return migrationErr }).Migrate(), migrationErr)
-	})
-
-	t.Run("wraps app dispatch and jobs construction errors", func(t *testing.T) {
-		migrator := &DatabaseMigrator{}
-		migrator.rootLogger = slog.Default()
-		migrator.applicationDatabaseDSN = " "
-		migrator.applicationSQLDB = nil
-		migrator.applicationDatabaseTablePrefix = fake.UUID().V4()
-		require.Error(t, migrator.migrateAppDispatch(t.Context()))
-		require.Error(t, migrator.migrateJobs(t.Context()))
-		require.Error(t, migrator.migrateFinance(t.Context()))
-	})
-
-	t.Run("propagates concrete storage migration failures", func(t *testing.T) {
-		migrator := makeMigrator(t)
-		require.NoError(t, migrator.applicationSQLDB.Close())
-		require.Error(t, migrator.migrateAuthentication(t.Context()))
-		require.Error(t, migrator.migrateAppDispatch(t.Context()))
-		require.Error(t, migrator.migrateJobs(t.Context()))
-		require.Error(t, migrator.migrateFinance(t.Context()))
-	})
-
-	t.Run("wraps durable jobs and finance migration execution failures", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "readonly.sqlite")
-		require.NoError(t, os.WriteFile(path, nil, 0o600))
-		dsn := "file:" + path + "?mode=ro"
-		db, err := sqlconn.Open(dsn)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		migrator := &DatabaseMigrator{
-			rootLogger: slog.Default(), applicationSQLDB: db, applicationDatabaseDSN: dsn,
-		}
-		require.Error(t, migrator.migrateJobs(t.Context()))
-		require.Error(t, migrator.migrateFinance(t.Context()))
-	})
-
-	t.Run("reports refresh migration failures after users are migrated", func(t *testing.T) {
-		usersDSN := filepath.Join(t.TempDir(), "users.sqlite")
-		usersDB, err := sqlconn.Open(usersDSN)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, usersDB.Close()) })
-		users, err := auth.NewUserStore(auth.UserStoreDeps{
-			SQLDB: usersDB, DatabaseDSN: usersDSN, IDGen: ident.NewDefaultGenerator(), Logger: slog.Default(),
+		migrator := NewDatabaseMigrator(DatabaseMigrationDeps{
+			RootLogger:              slog.Default(),
+			AgentRuntimeStorageType: "file",
+			AuthenticationMigrator:  authentication,
+			AppDispatchMigrator:     appDispatch,
+			JobsMigrator:            jobs,
+			FinanceMigrator:         finance,
 		})
-		require.NoError(t, err)
-		refreshDSN := filepath.Join(t.TempDir(), "refresh.sqlite")
-		refreshDB, err := sqlconn.Open(refreshDSN)
-		require.NoError(t, err)
-		refresh, err := auth.NewRefreshTokenStore(auth.RefreshTokenStoreDeps{
-			SQLDB: refreshDB, DatabaseDSN: refreshDSN, Logger: slog.Default(),
+		require.NoError(t, migrator.Migrate(t.Context()))
+	})
+
+	t.Run("wraps component migration errors without executing schema work", func(t *testing.T) {
+		expectedErr := errors.New(fake.UUID().V4())
+		authentication := newMockcomponentMigrator(t)
+		appDispatch := newMockcomponentMigrator(t)
+		authentication.EXPECT().Migrate(mock.Anything).Return(nil).Once()
+		appDispatch.EXPECT().Migrate(mock.Anything).Return(expectedErr).Once()
+		migrator := NewDatabaseMigrator(DatabaseMigrationDeps{
+			RootLogger:              slog.Default(),
+			AgentRuntimeStorageType: "file",
+			AuthenticationMigrator:  authentication,
+			AppDispatchMigrator:     appDispatch,
+			JobsMigrator:            newMockcomponentMigrator(t),
+			FinanceMigrator:         newMockcomponentMigrator(t),
 		})
-		require.NoError(t, err)
-		require.NoError(t, refreshDB.Close())
-		migrator := &DatabaseMigrator{
-			rootLogger: slog.Default(), authUsers: users, authRefreshTokens: refresh,
-		}
-		require.Error(t, migrator.migrateAuthentication(t.Context()))
+		err := migrator.Migrate(t.Context())
+		require.ErrorIs(t, err, expectedErr)
+		require.ErrorContains(t, err, "migrate app dispatch transport schema")
+	})
+
+	t.Run("returns component migration errors with their component", func(t *testing.T) {
+		expectedErr := errors.New(fake.UUID().V4())
+		migrator := &DatabaseMigrator{rootLogger: slog.Default()}
+		err := migrator.runStep(t.Context(), "finance", func(context.Context) error { return expectedErr })
+		require.ErrorIs(t, err, expectedErr)
+		require.ErrorContains(t, err, "migrate finance schema")
 	})
 }

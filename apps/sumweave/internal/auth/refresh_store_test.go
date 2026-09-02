@@ -1,11 +1,16 @@
+//go:build postgres_test
+
 package auth
 
 import (
-	"fmt"
+	"errors"
+	"os"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	"github.com/jaswdr/faker/v2"
@@ -16,15 +21,15 @@ func TestRefreshTokenStore(t *testing.T) {
 	fake := faker.New()
 	makeStore := func(t *testing.T) *RefreshTokenStore {
 		t.Helper()
-		dsn := fmt.Sprintf("file:auth-refresh-%s?mode=memory&cache=shared", fake.UUID().V4())
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
 		sqlDB, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		store, err := NewRefreshTokenStore(RefreshTokenStoreDeps{
-			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "test_auth_", Logger: telemetry.RootTestLogger(),
+			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "sumweave_auth_", Logger: telemetry.RootTestLogger(),
 		})
 		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
 		return store
 	}
 
@@ -47,6 +52,12 @@ func TestRefreshTokenStore(t *testing.T) {
 		expired, err := store.Create(t.Context(), fake.UUID().V4(), -time.Second)
 		require.NoError(t, err)
 		_, err = store.Consume(t.Context(), expired)
+		require.ErrorIs(t, err, ErrInvalidRefreshToken)
+
+		toDelete, err := store.Create(t.Context(), userID, time.Hour)
+		require.NoError(t, err)
+		require.NoError(t, store.DeleteAllForUser(t.Context(), userID))
+		_, err = store.Consume(t.Context(), toDelete)
 		require.ErrorIs(t, err, ErrInvalidRefreshToken)
 	})
 
@@ -89,6 +100,24 @@ func TestRefreshTokenStore(t *testing.T) {
 		_, err = store.Consume(t.Context(), fake.Lorem().Text(40))
 		require.Error(t, err)
 		require.Error(t, store.DeleteAllForUser(t.Context(), fake.UUID().V4()))
-		require.Error(t, store.AutoMigrate())
+	})
+
+	t.Run("surfaces token entropy and prepared schema errors", func(t *testing.T) {
+		store := &RefreshTokenStore{randomSource: iotest.ErrReader(errors.New(fake.UUID().V4()))}
+		_, err := store.Create(t.Context(), fake.UUID().V4(), time.Hour)
+		require.Error(t, err)
+
+		db, databaseMock, err := sqlmock.New()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = db.Close() })
+		preparedStore, err := NewRefreshTokenStore(RefreshTokenStoreDeps{
+			SQLDB: db, DatabaseDSN: "postgres://" + fake.UUID().V4(), Logger: telemetry.RootTestLogger(),
+		})
+		require.NoError(t, err)
+		preparedSQLDB, err := preparedStore.db.DB()
+		require.NoError(t, err)
+		databaseMock.ExpectClose()
+		require.NoError(t, preparedSQLDB.Close())
+		require.Error(t, preparedStore.AutoMigrate())
 	})
 }

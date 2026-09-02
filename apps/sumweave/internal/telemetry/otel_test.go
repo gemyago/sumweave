@@ -5,6 +5,8 @@ import (
 
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	semconv "go.opentelemetry.io/otel/semconv/v1.30.0"
 )
 
 func Test_detectEndpointSecurity(t *testing.T) {
@@ -39,4 +41,16 @@ func Test_detectEndpointSecurity(t *testing.T) {
 		assert.Equal(t, expectedEndpoint, actualEndpoint)
 		assert.False(t, isSecure)
 	})
+}
+
+func TestNewResource(t *testing.T) {
+	fake := faker.New()
+	environment := fake.Lorem().Word()
+
+	resource, err := NewResource(t.Context(), ResourceDeps{Environment: environment})
+
+	require.NoError(t, err)
+	value, ok := resource.Set().Value(semconv.DeploymentEnvironmentNameKey)
+	require.True(t, ok)
+	assert.Equal(t, environment, value.AsString())
 }

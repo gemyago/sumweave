@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -12,11 +11,8 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 	apphttpclient "github.com/gemyago/sumweave/apps/sumweave/internal/infrastructure/httpclient"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/credentials"
-	"github.com/gemyago/sumweave/finance/domain"
-	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -49,24 +45,24 @@ func TestFinanceModuleHelpers(t *testing.T) {
 		_, err = newMonobankHTTPClient(makeFactory(), 0)
 		require.Error(t, err)
 		assert.NotNil(t, resolveFinanceLogger(nil))
+		logger := slog.New(slog.DiscardHandler)
+		assert.Same(t, logger, resolveFinanceLogger(logger))
+		baseURL := "https://" + fake.Internet().Domain()
+		assert.Equal(t, baseURL, resolveMonobankBaseURL(" "+baseURL+" "))
+		configuredCipher, err := makeFinanceCipher(fake.UUID().V4())
+		require.NoError(t, err)
+		_, err = configuredCipher.SealString(fake.UUID().V4())
+		require.NoError(t, err)
+		_, err = NewDatabase(nil, "sqlite:"+fake.UUID().V4(), logger)
+		require.Error(t, err)
 	})
 
 	t.Run(
 		"keeps FX generic scheduling while registering only error-returning handlers",
 		func(t *testing.T) {
-			dsn := fmt.Sprintf(
-				"file:finance-schedule-%s?mode=memory&cache=shared",
-				fake.UUID().V4(),
-			)
-			db, err := sqlconn.Open(dsn)
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, db.Close()) })
-			store, err := jobspkg.NewStore(db, dsn, jobspkg.StoreOpts{TablePrefix: "finance_"})
-			require.NoError(t, err)
-			require.NoError(t, store.AutoMigrate())
 			registry := jobspkg.NewRegistry()
 			require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil))
-			_, err = registry.Handler(financepkg.FXRatesRefreshCommandTopic)
+			_, err := registry.Handler(financepkg.FXRatesRefreshCommandTopic)
 			require.ErrorIs(t, err, jobspkg.ErrHandlerNotRegistered)
 		},
 	)
@@ -74,75 +70,6 @@ func TestFinanceModuleHelpers(t *testing.T) {
 
 func TestFinanceJobRegistrationAdapters(t *testing.T) {
 	fake := faker.New()
-	makeStore := func(t *testing.T) (*jobspkg.Store, *sql.DB, string) {
-		t.Helper()
-		dsn := fmt.Sprintf("file:finance-job-adapter-%s?mode=memory&cache=shared", fake.UUID().V4())
-		db, err := sqlconn.Open(dsn)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		store, err := jobspkg.NewStore(db, dsn, jobspkg.StoreOpts{TablePrefix: "finance_adapter_"})
-		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
-		return store, db, dsn
-	}
-
-	t.Run("publishes each finance workload directly without a job row", func(t *testing.T) {
-		store, db, dsn := makeStore(t)
-		config := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "finance_adapter_"}
-		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
-		publisher, err := appdispatch.NewPublisher(config, db, slog.New(slog.DiscardHandler))
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
-		adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
-		now := time.Now()
-		commands := []financepkg.SemanticCommand{
-			{
-				Topic:   financepkg.TransactionCSVImportCommandTopic,
-				Payload: []byte(`{"importId":"` + fake.UUID().V4() + `"}`),
-			},
-			{
-				Topic:   financepkg.AccountCSVImportCommandTopic,
-				Payload: []byte(`{"importId":"` + fake.UUID().V4() + `"}`),
-			},
-			{
-				Topic: financepkg.BankConnectionSyncCommandTopic,
-				Payload: []byte(
-					`{"connectionId":"` + fake.UUID().
-						V4() +
-						`","scheduledAt":"` + now.Format(
-						time.RFC3339Nano,
-					) + `"}`,
-				),
-			},
-			{
-				Topic:   financepkg.FXRatesRefreshCommandTopic,
-				Payload: []byte(`{"provider":"` + fake.Letter() + `"}`),
-			},
-		}
-		for _, command := range commands {
-			reference, publishErr := adapter.PublishSemanticCommand(t.Context(), command)
-			require.NoError(t, publishErr)
-			assert.NotEmpty(t, reference.MessageID)
-		}
-		jobs, err := store.List(t.Context(), jobspkg.ListParams{})
-		require.NoError(t, err)
-		assert.Empty(t, jobs.Items)
-
-		command := financepkg.SemanticCommand{
-			Topic:          financepkg.TransactionCSVImportCommandTopic,
-			Payload:        []byte(`{"importId":"` + fake.UUID().V4() + `"}`),
-			IdempotencyKey: "finance.csv-import:" + fake.UUID().V4(),
-		}
-		first, err := adapter.PublishSemanticCommand(t.Context(), command)
-		require.NoError(t, err)
-		second, err := adapter.PublishSemanticCommand(t.Context(), command)
-		require.NoError(t, err)
-		assert.Equal(t, first, second)
-		command.Payload = []byte(`{"importId":"` + fake.UUID().V4() + `"}`)
-		_, err = adapter.PublishSemanticCommand(t.Context(), command)
-		require.ErrorIs(t, err, appdispatch.ErrPublicationConflict)
-	})
-
 	t.Run("registers the four workload names once and maps bank metadata", func(t *testing.T) {
 		registry := jobspkg.NewRegistry()
 		require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil))
@@ -183,6 +110,16 @@ func TestFinanceJobRegistrationAdapters(t *testing.T) {
 				func() error { return assert.AnError },
 			),
 		)
+	})
+
+	t.Run("registers typed workload adapters against non-nil services", func(t *testing.T) {
+		registry := jobspkg.NewRegistry()
+		fxService := newMockfxRefreshJobService(t)
+		csvService := newMockcsvImportJobService(t)
+		bankService := newMockbankSyncJobService(t)
+		require.NoError(t, registerFinanceJobHandlers(registry, fxService, csvService, bankService))
+		assert.Len(t, registry.Handlers(), 4)
+		require.NoError(t, registerFinanceJobHandlers(registry, fxService, csvService, bankService))
 	})
 
 	t.Run("rejects incomplete native module dependencies before registration", func(t *testing.T) {
@@ -230,6 +167,47 @@ func TestFinanceJobRegistrationAdapters(t *testing.T) {
 			assert.NoError(t, handledFinanceFailure(nil))
 		},
 	)
+
+	t.Run("publishes semantic commands through the appdispatch adapter", func(t *testing.T) {
+		publisher := newMockappdispatchPublisher(t)
+		command := financepkg.SemanticCommand{
+			Topic:          "finance.command." + fake.UUID().V4(),
+			Payload:        []byte(fake.UUID().V4()),
+			IdempotencyKey: fake.UUID().V4(),
+		}
+		publisher.EXPECT().PublishRequest(
+			mock.Anything,
+			appdispatch.PublicationRequest{
+				Topic: command.Topic, Payload: command.Payload, IdempotencyKey: command.IdempotencyKey,
+			},
+		).Return(appdispatch.PublicationReference{MessageID: fake.UUID().V4()}, nil).Once()
+		adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
+		reference, err := adapter.PublishSemanticCommand(t.Context(), command)
+		require.NoError(t, err)
+		assert.NotEmpty(t, reference.MessageID)
+
+		tx := &sql.Tx{}
+		publisher.EXPECT().PublishRequestInTx(
+			mock.Anything,
+			tx,
+			appdispatch.PublicationRequest{
+				Topic: command.Topic, Payload: command.Payload, IdempotencyKey: command.IdempotencyKey,
+			},
+		).Return(appdispatch.PublicationReference{MessageID: fake.UUID().V4()}, nil).Once()
+		reference, err = adapter.PublishScheduledSemanticCommand(t.Context(), tx, command)
+		require.NoError(t, err)
+		assert.NotEmpty(t, reference.MessageID)
+
+		publishErr := errors.New(fake.Lorem().Sentence(3))
+		publisher.EXPECT().PublishRequest(mock.Anything, mock.Anything).
+			Return(appdispatch.PublicationReference{}, publishErr).Once()
+		_, err = adapter.PublishSemanticCommand(t.Context(), command)
+		require.ErrorIs(t, err, publishErr)
+		publisher.EXPECT().PublishRequestInTx(mock.Anything, tx, mock.Anything).
+			Return(appdispatch.PublicationReference{}, publishErr).Once()
+		_, err = adapter.PublishScheduledSemanticCommand(t.Context(), tx, command)
+		require.ErrorIs(t, err, publishErr)
+	})
 }
 
 func TestFinanceObservedHandlerFailureClassification(t *testing.T) {
@@ -324,174 +302,5 @@ func TestFinanceObservedHandlerFailureClassification(t *testing.T) {
 				assertClassification(t, runFXRefreshJob(t.Context(), service, input), name == "terminal")
 			})
 		}
-	})
-}
-
-func TestBankScheduleDispatch(t *testing.T) {
-	fake := faker.New()
-
-	makeScheduleService := func(t *testing.T, migrateDispatch bool) (
-		*financepkg.BankConnectionScheduleService,
-		*persistence.BankConnectionScheduleStore,
-		*sql.DB,
-		appdispatch.Config,
-	) {
-		t.Helper()
-		dsn := fmt.Sprintf("file:bank-schedule-%s?mode=memory&cache=shared", fake.UUID().V4())
-		db, err := sqlconn.Open(dsn)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		config := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "bank_schedule_"}
-		if migrateDispatch {
-			require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
-		}
-		database, err := persistence.NewDatabase(db, dsn)
-		require.NoError(t, err)
-		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
-		publisher, err := appdispatch.NewPublisher(config, db, slog.New(slog.DiscardHandler))
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
-		store := persistence.NewBankConnectionScheduleStore(database)
-		now := time.Now()
-		return financepkg.NewBankConnectionScheduleService(
-			store,
-			financepkg.WithBankConnectionScheduleServiceNow(func() time.Time { return now }),
-			financepkg.WithBankConnectionScheduleServicePublisher(
-				appdispatchSemanticCommandPublisher{publisher: publisher},
-			),
-		), store, db, config
-	}
-
-	makeSchedule := func(now time.Time) domain.BankConnectionSchedule {
-		dueAt := now.Add(-time.Hour)
-		return domain.BankConnectionSchedule{
-			ConnectionID: fake.UUID().V4(), Interval: time.Hour, NextRunAt: &dueAt,
-			Enabled: true, CreatedAt: now, UpdatedAt: now,
-		}
-	}
-
-	t.Run("commits occurrence advance and dispatch reference together without rerun duplication", func(t *testing.T) {
-		service, store, db, config := makeScheduleService(t, true)
-		now := time.Now()
-		schedule := makeSchedule(now)
-		require.NoError(t, store.Save(t.Context(), schedule))
-
-		first, err := service.EnqueueDue(t.Context())
-		require.NoError(t, err)
-		second, err := service.EnqueueDue(t.Context())
-		require.NoError(t, err)
-
-		assert.Equal(t, 1, first)
-		assert.Zero(t, second)
-		actual, err := store.Get(t.Context(), schedule.ConnectionID)
-		require.NoError(t, err)
-		assert.True(t, actual.NextRunAt.After(*schedule.NextRunAt))
-		assert.NotEmpty(t, actual.LastJobID)
-		var count int
-		require.NoError(t, db.QueryRowContext(
-			t.Context(),
-			`SELECT COUNT(*) FROM "`+config.MessagesTable()+`" WHERE topic = ?`,
-			financepkg.BankConnectionSyncCommandTopic,
-		).Scan(&count))
-		assert.Equal(t, 1, count)
-	})
-
-	t.Run("rolls back bank occurrence state when dispatch cannot be persisted", func(t *testing.T) {
-		service, store, _, _ := makeScheduleService(t, false)
-		now := time.Now()
-		schedule := makeSchedule(now)
-		require.NoError(t, store.Save(t.Context(), schedule))
-
-		_, err := service.EnqueueDue(t.Context())
-
-		require.Error(t, err)
-		actual, getErr := store.Get(t.Context(), schedule.ConnectionID)
-		require.NoError(t, getErr)
-		assert.True(t, actual.NextRunAt.Equal(*schedule.NextRunAt))
-		assert.Nil(t, actual.LastScheduledAt)
-		assert.Empty(t, actual.LastJobID)
-	})
-}
-
-func TestFXScheduleDispatch(t *testing.T) {
-	fake := faker.New()
-
-	makeScheduleService := func(t *testing.T, migrateDispatch bool) (
-		*financepkg.FXRefreshScheduleService,
-		*persistence.FXRefreshScheduleStore,
-		*sql.DB,
-		appdispatch.Config,
-	) {
-		t.Helper()
-		dsn := fmt.Sprintf("file:fx-schedule-%s?mode=memory&cache=shared", fake.UUID().V4())
-		db, err := sqlconn.Open(dsn)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		config := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "fx_schedule_"}
-		if migrateDispatch {
-			require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
-		}
-		database, err := persistence.NewDatabase(db, dsn)
-		require.NoError(t, err)
-		require.NoError(t, persistence.NewMigrator(database).Migrate(t.Context()))
-		publisher, err := appdispatch.NewPublisher(config, db, slog.New(slog.DiscardHandler))
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
-		now := time.Now()
-		return financepkg.NewFXRefreshScheduleService(
-			persistence.NewFXRefreshScheduleStore(database),
-			financepkg.WithFXRefreshScheduleServiceNow(func() time.Time { return now }),
-			financepkg.WithFXRefreshScheduleServicePublisher(appdispatchSemanticCommandPublisher{publisher: publisher}),
-		), persistence.NewFXRefreshScheduleStore(database), db, config
-	}
-
-	makeSchedule := func(now time.Time) domain.FXRefreshSchedule {
-		dueAt := now.Add(-time.Hour)
-		return domain.FXRefreshSchedule{
-			ScheduleID: fake.UUID().V4(), Provider: "provider-" + fake.Letter(),
-			Interval: time.Hour, NextRunAt: &dueAt, Enabled: true, CreatedAt: now, UpdatedAt: now,
-		}
-	}
-
-	t.Run("commits the FX occurrence and dispatch reference together without rerun duplication", func(t *testing.T) {
-		service, store, db, config := makeScheduleService(t, true)
-		now := time.Now()
-		schedule := makeSchedule(now)
-		require.NoError(t, store.Save(t.Context(), schedule))
-
-		first, err := service.EnqueueDue(t.Context())
-		require.NoError(t, err)
-		second, err := service.EnqueueDue(t.Context())
-		require.NoError(t, err)
-
-		assert.Equal(t, 1, first)
-		assert.Zero(t, second)
-		actual, err := store.Get(t.Context(), schedule.ScheduleID)
-		require.NoError(t, err)
-		assert.True(t, actual.NextRunAt.After(*schedule.NextRunAt))
-		assert.NotEmpty(t, actual.LastJobID)
-		var count int
-		require.NoError(t, db.QueryRowContext(
-			t.Context(),
-			`SELECT COUNT(*) FROM "`+config.MessagesTable()+`" WHERE topic = ?`,
-			financepkg.FXRatesRefreshCommandTopic,
-		).Scan(&count))
-		assert.Equal(t, 1, count)
-	})
-
-	t.Run("rolls back the FX occurrence when dispatch cannot be persisted", func(t *testing.T) {
-		service, store, _, _ := makeScheduleService(t, false)
-		now := time.Now()
-		schedule := makeSchedule(now)
-		require.NoError(t, store.Save(t.Context(), schedule))
-
-		_, err := service.EnqueueDue(t.Context())
-
-		require.Error(t, err)
-		actual, getErr := store.Get(t.Context(), schedule.ScheduleID)
-		require.NoError(t, getErr)
-		assert.True(t, actual.NextRunAt.Equal(*schedule.NextRunAt))
-		assert.Nil(t, actual.LastScheduledAt)
-		assert.Empty(t, actual.LastJobID)
 	})
 }

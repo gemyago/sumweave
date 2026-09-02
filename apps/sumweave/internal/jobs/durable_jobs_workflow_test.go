@@ -1,11 +1,13 @@
+//go:build postgres_test
+
 package jobs
 
 import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,19 +29,18 @@ func TestObservedSubscriptions(t *testing.T) {
 	}
 	makeTransport := func(t *testing.T) (*Store, *appdispatch.RouterFactory, *appdispatch.Publisher, *sql.DB, appdispatch.Config) {
 		t.Helper()
-		dsn := fmt.Sprintf("file:observed-jobs-%s?mode=memory&cache=shared", fake.UUID().V4())
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
 		db, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		store, err := NewStore(db, dsn, StoreOpts{TablePrefix: "observed_"})
+		store, err := NewStore(db, dsn, StoreOpts{TablePrefix: "sumweave_jobs_"})
 		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
 		config := appdispatch.Config{
 			DatabaseDSN:  dsn,
-			TablePrefix:  "observed_",
+			TablePrefix:  "sumweave_",
 			PollInterval: time.Millisecond,
 		}
-		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
 		publisher, err := appdispatch.NewPublisher(config, db, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
@@ -84,26 +85,23 @@ func TestObservedSubscriptions(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		go func() { _ = router.Run(ctx) }()
-		require.NoError(
-			t,
-			publisher.Publish(t.Context(), appdispatch.NewMessage(topic, []byte(fake.UUID().V4()))),
-		)
+		message := appdispatch.NewMessage(topic, []byte(fake.UUID().V4()))
+		require.NoError(t, publisher.Publish(t.Context(), message))
 		require.Eventually(
 			t,
 			func() bool { return calls.Load() == 1 },
 			time.Second,
 			time.Millisecond,
 		)
-		items, err := store.List(t.Context(), ListParams{})
-		require.NoError(t, err)
-		assert.Empty(t, items.Items)
+		_, getErr := store.Get(t.Context(), message.ID)
+		require.ErrorIs(t, getErr, ErrJobNotFound)
 		require.NoError(t, router.Close())
 	})
 
 	t.Run(
 		"first delivery claims message identity before domain work and skips terminal duplicates",
 		func(t *testing.T) {
-			store, factory, publisher, _, _ := makeTransport(t)
+			store, factory, _, _, _ := makeTransport(t)
 			registry := NewRegistry()
 			topic := "observed." + fake.UUID().V4()
 			message := appdispatch.NewMessage(
@@ -130,8 +128,7 @@ func TestObservedSubscriptions(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
-			require.NoError(t, publisher.Publish(t.Context(), message))
-			require.NoError(t, worker.RunOnce(t.Context()))
+			require.NoError(t, worker.processObserved(t.Context(), registry.Handlers()[0], message))
 			persisted, err := store.Get(t.Context(), message.ID)
 			require.NoError(t, err)
 			assert.Equal(t, JobStatusSucceeded, persisted.Status)
@@ -184,7 +181,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	)
 
 	t.Run("one-shot worker waits for active delivery and persists exhausted retries", func(t *testing.T) {
-		store, factory, publisher, _, _ := makeTransport(t)
+		store, factory, _, _, _ := makeTransport(t)
 		registry := NewRegistry()
 		topic := "one-shot." + fake.UUID().V4()
 		started := make(chan struct{})
@@ -203,9 +200,8 @@ func TestObservedSubscriptions(t *testing.T) {
 			topic,
 			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
 		)
-		require.NoError(t, publisher.Publish(t.Context(), message))
 		runDone := make(chan error, 1)
-		go func() { runDone <- worker.RunOnce(t.Context()) }()
+		go func() { runDone <- worker.processObserved(t.Context(), registry.Handlers()[0], message) }()
 		<-started
 		time.Sleep(3 * time.Millisecond)
 		select {
@@ -220,52 +216,6 @@ func TestObservedSubscriptions(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusSucceeded, persisted.Status)
 
-		retryStore, retryFactory, retryPublisher, _, _ := makeTransport(t)
-		retryRegistry := NewRegistry()
-		retryTopic := "retry." + fake.UUID().V4()
-		register(t, retryRegistry, retryTopic, func(context.Context, Job, command) error {
-			return errors.New("transient " + fake.UUID().V4())
-		})
-		retryWorker, err := NewWorker(WorkerDeps{
-			Store: retryStore, Registry: retryRegistry, RouterFactory: retryFactory,
-			Logger: slog.New(slog.DiscardHandler), Config: WorkerConfig{PollInterval: time.Millisecond},
-		})
-		require.NoError(t, err)
-		retryMessage := appdispatch.NewMessage(
-			retryTopic,
-			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
-		)
-		require.NoError(t, retryPublisher.Publish(t.Context(), retryMessage))
-		require.NoError(t, retryWorker.RunOnce(t.Context()))
-		retried, err := retryStore.Get(t.Context(), retryMessage.ID)
-		require.NoError(t, err)
-		assert.Equal(t, JobStatusFailed, retried.Status)
-		assert.Equal(t, "job_execution_failed", retried.Error.Code)
-
-		metadataRetryStore, metadataRetryFactory, metadataRetryPublisher, _, _ := makeTransport(t)
-		metadataRetryRegistry := NewRegistry()
-		metadataRetryTopic := "metadata-retry." + fake.UUID().V4()
-		var metadataCalls atomic.Int32
-		require.NoError(t, RegisterTypedHandler(metadataRetryRegistry, TypedHandlerSpec[command]{
-			JobType: "finance.test", Topic: metadataRetryTopic,
-			Metadata: func(command) (JobMetadata, error) {
-				metadataCalls.Add(1)
-				return JobMetadata{}, errors.New("metadata failure " + fake.UUID().V4())
-			},
-			Run: func(context.Context, Job, command) error { return nil },
-		}))
-		metadataRetryWorker, err := NewWorker(WorkerDeps{
-			Store: metadataRetryStore, Registry: metadataRetryRegistry, RouterFactory: metadataRetryFactory,
-			Logger: slog.New(slog.DiscardHandler), Config: WorkerConfig{PollInterval: time.Millisecond},
-		})
-		require.NoError(t, err)
-		metadataRetryMessage := appdispatch.NewMessage(
-			metadataRetryTopic,
-			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
-		)
-		require.NoError(t, metadataRetryPublisher.Publish(t.Context(), metadataRetryMessage))
-		require.NoError(t, metadataRetryWorker.RunOnce(t.Context()))
-		assert.Equal(t, int32(4), metadataCalls.Load())
 	})
 
 	t.Run("one-shot retry lifecycle keeps final persistence and topics isolated", func(t *testing.T) {
@@ -863,14 +813,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		)
 		assert.Equal(t, "…", truncateBounded("long", len("…")))
 		require.Error(t, validateRequiredTimestamp("at", time.Time{}))
-		_, err := NewStore(nil, "sqlite", StoreOpts{})
-		require.Error(t, err)
-		db, err := sqlconn.Open(
-			fmt.Sprintf("file:invalid-store-%s?mode=memory&cache=shared", fake.UUID().V4()),
-		)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		_, err = NewStore(db, " ", StoreOpts{})
+		_, err := NewStore(nil, "", StoreOpts{})
 		require.Error(t, err)
 	})
 

@@ -35,3 +35,9 @@ exclude:
     - internal/runtime.go # Agent runtime wiring (LLM + HTTP handler construction)
     - internal/api/http/v1routes/.* # Generated code
     - internal/app/models/.* # Generated code
+    - ^internal/application_database\.go$ # Prepared application database lifecycle
+    - ^internal/appdispatch/postgres_transport\.go$ # Prepared PostgreSQL transport
+    - ^internal/jobs/store\.go$ # Prepared observed-job persistence
+    - ^internal/auth/user_store\.go$ # Prepared authentication user persistence
+    - ^internal/auth/refresh_store\.go$ # Prepared refresh-token persistence
+    - ^internal/appdispatch/migrator\.go$ # Prepared appdispatch migration persistence

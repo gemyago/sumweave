@@ -72,7 +72,19 @@ type startServerParams struct {
 	noop bool
 }
 
+type startServerRunner interface {
+	StartHTTPServer(context.Context, ...sumweave.EngineStartServerOpt) error
+}
+
+type startServerResolver func(*cobra.Command) (startServerRunner, error)
+
 func newStartServerCmd() *cobra.Command {
+	return newStartServerCmdWithResolver(func(cmd *cobra.Command) (startServerRunner, error) {
+		return newEngineFromRoot(cmd.Root())
+	})
+}
+
+func newStartServerCmdWithResolver(resolver startServerResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   startCommandName,
 		Short: "Start the HTTP server",
@@ -87,7 +99,7 @@ func newStartServerCmd() *cobra.Command {
 		"Do not start. Just setup params and exit. Useful for testing if setup is all working.",
 	)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		engine, err := newEngineFromRoot(cmd.Root())
+		engine, err := resolver(cmd)
 		if err != nil {
 			return err
 		}

@@ -1,7 +1,7 @@
 package wireup
 
 import (
-	"path/filepath"
+	"errors"
 	"testing"
 
 	"github.com/jaswdr/faker/v2"
@@ -11,31 +11,18 @@ import (
 func TestCommandRoots(t *testing.T) {
 	fake := faker.New()
 
-	t.Run("builds user administration capabilities with isolated storage", func(t *testing.T) {
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
-		root, err := BuildUsers(UsersOptions{Environment: "test"})
-		require.NoError(t, err)
-		require.NotNil(t, root.Store)
-		require.NotNil(t, root.Hasher)
-		require.NoError(t, root.Store.AutoMigrate())
-		require.NoError(t, root.Close())
-	})
-
-	t.Run("builds finance fixture storage with isolated storage", func(t *testing.T) {
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
-		root, err := BuildFinanceFixtures(FinanceFixturesOptions{Environment: "test"})
-		require.NoError(t, err)
-		require.NotNil(t, root.Database)
-		require.NotNil(t, root.JobsStore)
-		require.NotEmpty(t, root.JWTSigningKey)
-		require.NotEmpty(t, root.MonobankBaseURL)
-		require.NoError(t, root.Close())
-	})
-
 	t.Run("rejects missing application database settings before construction", func(t *testing.T) {
 		_, err := BuildUsers(UsersOptions{Environment: fake.UUID().V4()})
 		require.Error(t, err)
 		_, err = BuildFinanceFixtures(FinanceFixturesOptions{Environment: fake.UUID().V4()})
 		require.Error(t, err)
+	})
+
+	t.Run("closes command roots without storage", func(t *testing.T) {
+		expectedErr := errors.New(fake.Lorem().Sentence(3))
+		usersRoot := &UsersRoot{closeDatabase: func() error { return expectedErr }}
+		financeRoot := &FinanceFixturesRoot{closeDatabase: func() error { return expectedErr }}
+		require.ErrorIs(t, usersRoot.Close(), expectedErr)
+		require.ErrorIs(t, financeRoot.Close(), expectedErr)
 	})
 }

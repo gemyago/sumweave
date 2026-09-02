@@ -223,7 +223,12 @@ func (e retryLifecycleError) OnRetriesExhausted() error {
 }
 
 type deadLetterPublisher struct {
-	publisher wmmessage.Publisher
+	publisher messagePublisher
+}
+
+type messagePublisher interface {
+	Publish(string, ...*wmmessage.Message) error
+	Close() error
 }
 
 func (p deadLetterPublisher) Publish(topic string, messages ...*wmmessage.Message) error {

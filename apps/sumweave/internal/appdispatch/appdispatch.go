@@ -25,6 +25,7 @@ const (
 	DeadLetterTopic = "app.dispatch.dead-letter.v1"
 
 	transportPayloadHashMetadataKey = "_appdispatchPayloadHash"
+	appDispatchTopicLogKey          = "topic"
 )
 
 var (
@@ -178,7 +179,7 @@ func (p *Publisher) Publish(ctx context.Context, message Message) error {
 	}
 	p.logger.InfoContext(ctx, "message published",
 		slog.String("messageId", message.ID),
-		slog.String("topic", message.Topic),
+		slog.String(appDispatchTopicLogKey, message.Topic),
 	)
 	return nil
 }
@@ -203,7 +204,7 @@ func (p *Publisher) PublishInTx(ctx context.Context, tx *sql.Tx, message Message
 	}
 	p.logger.InfoContext(ctx, "message published in transaction",
 		slog.String("messageId", message.ID),
-		slog.String("topic", message.Topic),
+		slog.String(appDispatchTopicLogKey, message.Topic),
 	)
 	return nil
 }
@@ -483,7 +484,9 @@ func buildSQLiteMigrationQueries(config Config) []string {
 	}
 }
 
-func buildPostgresMigrationQueries(config Config) ([]wmsql.Query, error) {
+func buildPostgresMigrationQueries(
+	config Config,
+) ([]wmsql.Query, error) {
 	queries, err := postgresSchema(config).SchemaInitializingQueries(wmsql.SchemaInitializingQueriesParams{})
 	if err != nil {
 		return nil, fmt.Errorf("build postgres messages schema queries: %w", err)

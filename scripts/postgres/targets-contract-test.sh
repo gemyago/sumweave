@@ -511,13 +511,19 @@ assert_finance_routine_contracts unanchored 'finance.go'
 assert_finance_routine_contracts directory '^persistence/$'
 require_finance_routine_exclusions "${repository_root}/finance/.testcoverage-routine.yaml"
 require_exact_exclusions "${repository_root}/apps/sumweave/.testcoverage-routine.yaml" \
-	'testing.go' 'mock_.*.go' 'mock_*.go' 'mock.go' 'internal/telemetry/otel.go' 'internal/telemetry/otel_logger.go' 'internal/telemetry/otel_meter.go' 'internal/telemetry/otel_tracer.go' 'cmd/sumweave/engine_cmd.go' 'internal/runtime.go' 'internal/api/http/v1routes/.*' 'internal/app/models/.*'
+	'testing.go' 'mock_.*.go' 'mock_*.go' 'mock.go' 'internal/telemetry/otel.go' 'internal/telemetry/otel_logger.go' 'internal/telemetry/otel_meter.go' 'internal/telemetry/otel_tracer.go' 'cmd/sumweave/engine_cmd.go' 'internal/runtime.go' 'internal/api/http/v1routes/.*' 'internal/app/models/.*' '^internal/application_database\.go$' '^internal/appdispatch/postgres_transport\.go$' '^internal/jobs/store\.go$' '^internal/auth/user_store\.go$' '^internal/auth/refresh_store\.go$' '^internal/appdispatch/migrator\.go$'
 
 require_tagged_owner 'runtime/agent/agent_profiles.go' 'runtime/agent/database_services_postgres_test.go'
 require_tagged_owner 'runtime/agent/providers_config.go' 'runtime/agent/database_services_postgres_test.go'
 require_tagged_owner 'runtime/internal/agentprofiles/db_agent_profiles_service.go' 'runtime/internal/agentprofiles/db_agent_profiles_service_postgres_test.go'
 require_tagged_owner 'runtime/internal/llmproviders/db_providers_config_service.go' 'runtime/internal/llmproviders/db_providers_config_service_postgres_test.go'
 require_tagged_owner 'runtime/internal/sessions/database.go' 'runtime/internal/sessions/database_service_postgres_test.go'
+require_tagged_owner 'apps/sumweave/internal/application_database.go' 'apps/sumweave/internal/application_composition_postgres_test.go'
+require_tagged_owner 'apps/sumweave/internal/appdispatch/postgres_transport.go' 'apps/sumweave/internal/appdispatch/appdispatch_test.go'
+require_tagged_owner 'apps/sumweave/internal/jobs/store.go' 'apps/sumweave/internal/jobs/store_postgres_test.go'
+require_tagged_owner 'apps/sumweave/internal/auth/user_store.go' 'apps/sumweave/internal/auth/user_store_test.go'
+require_tagged_owner 'apps/sumweave/internal/auth/refresh_store.go' 'apps/sumweave/internal/auth/refresh_store_test.go'
+require_tagged_owner 'apps/sumweave/internal/appdispatch/migrator.go' 'apps/sumweave/internal/appdispatch/appdispatch_test.go'
 
 for module in runtime finance apps/sumweave; do
   module_makefile="${repository_root}/${module}/Makefile"

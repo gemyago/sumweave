@@ -1,18 +1,11 @@
 package internal
 
 import (
-	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	"github.com/gemyago/sumweave/runtime/agent"
 	"github.com/stretchr/testify/assert"
@@ -20,29 +13,6 @@ import (
 )
 
 func TestApplicationComposition(t *testing.T) {
-	makeMigrationDeps := func(t *testing.T) DatabaseMigrationDeps {
-		t.Helper()
-		dsn := filepath.Join(t.TempDir(), "application.sqlite")
-		db, err := sqlconn.Open(dsn)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		users, err := auth.NewUserStore(auth.UserStoreDeps{
-			SQLDB:       db,
-			DatabaseDSN: dsn,
-			TablePrefix: "app_auth_",
-			IDGen:       ident.NewDefaultGenerator(),
-			Logger:      slog.Default(),
-		})
-		require.NoError(t, err)
-		refresh, err := auth.NewRefreshTokenStore(auth.RefreshTokenStoreDeps{
-			SQLDB: db, DatabaseDSN: dsn, TablePrefix: "app_auth_", Logger: slog.Default(),
-		})
-		require.NoError(t, err)
-		return DatabaseMigrationDeps{
-			RootLogger: telemetry.RootTestLogger(), AgentRuntimeStorageType: "file", ApplicationDatabaseDSN: dsn,
-			ApplicationDatabaseTablePrefix: "app_", ApplicationSQLDB: db, AuthUsers: users, AuthRefreshTokens: refresh,
-		}
-	}
 	makeRuntimeDeps := func(t *testing.T, storage string) RuntimeDeps {
 		t.Helper()
 		dataDir, platformDir := t.TempDir(), t.TempDir()
@@ -58,16 +28,6 @@ func TestApplicationComposition(t *testing.T) {
 			ToolsRegistry:                   agent.NewToolsRegistry(),
 		}
 	}
-
-	t.Run("application migration composes application schemas with file runtime storage", func(t *testing.T) {
-		deps := makeMigrationDeps(t)
-		migrator := NewDatabaseMigrator(deps)
-		require.NoError(t, migrator.Migrate(t.Context()))
-		err := migrator.runStep(t.Context(), "finance", func(context.Context) error { return errors.New("failed") })
-		require.ErrorIs(t, err, errors.Unwrap(err))
-		require.ErrorContains(t, err, "migrate finance schema")
-		assert.NotEmpty(t, appdispatch.Config{TablePrefix: "app_"}.MessagesTable())
-	})
 
 	t.Run(
 		"agent runtime supports file and database persistence with workspace and skills",
@@ -180,15 +140,8 @@ func TestApplicationComposition(t *testing.T) {
 		},
 	)
 
-	t.Run("application database registers lifecycle cleanup", func(t *testing.T) {
-		hooks := lifecycle.NewTestShutdownHooks()
-		db, err := NewApplicationSQLDB(filepath.Join(t.TempDir(), "application.sqlite"), hooks)
-		require.NoError(t, err)
-		require.NotNil(t, db)
-	})
-
 	t.Run("application database constructor returns open errors", func(t *testing.T) {
-		_, err := NewApplicationSQLDB("", lifecycle.NewTestShutdownHooks())
+		_, err := NewApplicationSQLDB("", nil)
 		require.Error(t, err)
 	})
 }

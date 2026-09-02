@@ -9,6 +9,7 @@ import (
 
 func TestEmbeddedUIAssets(t *testing.T) {
 	t.Run("returns a usable distribution only when index exists", func(t *testing.T) {
+		assert.NotNil(t, getEmbeddedUIFiles())
 		assert.Nil(t, resolveEmbeddedUIFiles(fstest.MapFS{}))
 		assert.Nil(
 			t,

@@ -43,15 +43,47 @@ packages:
   github.com/gemyago/sumweave/apps/sumweave/internal/jobs:
     interfaces:
       workerStore:
+      workerRouter:
+      workerRouterFactory:
+      jobReader:
+      schemaMigrator:
+        config:
+          filename: mock_schema_migrator_test.go
+  github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch:
+    interfaces:
+      migrationRunner:
+        config:
+          filename: mock_migration_runner_test.go
+      messagePublisher:
+        config:
+          filename: mock_message_publisher_test.go
+  github.com/gemyago/sumweave/apps/sumweave/internal/appevents:
+    interfaces:
+      messagePublisher:
+        config:
+          filename: mocks_test.go
+      handlerRegistrar:
+        config:
+          filename: mock_handler_registrar_test.go
   github.com/gemyago/sumweave/apps/sumweave/internal:
     interfaces:
       AgentRuntimeMigrator:
       databaseRuntimeServiceFactory:
+      componentMigrator:
+      autoMigrator:
+  github.com/gemyago/sumweave/apps/sumweave/internal/wireup:
+    interfaces:
+      migrationRunner:
+      migrationConfigLoader:
+      agentRuntimeSchemaMigrator:
+      agentRuntimeMigrationPreparer:
+      scheduleEnqueuer:
   github.com/gemyago/sumweave/apps/sumweave/internal/financeapp:
     interfaces:
       fxRefreshJobService:
       csvImportJobService:
       bankSyncJobService:
+      appdispatchPublisher:
   github.com/ThreeDotsLabs/watermill/message:
     interfaces:
       Subscriber:
@@ -67,3 +99,12 @@ packages:
       jobsSchedulerCommandRunner:
       startAllHTTPServer:
       startAllRunner:
+      startServerRunner:
+      userCommandStore:
+      financeFixturesTenantService:
+      financeFixturesCatalogService:
+      financeFixturesLedgerService:
+      financeFixturesCSVImportService:
+      financeFixturesBankConnectionService:
+      financeFixturesBankSyncService:
+      financeFixturesFXService:

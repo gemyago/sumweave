@@ -1,7 +1,9 @@
+//go:build postgres_test
+
 package auth
 
 import (
-	"fmt"
+	"os"
 	"sync"
 	"testing"
 
@@ -16,20 +18,23 @@ func TestUserStore(t *testing.T) {
 	fake := faker.New()
 	makeStore := func(t *testing.T) *UserStore {
 		t.Helper()
-		dsn := fmt.Sprintf("file:auth-users-%s?mode=memory&cache=shared", fake.UUID().V4())
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
 		sqlDB, err := sqlconn.Open(dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		store, err := NewUserStore(UserStoreDeps{
-			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "test_auth_",
+			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "sumweave_auth_",
 			IDGen: ident.NewDefaultGenerator(), Logger: telemetry.RootTestLogger(),
 		})
 		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
 		return store
 	}
 	makeParams := func(prefix string) CreateUserParams {
-		return CreateUserParams{Username: prefix + "-" + fake.Internet().User(), PasswordHash: fake.Lorem().Text(60)}
+		return CreateUserParams{
+			Username:     prefix + "-" + fake.UUID().V4(),
+			PasswordHash: fake.Lorem().Text(60),
+		}
 	}
 
 	t.Run("creates indexed users, lists deterministically, and updates passwords", func(t *testing.T) {
@@ -54,8 +59,15 @@ func TestUserStore(t *testing.T) {
 
 		users, err := store.List(t.Context())
 		require.NoError(t, err)
-		require.Len(t, users, 2)
-		require.LessOrEqual(t, users[0].Username, users[1].Username)
+		created := map[string]User{first.ID: *first, second.ID: *second}
+		found := make([]User, 0, len(created))
+		for _, user := range users {
+			if _, ok := created[user.ID]; ok {
+				found = append(found, user)
+			}
+		}
+		require.Len(t, found, len(created))
+		require.LessOrEqual(t, found[0].Username, found[1].Username)
 		newHash := fake.Lorem().Text(60)
 		require.NoError(t, store.UpdatePassword(t.Context(), first.ID, newHash))
 		updated, err := store.GetByID(t.Context(), first.ID)
@@ -99,11 +111,9 @@ func TestUserStore(t *testing.T) {
 		store := makeStore(t)
 		_, err = store.GetByID(t.Context(), fake.UUID().V4())
 		require.ErrorIs(t, err, ErrUserNotFound)
-		_, err = store.GetByUsername(t.Context(), fake.Internet().User())
+		missingUsername := "missing-" + fake.UUID().V4()
+		_, err = store.GetByUsername(t.Context(), missingUsername)
 		require.ErrorIs(t, err, ErrUserNotFound)
-		users, err := store.List(t.Context())
-		require.NoError(t, err)
-		require.Empty(t, users)
 	})
 
 	t.Run("propagates database failures", func(t *testing.T) {
@@ -120,16 +130,5 @@ func TestUserStore(t *testing.T) {
 		require.Error(t, store.UpdatePassword(t.Context(), fake.UUID().V4(), fake.Lorem().Text(60)))
 		_, err = store.List(t.Context())
 		require.Error(t, err)
-		require.Error(t, store.AutoMigrate())
-	})
-
-	t.Run("validates connection settings before opening auth persistence", func(t *testing.T) {
-		db, err := sqlconn.Open(":memory:")
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		_, err = openAuthDatabase(db, ":memory:", "invalid-prefix-")
-		require.Error(t, err)
-		require.Error(t, validateTablePrefix("invalid-prefix-"))
-		require.NoError(t, validateTablePrefix("auth_users_"))
 	})
 }

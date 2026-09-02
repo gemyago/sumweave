@@ -23,7 +23,9 @@ type financeModuleBuildDeps struct {
 	Finance           config.Finance
 }
 
-func buildFinanceModule(deps financeModuleBuildDeps) (*financepkg.Finance, error) {
+func buildFinanceModule(
+	deps financeModuleBuildDeps,
+) (*financepkg.Finance, error) {
 	providers := deps.Finance.Providers
 	return financeapp.NewModule(financeapp.ModuleDeps{
 		Database:                        deps.Database,
