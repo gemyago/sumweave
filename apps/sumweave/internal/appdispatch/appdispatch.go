@@ -24,7 +24,6 @@ const (
 	DeadLetterTopic = "app.dispatch.dead-letter.v1"
 
 	transportPayloadHashMetadataKey = "_appdispatchPayloadHash"
-	appDispatchTopicLogKey          = "topic"
 )
 
 var (
@@ -155,7 +154,7 @@ func (p *Publisher) Publish(ctx context.Context, message Message) error {
 	}
 	p.logger.InfoContext(ctx, "message published",
 		slog.String("messageId", message.ID),
-		slog.String(appDispatchTopicLogKey, message.Topic),
+		slog.String("topic", message.Topic),
 	)
 	return nil
 }
@@ -180,7 +179,7 @@ func (p *Publisher) PublishInTx(ctx context.Context, tx *sql.Tx, message Message
 	}
 	p.logger.InfoContext(ctx, "message published in transaction",
 		slog.String("messageId", message.ID),
-		slog.String(appDispatchTopicLogKey, message.Topic),
+		slog.String("topic", message.Topic),
 	)
 	return nil
 }

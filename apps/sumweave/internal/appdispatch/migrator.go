@@ -11,19 +11,6 @@ import (
 type Migrator struct {
 	config Config
 	db     *sql.DB
-	runner migrationRunner
-}
-
-type migrationRunner interface {
-	Migrate(context.Context) error
-}
-
-type postgresMigrationRunner struct{ migrator *Migrator }
-
-func (r postgresMigrationRunner) Migrate(
-	ctx context.Context,
-) error {
-	return r.migrator.migratePostgres(ctx)
 }
 
 func NewMigrator(config Config, db *sql.DB) (*Migrator, error) {
@@ -31,16 +18,10 @@ func NewMigrator(config Config, db *sql.DB) (*Migrator, error) {
 	if db == nil {
 		return nil, errors.New("sql database is required")
 	}
-	migrator := &Migrator{config: config, db: db}
-	migrator.runner = postgresMigrationRunner{migrator: migrator}
-	return migrator, nil
+	return &Migrator{config: config, db: db}, nil
 }
 
-func AutoMigrate(
-	ctx context.Context,
-	config Config,
-	db *sql.DB,
-) error {
+func AutoMigrate(ctx context.Context, config Config, db *sql.DB) error {
 	migrator, err := NewMigrator(config, db)
 	if err != nil {
 		return err
@@ -49,12 +30,10 @@ func AutoMigrate(
 }
 
 func (m *Migrator) Migrate(ctx context.Context) error {
-	return m.runner.Migrate(ctx)
+	return m.migratePostgres(ctx)
 }
 
-func (m *Migrator) migratePostgres(
-	ctx context.Context,
-) error {
+func (m *Migrator) migratePostgres(ctx context.Context) error {
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin postgres transport migration: %w", err)
@@ -82,10 +61,7 @@ func (m *Migrator) migratePostgres(
 	return nil
 }
 
-func (m *Migrator) ensurePostgresPayloadHash(
-	ctx context.Context,
-	tx *sql.Tx,
-) error {
+func (m *Migrator) ensurePostgresPayloadHash(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(
 		ctx,
 		`ALTER TABLE `+quoteIdentifier(m.config.MessagesTable())+
@@ -96,10 +72,7 @@ func (m *Migrator) ensurePostgresPayloadHash(
 	return nil
 }
 
-func (m *Migrator) ensurePostgresMessageIDUniqueness(
-	ctx context.Context,
-	tx *sql.Tx,
-) error {
+func (m *Migrator) ensurePostgresMessageIDUniqueness(ctx context.Context, tx *sql.Tx) error {
 	messagesTable := quoteIdentifier(m.config.MessagesTable())
 	//nolint:gosec // Table names derive from trusted application configuration.
 	if _, err := tx.ExecContext(

@@ -492,6 +492,27 @@ func TestAppDispatch(t *testing.T) {
 		assert.Empty(t, transportMessagePayloadHash(&wmmessage.Message{}))
 	})
 
+	t.Run("rejects concurrent calls to a running PostgreSQL router", func(t *testing.T) {
+		config := makeConfig(t)
+		db := openPrepared(t, config)
+		publisher := makePublisher(t, config, db)
+		factory, err := NewRouterFactory(config, db, publisher, logger)
+		require.NoError(t, err)
+		router, err := factory.NewRouter("concurrent-run-group-" + fake.UUID().V4())
+		require.NoError(t, err)
+		handler, err := NewHandler(testTopic, func(context.Context, Message) error { return nil })
+		require.NoError(t, err)
+		require.NoError(t, router.Handle(handler))
+		firstCtx, cancelFirst := context.WithCancel(t.Context())
+		t.Cleanup(cancelFirst)
+		firstRun := make(chan error, 1)
+		go func() { firstRun <- router.Run(firstCtx) }()
+		<-router.router.Running()
+		require.ErrorContains(t, router.Run(t.Context()), "run message router")
+		cancelFirst()
+		<-firstRun
+	})
+
 	t.Run("does not leak Watermill into domain or runtime packages", func(t *testing.T) {
 		for _, root := range []string{
 			filepath.Clean(filepath.Join("..", "..", "..", "..", "finance")),
