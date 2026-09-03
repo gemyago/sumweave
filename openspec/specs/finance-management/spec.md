@@ -17,7 +17,8 @@ The system SHALL implement finance as a root `finance/` product module that rema
 - **THEN** finance-owned tables MUST use `finance_` prefixes and explicit
   column names, with schema preparation owned by `sumweave db-migrate`
 - **AND** finance domain models MUST remain separate from GORM persistence models
-- **AND** the storage design MUST stay compatible with SQLite local development and PostgreSQL-oriented production use
+- **AND** the storage design MUST use PostgreSQL in local, test, and production
+  environments
 
 ### Requirement: Tenant, Account, Category, And Tag Management
 The finance module SHALL support tenant-based personal-finance ownership, tenant profile updates, and tenant-local finance catalogs.
@@ -200,11 +201,11 @@ The backend application SHALL expose finance APIs through the existing app under
 The backend application SHALL include finance-owned persistence schema initialization in the explicit backend database migration command.
 
 #### Scenario: Migration creates finance-owned tables
-- **WHEN** a user runs `sumweave db-migrate` with valid backend database configuration
+- **WHEN** a user runs `sumweave db-migrate` with valid PostgreSQL backend
+  database configuration
 - **THEN** the command MUST run the finance persistence migration for finance-owned tables before finance API, import, reporting, sync, or finance durable job flows rely on those tables
 - **AND** finance-owned tables MUST keep finance persistence ownership, explicit
-  column names, and compatibility with SQLite local development and
-  PostgreSQL-oriented production use
+  column names, and PostgreSQL-only behavior
 
 #### Scenario: Finance startup relies on prepared schema in standard setup
 - **WHEN** the documented standard setup has run `sumweave db-migrate`

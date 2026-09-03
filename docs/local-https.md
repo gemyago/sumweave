@@ -32,13 +32,12 @@ certificate-path fallback, but Vite HTTPS remains separately opt-in below.
 
 ## Start with PM2
 
-Run the database migration from `apps/sumweave`, then return to the
-repository root to create or start the PM2 applications:
+Prepare the required local PostgreSQL schemas from the repository root, then
+create or start the PM2 applications:
 
 ```bash
-cd apps/sumweave
-go run ./cmd/sumweave db-migrate --env local
-cd ../..
+make postgres-bootstrap
+pm2 start ecosystem.config.js
 ```
 
 Set Vite's explicit HTTPS enablement in `apps/sumweave-ui/.env.local`:
@@ -52,12 +51,6 @@ VITE_AGENT_API_BASE_URL=/api/v1/runtime/
 paths. Add the optional `VITE_LOCAL_HTTPS_CERT_FILE` and
 `VITE_LOCAL_HTTPS_KEY_FILE` values only when Vite needs paths different from
 the shared `APP_` values.
-
-From the repository root, start both processes:
-
-```bash
-npm run pm2:start
-```
 
 Open `https://localhost:5173`. Vite serves HTTPS and proxies `/api/v1` to the
 HTTPS backend, so auth, runtime, finance, and other same-origin API calls stay
@@ -77,13 +70,11 @@ variables from the ignored `apps/sumweave-ui/.env.local`. Keep
 `VITE_AGENT_API_BASE_URL=/api/v1/runtime/` so Vite continues to proxy the
 same-origin API calls.
 
-Then migrate from the backend app root and recreate both PM2 applications from
-the repository root so neither process retains an old TLS environment:
+Then prepare the PostgreSQL schemas and recreate both PM2 applications from the
+repository root so neither process retains an old TLS environment:
 
 ```bash
-cd apps/sumweave
-go run ./cmd/sumweave db-migrate --env local
-cd ../..
+make postgres-bootstrap
 pm2 delete sumweave-api
 pm2 delete sumweave-ui
 pm2 start ecosystem.config.js

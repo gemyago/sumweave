@@ -31,7 +31,7 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 ## Layout (conceptual)
 
 - **`main.go`** / **`cli.go`** — Cobra commands, process lifecycle, and command-local explicit root resolution.
-- **`db-migrate`** — loads typed configuration and eagerly builds only logging/lifecycle/telemetry, SQL/auth stores, runtime migration inputs, and `DatabaseMigrator`; it does not build finance services, jobs worker/service, JWT, routes, or HTTP. It migrates the finance schema itself and remains the standard local backend workflow before **`start-all`**.
+- **`db-migrate`** — loads typed configuration and eagerly builds only logging/lifecycle/telemetry, SQL/auth stores, runtime migration inputs, and `DatabaseMigrator`; it does not build finance services, jobs worker/service, JWT, routes, or HTTP. It migrates the finance schema itself. Local setup invokes it exactly once for each prepared PostgreSQL environment through `make postgres-bootstrap` before **`start-all`**.
 - **`start-all`** — standard local backend workflow entrypoint; runs the HTTP server, appdispatch worker, and non-overlapping scheduler loop in one process using the same components as the split commands.
 - **`start`** — API-only HTTP server mode for split or production-like environments.
 - **`sumweave jobs worker`** / **`sumweave jobs enqueue-due`** — dedicated split-environment appdispatch consumer and one-shot scheduler commands. The worker registers ordinary and job-observed finance consumers; the scheduler reads finance-owned bank and FX schedules, publishes due semantic commands, advances schedule state atomically with the publication, and does not run finance work or create job rows. Neither builds HTTP routes or a server.
@@ -46,8 +46,8 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 
 - **`internal/appdispatch/`** is a low-level, multi-topic SQL transport. One
   message table stores topic, immutable unique identity, opaque payload, and
-  metadata; one offsets table is keyed by topic and consumer group. SQLite and
-  PostgreSQL follow the same delivery contract. Semantic packages publish
+  metadata; one offsets table is keyed by topic and consumer group. PostgreSQL
+  provides the delivery contract. Semantic packages publish
   commands and events through it and receive the message ID before consumption.
   It is the only durable publication, scheduling, and delivery path for
   background work; the transport does not create a user-facing execution model.
@@ -110,14 +110,14 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 
 - **Layers:** embedded **`default.yaml`**, then **`internal/config/<env>.yaml`** (from **`--env` / `-e`**, default **`local`**), then optional **`<env>-user.yaml`** for local secrets.
 - **Env:** keys map to **`APP_…`** (Viper `AutomaticEnv()`); nested keys use underscores (e.g. **`APP_OPENAI_APIKEY`** for OpenAI). The loader exact-decodes the layered values before roots validate and translate them to native component inputs.
-- **Database setup:** startup commands no longer auto-migrate app-owned schemas; run **`sumweave db-migrate`** before **`start-all`** as the standard local backend workflow, and also before **`start`**, **`jobs worker`**, or **`jobs enqueue-due`** when the environment uses persisted tables.
+- **Database setup:** PostgreSQL is the only supported database. Startup commands never migrate app-owned schemas; run **`make postgres-bootstrap`** from the repository root before **`start-all`**, **`start`**, **`jobs worker`**, or **`jobs enqueue-due`**. It provisions local/test databases and roles, runs the two explicit `db-migrate` commands through the migrator role, then grants the runtime role access to the prepared schemas.
 - **HTTP defaults:** e.g. **`httpServer.port`** **4501**, **`writeTimeout`** aligned with long SSE/agent runs (see comments in **`default.yaml`**). Set both `httpServer.tls.certFile` and `keyFile` (or their `APP_` equivalents) for local HTTPS; see [../../../docs/local-https.md](../../../docs/local-https.md). No secrets in repo.
 
 ## Repository integration
 
 - **Module:** `github.com/gemyago/sumweave/apps/sumweave` with **`replace github.com/gemyago/sumweave/runtime => ../../runtime`** for local **`runtime/`** development.
-- **`apps/sumweave/Makefile`:** **`make lint`** (**`golangci-lint`**), **`make test`** (coverage profile + **`go-test-coverage`** vs **`.testcoverage.yaml`**), **`make dist/bin`** (rebuilds UI embed assets, validates `embeddedui/dist/index.html`, then `go build`).
-- **Root `Makefile`** runs **`$(MAKE) -C apps/sumweave lint|test`** before **`apps/sumweave-ui`**; Go coverage from this module is merged into the root merged HTML report (see root Makefile **`tail`** of **`apps/sumweave/.cover/profile.out`**).
+- **`apps/sumweave/Makefile`:** **`make lint`**, database-free **`make test`** (routine coverage profile), tagged **`make test-postgres`** (full PostgreSQL coverage profile), and **`make dist/bin`** (rebuilds UI embed assets, validates `embeddedui/dist/index.html`, then `go build`).
+- **Root `Makefile`** runs the routine module targets before **`apps/sumweave-ui`**; Go coverage from this module's `.cover/routine.out` is merged into the root HTML report. `make postgres-test-sumweave` and serial `make postgres-verify` are explicit non-routine paths.
 
 ## API integration
 
@@ -133,7 +133,7 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 
 ## Technical notes (one-liners)
 
-- **Local persistence:** app-root launches use **`data`** for filesystem-backed agent state and **`data/application.db`** as the finance application database for auth, finance, multi-topic durable transport, and jobs. Agent runtime database persistence is configured separately. On disk these are under **`apps/sumweave/data`**.
+- **Local persistence:** app-root launches use **`data`** only for filesystem-backed agent state. Auth, finance, multi-topic durable transport, jobs, and agent runtime persistence use Compose PostgreSQL `sumweave_local` through the runtime role, with the fixed `sumweave_`, `sumweave_runtime_`, and `finance_` table prefixes.
 - **LLM HTTP client timeout** in **`internal/agent_runtime.go`** should stay consistent with **`httpServer.writeTimeout`** for streaming runs.
 - **Health** and **auth** routes use the generated v1 stack (**`RegisterHealthRoutes`**, **`RegisterAuthRoutes`**); **`GET /api/v1/auth/me`** is wrapped with **`AuthMiddleware`** in controller. **Agent** traffic is a separate subtree under **`/api/v1/runtime/`**.
 

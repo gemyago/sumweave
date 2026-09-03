@@ -4,10 +4,12 @@
 Define explicit preparation of the Sumweave application database.
 ## Requirements
 ### Requirement: Explicit Backend Database Migration Command
-The backend application SHALL provide an explicit `sumweave db-migrate` command that prepares configured Sumweave-managed database schemas without starting long-running application processes.
+The backend application SHALL provide an explicit `sumweave db-migrate` command
+that prepares configured Sumweave-managed PostgreSQL schemas without starting
+long-running application processes.
 
 #### Scenario: Command migrates all configured app schemas
-- **WHEN** a user runs `sumweave db-migrate` with a valid environment configuration
+- **WHEN** a user runs `sumweave db-migrate` with valid PostgreSQL environment configuration
 - **THEN** the command MUST run all configured schema initialization steps for
   agent runtime storage, application database-backed auth and dispatch state,
   job-projection persistence used by observed consumers, and finance persistence
@@ -18,11 +20,19 @@ The backend application SHALL provide an explicit `sumweave db-migrate` command 
 - **AND** it MUST complete without starting the HTTP server, jobs consumer mode, scheduler loop, provider sync, or AI/runtime request execution
 
 ### Requirement: Standard Environment Setup Uses Explicit Migration
-The repository SHALL document explicit database migration as a standard setup step before starting Sumweave backend processes.
+The repository SHALL document `make postgres-bootstrap` as standard setup before
+starting Sumweave backend processes. It provisions PostgreSQL and invokes the
+explicit migration command.
 
 #### Scenario: Local setup documents migration before local all-in-one startup
 - **WHEN** a developer follows documented local backend setup instructions
-- **THEN** the instructions MUST direct them to run `sumweave db-migrate` before starting `sumweave start-all` or other backend processes that depend on persisted tables
+- **THEN** the instructions MUST direct them to run `make postgres-bootstrap`
+  before starting `sumweave start-all` or other backend processes that depend on
+  persisted tables
+- **AND** bootstrap MUST prepare separate `sumweave_local` and `sumweave_test`
+  databases, run `sumweave db-migrate` once for each through the migrator role,
+  and grant the runtime role access before backend processes or tagged tests run
+- **AND** routine tests MUST remain database-independent
 
 #### Scenario: Split process modes use the same prepared schemas
 

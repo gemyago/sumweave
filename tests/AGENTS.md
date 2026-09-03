@@ -41,7 +41,10 @@ Once setup check succeeds, follow [./agent/scenarios/master.md](./agent/scenario
 
 ## Manual browser e2e
 
-- Manual browser e2e notes live in [../docs/manual-e2e.md](../docs/manual-e2e.md).
+- Manual browser E2E notes live in
+  [../docs/manual-e2e/README.md](../docs/manual-e2e/README.md).
+- Follow the manual E2E setup's `make postgres-bootstrap` prerequisite before a
+  backend flow. Routine harness tests remain database-independent.
 
 ## Task Completion Protocol
 

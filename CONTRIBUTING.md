@@ -76,22 +76,19 @@ go get -u ./... && go mod tidy
 
 ## Run locally
 
-The normal local workflow uses PM2 from the repository root. First migrate the
-backend database, then create the PM2 process definitions:
+The normal local workflow uses Compose PostgreSQL and PM2 from the repository
+root. Bootstrap starts Compose, prepares the local and test databases, runs both
+explicit migrations, and grants the runtime role before PM2 starts the backend:
 
 ```bash
-# Run the migration from the backend module.
-cd apps/sumweave
-go run ./cmd/sumweave db-migrate --env local
-
-# Return to the repository root and start the API and Vite development server.
-cd ../..
-npm run pm2:start
+make postgres-bootstrap
+pm2 start ecosystem.config.js
 ```
 
-Backend CLI paths are relative to `apps/sumweave`. Nx and PM2 set that
-working directory for the backend process; PM2 commands themselves remain
-repo-root commands because `PM2_HOME` is repo-scoped.
+Backend CLI paths, including the explicit `db-migrate` command, are relative to
+`apps/sumweave`. Nx and PM2 set that working directory for the backend process;
+PM2 commands themselves remain repo-root commands because `PM2_HOME` is
+repo-scoped. Do not use direct `db-migrate` as a replacement for local bootstrap.
 
 Frontend host/port: http://localhost:5173
 Backend host/port: http://localhost:4501

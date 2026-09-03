@@ -85,13 +85,14 @@ Durable jobs workflow:
 - Explicit finance terminal failures become sanitized failed observed jobs and are acknowledged; unclassified service, payload, materialization, claim, panic, and terminal-write failures remain dispatch failures.
 - Message routers use at-least-once delivery and durable dead letters.
 - Worker recovery runs at startup and between polls for claims older than `jobs.worker.staleRunningAge` (five minutes by default); active handlers renew their claims before recovery.
-- Recreate old local databases before the topic-aware dispatch migration.
+- Recreate the repo-scoped Compose PostgreSQL volume only when a clean local
+  environment is required; no SQLite data migration or compatibility path exists.
 
 ## Lint / test
 
-- **This module:** `make lint`, `make test`, and non-routine `make test-postgres`
-  from `apps/sumweave` (uses repo-root pinned `golangci-lint` from `bin/` unless
-  `CI=true`); run root `make postgres-bootstrap` before the tagged target.
+- **This module:** `make lint` and database-free `make test`; use root
+  `make postgres-test-sumweave` for tagged PostgreSQL coverage (it bootstraps
+  the prepared test schema).
 - **Release build:** `make -C build dist` from the repository root produces `build/dist/linux/{amd64,arm64}/sumweave` with embedded UI assets and stages `build/dist/platform-agents/skills`.
 - **Whole repo:** from the repository root, `make lint` and `make test` include this module via `$(MAKE) -C apps/sumweave …`.
 

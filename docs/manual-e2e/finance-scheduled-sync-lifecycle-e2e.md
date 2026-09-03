@@ -17,13 +17,14 @@ REPO_ROOT="$PWD"
 E2E_ROOT="$REPO_ROOT/tmp/jobs-system-simplification-028-e2e/scheduled-bank"
 rm -rf "$E2E_ROOT"
 mkdir -p "$E2E_ROOT"
-export APP_DATADIR="$E2E_ROOT/data"
-export APP_APPLICATION_DATABASE_DSN="$E2E_ROOT/application.db"
+# Stop the normal PM2 start-all backend before resetting its shared database.
+pm2 stop sumweave-api
+docker compose down -v
+make postgres-bootstrap
 export APP_FINANCE_PROVIDERS_MONOBANK_BASEURL=http://127.0.0.1:4599
 export APP_FINANCE_PROVIDERS_FRANKFURTER_BASEURL=http://127.0.0.1:4598
 
 cd "$REPO_ROOT/apps/sumweave"
-go run ./cmd/sumweave db-migrate --env local
 IFS=: read -r USER PASS < "$REPO_ROOT/.local-users"
 go run ./cmd/sumweave --env local user add \
   --username "$USER" --password "$PASS" --if-not-exists
@@ -121,15 +122,12 @@ go run ./cmd/sumweave jobs enqueue-due --env local
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/connections" \
   -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/connections-after-dispatch.json"
 BANK_JOB_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["items"][0]["schedule"]["lastJobId"])' "$E2E_ROOT/connections-after-dispatch.json")
-FX_STATE_BEFORE=$(python3 - "$APP_APPLICATION_DATABASE_DSN" <<'PY'
-import json, sqlite3, sys
-db = sqlite3.connect(sys.argv[1])
-row = db.execute("select provider,next_run_at,last_scheduled_at,last_job_id from finance_fx_refresh_schedules where schedule_id = ?", ("finance.fx_rates_daily_refresh",)).fetchone()
-assert row and row[0] == "frankfurter" and row[1] and row[2] and row[3]
-print(json.dumps({"provider": row[0], "nextRunAt": row[1], "lastScheduledAt": row[2], "lastJobId": row[3]}))
-PY
-)
-FX_JOB_ID=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["lastJobId"])' "$FX_STATE_BEFORE")
+IFS=$'\t' read -r FX_NEXT_RUN_BEFORE FX_LAST_SCHEDULED_BEFORE FX_JOB_ID <<<"$(
+  docker compose exec -T -e PGPASSWORD=sumweave_runtime_local postgres \
+    psql -p 55432 -U sumweave_runtime -d sumweave_local -At -F $'\t' \
+    -c "SELECT next_run_at,last_scheduled_at,last_job_id FROM finance_fx_refresh_schedules WHERE schedule_id = 'finance.fx_rates_daily_refresh' AND provider = 'frankfurter'"
+)"
+test -n "$FX_NEXT_RUN_BEFORE" && test -n "$FX_LAST_SCHEDULED_BEFORE" && test -n "$FX_JOB_ID"
 for JOB_ID in "$BANK_JOB_ID" "$FX_JOB_ID"; do
   STATUS=$(curl -sS -o "$E2E_ROOT/job-$JOB_ID-before-delivery.json" -w '%{http_code}' \
     "http://127.0.0.1:4501/api/v1/jobs/$JOB_ID" -H "Authorization: Bearer $ACCESS_TOKEN")
@@ -176,25 +174,27 @@ failure result.
 ## 5. Verify due-state advancement and repeat/idempotency
 
 ```bash
-python3 - "$APP_APPLICATION_DATABASE_DSN" "$FX_STATE_BEFORE" <<'PY'
-import json, sqlite3, sys
-db = sqlite3.connect(sys.argv[1])
-before = json.loads(sys.argv[2])
-row = db.execute("select next_run_at,last_scheduled_at,last_job_id from finance_fx_refresh_schedules where schedule_id = ?", ("finance.fx_rates_daily_refresh",)).fetchone()
-assert row[0] != before["nextRunAt"] and row[1] == before["lastScheduledAt"] and row[2] == before["lastJobId"]
-PY
+IFS=$'\t' read -r FX_NEXT_RUN_AFTER FX_LAST_SCHEDULED_AFTER FX_LAST_JOB_AFTER <<<"$(
+  docker compose exec -T -e PGPASSWORD=sumweave_runtime_local postgres \
+    psql -p 55432 -U sumweave_runtime -d sumweave_local -At -F $'\t' \
+    -c "SELECT next_run_at,last_scheduled_at,last_job_id FROM finance_fx_refresh_schedules WHERE schedule_id = 'finance.fx_rates_daily_refresh'"
+)"
+test "$FX_NEXT_RUN_AFTER" != "$FX_NEXT_RUN_BEFORE"
+test "$FX_LAST_SCHEDULED_AFTER" = "$FX_LAST_SCHEDULED_BEFORE"
+test "$FX_LAST_JOB_AFTER" = "$FX_JOB_ID"
 
 go run ./cmd/sumweave jobs enqueue-due --env local
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/connections" \
   -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/connections-after-repeat.json"
-python3 - "$E2E_ROOT/connections-after.json" "$E2E_ROOT/connections-after-repeat.json" "$APP_APPLICATION_DATABASE_DSN" "$FX_JOB_ID" <<'PY'
-import json, sqlite3, sys
-first, repeat = (json.load(open(path)) for path in sys.argv[1:3])
+python3 - "$E2E_ROOT/connections-after.json" "$E2E_ROOT/connections-after-repeat.json" <<'PY'
+import json, sys
+first, repeat = (json.load(open(path)) for path in sys.argv[1:])
 assert first["items"][0]["schedule"]["lastJobId"] == repeat["items"][0]["schedule"]["lastJobId"]
-db = sqlite3.connect(sys.argv[3])
-fx_job_id = db.execute("select last_job_id from finance_fx_refresh_schedules where schedule_id = ?", ("finance.fx_rates_daily_refresh",)).fetchone()[0]
-assert fx_job_id == sys.argv[4]
 PY
+FX_REPEAT_JOB_ID=$(docker compose exec -T -e PGPASSWORD=sumweave_runtime_local postgres \
+  psql -p 55432 -U sumweave_runtime -d sumweave_local -At \
+  -c "SELECT last_job_id FROM finance_fx_refresh_schedules WHERE schedule_id = 'finance.fx_rates_daily_refresh'")
+test "$FX_REPEAT_JOB_ID" = "$FX_JOB_ID"
 ```
 
 The second scheduler tick is a no-op because both finance-owned schedules are
@@ -206,4 +206,8 @@ reference, or create a `job_schedules` row.
 ```bash
 kill "$API_PID" "$MONOBANK_PID" "$FX_PID" 2>/dev/null || true
 wait "$API_PID" "$MONOBANK_PID" "$FX_PID" 2>/dev/null || true
+cd "$REPO_ROOT"
+pm2 start ecosystem.config.js
 ```
+
+This guide owns restoring the normal PM2 backend after its API-only run.

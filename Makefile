@@ -23,7 +23,7 @@ ifneq ($(POSTGRES_HOST):$(POSTGRES_PORT),127.0.0.1:55432)
 postgres_test_app_env=APP_APPLICATION_DATABASE_DSN="$(postgres_test_dsn)" APP_AGENTRUNTIME_DATABASE_DSN="$(postgres_test_dsn)"
 endif
 
-.PHONY: postgres-bootstrap postgres-bootstrap-contract-test postgres-target-contract-test postgres-workflow-contract-test postgres-test-runtime postgres-test-finance postgres-test-sumweave postgres-verify
+.PHONY: postgres-bootstrap postgres-bootstrap-contract-test postgres-target-contract-test postgres-workflow-contract-test postgres-documentation-contract-test postgres-test-runtime postgres-test-finance postgres-test-sumweave postgres-verify
 .NOTPARALLEL: postgres-verify
 postgres-bootstrap:
 	@if [ "$(POSTGRES_MANAGED_EXTERNALLY)" != "1" ]; then \
@@ -42,6 +42,9 @@ postgres-target-contract-test:
 
 postgres-workflow-contract-test:
 	bash ./scripts/postgres/workflow-contract-test.sh
+
+postgres-documentation-contract-test:
+	bash ./scripts/postgres/documentation-contract-test.sh
 
 postgres-test-runtime: postgres-bootstrap
 	SUMWEAVE_POSTGRES_TEST_DSN="$(postgres_test_dsn)" $(MAKE) -C runtime test-postgres

@@ -239,15 +239,15 @@ that root releases the shared application database.
 - **AND** cleanup errors MUST remain observable to the owning command or
   embedder.
 
-### Requirement: Explicit multi-driver pub/sub schema preparation
+### Requirement: Explicit PostgreSQL pub/sub schema preparation
 
 The explicit database migration command SHALL prepare the topic-aware pub/sub
-message and offset schema for the configured SQLite or PostgreSQL application
-database.
+message and offset schema for the configured PostgreSQL application database.
 
 #### Scenario: Migration prepares pub/sub storage
 
-- **WHEN** `sumweave db-migrate` runs against a supported application database
+- **WHEN** `sumweave db-migrate` runs against a supported PostgreSQL application
+  database
 - **THEN** it MUST prepare durable topic messages and offsets keyed by topic and
   consumer group
 - **AND** later publisher and router startup MUST NOT create or alter those

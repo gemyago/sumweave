@@ -151,7 +151,7 @@ The rules are:
 - Routine CI tests must not require PostgreSQL to be available.
 - Do not test generated ORM queries by matching SQL strings.
 - Do not explicitly normalize dates or timestamps to UTC.
-- Consider SQLite as local-dev only storage. Small issues and inconsistencies are tolerable.
+- PostgreSQL is the sole supported core product database in every environment.
 - Keep API responses single-purpose by default (e.g operating on a single entity); Composition must have a good justification.
 - Keep migration tests shallow; allow one smoke test, no detailed schema checks.
 - Build frontend/backend release artifacts on the host; Docker only packages them.

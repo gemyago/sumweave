@@ -35,7 +35,8 @@ Root Go module for the finance product slice.
 ## Commands
 
 - `make test`
-- Root `make postgres-test-finance` for tagged coverage (after bootstrap)
+- Root `make postgres-bootstrap`, then `make postgres-test-finance` for tagged
+  PostgreSQL coverage; routine `make test` remains database-free
 - `make lint`
 
 To fix lint errors, attempt: `golangci-lint run --fix` and then manually fix the remaining errors (if still present).
