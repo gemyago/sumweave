@@ -46,44 +46,12 @@ type runtimeServices struct {
 	agentProfilesSvc   agent.AgentProfilesService
 }
 
-type databaseRuntimeServiceFactory interface {
-	NewProvidersConfigService(string, *slog.Logger, string) (agent.ProvidersConfigService, error)
-	NewAgentProfilesService(string, *slog.Logger, string) (agent.AgentProfilesService, error)
-}
-
-type agentDatabaseRuntimeServiceFactory struct{}
-
-//nolint:ireturn
-func (agentDatabaseRuntimeServiceFactory) NewProvidersConfigService(
-	dsn string,
-	logger *slog.Logger,
-	tablePrefix string,
-) (agent.ProvidersConfigService, error) {
-	return agent.NewDatabaseProvidersConfigService(dsn, logger, tablePrefix)
-}
-
-//nolint:ireturn
-func (agentDatabaseRuntimeServiceFactory) NewAgentProfilesService(
-	dsn string,
-	logger *slog.Logger,
-	tablePrefix string,
-) (agent.AgentProfilesService, error) {
-	return agent.NewDatabaseAgentProfilesService(dsn, logger, tablePrefix)
-}
-
 func newProvidersConfigService(deps RuntimeDeps) (agent.ProvidersConfigService, error) { //nolint:ireturn
-	return newProvidersConfigServiceWithFactory(deps, agentDatabaseRuntimeServiceFactory{})
-}
-
-func newProvidersConfigServiceWithFactory( //nolint:ireturn
-	deps RuntimeDeps,
-	factory databaseRuntimeServiceFactory,
-) (agent.ProvidersConfigService, error) {
 	if deps.AgentRuntimeStorageType == storageTypeDatabase {
 		if deps.AgentRuntimeDatabaseDSN == "" {
 			return nil, errors.New("agent runtime database dsn is required")
 		}
-		svc, err := factory.NewProvidersConfigService(
+		svc, err := agent.NewDatabaseProvidersConfigService(
 			deps.AgentRuntimeDatabaseDSN,
 			deps.RootLogger,
 			deps.AgentRuntimeDatabaseTablePrefix,
@@ -101,18 +69,11 @@ func newProvidersConfigServiceWithFactory( //nolint:ireturn
 }
 
 func newAgentProfilesService(deps RuntimeDeps) (agent.AgentProfilesService, error) { //nolint:ireturn
-	return newAgentProfilesServiceWithFactory(deps, agentDatabaseRuntimeServiceFactory{})
-}
-
-func newAgentProfilesServiceWithFactory( //nolint:ireturn
-	deps RuntimeDeps,
-	factory databaseRuntimeServiceFactory,
-) (agent.AgentProfilesService, error) {
 	if deps.AgentRuntimeStorageType == storageTypeDatabase {
 		if deps.AgentRuntimeDatabaseDSN == "" {
 			return nil, errors.New("agent runtime database dsn is required")
 		}
-		svc, err := factory.NewAgentProfilesService(
+		svc, err := agent.NewDatabaseAgentProfilesService(
 			deps.AgentRuntimeDatabaseDSN,
 			deps.RootLogger,
 			deps.AgentRuntimeDatabaseTablePrefix,
@@ -130,18 +91,11 @@ func newAgentProfilesServiceWithFactory( //nolint:ireturn
 }
 
 func newRuntimeServices(deps RuntimeDeps) (*runtimeServices, error) {
-	return newRuntimeServicesWithFactory(deps, agentDatabaseRuntimeServiceFactory{})
-}
-
-func newRuntimeServicesWithFactory(
-	deps RuntimeDeps,
-	factory databaseRuntimeServiceFactory,
-) (*runtimeServices, error) {
-	providersConfigSvc, err := newProvidersConfigServiceWithFactory(deps, factory)
+	providersConfigSvc, err := newProvidersConfigService(deps)
 	if err != nil {
 		return nil, err
 	}
-	agentProfilesSvc, err := newAgentProfilesServiceWithFactory(deps, factory)
+	agentProfilesSvc, err := newAgentProfilesService(deps)
 	if err != nil {
 		return nil, err
 	}

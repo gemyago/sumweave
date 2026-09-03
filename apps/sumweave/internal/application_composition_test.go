@@ -1,13 +1,22 @@
+//go:build postgres_test
+
 package internal
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	"github.com/gemyago/sumweave/runtime/agent"
+	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,55 +79,6 @@ func TestApplicationComposition(t *testing.T) {
 			databaseOptsDeps.AgentRuntimeDatabaseDSN = "database-runtime"
 			_, err = buildRunnerOpts(databaseOptsDeps, agent.NewToolsRegistry())
 			require.NoError(t, err)
-			databaseServicesDeps := makeRuntimeDeps(t, storageTypeDatabase)
-			databaseServicesDeps.AgentRuntimeDatabaseDSN = "database-runtime"
-			databaseFactory := newMockdatabaseRuntimeServiceFactory(t)
-			databaseProviders, err := agent.NewFileProvidersConfigService(t.TempDir(), telemetry.RootTestLogger())
-			require.NoError(t, err)
-			databaseProfiles, err := agent.NewFileAgentProfilesService(t.TempDir(), telemetry.RootTestLogger())
-			require.NoError(t, err)
-			databaseFactory.EXPECT().
-				NewProvidersConfigService(
-					databaseServicesDeps.AgentRuntimeDatabaseDSN,
-					databaseServicesDeps.RootLogger,
-					databaseServicesDeps.AgentRuntimeDatabaseTablePrefix,
-				).
-				Return(databaseProviders, nil).
-				Once()
-			databaseFactory.EXPECT().
-				NewAgentProfilesService(
-					databaseServicesDeps.AgentRuntimeDatabaseDSN,
-					databaseServicesDeps.RootLogger,
-					databaseServicesDeps.AgentRuntimeDatabaseTablePrefix,
-				).
-				Return(databaseProfiles, nil).
-				Once()
-			services, err = newRuntimeServicesWithFactory(databaseServicesDeps, databaseFactory)
-			require.NoError(t, err)
-			assert.Same(t, databaseProviders, services.providersConfigSvc)
-			assert.Same(t, databaseProfiles, services.agentProfilesSvc)
-			databaseFactory = newMockdatabaseRuntimeServiceFactory(t)
-			databaseFactory.EXPECT().
-				NewProvidersConfigService(
-					databaseServicesDeps.AgentRuntimeDatabaseDSN,
-					databaseServicesDeps.RootLogger,
-					databaseServicesDeps.AgentRuntimeDatabaseTablePrefix,
-				).
-				Return(nil, errors.New("providers failure")).
-				Once()
-			_, err = newProvidersConfigServiceWithFactory(databaseServicesDeps, databaseFactory)
-			require.Error(t, err)
-			databaseFactory = newMockdatabaseRuntimeServiceFactory(t)
-			databaseFactory.EXPECT().
-				NewAgentProfilesService(
-					databaseServicesDeps.AgentRuntimeDatabaseDSN,
-					databaseServicesDeps.RootLogger,
-					databaseServicesDeps.AgentRuntimeDatabaseTablePrefix,
-				).
-				Return(nil, errors.New("profiles failure")).
-				Once()
-			_, err = newAgentProfilesServiceWithFactory(databaseServicesDeps, databaseFactory)
-			require.Error(t, err)
 			_, err = NewRuntime(fileDeps)
 			require.NoError(t, err)
 			invalidWorkspaceDeps := makeRuntimeDeps(t, "file")
@@ -148,5 +108,129 @@ func TestApplicationComposition(t *testing.T) {
 	t.Run("application database rejects SQLite configuration", func(t *testing.T) {
 		_, err := OpenApplicationSQLDB(":memory:")
 		require.Error(t, err)
+	})
+
+	t.Run("application composition validates direct migration dependencies", func(t *testing.T) {
+		migrator := &DatabaseMigrator{rootLogger: telemetry.RootTestLogger()}
+		require.NoError(t, migrator.migrateAgentRuntime(t.Context()))
+		require.Error(t, migrator.migrateAuthentication(t.Context()))
+		require.Error(t, migrator.migrateAppDispatch(t.Context()))
+		require.Error(t, migrator.migrateJobs(t.Context()))
+		require.Error(t, migrator.migrateFinance(t.Context()))
+		migrator.agentRuntimeStorageType = storageTypeDatabase
+		require.Error(t, migrator.migrateAgentRuntime(t.Context()))
+		require.Error(t, migrator.Migrate(t.Context()))
+		expectedErr := errors.New(faker.New().UUID().V4())
+		err := migrator.runStep(t.Context(), "finance", func(context.Context) error { return expectedErr })
+		require.ErrorIs(t, err, expectedErr)
+		require.ErrorContains(t, err, "migrate finance schema")
+
+		invalidDatabaseDeps := makeRuntimeDeps(t, storageTypeDatabase)
+		invalidDatabaseDeps.AgentRuntimeDatabaseDSN = ":memory:"
+		_, err = newProvidersConfigService(invalidDatabaseDeps)
+		require.Error(t, err)
+	})
+
+	t.Run("application database opens the prepared runtime-role schema and runs migrations", func(t *testing.T) {
+		values, err := config.LoadValues(config.ValuesLoadInput{Environment: "test"})
+		require.NoError(t, err)
+		rootConfig, err := values.HTTPRoot("test")
+		require.NoError(t, err)
+		migrationDSN := strings.Replace(
+			rootConfig.Application.Database.DSN,
+			"sumweave_runtime:sumweave_runtime_local",
+			"sumweave_migrator:sumweave_migrator_local",
+			1,
+		)
+		deps := RuntimeDeps{
+			RootLogger:                      telemetry.RootTestLogger(),
+			DataDir:                         t.TempDir(),
+			PlatformAgentsPath:              t.TempDir(),
+			AgentRuntimeStorageType:         rootConfig.AgentRuntime.Storage.Type,
+			AgentRuntimeDatabaseDSN:         migrationDSN,
+			AgentRuntimeDatabaseTablePrefix: rootConfig.AgentRuntime.Database.TablePrefix,
+			SkillsMaxSkillBytes:             4096,
+			SkillsMaxCatalogEntries:         10,
+			ToolsRegistry:                   agent.NewToolsRegistry(),
+		}
+		runtime, err := newRuntime(deps)
+		require.NoError(t, err)
+		assert.NotNil(t, runtime.Runner)
+		services, err := newRuntimeServices(deps)
+		require.NoError(t, err)
+		assert.NotNil(t, services.agentProfilesSvc)
+		hooks := lifecycle.NewTestShutdownHooks()
+		database, err := NewApplicationSQLDB(migrationDSN, hooks)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, hooks.PerformShutdown(context.WithoutCancel(t.Context()))) })
+		require.NotNil(t, database)
+		users, err := auth.NewUserStore(auth.UserStoreDeps{
+			SQLDB:       database,
+			DatabaseDSN: migrationDSN,
+			TablePrefix: rootConfig.Application.Database.TablePrefix + "auth_",
+			IDGen:       ident.NewDefaultGenerator(),
+			Logger:      telemetry.RootTestLogger(),
+		})
+		require.NoError(t, err)
+		refreshTokens, err := auth.NewRefreshTokenStore(auth.RefreshTokenStoreDeps{
+			SQLDB:       database,
+			DatabaseDSN: migrationDSN,
+			TablePrefix: rootConfig.Application.Database.TablePrefix + "auth_",
+			Logger:      telemetry.RootTestLogger(),
+		})
+		require.NoError(t, err)
+		migrator := NewDatabaseMigrator(DatabaseMigrationDeps{
+			RootLogger:                      telemetry.RootTestLogger(),
+			AgentRuntimeStorageType:         rootConfig.AgentRuntime.Storage.Type,
+			AgentRuntimeDatabaseDSN:         migrationDSN,
+			AgentRuntimeDatabaseTablePrefix: rootConfig.AgentRuntime.Database.TablePrefix,
+			ApplicationDatabaseDSN:          migrationDSN,
+			ApplicationDatabaseTablePrefix:  rootConfig.Application.Database.TablePrefix,
+			ApplicationSQLDB:                database,
+			AuthUsers:                       users,
+			AuthRefreshTokens:               refreshTokens,
+		})
+		require.NoError(t, migrator.Migrate(t.Context()))
+		canceledContext, cancel := context.WithCancel(t.Context())
+		cancel()
+		require.Error(t, migrator.migrateAppDispatch(canceledContext))
+		require.Error(t, migrator.migrateFinance(canceledContext))
+		runtimeRoleMigrator := &DatabaseMigrator{
+			rootLogger:                      telemetry.RootTestLogger(),
+			agentRuntimeStorageType:         storageTypeDatabase,
+			agentRuntimeDatabaseDSN:         rootConfig.AgentRuntime.Database.DSN,
+			agentRuntimeDatabaseTablePrefix: rootConfig.AgentRuntime.Database.TablePrefix,
+		}
+		require.Error(t, runtimeRoleMigrator.migrateAgentRuntime(t.Context()))
+		usersDatabase, err := OpenApplicationSQLDB(migrationDSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, usersDatabase.Close()) })
+		refreshTokensDatabase, err := OpenApplicationSQLDB(migrationDSN)
+		require.NoError(t, err)
+		users, err = auth.NewUserStore(auth.UserStoreDeps{
+			SQLDB:       usersDatabase,
+			DatabaseDSN: migrationDSN,
+			TablePrefix: rootConfig.Application.Database.TablePrefix + "auth_",
+			IDGen:       ident.NewDefaultGenerator(),
+			Logger:      telemetry.RootTestLogger(),
+		})
+		require.NoError(t, err)
+		refreshTokens, err = auth.NewRefreshTokenStore(auth.RefreshTokenStoreDeps{
+			SQLDB:       refreshTokensDatabase,
+			DatabaseDSN: migrationDSN,
+			TablePrefix: rootConfig.Application.Database.TablePrefix + "auth_",
+			Logger:      telemetry.RootTestLogger(),
+		})
+		require.NoError(t, err)
+		require.NoError(t, refreshTokensDatabase.Close())
+		migrator = NewDatabaseMigrator(DatabaseMigrationDeps{
+			RootLogger: telemetry.RootTestLogger(), AuthUsers: users, AuthRefreshTokens: refreshTokens,
+		})
+		require.Error(t, migrator.migrateAuthentication(t.Context()))
+		require.NoError(t, database.Close())
+		require.Error(t, migrator.migrateAuthentication(t.Context()))
+		require.Error(t, migrator.migrateAppDispatch(t.Context()))
+		require.Error(t, migrator.migrateJobs(t.Context()))
+		require.Error(t, migrator.migrateFinance(t.Context()))
 	})
 }

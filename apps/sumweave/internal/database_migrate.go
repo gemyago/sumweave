@@ -11,36 +11,8 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	"github.com/gemyago/sumweave/finance/persistence"
+	"github.com/gemyago/sumweave/runtime/agent"
 )
-
-// AgentRuntimeMigrator applies agent-runtime schema migrations.
-type AgentRuntimeMigrator interface {
-	Migrate() error
-}
-
-type componentMigrator interface {
-	Migrate(context.Context) error
-}
-
-type componentMigratorFactory func() (componentMigrator, error)
-
-type autoMigrator interface {
-	AutoMigrate() error
-}
-
-type componentMigratorFunc func(context.Context) error
-
-func (f componentMigratorFunc) Migrate(ctx context.Context) error {
-	return f(ctx)
-}
-
-// AgentRuntimeMigratorFunc adapts a migration function for wireup.
-type AgentRuntimeMigratorFunc func() error
-
-// Migrate applies the configured agent-runtime migration.
-func (f AgentRuntimeMigratorFunc) Migrate() error {
-	return f()
-}
 
 type DatabaseMigrationDeps struct {
 	RootLogger                      *slog.Logger
@@ -52,60 +24,34 @@ type DatabaseMigrationDeps struct {
 	ApplicationSQLDB                *sql.DB
 	AuthUsers                       *auth.UserStore
 	AuthRefreshTokens               *auth.RefreshTokenStore
-	AgentRuntimeMigrator            AgentRuntimeMigrator
-	AuthenticationMigrator          componentMigrator
-	AppDispatchMigrator             componentMigrator
-	JobsMigrator                    componentMigrator
-	FinanceMigrator                 componentMigrator
 }
 
 // DatabaseMigrator runs the explicit schema setup flow for application subsystems.
 type DatabaseMigrator struct {
-	rootLogger              *slog.Logger
-	agentRuntimeStorageType string
-	agentRuntimeMigrator    AgentRuntimeMigrator
-	authenticationMigrator  componentMigrator
-	appDispatchMigrator     componentMigrator
-	jobsMigrator            componentMigrator
-	financeMigrator         componentMigrator
+	rootLogger                      *slog.Logger
+	agentRuntimeStorageType         string
+	agentRuntimeDatabaseDSN         string
+	agentRuntimeDatabaseTablePrefix string
+	applicationDatabaseDSN          string
+	applicationDatabaseTablePrefix  string
+	applicationSQLDB                *sql.DB
+	authUsers                       *auth.UserStore
+	authRefreshTokens               *auth.RefreshTokenStore
 }
 
 // NewDatabaseMigrator constructs the migration runner from direct dependencies.
 func NewDatabaseMigrator(deps DatabaseMigrationDeps) *DatabaseMigrator {
-	migrator := &DatabaseMigrator{
-		rootLogger:              deps.RootLogger,
-		agentRuntimeStorageType: deps.AgentRuntimeStorageType,
-		agentRuntimeMigrator:    deps.AgentRuntimeMigrator,
-		authenticationMigrator:  deps.AuthenticationMigrator,
-		appDispatchMigrator:     deps.AppDispatchMigrator,
-		jobsMigrator:            deps.JobsMigrator,
-		financeMigrator:         deps.FinanceMigrator,
+	return &DatabaseMigrator{
+		rootLogger:                      deps.RootLogger,
+		agentRuntimeStorageType:         deps.AgentRuntimeStorageType,
+		agentRuntimeDatabaseDSN:         deps.AgentRuntimeDatabaseDSN,
+		agentRuntimeDatabaseTablePrefix: deps.AgentRuntimeDatabaseTablePrefix,
+		applicationDatabaseDSN:          deps.ApplicationDatabaseDSN,
+		applicationDatabaseTablePrefix:  deps.ApplicationDatabaseTablePrefix,
+		applicationSQLDB:                deps.ApplicationSQLDB,
+		authUsers:                       deps.AuthUsers,
+		authRefreshTokens:               deps.AuthRefreshTokens,
 	}
-	if migrator.authenticationMigrator == nil {
-		migrator.authenticationMigrator = newAuthenticationMigrator(deps.AuthUsers, deps.AuthRefreshTokens)
-	}
-	if migrator.appDispatchMigrator == nil {
-		migrator.appDispatchMigrator = newAppDispatchMigrator(newAppDispatchMigratorFactory(
-			deps.ApplicationDatabaseDSN,
-			deps.ApplicationDatabaseTablePrefix,
-			deps.ApplicationSQLDB,
-		))
-	}
-	if migrator.jobsMigrator == nil {
-		migrator.jobsMigrator = newJobsMigrator(newJobsMigratorFactory(
-			deps.ApplicationDatabaseDSN,
-			deps.ApplicationDatabaseTablePrefix,
-			deps.ApplicationSQLDB,
-		))
-	}
-	if migrator.financeMigrator == nil {
-		migrator.financeMigrator = newFinanceMigrator(newFinanceMigratorFactory(
-			deps.ApplicationDatabaseDSN,
-			deps.ApplicationSQLDB,
-			deps.RootLogger,
-		))
-	}
-	return migrator
 }
 
 type componentMigrationError struct {
@@ -116,6 +62,7 @@ type componentMigrationError struct {
 func (e *componentMigrationError) Error() string {
 	return fmt.Sprintf("migrate %s schema", e.component)
 }
+
 func (e *componentMigrationError) Unwrap() error { return e.err }
 
 func (m *DatabaseMigrator) Migrate(ctx context.Context) error {
@@ -123,7 +70,11 @@ func (m *DatabaseMigrator) Migrate(ctx context.Context) error {
 		component string
 		run       func(context.Context) error
 	}{
-		{"agent runtime", m.migrateAgentRuntime}, {"authentication", m.migrateAuthentication}, {"app dispatch transport", m.migrateAppDispatch}, {"durable jobs", m.migrateJobs}, {"finance", m.migrateFinance},
+		{"agent runtime", m.migrateAgentRuntime},
+		{"authentication", m.migrateAuthentication},
+		{"app dispatch transport", m.migrateAppDispatch},
+		{"durable jobs", m.migrateJobs},
+		{"finance", m.migrateFinance},
 	} {
 		if err := m.runStep(ctx, step.component, step.run); err != nil {
 			return err
@@ -146,141 +97,92 @@ func (m *DatabaseMigrator) migrateAgentRuntime(_ context.Context) error {
 	if m.agentRuntimeStorageType != storageTypeDatabase {
 		return nil
 	}
-	if m.agentRuntimeMigrator == nil {
-		return errors.New("agent runtime migrator is required")
+	services, err := newRuntimeServices(RuntimeDeps{
+		RootLogger:                      m.rootLogger,
+		AgentRuntimeStorageType:         m.agentRuntimeStorageType,
+		AgentRuntimeDatabaseDSN:         m.agentRuntimeDatabaseDSN,
+		AgentRuntimeDatabaseTablePrefix: m.agentRuntimeDatabaseTablePrefix,
+	})
+	if err != nil {
+		return fmt.Errorf("create agent runtime services: %w", err)
 	}
-	if err := m.agentRuntimeMigrator.Migrate(); err != nil {
-		return fmt.Errorf("migrate agent runtime: %w", err)
+	providers, profiles := services.providersConfigSvc, services.agentProfilesSvc
+	runner, err := agent.NewRunner(
+		agent.RunnerArgs{ProvidersConfigService: providers, AgentProfilesService: profiles},
+		agent.WithLogger(m.rootLogger),
+		agent.WithDatabaseStorage(m.agentRuntimeDatabaseDSN),
+		agent.WithDatabaseTablePrefix(m.agentRuntimeDatabaseTablePrefix),
+	)
+	if err != nil {
+		return fmt.Errorf("create agent runner: %w", err)
+	}
+	if err = runner.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate sessions database: %w", err)
+	}
+	if err = profiles.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate agent profiles database: %w", err)
+	}
+	//nolint:errcheck // The concrete database provider service supports AutoMigrate.
+	migrator := providers.(interface{ AutoMigrate() error })
+	if err = migrator.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate providers config database: %w", err)
 	}
 	return nil
 }
 
-func (m *DatabaseMigrator) migrateAuthentication(ctx context.Context) error {
-	if m.authenticationMigrator == nil {
-		return errors.New("authentication migrator is required")
+func (m *DatabaseMigrator) migrateAuthentication(_ context.Context) error {
+	if m.authUsers == nil || m.authRefreshTokens == nil {
+		return errors.New("auth stores are required")
 	}
-	return m.authenticationMigrator.Migrate(ctx)
+	if err := m.authUsers.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate auth users: %w", err)
+	}
+	if err := m.authRefreshTokens.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate auth refresh tokens: %w", err)
+	}
+	return nil
 }
 
 func (m *DatabaseMigrator) migrateAppDispatch(ctx context.Context) error {
-	if m.appDispatchMigrator == nil {
-		return errors.New("app dispatch migrator is required")
+	migrator, err := appdispatch.NewMigrator(
+		appdispatch.Config{DatabaseDSN: m.applicationDatabaseDSN, TablePrefix: m.applicationDatabaseTablePrefix},
+		m.applicationSQLDB,
+	)
+	if err != nil {
+		return fmt.Errorf("create app dispatch migrator: %w", err)
 	}
-	return m.appDispatchMigrator.Migrate(ctx)
+	if err = migrator.Migrate(ctx); err != nil {
+		return fmt.Errorf("migrate app dispatch transport: %w", err)
+	}
+	return nil
 }
 
-func (m *DatabaseMigrator) migrateJobs(ctx context.Context) error {
-	if m.jobsMigrator == nil {
-		return errors.New("jobs migrator is required")
+func (m *DatabaseMigrator) migrateJobs(_ context.Context) error {
+	store, err := jobspkg.NewStore(
+		m.applicationSQLDB,
+		m.applicationDatabaseDSN,
+		jobspkg.StoreOpts{TablePrefix: m.applicationDatabaseTablePrefix + "jobs_"},
+	)
+	if err != nil {
+		return fmt.Errorf("create jobs store: %w", err)
 	}
-	return m.jobsMigrator.Migrate(ctx)
+	if err = store.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate jobs store: %w", err)
+	}
+	return nil
 }
 
 func (m *DatabaseMigrator) migrateFinance(ctx context.Context) error {
-	if m.financeMigrator == nil {
-		return errors.New("finance migrator is required")
+	database, err := persistence.NewDatabase(
+		m.applicationSQLDB,
+		m.applicationDatabaseDSN,
+		persistence.WithLogger(m.rootLogger),
+	)
+	if err != nil {
+		return fmt.Errorf("open finance database: %w", err)
 	}
-	return m.financeMigrator.Migrate(ctx)
-}
-
-// The migration command is the sole owner of concrete schema migration coverage.
-func newAuthenticationMigrator(
-	users autoMigrator,
-	refreshTokens autoMigrator,
-) componentMigratorFunc {
-	return componentMigratorFunc(func(context.Context) error {
-		if users == nil || refreshTokens == nil {
-			return errors.New("auth stores are required")
-		}
-		if err := users.AutoMigrate(); err != nil {
-			return fmt.Errorf("auto migrate auth users: %w", err)
-		}
-		if err := refreshTokens.AutoMigrate(); err != nil {
-			return fmt.Errorf("auto migrate auth refresh tokens: %w", err)
-		}
-		return nil
-	})
-}
-
-// The migration command is the sole owner of concrete schema migration coverage.
-func newAppDispatchMigrator(
-	factory componentMigratorFactory,
-) componentMigratorFunc {
-	return componentMigratorFunc(func(ctx context.Context) error {
-		migrator, err := factory()
-		if err != nil {
-			return fmt.Errorf("create app dispatch migrator: %w", err)
-		}
-		if err = migrator.Migrate(ctx); err != nil {
-			return fmt.Errorf("migrate app dispatch transport: %w", err)
-		}
-		return nil
-	})
-}
-
-func newAppDispatchMigratorFactory(
-	dsn, tablePrefix string,
-	db *sql.DB,
-) componentMigratorFactory {
-	return func() (componentMigrator, error) {
-		return appdispatch.NewMigrator(appdispatch.Config{DatabaseDSN: dsn, TablePrefix: tablePrefix}, db)
+	if err = persistence.NewMigrator(database).Migrate(ctx); err != nil {
+		return fmt.Errorf("migrate finance schema: %w", err)
 	}
-}
-
-// The migration command is the sole owner of concrete schema migration coverage.
-func newJobsMigrator(
-	factory componentMigratorFactory,
-) componentMigratorFunc {
-	return componentMigratorFunc(func(ctx context.Context) error {
-		migrator, err := factory()
-		if err != nil {
-			return fmt.Errorf("create jobs store: %w", err)
-		}
-		return migrator.Migrate(ctx)
-	})
-}
-
-func newJobsMigratorFactory(
-	dsn, tablePrefix string,
-	db *sql.DB,
-) componentMigratorFactory {
-	return func() (componentMigrator, error) {
-		store, err := jobspkg.NewStore(db, dsn, jobspkg.StoreOpts{TablePrefix: tablePrefix + "jobs_"})
-		if err != nil {
-			return nil, err
-		}
-		return componentMigratorFunc(func(context.Context) error {
-			if migrateErr := store.AutoMigrate(); migrateErr != nil {
-				return fmt.Errorf("auto migrate jobs store: %w", migrateErr)
-			}
-			return nil
-		}), nil
-	}
-}
-
-// The migration command is the sole owner of concrete schema migration coverage.
-func newFinanceMigrator(
-	factory componentMigratorFactory,
-) componentMigratorFunc {
-	return componentMigratorFunc(func(ctx context.Context) error {
-		migrator, err := factory()
-		if err != nil {
-			return fmt.Errorf("open finance database: %w", err)
-		}
-		return migrator.Migrate(ctx)
-	})
-}
-
-func newFinanceMigratorFactory(
-	dsn string,
-	db *sql.DB,
-	logger *slog.Logger,
-) componentMigratorFactory {
-	return func() (componentMigrator, error) {
-		database, err := persistence.NewDatabase(db, dsn, persistence.WithLogger(logger))
-		if err != nil {
-			return nil, err
-		}
-		return persistence.NewMigrator(database), nil
-	}
+	return nil
 }

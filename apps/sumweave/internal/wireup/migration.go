@@ -69,6 +69,12 @@ func (f agentRuntimeMigrationPreparerFunc) Prepare() (agentRuntimeMigrationCompo
 	return f()
 }
 
+type agentRuntimeMigratorFunc func() error
+
+func (f agentRuntimeMigratorFunc) Migrate() error {
+	return f()
+}
+
 type agentRuntimeMigrationComponentConstructors struct {
 	providers        func() (agent.ProvidersConfigService, error)
 	profiles         func() (agent.AgentProfilesService, error)
@@ -103,7 +109,7 @@ func (m agentRuntimeMigrationComponents) Migrate() error {
 
 func newAgentRuntimeMigrator(
 	preparer agentRuntimeMigrationPreparer,
-) internal.AgentRuntimeMigratorFunc {
+) agentRuntimeMigratorFunc {
 	return func() error {
 		components, err := preparer.Prepare()
 		if err != nil {
@@ -398,13 +404,6 @@ func buildMigration(
 			ApplicationSQLDB:                database,
 			AuthUsers:                       userStore,
 			AuthRefreshTokens:               refreshTokenStore,
-			AgentRuntimeMigrator: newAgentRuntimeMigrator(
-				newDatabaseAgentRuntimeMigrationPreparer(
-					rootConfig.AgentRuntime.Database.DSN,
-					rootConfig.AgentRuntime.Database.TablePrefix,
-					rootLogger,
-				),
-			),
 		}),
 		shutdownHooks: shutdownHooks,
 	}, nil
