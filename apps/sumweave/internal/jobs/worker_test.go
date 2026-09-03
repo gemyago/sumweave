@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package jobs
 
 import (
@@ -21,36 +19,36 @@ import (
 
 func TestWorker(t *testing.T) {
 	fake := faker.New()
-	_, err := NewWorker(WorkerDeps{})
-	require.Error(t, err)
+	_, workerErr := NewWorker(WorkerDeps{})
+	require.Error(t, workerErr)
 
 	makeRouterFactory := func(t *testing.T) *appdispatch.RouterFactory {
 		t.Helper()
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
-		db, err := sql.Open("pgx", dsn)
-		require.NoError(t, err)
+		db, openErr := sql.Open("pgx", dsn)
+		require.NoError(t, openErr)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		config := appdispatch.Config{
 			DatabaseDSN:  dsn,
 			TablePrefix:  "sumweave_",
 			PollInterval: time.Millisecond,
 		}
-		publisher, err := appdispatch.NewPublisher(config, db, slog.New(slog.DiscardHandler))
-		require.NoError(t, err)
+		publisher, publisherErr := appdispatch.NewPublisher(config, db, slog.New(slog.DiscardHandler))
+		require.NoError(t, publisherErr)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
-		factory, err := appdispatch.NewRouterFactory(config, db, publisher, slog.New(slog.DiscardHandler))
-		require.NoError(t, err)
+		factory, factoryErr := appdispatch.NewRouterFactory(config, db, publisher, slog.New(slog.DiscardHandler))
+		require.NoError(t, factoryErr)
 		return factory
 	}
 	makeWorker := func(t *testing.T, store *mockworkerStore, config WorkerConfig) *Worker {
 		t.Helper()
-		worker, err := NewWorker(WorkerDeps{
+		worker, newWorkerErr := NewWorker(WorkerDeps{
 			Store: store, Registry: NewRegistry(), RouterFactory: makeRouterFactory(t),
 			Logger: slog.New(slog.DiscardHandler), Clock: func() time.Time { return time.Time{} },
 			Config: config, WorkerID: fake.UUID().V4(),
 		})
-		require.NoError(t, err)
+		require.NoError(t, newWorkerErr)
 		return worker
 	}
 
@@ -187,9 +185,9 @@ func TestWorker(t *testing.T) {
 				Return(persistErr).
 				Once()
 			worker := &Worker{store: store, logger: slog.New(slog.DiscardHandler)}
-			err := worker.persistTerminalState(ctx, Job{ID: jobID}, state)
-			require.ErrorIs(t, err, context.Canceled)
-			require.ErrorIs(t, err, persistErr)
+			persistStateErr := worker.persistTerminalState(ctx, Job{ID: jobID}, state)
+			require.ErrorIs(t, persistStateErr, context.Canceled)
+			require.ErrorIs(t, persistStateErr, persistErr)
 		})
 	})
 

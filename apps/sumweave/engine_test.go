@@ -1,4 +1,4 @@
-//go:build postgres_test && !release
+//go:build !release
 
 package sumweave_test
 

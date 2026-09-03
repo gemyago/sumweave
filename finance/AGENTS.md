@@ -35,8 +35,8 @@ Root Go module for the finance product slice.
 ## Commands
 
 - `make test`
-- Run root `make postgres-bootstrap` before `make test`; it selects
-  `postgres_test` and checks the single `.cover/profile.out` profile
+- Run root `make postgres-bootstrap` before `make test`; it checks the single
+  `.cover/profile.out` profile
 - `make lint`
 
 To fix lint errors, attempt: `golangci-lint run --fix` and then manually fix the remaining errors (if still present).

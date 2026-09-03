@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package finance
 
 import (
@@ -16,7 +14,7 @@ func openTestDatabase(t *testing.T) *persistence.Database {
 
 	dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 	if dsn == "" {
-		t.Fatal("SUMWEAVE_POSTGRES_TEST_DSN is required for postgres_test")
+		t.Fatal("SUMWEAVE_POSTGRES_TEST_DSN is required for database tests")
 	}
 	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {

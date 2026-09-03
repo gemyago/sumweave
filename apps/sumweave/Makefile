@@ -34,5 +34,5 @@ dist/bin:
 go-test-coverage=go run github.com/vladopajic/go-test-coverage/v2
 
 test: $(cover_dir)
-	TZ=US/Alaska SUMWEAVE_POSTGRES_TEST_DSN="$(SUMWEAVE_POSTGRES_TEST_DSN)" go test -tags=postgres_test -timeout=${DEFAULT_TESTS_TIMEOUT} -shuffle=on -failfast -coverpkg=./cmd/sumweave,./internal/... -coverprofile=$(cover_profile) -covermode=atomic ./...
+	TZ=US/Alaska SUMWEAVE_POSTGRES_TEST_DSN="$(SUMWEAVE_POSTGRES_TEST_DSN)" go test -timeout=${DEFAULT_TESTS_TIMEOUT} -shuffle=on -failfast -coverpkg=./cmd/sumweave,./internal/... -coverprofile=$(cover_profile) -covermode=atomic ./...
 	$(go-test-coverage) --config .testcoverage.yaml --profile $(cover_profile)

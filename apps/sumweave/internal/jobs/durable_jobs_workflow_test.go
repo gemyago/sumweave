@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package jobs
 
 import (
@@ -27,7 +25,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		Value     string `json:"value"`
 		Requester string `json:"requester"`
 	}
-	makeTransport := func(t *testing.T) (*Store, *appdispatch.RouterFactory, *appdispatch.Publisher, *sql.DB, appdispatch.Config) {
+	makeTransport := func(t *testing.T) (*Store, *appdispatch.RouterFactory, *appdispatch.Publisher, *sql.DB) {
 		t.Helper()
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
 		require.NotEmpty(t, dsn)
@@ -51,7 +49,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			slog.New(slog.DiscardHandler),
 		)
 		require.NoError(t, err)
-		return store, factory, publisher, db, config
+		return store, factory, publisher, db
 	}
 	register := func(t *testing.T, registry *Registry, topic string, run func(context.Context, Job, command) error) {
 		t.Helper()
@@ -68,7 +66,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	}
 
 	t.Run("ordinary subscriptions execute with zero job rows", func(t *testing.T) {
-		store, factory, publisher, _, _ := makeTransport(t)
+		store, factory, publisher, _ := makeTransport(t)
 		topic := "ordinary." + fake.UUID().V4()
 		var calls atomic.Int32
 		router, err := factory.NewRouter("ordinary." + fake.UUID().V4())
@@ -101,7 +99,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	t.Run(
 		"first delivery claims message identity before domain work and skips terminal duplicates",
 		func(t *testing.T) {
-			store, factory, _, _, _ := makeTransport(t)
+			store, factory, _, _ := makeTransport(t)
 			registry := NewRegistry()
 			topic := "observed." + fake.UUID().V4()
 			message := appdispatch.NewMessage(
@@ -181,7 +179,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	)
 
 	t.Run("one-shot worker waits for active delivery and persists exhausted retries", func(t *testing.T) {
-		store, factory, _, _, _ := makeTransport(t)
+		store, factory, _, _ := makeTransport(t)
 		registry := NewRegistry()
 		topic := "one-shot." + fake.UUID().V4()
 		started := make(chan struct{})
@@ -215,9 +213,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		persisted, err := store.Get(t.Context(), message.ID)
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusSucceeded, persisted.Status)
-
 	})
-
 	t.Run("one-shot retry lifecycle keeps final persistence and topics isolated", func(t *testing.T) {
 		store := newMockworkerStore(t)
 		registry := NewRegistry()
@@ -307,7 +303,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	})
 
 	t.Run("worker lifecycle uses the concrete PostgreSQL store and router", func(t *testing.T) {
-		store, factory, _, _, _ := makeTransport(t)
+		store, factory, _, _ := makeTransport(t)
 		registry := NewRegistry()
 		topic := "lifecycle." + fake.UUID().V4()
 		register(t, registry, topic, func(context.Context, Job, command) error { return nil })
@@ -352,7 +348,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	})
 
 	t.Run("worker startup fails when its concrete store is unavailable", func(t *testing.T) {
-		store, factory, _, db, _ := makeTransport(t)
+		store, factory, _, db := makeTransport(t)
 		config := WorkerConfig{PollInterval: time.Millisecond, StaleRunningAge: time.Millisecond}
 		worker, err := NewWorker(WorkerDeps{
 			Store: store, Registry: NewRegistry(), RouterFactory: factory,
@@ -443,7 +439,10 @@ func TestObservedSubscriptions(t *testing.T) {
 		require.NoError(t, worker.processObserved(t.Context(), registry.Handlers()[0], message))
 
 		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&queued, nil).Once()
-		store.EXPECT().ClaimQueued(mock.Anything, message.ID, worker.workerID, mock.Anything).Return(nil, ErrJobNotQueued).Once()
+		store.EXPECT().
+			ClaimQueued(mock.Anything, message.ID, worker.workerID, mock.Anything).
+			Return(nil, ErrJobNotQueued).
+			Once()
 		require.NoError(t, worker.processObserved(t.Context(), registry.Handlers()[0], message))
 	})
 
@@ -513,7 +512,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	})
 
 	t.Run("second worker startup recovery does not requeue a live claim", func(t *testing.T) {
-		store, _, _, _, _ := makeTransport(t)
+		store, _, _, _ := makeTransport(t)
 		registry := NewRegistry()
 		topic := "live-claim." + fake.UUID().V4()
 		firstWorkerID := fake.UUID().V4()
@@ -799,7 +798,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	t.Run(
 		"keeps registry, read service, and lifecycle storage boundaries explicit",
 		func(t *testing.T) {
-			store, _, _, _, _ := makeTransport(t)
+			store, _, _, _ := makeTransport(t)
 			now := time.Now()
 			job := Job{ID: fake.UUID().V4(), JobType: "type-a", Status: JobStatusQueued,
 				Requester: Requester{
@@ -960,7 +959,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	})
 
 	t.Run("validates worker construction and pending duplicate delivery", func(t *testing.T) {
-		_, factory, _, _, _ := makeTransport(t)
+		_, factory, _, _ := makeTransport(t)
 		registry := NewRegistry()
 		topic := "worker." + fake.UUID().V4()
 		register(t, registry, topic, func(context.Context, Job, command) error { return nil })

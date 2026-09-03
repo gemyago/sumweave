@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package financeapp
 
 import (
@@ -154,7 +152,6 @@ func TestFinanceJobRegistrationAdapters(t *testing.T) {
 			assert.NoError(t, handledFinanceFailure(nil))
 		},
 	)
-
 }
 
 func TestFinanceObservedHandlerFailureClassification(t *testing.T) {
@@ -326,12 +323,21 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
 		now := time.Now()
 		commands := []financepkg.SemanticCommand{
-			{Topic: financepkg.TransactionCSVImportCommandTopic, Payload: []byte(`{"importId":"` + fake.UUID().V4() + `"}`)},
-			{Topic: financepkg.AccountCSVImportCommandTopic, Payload: []byte(`{"importId":"` + fake.UUID().V4() + `"}`)},
+			{
+				Topic:   financepkg.TransactionCSVImportCommandTopic,
+				Payload: []byte(`{"importId":"` + fake.UUID().V4() + `"}`),
+			},
+			{
+				Topic:   financepkg.AccountCSVImportCommandTopic,
+				Payload: []byte(`{"importId":"` + fake.UUID().V4() + `"}`),
+			},
 			{Topic: financepkg.BankConnectionSyncCommandTopic, Payload: []byte(
 				`{"connectionId":"` + fake.UUID().V4() + `","scheduledAt":"` + now.Format(time.RFC3339Nano) + `"}`,
 			)},
-			{Topic: financepkg.FXRatesRefreshCommandTopic, Payload: []byte(`{"provider":"provider-` + fake.UUID().V4() + `"}`)},
+			{
+				Topic:   financepkg.FXRatesRefreshCommandTopic,
+				Payload: []byte(`{"provider":"provider-` + fake.UUID().V4() + `"}`),
+			},
 		}
 		for _, command := range commands {
 			reference, publishErr := adapter.PublishSemanticCommand(t.Context(), command)
@@ -393,17 +399,25 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		conflictNow := makeScheduleNow()
 		conflictDueAt := conflictNow.Add(-time.Hour)
 		conflict := domain.BankConnectionSchedule{
-			ConnectionID: fake.UUID().V4(), Interval: time.Hour, NextRunAt: &conflictDueAt,
-			Enabled: true, CreatedAt: conflictNow, UpdatedAt: conflictNow,
+			ConnectionID: fake.UUID().V4(),
+			Interval:     time.Hour,
+			NextRunAt:    &conflictDueAt,
+			Enabled:      true,
+			CreatedAt:    conflictNow,
+			UpdatedAt:    conflictNow,
 		}
 		cleanupBankSchedule(t, db, conflict.ConnectionID)
 		require.NoError(t, store.Save(t.Context(), conflict))
 		persistedConflict, err := store.Get(t.Context(), conflict.ConnectionID)
 		require.NoError(t, err)
 		_, err = adapter.PublishSemanticCommand(t.Context(), financepkg.SemanticCommand{
-			Topic:          "finance.conflict." + fake.UUID().V4(),
-			Payload:        []byte(`{"value":"` + fake.UUID().V4() + `"}`),
-			IdempotencyKey: fmt.Sprintf("finance.bank-connection-sync:%s:%s", conflict.ConnectionID, persistedConflict.NextRunAt.Format(time.RFC3339Nano)),
+			Topic:   "finance.conflict." + fake.UUID().V4(),
+			Payload: []byte(`{"value":"` + fake.UUID().V4() + `"}`),
+			IdempotencyKey: fmt.Sprintf(
+				"finance.bank-connection-sync:%s:%s",
+				conflict.ConnectionID,
+				persistedConflict.NextRunAt.Format(time.RFC3339Nano),
+			),
 		})
 		require.NoError(t, err)
 		_, err = newService(conflictNow).EnqueueDue(t.Context())
@@ -451,17 +465,26 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		conflictNow := makeScheduleNow()
 		conflictDueAt := conflictNow.Add(-time.Hour)
 		conflict := domain.FXRefreshSchedule{
-			ScheduleID: fake.UUID().V4(), Provider: "provider-" + fake.UUID().V4(),
-			Interval: time.Hour, NextRunAt: &conflictDueAt, Enabled: true, CreatedAt: conflictNow, UpdatedAt: conflictNow,
+			ScheduleID: fake.UUID().V4(),
+			Provider:   "provider-" + fake.UUID().V4(),
+			Interval:   time.Hour,
+			NextRunAt:  &conflictDueAt,
+			Enabled:    true,
+			CreatedAt:  conflictNow,
+			UpdatedAt:  conflictNow,
 		}
 		cleanupFXSchedule(t, db, conflict.ScheduleID)
 		require.NoError(t, store.Save(t.Context(), conflict))
 		persistedConflict, err := store.Get(t.Context(), conflict.ScheduleID)
 		require.NoError(t, err)
 		_, err = adapter.PublishSemanticCommand(t.Context(), financepkg.SemanticCommand{
-			Topic:          "finance.conflict." + fake.UUID().V4(),
-			Payload:        []byte(`{"value":"` + fake.UUID().V4() + `"}`),
-			IdempotencyKey: fmt.Sprintf("finance.fx-rates-refresh:%s:%s", conflict.ScheduleID, persistedConflict.NextRunAt.Format(time.RFC3339Nano)),
+			Topic:   "finance.conflict." + fake.UUID().V4(),
+			Payload: []byte(`{"value":"` + fake.UUID().V4() + `"}`),
+			IdempotencyKey: fmt.Sprintf(
+				"finance.fx-rates-refresh:%s:%s",
+				conflict.ScheduleID,
+				persistedConflict.NextRunAt.Format(time.RFC3339Nano),
+			),
 		})
 		require.NoError(t, err)
 		_, err = newService(conflictNow).EnqueueDue(t.Context())

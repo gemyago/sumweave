@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package appevents
 
 import (
@@ -67,10 +65,14 @@ func TestEvents(t *testing.T) {
 		require.NoError(t, routerErr)
 		received := make(chan testEvent, 1)
 		topic := "test.event." + fake.UUID().V4()
-		require.NoError(t, RegisterHandler(router, testEvent{TopicName: topic}, func(_ context.Context, event testEvent) error {
-			received <- event
-			return nil
-		}))
+		require.NoError(t, RegisterHandler(
+			router,
+			testEvent{TopicName: topic},
+			func(_ context.Context, event testEvent) error {
+				received <- event
+				return nil
+			},
+		))
 		ctx, cancel := context.WithCancel(t.Context())
 		t.Cleanup(func() {
 			cancel()
@@ -116,9 +118,12 @@ func TestEvents(t *testing.T) {
 
 	t.Run("fails malformed typed payloads", func(t *testing.T) {
 		malformedTopic := "malformed.event." + fake.UUID().V4()
-		handler, handlerErr := MakeHandler(testEvent{TopicName: malformedTopic}, func(context.Context, testEvent) error {
-			return errors.New("must not run")
-		})
+		handler, handlerErr := MakeHandler(
+			testEvent{TopicName: malformedTopic},
+			func(context.Context, testEvent) error {
+				return errors.New("must not run")
+			},
+		)
 		require.NoError(t, handlerErr)
 		factory, factoryErr := appdispatch.NewRouterFactory(config, db, rawPublisher, logger)
 		require.NoError(t, factoryErr)

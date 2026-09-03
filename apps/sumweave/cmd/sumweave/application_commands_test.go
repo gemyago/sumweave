@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package main
 
 import (
@@ -101,11 +99,17 @@ func TestApplicationCommands(t *testing.T) {
 		))
 		require.Contains(t, output.String(), username)
 		require.Error(t, runUserAdd(
-			t.Context(), userAddCmdDeps{Store: store, Hasher: hasher}, makeAddParams(fake.Internet().Password(), false), &bytes.Buffer{},
+			t.Context(),
+			userAddCmdDeps{Store: store, Hasher: hasher},
+			makeAddParams(fake.Internet().Password(), false),
+			&bytes.Buffer{},
 		))
 		var ensureOutput bytes.Buffer
 		require.NoError(t, runUserAdd(
-			t.Context(), userAddCmdDeps{Store: store, Hasher: hasher}, makeAddParams(fake.Internet().Password(), true), &ensureOutput,
+			t.Context(),
+			userAddCmdDeps{Store: store, Hasher: hasher},
+			makeAddParams(fake.Internet().Password(), true),
+			&ensureOutput,
 		))
 		require.Contains(t, ensureOutput.String(), "already exists")
 		existingUser, err := store.GetByUsername(t.Context(), username)
@@ -131,5 +135,4 @@ func TestApplicationCommands(t *testing.T) {
 			userChangePasswordParams{Username: makeUsername(), Password: newPassword}, &bytes.Buffer{},
 		))
 	})
-
 }

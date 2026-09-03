@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package agentprofiles
 
 import (
@@ -378,6 +376,6 @@ const postgresTestTablePrefix = "sumweave_runtime_"
 func postgresTestDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
-	require.NotEmpty(t, dsn, "SUMWEAVE_POSTGRES_TEST_DSN is required for postgres_test")
+	require.NotEmpty(t, dsn, "SUMWEAVE_POSTGRES_TEST_DSN is required for database tests")
 	return dsn
 }

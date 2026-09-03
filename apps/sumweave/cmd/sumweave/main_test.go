@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package main
 
 import (

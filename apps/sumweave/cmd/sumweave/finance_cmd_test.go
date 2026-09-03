@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package main
 
 import (
@@ -242,7 +240,10 @@ func TestFinanceCommand(t *testing.T) {
 
 	t.Run("joins fixture root close errors with command errors", func(t *testing.T) {
 		closeErr := assert.AnError
-		err := closeFinanceFixturesRuntimeConfig(closeErr, financeFixturesRuntimeConfig{close: func() error { return closeErr }})
+		err := closeFinanceFixturesRuntimeConfig(
+			closeErr,
+			financeFixturesRuntimeConfig{close: func() error { return closeErr }},
+		)
 		require.ErrorIs(t, err, closeErr)
 		require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, financeFixturesRuntimeConfig{}))
 	})

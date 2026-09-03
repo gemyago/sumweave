@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package sessions
 
 import (
@@ -217,7 +215,7 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 	t.Run("List returns a find error after scoped count succeeds", func(t *testing.T) {
 		t.Parallel()
 		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
-		store.db.Callback().Query().Before("gorm:query").Register("postgres_test:fail-find", func(tx *gorm.DB) {
+		store.db.Callback().Query().Before("gorm:query").Register("test:fail-find", func(tx *gorm.DB) {
 			if _, ok := tx.Statement.Dest.(*[]sessionMetadataModel); ok {
 				tx.AddError(errors.New("injected find failure"))
 			}
@@ -485,6 +483,5 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 
 		err = store.Delete(t.Context(), fake.Lorem().Word(), fake.UUID().V4(), fake.UUID().V4())
 		require.Error(t, err)
-
 	})
 }

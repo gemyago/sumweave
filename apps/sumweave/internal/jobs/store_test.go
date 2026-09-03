@@ -1,5 +1,3 @@
-//go:build postgres_test
-
 package jobs
 
 import (
@@ -140,12 +138,29 @@ func TestStore(t *testing.T) {
 		scheduledAt := now.Add(4 * time.Second)
 		nextRunAt := now.Add(5 * time.Second)
 		input := Job{
-			ID: " " + fake.UUID().V4() + " ", JobType: JobType(fake.Lorem().Word()), Status: JobStatusFailed,
-			Requester: Requester{UserID: " " + fake.UUID().V4() + " ", Source: RequesterSource(" operator ")},
-			Error:     &JobError{Code: " " + fake.Lorem().Word() + " ", Summary: " " + fake.Lorem().Sentence(3) + " ", Details: " " + fake.Lorem().Sentence(5) + " "},
-			CreatedAt: now, UpdatedAt: now, QueuedAt: now, StartedAt: &startedAt, CompletedAt: &completedAt,
-			WorkerID: " " + fake.UUID().V4() + " ", AttemptCount: fake.IntBetween(1, 10), LastAttemptAt: &lastAttemptAt,
-			ScheduleID: " " + fake.UUID().V4() + " ", ScheduledAt: &scheduledAt, ScheduledNextRunAt: &nextRunAt,
+			ID:      " " + fake.UUID().V4() + " ",
+			JobType: JobType(fake.Lorem().Word()),
+			Status:  JobStatusFailed,
+			Requester: Requester{
+				UserID: " " + fake.UUID().V4() + " ",
+				Source: RequesterSource(" operator "),
+			},
+			Error: &JobError{
+				Code:    " " + fake.Lorem().Word() + " ",
+				Summary: " " + fake.Lorem().Sentence(3) + " ",
+				Details: " " + fake.Lorem().Sentence(5) + " ",
+			},
+			CreatedAt:          now,
+			UpdatedAt:          now,
+			QueuedAt:           now,
+			StartedAt:          &startedAt,
+			CompletedAt:        &completedAt,
+			WorkerID:           " " + fake.UUID().V4() + " ",
+			AttemptCount:       fake.IntBetween(1, 10),
+			LastAttemptAt:      &lastAttemptAt,
+			ScheduleID:         " " + fake.UUID().V4() + " ",
+			ScheduledAt:        &scheduledAt,
+			ScheduledNextRunAt: &nextRunAt,
 		}
 
 		model := newJobModel(input)
@@ -188,7 +203,9 @@ func TestStore(t *testing.T) {
 		assert.NotEmpty(t, cursorID)
 		_, _, err = decodeCursor(base64.RawURLEncoding.EncodeToString([]byte(fake.UUID().V4())))
 		require.Error(t, err)
-		_, _, err = decodeCursor(base64.RawURLEncoding.EncodeToString([]byte(fake.Lorem().Word() + "|" + fake.UUID().V4())))
+		_, _, err = decodeCursor(base64.RawURLEncoding.EncodeToString(
+			[]byte(fake.Lorem().Word() + "|" + fake.UUID().V4()),
+		))
 		require.Error(t, err)
 		_, err = store.List(t.Context(), ListParams{
 			Sources: []RequesterSource{RequesterSourceOperator}, Cursor: fake.UUID().V4(),
@@ -243,7 +260,11 @@ func TestStore(t *testing.T) {
 			tx.AddError(updateErr)
 		}))
 		t.Cleanup(func() { require.NoError(t, store.db.Callback().Update().Remove(callbackName)) })
-		require.ErrorIs(t, store.RecoverStaleRunning(t.Context(), now, time.Minute, defaultWorkerMaxAttempts), updateErr)
+		require.ErrorIs(
+			t,
+			store.RecoverStaleRunning(t.Context(), now, time.Minute, defaultWorkerMaxAttempts),
+			updateErr,
+		)
 	})
 
 	t.Run("keeps schema helpers safe for missing artifacts", func(t *testing.T) {
