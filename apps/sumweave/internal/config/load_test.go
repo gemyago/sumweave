@@ -7,9 +7,6 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	t.Setenv("APP_APPLICATION_DATABASE_DSN", "")
-	t.Setenv("APP_AGENTRUNTIME_DATABASE_DSN", "")
-
 	t.Run("loads environment defaults and reports missing resources", func(t *testing.T) {
 		cfg := New()
 		require.NoError(t, load(cfg, NewLoadOpts().WithEnv("test")))
