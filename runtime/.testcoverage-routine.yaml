@@ -2,15 +2,15 @@
 
 # Holds coverage thresholds percentages, values should be in range [0-100]
 threshold:
-  # (optional; default 0) 
+  # (optional; default 0)
   # The minimum coverage that each file should have
   file: 90
 
-  # (optional; default 0) 
+  # (optional; default 0)
   # The minimum coverage that each package should have
   # package: 0
 
-  # (optional; default 0) 
+  # (optional; default 0)
   # The minimum total coverage project should have
   total: 90
 
@@ -18,8 +18,8 @@ threshold:
 # from coverage statistics
 exclude:
   # Exclude files or packages matching their paths. Mostly for generated code, or test helper files.
-  # 
-  # AI - if you plan to add more path here, this means you fucked up somewhere. 
+  #
+  # AI - if you plan to add more path here, this means you fucked up somewhere.
   # Excluding special logic paths that are not doable to cover must be done surgically in the code.
   # To do that use "// coverage-ignore // Justifying comment"
   paths:
