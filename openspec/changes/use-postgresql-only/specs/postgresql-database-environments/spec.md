@@ -79,7 +79,26 @@ module test targets SHALL NOT pass it.
 ### Requirement: PostgreSQL Tests Use The Dedicated Test Database
 
 Database-backed tests SHALL use the bootstrap-prepared dedicated test
-database and independent randomized state.
+database and independent randomized state. The standard local and CI execution
+environments SHALL provide its runtime-role DSN to Go test processes through
+`SUMWEAVE_POSTGRES_TEST_DSN`; module Makefiles SHALL only inherit that input.
+
+#### Scenario: Local shell supplies the test-process DSN
+
+- **WHEN** a developer enters the repository through its standard direnv setup
+  and runs runtime, finance, app, root, or Nx tests after bootstrap
+- **THEN** root `.envrc` MUST supply `SUMWEAVE_POSTGRES_TEST_DSN`
+- **AND** child Make and Go test processes MUST inherit it without a module
+  Makefile fallback or command-level DSN assignment
+
+#### Scenario: Reusable CI supplies the test-process DSN
+
+- **WHEN** the reusable workflow runs its existing ordinary Nx test step after
+  bootstrap
+- **THEN** that step's environment MUST supply
+  `SUMWEAVE_POSTGRES_TEST_DSN`
+- **AND** it MUST NOT depend on bootstrap exporting to the parent workflow or on
+  a manually configured repository variable
 
 #### Scenario: Database-backed test creates state
 

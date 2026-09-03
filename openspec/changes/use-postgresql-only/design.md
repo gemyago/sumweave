@@ -77,14 +77,39 @@ developers to bootstrap before `make test`, Nx tests, or
 `make affected-lint-test`. Module test targets assume that prerequisite is
 satisfied; they do not start Docker independently.
 
+### Environment setup owns the shared test DSN
+
+`SUMWEAVE_POSTGRES_TEST_DSN` is an input to database-backed Go test fixtures,
+not an application configuration key. The committed root `.envrc` exports the
+Compose runtime-role `sumweave_test` DSN for the standard local direnv shell.
+Direct runtime, finance, and app module tests, root recursive tests, and local Nx
+tests then inherit one prepared value from that shell. The reusable CI workflow
+sets the same variable on its existing Nx test step, whose child module
+Makefiles and Go processes inherit it.
+
+The three core module Makefiles neither define a fallback nor prefix `go test`
+with a DSN assignment. This removes three duplicated defaults and three
+command-boundary re-exports without adding an env-file loader, Make include, Nx
+wrapper, or Go test-config package.
+
+Bootstrap owns service, role, database, migration, and grant preparation only.
+It does not print, persist, or attempt to export test-process environment:
+`make postgres-bootstrap` runs as a child and cannot mutate its caller's shell.
+`apps/sumweave/internal/config/test.yaml` remains the source for the app's typed
+`application.database.dsn` and `agentRuntime.database.dsn` values when code
+loads the `test` profile. Existing `APP_` `AutomaticEnv` mapping remains the
+only application-config override mechanism. The test YAML, config loader,
+bootstrap script, Compose file, root Makefile, test helpers, and Nx project
+files require no change for this correction.
+
 ### One ordinary test and coverage flow
 
 Restore each core module Makefile to the pre-change one-target shape:
 
 - `make test` runs ordinary `go test` over its existing package and `-coverpkg`
   scope, without a PostgreSQL build tag;
-- `SUMWEAVE_POSTGRES_TEST_DSN` defaults to the Compose test runtime-role DSN and
-  is passed once at the module command boundary;
+- `SUMWEAVE_POSTGRES_TEST_DSN` is required from the inherited local or CI
+  execution environment;
 - finance may retain `-p 1` only if the shared prepared database demonstrates a
   real in-module ordering conflict;
 - the profile is `.cover/profile.out` and is checked by the existing
@@ -99,8 +124,11 @@ There is no `test-postgres`, `postgres-test-runtime`,
 variable or readiness marker.
 
 Ownership is intentionally non-overlapping. The ordinary-test switch owns every
-caller and consumer: root/module Makefile targets, variable exports,
-profile/config selection, raw-covdata composition, and readiness-marker checks.
+caller and consumer: root/module Makefile targets, the historical command-level
+variable wiring, profile/config selection, raw-covdata composition, and
+readiness-marker checks. The latest environment correction removes that
+historical Makefile wiring and places the test-process input at the local and CI
+environment boundaries.
 It also adds the one smallest shallow PostgreSQL smoke to the neutral pre-change
 `finance/persistence/migrations_test.go` owner so the atomic switch satisfies the
 unchanged coverage gate. The operational-bootstrap chunk owns the dormant
@@ -485,6 +513,10 @@ do not add another root project rule.
     the corresponding three module test flags and finance lint flag; update only
     stale root/module AGENTS guidance; then run residue, bootstrap, module, root,
     affected, and strict OpenSpec checks in the same serialized correction chunk.
+22. Move the shared test DSN out of the three module Makefiles: export it from
+    root `.envrc` for standard local shells, set it on the existing reusable CI
+    Nx test step, and let module/root/Nx children inherit it without changing
+    bootstrap, app config mapping, test helpers, or Nx project definitions.
 
 All backend chunks are serialized, and each task embeds its own applicable TDD
 or restoration rationale plus immediate verification. Each production seam, its

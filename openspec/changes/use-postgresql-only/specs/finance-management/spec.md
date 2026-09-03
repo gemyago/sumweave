@@ -31,7 +31,7 @@ The backend application SHALL include finance-owned PostgreSQL schema initializa
 #### Scenario: Finance migration receives shallow ordinary coverage
 
 - **WHEN** finance migration execution requires direct Go coverage
-- **THEN** one tagged migration smoke MAY execute the finance migrator against
+- **THEN** one ordinary migration smoke MAY execute the finance migrator against
   the bootstrap-prepared test database in the ordinary test flow
 - **AND** tests MUST NOT require bootstrap coverage instrumentation, a separate
   finance coverage profile, detailed legacy schema fixtures, or a production

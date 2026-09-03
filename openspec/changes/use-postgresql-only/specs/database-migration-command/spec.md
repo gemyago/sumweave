@@ -27,8 +27,8 @@ backend tests.
 - **AND** it MUST run `sumweave db-migrate` from `apps/sumweave` once for the
   regular environment and once for the test environment through the migrator
   role
-- **AND** regular backend processes MUST use the regular database while tagged
-  tests in the ordinary test flow use the test database
+- **AND** regular backend processes MUST use the regular database while ordinary
+  tests use the test database
 
 #### Scenario: CI setup uses the same migration contract
 

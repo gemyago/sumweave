@@ -22,6 +22,10 @@ development and CI prerequisite that is started and bootstrapped before tests.
   applies the existing migrations, and grants runtime access.
 - Treat PostgreSQL setup as a normal local and CI prerequisite. The reusable CI
   workflow bootstraps it before the existing Nx test command.
+- Treat the shared runtime-role test DSN as execution-environment setup rather
+  than a Makefile fallback. The standard direnv environment supplies it for
+  local module, root, and Nx tests, while the reusable CI workflow supplies it
+  to its Nx test step; module recipes only inherit it.
 - Remove every `postgres_test` reference from core Go source: delete the build
   constraint from every affected test, neutralize the stale DSN diagnostics and
   callback key that name it, and select PostgreSQL-backed tests normally. Keep
@@ -86,7 +90,7 @@ development and CI prerequisite that is started and bootstrapped before tests.
   `make postgres-bootstrap` before tests.
 - Core module test Makefiles remain close to their pre-change shape: one `test`
   target, one profile, and one coverage configuration, with no PostgreSQL test
-  build tag or alternate lane.
+  build tag, DSN fallback/recipe export, or alternate lane.
 - The correction removes the standalone verification workflow and the test,
   coverage, parser, contract, mock, and production-seam expansion caused by the
   rejected lane split.
