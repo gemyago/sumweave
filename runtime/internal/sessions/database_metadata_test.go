@@ -71,6 +71,36 @@ func TestDatabaseSessionMetadataStore(t *testing.T) {
 		require.NoError(t, store.db.First(&stored, "session_id = ?", sid).Error)
 	})
 
+	t.Run("Save rounds timestamps to PostgreSQL precision", func(t *testing.T) {
+		t.Parallel()
+		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
+
+		zone := time.FixedZone("test-zone", 5*60*60+45*60)
+		metadata := SessionMetadata{
+			SessionID: fake.UUID().V4(),
+			AppName:   fake.Lorem().Word(),
+			UserID:    fake.UUID().V4(),
+			Title:     fake.Lorem().Sentence(4),
+			CreatedAt: time.Date(2026, time.March, 4, 5, 6, 7, 123456789, zone),
+			UpdatedAt: time.Date(2026, time.March, 4, 8, 9, 10, 987654321, zone),
+		}
+		require.NoError(t, store.Save(t.Context(), metadata))
+
+		res, err := store.List(t.Context(), ListSessionMetadataParams{
+			AppName: metadata.AppName,
+			UserID:  metadata.UserID,
+			Limit:   10,
+		})
+		require.NoError(t, err)
+		require.Len(t, res.Sessions, 1)
+		// pgx decodes PostgreSQL timestamp-with-time-zone values in time.Local.
+		// The database round trip preserves instants but not the input location.
+		expected := metadata
+		expected.CreatedAt = expected.CreatedAt.Truncate(time.Microsecond).In(time.Local)
+		expected.UpdatedAt = expected.UpdatedAt.Truncate(time.Microsecond).In(time.Local)
+		require.Equal(t, expected, res.Sessions[0])
+	})
+
 	t.Run("Save updates existing metadata entry (upsert)", func(t *testing.T) {
 		t.Parallel()
 		store := newStore(t, gormsumweave.GormSumweaveTablesOpts{})
