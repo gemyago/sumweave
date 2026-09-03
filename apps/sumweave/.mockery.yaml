@@ -33,7 +33,6 @@ packages:
       AuthenticatingService:
       bankConnectionService:
       financeService:
-      syntheticLinkStateService:
       providerSnapshotService:
       transferDetailService:
       jobsService:
@@ -44,33 +43,11 @@ packages:
   github.com/gemyago/sumweave/apps/sumweave/internal/jobs:
     interfaces:
       workerStore:
-  github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch:
-    interfaces:
-      migrationRunner:
-        config:
-          filename: mock_migration_runner_test.go
-      messagePublisher:
-        config:
-          filename: mock_message_publisher_test.go
-  github.com/gemyago/sumweave/apps/sumweave/internal:
-    interfaces:
-      AgentRuntimeMigrator:
-      databaseRuntimeServiceFactory:
-      componentMigrator:
-      autoMigrator:
-  github.com/gemyago/sumweave/apps/sumweave/internal/wireup:
-    interfaces:
-      migrationRunner:
-      migrationConfigLoader:
-      agentRuntimeSchemaMigrator:
-      agentRuntimeMigrationPreparer:
-      scheduleEnqueuer:
   github.com/gemyago/sumweave/apps/sumweave/internal/financeapp:
     interfaces:
       fxRefreshJobService:
       csvImportJobService:
       bankSyncJobService:
-      appdispatchPublisher:
   github.com/ThreeDotsLabs/watermill/message:
     interfaces:
       Subscriber:
