@@ -25,7 +25,7 @@ that window.
 Local database setup:
 
 - [postgres-local-verification.md](./postgres-local-verification.md) — local
-  Compose PostgreSQL bootstrap, tagged verification, and clean-volume runbook.
+  Compose PostgreSQL bootstrap, ordinary backend-test, and clean-volume runbook.
 
 ## Setup
 

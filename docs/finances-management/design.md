@@ -250,7 +250,7 @@ Use the same persistence approach as the rest of the product direction:
 
 - GORM
 - GORM auto-migrate for finance-owned tables
-- PostgreSQL for local development, tagged verification, and production
+- PostgreSQL for local development, ordinary tests, and production
 - Preserve timestamps as produced by the application/provider contracts; do not
   impose a separate UTC-normalization rule in the finance persistence design.
 
