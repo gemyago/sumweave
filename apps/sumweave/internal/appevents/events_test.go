@@ -5,12 +5,14 @@ package appevents
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
@@ -58,16 +60,32 @@ func TestEvents(t *testing.T) {
 	publisher, err := NewPublisher(rawPublisher)
 	require.NoError(t, err)
 
-	t.Run("publishes typed events to the prepared transport", func(t *testing.T) {
-		expected := testEvent{ID: fake.UUID().V4(), TopicName: "test.event." + fake.UUID().V4()}
+	t.Run("publishes and dispatches typed events", func(t *testing.T) {
+		factory, factoryErr := appdispatch.NewRouterFactory(config, db, rawPublisher, logger)
+		require.NoError(t, factoryErr)
+		router, routerErr := factory.NewRouter("events-group-" + fake.UUID().V4())
+		require.NoError(t, routerErr)
+		received := make(chan testEvent, 1)
+		topic := "test.event." + fake.UUID().V4()
+		require.NoError(t, RegisterHandler(router, testEvent{TopicName: topic}, func(_ context.Context, event testEvent) error {
+			received <- event
+			return nil
+		}))
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(func() {
+			cancel()
+			require.NoError(t, router.Close())
+		})
+		go func() { _ = router.Run(ctx) }()
+
+		expected := testEvent{ID: fake.UUID().V4(), TopicName: topic}
 		require.NoError(t, publisher.Publish(t.Context(), expected))
-		var count int
-		require.NoError(t, db.QueryRowContext(
-			t.Context(),
-			`SELECT COUNT(*) FROM sumweave_app_dispatch_messages WHERE topic=$1`,
-			expected.Topic(),
-		).Scan(&count))
-		assert.Equal(t, 1, count)
+		select {
+		case actual := <-received:
+			assert.Equal(t, expected.ID, actual.ID)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for typed event")
+		}
 	})
 
 	t.Run("supports transaction-bound event publication", func(t *testing.T) {
@@ -94,6 +112,40 @@ func TestEvents(t *testing.T) {
 		require.EqualError(t, RegisterHandler[testEvent](nil, testEvent{}, func(context.Context, testEvent) error {
 			return nil
 		}), "event router is required")
+	})
+
+	t.Run("fails malformed typed payloads", func(t *testing.T) {
+		malformedTopic := "malformed.event." + fake.UUID().V4()
+		handler, handlerErr := MakeHandler(testEvent{TopicName: malformedTopic}, func(context.Context, testEvent) error {
+			return errors.New("must not run")
+		})
+		require.NoError(t, handlerErr)
+		factory, factoryErr := appdispatch.NewRouterFactory(config, db, rawPublisher, logger)
+		require.NoError(t, factoryErr)
+		router, routerErr := factory.NewRouter("malformed-group-" + fake.UUID().V4())
+		require.NoError(t, routerErr)
+		require.NoError(t, router.Handle(handler))
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(func() {
+			cancel()
+			require.NoError(t, router.Close())
+		})
+		go func() { _ = router.Run(ctx) }()
+		require.Eventually(t, func() bool {
+			message := appdispatch.NewMessage(malformedTopic, []byte("bad-json"))
+			if rawPublisher.Publish(t.Context(), message) != nil {
+				return false
+			}
+			var count int
+			queryErr := db.QueryRowContext(
+				t.Context(),
+				`SELECT COUNT(*) FROM sumweave_app_dispatch_messages WHERE topic=$1 AND metadata->>$2=$3`,
+				appdispatch.DeadLetterTopic,
+				middleware.PoisonedTopicKey,
+				malformedTopic,
+			).Scan(&count)
+			return queryErr == nil && count > 0
+		}, 8*time.Second, 50*time.Millisecond)
 	})
 
 	t.Run("reports transport publication failures", func(t *testing.T) {

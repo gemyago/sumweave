@@ -58,14 +58,6 @@ packages:
       messagePublisher:
         config:
           filename: mock_message_publisher_test.go
-  github.com/gemyago/sumweave/apps/sumweave/internal/appevents:
-    interfaces:
-      messagePublisher:
-        config:
-          filename: mocks_test.go
-      handlerRegistrar:
-        config:
-          filename: mock_handler_registrar_test.go
   github.com/gemyago/sumweave/apps/sumweave/internal:
     interfaces:
       AgentRuntimeMigrator:

@@ -21,10 +21,6 @@ type messagePublisher interface {
 	PublishInTx(context.Context, *sql.Tx, appdispatch.Message) error
 }
 
-type handlerRegistrar interface {
-	Handle(appdispatch.Handler) error
-}
-
 // Publisher serializes typed events onto the app-owned durable transport.
 type Publisher struct {
 	publisher messagePublisher
@@ -86,20 +82,13 @@ func MakeHandler[EventType Event](
 	if topic == "" {
 		return appdispatch.Handler{}, errors.New("domain event topic is required")
 	}
-	return appdispatch.NewHandler(topic, makeEventHandler(topic, run))
-}
-
-func makeEventHandler[EventType Event](
-	topic string,
-	run func(context.Context, EventType) error,
-) func(context.Context, appdispatch.Message) error {
-	return func(ctx context.Context, message appdispatch.Message) error {
+	return appdispatch.NewHandler(topic, func(ctx context.Context, message appdispatch.Message) error {
 		var event EventType
 		if err := json.Unmarshal(message.Payload, &event); err != nil {
 			return fmt.Errorf("decode domain event on topic %s: %w", topic, err)
 		}
 		return run(ctx, event)
-	}
+	})
 }
 
 // RegisterHandler binds one typed event handler to a named appdispatch router.
@@ -111,14 +100,6 @@ func RegisterHandler[EventType Event](
 	if router == nil {
 		return errors.New("event router is required")
 	}
-	return registerHandler(router, example, run)
-}
-
-func registerHandler[EventType Event](
-	router handlerRegistrar,
-	example EventType,
-	run func(context.Context, EventType) error,
-) error {
 	handler, err := MakeHandler(example, run)
 	if err != nil {
 		return err
