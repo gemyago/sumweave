@@ -25,8 +25,11 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/firebase/genkit/go v1.6.0 // indirect
+	github.com/glebarez/go-sqlite v1.22.0 // indirect
+	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
@@ -56,8 +59,10 @@ require (
 	github.com/mitranim/gg v0.1.31 // indirect
 	github.com/mitranim/gow v0.0.0-20260225145757-ff0f6779ab4c // indirect
 	github.com/narqo/go-badge v0.0.0-20230821190521-c9a75c019a59 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/openai/openai-go v1.12.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rjeczalik/notify v0.9.3 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
@@ -96,6 +101,9 @@ require (
 	gorm.io/driver/postgres v1.6.0 // indirect
 	gorm.io/gorm v1.31.1 // indirect
 	modernc.org/libc v1.70.0 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.48.1 // indirect
 	rsc.io/omap v1.2.0 // indirect
 	rsc.io/ordered v1.1.1 // indirect
 )
