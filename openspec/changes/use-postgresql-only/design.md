@@ -374,6 +374,13 @@ removals and only unavoidable workspace-sum changes; use `go mod why` to accept
 ADK test-only SQLite metadata only when it is outside the production package
 graph.
 
+The final review found one narrower dependency correction: a module-local tidy
+of `apps/sumweave` must remove only the stale indirect requirements
+`github.com/ncruces/go-strftime`, `modernc.org/mathutil`, and
+`modernc.org/memory`. Apply exactly that tidy diff, immediately prove all three
+core modules are tidy and verified, and do not change any other manifest or
+workspace sum.
+
 The three base specs under `openspec/specs/` were edited prematurely while this
 change is active. Restoring them is an implementation action, not part of plan
 authoring. The unchecked documentation/spec implementation chunk restores each
@@ -460,6 +467,9 @@ non-command setup/product/manual-E2E wording and exact base-spec restoration.
     manifests last, and verify final dependency traversal and manifest diffs.
 19. Align only remaining uncoupled prose and restore the three premature base
     specs to `main`; run strict OpenSpec validation and its scoped diff audit.
+20. Apply the final app module-local tidy correction for only the three stale
+    indirect requirements, then immediately verify tidy state, module integrity,
+    bootstrap, and app/affected checks without broader manifest changes.
 
 All backend chunks are serialized, and each task embeds its own applicable TDD
 or restoration rationale plus immediate verification. Each production seam, its
