@@ -27,6 +27,3 @@ packages:
       WindowSyncPersistence:
       WindowChunkPolicy:
       WindowExecutor:
-  github.com/gemyago/sumweave/finance/persistence:
-    interfaces:
-      autoMigrator:

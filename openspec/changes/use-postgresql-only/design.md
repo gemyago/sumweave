@@ -125,6 +125,16 @@ restored concrete migrator, but must not create another owner or test. The smoke
 replaces, rather than adds to, detailed schema-contract tests and does not require
 bootstrap coverage instrumentation.
 
+Task 2.6 keeps both ordered model groups and their existing wrapped error
+contexts, but deduplicates the direct `WithContext(ctx).AutoMigrate(...)` call
+and wrapping in one unexported concrete `Migrator` method. The existing
+`TestMigrate` then adds one canceled-context assertion against the prepared real
+PostgreSQL database, covering the shared failure path and first caller return.
+This is the minimum same-owner refinement that clears the unchanged per-file
+gate: it adds no interface, mock, second smoke, schema assertion, fixture, or
+coverage exclusion, and leaves the second caller error return structurally
+uncovered while preserving its production behavior.
+
 ### Restore filenames and collapse lane-only splits
 
 Direct runtime renames are reversed exactly:
@@ -403,8 +413,10 @@ non-command setup/product/manual-E2E wording and exact base-spec restoration.
   corrections and serialize only demonstrated conflicts rather than creating a
   generic isolation framework.
 - Removing coverage-only seams may reveal gaps under the unchanged 90% gate.
-  Prefer existing PostgreSQL integration coverage or one shallow tagged smoke;
-  do not recreate a second lane, broad exclusions, or production abstractions.
+  Prefer existing PostgreSQL integration coverage or one shallow tagged smoke.
+  For the concrete finance migrator, share only its duplicate direct GORM error
+  handling and add one canceled-context assertion in that same smoke owner; do
+  not recreate a second lane, broad exclusions, or mockable abstractions.
 - CI bootstrap adds infrastructure time to every workflow execution. This is the
   accepted cost of testing the sole supported persistence implementation in the
   ordinary path.
@@ -425,8 +437,9 @@ non-command setup/product/manual-E2E wording and exact base-spec restoration.
    PostgreSQL fixtures.
 5. Restore root finance test ownership and retained PostgreSQL fixtures.
 6. Restore finance persistence/migration ownership, remove its mock seam and
-   replacement suite, and retain or minimally refine only the task 2.2 smoke
-   without adding duplicate migration-test ownership.
+   replacement suite, preserve both wrapped migration errors through one private
+   concrete GORM routine, and add only one canceled-context error assertion to
+   the task 2.2 smoke without adding duplicate migration-test ownership.
 7. Roll back `cmd/sumweave` coverage seams with package-owned tests/mocks.
 8. Restore root app Engine test ownership.
 9. Roll back app-internal composition factories and coverage file splits.

@@ -8,23 +8,11 @@ import (
 )
 
 type Migrator struct {
-	autoMigrator autoMigrator
-}
-
-func NewMigrator(database *Database) *Migrator {
-	return &Migrator{autoMigrator: &gormAutoMigrator{db: database.db}}
-}
-
-type autoMigrator interface {
-	AutoMigrate(context.Context, []any) error
-}
-
-type gormAutoMigrator struct {
 	db *gorm.DB
 }
 
-func (m *gormAutoMigrator) AutoMigrate(ctx context.Context, models []any) error {
-	return m.db.WithContext(ctx).AutoMigrate(models...)
+func NewMigrator(database *Database) *Migrator {
+	return &Migrator{db: database.db}
 }
 
 func financeSchemaModels() []any {
@@ -60,11 +48,22 @@ func currentObservationSchemaModels() []any {
 }
 
 func (m *Migrator) Migrate(ctx context.Context) error {
-	if err := m.autoMigrator.AutoMigrate(ctx, financeSchemaModels()); err != nil {
-		return fmt.Errorf("auto-migrate finance schema: %w", err)
+	if err := m.migrateModels(ctx, "auto-migrate finance schema", financeSchemaModels()...); err != nil {
+		return err
 	}
-	if err := m.autoMigrator.AutoMigrate(ctx, currentObservationSchemaModels()); err != nil {
-		return fmt.Errorf("auto-migrate finance current observations: %w", err)
+	if err := m.migrateModels(
+		ctx,
+		"auto-migrate finance current observations",
+		currentObservationSchemaModels()...); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Migrator) migrateModels(ctx context.Context, operation string, models ...any) error {
+	if err := m.db.WithContext(ctx).AutoMigrate(models...); err != nil {
+		return fmt.Errorf("%s: %w", operation, err)
 	}
 
 	return nil
