@@ -18,8 +18,15 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestStorePostgres(t *testing.T) {
+func TestStore(t *testing.T) {
 	fake := faker.New()
+
+	t.Run("rejects invalid PostgreSQL store inputs", func(t *testing.T) {
+		_, err := NewStore(nil, "", StoreOpts{})
+		require.ErrorContains(t, err, "sql database is required")
+		_, err = NewStore(&sql.DB{}, fake.UUID().V4(), StoreOpts{})
+		require.ErrorContains(t, err, "parse jobs database dsn")
+	})
 
 	makeStore := func(t *testing.T) *Store {
 		t.Helper()
@@ -204,7 +211,7 @@ func TestStorePostgres(t *testing.T) {
 		claim.StartedAt = &now
 		terminal := newSucceededTerminalJobState(fake.UUID().V4(), now)
 
-		require.Error(t, store.createWithDB(t.Context(), store.db, job))
+		require.Error(t, createWithDB(t.Context(), store.db, store.tableName, job))
 		_, err = store.Get(t.Context(), job.ID)
 		require.Error(t, err)
 		_, err = store.MaterializeQueued(t.Context(), job)
@@ -241,11 +248,10 @@ func TestStorePostgres(t *testing.T) {
 
 	t.Run("keeps schema helpers safe for missing artifacts", func(t *testing.T) {
 		store := makeStore(t)
-		migrator := gormSchemaMigrator{db: store.db}
 		tableName := "jobs_store_" + strings.ReplaceAll(fake.UUID().V4(), "-", "")
-		require.NoError(t, migrator.DropColumnIfExists(store.tableName, fake.Lorem().Word()))
-		require.NoError(t, migrator.DropColumnIfExists(tableName, fake.Lorem().Word()))
-		require.NoError(t, migrator.DropTableIfExists(tableName))
+		require.NoError(t, store.dropColumnIfExists(store.tableName, fake.Lorem().Word()))
+		require.NoError(t, store.dropColumnIfExists(tableName, fake.Lorem().Word()))
+		require.NoError(t, store.dropTableIfExists(tableName))
 		assert.Equal(t, `"jobs""store"`, quoteIdentifier(`jobs"store`))
 		require.Error(t, store.RenewRunning(t.Context(), Job{}, time.Time{}))
 	})

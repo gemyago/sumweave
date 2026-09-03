@@ -39,18 +39,9 @@ const (
 type Store struct {
 	db        *gorm.DB
 	tableName string
-	migration schemaMigrator
 }
 
 type StoreOpts struct{ TablePrefix string }
-
-type schemaMigrator interface {
-	AutoMigrate(string) error
-	DropTableIfExists(string) error
-	DropColumnIfExists(string, string) error
-}
-
-type gormSchemaMigrator struct{ db *gorm.DB }
 
 type terminalJobState struct {
 	status      JobStatus
@@ -103,42 +94,29 @@ func NewStore(sqlDB *sql.DB, dsn string, opts StoreOpts) (*Store, error) {
 	if opts.TablePrefix != "" {
 		tableName = opts.TablePrefix + tableName
 	}
-	return &Store{
-		db:        db,
-		tableName: tableName,
-		migration: gormSchemaMigrator{db: db},
-	}, nil
+	return &Store{db: db, tableName: tableName}, nil
 }
 
 // AutoMigrate explicitly removes alpha-only fields because GORM does not do so.
 func (s *Store) AutoMigrate() error {
-	if err := s.migration.AutoMigrate(s.tableName); err != nil {
+	if err := s.db.Table(s.tableName).AutoMigrate(&jobModel{}); err != nil {
 		return fmt.Errorf("migrate jobs table: %w", err)
 	}
-	if err := s.migration.DropTableIfExists(
+	if err := s.dropTableIfExists(
 		s.scheduleTableName(),
 	); err != nil {
 		return err
 	}
 	for _, column := range []string{"agent_session_id", "agent_run_id", "idempotency_key", "canonical_input_hash", "input_json", "result_json", "progress_json", "max_attempts", "correlation_id"} {
-		if err := s.migration.DropColumnIfExists(s.tableName, column); err != nil {
+		if err := s.dropColumnIfExists(s.tableName, column); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Concrete schema DDL is exercised by the serialized bootstrap migration smoke.
-func (m gormSchemaMigrator) AutoMigrate(
-	tableName string,
-) error {
-	return m.db.Table(tableName).AutoMigrate(&jobModel{})
-}
-
-func (m gormSchemaMigrator) DropTableIfExists(
-	tableName string,
-) error {
-	migrator := m.db.Migrator()
+func (s *Store) dropTableIfExists(tableName string) error {
+	migrator := s.db.Migrator()
 	if !migrator.HasTable(tableName) {
 		return nil
 	}
@@ -148,10 +126,8 @@ func (m gormSchemaMigrator) DropTableIfExists(
 	return nil
 }
 
-func (m gormSchemaMigrator) DropColumnIfExists(
-	tableName, column string,
-) error {
-	migrator := m.db.Table(tableName).Migrator()
+func (s *Store) dropColumnIfExists(tableName, column string) error {
+	migrator := s.db.Table(tableName).Migrator()
 	if !migrator.HasColumn(tableName, column) {
 		return nil
 	}
@@ -160,7 +136,7 @@ func (m gormSchemaMigrator) DropColumnIfExists(
 		quoteIdentifier(tableName),
 		quoteIdentifier(column),
 	)
-	if err := m.db.Exec(statement).Error; err != nil {
+	if err := s.db.Exec(statement).Error; err != nil {
 		return fmt.Errorf("drop obsolete %s column %s: %w", tableName, column, err)
 	}
 	return nil
@@ -168,14 +144,6 @@ func (m gormSchemaMigrator) DropColumnIfExists(
 
 func quoteIdentifier(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
-}
-
-func (s *Store) createWithDB(ctx context.Context, db *gorm.DB, job Job) error {
-	model := newJobModel(job)
-	if err := db.WithContext(ctx).Table(s.tableName).Create(&model).Error; err != nil {
-		return fmt.Errorf("create job: %w", err)
-	}
-	return nil
 }
 
 func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {

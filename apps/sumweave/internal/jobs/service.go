@@ -10,14 +10,9 @@ import (
 
 // ServiceDeps configures the jobs read model. Commands are published directly to
 // appdispatch, and lifecycle writes are performed by observed consumers.
-type jobReader interface {
-	Get(context.Context, string) (*Job, error)
-	List(context.Context, ListParams) (ListResult, error)
-}
+type ServiceDeps struct{ Store *Store }
 
-type ServiceDeps struct{ Store jobReader }
-
-type Service struct{ store jobReader }
+type Service struct{ store *Store }
 
 func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Store == nil { // coverage-ignore // Constructor dependency failure is exercised by wireup callers.

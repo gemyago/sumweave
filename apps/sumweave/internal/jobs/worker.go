@@ -26,30 +26,6 @@ type workerStore interface {
 	RecoverStaleRunning(context.Context, time.Time, time.Duration, int) error
 }
 
-type workerRouter interface {
-	SetRetryLifecycle(appdispatch.RetryLifecycle) error
-	Handle(appdispatch.Handler) error
-	Run(context.Context) error
-	Close() error
-}
-
-type workerRouterFactory interface {
-	NewRouter(string) (workerRouterResult, error)
-}
-
-type workerRouterResult struct {
-	router workerRouter
-}
-
-type appdispatchWorkerRouterFactory struct {
-	newRouter func(string) (*appdispatch.Router, error)
-}
-
-func (f appdispatchWorkerRouterFactory) NewRouter(consumerGroup string) (workerRouterResult, error) {
-	router, err := f.newRouter(consumerGroup)
-	return workerRouterResult{router: router}, err
-}
-
 type WorkerDeps struct {
 	Store         workerStore
 	Registry      *Registry
@@ -58,7 +34,6 @@ type WorkerDeps struct {
 	Config        WorkerConfig
 	WorkerID      string
 	RouterFactory *appdispatch.RouterFactory
-	routerFactory workerRouterFactory
 }
 
 type Worker struct {
@@ -68,7 +43,7 @@ type Worker struct {
 	clock     func() time.Time
 	config    WorkerConfig
 	workerID  string
-	router    workerRouter
+	router    *appdispatch.Router
 	mu        sync.Mutex
 	installed bool
 	runOnce   *runOnceTracker
@@ -82,7 +57,7 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 	if deps.Registry == nil {
 		return nil, errors.New("jobs registry is required")
 	}
-	if deps.RouterFactory == nil && deps.routerFactory == nil {
+	if deps.RouterFactory == nil {
 		return nil, errors.New("jobs router factory is required")
 	}
 	if deps.Logger == nil {
@@ -94,15 +69,10 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 	if deps.WorkerID == "" {
 		deps.WorkerID = "jobs-worker"
 	}
-	routerFactory := deps.routerFactory
-	if routerFactory == nil {
-		routerFactory = appdispatchWorkerRouterFactory{newRouter: deps.RouterFactory.NewRouter}
-	}
-	routerResult, err := routerFactory.NewRouter(jobConsumerGroup)
+	router, err := deps.RouterFactory.NewRouter(jobConsumerGroup)
 	if err != nil {
 		return nil, fmt.Errorf("create jobs router: %w", err)
 	}
-	router := routerResult.router
 	worker := &Worker{
 		store: deps.Store, registry: deps.Registry, logger: deps.Logger, clock: deps.Clock,
 		config: normalizeWorkerConfig(deps.Config), workerID: deps.WorkerID, router: router,
@@ -423,25 +393,12 @@ func (w *Worker) recoverStaleRunningPeriodically(ctx context.Context, stop <-cha
 		case <-stop:
 			return
 		case <-ticker.C:
-			if !w.runPeriodicRecoveryCycle(ctx) {
-				return
+			w.renewRunningClaims(ctx)
+			if err := w.recoverStaleRunning(ctx); err != nil {
+				w.logger.ErrorContext(ctx, "recover stale running jobs failed", "error", err)
 			}
 		}
 	}
-}
-
-func (w *Worker) runPeriodicRecoveryCycle(ctx context.Context) bool {
-	if ctx.Err() != nil {
-		return false
-	}
-	w.renewRunningClaims(ctx)
-	if ctx.Err() != nil {
-		return false
-	}
-	if err := w.recoverStaleRunning(ctx); err != nil {
-		w.logger.ErrorContext(ctx, "recover stale running jobs failed", "error", err)
-	}
-	return true
 }
 
 func (w *Worker) recoveryInterval() time.Duration {

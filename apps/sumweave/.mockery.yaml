@@ -44,12 +44,6 @@ packages:
   github.com/gemyago/sumweave/apps/sumweave/internal/jobs:
     interfaces:
       workerStore:
-      workerRouter:
-      workerRouterFactory:
-      jobReader:
-      schemaMigrator:
-        config:
-          filename: mock_schema_migrator_test.go
   github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch:
     interfaces:
       migrationRunner:

@@ -19,8 +19,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestWorkerUnit(t *testing.T) {
+func TestWorker(t *testing.T) {
 	fake := faker.New()
+	_, err := NewWorker(WorkerDeps{})
+	require.Error(t, err)
 
 	makeRouterFactory := func(t *testing.T) *appdispatch.RouterFactory {
 		t.Helper()
@@ -64,6 +66,33 @@ func TestWorkerUnit(t *testing.T) {
 		require.NoError(t, worker.RunOnce(t.Context()))
 		assert.True(t, worker.installed)
 		assert.GreaterOrEqual(t, recoveries, 1)
+	})
+
+	t.Run("returns startup recovery errors", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		recoveryErr := errors.New(fake.UUID().V4())
+		store.EXPECT().
+			RecoverStaleRunning(mock.Anything, time.Time{}, time.Second, defaultWorkerMaxAttempts).
+			Return(recoveryErr).
+			Once()
+		worker := makeWorker(t, store, WorkerConfig{StaleRunningAge: time.Second})
+		require.ErrorIs(t, worker.Run(t.Context()), recoveryErr)
+		require.NoError(t, worker.Stop(t.Context()))
+	})
+
+	t.Run("accepts cancellation before one-shot routing starts", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		store.EXPECT().
+			RecoverStaleRunning(mock.Anything, time.Time{}, time.Second, defaultWorkerMaxAttempts).
+			Return(nil).
+			Once()
+		worker := makeWorker(t, store, WorkerConfig{
+			PollInterval: time.Hour, StaleRunningAge: time.Second,
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		require.NoError(t, worker.RunOnce(ctx))
+		require.NoError(t, worker.Stop(t.Context()))
 	})
 
 	t.Run("installs observed handlers once", func(t *testing.T) {
@@ -110,44 +139,6 @@ func TestWorkerUnit(t *testing.T) {
 		<-done
 	})
 
-	t.Run("skips recovery when renewal callback cancels context", func(t *testing.T) {
-		store := newMockworkerStore(t)
-		now := time.Now()
-		claim := Job{ID: fake.UUID().V4()}
-		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(cancel)
-		store.EXPECT().RenewRunning(mock.Anything, claim, now).
-			Run(func(context.Context, Job, time.Time) { cancel() }).
-			Return(nil).
-			Once()
-		worker := &Worker{
-			store:  store,
-			logger: slog.New(slog.DiscardHandler),
-			clock:  func() time.Time { return now },
-			config: WorkerConfig{MaxAttempts: defaultWorkerMaxAttempts},
-			claims: map[string]Job{claim.ID: claim},
-		}
-
-		assert.False(t, worker.runPeriodicRecoveryCycle(ctx))
-	})
-
-	t.Run("does not start a periodic recovery cycle after cancellation", func(t *testing.T) {
-		store := newMockworkerStore(t)
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		claim := Job{ID: fake.UUID().V4()}
-		worker := &Worker{
-			store:  store,
-			logger: slog.New(slog.DiscardHandler),
-			config: WorkerConfig{
-				MaxAttempts: defaultWorkerMaxAttempts,
-			},
-			claims: map[string]Job{claim.ID: claim},
-		}
-
-		assert.False(t, worker.runPeriodicRecoveryCycle(ctx))
-	})
-
 	t.Run("finalizes exhausted retries through the store", func(t *testing.T) {
 		store := newMockworkerStore(t)
 		jobID := fake.UUID().V4()
@@ -159,6 +150,7 @@ func TestWorkerUnit(t *testing.T) {
 
 		finalizeErr := errors.New(fake.UUID().V4())
 		exhausted := exhaustedRetryError{err: finalizeErr, finalize: func() error { return finalizeErr }}
+		require.ErrorContains(t, exhausted, finalizeErr.Error())
 		require.ErrorIs(t, exhausted, finalizeErr)
 		require.ErrorIs(t, exhausted.OnRetriesExhausted(), finalizeErr)
 	})
@@ -199,5 +191,51 @@ func TestWorkerUnit(t *testing.T) {
 			require.ErrorIs(t, err, context.Canceled)
 			require.ErrorIs(t, err, persistErr)
 		})
+	})
+
+	t.Run("handles claim renewal and invalid terminal state", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		job := Job{ID: fake.UUID().V4()}
+		store.EXPECT().RenewRunning(mock.Anything, job, mock.Anything).Return(errors.New(fake.UUID().V4())).Once()
+		worker := &Worker{
+			store: store, logger: slog.New(slog.DiscardHandler), clock: time.Now,
+			claims: map[string]Job{job.ID: job},
+		}
+		worker.renewRunningClaims(t.Context())
+		require.Error(t, worker.persistTerminalState(t.Context(), job, terminalJobState{}))
+		unexpected := errors.New(fake.UUID().V4())
+		require.ErrorIs(t, worker.runOnceResult(unexpected), unexpected)
+	})
+
+	t.Run("returns transient requeue failures", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		registry := NewRegistry()
+		jobType := JobType("finance." + fake.Letter())
+		topic := "worker." + fake.UUID().V4()
+		requester := Requester{UserID: fake.UUID().V4(), Source: RequesterSourceOperator}
+		retryErr := errors.New(fake.UUID().V4())
+		require.NoError(t, RegisterTypedHandler(registry, TypedHandlerSpec[struct{}]{
+			JobType: jobType,
+			Topic:   topic,
+			Metadata: func(struct{}) (JobMetadata, error) {
+				return JobMetadata{JobType: jobType, Requester: requester}, nil
+			},
+			Run: func(context.Context, Job, struct{}) error { return retryErr },
+		}))
+		now := time.Now()
+		workerID := fake.UUID().V4()
+		worker := &Worker{
+			store: store, registry: registry, logger: slog.New(slog.DiscardHandler),
+			clock: func() time.Time { return now }, workerID: workerID,
+		}
+		message := appdispatch.Message{ID: fake.UUID().V4(), Payload: []byte(`{}`)}
+		queued := Job{ID: message.ID, JobType: jobType, Status: JobStatusQueued}
+		claimed := queued
+		claimed.Status = JobStatusRunning
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&queued, nil).Once()
+		store.EXPECT().ClaimQueued(mock.Anything, message.ID, workerID, now).Return(&claimed, nil).Once()
+		store.EXPECT().RequeueRunning(mock.Anything, claimed, now).Return(retryErr).Once()
+
+		require.ErrorIs(t, worker.processObserved(t.Context(), registry.Handlers()[0], message), retryErr)
 	})
 }
