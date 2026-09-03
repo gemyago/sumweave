@@ -103,7 +103,7 @@ func WithLogger(logger *slog.Logger) ServiceOption {
 func NewService(store serviceStore, opts ...ServiceOption) *Service {
 	service := &Service{
 		store:             store,
-		now:               func() time.Time { return time.Now().UTC() },
+		now:               func() time.Time { return time.Now().Truncate(time.Microsecond) },
 		newID:             uuid.NewString,
 		fxProviders:       defaultFXProviders(),
 		defaultFXProvider: FXProviderFrankfurter,

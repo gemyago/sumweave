@@ -101,8 +101,7 @@ func TestDatabaseAgentProfilesService(t *testing.T) {
 
 		got, err := svc.Get(ctx, created.Name)
 		require.NoError(t, err)
-		assert.Equal(t, created.Name, got.Name)
-		assert.True(t, got.CreatedAt.Equal(created.CreatedAt))
+		assert.Equal(t, created, got)
 
 		listed, err := svc.List(ctx)
 		require.NoError(t, err)
@@ -147,8 +146,8 @@ func TestDatabaseAgentProfilesService(t *testing.T) {
 	t.Run("List preserves canonical creation timestamp ordering", func(t *testing.T) {
 		svc := makeService(t)
 		ctx := t.Context()
-		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 		require.True(t, earlier.Before(later))
 
 		earlierProfile, err := svc.Create(ctx, makeCreateParams())
@@ -195,7 +194,7 @@ func TestDatabaseAgentProfilesService(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, created.Name, updated.Name)
-		assert.True(t, updated.CreatedAt.Equal(created.CreatedAt))
+		assert.Equal(t, created.CreatedAt, updated.CreatedAt)
 		assert.True(t, updated.UpdatedAt.After(created.UpdatedAt))
 		assert.Equal(t, "Updated Name", updated.DisplayName)
 		assert.Equal(t, "reviewer", updated.Role)
@@ -236,14 +235,7 @@ func TestDatabaseAgentProfilesService(t *testing.T) {
 		svc2 := makeService(t)
 		loaded, err := svc2.Get(ctx, created.Name)
 		require.NoError(t, err)
-		assert.Equal(t, created.Name, loaded.Name)
-		assert.Equal(t, created.DisplayName, loaded.DisplayName)
-		assert.Equal(t, created.Role, loaded.Role)
-		assert.Equal(t, created.Instructions, loaded.Instructions)
-		assert.Equal(t, created.ToolRefs, loaded.ToolRefs)
-		assert.Equal(t, created.ExecutionSettings, loaded.ExecutionSettings)
-		assert.Equal(t, created.CreatedAt.UnixNano(), loaded.CreatedAt.UnixNano())
-		assert.Equal(t, created.UpdatedAt.UnixNano(), loaded.UpdatedAt.UnixNano())
+		assert.Equal(t, created, loaded)
 	})
 
 	t.Run("round-trips execution settings variants", func(t *testing.T) {

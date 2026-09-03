@@ -110,8 +110,8 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 
 		t.Run("preserves canonical creation timestamp ordering", func(t *testing.T) {
 			svc := makeService(t)
-			earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-			later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+			earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+			later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 			require.True(t, earlier.Before(later))
 
 			earlierModel := insertModel(t, svc)
@@ -192,8 +192,7 @@ func TestDatabaseProvidersConfigService(t *testing.T) {
 
 			got, err := svc.Get(t.Context(), created.Name)
 			require.NoError(t, err)
-			assert.Equal(t, created.Name, got.Name)
-			assert.Equal(t, created.APIKey, got.APIKey)
+			assert.Equal(t, created, got)
 		})
 
 		t.Run("returns ErrProviderConfigNameConflict for duplicate name", func(t *testing.T) {

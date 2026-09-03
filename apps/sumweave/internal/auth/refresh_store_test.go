@@ -57,6 +57,24 @@ func TestRefreshTokenStore(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidRefreshToken)
 	})
 
+	t.Run("normalizes persisted timestamps to PostgreSQL microsecond precision", func(t *testing.T) {
+		store := makeStore(t)
+		location := time.FixedZone(fake.Lorem().Word(), 2*60*60)
+		clockValue := time.Date(2026, time.September, 3, 19, 20, 30, 123456789, location)
+		store.now = func() time.Time { return clockValue }
+		ttl := time.Hour + 987
+
+		token, err := store.Create(t.Context(), fake.UUID().V4(), ttl)
+		require.NoError(t, err)
+		var stored authRefreshTokenModel
+		require.NoError(t, store.db.Where("token_hash = ?", hashToken(token)).First(&stored).Error)
+
+		expectedCreatedAt := clockValue.Truncate(time.Microsecond)
+		expectedExpiresAt := expectedCreatedAt.Add(ttl).Truncate(time.Microsecond)
+		require.True(t, expectedCreatedAt.Equal(stored.CreatedAt))
+		require.True(t, expectedExpiresAt.Equal(stored.ExpiresAt))
+	})
+
 	t.Run("consumes one token exactly once under concurrency", func(t *testing.T) {
 		store := makeStore(t)
 		userID := fake.UUID().V4()

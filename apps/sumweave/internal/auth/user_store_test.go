@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
@@ -73,6 +74,34 @@ func TestUserStore(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, newHash, updated.PasswordHash)
 		require.ErrorIs(t, store.UpdatePassword(t.Context(), fake.UUID().V4(), newHash), ErrUserNotFound)
+	})
+
+	t.Run("normalizes write timestamps to PostgreSQL microsecond precision", func(t *testing.T) {
+		store := makeStore(t)
+		location := time.FixedZone(fake.Lorem().Word(), 2*60*60)
+		createdClockValue := time.Date(2026, time.September, 3, 19, 20, 30, 123456789, location)
+		updatedClockValue := createdClockValue.Add(time.Second + 987)
+		clockValue := createdClockValue
+		store.now = func() time.Time { return clockValue }
+
+		created, err := store.Create(t.Context(), makeParams("precise"))
+		require.NoError(t, err)
+		expectedCreatedAt := createdClockValue.Truncate(time.Microsecond)
+		require.Equal(t, expectedCreatedAt, created.CreatedAt)
+		require.Equal(t, expectedCreatedAt, created.UpdatedAt)
+		require.Same(t, location, created.CreatedAt.Location())
+
+		stored, err := store.GetByID(t.Context(), created.ID)
+		require.NoError(t, err)
+		require.True(t, expectedCreatedAt.Equal(stored.CreatedAt))
+		require.True(t, expectedCreatedAt.Equal(stored.UpdatedAt))
+
+		clockValue = updatedClockValue
+		require.NoError(t, store.UpdatePassword(t.Context(), created.ID, fake.Lorem().Text(60)))
+		updated, err := store.GetByID(t.Context(), created.ID)
+		require.NoError(t, err)
+		expectedUpdatedAt := updatedClockValue.Truncate(time.Microsecond)
+		require.True(t, expectedUpdatedAt.Equal(updated.UpdatedAt))
 	})
 
 	t.Run("maps concurrent duplicate usernames to ErrUsernameExists", func(t *testing.T) {
