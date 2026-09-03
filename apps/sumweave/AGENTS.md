@@ -90,9 +90,9 @@ Durable jobs workflow:
 
 ## Lint / test
 
-- **This module:** `make lint` and database-free `make test`; use root
-  `make postgres-test-sumweave` for tagged PostgreSQL coverage (it bootstraps
-  the prepared test schema).
+- **This module:** run root `make postgres-bootstrap`, then `make lint` and
+  `make test`; ordinary tests select `postgres_test` and use one coverage
+  profile.
 - **Release build:** `make -C build dist` from the repository root produces `build/dist/linux/{amd64,arm64}/sumweave` with embedded UI assets and stages `build/dist/platform-agents/skills`.
 - **Whole repo:** from the repository root, `make lint` and `make test` include this module via `$(MAKE) -C apps/sumweave …`.
 

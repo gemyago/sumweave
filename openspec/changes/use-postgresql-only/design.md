@@ -100,24 +100,30 @@ There is no `test-postgres`, `postgres-test-runtime`,
 `.testcoverage-routine.yaml`; and no finance migration coverage environment
 variable or readiness marker.
 
-Ownership of that removal is intentionally non-overlapping. The ordinary-test
-switch owns every caller and consumer: root/module Makefile targets, variable
-exports, profile/config selection, raw-covdata composition, and readiness-marker
-checks. The operational-bootstrap chunk owns the dormant implementation branches
-inside `scripts/postgres/bootstrap.sh`: migration coverage environment parsing,
-`GOCOVERDIR`, raw-directory handling, and marker creation. The later finance
-persistence chunk may own one ordinary tagged migration smoke, but it must not
-restore either caller-side coverage transport or bootstrap instrumentation.
+Ownership is intentionally non-overlapping. The ordinary-test switch owns every
+caller and consumer: root/module Makefile targets, variable exports,
+profile/config selection, raw-covdata composition, and readiness-marker checks.
+It also adds the one smallest shallow tagged smoke to the neutral pre-change
+`finance/persistence/migrations_test.go` owner so the atomic switch satisfies the
+unchanged coverage gate. The operational-bootstrap chunk owns the dormant
+implementation branches inside `scripts/postgres/bootstrap.sh`: migration
+coverage environment parsing, `GOCOVERDIR`, raw-directory handling, and marker
+creation. The later finance persistence chunk removes the coverage-only seam and
+suite while retaining or minimally refining that existing smoke; it must not add
+a duplicate or restore caller-side coverage transport or bootstrap
+instrumentation.
 
 Build tags remain on files that access the prepared database. The tag is an
 explicit source boundary, not a separate test lane. Because ordinary targets
 always select it, the ordinary coverage profile includes both tagged and
 untagged tests.
 
-The one shallow migration smoke should execute through a tagged ordinary test
-if direct migration execution is needed for coverage. It must replace, not add
-to, detailed schema-contract tests and must not require bootstrap coverage
-instrumentation.
+The one shallow migration smoke executes through the tagged ordinary test added
+to `finance/persistence/migrations_test.go` with the ordinary-test switch. The
+later persistence restoration may minimally refine that same smoke for the
+restored concrete migrator, but must not create another owner or test. The smoke
+replaces, rather than adds to, detailed schema-contract tests and does not require
+bootstrap coverage instrumentation.
 
 ### Restore filenames and collapse lane-only splits
 
@@ -190,9 +196,11 @@ profiles, composition, and marker checks; the following bootstrap chunk removes
 the corresponding raw-covdata and marker-producing branches from
 `scripts/postgres/bootstrap.sh`. Restore branch-only hunks in
 `db_migrate_cmd_test.go`, config `load_test.go`/`values_test.go`, and wireup
-`jobs_test.go`/`migration_test.go`. Restore finance `migrations_test.go` as the
-owner of at most one shallow tagged smoke and remove the `autoMigrator` seam,
-generated mocks, and replacement migration test.
+`jobs_test.go`/`migration_test.go`. The ordinary-test chunk restores finance
+`migrations_test.go` as the owner of exactly one smallest shallow tagged smoke.
+The later persistence chunk retains or minimally refines only that smoke while
+removing the `autoMigrator` seam, generated mocks, and replacement migration
+test.
 
 **Runtime lane conversion (`398f271`):** retain PostgreSQL fixture bodies and
 build tags, but reverse all five direct renames and the extracted-file layout.
@@ -406,16 +414,19 @@ non-command setup/product/manual-E2E wording and exact base-spec restoration.
 1. Add CI bootstrap before the unchanged ordinary Nx test step and verify it in
    the same chunk.
 2. Atomically collapse Makefiles/coverage to one tagged ordinary flow, remove
-   all caller-side lane/coverage machinery, and make every command-facing
-   AGENTS/doc truthful before running ordinary and repository checks.
+   all caller-side lane/coverage machinery, add the smallest shallow tagged
+   smoke in `finance/persistence/migrations_test.go`, and make every
+   command-facing AGENTS/doc truthful before running ordinary and repository
+   checks.
 3. Delete contract/parser scripts and remove bootstrap-owned external,
    migration-covdata, and readiness-marker branches; verify fresh and idempotent
    Compose bootstrap immediately.
 4. Restore runtime test ownership and names, retaining and verifying tagged
    PostgreSQL fixtures.
 5. Restore root finance test ownership and retained PostgreSQL fixtures.
-6. Restore finance persistence/migration ownership, remove its mock seam, and
-   verify at most one demonstrated shallow ordinary tagged migration smoke.
+6. Restore finance persistence/migration ownership, remove its mock seam and
+   replacement suite, and retain or minimally refine only the task 2.2 smoke
+   without adding duplicate migration-test ownership.
 7. Roll back `cmd/sumweave` coverage seams with package-owned tests/mocks.
 8. Restore root app Engine test ownership.
 9. Roll back app-internal composition factories and coverage file splits.

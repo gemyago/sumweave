@@ -2,7 +2,7 @@
 
 PostgreSQL is the mandatory local backend database. The repository Compose
 environment and `make postgres-bootstrap` are the supported setup path; this
-guide explains its concrete contract and the explicit tagged verification lane.
+guide explains its concrete contract for backend processes and ordinary tests.
 
 ## What this covers
 
@@ -11,7 +11,7 @@ guide explains its concrete contract and the explicit tagged verification lane.
 - Backend processes use the DML/query runtime role.
 - Agent runtime, application auth/jobs/dispatch, and finance storage use the
   prepared PostgreSQL schemas.
-- API-only manual E2E guides and `make postgres-verify` reuse the same contract.
+- API-only manual E2E guides and ordinary backend tests reuse the same contract.
 
 ## Local roles, passwords, and DSNs
 
@@ -57,8 +57,8 @@ From `apps/sumweave`:
 
 ```bash
 go run ./cmd/sumweave --log-level WARN --env local user add \
-  --username 'postgres-verify-e2e' \
-  --password 'postgres-verify-e2e-local'
+  --username 'sumweave-local-e2e' \
+  --password 'sumweave-local-e2e'
 ```
 
 If that user already exists after a partial run, use `user change-password` with the same env.
@@ -72,8 +72,8 @@ After the backend is up, reuse the existing guides:
 
 Suggested login for that verification:
 
-- username: `postgres-verify-e2e`
-- password: `postgres-verify-e2e-local`
+- username: `sumweave-local-e2e`
+- password: `sumweave-local-e2e`
 
 Useful spot checks:
 
@@ -97,5 +97,5 @@ docker compose down -v
 ```
 
 Run `make postgres-bootstrap` later to recreate the two databases and schemas.
-Run `make postgres-verify` when the tagged PostgreSQL test lane is needed;
-routine `make affected-lint-test` remains database-independent.
+Run ordinary backend `make test` or `make affected-lint-test` commands after
+bootstrap; they select tagged PostgreSQL tests where applicable.

@@ -46,8 +46,6 @@ Project-level rules in root `AGENTS.md` apply. For this module:
 - Keep removed package/release pipeline paths out unless explicitly requested.
 - For Makefile targets prefer Makefile philosophy: targets are files but not just commands.
 - Run `make -C build test` when changing release scripts.
-- Release and routine test tasks must not implicitly provision PostgreSQL;
-  `make postgres-verify` is the explicit serial database verification lane.
 
 ## Task Completion Protocol
 

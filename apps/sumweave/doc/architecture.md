@@ -116,8 +116,8 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 ## Repository integration
 
 - **Module:** `github.com/gemyago/sumweave/apps/sumweave` with **`replace github.com/gemyago/sumweave/runtime => ../../runtime`** for local **`runtime/`** development.
-- **`apps/sumweave/Makefile`:** **`make lint`**, database-free **`make test`** (routine coverage profile), tagged **`make test-postgres`** (full PostgreSQL coverage profile), and **`make dist/bin`** (rebuilds UI embed assets, validates `embeddedui/dist/index.html`, then `go build`).
-- **Root `Makefile`** runs the routine module targets before **`apps/sumweave-ui`**; Go coverage from this module's `.cover/routine.out` is merged into the root HTML report. `make postgres-test-sumweave` and serial `make postgres-verify` are explicit non-routine paths.
+- **`apps/sumweave/Makefile`:** after root **`make postgres-bootstrap`**, **`make lint`** and ordinary tagged **`make test`** (the single **`.cover/profile.out`** checked by **`.testcoverage.yaml`**), plus **`make dist/bin`** (rebuilds UI embed assets, validates `embeddedui/dist/index.html`, then `go build`).
+- **Root `Makefile`** runs module targets before **`apps/sumweave-ui`**; Go coverage from this module's `.cover/profile.out` is merged into the root HTML report.
 
 ## API integration
 

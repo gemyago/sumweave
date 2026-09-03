@@ -116,10 +116,9 @@ environment is required; there is no SQLite data migration. Explicit jobs and
 HTTP roots stop their message routers before closing the shared application
 database. The migration root creates no publisher or router.
 
-Routine module and Nx tests remain database-free. Run the explicit tagged,
-serial PostgreSQL lane with `make postgres-verify`; it bootstraps and tests the
-prepared `sumweave_test` schemas. The separately dispatched PostgreSQL workflow
-uses the same bootstrap contract against an externally managed service.
+Run `make postgres-bootstrap` before ordinary module or Nx backend tests. Each
+core module's `make test` selects tagged PostgreSQL tests with the prepared
+`sumweave_test` schema; there is no separate verification lane or workflow.
 
 Release builds run on the host with `make -C build dist`; Docker packages the
 prepared binary and staged platform-agent root. The Helm chart deploys app,

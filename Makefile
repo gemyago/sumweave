@@ -1,5 +1,3 @@
-override repository_makefile_dir := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))
-
 include build/make/golangci-lint.mk
 
 cover_dir=.cover
@@ -7,9 +5,9 @@ cover_profile=$(cover_dir)/profile.out
 
 go-test-coverage=go run github.com/vladopajic/go-test-coverage/v2
 
+POSTGRES_MANAGED_EXTERNALLY ?=
 POSTGRES_HOST ?= 127.0.0.1
 POSTGRES_PORT ?= 55432
-POSTGRES_MANAGED_EXTERNALLY ?=
 
 ifeq ($(POSTGRES_MANAGED_EXTERNALLY),1)
 POSTGRES_BOOTSTRAP_DSN ?=
@@ -17,14 +15,7 @@ else
 POSTGRES_BOOTSTRAP_DSN ?= postgres://postgres:sumweave_postgres_local@127.0.0.1:55432/postgres?sslmode=disable
 endif
 
-postgres_test_dsn=postgres://sumweave_runtime:sumweave_runtime_local@$(POSTGRES_HOST):$(POSTGRES_PORT)/sumweave_test?sslmode=disable
-
-ifneq ($(POSTGRES_HOST):$(POSTGRES_PORT),127.0.0.1:55432)
-postgres_test_app_env=APP_APPLICATION_DATABASE_DSN="$(postgres_test_dsn)" APP_AGENTRUNTIME_DATABASE_DSN="$(postgres_test_dsn)"
-endif
-
-.PHONY: postgres-bootstrap postgres-bootstrap-contract-test postgres-target-contract-test postgres-workflow-contract-test postgres-documentation-contract-test postgres-test-runtime postgres-test-finance postgres-test-sumweave postgres-verify
-.NOTPARALLEL: postgres-verify
+.PHONY: postgres-bootstrap
 postgres-bootstrap:
 	@if [ "$(POSTGRES_MANAGED_EXTERNALLY)" != "1" ]; then \
 		docker compose -f compose.yaml up --detach --wait postgres; \
@@ -33,31 +24,6 @@ postgres-bootstrap:
 		POSTGRES_MANAGED_EXTERNALLY="$(POSTGRES_MANAGED_EXTERNALLY)" \
 		POSTGRES_BOOTSTRAP_DSN="$(POSTGRES_BOOTSTRAP_DSN)" \
 		./scripts/postgres/bootstrap.sh
-
-postgres-bootstrap-contract-test:
-	./scripts/postgres/bootstrap-contract-test.sh
-
-postgres-target-contract-test:
-	bash ./scripts/postgres/targets-contract-test.sh
-
-postgres-workflow-contract-test:
-	bash ./scripts/postgres/workflow-contract-test.sh
-
-postgres-documentation-contract-test:
-	bash ./scripts/postgres/documentation-contract-test.sh
-
-postgres-test-runtime: postgres-bootstrap
-	SUMWEAVE_POSTGRES_TEST_DSN="$(postgres_test_dsn)" $(MAKE) -C runtime test-postgres
-
-postgres-test-finance: export SUMWEAVE_FINANCE_MIGRATION_COVER_DIR=$(repository_makefile_dir)/finance/.cover/postgres-migration
-postgres-test-finance: postgres-bootstrap
-	SUMWEAVE_POSTGRES_TEST_DSN="$(postgres_test_dsn)" $(MAKE) -C finance test-postgres
-
-postgres-test-sumweave: postgres-bootstrap
-	SUMWEAVE_POSTGRES_TEST_DSN="$(postgres_test_dsn)" $(postgres_test_app_env) $(MAKE) -C apps/sumweave test-postgres
-
-postgres-verify: export SUMWEAVE_FINANCE_MIGRATION_COVER_DIR=$(repository_makefile_dir)/finance/.cover/postgres-migration
-postgres-verify: postgres-test-runtime postgres-test-finance postgres-test-sumweave
 
 $(cover_dir):
 	mkdir -p $(cover_dir)
@@ -143,8 +109,8 @@ test: $(cover_dir)
 	cat tools/firecrawl/.cover/profile.out > $(cover_profile)
 	tail -n +2 tools/skills/.cover/profile.out >> $(cover_profile)
 	tail -n +2 tools/workspacefs/.cover/profile.out >> $(cover_profile)
-	tail -n +2 runtime/.cover/routine.out >> $(cover_profile)
-	tail -n +2 finance/.cover/routine.out >> $(cover_profile)
-	tail -n +2 apps/sumweave/.cover/routine.out >> $(cover_profile)
+	tail -n +2 runtime/.cover/profile.out >> $(cover_profile)
+	tail -n +2 finance/.cover/profile.out >> $(cover_profile)
+	tail -n +2 apps/sumweave/.cover/profile.out >> $(cover_profile)
 	go tool cover -html=$(cover_profile) -o $(cover_dir)/coverage.html
 	$(go-test-coverage) --badge-file-name $(cover_dir)/coverage.svg --profile $(cover_profile)

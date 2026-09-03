@@ -133,9 +133,8 @@ scaling.
 4. Verify finance data, current finance provider snapshots, agent sessions, provider
    configuration, and profiles survive process replacement through database
    reads.
-5. Run `make postgres-verify` for serial tagged PostgreSQL verification.
-6. Run `make affected-lint-test` for implementation changes; it does not require
-   PostgreSQL.
+5. Run ordinary module `make test` commands for tagged PostgreSQL coverage.
+6. Run `make affected-lint-test` for implementation changes after bootstrap.
 
 ## Completion Criteria
 
@@ -148,7 +147,7 @@ This design is satisfied when:
 - `db-migrate` prepares all retained schemas
 - production workloads require no persistent filesystem volume
 - local development uses the Compose PostgreSQL environment
-- tagged PostgreSQL verification passes without changing timestamp semantics
+- ordinary tagged PostgreSQL tests pass without changing timestamp semantics
 
 ## Provider snapshot upgrade cleanup
 
