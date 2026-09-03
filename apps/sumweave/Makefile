@@ -7,8 +7,6 @@ cover_profile=$(cover_dir)/profile.out
 cover_html=$(cover_dir)/coverage.html
 ui_embed_dist_dir=$(CURDIR)/internal/api/http/embeddedui/dist
 
-SUMWEAVE_POSTGRES_TEST_DSN ?= postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_test?sslmode=disable
-
 # Package-level coverage runs need some CI headroom.
 DEFAULT_TESTS_TIMEOUT ?= 30s
 
@@ -34,5 +32,5 @@ dist/bin:
 go-test-coverage=go run github.com/vladopajic/go-test-coverage/v2
 
 test: $(cover_dir)
-	TZ=US/Alaska SUMWEAVE_POSTGRES_TEST_DSN="$(SUMWEAVE_POSTGRES_TEST_DSN)" go test -timeout=${DEFAULT_TESTS_TIMEOUT} -shuffle=on -failfast -coverpkg=./cmd/sumweave,./internal/... -coverprofile=$(cover_profile) -covermode=atomic ./...
+	TZ=US/Alaska go test -timeout=${DEFAULT_TESTS_TIMEOUT} -shuffle=on -failfast -coverpkg=./cmd/sumweave,./internal/... -coverprofile=$(cover_profile) -covermode=atomic ./...
 	$(go-test-coverage) --config .testcoverage.yaml --profile $(cover_profile)
