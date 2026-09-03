@@ -384,16 +384,7 @@ func handledFinanceFailure(err error) error {
 	return appdispatch.NewBusinessFailure(err, failure.Code, failure.Summary, failure.Details)
 }
 
-type appdispatchPublisher interface {
-	PublishRequest(context.Context, appdispatch.PublicationRequest) (appdispatch.PublicationReference, error)
-	PublishRequestInTx(
-		context.Context,
-		*sql.Tx,
-		appdispatch.PublicationRequest,
-	) (appdispatch.PublicationReference, error)
-}
-
-type appdispatchSemanticCommandPublisher struct{ publisher appdispatchPublisher }
+type appdispatchSemanticCommandPublisher struct{ publisher *appdispatch.Publisher }
 
 func (p appdispatchSemanticCommandPublisher) PublishSemanticCommand(
 	ctx context.Context,

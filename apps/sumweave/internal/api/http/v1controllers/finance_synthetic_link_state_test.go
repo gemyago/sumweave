@@ -72,11 +72,7 @@ func TestFinanceSyntheticLinkStateControllerPostgres(t *testing.T) {
 		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
 		return payload
 	}
-	newActualHandler := func(
-		t *testing.T,
-		module *financepkg.Finance,
-		auth middleware.AuthMiddleware,
-	) http.Handler {
+	newActualHandler := func(t *testing.T, module *financepkg.Finance, auth middleware.AuthMiddleware) http.Handler {
 		t.Helper()
 		controller := NewFinanceController(FinanceControllerDeps{
 			BankConnectionService:     module.BankConnectionService,
@@ -105,28 +101,15 @@ func TestFinanceSyntheticLinkStateControllerPostgres(t *testing.T) {
 		ConnectionSecretCipher: connectionCipher,
 		Monobank:               financepkg.MonobankConfig{BaseURL: "https://api.monobank.ua"},
 		EnableBanking: financepkg.EnableBankingConfig{
-			BaseURL:        "https://enable-banking.example.test",
-			AppID:          "app-" + fake.UUID().V4(),
-			PrivateKeyPath: makePrivateKeyPath(t),
-			ASPSPs: []financepkg.EnableBankingASPSP{{
-				ProviderID: domain.ProviderIDPKO,
-				Name:       "Mock ASPSP",
-				Country:    "PL",
-				PSUType:    "personal",
-				ValidDays:  90,
-			}},
+			BaseURL: "https://enable-banking.example.test", AppID: "app-" + fake.UUID().V4(), PrivateKeyPath: makePrivateKeyPath(t),
+			ASPSPs: []financepkg.EnableBankingASPSP{{ProviderID: domain.ProviderIDPKO, Name: "Mock ASPSP", Country: "PL", PSUType: "personal", ValidDays: 90}},
 		},
 	})
 	require.NoError(t, err)
 
 	userID := fake.UUID().V4()
 	otherUserID := fake.UUID().V4()
-	tenant, err := module.TenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{
-		ActorUserID:     userID,
-		Name:            "tenant-" + fake.UUID().V4(),
-		DisplayCurrency: "USD",
-		SeedDefaults:    true,
-	})
+	tenant, err := module.TenantService.CreateTenant(t.Context(), financepkg.CreateTenantParams{ActorUserID: userID, Name: "tenant-" + fake.UUID().V4(), DisplayCurrency: "USD", SeedDefaults: true})
 	require.NoError(t, err)
 	handler := newActualHandler(t, module, makeAuthMiddleware(userID))
 	otherHandler := newActualHandler(t, module, makeAuthMiddleware(otherUserID))
@@ -137,12 +120,7 @@ func TestFinanceSyntheticLinkStateControllerPostgres(t *testing.T) {
 	}
 
 	startResponse := httptest.NewRecorder()
-	handler.ServeHTTP(startResponse, newRequest(
-		http.MethodPost,
-		"/api/v1/finance/tenants/"+tenant.ID+"/connections/link-redirect/start",
-		`{"provider":"synthetic","callbackUrl":"https://app.example.test/#/finance/connections"}`,
-		true,
-	))
+	handler.ServeHTTP(startResponse, newRequest(http.MethodPost, "/api/v1/finance/tenants/"+tenant.ID+"/connections/link-redirect/start", `{"provider":"synthetic","callbackUrl":"https://app.example.test/#/finance/connections"}`, true))
 	require.Equal(t, http.StatusOK, startResponse.Code)
 	startPayload := decode(t, startResponse)
 	state := startPayload["state"].(string)
@@ -167,15 +145,7 @@ func TestFinanceSyntheticLinkStateControllerPostgres(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, isolationResponse.Code)
 
 	putResponse := httptest.NewRecorder()
-	handler.ServeHTTP(putResponse, newRequest(
-		http.MethodPut,
-		statePath,
-		configuredAccountsJSON([]map[string]string{
-			{"name": "checking-" + fake.UUID().V4(), "currency": "USD"},
-			{"name": "checking-" + fake.UUID().V4(), "currency": "USD"},
-		}),
-		true,
-	))
+	handler.ServeHTTP(putResponse, newRequest(http.MethodPut, statePath, configuredAccountsJSON([]map[string]string{{"name": "checking-" + fake.UUID().V4(), "currency": "USD"}, {"name": "checking-" + fake.UUID().V4(), "currency": "USD"}}), true))
 	require.Equal(t, http.StatusOK, putResponse.Code)
 	configuredAccounts := decode(t, putResponse)["configuredAccounts"].([]any)
 	require.Len(t, configuredAccounts, 2)
@@ -194,27 +164,14 @@ func TestFinanceSyntheticLinkStateControllerPostgres(t *testing.T) {
 	assert.Equal(t, secondKey, refreshedAccounts[1].(map[string]any)["key"])
 
 	reSaveResponse := httptest.NewRecorder()
-	handler.ServeHTTP(reSaveResponse, newRequest(
-		http.MethodPut,
-		statePath,
-		configuredAccountsJSON([]map[string]string{
-			{"key": firstKey, "name": "checking-" + fake.UUID().V4(), "currency": "USD"},
-			{"key": secondKey, "name": "checking-" + fake.UUID().V4(), "currency": "USD"},
-		}),
-		true,
-	))
+	handler.ServeHTTP(reSaveResponse, newRequest(http.MethodPut, statePath, configuredAccountsJSON([]map[string]string{{"key": firstKey, "name": "checking-" + fake.UUID().V4(), "currency": "USD"}, {"key": secondKey, "name": "checking-" + fake.UUID().V4(), "currency": "USD"}}), true))
 	require.Equal(t, http.StatusOK, reSaveResponse.Code)
 	reSavedAccounts := decode(t, reSaveResponse)["configuredAccounts"].([]any)
 	assert.Equal(t, firstKey, reSavedAccounts[0].(map[string]any)["key"])
 	assert.Equal(t, secondKey, reSavedAccounts[1].(map[string]any)["key"])
 
 	finishResponse := httptest.NewRecorder()
-	handler.ServeHTTP(finishResponse, newRequest(
-		http.MethodPost,
-		"/api/v1/finance/tenants/"+tenant.ID+"/connections/link-redirect/finish",
-		`{"provider":"synthetic","state":"`+state+`"}`,
-		true,
-	))
+	handler.ServeHTTP(finishResponse, newRequest(http.MethodPost, "/api/v1/finance/tenants/"+tenant.ID+"/connections/link-redirect/finish", `{"provider":"synthetic","state":"`+state+`"}`, true))
 	require.Equal(t, http.StatusOK, finishResponse.Code)
 	finishPayload := decode(t, finishResponse)
 	assert.Equal(t, "synthetic", finishPayload["provider"])

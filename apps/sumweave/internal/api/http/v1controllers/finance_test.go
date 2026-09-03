@@ -52,10 +52,6 @@ func TestFinanceController(t *testing.T) {
 	withUserDirectory := func(directory userDirectory) controllerOption {
 		return func(deps *FinanceControllerDeps) { deps.UserDirectory = directory }
 	}
-	withSyntheticLinkState := func(service syntheticLinkStateService) controllerOption {
-		return func(deps *FinanceControllerDeps) { deps.SyntheticLinkStateService = service }
-	}
-
 	newHandler := func(
 		service financeService,
 		bankConnections bankConnectionService,
@@ -63,17 +59,16 @@ func TestFinanceController(t *testing.T) {
 		options ...controllerOption,
 	) http.Handler {
 		deps := FinanceControllerDeps{
-			TenantService:             service,
-			UserDirectory:             newMockuserDirectory(t),
-			CatalogService:            service,
-			LedgerService:             service,
-			BankSyncService:           service,
-			ReportingService:          service,
-			FXService:                 service,
-			CSVImportService:          service,
-			BankConnectionService:     bankConnections,
-			SyntheticLinkStateService: nil,
-			AuthMiddleware:            auth,
+			TenantService:         service,
+			UserDirectory:         newMockuserDirectory(t),
+			CatalogService:        service,
+			LedgerService:         service,
+			BankSyncService:       service,
+			ReportingService:      service,
+			FXService:             service,
+			CSVImportService:      service,
+			BankConnectionService: bankConnections,
+			AuthMiddleware:        auth,
 		}
 		for _, option := range options {
 			option(&deps)
@@ -1767,66 +1762,6 @@ func TestFinanceController(t *testing.T) {
 				assert.Empty(t, resp.Body.String())
 			})
 		}
-	})
-
-	t.Run("synthetic link-state endpoints map authenticated service state", func(t *testing.T) {
-		userID := fake.UUID().V4()
-		tenantID := "tenant-" + fake.UUID().V4()
-		state := "state-" + fake.UUID().V4()
-		accounts := []financepkg.SyntheticLinkStateAccount{{
-			Key:      "account-" + fake.UUID().V4(),
-			Name:     "Checking " + fake.Lorem().Word(),
-			Currency: "USD",
-		}}
-		expectedState := financepkg.PendingSyntheticLinkState{
-			Provider:           "synthetic",
-			State:              state,
-			ConfiguredAccounts: accounts,
-			CanFinish:          true,
-		}
-		syntheticLinkState := newMocksyntheticLinkStateService(t)
-		syntheticLinkState.EXPECT().
-			GetPendingSyntheticLinkState(mock.Anything, financepkg.GetPendingSyntheticLinkStateParams{
-				ActorUserID: userID,
-				TenantID:    tenantID,
-				State:       state,
-			}).
-			Return(expectedState, nil).
-			Once()
-		syntheticLinkState.EXPECT().
-			SavePendingSyntheticLinkState(mock.Anything, financepkg.SavePendingSyntheticLinkStateParams{
-				ActorUserID:        userID,
-				TenantID:           tenantID,
-				State:              state,
-				ConfiguredAccounts: accounts,
-			}).
-			Return(expectedState, nil).
-			Once()
-
-		handler := newHandler(
-			newMockfinanceService(t),
-			newMockbankConnectionService(t),
-			makeAuthMiddleware(userID),
-			withSyntheticLinkState(syntheticLinkState),
-		)
-		statePath := "/api/v1/finance/tenants/" + tenantID + "/connections/synthetic-link-states/state/" + state
-		getResponse := httptest.NewRecorder()
-		handler.ServeHTTP(getResponse, newRequest(http.MethodGet, statePath, "", true))
-		require.Equal(t, http.StatusOK, getResponse.Code)
-		assert.Equal(t, expectedState.Provider, decode(t, getResponse)["provider"])
-
-		putResponse := httptest.NewRecorder()
-		handler.ServeHTTP(
-			putResponse,
-			newRequest(
-				http.MethodPut,
-				statePath,
-				`{"configuredAccounts":[{"key":"`+accounts[0].Key+`","name":"`+accounts[0].Name+`","currency":"USD"}]}`,
-				true,
-			),
-		)
-		require.Equal(t, http.StatusOK, putResponse.Code)
-		assert.Equal(t, expectedState.State, decode(t, putResponse)["state"])
 	})
 
 	t.Run("redirect finish keeps provider-specific code validation", func(t *testing.T) {
