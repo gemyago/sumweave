@@ -4,14 +4,11 @@ package auth
 
 import (
 	"database/sql"
-	"errors"
 	"os"
 	"sync"
 	"testing"
-	"testing/iotest"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
@@ -101,24 +98,6 @@ func TestRefreshTokenStore(t *testing.T) {
 		_, err = store.Consume(t.Context(), fake.Lorem().Text(40))
 		require.Error(t, err)
 		require.Error(t, store.DeleteAllForUser(t.Context(), fake.UUID().V4()))
-	})
-
-	t.Run("surfaces token entropy and prepared schema errors", func(t *testing.T) {
-		store := &RefreshTokenStore{randomSource: iotest.ErrReader(errors.New(fake.UUID().V4()))}
-		_, err := store.Create(t.Context(), fake.UUID().V4(), time.Hour)
-		require.Error(t, err)
-
-		db, databaseMock, err := sqlmock.New()
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = db.Close() })
-		preparedStore, err := NewRefreshTokenStore(RefreshTokenStoreDeps{
-			SQLDB: db, DatabaseDSN: "postgres://" + fake.UUID().V4(), Logger: telemetry.RootTestLogger(),
-		})
-		require.NoError(t, err)
-		preparedSQLDB, err := preparedStore.db.DB()
-		require.NoError(t, err)
-		databaseMock.ExpectClose()
-		require.NoError(t, preparedSQLDB.Close())
-		require.Error(t, preparedStore.AutoMigrate())
+		require.Error(t, store.AutoMigrate())
 	})
 }

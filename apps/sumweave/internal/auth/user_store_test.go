@@ -131,5 +131,18 @@ func TestUserStore(t *testing.T) {
 		require.Error(t, store.UpdatePassword(t.Context(), fake.UUID().V4(), fake.Lorem().Text(60)))
 		_, err = store.List(t.Context())
 		require.Error(t, err)
+		require.Error(t, store.AutoMigrate())
+	})
+
+	t.Run("validates connection settings before opening auth persistence", func(t *testing.T) {
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
+		db, err := sql.Open("pgx", dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		_, err = openAuthDatabase(db, dsn, "invalid-prefix-")
+		require.Error(t, err)
+		require.Error(t, validateTablePrefix("invalid-prefix-"))
+		require.NoError(t, validateTablePrefix("sumweave_auth_"))
 	})
 }

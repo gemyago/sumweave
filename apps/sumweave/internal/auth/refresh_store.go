@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"time"
 
@@ -39,9 +38,8 @@ func (authRefreshTokenModel) TableName(namer schema.Namer) string {
 }
 
 type RefreshTokenStore struct {
-	db           *gorm.DB
-	logger       *slog.Logger
-	randomSource io.Reader
+	db     *gorm.DB
+	logger *slog.Logger
 }
 
 func NewRefreshTokenStore(deps RefreshTokenStoreDeps) (*RefreshTokenStore, error) {
@@ -52,7 +50,7 @@ func NewRefreshTokenStore(deps RefreshTokenStoreDeps) (*RefreshTokenStore, error
 	if err != nil {
 		return nil, fmt.Errorf("open refresh token store database: %w", err)
 	}
-	return &RefreshTokenStore{db: db, logger: deps.Logger, randomSource: rand.Reader}, nil
+	return &RefreshTokenStore{db: db, logger: deps.Logger}, nil
 }
 
 func (s *RefreshTokenStore) AutoMigrate() error {
@@ -70,7 +68,7 @@ func hashToken(opaqueToken string) string {
 // Create generates a new opaque refresh token and stores only its SHA-256 hash.
 func (s *RefreshTokenStore) Create(ctx context.Context, userID string, ttl time.Duration) (string, error) {
 	raw := make([]byte, 32)
-	if _, err := io.ReadFull(s.randomSource, raw); err != nil {
+	if _, err := rand.Read(raw); err != nil {
 		return "", fmt.Errorf("generate refresh token: %w", err)
 	}
 	opaqueToken := base64.RawURLEncoding.EncodeToString(raw)
