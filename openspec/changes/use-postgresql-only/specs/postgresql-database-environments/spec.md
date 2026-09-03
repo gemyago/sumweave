@@ -4,216 +4,105 @@
 
 All core product database-backed components SHALL use PostgreSQL. Components in
 `finance/`, `runtime/`, and `apps/sumweave/` SHALL NOT contain a SQLite runtime,
-test, configuration, or dependency fallback.
+configuration, dependency, or test fallback.
 
 #### Scenario: PostgreSQL configuration initializes database components
 
-- **WHEN** a Sumweave database-backed component receives valid PostgreSQL
-  configuration and its database is available
-- **THEN** it MUST construct its SQL and ORM access through the PostgreSQL
-  drivers
-- **AND** finance, agent runtime, auth, jobs, dispatch, and migration behavior
-  MUST use PostgreSQL semantics only
+- **WHEN** a core database-backed component receives valid PostgreSQL
+  configuration and the prepared database is available
+- **THEN** it MUST construct SQL and ORM access through PostgreSQL drivers
+- **AND** finance, runtime, auth, jobs, dispatch, and migration behavior MUST use
+  PostgreSQL semantics only
 
 #### Scenario: SQLite configuration is unsupported
 
-- **WHEN** any core product application, command, or database-backed test
-  attempts to use a SQLite memory, file, URL, or filename DSN
-- **THEN** initialization MUST fail rather than selecting a SQLite driver or
-  compatibility path
-- **AND** the `finance`, `runtime`, and `sumweave` Go module dependency graphs
-  MUST NOT include a SQLite driver
+- **WHEN** a core application, command, or database-backed test receives a
+  SQLite memory, file, URL, or filename DSN
+- **THEN** initialization MUST fail instead of selecting a compatibility path
+- **AND** core production imports and dependency graphs MUST NOT include a
+  SQLite driver
 
-### Requirement: Local PostgreSQL Is Provisioned By Docker Compose
+### Requirement: Local And CI PostgreSQL Use The Standard Bootstrap
 
 The repository SHALL provide a canonical Docker Compose PostgreSQL environment
-with one regular database and one dedicated test database as a required part of
-local backend and database-backed test setup.
+and `make postgres-bootstrap` command as a normal prerequisite for local backend
+processes and ordinary backend tests.
 
-#### Scenario: Developer prepares the local backend environment
+#### Scenario: Developer prepares the local environment
 
-- **WHEN** a developer follows the standard local setup workflow
-- **THEN** `make postgres-bootstrap` MUST start the repository-managed
-  PostgreSQL service and wait until it is ready
-- **AND** readiness and all cluster-level setup MUST use the local Compose
-  default for privileged `POSTGRES_BOOTSTRAP_DSN`
-- **AND** it MUST idempotently ensure `sumweave_local` and `sumweave_test` plus
-  the local owner, migrator, and runtime roles
-- **AND** checked-in local configuration MUST point application and agent runtime
-  storage at `sumweave_local` through runtime-role DSNs
-- **AND** checked-in test configuration MUST point application and agent runtime
-  storage at `sumweave_test` through runtime-role DSNs
-- **AND** the target MUST run `sumweave db-migrate` through migrator-role DSNs
-  once for the regular environment and once for the test environment
-- **AND** it MUST grant the runtime role access to the resulting tables and
-  sequences before PM2, another backend process, or a tagged database test runs
+- **WHEN** a developer follows the standard local setup
+- **THEN** `make postgres-bootstrap` MUST start the repository Compose service
+  and wait until it is ready
+- **AND** it MUST idempotently prepare `sumweave_local`, `sumweave_test`, and the
+  local owner, migrator, and runtime roles
+- **AND** it MUST run `sumweave db-migrate` once for the regular environment and
+  once for the test environment through the migrator role
+- **AND** it MUST grant the runtime role access before a backend process or
+  ordinary backend test runs
 
-### Requirement: Routine Tests Are Database-Independent
+#### Scenario: Reusable CI prepares PostgreSQL before tests
 
-Routine tests SHALL run without PostgreSQL or another database service being
-available. This includes module `test` targets, Nx `test`,
-`make affected-lint-test`, and the reusable pull-request test workflow.
+- **WHEN** the reusable test workflow reaches its ordinary test step
+- **THEN** it MUST first run the same `make postgres-bootstrap` setup against the
+  repository Compose service
+- **AND** it MUST then invoke its existing ordinary Nx test command
+- **AND** it MUST NOT delegate database tests to a separate workflow or
+  verification target
 
-#### Scenario: Routine affected tests run without PostgreSQL
+### Requirement: Tagged PostgreSQL Tests Run In The Ordinary Test Flow
 
-- **WHEN** the reusable tests workflow starts on an Ubuntu runner
-- **THEN** it MUST run only database-free tests through the routine affected
-  `test` targets
-- **AND** it MUST NOT start PostgreSQL, invoke a `postgres-*` target, probe a
-  database port, or require a database DSN
-- **AND** database-backed test files MUST be excluded from this lane at build
-  time rather than skipped according to runtime database availability
+Database-backed Go test files SHALL retain the `postgres_test` build tag, and
+ordinary core module test targets SHALL select that tag after PostgreSQL setup.
 
-### Requirement: PostgreSQL Verification Is Explicit And Non-Routine
+#### Scenario: Core module runs ordinary tests
 
-The repository SHALL provide an explicit serial PostgreSQL verification target
-and a separate manually dispatched GitHub Actions workflow for database-backed
-tests.
-
-#### Scenario: Developer runs PostgreSQL verification
-
-- **WHEN** a developer runs `make postgres-verify`
-- **THEN** the target MUST depend on `make postgres-bootstrap`
-- **AND** it MUST run the `runtime`, `finance`, and `sumweave` database-backed
-  targets serially with the `postgres_test` build tag
-- **AND** focused root targets for each core module MUST use the same bootstrap
-  prerequisite when invoked independently
-
-#### Scenario: Both test lanes enforce coverage
-
-- **WHEN** a core module runs its routine `make test` target
-- **THEN** it MUST write `.cover/routine.out` without a PostgreSQL build tag and
-  enforce 90% per-file and total coverage through
-  `.testcoverage-routine.yaml`
-- **AND** when its `make test-postgres` target runs, it MUST pass
-  `-tags=postgres_test`, write `.cover/postgres.out`, and enforce 90% per-file
-  and total coverage through the module's full `.testcoverage.yaml`
-- **AND** only root `postgres-test-finance` and `postgres-verify` MUST export
-  the target-specific `SUMWEAVE_FINANCE_MIGRATION_COVER_DIR` value
-  `$(CURDIR)/finance/.cover/postgres-migration` to their shared
-  `postgres-bootstrap` prerequisite; ordinary `make postgres-bootstrap` MUST
-  remain uninstrumented
-- **AND** the finance profile MUST compose ordinary tagged-test coverage with
-  coverage emitted by bootstrap's single test-environment migration command
-- **AND** the tagged profile MUST include untagged plus tagged tests and every
-  non-excluded production file
-- **AND** bootstrap MUST remove and recreate
-  `$(SUMWEAVE_FINANCE_MIGRATION_COVER_DIR)/raw`, set `GOCOVERDIR` only for the
-  one instrumented migration command, and write a fresh
-  `$(SUMWEAVE_FINANCE_MIGRATION_COVER_DIR)/ready` marker only after non-empty
-  finance raw data is present
-- **AND** finance tests MUST use a separate `finance/.cover/postgres-test-raw`
-  directory through `-test.gocoverdir`, not `GOCOVERDIR`
-- **AND** `go tool covdata textfmt` MUST read exactly those two raw directories,
-  restrict packages to `github.com/gemyago/sumweave/finance/...`, and write
-  `finance/.cover/postgres.out`, merging matching source blocks
-- **AND** missing, stale, empty, or bootstrap-not-recreated input MUST fail
-  before finance tests or profile checking, and composition MUST NOT exclude the
-  finance migrator or run a second migration smoke
-- **AND** routine-only omissions MUST be exact anchored source-file paths paired
-  with tagged ownership and full-profile coverage; package, directory, wildcard,
-  lowered-threshold, and broad coverage-ignore exceptions MUST NOT be added
-
-#### Scenario: Root routine coverage aggregation remains compatible
-
-- **WHEN** a developer runs the root `make test` target
-- **THEN** it MUST consume `.cover/routine.out` from `runtime`, `finance`, and
+- **WHEN** a developer or CI runs `make test` for `runtime`, `finance`, or
   `apps/sumweave`
-- **AND** it MUST continue to consume the unchanged `.cover/profile.out` from
-  `tools/firecrawl`, `tools/skills`, and `tools/workspacefs`
-- **AND** it MUST consume those profiles in the existing order: firecrawl,
-  skills, workspacefs, runtime, finance, then sumweave
-- **AND** it MUST write the single root aggregate profile to
-  `.cover/profile.out`, preserving one profile header while appending the
-  remaining profile bodies without duplicate headers
-- **AND** it MUST generate `.cover/coverage.html` with `go tool cover` and run
-  the existing root aggregate `go-test-coverage --profile .cover/profile.out`
-  check
-- **AND** target-contract assertions MUST verify these exact input paths, the
-  aggregate profile/report/check paths, and the core/template profile
-  ownership split
-- **AND** the complete root routine target MUST succeed when PostgreSQL is
-  unavailable without starting, probing, or requiring a PostgreSQL service
+- **THEN** the target MUST run `go test` with `-tags=postgres_test`
+- **AND** it MUST run untagged and tagged tests together in one invocation
+- **AND** it MUST write `.cover/profile.out` and enforce the existing 90% per-file
+  and total thresholds through `.testcoverage.yaml`
+- **AND** it MUST NOT create a routine/PostgreSQL profile or coverage-config split
 
-#### Scenario: Manual PostgreSQL workflow runs on GitHub Actions
+#### Scenario: Root ordinary coverage is aggregated
 
-- **WHEN** the manually dispatched PostgreSQL verification workflow starts
-- **THEN** it MUST start `postgresql.service` and confirm readiness with
-  `pg_isready`
-- **AND** it MUST use the Ubuntu `postgres` OS account to make the fresh cluster
-  administrator reachable through an ephemeral privileged
-  `POSTGRES_BOOTSTRAP_DSN`
-- **AND** it MUST invoke `make postgres-verify` with
-  `POSTGRES_MANAGED_EXTERNALLY=1`, `POSTGRES_HOST=127.0.0.1`,
-  `POSTGRES_PORT=5432`, and that administrator DSN so Compose startup is skipped
-- **AND** it MUST otherwise use the same databases, roles, migrations, prefixes,
-  grants, and serial tagged-test order as local verification
-- **AND** it MUST NOT be called by the reusable routine test workflow or made an
-  implicit prerequisite of a routine test target
-
-#### Scenario: Fresh externally managed service is bootstrapped
-
-- **WHEN** `make postgres-bootstrap` runs with
-  `POSTGRES_MANAGED_EXTERNALLY=1` against a fresh PostgreSQL service
-- **THEN** `POSTGRES_BOOTSTRAP_DSN` MUST be required and MUST identify a login
-  able to create and alter roles, create databases, establish ownership, grant
-  database/schema/object privileges, and alter migrator default privileges
-- **AND** readiness, all three role creations, both database creations,
-  ownership, grants, and default privileges MUST run through that connection
-- **AND** the target MUST fail before migration when the privileged DSN is
-  absent, unreachable, or insufficiently privileged
-- **AND** after complete bootstrap, both explicit migrations and all three
-  serial module database targets MUST succeed without Docker Compose
+- **WHEN** a developer runs root `make test`
+- **THEN** the root target MUST consume each Go module's ordinary
+  `.cover/profile.out` in the pre-change order
+- **AND** it MUST retain the existing aggregate profile, HTML report, and
+  `go-test-coverage` check
+- **AND** no `postgres-verify`, focused `postgres-test-*`, or module
+  `test-postgres` target SHALL exist
 
 ### Requirement: PostgreSQL Tests Use The Dedicated Test Database
 
-Tagged database-backed tests SHALL exercise PostgreSQL only through the prepared
-dedicated test database and SHALL create independent randomized domain data for
-each test.
+Tagged database-backed tests SHALL use the bootstrap-prepared dedicated test
+database and independent randomized state.
 
 #### Scenario: Database-backed test creates state
 
-- **WHEN** a database-backed test needs users, tenants, sessions, jobs, provider
-  records, or other persisted state
-- **THEN** it MUST create fresh randomized identities and scope reads and
-  assertions to the state it owns
-- **AND** it MUST NOT depend on globally empty tables or use the regular local
+- **WHEN** a test needs users, tenants, sessions, jobs, provider records, or other
+  persisted state
+- **THEN** it MUST use the runtime-role test DSN and fixed application,
+  agent-runtime, and finance prefixes
+- **AND** it MUST create fresh randomized identities and scope assertions to the
+  state it owns
+- **AND** it MUST NOT use the regular local database or assume globally empty
+  tables
+
+#### Scenario: Shared test state conflicts
+
+- **WHEN** repeated or concurrent tests demonstrate a shared-state conflict
+- **THEN** the smallest affected fixture MUST randomize, scope, clean up, or
+  serialize that concrete case
+- **AND** the implementation MUST NOT introduce a generic per-test database or
+  schema framework
+
+#### Scenario: Migration behavior needs test coverage
+
+- **WHEN** migration execution must be included in the ordinary Go coverage
+  profile
+- **THEN** one shallow tagged migration smoke MAY run through the prepared test
   database
-- **AND** it MUST use the runtime role and fixed application, agent-runtime, and
-  finance table prefixes prepared by bootstrap
-- **AND** it MUST NOT run AutoMigrate or otherwise modify schema
-
-#### Scenario: Shared test database exposes a concrete conflict
-
-- **WHEN** concurrent or repeated tests conflict through shared persisted state
-- **THEN** the affected tests MUST remove static identities, create fresh
-  tenant-scoped data, narrow their queries, clean up their owned rows, or
-  serialize only the incompatible case
-- **AND** the implementation MUST NOT introduce per-test PostgreSQL databases or
-  schemas unless observed behavior shows that the simpler remedies are
-  insufficient
-
-#### Scenario: Test schema is prepared
-
-- **WHEN** the PostgreSQL bootstrap prepares `sumweave_test`
-- **THEN** its single serialized `sumweave db-migrate --env test` invocation
-  MUST be the shallow migration smoke check for the test lane
-- **AND** that same invocation MAY be coverage-instrumented, only when the
-  target-specific finance coverage variable is supplied, and contribute its
-  finance-package execution to the finance full-coverage profile
-- **AND** application table definitions MUST NOT be duplicated in cluster
-  bootstrap SQL or ordinary test fixtures
-
-#### Scenario: Finance target contracts preserve coverage ownership
-
-- **WHEN** `scripts/postgres/targets-contract-test.sh` validates the finance
-  coverage targets
-- **THEN** it MUST assert both 90/90 thresholds, unchanged full-config
-  exclusions, exact anchored routine-only paths, and one tagged/full-profile
-  owner for each routine omission
-- **AND** it MUST assert target-variable propagation, bootstrap cleanup and
-  readiness, the two distinct coverage transports, separate raw directories,
-  covdata restriction/output, absent/stale-input failure, and exactly one
-  `db-migrate --env test` command
-- **AND** it MUST NOT rely on byte-for-byte equality between routine and full
-  coverage configurations
+- **AND** it MUST replace detailed schema contracts rather than instrumenting
+  bootstrap, adding raw covdata transport, or creating another test lane

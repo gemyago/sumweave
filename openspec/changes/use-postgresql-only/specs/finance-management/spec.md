@@ -28,17 +28,13 @@ The backend application SHALL include finance-owned PostgreSQL schema initializa
 - **THEN** finance service registration and finance job handler registration MUST rely on the prepared finance schema
 - **AND** they MUST NOT create or update finance tables implicitly during startup
 
-#### Scenario: Finance migration coverage preserves schema ownership
+#### Scenario: Finance migration receives shallow ordinary coverage
 
-- **WHEN** the finance PostgreSQL full-coverage lane verifies the finance
-  migrator
-- **THEN** successful GORM schema execution MUST be covered by bootstrap's one
-  serialized test-environment migration command
-- **AND** ordinary finance persistence tests MUST continue to use the prepared
-  schema through the runtime role without invoking GORM AutoMigrate
-- **AND** database-free migrator orchestration tests MAY use generated mocks but
-  MUST use the smallest consumer-defined AutoMigrate seam and a Mockery-generated
-  mock for remaining `Migrator.Migrate` error wrapping, and MUST NOT call
-  AutoMigrate, create legacy schema fixtures, or modify a database schema
-- **AND** `removeRetiredBankConnectionIdentitySchema` and its direct test call
-  MUST be removed while detailed legacy migration fixture deletion is retained
+- **WHEN** finance migration execution requires direct Go coverage
+- **THEN** one tagged migration smoke MAY execute the finance migrator against
+  the bootstrap-prepared test database in the ordinary test flow
+- **AND** tests MUST NOT require bootstrap coverage instrumentation, a separate
+  finance coverage profile, detailed legacy schema fixtures, or a production
+  AutoMigrate seam added only for mocking
+- **AND** obsolete SQLite-era compatibility cleanup and detailed migration
+  contracts MUST NOT be restored

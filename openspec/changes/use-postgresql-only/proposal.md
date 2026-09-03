@@ -1,99 +1,94 @@
 ## Why
 
-Sumweave production already runs on PostgreSQL, while SQLite support adds a
-second persistence and dispatch implementation used only by local development
-and tests. Making PostgreSQL the only product database removes dialect drift.
-PostgreSQL behavior will be exercised through an explicit non-routine
-verification path; routine CI remains database-independent and does not require
-PostgreSQL to be available.
+Sumweave production already uses PostgreSQL, while SQLite support adds a second
+persistence and dispatch implementation used only by local development and
+tests. PostgreSQL should be the sole product database, and the same database
+behavior should be exercised by the normal local and CI test flow.
+
+The first implementation of this change incorrectly made PostgreSQL testing a
+separate verification product: it added a `postgres-verify` workflow, dedicated
+test and coverage lanes, renamed/split test files around a `_postgres_test.go`
+suffix, and added extensive contract scripts and coverage-only production
+seams. This correction removes that machinery. PostgreSQL is instead a normal
+development and CI prerequisite that is started and bootstrapped before tests.
 
 ## What Changes
 
-- **BREAKING** Remove SQLite as a supported database from the finance module,
-  generic runtime, Sumweave application, durable jobs, authentication, and
-  application pub/sub transport; PostgreSQL becomes the only accepted database
-  dialect.
-- Remove SQLite-specific connection setup, WAL and busy-timeout handling, DSN
-  detection, GORM dialectors, dialect-specific predicates, dispatch migrations
-  and subscriber implementation, tests, and Go dependencies from the core Go
-  product modules: `finance/`, `runtime/`, and `apps/sumweave/`.
-- Replace local file-database defaults with a repository-managed PostgreSQL
-  Docker Compose environment that provisions two databases: one regular local
-  database and one database used only by tests.
-- Add a canonical repository bootstrap target that starts and waits for Compose
-  by default, or accepts a required privileged `POSTGRES_BOOTSTRAP_DSN` for a
-  fresh externally managed service, then creates the local roles plus both
-  databases, runs `sumweave db-migrate` for the regular and test environments,
-  and grants runtime access to the migrated objects.
-- Keep routine module `make test`, Nx `test`, `make affected-lint-test`, and the
-  reusable pull-request test workflow database-independent. Database-backed
-  tests move behind an explicit PostgreSQL test build tag and non-routine root
-  target instead of silently starting infrastructure.
-- Run the tagged database-backed tests serially against the dedicated
-  PostgreSQL test database. Tests MUST use the prepared schema, runtime role,
-  fixed table-prefix contract, fresh randomized identities, and scoped data;
-  only the bootstrap's serialized `db-migrate --env test` invocation acts as
-  the shallow migration smoke check.
-- Preserve the existing 90% per-file and total Go coverage gates in both lanes:
-  routine targets write and check routine profiles, while tagged targets run
-  the untagged plus `postgres_test` tests, write full PostgreSQL profiles, and
-  check every production file under the existing full-coverage configuration.
-  Routine-only configuration may omit only individually anchored,
-  PostgreSQL-owned source files; it cannot add package/directory exclusions or
-  reduce either threshold.
-- Add a separate manually dispatched PostgreSQL verification workflow. It
-  follows the `community-manager` service pattern by starting the Ubuntu
-  PostgreSQL service, waiting with `pg_isready`, provisioning the same roles and
-  databases, and invoking the same non-routine PostgreSQL verification target.
-- Keep the existing explicit `sumweave db-migrate` command and current
-  auto-migration mechanisms for agent runtime, auth, dispatch, durable jobs, and
-  finance schemas; retain job-projection persistence, authoritative finance
-  bank-schedule and FX due-state tables, and the same prepared schemas for
-  all-in-one and split process modes. This change does not introduce a new
-  migration framework.
-- Do not add timestamp or date normalization as part of the dialect cutover.
-- Do not migrate or preserve local SQLite data and do not add a compatibility
-  period or dual-dialect fallback. Production PostgreSQL data and schemas remain
-  in place and continue through the existing migration command.
-- Align active architecture, setup, manual E2E, OpenSpec, and agent guidance
-  with the PostgreSQL-only contract.
+- **BREAKING** Remove SQLite as a supported database from `finance/`,
+  `runtime/`, and `apps/sumweave/`; PostgreSQL remains the sole persistence and
+  appdispatch implementation in every environment.
+- Keep the repository Compose service and one small operational
+  `make postgres-bootstrap` path that prepares the regular and test databases,
+  applies the existing migrations, and grants runtime access.
+- Treat PostgreSQL setup as a normal local and CI prerequisite. Add bootstrap to
+  the reusable CI workflow before, or atomically with, changing ordinary tests
+  to select `postgres_test`; keep its existing Nx test command.
+- Keep database-backed Go tests behind the `postgres_test` build tag, but make
+  each module's ordinary `make test` select that tag and produce the existing
+  single `.cover/profile.out` checked by `.testcoverage.yaml`.
+- Remove `postgres-verify`, focused `postgres-test-*` and module
+  `test-postgres` targets, the separate workflow, PostgreSQL-only coverage
+  profiles/configuration, migration coverage transport, and contract scripts
+  that exist only to enforce those lanes.
+- Restore pre-change test filenames. Merge test splits created only for the
+  separate lane back into their original files, while retaining the PostgreSQL
+  fixtures, build tags, randomized identities, and scoped assertions needed by
+  the PostgreSQL-only implementation.
+- Revert generated mocks, interfaces, adapters, and tests introduced only to
+  maintain database-free routine coverage. Keep only production changes needed
+  for PostgreSQL-only persistence and real PostgreSQL test compatibility. Revert
+  the unrelated jobs worker periodic-cycle change and its new unit test
+  unconditionally; any cancellation fix belongs in a separate approved change.
+- Keep active setup and architecture documentation focused on the sole database,
+  one bootstrap command, and one ordinary test command. Remove documentation and
+  agent guidance for the rejected verification-lane design, while preserving
+  the independent agent-harness statement in `tests/AGENTS.md` that its routine
+  harness tests remain database-independent. Land command-facing root/module
+  AGENTS and docs atomically with the ordinary-test switch so no reviewed commit
+  advertises a removed command.
+- During implementation, restore the three base specs edited before this active
+  change is archived—`database-migration-command`, `domain-event-pubsub`, and
+  `finance-management`—to `main`; keep the PostgreSQL requirements in this
+  change's deltas until archive.
+- Use commit and hunk provenance for every rollback. Restore branch-only test,
+  generated-mock, formatting, manifest, and prose churn to `main`, and preserve
+  only the smallest observable PostgreSQL-only delta.
+- Give every implementation chunk its own applicable TDD or restoration
+  rationale and immediate checks; do not defer implementation verification to a
+  standalone final task. Keep chunk review quick and shallow, then reserve the
+  deep provenance and final-state audit for the independent final reviewer.
+- Do not add timestamp normalization, a new migration framework, SQLite data
+  conversion, or compatibility support.
 
 ## Capabilities
 
 ### New Capabilities
 
 - `postgresql-database-environments`: Define PostgreSQL as the sole supported
-  product database, require separate regular and test databases, and separate
-  database-independent routine tests from non-routine PostgreSQL verification.
+  product database and as a normal prerequisite of local and CI tests.
 
 ### Modified Capabilities
 
-- `database-migration-command`: Require the explicit migration command and
-  standard environment setup to operate against prepared PostgreSQL databases
-  only while retaining the existing schema initialization mechanisms.
-- `domain-event-pubsub`: Remove multi-driver schema preparation and require the
-  durable topic transport, offsets, publication, and subscription behavior on
-  PostgreSQL only.
-- `finance-management`: Replace SQLite-local/PostgreSQL-production
-  compatibility requirements with PostgreSQL-only finance persistence and
-  schema preparation.
+- `database-migration-command`: Keep the explicit PostgreSQL migration command
+  and use it from the normal local/CI bootstrap.
+- `domain-event-pubsub`: Require the durable transport and schema preparation to
+  use PostgreSQL only.
+- `finance-management`: Require finance persistence and schema preparation to
+  use PostgreSQL only.
 
 ## Impact
 
-- Affects database construction and persistence code in `finance/`, `runtime/`,
-  and `apps/sumweave/`, especially application SQL connections, GORM setup,
-  auth, jobs, appdispatch, migrations, and explicit wireup roots.
-- Replaces SQLite-backed persistence and composition fixtures in the core Go
-  modules with tagged PostgreSQL-backed tests, while retaining database-free
-  unit tests in routine module and Nx targets.
-- Affects local configuration, PM2 prerequisites, Docker Compose assets,
-  repository setup instructions, core Nx targets, a new manual GitHub Actions
-  verification path, and active operational documentation. Routine CI keeps its
-  existing no-PostgreSQL contract.
-- Removes the pure-Go SQLite driver and its transitive `modernc` dependency tree
-  from core product modules. Workspace manifests are synchronized only for
-  indirect changes caused by those core removals; template tools and the
-  integration harness are not adopted or behaviorally changed by this work.
-- Does not change HTTP APIs, finance domain behavior, durable-job semantics,
-  application/agent-runtime database configuration boundaries, or the deployed
-  PostgreSQL data model beyond schemas produced by the existing migration path.
+- Production persistence code and core dependency cleanup from the PostgreSQL
+  cutover remain in `finance/`, `runtime/`, and `apps/sumweave/`.
+- Local and CI environments require the repository PostgreSQL service and
+  `make postgres-bootstrap` before tests.
+- Core module test Makefiles remain close to their pre-change shape: one `test`
+  target, one profile, and one coverage configuration, with the
+  `postgres_test` tag enabled.
+- The correction removes the standalone verification workflow and the test,
+  coverage, parser, contract, mock, and production-seam expansion caused by the
+  rejected lane split.
+- Base specifications remain untouched during planning and are restored as an
+  explicit unchecked implementation task before this change is archived.
+- HTTP APIs, finance behavior, durable-job semantics, table shapes, and deployed
+  PostgreSQL persistence are unchanged by the correction.
