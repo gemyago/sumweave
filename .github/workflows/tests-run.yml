@@ -47,5 +47,8 @@ jobs:
       - name: Run lint
         run: npx nx affected --target=lint --parallel=3
 
+      - name: Bootstrap PostgreSQL
+        run: make postgres-bootstrap
+
       - name: Run tests
         run: npx nx affected --target=test --parallel=3
