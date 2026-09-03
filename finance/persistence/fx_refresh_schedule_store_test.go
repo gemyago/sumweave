@@ -64,7 +64,7 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("rolls back occurrence state changes", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
@@ -90,7 +90,7 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("keeps committed occurrence state when ensuring the default schedule", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		nextRunAt := now.Add(time.Hour)
 		lastScheduledAt := now.Add(-time.Hour)
 		schedule := makeSchedule(now, &nextRunAt, true)
@@ -112,7 +112,7 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("commits occurrence state changes and reports missing schedules", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
@@ -132,7 +132,7 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("conditionally claims and finalizes only the expected due occurrence", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)

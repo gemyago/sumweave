@@ -64,7 +64,7 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 	t.Run("rolls back occurrence state changes", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewBankConnectionScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
@@ -90,7 +90,7 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 	t.Run("commits occurrence state changes", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewBankConnectionScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
@@ -109,7 +109,7 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 	t.Run("conditionally claims and finalizes only the expected due occurrence", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewBankConnectionScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)

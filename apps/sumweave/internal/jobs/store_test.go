@@ -50,7 +50,7 @@ func TestStore(t *testing.T) {
 
 	t.Run("persists terminal states and retry exhaustion", func(t *testing.T) {
 		store := makeStore(t)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		queued := makeQueuedJob(now)
 		_, err := store.MaterializeQueued(t.Context(), queued)
 		require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestStore(t *testing.T) {
 
 	t.Run("recovers stale running claims into queued and exhausted terminal states", func(t *testing.T) {
 		store := makeStore(t)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		staleAt := now.Add(-2 * time.Minute)
 		workerID := fake.UUID().V4()
 		makeStale := func(attemptCount int) Job {
