@@ -59,7 +59,7 @@ func TestCurrentFXRateStore(t *testing.T) {
 		store := NewCurrentFXRateStore(database)
 		fake := faker.New()
 		provider := "fixture-" + fake.UUID().V4()
-		rateDate := time.Now()
+		rateDate := time.Now().Truncate(time.Microsecond)
 		require.NoError(t, store.SaveCurrentFXRatesIfAbsent(t.Context(), []domain.FXRate{{
 			Provider: provider, BaseCurrency: "EUR", QuoteCurrency: "USD", RateDate: rateDate,
 			Rate: float64(fake.IntBetween(101, 200)) / 100,
