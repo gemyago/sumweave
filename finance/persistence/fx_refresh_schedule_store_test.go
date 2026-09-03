@@ -34,7 +34,7 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("lists only enabled due schedules in occurrence order", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		earlier := now.Add(-2 * time.Hour)
 		later := now.Add(-time.Hour)
 		future := now.Add(time.Hour)
