@@ -55,4 +55,13 @@ func TestEngine(t *testing.T) {
 		require.NoError(t, engine.Close(t.Context()))
 		require.NoError(t, engine.Close(t.Context()))
 	})
+
+	t.Run("File-backed agent runtime storage", func(t *testing.T) {
+		t.Setenv("APP_AGENTRUNTIME_STORAGE_TYPE", "file")
+		engine := makeEngine(t)
+
+		_, err := engine.GetToolsRegistry()
+		require.NoError(t, err)
+		require.NoError(t, engine.StartHTTPServer(t.Context(), sumweave.WithStartHTTPServerNoop(true)))
+	})
 }
