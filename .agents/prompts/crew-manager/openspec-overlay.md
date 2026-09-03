@@ -19,11 +19,13 @@ choose a suitable agent through Crew Manager's normal routing:
   list; it does not implement.
 - **Implementer:** owns one named chunk, uses `openspec apply`, marks its completed
   tasks, runs applicable checks, and reports changed files and results.
-- **Chunk reviewer:** independently performs a focused review and verification 
-  (using repo standards and best practices) of one implemented chunk and returns 
-  either commit & safe-to-continue signal or actionable findings.
-- **Final reviewer:** independently reviews the complete implemented change and
-  returns either a clean verdict or findings mapped to follow-up chunks.
+- **Chunk reviewer:** performs a quick, shallow review of one implemented chunk:
+  confirm the checks are green and the chunk appears complete, then return either
+  a commit-and-safe-to-continue signal or actionable findings. Do not deep-review
+  or nit-pick; reserve that for the final reviewer.
+- **Final reviewer:** independently performs the deep review of the complete
+  implemented change, including nit-picking, and returns either a clean verdict
+  or findings mapped to follow-up chunks.
 
 ## Workflow
 
