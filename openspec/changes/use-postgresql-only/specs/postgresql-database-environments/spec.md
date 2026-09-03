@@ -49,17 +49,19 @@ processes and ordinary backend tests.
 - **AND** it MUST NOT delegate database tests to a separate workflow or
   verification target
 
-### Requirement: Tagged PostgreSQL Tests Run In The Ordinary Test Flow
+### Requirement: PostgreSQL Tests Use Normal Package Selection
 
-Database-backed Go test files SHALL retain the `postgres_test` build tag, and
-ordinary core module test targets SHALL select that tag after PostgreSQL setup.
+Database-backed Go test files SHALL participate in normal package selection after
+PostgreSQL setup. No core Go source file SHALL mention or use `postgres_test`,
+active test instructions SHALL NOT claim that tag remains, and ordinary core
+module test targets SHALL NOT pass it.
 
 #### Scenario: Core module runs ordinary tests
 
 - **WHEN** a developer or CI runs `make test` for `runtime`, `finance`, or
   `apps/sumweave`
-- **THEN** the target MUST run `go test` with `-tags=postgres_test`
-- **AND** it MUST run untagged and tagged tests together in one invocation
+- **THEN** the target MUST run ordinary `go test` without a PostgreSQL build tag
+- **AND** it MUST run all normally selected package tests in one invocation
 - **AND** it MUST write `.cover/profile.out` and enforce the existing 90% per-file
   and total thresholds through `.testcoverage.yaml`
 - **AND** it MUST NOT create a routine/PostgreSQL profile or coverage-config split
@@ -76,7 +78,7 @@ ordinary core module test targets SHALL select that tag after PostgreSQL setup.
 
 ### Requirement: PostgreSQL Tests Use The Dedicated Test Database
 
-Tagged database-backed tests SHALL use the bootstrap-prepared dedicated test
+Database-backed tests SHALL use the bootstrap-prepared dedicated test
 database and independent randomized state.
 
 #### Scenario: Database-backed test creates state
@@ -102,7 +104,7 @@ database and independent randomized state.
 
 - **WHEN** migration execution must be included in the ordinary Go coverage
   profile
-- **THEN** one shallow tagged migration smoke MAY run through the prepared test
+- **THEN** one shallow migration smoke MAY run through the prepared test
   database
 - **AND** it MUST replace detailed schema contracts rather than instrumenting
   bootstrap, adding raw covdata transport, or creating another test lane

@@ -12,8 +12,8 @@ and added contract scripts plus production interfaces solely to satisfy the
 database-free coverage lane. That design is contrary to the correction request.
 
 The corrected model is simpler: PostgreSQL is ordinary local/CI infrastructure.
-Setup happens before tests, and the existing module and Nx `test` targets run
-both untagged and `postgres_test` files in one coverage invocation.
+Setup happens before tests, and PostgreSQL-backed tests participate in normal Go
+package selection without a custom build tag or alternate test lane.
 
 ## Goals / Non-Goals
 
@@ -22,8 +22,8 @@ both untagged and `postgres_test` files in one coverage invocation.
 - Preserve PostgreSQL-only production persistence and appdispatch behavior.
 - Keep one canonical Compose/bootstrap setup for local development and CI.
 - Make PostgreSQL available before ordinary local and CI tests.
-- Keep database-backed files build-tagged while selecting the tag from ordinary
-  module test targets.
+- Remove every `postgres_test` reference from core Go source while preserving
+  the three affected `!release` constraints.
 - Restore the original single profile and coverage configuration per module.
 - Restore pre-change test filenames and remove lane-driven file splits.
 - Delete scripts, mocks, adapters, tests, docs, and rules that exist only to
@@ -72,19 +72,17 @@ from bootstrap. Do not combine the SQL files merely to reduce file count: that
 would add churn without changing the operational path.
 
 The reusable `.github/workflows/tests-run.yml` runs bootstrap once before its
-existing test step. That prerequisite is committed before, or in the same atomic
-chunk as, changing ordinary module tests to select `postgres_test`; no reviewed
-intermediate commit may make CI tests require an unprepared database. The Nx
-command remains unchanged. Local documentation tells developers to bootstrap
-before `make test`, Nx tests, or `make affected-lint-test`. Module test targets
-assume that prerequisite is satisfied; they do not start Docker independently.
+existing test step. The Nx command remains unchanged. Local documentation tells
+developers to bootstrap before `make test`, Nx tests, or
+`make affected-lint-test`. Module test targets assume that prerequisite is
+satisfied; they do not start Docker independently.
 
 ### One ordinary test and coverage flow
 
 Restore each core module Makefile to the pre-change one-target shape:
 
-- `make test` runs `go test -tags=postgres_test` over its existing package and
-  `-coverpkg` scope;
+- `make test` runs ordinary `go test` over its existing package and `-coverpkg`
+  scope, without a PostgreSQL build tag;
 - `SUMWEAVE_POSTGRES_TEST_DSN` defaults to the Compose test runtime-role DSN and
   is passed once at the module command boundary;
 - finance may retain `-p 1` only if the shared prepared database demonstrates a
@@ -103,7 +101,7 @@ variable or readiness marker.
 Ownership is intentionally non-overlapping. The ordinary-test switch owns every
 caller and consumer: root/module Makefile targets, variable exports,
 profile/config selection, raw-covdata composition, and readiness-marker checks.
-It also adds the one smallest shallow tagged smoke to the neutral pre-change
+It also adds the one smallest shallow PostgreSQL smoke to the neutral pre-change
 `finance/persistence/migrations_test.go` owner so the atomic switch satisfies the
 unchanged coverage gate. The operational-bootstrap chunk owns the dormant
 implementation branches inside `scripts/postgres/bootstrap.sh`: migration
@@ -113,12 +111,18 @@ suite while retaining or minimally refining that existing smoke; it must not add
 a duplicate or restore caller-side coverage transport or bootstrap
 instrumentation.
 
-Build tags remain on files that access the prepared database. The tag is an
-explicit source boundary, not a separate test lane. Because ordinary targets
-always select it, the ordinary coverage profile includes both tagged and
-untagged tests.
+In the target state, no test or source file mentions or uses `postgres_test`.
+PostgreSQL-backed tests are ordinary package members after bootstrap. The current
+inventory has 84 such source occurrences across 76 core test files: 76 build
+constraints, seven stale DSN diagnostics, and one GORM callback registration
+key. Of those 76 files, 73 lose their constraint entirely; the two runtime agent
+tests and app `engine_test.go`
+with compound `postgres_test && !release` constraints retain only
+`//go:build !release`. The diagnostics and callback key become neutral database
+test wording, and the corresponding three `-tags=postgres_test` test arguments
+plus the finance lint build-tag argument are removed rather than replaced.
 
-The one shallow migration smoke executes through the tagged ordinary test added
+The one shallow migration smoke executes through the ordinary test added
 to `finance/persistence/migrations_test.go` with the ordinary-test switch. The
 later persistence restoration may minimally refine that same smoke for the
 restored concrete migrator, but must not create another owner or test. The smoke
@@ -174,8 +178,9 @@ split file:
   `root_service_test_helper_test.go`.
 
 Do not mechanically restore SQLite fixtures. Preserve PostgreSQL setup,
-build tags, randomized IDs, tenant/user scoping, and the smallest demonstrated
-serialization fixes while restoring file organization.
+randomized IDs, tenant/user scoping, and the smallest demonstrated serialization
+fixes while restoring file organization. The latest correction removes every
+`postgres_test` source reference and preserves unrelated `!release` constraints.
 
 ### Provenance-based correction inventory
 
@@ -207,13 +212,15 @@ the corresponding raw-covdata and marker-producing branches from
 `scripts/postgres/bootstrap.sh`. Restore branch-only hunks in
 `db_migrate_cmd_test.go`, config `load_test.go`/`values_test.go`, and wireup
 `jobs_test.go`/`migration_test.go`. The ordinary-test chunk restores finance
-`migrations_test.go` as the owner of exactly one smallest shallow tagged smoke.
+`migrations_test.go` as the owner of exactly one smallest shallow smoke (tagged
+at that historical stage and made normally selected by the latest correction).
 The later persistence chunk retains or minimally refines only that smoke while
 removing the `autoMigrator` seam, generated mocks, and replacement migration
 test.
 
-**Runtime lane conversion (`398f271`):** retain PostgreSQL fixture bodies and
-build tags, but reverse all five direct renames and the extracted-file layout.
+**Runtime lane conversion (`398f271`):** retain PostgreSQL fixture bodies, but
+reverse all five direct renames and the extracted-file layout. The latest
+correction removes the `postgres_test` constraints.
 The complete touched test set is `runtime/agent/{agent_profiles_test.go,
 database_services_postgres_test.go,providers_config_test.go,runner_test.go}`;
 `runtime/internal/agentprofiles/db_agent_profiles_service_postgres_test.go`;
@@ -224,8 +231,8 @@ database_service_postgres_test.go,database_storage_postgres_test.go,
 factory_postgres_test.go,factory_test.go,postgres_test.go}`. The routine coverage
 config hunk is deleted.
 
-**App fixture extraction (`fe6a7a2`):** retain only PostgreSQL fixture/tag
-content while restoring original ownership for `cmd/sumweave/{main_test.go,
+**App fixture extraction (`fe6a7a2`):** retain only PostgreSQL fixture content
+while restoring original ownership for `cmd/sumweave/{main_test.go,
 runtime_resolution_test.go}`, root `{engine_test.go}`, internal
 `application_composition_test.go`, and wireup `{http_test.go,jobs_test.go,
 migration_test.go}`. Delete or merge `main_file_test.go`, `engine_file_test.go`,
@@ -237,10 +244,10 @@ migration_test.go}`. Delete or merge `main_file_test.go`, `engine_file_test.go`,
 retain only direct PostgreSQL validation and construction.
 
 **Finance lane conversion (`7a9d071`):** preserve required PostgreSQL fixtures,
-tags, randomized data, scoped assertions, and demonstrated isolation in every
+randomized data, scoped assertions, and demonstrated isolation in every
 pre-existing finance test touched by the commit. Remove
 `finance/imports_parser_test.go` and
-`finance/persistence/instant_predicate_test.go` when the restored tagged owners
+`finance/persistence/instant_predicate_test.go` when the restored owners
 cover those behaviors; merge `root_service_postgres_test.go` into
 `root_service_test_helper_test.go`; restore branch-only additions in
 `finance/mocks_test.go`; and delete the routine config hunk. This rule covers all
@@ -396,7 +403,8 @@ only files that currently make one of those backend claims; avoid broader prose
 rewrites.
 
 Root and module `AGENTS.md` files must state that PostgreSQL is a normal
-prerequisite and that ordinary tests include tagged database tests. The root
+prerequisite and that ordinary tests include database-backed tests without a
+custom build tag. The root
 rule `Routine CI tests must not require PostgreSQL to be available` is replaced
 with the corrected one-line rule; no second competing rule remains. Restore the
 lane-only addition in `build/AGENTS.md` to `main` rather than adding a backend
@@ -411,6 +419,8 @@ not in the later prose cleanup. That commit owns root/runtime/finance/app
 `docs/manual-e2e/postgres-local-verification.md`, and
 `apps/sumweave/doc/architecture.md`. The later prose chunk owns only remaining
 non-command setup/product/manual-E2E wording and exact base-spec restoration.
+For this latest correction, replace only the four existing stale AGENTS claims;
+do not add another root project rule.
 
 ## Risks / Trade-offs
 
@@ -420,7 +430,7 @@ non-command setup/product/manual-E2E wording and exact base-spec restoration.
   corrections and serialize only demonstrated conflicts rather than creating a
   generic isolation framework.
 - Removing coverage-only seams may reveal gaps under the unchanged 90% gate.
-  Prefer existing PostgreSQL integration coverage or one shallow tagged smoke.
+  Prefer existing PostgreSQL integration coverage or one shallow smoke.
   For the concrete finance migrator, share only its duplicate direct GORM error
   handling and add one canceled-context assertion in that same smoke owner; do
   not recreate a second lane, broad exclusions, or mockable abstractions.
@@ -432,7 +442,7 @@ non-command setup/product/manual-E2E wording and exact base-spec restoration.
 
 1. Add CI bootstrap before the unchanged ordinary Nx test step and verify it in
    the same chunk.
-2. Atomically collapse Makefiles/coverage to one tagged ordinary flow, remove
+2. Historically, collapse Makefiles/coverage to one then-tagged ordinary flow, remove
    all caller-side lane/coverage machinery, add the smallest shallow tagged
    smoke in `finance/persistence/migrations_test.go`, and make every
    command-facing AGENTS/doc truthful before running ordinary and repository
@@ -470,6 +480,11 @@ non-command setup/product/manual-E2E wording and exact base-spec restoration.
 20. Apply the final app module-local tidy correction for only the three stale
     indirect requirements, then immediately verify tidy state, module integrity,
     bootstrap, and app/affected checks without broader manifest changes.
+21. Remove all 84 `postgres_test` source occurrences across the 76 core test
+    files, preserving only the three unrelated `!release` constraints; remove
+    the corresponding three module test flags and finance lint flag; update only
+    stale root/module AGENTS guidance; then run residue, bootstrap, module, root,
+    affected, and strict OpenSpec checks in the same serialized correction chunk.
 
 All backend chunks are serialized, and each task embeds its own applicable TDD
 or restoration rationale plus immediate verification. Each production seam, its
@@ -485,6 +500,8 @@ or ordered follow-up chunks.
 
 ## Open Questions
 
-There are no blocking design questions. If finance tests fail only because they
-share the prepared database, retain `-p 1`; otherwise restore the exact
-pre-change command apart from `-tags=postgres_test` and the standard test DSN.
+There are no blocking design questions. If untagging exposes a package-level
+helper or test-name conflict, resolve it minimally within the existing package
+and owner; do not add a package split, replacement build tag, or alternate lane.
+The currently tagged files already compile together with untagged tests in the
+ordinary tagged command, so no duplicate declaration is presently expected.

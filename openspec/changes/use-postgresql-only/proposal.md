@@ -20,20 +20,21 @@ development and CI prerequisite that is started and bootstrapped before tests.
 - Keep the repository Compose service and one small operational
   `make postgres-bootstrap` path that prepares the regular and test databases,
   applies the existing migrations, and grants runtime access.
-- Treat PostgreSQL setup as a normal local and CI prerequisite. Add bootstrap to
-  the reusable CI workflow before, or atomically with, changing ordinary tests
-  to select `postgres_test`; keep its existing Nx test command.
-- Keep database-backed Go tests behind the `postgres_test` build tag, but make
-  each module's ordinary `make test` select that tag and produce the existing
-  single `.cover/profile.out` checked by `.testcoverage.yaml`.
+- Treat PostgreSQL setup as a normal local and CI prerequisite. The reusable CI
+  workflow bootstraps it before the existing Nx test command.
+- Remove every `postgres_test` reference from core Go source: delete the build
+  constraint from every affected test, neutralize the stale DSN diagnostics and
+  callback key that name it, and select PostgreSQL-backed tests normally. Keep
+  the three affected `!release` constraints, one ordinary `make test`, and the
+  existing single `.cover/profile.out` checked by `.testcoverage.yaml`.
 - Remove `postgres-verify`, focused `postgres-test-*` and module
   `test-postgres` targets, the separate workflow, PostgreSQL-only coverage
   profiles/configuration, migration coverage transport, and contract scripts
   that exist only to enforce those lanes.
 - Restore pre-change test filenames. Merge test splits created only for the
   separate lane back into their original files, while retaining the PostgreSQL
-  fixtures, build tags, randomized identities, and scoped assertions needed by
-  the PostgreSQL-only implementation.
+  fixtures, unrelated build constraints, randomized identities, and scoped
+  assertions needed by the PostgreSQL-only implementation.
 - Revert generated mocks, interfaces, adapters, and tests introduced only to
   maintain database-free routine coverage. Keep only production changes needed
   for PostgreSQL-only persistence and real PostgreSQL test compatibility. Revert
@@ -41,7 +42,8 @@ development and CI prerequisite that is started and bootstrapped before tests.
   unconditionally; any cancellation fix belongs in a separate approved change.
 - Keep active setup and architecture documentation focused on the sole database,
   one bootstrap command, and one ordinary test command. Remove documentation and
-  agent guidance for the rejected verification-lane design, while preserving
+  agent guidance claiming that `postgres_test` or the rejected verification lane
+  remains, while preserving
   the independent agent-harness statement in `tests/AGENTS.md` that its routine
   harness tests remain database-independent. Land command-facing root/module
   AGENTS and docs atomically with the ordinary-test switch so no reviewed commit
@@ -83,8 +85,8 @@ development and CI prerequisite that is started and bootstrapped before tests.
 - Local and CI environments require the repository PostgreSQL service and
   `make postgres-bootstrap` before tests.
 - Core module test Makefiles remain close to their pre-change shape: one `test`
-  target, one profile, and one coverage configuration, with the
-  `postgres_test` tag enabled.
+  target, one profile, and one coverage configuration, with no PostgreSQL test
+  build tag or alternate lane.
 - The correction removes the standalone verification workflow and the test,
   coverage, parser, contract, mock, and production-seam expansion caused by the
   rejected lane split.
