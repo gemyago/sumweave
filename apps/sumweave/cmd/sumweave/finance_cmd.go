@@ -41,6 +41,8 @@ const (
 	fixtureMonobankProviderName  = "monobank"
 	fixturesEnableBankingBaseURL = "https://example.test"
 	fixturesPSUTypePersonal      = "personal"
+	fixtureFXBaseCurrency        = "EUR"
+	fixtureFXQuoteCurrency       = "USD"
 )
 
 type financeFixturesRuntimeConfig struct {
@@ -184,7 +186,11 @@ func runFinanceFixturesGenerate(
 			csvImportService:      financeModule.CSVImportService,
 			bankConnectionService: financeModule.BankConnectionService,
 			bankSyncService:       financeModule.BankSyncService,
-			fxService:             financeModule.FXService,
+			fxRefreshService: newFinanceFixturesFXRefreshService(
+				persistence.NewCurrentFXRateStore(runtimeConfig.Database),
+				financeFixturesFXProvider{now: func() time.Time { return params.Now }},
+				func() time.Time { return params.Now },
+			),
 		},
 		financefixtures.Config{
 			Seed:               params.Seed,
@@ -243,7 +249,7 @@ type financeFixturesScenarioService struct {
 	csvImportService      *financepkg.CSVImportService
 	bankConnectionService *financepkg.BankConnectionService
 	bankSyncService       *financepkg.BankSyncService
-	fxService             *financepkg.FXService
+	fxRefreshService      *financepkg.FXService
 }
 
 func (s financeFixturesScenarioService) CreateTenant(
@@ -334,7 +340,7 @@ func (s financeFixturesScenarioService) RefreshRequiredFXRates(
 	ctx context.Context,
 	params financepkg.RefreshFXRatesParams,
 ) (financepkg.RefreshFXRatesResult, error) {
-	return s.fxService.RefreshRequiredFXRates(ctx, params)
+	return s.fxRefreshService.RefreshRequiredFXRates(ctx, params)
 }
 
 func newFinanceFixturesMonobankServer() *httptest.Server {
@@ -372,6 +378,43 @@ func (p financeFixturesFXProvider) FetchLatestRates(
 		})
 	}
 	return rates, nil
+}
+
+type financeFixturesFXRateStore struct {
+	store *persistence.CurrentFXRateStore
+}
+
+func (s financeFixturesFXRateStore) SaveCurrentFXRates(ctx context.Context, rates []domain.FXRate) error {
+	return s.store.SaveCurrentFXRatesIfAbsent(ctx, rates)
+}
+
+func (s financeFixturesFXRateStore) ListCurrentFXRates(
+	ctx context.Context,
+	params persistence.ListCurrentFXRatesParams,
+) ([]domain.FXRate, error) {
+	return s.store.ListCurrentFXRates(ctx, params)
+}
+
+type financeFixturesFXPairLister struct{}
+
+func (financeFixturesFXPairLister) ListRequiredFXPairs(context.Context) ([]persistence.RequiredFXPair, error) {
+	return []persistence.RequiredFXPair{{
+		BaseCurrency: fixtureFXBaseCurrency, QuoteCurrency: fixtureFXQuoteCurrency,
+	}}, nil
+}
+
+func newFinanceFixturesFXRefreshService(
+	rateStore *persistence.CurrentFXRateStore,
+	provider financeFixturesFXProvider,
+	now func() time.Time,
+) *financepkg.FXService {
+	return financepkg.NewFXService(
+		financeFixturesFXRateStore{store: rateStore},
+		financepkg.WithFXServiceNow(now),
+		financepkg.WithFXServiceProviders(provider),
+		financepkg.WithFXServiceDefaultProvider(provider.Name()),
+		financepkg.WithFXServiceRequiredPairs(financeFixturesFXPairLister{}),
+	)
 }
 
 func resolveFinanceFixturesRuntimeConfig(root *cobra.Command) (financeFixturesRuntimeConfig, error) {

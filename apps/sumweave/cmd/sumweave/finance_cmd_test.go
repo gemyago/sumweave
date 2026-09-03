@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/gemyago/sumweave/finance/domain"
 	financefixtures "github.com/gemyago/sumweave/finance/fixtures"
 	"github.com/gemyago/sumweave/finance/persistence"
+	"github.com/jackc/pgx/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/spf13/cobra"
@@ -92,8 +94,71 @@ func TestFinanceCommand(t *testing.T) {
 	t.Run("generate uses PostgreSQL schemas and scopes generated data to its owner", func(t *testing.T) {
 		fake := faker.New()
 		t.Chdir("../..")
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
+		adminDSN := strings.Replace(
+			dsn,
+			"sumweave_runtime:sumweave_runtime_local",
+			"postgres:sumweave_postgres_local",
+			1,
+		)
+		adminDB, err := sql.Open("pgx", adminDSN)
+		require.NoError(t, err)
+		schemaName := "fixtures_" + strings.ReplaceAll(fake.UUID().V4(), "-", "")
+		schemaIdentifier := pgx.Identifier{schemaName}.Sanitize()
+		_, err = adminDB.ExecContext(t.Context(), "CREATE SCHEMA "+schemaIdentifier)
+		require.NoError(t, err)
+		runtimeRole := pgx.Identifier{"sumweave_runtime"}.Sanitize()
+		grantStatement := "GRANT USAGE, CREATE ON SCHEMA " + schemaIdentifier + " TO " + runtimeRole
+		_, err = adminDB.ExecContext(t.Context(), grantStatement)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			require.NoError(t, adminDB.Close())
+			cleanupDB, cleanupErr := sql.Open("pgx", adminDSN)
+			require.NoError(t, cleanupErr)
+			defer func() { require.NoError(t, cleanupDB.Close()) }()
+			_, cleanupErr = cleanupDB.ExecContext(
+				context.WithoutCancel(t.Context()), "DROP SCHEMA "+schemaIdentifier+" CASCADE",
+			)
+			require.NoError(t, cleanupErr)
+		})
+		t.Setenv("APP_APPLICATION_DATABASE_DSN", dsn+"&search_path="+schemaName)
 		rootCmd, stdout := makeRootCmd(t)
 		require.NoError(t, rootCmd.PersistentFlags().Set("env", "test"))
+		runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, runtimeConfig)) })
+		require.NoError(t, persistence.NewMigrator(runtimeConfig.Database).Migrate(t.Context()))
+		rateStore := persistence.NewCurrentFXRateStore(runtimeConfig.Database)
+		loadRate := func(t *testing.T, baseCurrency string, quoteCurrency string) domain.FXRate {
+			t.Helper()
+			rates, listErr := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
+				Provider:      financepkg.FXProviderFrankfurter,
+				BaseCurrency:  baseCurrency,
+				QuoteCurrency: quoteCurrency,
+			})
+			require.NoError(t, listErr)
+			require.Len(t, rates, 1)
+			return rates[0]
+		}
+		existingRates := []domain.FXRate{
+			{
+				Provider:     financepkg.FXProviderFrankfurter,
+				BaseCurrency: fixtureFXBaseCurrency, QuoteCurrency: fixtureFXQuoteCurrency,
+				EffectiveAt:             time.Date(2026, time.June, 19, 12, 0, 0, 0, time.UTC),
+				LastSuccessfulRefreshAt: time.Date(2026, time.June, 19, 12, 0, 0, 0, time.UTC),
+				Rate:                    1.23,
+			},
+			{
+				Provider: financepkg.FXProviderFrankfurter, BaseCurrency: "USD", QuoteCurrency: "CHF",
+				EffectiveAt:             time.Date(2026, time.June, 18, 12, 0, 0, 0, time.UTC),
+				LastSuccessfulRefreshAt: time.Date(2026, time.June, 18, 12, 0, 0, 0, time.UTC),
+				Rate:                    0.79,
+			},
+		}
+		require.NoError(t, rateStore.SaveCurrentFXRates(t.Context(), existingRates))
+		beforeEURUSD := loadRate(t, fixtureFXBaseCurrency, fixtureFXQuoteCurrency)
+		beforeUSDCHF := loadRate(t, "USD", "CHF")
 		ownerID := "owner-" + fake.UUID().V4()
 		memberID := "member-" + fake.UUID().V4()
 		seed := int64(1_000_000 + fake.Int())
@@ -108,9 +173,8 @@ func TestFinanceCommand(t *testing.T) {
 			Seed: seed, Scenario: realisticScenarioName, ScenarioIDs: []string{"realistic-core"},
 		}, got)
 
-		runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, runtimeConfig)) })
+		assert.Equal(t, beforeEURUSD, loadRate(t, fixtureFXBaseCurrency, fixtureFXQuoteCurrency))
+		assert.Equal(t, beforeUSDCHF, loadRate(t, "USD", "CHF"))
 		store := persistence.NewStore(runtimeConfig.Database)
 		tenantService := financepkg.NewTenantService(store)
 		ownerTenants, err := tenantService.ListTenantsForUser(t.Context(), ownerID)
