@@ -275,7 +275,7 @@ func TestAppDispatch(t *testing.T) {
 		require.NoError(t, publisher.Publish(t.Context(), messageA))
 		require.NoError(t, publisher.Publish(t.Context(), messageB))
 
-		subscribe := func(t *testing.T, group string, topic string) (<-chan *Message, context.CancelFunc) {
+		subscribe := func(t *testing.T, group string, topic string) (<-chan *Message, func()) {
 			t.Helper()
 			router, routerErr := factory.NewRouter(group)
 			require.NoError(t, routerErr)
@@ -290,11 +290,12 @@ func TestAppDispatch(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			go func() { _ = router.Run(ctx) }()
 			<-router.router.Running()
-			t.Cleanup(func() {
+			stop := func() {
 				cancel()
 				require.NoError(t, router.Close())
-			})
-			return results, cancel
+			}
+			t.Cleanup(stop)
+			return results, stop
 		}
 
 		groupAMessages, stopGroupA := subscribe(t, groupA, topicA)
