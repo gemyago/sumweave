@@ -4,34 +4,50 @@
 Define explicit preparation of the Sumweave application database.
 ## Requirements
 ### Requirement: Explicit Backend Database Migration Command
-The backend application SHALL provide an explicit `sumweave db-migrate` command that prepares configured Sumweave-managed database schemas without starting long-running application processes.
+
+The backend application SHALL provide an explicit `sumweave db-migrate`
+command that prepares configured Sumweave-managed PostgreSQL schemas without
+starting long-running application processes.
 
 #### Scenario: Command migrates all configured app schemas
-- **WHEN** a user runs `sumweave db-migrate` with a valid environment configuration
-- **THEN** the command MUST run all configured schema initialization steps for
-  agent runtime storage, application database-backed auth and dispatch state,
-  job-projection persistence used by observed consumers, and finance persistence
-- **AND** dispatch storage MUST support immutable unique message IDs and the
-  topic/consumer-group offsets required for durable delivery
-- **AND** finance persistence MUST include the authoritative bank-connection
-  schedule and daily FX refresh due-state tables used by `jobs enqueue-due`
-- **AND** it MUST complete without starting the HTTP server, jobs consumer mode, scheduler loop, provider sync, or AI/runtime request execution
+
+- **WHEN** a user runs `sumweave db-migrate` with valid PostgreSQL configuration
+- **THEN** the command MUST initialize agent runtime, auth, appdispatch,
+  job-projection, and finance schemas
+- **AND** it MUST complete without starting HTTP, workers, schedulers, provider
+  sync, or runtime request execution
 
 ### Requirement: Standard Environment Setup Uses Explicit Migration
-The repository SHALL document explicit database migration as a standard setup step before starting Sumweave backend processes.
 
-#### Scenario: Local setup documents migration before local all-in-one startup
-- **WHEN** a developer follows documented local backend setup instructions
-- **THEN** the instructions MUST direct them to run `sumweave db-migrate` before starting `sumweave start-all` or other backend processes that depend on persisted tables
+The repository SHALL provision PostgreSQL and run explicit migrations for the
+regular and test environments before local backend processes or ordinary
+backend tests.
+
+#### Scenario: Local setup migrates regular and test databases
+
+- **WHEN** a developer runs `make postgres-bootstrap`
+- **THEN** it MUST start and wait for the repository Compose service
+- **AND** it MUST run `sumweave db-migrate` from `apps/sumweave` once for the
+  regular environment and once for the test environment through the migrator
+  role
+- **AND** regular backend processes MUST use the regular database while ordinary
+  tests use the test database
+
+#### Scenario: CI setup uses the same migration contract
+
+- **WHEN** the reusable test workflow prepares to run ordinary tests
+- **THEN** it MUST invoke `make postgres-bootstrap` before the existing test step
+- **AND** it MUST NOT use a standalone verification workflow, external bootstrap
+  mode, or coverage-instrumented migration command
 
 #### Scenario: Split process modes use the same prepared schemas
 
 - **WHEN** a developer runs `sumweave start`, `sumweave jobs worker`, or
-  `sumweave jobs enqueue-due` after migration
+  `sumweave jobs enqueue-due` after bootstrap
 - **THEN** each mode MUST use the same prepared dispatch, job-projection, and
   finance schemas
-- **AND** scheduler publication MUST not create an observed job row before
-  worker delivery.
+- **AND** scheduler publication MUST NOT create an observed job row before
+  worker delivery
 
 ### Requirement: Startup Does Not Run Schema Migrations
 Backend process startup SHALL rely on schemas prepared by the explicit migration command instead of creating or updating schemas implicitly.
@@ -41,3 +57,4 @@ Backend process startup SHALL rely on schemas prepared by the explicit migration
 - **THEN** `sumweave start`, `sumweave start-all`, jobs consumer commands, and scheduler commands MUST rely on schemas prepared by `sumweave db-migrate`
 - **AND** those startup paths MUST NOT run app-owned database or app-owned pub/sub transport migration steps implicitly
 - **AND** migration failures MUST be observable from the migration command rather than during server, consumer, or scheduler startup
+
