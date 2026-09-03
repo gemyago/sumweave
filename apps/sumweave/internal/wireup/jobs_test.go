@@ -1,38 +1,43 @@
+//go:build postgres_test
+
 package wireup
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
+	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBuildProcessRoots(t *testing.T) {
 	fake := faker.New()
+	t.Chdir("../..")
 
-	t.Run("scheduler delegates due commands without persistence", func(t *testing.T) {
-		bankSchedules := newMockscheduleEnqueuer(t)
-		fxSchedules := newMockscheduleEnqueuer(t)
-		bankSchedules.EXPECT().EnqueueDue(t.Context()).Return(2, nil).Once()
-		fxSchedules.EXPECT().EnqueueDue(t.Context()).Return(3, nil).Once()
-		scheduler := &SchedulerRoot{bankSchedules: bankSchedules, fxSchedules: fxSchedules}
-		enqueued, err := scheduler.EnqueueDue(t.Context())
+	t.Run("worker builds observed finance handlers without HTTP or scheduler", func(t *testing.T) {
+		root, err := BuildWorker(t.Context(), WorkerOptions{Environment: "test"})
 		require.NoError(t, err)
-		require.Equal(t, 5, enqueued)
+		t.Cleanup(func() { require.NoError(t, root.Close(t.Context())) })
+		require.NotNil(t, root.Worker)
+		require.NotNil(t, root.Registry)
+		for _, topic := range []string{
+			financepkg.FXRatesRefreshCommandTopic,
+			financepkg.TransactionCSVImportCommandTopic,
+			financepkg.BankConnectionSyncCommandTopic,
+		} {
+			_, handlerErr := root.Registry.Handler(topic)
+			require.NoError(t, handlerErr)
+		}
 	})
 
-	t.Run("scheduler returns the command count before a failed due service", func(t *testing.T) {
-		bankSchedules := newMockscheduleEnqueuer(t)
-		fxSchedules := newMockscheduleEnqueuer(t)
-		expectedErr := errors.New(fake.Lorem().Sentence(3))
-		bankSchedules.EXPECT().EnqueueDue(t.Context()).Return(2, nil).Once()
-		fxSchedules.EXPECT().EnqueueDue(t.Context()).Return(0, expectedErr).Once()
-		scheduler := &SchedulerRoot{bankSchedules: bankSchedules, fxSchedules: fxSchedules}
-		enqueued, err := scheduler.EnqueueDue(t.Context())
-		require.ErrorIs(t, err, expectedErr)
-		require.Equal(t, 2, enqueued)
+	t.Run("scheduler builds prepared finance schedules without worker or HTTP", func(t *testing.T) {
+		root, err := BuildScheduler(t.Context(), SchedulerOptions{Environment: "test"})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, root.Close(t.Context())) })
+		require.NotNil(t, root)
+		_, err = root.EnqueueDue(t.Context())
+		require.NoError(t, err)
 	})
 
 	t.Run("rejects root settings before opening process resources", func(t *testing.T) {

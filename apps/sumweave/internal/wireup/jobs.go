@@ -49,15 +49,11 @@ type WorkerRoot struct {
 // SchedulerRoot owns the dispatch publisher and finance schedule operations.
 // It deliberately exposes no HTTP or worker capability.
 type SchedulerRoot struct {
-	bankSchedules         scheduleEnqueuer
-	fxSchedules           scheduleEnqueuer
+	bankSchedules         *financepkg.BankConnectionScheduleService
+	fxSchedules           *financepkg.FXRefreshScheduleService
 	SchedulerLoopInterval time.Duration
 
 	shutdownHooks *lifecycle.ShutdownHooks
-}
-
-type scheduleEnqueuer interface {
-	EnqueueDue(context.Context) (int, error)
 }
 
 // BuildWorker loads typed configuration and composes the dedicated durable

@@ -46,10 +46,7 @@ type HTTPRoot struct {
 
 // BuildHTTP loads typed configuration and eagerly constructs the API-only HTTP
 // application. It never starts the durable worker.
-func BuildHTTP(
-	ctx context.Context,
-	options HTTPOptions,
-) (*HTTPRoot, error) {
+func BuildHTTP(ctx context.Context, options HTTPOptions) (*HTTPRoot, error) {
 	environment := options.Environment
 	if environment == "" {
 		environment = localEnvironment
