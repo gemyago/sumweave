@@ -83,15 +83,12 @@ func TestFinanceCommand(t *testing.T) {
 		rootCmd.AddCommand(newFinanceCmd())
 		return rootCmd, stdout
 	}
-
-	t.Run("wires finance fixtures generate command", func(t *testing.T) {
-		rootCmd, _ := makeRootCmd(t)
-		financeCmd, _, err := rootCmd.Find([]string{"finance", "fixtures", "generate"})
-		require.NoError(t, err)
-		assert.Equal(t, financeGenerateCommandName, financeCmd.Name())
-	})
-
-	t.Run("generate uses PostgreSQL schemas and scopes generated data to its owner", func(t *testing.T) {
+	makeIsolatedFixtureCommand := func(t *testing.T) (
+		*cobra.Command,
+		*bytes.Buffer,
+		financeFixturesRuntimeConfig,
+	) {
+		t.Helper()
 		fake := faker.New()
 		t.Chdir("../..")
 		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
@@ -129,6 +126,66 @@ func TestFinanceCommand(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, runtimeConfig)) })
 		require.NoError(t, persistence.NewMigrator(runtimeConfig.Database).Migrate(t.Context()))
+		return rootCmd, stdout, runtimeConfig
+	}
+
+	t.Run("wires finance fixtures generate command", func(t *testing.T) {
+		rootCmd, _ := makeRootCmd(t)
+		financeCmd, _, err := rootCmd.Find([]string{"finance", "fixtures", "generate"})
+		require.NoError(t, err)
+		assert.Equal(t, financeGenerateCommandName, financeCmd.Name())
+	})
+
+	t.Run("generate inserts missing EUR USD fixture rate and completes dashboard", func(t *testing.T) {
+		fake := faker.New()
+		rootCmd, stdout, runtimeConfig := makeIsolatedFixtureCommand(t)
+		rateStore := persistence.NewCurrentFXRateStore(runtimeConfig.Database)
+		rates, err := rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
+			Provider: financepkg.FXProviderFrankfurter, BaseCurrency: fixtureFXBaseCurrency,
+			QuoteCurrency: fixtureFXQuoteCurrency,
+		})
+		require.NoError(t, err)
+		assert.Empty(t, rates)
+		ownerID := "owner-" + fake.UUID().V4()
+		memberID := "member-" + fake.UUID().V4()
+		seed := int64(1_000_000 + fake.Int())
+		rootCmd.SetArgs([]string{
+			"finance", "fixtures", "generate", "--seed", strconv.FormatInt(seed, 10),
+			"--owner-user-id", ownerID, "--member-user-id", memberID,
+		})
+		require.NoError(t, rootCmd.ExecuteContext(t.Context()))
+		var got financefixtures.Summary
+		require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
+		assert.Equal(t, financefixtures.Summary{
+			Seed: seed, Scenario: realisticScenarioName, ScenarioIDs: []string{"realistic-core"},
+		}, got)
+		rates, err = rateStore.ListCurrentFXRates(t.Context(), persistence.ListCurrentFXRatesParams{
+			Provider: financepkg.FXProviderFrankfurter, BaseCurrency: fixtureFXBaseCurrency,
+			QuoteCurrency: fixtureFXQuoteCurrency,
+		})
+		require.NoError(t, err)
+		require.Len(t, rates, 1)
+		assert.InDelta(t, 1.1, rates[0].Rate, 0.00001)
+		store := persistence.NewStore(runtimeConfig.Database)
+		tenantService := financepkg.NewTenantService(store)
+		ownerTenants, err := tenantService.ListTenantsForUser(t.Context(), ownerID)
+		require.NoError(t, err)
+		require.Len(t, ownerTenants, 1)
+		reportingService := financepkg.NewReportingService(store)
+		dashboard, err := reportingService.GetDashboard(t.Context(), financepkg.DashboardParams{
+			ActorUserID: ownerID, TenantID: ownerTenants[0].Tenant.ID,
+			Preset:    financepkg.DashboardPeriodPresetCustom,
+			StartDate: time.Now().AddDate(-5, 0, 0), EndDate: time.Now().AddDate(1, 0, 0),
+		})
+		require.NoError(t, err)
+		assert.True(t, dashboard.Settled.Complete)
+		assert.True(t, dashboard.Pending.Complete)
+		assert.Empty(t, dashboard.MissingFX)
+	})
+
+	t.Run("generate uses PostgreSQL schemas and scopes generated data to its owner", func(t *testing.T) {
+		fake := faker.New()
+		rootCmd, stdout, runtimeConfig := makeIsolatedFixtureCommand(t)
 		rateStore := persistence.NewCurrentFXRateStore(runtimeConfig.Database)
 		loadRate := func(t *testing.T, baseCurrency string, quoteCurrency string) domain.FXRate {
 			t.Helper()
