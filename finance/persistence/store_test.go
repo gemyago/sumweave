@@ -266,7 +266,7 @@ func TestStore(t *testing.T) {
 		expectedLoaded := *loaded
 		expectedLoaded.CreatedAt = record.CreatedAt
 		expectedLoaded.UpdatedAt = record.UpdatedAt
-		assert.Equal(t, record, expectedLoaded)
+		assert.Equal(t, expectedLoaded, record)
 		assert.True(t, record.CreatedAt.Equal(loaded.CreatedAt))
 		assert.True(t, record.UpdatedAt.Equal(loaded.UpdatedAt))
 

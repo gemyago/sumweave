@@ -55,7 +55,8 @@ func TestBankConnectionScheduleService(t *testing.T) {
 					assert.NoError(t, json.Unmarshal(command.Payload, &input)) &&
 					input.ConnectionID == schedule.ConnectionID && input.Reason == BankConnectionSyncReasonScheduled &&
 					input.ScheduledAt != nil && input.ScheduledAt.Equal(dueAt) &&
-					command.IdempotencyKey == bankConnectionScheduleOccurrenceKey(schedule.ConnectionID, *input.ScheduledAt) &&
+					command.IdempotencyKey ==
+						bankConnectionScheduleOccurrenceKey(schedule.ConnectionID, *input.ScheduledAt) &&
 					input.ScheduledNextRunAt != nil && input.ScheduledNextRunAt.After(now)
 			})).
 			Return(DispatchReference{MessageID: messageID}, nil).

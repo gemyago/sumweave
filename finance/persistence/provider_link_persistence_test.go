@@ -3,6 +3,7 @@
 package persistence
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -367,7 +368,7 @@ func TestProviderLinkPersistence(t *testing.T) {
 			callbackName,
 			func(tx *gorm.DB) {
 				if tx.Statement.Table == (bankConnectionModel{}).TableName() {
-					tx.AddError(fmt.Errorf("connection insertion failed"))
+					tx.AddError(errors.New("connection insertion failed"))
 				}
 			},
 		))

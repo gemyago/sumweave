@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package finance
 
 import (
@@ -381,6 +383,14 @@ func (s *Service) GetDashboard(
 	params DashboardParams,
 ) (Dashboard, error) {
 	return s.reporting.GetDashboard(ctx, params)
+}
+
+func (s *Service) loadDashboardData(
+	ctx context.Context,
+	tenantID string,
+	params DashboardParams,
+) (dashboardData, error) {
+	return s.reporting.loadDashboardData(ctx, tenantID, params)
 }
 
 func (s *Service) TriggerFXRefresh(

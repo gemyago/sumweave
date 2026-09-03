@@ -14,7 +14,7 @@ DEFAULT_TESTS_TIMEOUT ?= 20s
 all: test
 
 lint: $(GOLANGCI_LINT_PREREQS)
-	$(GOLANGCI_LINT_RUN)
+	$(GOLANGCI_LINT_RUN) --build-tags=postgres_test
 
 $(cover_dir):
 	mkdir -p $(cover_dir)
