@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package sessions
 
 import (
@@ -8,6 +10,7 @@ import (
 	"github.com/gemyago/sumweave/runtime/internal/summarize"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/adk/session"
 )
 
 func TestNewSessionsStorage(t *testing.T) {
@@ -109,6 +112,40 @@ func TestNewSessionsStorage(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, ss)
 		require.Contains(t, err.Error(), "unsupported value")
+	})
+
+	t.Run("database type selects the prepared database backend", func(t *testing.T) {
+		storage, err := NewSessionsStorage(SessionServiceFactoryDeps{
+			RootLogger:          logger,
+			SessionStorageType:  "database",
+			DatabaseDSN:         postgresTestDSN(t),
+			DatabaseTablePrefix: postgresTestTablePrefix,
+			Summarizer:          sum,
+		})
+		require.NoError(t, err)
+		_, ok := metadataSyncInner(t, storage).(*DatabaseSessionsStorage)
+		require.True(t, ok)
+
+		created, err := storage.Create(t.Context(), &session.CreateRequest{
+			AppName:   fake.Lorem().Word(),
+			UserID:    fake.UUID().V4(),
+			SessionID: fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		require.NotNil(t, created)
+	})
+
+	t.Run("database flag selects the prepared database backend", func(t *testing.T) {
+		storage, err := NewSessionsStorage(SessionServiceFactoryDeps{
+			RootLogger:          logger,
+			UseDatabaseStorage:  true,
+			DatabaseDSN:         postgresTestDSN(t),
+			DatabaseTablePrefix: postgresTestTablePrefix,
+			Summarizer:          sum,
+		})
+		require.NoError(t, err)
+		_, ok := metadataSyncInner(t, storage).(*DatabaseSessionsStorage)
+		require.True(t, ok)
 	})
 }
 

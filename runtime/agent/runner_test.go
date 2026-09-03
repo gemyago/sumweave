@@ -1,3 +1,5 @@
+//go:build postgres_test
+
 package agent
 
 import (
@@ -110,6 +112,26 @@ func TestRunner(t *testing.T) {
 			}, WithLogger(rootTestLogger), WithDatabaseStorage(""))
 			require.Error(t, err)
 			require.ErrorContains(t, err, "session storage")
+		})
+
+		t.Run("succeeds with prepared database storage", func(t *testing.T) {
+			profiles, err := NewDatabaseAgentProfilesService(
+				testDatabaseDSN(t),
+				rootTestLogger,
+				testDatabaseTablePrefix,
+			)
+			require.NoError(t, err)
+
+			runner, err := NewRunner(RunnerArgs{
+				ProvidersConfigService: lp.NewMockProvidersConfigService(t),
+				AgentProfilesService:   profiles,
+			},
+				WithLogger(rootTestLogger),
+				WithDatabaseStorage(testDatabaseDSN(t)),
+				WithDatabaseTablePrefix(testDatabaseTablePrefix),
+			)
+			require.NoError(t, err)
+			require.NotNil(t, runner)
 		})
 
 		t.Run("WithDatabaseStorage clears file storage flag", func(t *testing.T) {

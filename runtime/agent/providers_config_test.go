@@ -1,4 +1,4 @@
-//go:build !release
+//go:build postgres_test && !release
 
 package agent
 
@@ -16,4 +16,11 @@ func TestNewFileProvidersConfigService(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, svc)
 	})
+}
+
+func TestNewDatabaseProvidersConfigService(t *testing.T) {
+	logger := internal.RootTestLogger()
+	svc, err := NewDatabaseProvidersConfigService(testDatabaseDSN(t), logger, testDatabaseTablePrefix)
+	require.NoError(t, err)
+	require.NotNil(t, svc)
 }

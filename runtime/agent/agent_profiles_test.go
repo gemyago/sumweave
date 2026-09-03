@@ -1,4 +1,4 @@
-//go:build !release
+//go:build postgres_test && !release
 
 package agent
 
@@ -31,6 +31,13 @@ func TestAgentProfilesAliases(t *testing.T) {
 func TestNewFileAgentProfilesService(t *testing.T) {
 	rootTestLogger := internal.RootTestLogger()
 	svc, err := NewFileAgentProfilesService(t.TempDir(), rootTestLogger)
+	require.NoError(t, err)
+	require.NotNil(t, svc)
+}
+
+func TestNewDatabaseAgentProfilesService(t *testing.T) {
+	logger := internal.RootTestLogger()
+	svc, err := NewDatabaseAgentProfilesService(testDatabaseDSN(t), logger, testDatabaseTablePrefix)
 	require.NoError(t, err)
 	require.NotNil(t, svc)
 }
