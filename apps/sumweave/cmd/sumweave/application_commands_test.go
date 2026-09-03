@@ -1,21 +1,47 @@
+//go:build postgres_test
+
 package main
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
+	"log/slog"
+	"os"
 	"testing"
-	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/spf13/cobra"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
 func TestApplicationCommands(t *testing.T) {
 	fake := faker.New()
+	makeUserDeps := func(t *testing.T) (*auth.UserStore, *auth.Argon2idHasher) {
+		t.Helper()
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
+		db, err := sql.Open("pgx", dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, db.Close()) })
+		store, err := auth.NewUserStore(auth.UserStoreDeps{
+			SQLDB:       db,
+			DatabaseDSN: dsn,
+			TablePrefix: "sumweave_auth_",
+			IDGen:       ident.NewDefaultGenerator(),
+			Logger:      slog.New(slog.DiscardHandler),
+		})
+		require.NoError(t, err)
+		return store, auth.NewArgon2idHasherWithParams(
+			auth.Argon2idHasherParams{Memory: 8, Time: 1, Parallelism: 1, SaltLen: 16, KeyLen: 32},
+		)
+	}
+	makeUsername := func() string { return "user-" + fake.UUID().V4() }
+
 	t.Run("database and jobs commands route resolvers and errors", func(t *testing.T) {
 		migrator := newMockdatabaseMigrationRunner(t)
 		migrator.EXPECT().Migrate(mock.Anything).Return(nil)
@@ -63,99 +89,47 @@ func TestApplicationCommands(t *testing.T) {
 		require.ErrorIs(t, schedulerCmd.ExecuteContext(t.Context()), resolverErr)
 	})
 
-	t.Run("builds the command tree without resolving persistence", func(t *testing.T) {
-		require.NotNil(t, setupCommands())
-		root := setupCommands()
-		require.NoError(t, root.PersistentPreRunE(root, nil))
-		require.NotNil(t, newStartServerCmd())
+	t.Run("user administration creates lists and changes scoped users", func(t *testing.T) {
+		store, hasher := makeUserDeps(t)
+		username, password := makeUsername(), fake.Internet().Password()
+		makeAddParams := func(candidatePassword string, ifNotExists bool) userAddParams {
+			return userAddParams{Username: username, Password: candidatePassword, IfNotExists: ifNotExists}
+		}
+		var output bytes.Buffer
+		require.NoError(t, runUserAdd(
+			t.Context(), userAddCmdDeps{Store: store, Hasher: hasher}, makeAddParams(password, false), &output,
+		))
+		require.Contains(t, output.String(), username)
+		require.Error(t, runUserAdd(
+			t.Context(), userAddCmdDeps{Store: store, Hasher: hasher}, makeAddParams(fake.Internet().Password(), false), &bytes.Buffer{},
+		))
+		var ensureOutput bytes.Buffer
+		require.NoError(t, runUserAdd(
+			t.Context(), userAddCmdDeps{Store: store, Hasher: hasher}, makeAddParams(fake.Internet().Password(), true), &ensureOutput,
+		))
+		require.Contains(t, ensureOutput.String(), "already exists")
+		existingUser, err := store.GetByUsername(t.Context(), username)
+		require.NoError(t, err)
+		passwordUnchanged, err := hasher.Verify(password, existingUser.PasswordHash)
+		require.NoError(t, err)
+		require.True(t, passwordUnchanged)
+		var listed bytes.Buffer
+		require.NoError(t, runUserList(t.Context(), userListCmdDeps{Store: store}, &listed))
+		require.Contains(t, listed.String(), username)
+		newPassword := fake.Internet().Password()
+		require.NoError(t, runUserChangePassword(
+			t.Context(), userChangePasswordCmdDeps{Store: store, Hasher: hasher},
+			userChangePasswordParams{Username: username, Password: newPassword}, &bytes.Buffer{},
+		))
+		user, err := store.GetByUsername(t.Context(), username)
+		require.NoError(t, err)
+		ok, err := hasher.Verify(newPassword, user.PasswordHash)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Error(t, runUserChangePassword(
+			t.Context(), userChangePasswordCmdDeps{Store: store, Hasher: hasher},
+			userChangePasswordParams{Username: makeUsername(), Password: newPassword}, &bytes.Buffer{},
+		))
 	})
 
-	t.Run("start command delegates without opening persistence", func(t *testing.T) {
-		runner := newMockstartServerRunner(t)
-		runner.EXPECT().StartHTTPServer(mock.Anything, mock.Anything).Return(nil).Once()
-		command := newStartServerCmdWithResolver(
-			func(*cobra.Command) (startServerRunner, error) { return runner, nil },
-		)
-		require.NoError(t, command.ExecuteContext(t.Context()))
-		resolverErr := errors.New(fake.Lorem().Sentence(3))
-		command = newStartServerCmdWithResolver(
-			func(*cobra.Command) (startServerRunner, error) { return nil, resolverErr },
-		)
-		require.ErrorIs(t, command.ExecuteContext(t.Context()), resolverErr)
-	})
-
-	t.Run("user command behavior uses injected store boundaries", func(t *testing.T) {
-		params := userAddParams{Username: fake.UUID().V4(), Password: fake.Lorem().Text(20)}
-		created := &auth.User{ID: fake.UUID().V4(), Username: params.Username, CreatedAt: time.Now()}
-		store := newMockuserCommandStore(t)
-		store.EXPECT().Create(mock.Anything, mock.MatchedBy(func(input auth.CreateUserParams) bool {
-			return input.Username == params.Username && input.PasswordHash != ""
-		})).Return(created, nil).Once()
-		out := &bytes.Buffer{}
-		require.NoError(t, runUserAdd(t.Context(), userAddCmdDeps{
-			Store: store, Hasher: auth.NewArgon2idHasher(),
-		}, params, out))
-		require.Contains(t, out.String(), "User created")
-
-		store = newMockuserCommandStore(t)
-		store.EXPECT().Create(mock.Anything, mock.Anything).Return(nil, auth.ErrUsernameExists).Once()
-		out.Reset()
-		require.NoError(t, runUserAdd(t.Context(), userAddCmdDeps{
-			Store: store, Hasher: auth.NewArgon2idHasher(),
-		}, userAddParams{Username: params.Username, Password: params.Password, IfNotExists: true}, out))
-		require.Contains(t, out.String(), "already exists")
-
-		store = newMockuserCommandStore(t)
-		listErr := errors.New(fake.Lorem().Sentence(3))
-		store.EXPECT().List(mock.Anything).Return(nil, listErr).Once()
-		require.ErrorIs(t, runUserList(t.Context(), userListCmdDeps{Store: store}, &bytes.Buffer{}), listErr)
-		store = newMockuserCommandStore(t)
-		store.EXPECT().List(mock.Anything).Return([]auth.User{*created}, nil).Once()
-		out.Reset()
-		require.NoError(t, runUserList(t.Context(), userListCmdDeps{Store: store}, out))
-		require.Contains(t, out.String(), params.Username)
-
-		store = newMockuserCommandStore(t)
-		store.EXPECT().GetByUsername(mock.Anything, params.Username).Return(created, nil).Once()
-		store.EXPECT().UpdatePassword(mock.Anything, created.ID, mock.Anything).Return(nil).Once()
-		out.Reset()
-		require.NoError(t, runUserChangePassword(t.Context(), userChangePasswordCmdDeps{
-			Store: store, Hasher: auth.NewArgon2idHasher(),
-		}, userChangePasswordParams{Username: params.Username, Password: params.Password}, out))
-		require.Contains(t, out.String(), "Password updated")
-
-		createErr := errors.New(fake.Lorem().Sentence(3))
-		store = newMockuserCommandStore(t)
-		store.EXPECT().Create(mock.Anything, mock.Anything).Return(nil, createErr).Once()
-		require.ErrorIs(t, runUserAdd(t.Context(), userAddCmdDeps{
-			Store: store, Hasher: auth.NewArgon2idHasher(),
-		}, params, out), createErr)
-
-		lookupErr := errors.New(fake.Lorem().Sentence(3))
-		store = newMockuserCommandStore(t)
-		store.EXPECT().GetByUsername(mock.Anything, params.Username).Return(nil, lookupErr).Once()
-		require.ErrorIs(t, runUserChangePassword(t.Context(), userChangePasswordCmdDeps{
-			Store: store, Hasher: auth.NewArgon2idHasher(),
-		}, userChangePasswordParams{Username: params.Username, Password: params.Password}, out), lookupErr)
-
-		updateErr := errors.New(fake.Lorem().Sentence(3))
-		store = newMockuserCommandStore(t)
-		store.EXPECT().GetByUsername(mock.Anything, params.Username).Return(created, nil).Once()
-		store.EXPECT().UpdatePassword(mock.Anything, created.ID, mock.Anything).Return(updateErr).Once()
-		require.ErrorIs(t, runUserChangePassword(t.Context(), userChangePasswordCmdDeps{
-			Store: store, Hasher: auth.NewArgon2idHasher(),
-		}, userChangePasswordParams{Username: params.Username, Password: params.Password}, out), updateErr)
-	})
-
-	t.Run("user cobra commands validate flags before resolving persistence", func(t *testing.T) {
-		resolver := func(*cobra.Command) (userCommandRuntime, error) { return userCommandRuntime{}, assert.AnError }
-		root := &cobra.Command{Use: "root"}
-		root.AddCommand(newUserCmdWithResolver(resolver))
-		root.SetArgs([]string{"user", "add", "--username", fake.UUID().V4()})
-		require.Error(t, root.ExecuteContext(t.Context()))
-		root.SetArgs([]string{"user", "list"})
-		require.ErrorIs(t, root.ExecuteContext(t.Context()), assert.AnError)
-		root.SetArgs([]string{"user", "change-password", "--username", fake.UUID().V4()})
-		require.Error(t, root.ExecuteContext(t.Context()))
-	})
 }

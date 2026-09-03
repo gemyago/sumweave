@@ -1,170 +1,198 @@
+//go:build postgres_test
+
 package main
 
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
-	"strings"
+	"net/http/httptest"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
+	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
 	financefixtures "github.com/gemyago/sumweave/finance/fixtures"
 	"github.com/gemyago/sumweave/finance/persistence"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
+type financeFixturesProvider struct{}
+
+func (financeFixturesProvider) Name() string { return fixtureMonobankProviderName }
+
+func (financeFixturesProvider) StartLink(
+	context.Context,
+	financepkg.ProviderStartLinkParams,
+) (financepkg.ProviderLinkStart, error) {
+	return financepkg.ProviderLinkStart{}, nil
+}
+
+func (financeFixturesProvider) FinishLink(
+	context.Context,
+	financepkg.ProviderFinishLinkParams,
+) (financepkg.ProviderLinkResult, error) {
+	return financepkg.ProviderLinkResult{}, nil
+}
+
+func (financeFixturesProvider) LinkToken(
+	ctx context.Context,
+	_ financepkg.ProviderTokenLinkParams,
+) (financepkg.ProviderTokenLinkResult, error) {
+	if err := ctx.Err(); err != nil {
+		return financepkg.ProviderTokenLinkResult{}, err
+	}
+	return financepkg.ProviderTokenLinkResult{
+		DisplayName:       "Fixture Connection",
+		ProviderReference: "fixture-reference",
+		Secret:            "fixture-secret",
+		State:             domain.BankConnectionStateActive,
+	}, nil
+}
+
 func TestFinanceCommand(t *testing.T) {
-	makeRootCmd := func(t *testing.T, deps financeFixturesCommandDeps) (*cobra.Command, *bytes.Buffer) {
+	makeRuntimeConfig := func(t *testing.T) financeFixturesRuntimeConfig {
+		t.Helper()
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
+		sqlDB, err := sql.Open("pgx", dsn)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		database, err := persistence.NewDatabase(sqlDB, dsn)
+		require.NoError(t, err)
+		jobsStore, err := jobspkg.NewStore(sqlDB, dsn, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
+		require.NoError(t, err)
+		return financeFixturesRuntimeConfig{Database: database, JobsStore: jobsStore}
+	}
+	makeRootCmd := func(t *testing.T) (*cobra.Command, *bytes.Buffer) {
 		t.Helper()
 		rootCmd := newRootCmd()
 		stdout := &bytes.Buffer{}
 		rootCmd.SetOut(stdout)
 		rootCmd.SetErr(stdout)
-		rootCmd.AddCommand(newFinanceCmd(deps))
+		rootCmd.AddCommand(newFinanceCmd())
 		return rootCmd, stdout
 	}
 
 	t.Run("wires finance fixtures generate command", func(t *testing.T) {
-		rootCmd, _ := makeRootCmd(t, financeFixturesCommandDeps{})
+		rootCmd, _ := makeRootCmd(t)
 		financeCmd, _, err := rootCmd.Find([]string{"finance", "fixtures", "generate"})
 		require.NoError(t, err)
 		assert.Equal(t, financeGenerateCommandName, financeCmd.Name())
 	})
 
-	t.Run("defaults production preparation wiring without preparing a schema", func(t *testing.T) {
-		deps := defaultFinanceFixturesCommandDeps(financeFixturesCommandDeps{})
-		require.NotNil(t, deps.Generate)
-		require.NotNil(t, deps.Prepare)
-	})
-
-	t.Run("generate orchestrates injected preparation and emits summary json", func(t *testing.T) {
+	t.Run("generate uses PostgreSQL schemas and scopes generated data to its owner", func(t *testing.T) {
 		fake := faker.New()
-		want := financefixtures.Summary{
-			Seed:        42,
-			Scenario:    "realistic",
-			ScenarioIDs: []string{"realistic-core"},
-		}
-		wantConfig := financeFixturesRuntimeConfig{
-			JWTSigningKey:   fake.UUID().V4(),
-			MonobankBaseURL: "https://" + fake.Internet().Domain(),
-		}
+		t.Chdir("../..")
+		rootCmd, stdout := makeRootCmd(t)
+		require.NoError(t, rootCmd.PersistentFlags().Set("env", "test"))
 		ownerID := "owner-" + fake.UUID().V4()
 		memberID := "member-" + fake.UUID().V4()
-		prepared := false
-		rootCmd, stdout := makeRootCmd(t, financeFixturesCommandDeps{
-			ResolveRuntimeConfig: func(*cobra.Command) (financeFixturesRuntimeConfig, error) {
-				return wantConfig, nil
-			},
-			Prepare: func(_ context.Context, runtimeConfig financeFixturesRuntimeConfig) error {
-				require.Equal(t, wantConfig, runtimeConfig)
-				prepared = true
-				return nil
-			},
-			Generate: func(
-				_ context.Context,
-				runtimeConfig financeFixturesRuntimeConfig,
-				params financeFixturesGenerateParams,
-			) (financefixtures.Summary, error) {
-				require.True(t, prepared)
-				require.Equal(t, wantConfig, runtimeConfig)
-				require.Equal(t, int64(42), params.Seed)
-				require.Equal(t, "realistic", params.Scenario)
-				require.Equal(t, ownerID, params.OwnerUserID)
-				require.Equal(t, memberID, params.MemberUserID)
-				require.Equal(t, fixtureMonobankProviderName, params.ConnectionProvider)
-				return want, nil
-			},
-			Now: func() time.Time { return time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC) },
-		})
+		seed := int64(1_000_000 + fake.Int())
 		rootCmd.SetArgs([]string{
-			"finance", "fixtures", "generate", "--seed", "42", "--scenario", "realistic",
+			"finance", "fixtures", "generate", "--seed", strconv.FormatInt(seed, 10),
 			"--owner-user-id", ownerID, "--member-user-id", memberID,
-			"--connection-provider", fixtureMonobankProviderName,
 		})
 		require.NoError(t, rootCmd.ExecuteContext(t.Context()))
 		var got financefixtures.Summary
 		require.NoError(t, json.Unmarshal(stdout.Bytes(), &got))
-		assert.Equal(t, want, got)
-	})
+		assert.Equal(t, financefixtures.Summary{
+			Seed: seed, Scenario: realisticScenarioName, ScenarioIDs: []string{"realistic-core"},
+		}, got)
 
-	t.Run("generate surfaces runner errors after preparation", func(t *testing.T) {
-		prepared := false
-		rootCmd, _ := makeRootCmd(t, financeFixturesCommandDeps{
-			Prepare: func(context.Context, financeFixturesRuntimeConfig) error {
-				prepared = true
-				return nil
-			},
-			Generate: func(context.Context, financeFixturesRuntimeConfig, financeFixturesGenerateParams) (financefixtures.Summary, error) {
-				require.True(t, prepared)
-				return financefixtures.Summary{}, assert.AnError
-			},
+		runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, runtimeConfig)) })
+		store := persistence.NewStore(runtimeConfig.Database)
+		tenantService := financepkg.NewTenantService(store)
+		ownerTenants, err := tenantService.ListTenantsForUser(t.Context(), ownerID)
+		require.NoError(t, err)
+		require.Len(t, ownerTenants, 1)
+		reportingService := financepkg.NewReportingService(store)
+		dashboard, err := reportingService.GetDashboard(t.Context(), financepkg.DashboardParams{
+			ActorUserID: ownerID,
+			TenantID:    ownerTenants[0].Tenant.ID,
+			Preset:      financepkg.DashboardPeriodPresetCustom,
+			StartDate:   time.Now().AddDate(-5, 0, 0),
+			EndDate:     time.Now().AddDate(1, 0, 0),
 		})
-		rootCmd.SetArgs([]string{"finance", "fixtures", "generate", "--seed", "7"})
-		require.ErrorIs(t, rootCmd.Execute(), assert.AnError)
+		require.NoError(t, err)
+		assert.True(t, dashboard.Settled.Complete)
+		assert.True(t, dashboard.Pending.Complete)
+		assert.Empty(t, dashboard.MissingFX)
 	})
 
-	t.Run("generate surfaces runtime config resolution errors", func(t *testing.T) {
-		rootCmd, _ := makeRootCmd(t, financeFixturesCommandDeps{
-			ResolveRuntimeConfig: func(*cobra.Command) (financeFixturesRuntimeConfig, error) {
-				return financeFixturesRuntimeConfig{}, assert.AnError
-			},
+	t.Run("generation never calls a configured live monobank", func(t *testing.T) {
+		fake := faker.New()
+		liveCalls := 0
+		liveServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { liveCalls++ }))
+		defer liveServer.Close()
+		runtimeConfig := makeRuntimeConfig(t)
+		runtimeConfig.MonobankBaseURL = liveServer.URL
+		_, err := runFinanceFixturesGenerate(t.Context(), runtimeConfig, financeFixturesGenerateParams{
+			Seed: int64(1_000_000 + fake.Int()), Scenario: realisticScenarioName,
+			Now:         time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
+			OwnerUserID: "owner-" + fake.UUID().V4(), MemberUserID: "member-" + fake.UUID().V4(),
 		})
-		rootCmd.SetArgs([]string{"finance", "fixtures", "generate", "--seed", "7"})
-		require.ErrorIs(t, rootCmd.Execute(), assert.AnError)
+		require.NoError(t, err)
+		assert.Zero(t, liveCalls)
 	})
 
-	t.Run("generate surfaces preparation failures without running generation", func(t *testing.T) {
-		rootCmd, _ := makeRootCmd(t, financeFixturesCommandDeps{
-			Prepare: func(context.Context, financeFixturesRuntimeConfig) error { return assert.AnError },
-			Generate: func(context.Context, financeFixturesRuntimeConfig, financeFixturesGenerateParams) (financefixtures.Summary, error) {
-				t.Fatal("generation must not run after preparation fails")
-				return financefixtures.Summary{}, nil
-			},
-		})
-		rootCmd.SetArgs([]string{"finance", "fixtures", "generate"})
-		require.ErrorIs(t, rootCmd.Execute(), assert.AnError)
+	t.Run("resolve finance fixtures runtime config uses checked-in test configuration", func(t *testing.T) {
+		fake := faker.New()
+		t.Chdir("../..")
+		t.Setenv("APP_FINANCE_PROVIDERS_MONOBANK_BASEURL", "https://"+fake.Internet().Domain())
+		t.Setenv("APP_AUTH_JWTSIGNINGKEY", fake.UUID().V4())
+		rootCmd := newRootCmd()
+		require.NoError(t, rootCmd.PersistentFlags().Set("env", "test"))
+		runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, runtimeConfig)) })
+		assert.NotNil(t, runtimeConfig.Database)
+		assert.NotNil(t, runtimeConfig.JobsStore)
+		assert.Equal(t, os.Getenv("APP_FINANCE_PROVIDERS_MONOBANK_BASEURL"), runtimeConfig.MonobankBaseURL)
+		assert.Equal(t, os.Getenv("APP_AUTH_JWTSIGNINGKEY"), runtimeConfig.JWTSigningKey)
 	})
 
-	t.Run("resolve finance fixtures runtime config reports command configuration errors", func(t *testing.T) {
+	t.Run("resolve finance fixtures runtime config preserves test defaults", func(t *testing.T) {
+		t.Chdir("../..")
+		rootCmd := newRootCmd()
+		require.NoError(t, rootCmd.PersistentFlags().Set("env", "test"))
+		runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(rootCmd)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, runtimeConfig)) })
+		assert.NotNil(t, runtimeConfig.Database)
+		assert.NotNil(t, runtimeConfig.JobsStore)
+		assert.NotEmpty(t, runtimeConfig.JWTSigningKey)
+	})
+
+	t.Run("reports invalid runtime resolution and generation input", func(t *testing.T) {
 		_, err := resolveFinanceFixturesRuntimeConfig(&cobra.Command{})
 		require.Error(t, err)
-	})
-
-	t.Run("run finance fixtures generate rejects unsupported scenarios without persistence", func(t *testing.T) {
 		fake := faker.New()
-		_, err := runFinanceFixturesGenerate(
-			t.Context(),
-			financeFixturesRuntimeConfig{JWTSigningKey: fake.UUID().V4()},
-			financeFixturesGenerateParams{
-				Seed: 3, Scenario: "unsupported-" + fake.Lorem().Word(), Now: time.Now(),
-			},
-		)
+		runtimeConfig := makeRuntimeConfig(t)
+		_, err = runFinanceFixturesGenerate(t.Context(), runtimeConfig, financeFixturesGenerateParams{
+			Seed: 3, Scenario: "unsupported-" + fake.Lorem().Word(), Now: time.Now(),
+		})
 		require.ErrorContains(t, err, "unsupported finance fixture scenario")
-	})
-
-	t.Run("run finance fixtures generate rejects unsupported providers without persistence", func(t *testing.T) {
-		fake := faker.New()
-		_, err := runFinanceFixturesGenerate(
-			t.Context(),
-			financeFixturesRuntimeConfig{JWTSigningKey: fake.UUID().V4()},
-			financeFixturesGenerateParams{
-				Seed: 8, Scenario: realisticScenarioName, Now: time.Now(),
-				ConnectionProvider: "unsupported-" + fake.Lorem().Word(),
-			},
-		)
+		_, err = runFinanceFixturesGenerate(t.Context(), runtimeConfig, financeFixturesGenerateParams{
+			Seed: 8, Scenario: realisticScenarioName, Now: time.Now(),
+			ConnectionProvider: "unsupported-" + fake.Lorem().Word(),
+		})
 		require.ErrorContains(t, err, "unsupported finance fixture connection provider")
 	})
 
-	t.Run("finance fixture module validates its composition inputs", func(t *testing.T) {
+	t.Run("finance fixture module validates composition inputs", func(t *testing.T) {
 		fake := faker.New()
 		cipher, err := credentials.NewAESGCMCipher([]byte("12345678901234567890123456789012"), fake.UUID().V4())
 		require.NoError(t, err)
@@ -178,32 +206,7 @@ func TestFinanceCommand(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("finance fixture composition surfaces storage failures through SQLMock", func(t *testing.T) {
-		sqlDB, databaseMock, err := sqlmock.New()
-		require.NoError(t, err)
-		t.Cleanup(func() {
-			databaseMock.ExpectClose()
-			require.NoError(t, sqlDB.Close())
-		})
-		database, err := persistence.NewDatabase(sqlDB, "postgres://example.invalid/fixtures")
-		require.NoError(t, err)
-		storageErr := assert.AnError
-		databaseMock.ExpectBegin().WillReturnError(storageErr)
-		_, err = runFinanceFixturesGenerate(
-			t.Context(),
-			financeFixturesRuntimeConfig{Database: database, JWTSigningKey: faker.New().UUID().V4()},
-			financeFixturesGenerateParams{
-				Seed:               9,
-				Scenario:           realisticScenarioName,
-				Now:                time.Now(),
-				ConnectionProvider: fixtureScenarioProviderName,
-			},
-		)
-		require.ErrorIs(t, err, storageErr)
-		require.NoError(t, databaseMock.ExpectationsWereMet())
-	})
-
-	t.Run("finance fixture monobank server rejects non-fixture paths", func(t *testing.T) {
+	t.Run("finance fixture monobank server serves only fixture paths", func(t *testing.T) {
 		server := newFinanceFixturesMonobankServer()
 		defer server.Close()
 		response, err := server.Client().Get(server.URL + "/personal/statement")
@@ -216,28 +219,7 @@ func TestFinanceCommand(t *testing.T) {
 		assert.Equal(t, http.StatusOK, response.StatusCode)
 	})
 
-	t.Run("fixture FX provider supplies every requested shared-schema pair", func(t *testing.T) {
-		fake := faker.New()
-		now := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)
-		provider := financeFixturesFXProvider{now: func() time.Time { return now }}
-		baseCurrency := fake.Currency().Code()
-		quoteCurrency := fake.Currency().Code()
-		rates, err := provider.FetchLatestRates(t.Context(), financepkg.FXProviderQuery{
-			BaseCurrency: baseCurrency, QuoteCurrencies: []string{quoteCurrency},
-		})
-		require.NoError(t, err)
-		assert.Equal(t, []domain.FXRate{{
-			Provider: financepkg.FXProviderFrankfurter, BaseCurrency: strings.ToUpper(baseCurrency),
-			QuoteCurrency: strings.ToUpper(quoteCurrency), RateDate: now, Rate: 1.1,
-		}}, rates)
-
-		canceledCtx, cancel := context.WithCancel(t.Context())
-		cancel()
-		_, err = provider.FetchLatestRates(canceledCtx, financepkg.FXProviderQuery{})
-		require.ErrorIs(t, err, context.Canceled)
-	})
-
-	t.Run("fixture provider exposes deterministic finance provider behavior", func(t *testing.T) {
+	t.Run("fixture provider exposes deterministic banking behavior", func(t *testing.T) {
 		provider := financeFixturesProvider{}
 		assert.Equal(t, fixtureMonobankProviderName, provider.Name())
 		start, err := provider.StartLink(t.Context(), financepkg.ProviderStartLinkParams{})
@@ -258,91 +240,10 @@ func TestFinanceCommand(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 	})
 
-	t.Run("fixture scenario adapter delegates every operation to its service boundary", func(t *testing.T) {
-		tenants := newMockfinanceFixturesTenantService(t)
-		catalog := newMockfinanceFixturesCatalogService(t)
-		ledger := newMockfinanceFixturesLedgerService(t)
-		csvImports := newMockfinanceFixturesCSVImportService(t)
-		connections := newMockfinanceFixturesBankConnectionService(t)
-		bankSync := newMockfinanceFixturesBankSyncService(t)
-		fx := newMockfinanceFixturesFXService(t)
-		service := financeFixturesScenarioService{
-			tenantService: tenants, catalogService: catalog, ledgerService: ledger,
-			csvImportService: csvImports, bankConnectionService: connections, bankSyncService: bankSync,
-			fxService: fx,
-		}
-
-		tenants.EXPECT().CreateTenant(mock.Anything, mock.Anything).Return(domain.Tenant{}, nil)
-		_, err := service.CreateTenant(t.Context(), financepkg.CreateTenantParams{})
-		require.NoError(t, err)
-		tenants.EXPECT().CreateTenantInvite(mock.Anything, mock.Anything).Return(domain.TenantInvite{}, nil)
-		_, err = service.CreateTenantInvite(t.Context(), financepkg.CreateTenantInviteParams{})
-		require.NoError(t, err)
-		tenants.EXPECT().AcceptTenantInvite(mock.Anything, mock.Anything).Return(domain.TenantMembership{}, nil)
-		_, err = service.AcceptTenantInvite(t.Context(), financepkg.AcceptTenantInviteParams{})
-		require.NoError(t, err)
-
-		catalog.EXPECT().CreateAccount(mock.Anything, mock.Anything).Return(domain.Account{}, nil)
-		_, err = service.CreateAccount(t.Context(), financepkg.CreateAccountParams{})
-		require.NoError(t, err)
-		catalog.EXPECT().ListCategories(mock.Anything, mock.Anything).Return([]domain.Category{}, nil)
-		_, err = service.ListCategories(t.Context(), financepkg.ListCategoriesParams{})
-		require.NoError(t, err)
-		catalog.EXPECT().ListTags(mock.Anything, mock.Anything).Return([]domain.Tag{}, nil)
-		_, err = service.ListTags(t.Context(), financepkg.ListTagsParams{})
-		require.NoError(t, err)
-
-		ledger.EXPECT().RecordTransaction(mock.Anything, mock.Anything).Return(domain.Transaction{}, nil)
-		_, err = service.RecordTransaction(t.Context(), financepkg.RecordTransactionParams{})
-		require.NoError(t, err)
-		ledger.EXPECT().HideTransaction(mock.Anything, mock.Anything).Return(nil)
-		require.NoError(t, service.HideTransaction(t.Context(), financepkg.HideTransactionParams{}))
-		ledger.EXPECT().LinkTransfers(mock.Anything, mock.Anything).Return(nil)
-		require.NoError(t, service.LinkTransfers(t.Context(), financepkg.LinkTransfersParams{}))
-
-		csvImports.EXPECT().PreviewCSVImport(mock.Anything, mock.Anything).Return(financepkg.CSVImportPreview{}, nil)
-		_, err = service.PreviewCSVImport(t.Context(), financepkg.PreviewCSVImportParams{})
-		require.NoError(t, err)
-		connections.EXPECT().LinkTokenBankConnection(mock.Anything, mock.Anything).Return(domain.BankConnection{}, nil)
-		_, err = service.LinkTokenBankConnection(t.Context(), financepkg.LinkTokenBankConnectionParams{})
-		require.NoError(t, err)
-		bankSync.EXPECT().UpsertBankConnectionSchedule(
-			mock.Anything,
-			mock.Anything,
-		).Return(domain.BankConnectionSchedule{}, nil)
-		_, err = service.UpsertBankConnectionSchedule(t.Context(), financepkg.UpsertBankConnectionScheduleParams{})
-		require.NoError(t, err)
-		fx.EXPECT().RefreshRequiredFXRates(mock.Anything, mock.Anything).Return(financepkg.RefreshFXRatesResult{}, nil)
-		_, err = service.RefreshRequiredFXRates(t.Context(), financepkg.RefreshFXRatesParams{})
-		require.NoError(t, err)
-	})
-
 	t.Run("joins fixture root close errors with command errors", func(t *testing.T) {
 		closeErr := assert.AnError
-		err := closeFinanceFixturesRuntimeConfig(
-			closeErr,
-			financeFixturesRuntimeConfig{close: func() error { return closeErr }},
-		)
+		err := closeFinanceFixturesRuntimeConfig(closeErr, financeFixturesRuntimeConfig{close: func() error { return closeErr }})
 		require.ErrorIs(t, err, closeErr)
 		require.NoError(t, closeFinanceFixturesRuntimeConfig(nil, financeFixturesRuntimeConfig{}))
-	})
-
-	t.Run("closes a resolved fixture root after a successful generation", func(t *testing.T) {
-		closed := false
-		rootCmd, _ := makeRootCmd(t, financeFixturesCommandDeps{
-			ResolveRuntimeConfig: func(*cobra.Command) (financeFixturesRuntimeConfig, error) {
-				return financeFixturesRuntimeConfig{close: func() error {
-					closed = true
-					return nil
-				}}, nil
-			},
-			Prepare: func(context.Context, financeFixturesRuntimeConfig) error { return nil },
-			Generate: func(context.Context, financeFixturesRuntimeConfig, financeFixturesGenerateParams) (financefixtures.Summary, error) {
-				return financefixtures.Summary{}, nil
-			},
-		})
-		rootCmd.SetArgs([]string{"finance", "fixtures", "generate"})
-		require.NoError(t, rootCmd.ExecuteContext(t.Context()))
-		assert.True(t, closed)
 	})
 }

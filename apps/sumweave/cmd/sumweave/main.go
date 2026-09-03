@@ -23,11 +23,7 @@ func setupCommands() *cobra.Command {
 		newStartAllCmd(),
 		newDatabaseMigrateCmd(),
 		newJobsCmd(),
-		newFinanceCmd(financeFixturesCommandDeps{
-			ResolveRuntimeConfig: func(cmd *cobra.Command) (financeFixturesRuntimeConfig, error) {
-				return resolveFinanceFixturesRuntimeConfig(cmd.Root())
-			},
-		}),
+		newFinanceCmd(),
 		newFinancePOCCmd(financePOCCommandDeps{}),
 		newUserCmd(),
 	)
@@ -72,19 +68,7 @@ type startServerParams struct {
 	noop bool
 }
 
-type startServerRunner interface {
-	StartHTTPServer(context.Context, ...sumweave.EngineStartServerOpt) error
-}
-
-type startServerResolver func(*cobra.Command) (startServerRunner, error)
-
 func newStartServerCmd() *cobra.Command {
-	return newStartServerCmdWithResolver(func(cmd *cobra.Command) (startServerRunner, error) {
-		return newEngineFromRoot(cmd.Root())
-	})
-}
-
-func newStartServerCmdWithResolver(resolver startServerResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   startCommandName,
 		Short: "Start the HTTP server",
@@ -99,7 +83,7 @@ func newStartServerCmdWithResolver(resolver startServerResolver) *cobra.Command 
 		"Do not start. Just setup params and exit. Useful for testing if setup is all working.",
 	)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		engine, err := resolver(cmd)
+		engine, err := newEngineFromRoot(cmd.Root())
 		if err != nil {
 			return err
 		}

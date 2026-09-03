@@ -18,13 +18,6 @@ type userAddParams struct {
 	IfNotExists bool
 }
 
-type userCommandStore interface {
-	Create(context.Context, auth.CreateUserParams) (*auth.User, error)
-	GetByUsername(context.Context, string) (*auth.User, error)
-	List(context.Context) ([]auth.User, error)
-	UpdatePassword(context.Context, string, string) error
-}
-
 type userChangePasswordParams struct {
 	Username string
 	Password string
@@ -33,16 +26,16 @@ type userChangePasswordParams struct {
 const userCommandName = "user"
 
 type userAddCmdDeps struct {
-	Store  userCommandStore
+	Store  *auth.UserStore
 	Hasher *auth.Argon2idHasher
 }
 
 type userListCmdDeps struct {
-	Store userCommandStore
+	Store *auth.UserStore
 }
 
 type userChangePasswordCmdDeps struct {
-	Store  userCommandStore
+	Store  *auth.UserStore
 	Hasher *auth.Argon2idHasher
 }
 
@@ -51,8 +44,6 @@ type userCommandRuntime struct {
 	hasher *auth.Argon2idHasher
 	close  func() error
 }
-
-type userCommandResolver func(*cobra.Command) (userCommandRuntime, error)
 
 func runUserAdd(
 	ctx context.Context,
@@ -119,14 +110,14 @@ func runUserChangePassword(
 	return err
 }
 
-func newUserAddCmd(resolver userCommandResolver) *cobra.Command { // coverage-ignore
+func newUserAddCmd() *cobra.Command { // coverage-ignore
 	var params userAddParams
 
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Add a new user",
 		RunE: func(cmd *cobra.Command, _ []string) (err error) {
-			runtime, err := resolver(cmd)
+			runtime, err := resolveUserCommandRuntime(cmd)
 			if err != nil {
 				return err
 			}
@@ -152,12 +143,12 @@ func newUserAddCmd(resolver userCommandResolver) *cobra.Command { // coverage-ig
 	return cmd
 }
 
-func newUserListCmd(resolver userCommandResolver) *cobra.Command { // coverage-ignore
+func newUserListCmd() *cobra.Command { // coverage-ignore
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List all users",
 		RunE: func(cmd *cobra.Command, _ []string) (err error) {
-			runtime, err := resolver(cmd)
+			runtime, err := resolveUserCommandRuntime(cmd)
 			if err != nil {
 				return err
 			}
@@ -168,14 +159,14 @@ func newUserListCmd(resolver userCommandResolver) *cobra.Command { // coverage-i
 	return cmd
 }
 
-func newUserChangePasswordCmd(resolver userCommandResolver) *cobra.Command { // coverage-ignore
+func newUserChangePasswordCmd() *cobra.Command { // coverage-ignore
 	var params userChangePasswordParams
 
 	cmd := &cobra.Command{
 		Use:   "change-password",
 		Short: "Change a user's password",
 		RunE: func(cmd *cobra.Command, _ []string) (err error) {
-			runtime, err := resolver(cmd)
+			runtime, err := resolveUserCommandRuntime(cmd)
 			if err != nil {
 				return err
 			}
@@ -196,18 +187,14 @@ func newUserChangePasswordCmd(resolver userCommandResolver) *cobra.Command { // 
 }
 
 func newUserCmd() *cobra.Command { // coverage-ignore
-	return newUserCmdWithResolver(resolveUserCommandRuntime)
-}
-
-func newUserCmdWithResolver(resolver userCommandResolver) *cobra.Command { // coverage-ignore
 	cmd := &cobra.Command{
 		Use:   userCommandName,
 		Short: "Manage users",
 	}
 	cmd.AddCommand(
-		newUserAddCmd(resolver),
-		newUserListCmd(resolver),
-		newUserChangePasswordCmd(resolver),
+		newUserAddCmd(),
+		newUserListCmd(),
+		newUserChangePasswordCmd(),
 	)
 	return cmd
 }

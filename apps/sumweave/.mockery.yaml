@@ -100,12 +100,3 @@ packages:
       jobsSchedulerCommandRunner:
       startAllHTTPServer:
       startAllRunner:
-      startServerRunner:
-      userCommandStore:
-      financeFixturesTenantService:
-      financeFixturesCatalogService:
-      financeFixturesLedgerService:
-      financeFixturesCSVImportService:
-      financeFixturesBankConnectionService:
-      financeFixturesBankSyncService:
-      financeFixturesFXService:
