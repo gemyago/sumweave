@@ -3,7 +3,7 @@
 This is the deterministic API-only gate for `finance.csv_import`. It verifies
 the fixed seven-column contract, confirmation publication, lazy job observation,
 audit completion, and repeat safety. Use the prepared local PostgreSQL database
-with fresh scoped data; do not use PM2 `start-all` for this gate because it can
+with fresh scoped data; do not use the normal PM2 worker for this gate because it can
 consume the message before the expected `404`.
 
 ## Isolated setup
@@ -17,8 +17,8 @@ E2E_ROOT="$REPO_ROOT/tmp/jobs-system-simplification-028-e2e/transaction-csv"
 rm -rf "$E2E_ROOT"
 mkdir -p "$E2E_ROOT"
 RUN_ID="$(date +%s)"
-# Stop the normal PM2 start-all backend before resetting its shared database.
-pm2 stop sumweave-api
+# Stop the normal PM2 API and worker before resetting their shared database.
+pm2 stop backend
 docker compose down -v
 make postgres-bootstrap
 

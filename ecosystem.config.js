@@ -3,13 +3,21 @@
 module.exports = {
   apps: [
     {
-      name: 'sumweave-api',
+      name: 'api',
+      namespace: 'backend',
       cwd: './apps/sumweave',
-      script: 'go run ./cmd/sumweave start-all --env local --json-logs | pino-pretty',
-      interpreter: "none"
+      script: 'go run ./cmd/sumweave start --env local --json-logs | pino-pretty',
+      interpreter: 'none',
     },
     {
-      name: 'sumweave-ui',
+      name: 'worker',
+      namespace: 'backend',
+      cwd: './apps/sumweave',
+      script: 'go run ./cmd/sumweave jobs worker --env local --json-logs | pino-pretty',
+      interpreter: 'none',
+    },
+    {
+      name: 'ui',
       script: 'npm run dev -- --host 127.0.0.1 --port 5173',
       interpreter: 'none',
       cwd: './apps/sumweave-ui',

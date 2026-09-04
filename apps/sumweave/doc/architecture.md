@@ -32,8 +32,8 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 
 - **`main.go`** / **`cli.go`** — Cobra commands, process lifecycle, and command-local explicit root resolution.
 - **`db-migrate`** — loads typed configuration and eagerly builds only logging/lifecycle/telemetry, SQL/auth stores, runtime migration inputs, and `DatabaseMigrator`; it does not build finance services, jobs worker/service, JWT, routes, or HTTP. It migrates the finance schema itself. Local setup invokes it exactly once for each prepared PostgreSQL environment through `make postgres-bootstrap` before **`start-all`**.
-- **`start-all`** — standard local backend workflow entrypoint; runs the HTTP server, appdispatch worker, and non-overlapping scheduler loop in one process using the same components as the split commands.
-- **`start`** — API-only HTTP server mode for split or production-like environments.
+- **`start-all`** — diagnostic entrypoint that runs the HTTP server, appdispatch worker, and non-overlapping scheduler loop in one process using the same components as the split commands.
+- **`start`** — API-only HTTP server mode used by local PM2 and production-like environments.
 - **`sumweave jobs worker`** / **`sumweave jobs enqueue-due`** — dedicated split-environment appdispatch consumer and one-shot scheduler commands. The worker registers ordinary and job-observed finance consumers; the scheduler reads finance-owned bank and FX schedules, publishes due semantic commands, advances schedule state atomically with the publication, and does not run finance work or create job rows. Neither builds HTTP routes or a server.
 - **`internal/wireup/`** — command-specific eager roots and explicit application wiring. HTTP, `start-all`, `db-migrate`, split jobs, user administration, and finance fixtures use direct construction.
 - **`internal/agent_runtime.go`** — constructs **`agent.Runner`** (LLM provider, **`workspacefs`** tools, filesystem storage under configurable data dir, and a required persisted agent profile service for runner-owned profile execution) and exposes **`httpapi`** as **`HTTPHandler`**.

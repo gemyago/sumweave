@@ -94,24 +94,27 @@ Frontend host/port: http://localhost:5173
 Backend host/port: http://localhost:4501
 
 PM2 process names:
-- `sumweave-api`
-- `sumweave-ui`
+- `api` and `worker` in the `backend` namespace
+- `ui` in PM2's default namespace
 
 Useful PM2 commands from the repo root:
 ```bash
-npm run pm2:status
-npm run pm2:restart
-npm run pm2:restart:api
-npm run pm2:restart:ui
-npm run pm2:stop
-npm run pm2:delete
+pm2 status
+pm2 restart backend
+pm2 restart ui
+pm2 stop backend
+pm2 stop ui
+pm2 delete backend
+pm2 delete ui
 ```
 
-Use `npm run pm2:logs` to inspect process output. If the backend ecosystem
-command or arguments change, recreate it rather than restarting it:
+Use `pm2 logs backend` for combined backend output and `pm2 logs` for all
+output. PM2 accepts `backend` as the positional namespace target for start,
+stop, restart, delete, and logs. If the backend ecosystem command or arguments
+change, recreate it rather than restarting it:
 
 ```bash
-pm2 delete sumweave-api
+pm2 delete backend
 pm2 start ecosystem.config.js
 ```
 
@@ -125,7 +128,7 @@ normal development workflow. From separate terminals, run the backend from
 `apps/sumweave` with `go run ./cmd/sumweave start-all --env local`
 and the UI from `apps/sumweave-ui` with `npm run dev`.
 
-If the data screen still shows a browse-first availability `404` after a PM2 restart, check `npm run pm2:status`: the UI proxies `/api/v1/*` to port `4501`, and a stale non-PM2 `sumweave start` process on that port can keep PM2's backend stopped. The PM2 API entry now attempts to replace a stale `sumweave start` listener automatically on startup.
+If the data screen still shows a browse-first availability `404` after a PM2 restart, check `pm2 status`: the UI proxies `/api/v1/*` to port `4501`, and a stale non-PM2 `sumweave start` process on that port can keep PM2's backend stopped. The PM2 API entry now attempts to replace a stale `sumweave start` listener automatically on startup.
 
 ### Combined local mode
 

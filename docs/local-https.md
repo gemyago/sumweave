@@ -57,9 +57,9 @@ HTTPS backend, so auth, runtime, finance, and other same-origin API calls stay
 on HTTPS without CORS configuration. Vite accepts the locally generated
 certificate when proxying this development-only connection.
 
-Use `npm run pm2:status` and `npm run pm2:logs` to inspect the processes. If
-the backend ecosystem command or arguments change, recreate it with
-`pm2 delete sumweave-api && pm2 start ecosystem.config.js`.
+Use `pm2 status` and `pm2 logs` to inspect the processes. If the backend
+ecosystem command or arguments change, recreate it with
+`pm2 delete backend && pm2 start ecosystem.config.js`.
 
 ## Return to the standard local HTTP workflow
 
@@ -75,8 +75,8 @@ repository root so neither process retains an old TLS environment:
 
 ```bash
 make postgres-bootstrap
-pm2 delete sumweave-api
-pm2 delete sumweave-ui
+pm2 delete backend
+pm2 delete ui
 pm2 start ecosystem.config.js
 pm2 status
 ```

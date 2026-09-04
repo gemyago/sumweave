@@ -48,8 +48,9 @@ go run ./cmd/sumweave start-all --env local
 ```
 
 For normal local development, return to the repository root and run `pm2 start
-ecosystem.config.js`. PM2 uses `start-all` only after bootstrap prepared the
-schemas.
+ecosystem.config.js`. PM2 starts separate `start` API and `jobs worker`
+processes after bootstrap prepared the schemas; run `jobs enqueue-due` separately
+when a scheduler tick is needed.
 
 ## Create or rotate the local app user
 

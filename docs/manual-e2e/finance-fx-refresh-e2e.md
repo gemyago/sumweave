@@ -16,8 +16,8 @@ REPO_ROOT="$PWD"
 E2E_ROOT="$REPO_ROOT/tmp/jobs-system-simplification-028-e2e/fx-refresh"
 rm -rf "$E2E_ROOT"
 mkdir -p "$E2E_ROOT"
-# Stop the normal PM2 start-all backend before resetting its shared database.
-pm2 stop sumweave-api
+# Stop the normal PM2 API and worker before resetting their shared database.
+pm2 stop backend
 docker compose down -v
 make postgres-bootstrap
 export APP_FINANCE_PROVIDERS_MONOBANK_BASEURL=http://127.0.0.1:4599
