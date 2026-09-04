@@ -5,6 +5,17 @@ cover_profile=$(cover_dir)/profile.out
 
 go-test-coverage=go run github.com/vladopajic/go-test-coverage/v2
 
+POSTGRES_HOST ?= 127.0.0.1
+POSTGRES_PORT ?= 55432
+POSTGRES_BOOTSTRAP_DSN ?= postgres://postgres:sumweave_postgres_local@127.0.0.1:55432/postgres?sslmode=disable
+
+.PHONY: postgres-bootstrap
+postgres-bootstrap:
+	docker compose -f compose.yaml up --detach --wait postgres
+	@POSTGRES_HOST="$(POSTGRES_HOST)" POSTGRES_PORT="$(POSTGRES_PORT)" \
+		POSTGRES_BOOTSTRAP_DSN="$(POSTGRES_BOOTSTRAP_DSN)" \
+		./scripts/postgres/bootstrap.sh
+
 $(cover_dir):
 	mkdir -p $(cover_dir)
 

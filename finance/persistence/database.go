@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -48,15 +47,6 @@ func NewDatabase(sqlDB *sql.DB, dsn string, opts ...OpenDatabaseOption) (*Databa
 		}
 	}
 
-	dialector := postgres.New(postgres.Config{DSN: dsn, Conn: sqlDB})
-	if dsn == ":memory:" ||
-		strings.HasPrefix(dsn, "file:") ||
-		strings.HasSuffix(dsn, ".db") ||
-		strings.HasSuffix(dsn, ".sqlite") ||
-		strings.Contains(dsn, "sqlite") {
-		dialector = sqlite.Dialector{DriverName: sqlite.DriverName, DSN: dsn, Conn: sqlDB}
-	}
-
 	gormCfg := &gorm.Config{TranslateError: true}
 	if cfg.logger != nil {
 		gormCfg.Logger = gormlogger.NewSlogLogger(cfg.logger.WithGroup("gorm"), gormlogger.Config{
@@ -67,7 +57,7 @@ func NewDatabase(sqlDB *sql.DB, dsn string, opts ...OpenDatabaseOption) (*Databa
 		})
 	}
 
-	db, err := gorm.Open(dialector, gormCfg)
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: dsn, Conn: sqlDB}), gormCfg)
 	if err != nil {
 		return nil, fmt.Errorf("open finance database: %w", err)
 	}

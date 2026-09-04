@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/glebarez/sqlite"
+	"github.com/jackc/pgx/v5"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -81,11 +81,10 @@ func NewStore(sqlDB *sql.DB, dsn string, opts StoreOpts) (*Store, error) {
 	if strings.TrimSpace(dsn) == "" {
 		return nil, errors.New("database dsn is required")
 	}
-	dialector := postgres.New(postgres.Config{DSN: dsn, Conn: sqlDB})
-	if isSQLiteDSN(dsn) {
-		dialector = sqlite.Dialector{DriverName: sqlite.DriverName, DSN: dsn, Conn: sqlDB}
+	if _, err := pgx.ParseConfig(dsn); err != nil {
+		return nil, fmt.Errorf("parse jobs database dsn: %w", err)
 	}
-	db, err := gorm.Open(dialector, &gorm.Config{
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: dsn, Conn: sqlDB}), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{TablePrefix: opts.TablePrefix}, TranslateError: true,
 	})
 	if err != nil {
@@ -98,25 +97,18 @@ func NewStore(sqlDB *sql.DB, dsn string, opts StoreOpts) (*Store, error) {
 	return &Store{db: db, tableName: tableName}, nil
 }
 
-func isSQLiteDSN(dsn string) bool {
-	trimmed := strings.TrimSpace(dsn)
-	return trimmed == ":memory:" || strings.HasPrefix(trimmed, "file:") ||
-		strings.Contains(trimmed, "sqlite") || strings.HasSuffix(trimmed, ".db") ||
-		strings.HasSuffix(trimmed, ".sqlite")
-}
-
 // AutoMigrate explicitly removes alpha-only fields because GORM does not do so.
 func (s *Store) AutoMigrate() error {
-	if err := s.db.Table(s.tableName).AutoMigrate(&jobModel{}); err != nil { // coverage-ignore
+	if err := s.db.Table(s.tableName).AutoMigrate(&jobModel{}); err != nil {
 		return fmt.Errorf("migrate jobs table: %w", err)
 	}
 	if err := s.dropTableIfExists(
 		s.scheduleTableName(),
-	); err != nil { // coverage-ignore // Driver drop failure propagation.
+	); err != nil {
 		return err
 	}
 	for _, column := range []string{"agent_session_id", "agent_run_id", "idempotency_key", "canonical_input_hash", "input_json", "result_json", "progress_json", "max_attempts", "correlation_id"} {
-		if err := s.dropColumnIfExists(s.tableName, column); err != nil { // coverage-ignore
+		if err := s.dropColumnIfExists(s.tableName, column); err != nil {
 			return err
 		}
 	}
@@ -128,7 +120,7 @@ func (s *Store) dropTableIfExists(tableName string) error {
 	if !migrator.HasTable(tableName) {
 		return nil
 	}
-	if err := migrator.DropTable(tableName); err != nil { // coverage-ignore // Driver drop failure propagation.
+	if err := migrator.DropTable(tableName); err != nil {
 		return fmt.Errorf("drop obsolete table %s: %w", tableName, err)
 	}
 	return nil
@@ -139,45 +131,13 @@ func (s *Store) dropColumnIfExists(tableName, column string) error {
 	if !migrator.HasColumn(tableName, column) {
 		return nil
 	}
-	if err := s.dropSQLiteIndexesUsingColumn(
-		tableName,
-		column,
-	); err != nil { // coverage-ignore // Driver index migration failure propagation.
-		return err
-	}
 	statement := fmt.Sprintf(
 		"ALTER TABLE %s DROP COLUMN %s",
 		quoteIdentifier(tableName),
 		quoteIdentifier(column),
 	)
-	if err := s.db.Exec(statement).Error; err != nil { // coverage-ignore
+	if err := s.db.Exec(statement).Error; err != nil {
 		return fmt.Errorf("drop obsolete %s column %s: %w", tableName, column, err)
-	}
-	return nil
-}
-
-func (s *Store) dropSQLiteIndexesUsingColumn(tableName, column string) error {
-	if s.db.Dialector.Name() != "sqlite" { // coverage-ignore // PostgreSQL drops dependent indexes with the column.
-		return nil
-	}
-	migrator := s.db.Table(tableName).Migrator()
-	indexes, err := migrator.GetIndexes(tableName)
-	if err != nil { // coverage-ignore // SQLite index inspection failure propagation.
-		return fmt.Errorf("inspect SQLite indexes for obsolete %s column: %w", column, err)
-	}
-	for _, index := range indexes {
-		for _, indexedColumn := range index.Columns() {
-			if indexedColumn != column {
-				continue
-			}
-			if dropErr := migrator.DropIndex(
-				tableName,
-				index.Name(),
-			); dropErr != nil { // coverage-ignore // SQLite index drop failure propagation.
-				return fmt.Errorf("drop SQLite index %s for obsolete %s column: %w", index.Name(), column, dropErr)
-			}
-			break
-		}
 	}
 	return nil
 }
@@ -186,26 +146,18 @@ func quoteIdentifier(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
-func (s *Store) createWithDB(ctx context.Context, db *gorm.DB, job Job) error {
-	model := newJobModel(job)
-	if err := db.WithContext(ctx).Table(s.tableName).Create(&model).Error; err != nil { // coverage-ignore
-		return fmt.Errorf("create job: %w", err)
-	}
-	return nil
-}
-
 func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {
 	var model jobModel
 	query := s.db.WithContext(ctx).Table(s.tableName).
 		Where("id = ?", strings.TrimSpace(jobID)).First(&model)
-	if err := query.Error; err != nil { // coverage-ignore
+	if err := query.Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrJobNotFound
 		}
 		return nil, fmt.Errorf(
 			"get job: %w",
 			err,
-		) // coverage-ignore // Driver read failure propagation.
+		)
 	}
 	job := jobFromModel(model)
 	return &job, nil
@@ -218,11 +170,11 @@ func (s *Store) MaterializeQueued(ctx context.Context, job Job) (*Job, error) {
 	create := s.db.WithContext(ctx).Table(s.tableName).
 		Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "id"}}, DoNothing: true}).
 		Create(&model)
-	if err := create.Error; err != nil { // coverage-ignore
+	if err := create.Error; err != nil {
 		return nil, fmt.Errorf("materialize queued job: %w", err)
 	}
 	materialized, err := s.Get(ctx, job.ID)
-	if err != nil { // coverage-ignore // Materialization read failure is a driver failure.
+	if err != nil {
 		return nil, fmt.Errorf("get materialized job: %w", err)
 	}
 	return materialized, nil
@@ -239,16 +191,16 @@ func (s *Store) List(ctx context.Context, params ListParams) (ListResult, error)
 	}
 	if len(
 		params.Sources,
-	) > 0 { // coverage-ignore // Source filtering is a deferred product decision.
+	) > 0 {
 		statement = statement.Where("requester_source IN ?", params.Sources)
 	}
-	if params.Cursor != "" { // coverage-ignore // Cursor pagination is controller-covered.
+	if params.Cursor != "" {
 		createdAt, id, err := decodeCursor(params.Cursor)
 		if err != nil {
 			return ListResult{}, fmt.Errorf(
 				"decode cursor: %w",
 				err,
-			) // coverage-ignore // Cursor validation is covered by controllers.
+			)
 		}
 		statement = statement.Where(
 			"(created_at < ?) OR (created_at = ? AND id < ?)",
@@ -259,7 +211,7 @@ func (s *Store) List(ctx context.Context, params ListParams) (ListResult, error)
 	}
 	var models []jobModel
 	findResult := statement.Order("created_at DESC").Order("id DESC").Limit(params.Limit).Find(&models)
-	if err := findResult.Error; err != nil { // coverage-ignore
+	if err := findResult.Error; err != nil {
 		return ListResult{}, fmt.Errorf("list jobs: %w", err)
 	}
 	result := ListResult{Items: make([]Job, 0, len(models))}
@@ -279,7 +231,7 @@ func (s *Store) ClaimQueued(
 ) (*Job, error) {
 	if err := validateRequiredTimestamp(
 		"claimedAt", claimedAt,
-	); err != nil { // coverage-ignore // Input validation is unit-tested at the worker boundary.
+	); err != nil {
 		return nil, err
 	}
 	result := s.db.WithContext(ctx).Table(s.tableName).Model(&jobModel{}).
@@ -289,7 +241,7 @@ func (s *Store) ClaimQueued(
 			columnAttemptCount: gorm.Expr("attempt_count + 1"), columnLastAttemptTime: claimedAt,
 			columnStartedAt: claimedAt, columnUpdatedAt: claimedAt,
 		})
-	if result.Error != nil { // coverage-ignore // Driver claim failure propagation.
+	if result.Error != nil {
 		return nil, fmt.Errorf("claim queued job: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
@@ -315,7 +267,7 @@ func (s *Store) persistTerminalState(
 			claim.StartedAt,
 		).
 		Updates(updates)
-	if result.Error != nil { // coverage-ignore
+	if result.Error != nil {
 		return fmt.Errorf("persist terminal job state: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
@@ -341,7 +293,7 @@ func (s *Store) FinalizeRetryExhausted(
 			queuedAt,
 		).
 		Updates(updates)
-	if result.Error != nil { // coverage-ignore
+	if result.Error != nil {
 		return fmt.Errorf("finalize exhausted job retries: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
@@ -356,7 +308,7 @@ func terminalStateUpdates(state terminalJobState) map[string]any {
 		columnErrorCode: "", columnErrorSummary: "", columnErrorDetails: "",
 		columnCompletedAt: state.completedAt, columnUpdatedAt: state.completedAt,
 	}
-	if state.jobError != nil { // coverage-ignore // Sanitized business errors are covered at the lifecycle decorator boundary.
+	if state.jobError != nil {
 		updates[columnErrorCode] = truncateBounded(state.jobError.Code, 128)
 		updates[columnErrorSummary] = truncateBounded(state.jobError.Summary, maxErrorSummaryLength)
 		updates[columnErrorDetails] = truncateBounded(state.jobError.Details, maxErrorDetailsLength)
@@ -366,7 +318,7 @@ func terminalStateUpdates(state terminalJobState) map[string]any {
 
 func (s *Store) RequeueRunning(ctx context.Context, claim Job, queuedAt time.Time) error {
 	// Input validation is unit-tested at the worker boundary.
-	if err := validateRequiredTimestamp("queuedAt", queuedAt); err != nil { // coverage-ignore
+	if err := validateRequiredTimestamp("queuedAt", queuedAt); err != nil {
 		return err
 	}
 	result := s.db.WithContext(ctx).Table(s.tableName).Model(&jobModel{}).
@@ -382,11 +334,11 @@ func (s *Store) RequeueRunning(ctx context.Context, claim Job, queuedAt time.Tim
 			columnQueuedAt: queuedAt, columnUpdatedAt: queuedAt,
 		})
 	// Driver requeue failure propagation.
-	if result.Error != nil { // coverage-ignore
+	if result.Error != nil {
 		return fmt.Errorf("requeue running job: %w", result.Error)
 	}
 	// A claim that has already been recovered cannot be requeued by its former owner.
-	if result.RowsAffected == 0 { // coverage-ignore
+	if result.RowsAffected == 0 {
 		return ErrJobClaimLost
 	}
 	return nil
@@ -405,7 +357,7 @@ func (s *Store) RenewRunning(ctx context.Context, claim Job, renewedAt time.Time
 			claim.StartedAt,
 		).
 		Update(columnUpdatedAt, renewedAt)
-	if result.Error != nil { // coverage-ignore
+	if result.Error != nil {
 		return fmt.Errorf("renew running job claim: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
@@ -442,7 +394,7 @@ func (s *Store) RecoverStaleRunning(
 	maxAttempts int,
 ) error {
 	// Worker supplies its validated clock value.
-	if err := validateRequiredTimestamp("now", now); err != nil { // coverage-ignore
+	if err := validateRequiredTimestamp("now", now); err != nil {
 		return err
 	}
 	if staleRunningAge <= 0 {
@@ -533,7 +485,7 @@ func newJobModel(job Job) jobModel {
 		ScheduledNextRunAt: job.ScheduledNextRunAt,
 	}
 	// Sanitized errors are covered by lifecycle mapping.
-	if job.Error != nil { // coverage-ignore
+	if job.Error != nil {
 		model.ErrorCode = truncateBounded(job.Error.Code, 128)
 		model.ErrorSummary = truncateBounded(job.Error.Summary, maxErrorSummaryLength)
 		model.ErrorDetails = truncateBounded(job.Error.Details, maxErrorDetailsLength)
@@ -585,11 +537,11 @@ func decodeCursor(cursor string) (time.Time, string, error) {
 	if len(parts) != 2 ||
 		strings.TrimSpace(
 			parts[1],
-		) == "" { // coverage-ignore // Cursor validation is controller-covered.
+		) == "" {
 		return time.Time{}, "", errors.New("invalid cursor")
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, parts[0])
-	if err != nil { // coverage-ignore // Cursor validation is controller-covered.
+	if err != nil {
 		return time.Time{}, "", errors.New("invalid cursor timestamp")
 	}
 	return parsed, parts[1], nil

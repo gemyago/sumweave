@@ -57,9 +57,6 @@ func NewDatabaseSessionMetadataStore(
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	if err = gormsumweave.ApplySQLiteConnectionDefaults(db, dsn); err != nil {
-		return nil, err
-	}
 	return &DatabaseSessionMetadataStore{db: db}, nil
 }
 
@@ -75,6 +72,8 @@ func (s *DatabaseSessionMetadataStore) Save(ctx context.Context, metadata Sessio
 	if err := ValidateMetadataForSave(metadata); err != nil {
 		return err
 	}
+	metadata.CreatedAt = metadata.CreatedAt.Truncate(time.Microsecond)
+	metadata.UpdatedAt = metadata.UpdatedAt.Truncate(time.Microsecond)
 	row := sessionMetadataToModel(metadata)
 	if err := s.db.WithContext(ctx).Save(&row).Error; err != nil {
 		return fmt.Errorf("save session metadata: %w", err)

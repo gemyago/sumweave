@@ -35,11 +35,14 @@ Configuration names are:
 - application table prefix: `sumweave_`
 - agent runtime table prefix: `sumweave_runtime_`
 
-SQLite is supported for local development and tests only. The local defaults
-are `data/application.db` and `data/agent-runtime.db` relative to
-`apps/sumweave`. Production configuration must receive PostgreSQL DSNs
-through its environment or secret management; it must not inherit local SQLite
-paths.
+PostgreSQL is the only supported database. Checked-in local configuration uses
+the `sumweave_runtime` role and `sumweave_local` database exposed by the
+repository-managed Compose service; checked-in test configuration uses the same
+role and `sumweave_test`. Both use the fixed `sumweave_`,
+`sumweave_runtime_`, and `finance_` table-prefix contract. Production receives
+its PostgreSQL DSNs through environment or secret management. Bootstrap owns the
+concrete local roles: `sumweave_owner` owns each database, `sumweave_migrator`
+runs DDL, and `sumweave_runtime` runs backend processes and tagged tests.
 
 ## Authentication And Signing Keys
 
@@ -80,15 +83,16 @@ support and debugging; they are not raw response retention or a history
 timeline.
 
 Finance persistence uses explicit table prefixes and domain models separate
-from persistence models. SQLite remains the local baseline; PostgreSQL is the
-production database. The finance module must not import the generic agent
-runtime.
+from persistence models. It uses PostgreSQL in local, test, and production
+environments. The finance module must not import the generic agent runtime.
 
 ## Migration Integration
 
-Run `sumweave db-migrate` before starting processes that use persisted
-tables. The command is idempotent and prepares the retained schemas in this
-order:
+Run `make postgres-bootstrap` before starting local processes that use persisted
+tables. It starts and waits for Compose, provisions roles and databases, runs
+`sumweave db-migrate` once with the migrator role for each of `local` and `test`,
+then grants runtime access. The migration command is idempotent and prepares the
+retained schemas in this order:
 
 1. database-backed agent runtime schema
 2. application authentication schema
@@ -99,9 +103,10 @@ order:
 Migration failures must identify the owning component. Migration tests remain
 shallow: one schema smoke path and migration-failure context are sufficient.
 
-No data migration from abandoned local files or obsolete databases is required.
+No data migration from abandoned SQLite files or obsolete databases is required.
 For this early-alpha provider-snapshot change, recreate local and test
-databases instead of retaining retired provider source-data tables or rows.
+PostgreSQL databases instead of retaining retired provider source-data tables or
+rows. The cutover does not change date or timestamp normalization.
 
 ## Worker And Scheduler Lifecycle
 
@@ -121,15 +126,15 @@ scaling.
 
 ## Verification
 
-1. Run `db-migrate` against fresh local application and agent-runtime SQLite
-   databases.
+1. Run `make postgres-bootstrap` to provision and migrate fresh local and test
+   PostgreSQL databases.
 2. Reseed the first `.local-users` entry and verify login and token rotation.
 3. Start the API and worker with no persistent data directory.
 4. Verify finance data, current finance provider snapshots, agent sessions, provider
    configuration, and profiles survive process replacement through database
    reads.
-5. Repeat migration and smoke behavior against PostgreSQL.
-6. Run `make affected-lint-test` for implementation changes.
+5. Run ordinary module `make test` commands for tagged PostgreSQL coverage.
+6. Run `make affected-lint-test` for implementation changes after bootstrap.
 
 ## Completion Criteria
 
@@ -141,8 +146,8 @@ This design is satisfied when:
 - JWT signing material is externally configured
 - `db-migrate` prepares all retained schemas
 - production workloads require no persistent filesystem volume
-- local development continues to work with SQLite
-- PostgreSQL smoke verification passes
+- local development uses the Compose PostgreSQL environment
+- ordinary tagged PostgreSQL tests pass without changing timestamp semantics
 
 ## Provider snapshot upgrade cleanup
 

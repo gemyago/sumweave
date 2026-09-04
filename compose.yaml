@@ -1,0 +1,22 @@
+name: sumweave
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    command: ["postgres", "-p", "55432"]
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: sumweave_postgres_local
+    ports:
+      - "127.0.0.1:55432:55432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres -p 55432"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - sumweave_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  sumweave_postgres_data:

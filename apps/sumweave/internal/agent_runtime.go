@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -47,6 +48,9 @@ type runtimeServices struct {
 
 func newProvidersConfigService(deps RuntimeDeps) (agent.ProvidersConfigService, error) { //nolint:ireturn
 	if deps.AgentRuntimeStorageType == storageTypeDatabase {
+		if deps.AgentRuntimeDatabaseDSN == "" {
+			return nil, errors.New("agent runtime database dsn is required")
+		}
 		svc, err := agent.NewDatabaseProvidersConfigService(
 			deps.AgentRuntimeDatabaseDSN,
 			deps.RootLogger,
@@ -66,6 +70,9 @@ func newProvidersConfigService(deps RuntimeDeps) (agent.ProvidersConfigService, 
 
 func newAgentProfilesService(deps RuntimeDeps) (agent.AgentProfilesService, error) { //nolint:ireturn
 	if deps.AgentRuntimeStorageType == storageTypeDatabase {
+		if deps.AgentRuntimeDatabaseDSN == "" {
+			return nil, errors.New("agent runtime database dsn is required")
+		}
 		svc, err := agent.NewDatabaseAgentProfilesService(
 			deps.AgentRuntimeDatabaseDSN,
 			deps.RootLogger,

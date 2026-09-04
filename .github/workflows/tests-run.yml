@@ -47,5 +47,10 @@ jobs:
       - name: Run lint
         run: npx nx affected --target=lint --parallel=3
 
+      - name: Bootstrap PostgreSQL
+        run: make postgres-bootstrap
+
       - name: Run tests
+        env:
+          SUMWEAVE_POSTGRES_TEST_DSN: "postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_test?sslmode=disable"
         run: npx nx affected --target=test --parallel=3

@@ -4,11 +4,11 @@ httpServer:
 
 application:
   database:
-    dsn: ":memory:"
+    dsn: postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_test?sslmode=disable
 
 agentRuntime:
   database:
-    dsn: ":memory:"
+    dsn: postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_test?sslmode=disable
 
 auth:
   jwtSigningKey: test-secret-key

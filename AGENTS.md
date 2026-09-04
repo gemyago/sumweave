@@ -73,8 +73,8 @@ Go and Node.js are managed by direnv (in .envrc) and nvm respectively. All depen
 PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from the repo root.
 
 **PM2 usage notes**
-- From `apps/sumweave`, run `go run ./cmd/sumweave db-migrate --env local` before starting or restarting backend PM2 processes that rely on persisted tables.
-- Standard local workflow is `db-migrate` from `apps/sumweave`, then `pm2 start ecosystem.config.js` from the repository root.
+- From the repository root, run `make postgres-bootstrap` before starting or restarting backend PM2 processes that rely on persisted tables.
+- Standard local workflow is `make postgres-bootstrap`, then `pm2 start ecosystem.config.js` from the repository root.
 - Use direct `go run ./cmd/sumweave start-all --env local` only to diagnose a local startup problem.
 - PM2 is invoked from the repository root, but its backend process uses `apps/sumweave` as its working directory.
 - Run `pm2 start ecosystem.config.js` to create the PM2 apps from the current ecosystem file.
@@ -86,7 +86,9 @@ PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from
 For optional local HTTPS backend and Vite development, follow [docs/local-https.md](./docs/local-https.md). The documented workflow generates ignored local certificates and does not change the normal PM2 HTTP workflow.
 
 Durable jobs workflow:
-- Run `sumweave db-migrate` from `apps/sumweave` before any process that uses persisted application tables.
+- Run `make postgres-bootstrap` from the repository root before any process that uses persisted application tables.
+- Run `make postgres-bootstrap` before ordinary backend tests; each core
+  module's `make test` runs normally selected tests.
 - `sumweave start` is API-only: it publishes appdispatch messages but does not run a worker or execute finance work inline.
 - `sumweave start-all` explicitly combines HTTP, the appdispatch worker, and the finance scheduler loop for local operation.
 - `sumweave jobs worker [--once]` is the split consumer; `--once` drains a bounded isolated/reseeded database and materializes observed jobs on delivery.
@@ -127,6 +129,7 @@ AI must always follow the rules and conventions defined in this section. This se
 
 The rules are:
 - **DO NOT** over engineer or over-complicate. Address problems present now or explicitly requested.
+- Main rule to follow - the simpler the better.
 - Never go outside of the project root
 - Store temp files in a project scoped tmp directory (e.g ${PWD}/tmp/...)
 - Update project rules and conventions when user corrects the behavior of AI.
@@ -145,10 +148,10 @@ The rules are:
 - Launch local backend CLI commands from `apps/sumweave`.
 - Avoid markdown tables, prefer lists or other formatting. Tables are hard to read by humans. Use tables only when user explicitly requests it.
 - Do not run `git diff --check` as a routine verification step.
-- Routine CI tests must not require PostgreSQL to be available.
+- Bootstrap PostgreSQL before ordinary backend test commands.
 - Do not test generated ORM queries by matching SQL strings.
 - Do not explicitly normalize dates or timestamps to UTC.
-- Consider SQLite as local-dev only storage. Small issues and inconsistencies are tolerable.
+- PostgreSQL is the sole supported core product database in every environment.
 - Keep API responses single-purpose by default (e.g operating on a single entity); Composition must have a good justification.
 - Keep migration tests shallow; allow one smoke test, no detailed schema checks.
 - Build frontend/backend release artifacts on the host; Docker only packages them.

@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"os"
 
+	appinternal "github.com/gemyago/sumweave/apps/sumweave/internal"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/finance/persistence"
 )
 
@@ -46,7 +46,7 @@ func BuildFinanceFixtures(
 		return nil, err
 	}
 
-	database, err := sqlconn.Open(rootConfig.Application.Database.DSN)
+	database, err := appinternal.OpenApplicationSQLDB(rootConfig.Application.Database.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("open finance fixtures application database: %w", err)
 	}

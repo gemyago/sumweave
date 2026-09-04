@@ -1,7 +1,6 @@
 package main
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -10,6 +9,7 @@ import (
 
 func TestRuntimeResolution(t *testing.T) {
 	t.Chdir("../..")
+	t.Setenv("APP_DATADIR", t.TempDir())
 	makeRoot := func(t *testing.T, command *cobra.Command) *cobra.Command {
 		t.Helper()
 		root := newRootCmd()
@@ -18,28 +18,7 @@ func TestRuntimeResolution(t *testing.T) {
 		require.NoError(t, root.PersistentFlags().Set("env", "test"))
 		return root
 	}
-	prepareSchemas := func(t *testing.T) {
-		t.Helper()
-		command := newDatabaseMigrateCmd()
-		root := makeRoot(t, command)
-		migrator, err := resolveDatabaseMigrator(root)
-		require.NoError(t, err)
-		require.NoError(t, migrator.Migrate(t.Context()))
-	}
-
-	t.Run("database migration resolves the explicit migrator", func(t *testing.T) {
-		command := newDatabaseMigrateCmd()
-		root := makeRoot(t, command)
-		resolved, err := resolveDatabaseMigrator(command)
-		require.NoError(t, err)
-		require.NotNil(t, resolved)
-		require.NoError(t, resolved.Migrate(t.Context()))
-		require.Same(t, root, command.Root())
-	})
-
 	t.Run("jobs split mode resolves worker and scheduler after finance job registration", func(t *testing.T) {
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
-		prepareSchemas(t)
 		jobsCommand := newJobsCmd()
 		root := makeRoot(t, jobsCommand)
 		workerCommand, _, err := jobsCommand.Find([]string{jobsWorkerCommandName})
@@ -62,8 +41,6 @@ func TestRuntimeResolution(t *testing.T) {
 	})
 
 	t.Run("start all noop resolves, validates, and closes local component wireup", func(t *testing.T) {
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
-		prepareSchemas(t)
 		command := newStartAllCmd()
 		makeRoot(t, command)
 		runtime, err := resolveStartAllRuntime(command, startServerParams{noop: true})

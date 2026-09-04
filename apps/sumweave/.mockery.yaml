@@ -35,6 +35,7 @@ packages:
       financeService:
       providerSnapshotService:
       transferDetailService:
+      syntheticLinkStateService:
       jobsService:
       userDirectory:
   github.com/gemyago/sumweave/apps/sumweave/internal/app:

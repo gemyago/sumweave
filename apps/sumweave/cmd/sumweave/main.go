@@ -23,11 +23,7 @@ func setupCommands() *cobra.Command {
 		newStartAllCmd(),
 		newDatabaseMigrateCmd(),
 		newJobsCmd(),
-		newFinanceCmd(financeFixturesCommandDeps{
-			ResolveRuntimeConfig: func(cmd *cobra.Command) (financeFixturesRuntimeConfig, error) {
-				return resolveFinanceFixturesRuntimeConfig(cmd.Root())
-			},
-		}),
+		newFinanceCmd(),
 		newFinancePOCCmd(financePOCCommandDeps{}),
 		newUserCmd(),
 	)

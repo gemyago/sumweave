@@ -7,12 +7,12 @@ This guide covers the browser flow for PKO linking through Enable Banking sandbo
 ## Before the run: recreate the local database
 
 This acceptance run must produce new snapshots, not inspect data from a prior
-schema. Stop the local services, remove the local application database and its
-SQLite sidecar files under `apps/sumweave/data/`, then run `sumweave db-migrate`
-from `apps/sumweave`. Reseed the first `.local-users` entry if needed, recreate
-the PM2 services from the repository root, and confirm both health endpoints
-before continuing. This early-alpha workflow intentionally performs no data
-migration or compatibility copy.
+schema. Stop local services, recreate the repository-managed Compose PostgreSQL
+environment with `docker compose down -v && make postgres-bootstrap`, then
+reseed the first `.local-users` entry if needed. Recreate the PM2 services from
+the repository root and confirm both health endpoints before continuing. This
+early-alpha workflow intentionally performs no SQLite data migration or
+compatibility copy.
 
 ## 1. Open the browser
 

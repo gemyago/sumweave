@@ -7,3 +7,5 @@ is retained for future financial workflows.
 
 Start with [the architecture](docs/ARCHITECTURE.md), then the
 [documentation index](docs/README.md) and [contributor workflow](CONTRIBUTING.md).
+Local backend setup starts with `make postgres-bootstrap`; PostgreSQL is the
+sole supported product database.

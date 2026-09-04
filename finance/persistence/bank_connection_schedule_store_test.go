@@ -13,6 +13,16 @@ import (
 
 func TestBankConnectionScheduleStore(t *testing.T) {
 	fake := faker.New()
+	saveSchedule := func(t *testing.T, store *BankConnectionScheduleStore, schedule domain.BankConnectionSchedule) {
+		t.Helper()
+		require.NoError(t, store.Save(t.Context(), schedule))
+		t.Cleanup(func() {
+			actual, err := store.Get(context.WithoutCancel(t.Context()), schedule.ConnectionID)
+			require.NoError(t, err)
+			actual.Enabled = false
+			require.NoError(t, store.Save(context.WithoutCancel(t.Context()), *actual))
+		})
+	}
 
 	makeSchedule := func(now time.Time, nextRunAt *time.Time, enabled bool) domain.BankConnectionSchedule {
 		return domain.BankConnectionSchedule{
@@ -24,34 +34,41 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 	t.Run("lists only enabled due schedules in occurrence order", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewBankConnectionScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		earlier := now.Add(-2 * time.Hour)
 		later := now.Add(-time.Hour)
 		future := now.Add(time.Hour)
 
 		expected := makeSchedule(now, &earlier, true)
-		require.NoError(t, store.Save(t.Context(), expected))
-		require.NoError(t, store.Save(t.Context(), makeSchedule(now, &later, true)))
-		require.NoError(t, store.Save(t.Context(), makeSchedule(now, &future, true)))
-		require.NoError(t, store.Save(t.Context(), makeSchedule(now, &earlier, false)))
-		require.NoError(t, store.Save(t.Context(), makeSchedule(now, nil, true)))
+		second := makeSchedule(now, &later, true)
+		saveSchedule(t, store, expected)
+		saveSchedule(t, store, second)
+		saveSchedule(t, store, makeSchedule(now, &future, true))
+		saveSchedule(t, store, makeSchedule(now, &earlier, false))
+		saveSchedule(t, store, makeSchedule(now, nil, true))
 
 		actual, err := store.ListDue(t.Context(), now)
 
 		require.NoError(t, err)
-		require.Len(t, actual, 2)
-		assert.Equal(t, expected.ConnectionID, actual[0].ConnectionID)
-		assert.True(t, later.Equal(*actual[1].NextRunAt))
+		var due []domain.BankConnectionSchedule
+		for _, item := range actual {
+			if item.ConnectionID == expected.ConnectionID || item.ConnectionID == second.ConnectionID {
+				due = append(due, item)
+			}
+		}
+		require.Len(t, due, 2)
+		assert.Equal(t, expected.ConnectionID, due[0].ConnectionID)
+		assert.True(t, later.Equal(*due[1].NextRunAt))
 	})
 
 	t.Run("rolls back occurrence state changes", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewBankConnectionScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 
 		err := store.WithTransaction(t.Context(), func(tx *BankConnectionScheduleTransaction) error {
 			schedule.NextRunAt = &nextRunAt
@@ -73,11 +90,11 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 	t.Run("commits occurrence state changes", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewBankConnectionScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 
 		require.NoError(t, store.WithTransaction(t.Context(), func(tx *BankConnectionScheduleTransaction) error {
 			schedule.NextRunAt = &nextRunAt
@@ -92,11 +109,11 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 	t.Run("conditionally claims and finalizes only the expected due occurrence", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewBankConnectionScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 		messageID := fake.UUID().V4()
 
 		require.NoError(t, store.WithTransaction(t.Context(), func(tx *BankConnectionScheduleTransaction) error {
@@ -126,7 +143,7 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 
 		err := store.WithTransaction(t.Context(), func(tx *BankConnectionScheduleTransaction) error {
 			canceledContext, cancel := context.WithCancel(t.Context())

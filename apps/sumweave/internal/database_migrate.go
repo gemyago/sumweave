@@ -62,6 +62,7 @@ type componentMigrationError struct {
 func (e *componentMigrationError) Error() string {
 	return fmt.Sprintf("migrate %s schema", e.component)
 }
+
 func (e *componentMigrationError) Unwrap() error { return e.err }
 
 func (m *DatabaseMigrator) Migrate(ctx context.Context) error {
@@ -69,7 +70,11 @@ func (m *DatabaseMigrator) Migrate(ctx context.Context) error {
 		component string
 		run       func(context.Context) error
 	}{
-		{"agent runtime", m.migrateAgentRuntime}, {"authentication", m.migrateAuthentication}, {"app dispatch transport", m.migrateAppDispatch}, {"durable jobs", m.migrateJobs}, {"finance", m.migrateFinance},
+		{"agent runtime", m.migrateAgentRuntime},
+		{"authentication", m.migrateAuthentication},
+		{"app dispatch transport", m.migrateAppDispatch},
+		{"durable jobs", m.migrateJobs},
+		{"finance", m.migrateFinance},
 	} {
 		if err := m.runStep(ctx, step.component, step.run); err != nil {
 			return err
@@ -92,22 +97,16 @@ func (m *DatabaseMigrator) migrateAgentRuntime(_ context.Context) error {
 	if m.agentRuntimeStorageType != storageTypeDatabase {
 		return nil
 	}
-	providers, err := agent.NewDatabaseProvidersConfigService(
-		m.agentRuntimeDatabaseDSN,
-		m.rootLogger,
-		m.agentRuntimeDatabaseTablePrefix,
-	)
+	services, err := newRuntimeServices(RuntimeDeps{
+		RootLogger:                      m.rootLogger,
+		AgentRuntimeStorageType:         m.agentRuntimeStorageType,
+		AgentRuntimeDatabaseDSN:         m.agentRuntimeDatabaseDSN,
+		AgentRuntimeDatabaseTablePrefix: m.agentRuntimeDatabaseTablePrefix,
+	})
 	if err != nil {
-		return fmt.Errorf("create providers config service: %w", err)
+		return fmt.Errorf("create agent runtime services: %w", err)
 	}
-	profiles, err := agent.NewDatabaseAgentProfilesService(
-		m.agentRuntimeDatabaseDSN,
-		m.rootLogger,
-		m.agentRuntimeDatabaseTablePrefix,
-	)
-	if err != nil {
-		return fmt.Errorf("create database agent profiles service: %w", err)
-	}
+	providers, profiles := services.providersConfigSvc, services.agentProfilesSvc
 	runner, err := agent.NewRunner(
 		agent.RunnerArgs{ProvidersConfigService: providers, AgentProfilesService: profiles},
 		agent.WithLogger(m.rootLogger),
@@ -123,10 +122,8 @@ func (m *DatabaseMigrator) migrateAgentRuntime(_ context.Context) error {
 	if err = profiles.AutoMigrate(); err != nil {
 		return fmt.Errorf("auto migrate agent profiles database: %w", err)
 	}
-	migrator, ok := providers.(interface{ AutoMigrate() error })
-	if !ok {
-		return errors.New("database providers config service does not support auto migration")
-	}
+	//nolint:errcheck // The concrete database provider service supports AutoMigrate.
+	migrator := providers.(interface{ AutoMigrate() error })
 	if err = migrator.AutoMigrate(); err != nil {
 		return fmt.Errorf("auto migrate providers config database: %w", err)
 	}

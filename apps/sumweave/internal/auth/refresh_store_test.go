@@ -1,13 +1,14 @@
 package auth
 
 import (
-	"fmt"
+	"database/sql"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -16,15 +17,15 @@ func TestRefreshTokenStore(t *testing.T) {
 	fake := faker.New()
 	makeStore := func(t *testing.T) *RefreshTokenStore {
 		t.Helper()
-		dsn := fmt.Sprintf("file:auth-refresh-%s?mode=memory&cache=shared", fake.UUID().V4())
-		sqlDB, err := sqlconn.Open(dsn)
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
+		sqlDB, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 		store, err := NewRefreshTokenStore(RefreshTokenStoreDeps{
-			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "test_auth_", Logger: telemetry.RootTestLogger(),
+			SQLDB: sqlDB, DatabaseDSN: dsn, TablePrefix: "sumweave_auth_", Logger: telemetry.RootTestLogger(),
 		})
 		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
 		return store
 	}
 
@@ -48,6 +49,30 @@ func TestRefreshTokenStore(t *testing.T) {
 		require.NoError(t, err)
 		_, err = store.Consume(t.Context(), expired)
 		require.ErrorIs(t, err, ErrInvalidRefreshToken)
+
+		toDelete, err := store.Create(t.Context(), userID, time.Hour)
+		require.NoError(t, err)
+		require.NoError(t, store.DeleteAllForUser(t.Context(), userID))
+		_, err = store.Consume(t.Context(), toDelete)
+		require.ErrorIs(t, err, ErrInvalidRefreshToken)
+	})
+
+	t.Run("normalizes persisted timestamps to PostgreSQL microsecond precision", func(t *testing.T) {
+		store := makeStore(t)
+		location := time.FixedZone(fake.Lorem().Word(), 2*60*60)
+		clockValue := time.Date(2026, time.September, 3, 19, 20, 30, 123456789, location)
+		store.now = func() time.Time { return clockValue }
+		ttl := time.Hour + 987
+
+		token, err := store.Create(t.Context(), fake.UUID().V4(), ttl)
+		require.NoError(t, err)
+		var stored authRefreshTokenModel
+		require.NoError(t, store.db.Where("token_hash = ?", hashToken(token)).First(&stored).Error)
+
+		expectedCreatedAt := clockValue.Truncate(time.Microsecond)
+		expectedExpiresAt := expectedCreatedAt.Add(ttl).Truncate(time.Microsecond)
+		require.True(t, expectedCreatedAt.Equal(stored.CreatedAt))
+		require.True(t, expectedExpiresAt.Equal(stored.ExpiresAt))
 	})
 
 	t.Run("consumes one token exactly once under concurrency", func(t *testing.T) {

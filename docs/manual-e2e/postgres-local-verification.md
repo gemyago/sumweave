@@ -1,23 +1,21 @@
-# Optional local Postgres verification
+# Local PostgreSQL verification
 
-This is an optional local-only verification path.
-
-- Default local workflow stays SQLite.
-- Do not change `default.yaml`, `local.yaml`, or `ecosystem.config.js` for this.
-- Use env overrides only.
+PostgreSQL is the mandatory local backend database. The repository Compose
+environment and `make postgres-bootstrap` are the supported setup path; this
+guide explains its concrete contract for backend processes and ordinary tests.
 
 ## What this covers
 
-Use this when you want to verify backend flows against local Postgres without making Postgres the default developer path.
-
-- `db-migrate` uses a DDL-capable role.
-- backend runtime uses a DML/query role.
-- agent runtime, application auth/jobs/dispatch, and finance storage use PostgreSQL.
-- synthetic-provider verification can then reuse the existing manual e2e guides.
+- `db-migrate` runs once for `local` and once for `test` through the DDL-capable
+  migrator role.
+- Backend processes use the DML/query runtime role.
+- Agent runtime, application auth/jobs/dispatch, and finance storage use the
+  prepared PostgreSQL schemas.
+- API-only manual E2E guides and ordinary backend tests reuse the same contract.
 
 ## Local roles, passwords, and DSNs
 
-Fixed local-only credentials used by `postgres-local.compose.yml`:
+Fixed local-only credentials used by `compose.yaml` and the bootstrap target:
 
 - owner role: `sumweave_owner`
 - owner password: `sumweave_owner_local`
@@ -25,83 +23,42 @@ Fixed local-only credentials used by `postgres-local.compose.yml`:
 - migration password: `sumweave_migrator_local`
 - runtime role: `sumweave_runtime`
 - runtime password: `sumweave_runtime_local`
-- database: `sumweave_local`
+- databases: `sumweave_local` and `sumweave_test`
 - host port: `55432`
-
-Suggested local env:
-
-```bash
-export PG_VERIFY_PROJECT=sumweave-pg-verify
-export PG_VERIFY_APP_DATA_DIR="$PWD/tmp/postgres-verify-appdata"
-export PG_VERIFY_OWNER_DSN='postgres://sumweave_owner:sumweave_owner_local@127.0.0.1:55432/sumweave_local?sslmode=disable'
-export PG_VERIFY_MIGRATE_DSN='postgres://sumweave_migrator:sumweave_migrator_local@127.0.0.1:55432/sumweave_local?sslmode=disable'
-export PG_VERIFY_RUNTIME_DSN='postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_local?sslmode=disable'
-```
-
-Backend env mapping for this path:
-
-- `APP_DATADIR="$PG_VERIFY_APP_DATA_DIR"` is only an ephemeral workspace path.
-- `APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN"` for `db-migrate`
-- `APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN"` for runtime and user commands
-- `APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN"` for `db-migrate`
-- `APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN"` for runtime and user commands
 
 ## Start local Postgres
 
 Run from the repo root:
 
 ```bash
-docker compose -f docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" down -v
-rm -rf "$PG_VERIFY_APP_DATA_DIR"
-mkdir -p "$PG_VERIFY_APP_DATA_DIR"
-docker compose -f docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" up -d
-docker compose -f docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" ps
+make postgres-bootstrap
 ```
 
-## Run migrations with the DDL role
-
-Change to the backend app root once:
-
-```bash
-cd apps/sumweave
-APP_DATADIR="$PG_VERIFY_APP_DATA_DIR" \
-APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN" \
-APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_MIGRATE_DSN" \
-go run ./cmd/sumweave db-migrate --env local
-```
-
-Then run an explicit grant pass as a guard:
-
-```bash
-docker compose -f ../../docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" exec postgres \
-  psql -U sumweave_owner -d sumweave_local \
-  -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO sumweave_runtime; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO sumweave_runtime;"
-```
+The target starts and waits for Compose, makes the owner, migrator, and runtime
+roles idempotently, creates both databases, runs `sumweave db-migrate --env
+local` and `sumweave db-migrate --env test` through the migrator role, then
+applies runtime grants. Cluster bootstrap never defines application tables.
 
 ## Run the backend with the runtime role
 
 From `apps/sumweave`:
 
 ```bash
-APP_DATADIR="$PG_VERIFY_APP_DATA_DIR" \
-APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
-APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
 go run ./cmd/sumweave start-all --env local
 ```
 
-For longer manual sessions, you can run the same command under PM2 with a separate process name instead of changing the default ecosystem config.
+For normal local development, return to the repository root and run `pm2 start
+ecosystem.config.js`. PM2 uses `start-all` only after bootstrap prepared the
+schemas.
 
 ## Create or rotate the local app user
 
 From `apps/sumweave`:
 
 ```bash
-APP_DATADIR="$PG_VERIFY_APP_DATA_DIR" \
-APP_APPLICATION_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
-APP_AGENTRUNTIME_DATABASE_DSN="$PG_VERIFY_RUNTIME_DSN" \
 go run ./cmd/sumweave --log-level WARN --env local user add \
-  --username 'postgres-verify-e2e' \
-  --password 'postgres-verify-e2e-local'
+  --username 'sumweave-local-e2e' \
+  --password 'sumweave-local-e2e'
 ```
 
 If that user already exists after a partial run, use `user change-password` with the same env.
@@ -115,26 +72,30 @@ After the backend is up, reuse the existing guides:
 
 Suggested login for that verification:
 
-- username: `postgres-verify-e2e`
-- password: `postgres-verify-e2e-local`
+- username: `sumweave-local-e2e`
+- password: `sumweave-local-e2e`
 
 Useful spot checks:
 
 ```bash
 curl -i http://127.0.0.1:4501/health
-docker compose -f ../../docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" exec postgres \
-  psql -U sumweave_owner -d sumweave_local \
+docker compose exec -T postgres \
+  psql -p 55432 -U sumweave_owner -d sumweave_local \
   -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name;"
 ```
 
 Notes:
 
-- Any non-SQLite DSN is treated as Postgres; use `postgres://...` and avoid `.db` or `.sqlite` in the DSN.
+- PostgreSQL DSNs use `postgres://...`; SQLite DSNs are unsupported.
 - `application.database.tablePrefix` remains a table-name prefix. Keep the default `sumweave_` for this path.
 - If runtime gets permission errors after a successful migration, fix grants/default privileges instead of switching the runtime to the migration role.
 
 ## Stop and clean up
 
 ```bash
-docker compose -f ../../docs/manual-e2e/postgres-local.compose.yml -p "$PG_VERIFY_PROJECT" down -v
+docker compose down -v
 ```
+
+Run `make postgres-bootstrap` later to recreate the two databases and schemas.
+Run ordinary backend `make test` or `make affected-lint-test` commands after
+bootstrap; they select tagged PostgreSQL tests where applicable.

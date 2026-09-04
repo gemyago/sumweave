@@ -3,11 +3,9 @@
 package sumweave_test
 
 import (
-	"path/filepath"
 	"testing"
 
 	sumweave "github.com/gemyago/sumweave/apps/sumweave"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/wireup"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,10 +13,7 @@ import (
 func TestEngine(t *testing.T) {
 	makeEngine := func(t *testing.T) *sumweave.Engine {
 		t.Helper()
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), "application.sqlite"))
-		migration, err := wireup.BuildMigration(t.Context(), wireup.MigrationOptions{Environment: "test"})
-		require.NoError(t, err)
-		require.NoError(t, migration.Migrate(t.Context()))
+		t.Setenv("APP_DATADIR", t.TempDir())
 		engine, err := sumweave.NewEngine(sumweave.WithEngineEnv("test"))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, engine.Close(t.Context())) })
@@ -59,5 +54,14 @@ func TestEngine(t *testing.T) {
 
 		require.NoError(t, engine.Close(t.Context()))
 		require.NoError(t, engine.Close(t.Context()))
+	})
+
+	t.Run("File-backed agent runtime storage", func(t *testing.T) {
+		t.Setenv("APP_AGENTRUNTIME_STORAGE_TYPE", "file")
+		engine := makeEngine(t)
+
+		_, err := engine.GetToolsRegistry()
+		require.NoError(t, err)
+		require.NoError(t, engine.StartHTTPServer(t.Context(), sumweave.WithStartHTTPServerNoop(true)))
 	})
 }

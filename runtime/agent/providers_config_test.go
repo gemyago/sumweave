@@ -19,10 +19,8 @@ func TestNewFileProvidersConfigService(t *testing.T) {
 }
 
 func TestNewDatabaseProvidersConfigService(t *testing.T) {
-	rootTestLogger := internal.RootTestLogger()
-	t.Run("creates service with sqlite memory dsn", func(t *testing.T) {
-		svc, err := NewDatabaseProvidersConfigService(":memory:", rootTestLogger, "")
-		require.NoError(t, err)
-		require.NotNil(t, svc)
-	})
+	logger := internal.RootTestLogger()
+	svc, err := NewDatabaseProvidersConfigService(testDatabaseDSN(t), logger, testDatabaseTablePrefix)
+	require.NoError(t, err)
+	require.NotNil(t, svc)
 }

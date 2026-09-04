@@ -40,6 +40,7 @@ func (authRefreshTokenModel) TableName(namer schema.Namer) string {
 type RefreshTokenStore struct {
 	db     *gorm.DB
 	logger *slog.Logger
+	now    func() time.Time
 }
 
 func NewRefreshTokenStore(deps RefreshTokenStoreDeps) (*RefreshTokenStore, error) {
@@ -50,7 +51,7 @@ func NewRefreshTokenStore(deps RefreshTokenStoreDeps) (*RefreshTokenStore, error
 	if err != nil {
 		return nil, fmt.Errorf("open refresh token store database: %w", err)
 	}
-	return &RefreshTokenStore{db: db, logger: deps.Logger}, nil
+	return &RefreshTokenStore{db: db, logger: deps.Logger, now: time.Now}, nil
 }
 
 func (s *RefreshTokenStore) AutoMigrate() error {
@@ -72,11 +73,11 @@ func (s *RefreshTokenStore) Create(ctx context.Context, userID string, ttl time.
 		return "", fmt.Errorf("generate refresh token: %w", err)
 	}
 	opaqueToken := base64.RawURLEncoding.EncodeToString(raw)
-	now := time.Now().Round(0)
+	now := s.now().Truncate(time.Microsecond)
 	if err := s.db.WithContext(ctx).Create(&authRefreshTokenModel{
 		TokenHash: hashToken(opaqueToken),
 		UserID:    userID,
-		ExpiresAt: now.Add(ttl),
+		ExpiresAt: now.Add(ttl).Truncate(time.Microsecond),
 		CreatedAt: now,
 	}).Error; err != nil {
 		return "", fmt.Errorf("create refresh token: %w", err)
@@ -94,7 +95,7 @@ func (s *RefreshTokenStore) Consume(ctx context.Context, opaqueToken string) (st
 		"DELETE FROM "+s.db.NamingStrategy.TableName("auth_refresh_tokens")+
 			" WHERE token_hash = ? AND expires_at > ? RETURNING user_id",
 		hashToken(opaqueToken),
-		time.Now(),
+		s.now().Truncate(time.Microsecond),
 	).Scan(&row)
 	if result.Error != nil {
 		return "", fmt.Errorf("consume refresh token: %w", result.Error)

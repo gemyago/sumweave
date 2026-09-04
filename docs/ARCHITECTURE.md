@@ -11,9 +11,9 @@ provider snapshots, balances, reports, and FX.
   independent from `runtime/`.
 - `apps/sumweave/` composes finance, auth, durable jobs, dispatch, HTTP,
   migrations, telemetry, and embedded UI delivery.
-- `apps/sumweave/internal/appdispatch` is the app-owned durable SQL pub/sub
+- `apps/sumweave/internal/appdispatch` is the app-owned durable PostgreSQL pub/sub
   transport. It stores multiple topics in one message table and tracks offsets
-  independently by topic and consumer group for SQLite and PostgreSQL. It is the
+  independently by topic and consumer group. It is the
   generic internal delivery mechanism for semantic imperative commands and
   factual domain events. Publication assigns and returns one immutable, stable
   message ID and creates no job record. It is the only durable publication,
@@ -40,12 +40,18 @@ provider snapshots, balances, reports, and FX.
 ## Operations
 
 The application database is configured at `application.database` (environment
-override `APP_APPLICATION_DATABASE_DSN`). Local default storage is
-`data/application.db`; SQLite is local development only. `db-migrate` prepares
-agent, auth, topic-aware dispatch, jobs, and finance schemas. `start-all` runs
-the API, worker, and scheduler together; split worker and scheduler commands
-remain for deployment. API-only `start` can publish dispatch messages but does
-not start a message router or execute background work.
+override `APP_APPLICATION_DATABASE_DSN`) and PostgreSQL is the only supported
+database. Local configuration uses the `sumweave_runtime` role against Compose's
+`sumweave_local` database; agent runtime has its separate configuration key but
+uses that same database with the `sumweave_runtime_` prefix. Run
+`make postgres-bootstrap` before backend processes: it provisions the
+`sumweave_owner`, `sumweave_migrator`, and `sumweave_runtime` roles; prepares
+`sumweave_local` and `sumweave_test`; runs `sumweave db-migrate` once for each;
+and grants the runtime role access to the migrated tables and sequences. After
+that setup, `sumweave start-all` runs the API, worker, and scheduler together;
+split worker and scheduler commands remain for deployment. API-only `start` can
+publish dispatch messages but does not start a message router or execute
+background work.
 
 The retained process modes are `start` for API-only serving, `jobs worker` for
 the durable appdispatch consumer, and `jobs enqueue-due` for one scheduler tick.
@@ -105,12 +111,14 @@ The uniform attempt policy defaults to three attempts; handlers and individual
 rows do not define competing retry limits.
 
 The topic-aware dispatch schema intentionally replaces the earlier alpha
-single-topic schema. Recreate or reseed an old local application database, then
-run `sumweave db-migrate`; mixed old and new binaries are unsupported. Explicit
-jobs and HTTP roots stop their message routers before closing the shared
-application database. The migration root creates no publisher or router.
+single-topic schema. Recreate the local Compose PostgreSQL volume if a clean
+environment is required; there is no SQLite data migration. Explicit jobs and
+HTTP roots stop their message routers before closing the shared application
+database. The migration root creates no publisher or router.
 
-Run `sumweave db-migrate` before `sumweave start-all` locally.
+Run `make postgres-bootstrap` before ordinary module or Nx backend tests. Each
+core module's `make test` selects tagged PostgreSQL tests with the prepared
+`sumweave_test` schema; there is no separate verification lane or workflow.
 
 Release builds run on the host with `make -C build dist`; Docker packages the
 prepared binary and staged platform-agent root. The Helm chart deploys app,

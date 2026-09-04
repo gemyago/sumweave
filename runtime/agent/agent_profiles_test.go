@@ -36,8 +36,8 @@ func TestNewFileAgentProfilesService(t *testing.T) {
 }
 
 func TestNewDatabaseAgentProfilesService(t *testing.T) {
-	rootTestLogger := internal.RootTestLogger()
-	svc, err := NewDatabaseAgentProfilesService(":memory:", rootTestLogger, "")
+	logger := internal.RootTestLogger()
+	svc, err := NewDatabaseAgentProfilesService(testDatabaseDSN(t), logger, testDatabaseTablePrefix)
 	require.NoError(t, err)
 	require.NotNil(t, svc)
 }

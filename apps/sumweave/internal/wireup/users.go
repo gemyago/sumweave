@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"os"
 
+	appinternal "github.com/gemyago/sumweave/apps/sumweave/internal"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
 )
 
@@ -43,7 +43,7 @@ func BuildUsers(
 		return nil, err
 	}
 
-	database, err := sqlconn.Open(rootConfig.Application.Database.DSN)
+	database, err := appinternal.OpenApplicationSQLDB(rootConfig.Application.Database.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("open users application database: %w", err)
 	}

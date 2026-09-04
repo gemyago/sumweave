@@ -134,8 +134,8 @@ func TestSyntheticPendingStartStore(t *testing.T) {
 	t.Run("filters expiry by canonical timestamp", func(t *testing.T) {
 		fake := faker.New()
 		store, pendingStore := makeStore(t)
-		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 		now := time.Date(2026, time.January, 1, 0, 15, 0, 0, time.FixedZone("zero", 0))
 		require.True(t, earlier.Before(later))
 		require.True(t, later.Before(now))

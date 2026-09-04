@@ -1,7 +1,6 @@
 package wireup
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/jaswdr/faker/v2"
@@ -10,19 +9,17 @@ import (
 
 func TestCommandRoots(t *testing.T) {
 	fake := faker.New()
+	t.Chdir("../..")
 
-	t.Run("builds user administration capabilities with isolated storage", func(t *testing.T) {
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
+	t.Run("builds user administration capabilities against the prepared application schema", func(t *testing.T) {
 		root, err := BuildUsers(UsersOptions{Environment: "test"})
 		require.NoError(t, err)
 		require.NotNil(t, root.Store)
 		require.NotNil(t, root.Hasher)
-		require.NoError(t, root.Store.AutoMigrate())
 		require.NoError(t, root.Close())
 	})
 
-	t.Run("builds finance fixture storage with isolated storage", func(t *testing.T) {
-		t.Setenv("APP_APPLICATION_DATABASE_DSN", filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"))
+	t.Run("builds finance fixture storage against the prepared application schema", func(t *testing.T) {
 		root, err := BuildFinanceFixtures(FinanceFixturesOptions{Environment: "test"})
 		require.NoError(t, err)
 		require.NotNil(t, root.Database)

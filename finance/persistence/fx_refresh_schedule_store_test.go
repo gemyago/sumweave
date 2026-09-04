@@ -13,6 +13,16 @@ import (
 
 func TestFXRefreshScheduleStore(t *testing.T) {
 	fake := faker.New()
+	saveSchedule := func(t *testing.T, store *FXRefreshScheduleStore, schedule domain.FXRefreshSchedule) {
+		t.Helper()
+		require.NoError(t, store.Save(t.Context(), schedule))
+		t.Cleanup(func() {
+			actual, err := store.Get(context.WithoutCancel(t.Context()), schedule.ScheduleID)
+			require.NoError(t, err)
+			actual.Enabled = false
+			require.NoError(t, store.Save(context.WithoutCancel(t.Context()), *actual))
+		})
+	}
 
 	makeSchedule := func(now time.Time, nextRunAt *time.Time, enabled bool) domain.FXRefreshSchedule {
 		return domain.FXRefreshSchedule{
@@ -24,34 +34,41 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("lists only enabled due schedules in occurrence order", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		earlier := now.Add(-2 * time.Hour)
 		later := now.Add(-time.Hour)
 		future := now.Add(time.Hour)
 
 		expected := makeSchedule(now, &earlier, true)
-		require.NoError(t, store.Save(t.Context(), expected))
-		require.NoError(t, store.Save(t.Context(), makeSchedule(now, &later, true)))
-		require.NoError(t, store.Save(t.Context(), makeSchedule(now, &future, true)))
-		require.NoError(t, store.Save(t.Context(), makeSchedule(now, &earlier, false)))
-		require.NoError(t, store.Save(t.Context(), makeSchedule(now, nil, true)))
+		second := makeSchedule(now, &later, true)
+		saveSchedule(t, store, expected)
+		saveSchedule(t, store, second)
+		saveSchedule(t, store, makeSchedule(now, &future, true))
+		saveSchedule(t, store, makeSchedule(now, &earlier, false))
+		saveSchedule(t, store, makeSchedule(now, nil, true))
 
 		actual, err := store.ListDue(t.Context(), now)
 
 		require.NoError(t, err)
-		require.Len(t, actual, 2)
-		assert.Equal(t, expected.ScheduleID, actual[0].ScheduleID)
-		assert.True(t, later.Equal(*actual[1].NextRunAt))
+		var due []domain.FXRefreshSchedule
+		for _, item := range actual {
+			if item.ScheduleID == expected.ScheduleID || item.ScheduleID == second.ScheduleID {
+				due = append(due, item)
+			}
+		}
+		require.Len(t, due, 2)
+		assert.Equal(t, expected.ScheduleID, due[0].ScheduleID)
+		assert.True(t, later.Equal(*due[1].NextRunAt))
 	})
 
 	t.Run("rolls back occurrence state changes", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 
 		err := store.WithTransaction(t.Context(), func(tx *FXRefreshScheduleTransaction) error {
 			schedule.NextRunAt = &nextRunAt
@@ -73,13 +90,13 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("keeps committed occurrence state when ensuring the default schedule", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		nextRunAt := now.Add(time.Hour)
 		lastScheduledAt := now.Add(-time.Hour)
 		schedule := makeSchedule(now, &nextRunAt, true)
 		schedule.LastScheduledAt = &lastScheduledAt
 		schedule.LastJobID = fake.UUID().V4()
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 
 		candidate := makeSchedule(now.Add(time.Hour), &now, true)
 		candidate.ScheduleID = schedule.ScheduleID
@@ -95,11 +112,11 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("commits occurrence state changes and reports missing schedules", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 
 		require.NoError(t, store.WithTransaction(t.Context(), func(tx *FXRefreshScheduleTransaction) error {
 			schedule.NextRunAt = &nextRunAt
@@ -115,11 +132,11 @@ func TestFXRefreshScheduleStore(t *testing.T) {
 	t.Run("conditionally claims and finalizes only the expected due occurrence", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := NewFXRefreshScheduleStore(database)
-		now := time.Now()
+		now := time.Now().Truncate(time.Microsecond)
 		dueAt := now.Add(-time.Hour)
 		nextRunAt := now.Add(time.Hour)
 		schedule := makeSchedule(now, &dueAt, true)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(t, store, schedule)
 		messageID := fake.UUID().V4()
 
 		require.NoError(t, store.WithTransaction(t.Context(), func(tx *FXRefreshScheduleTransaction) error {

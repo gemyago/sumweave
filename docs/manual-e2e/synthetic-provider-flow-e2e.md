@@ -2,8 +2,9 @@
 
 This is the deterministic API-only gate for a manual
 `finance.bank_connection_sync`. It uses the in-process synthetic connector and
-an isolated SQLite database. Every artifact stays under the repository `tmp/`
-directory. The synthetic fixture has no supported business-failure response.
+the prepared local PostgreSQL database. Every non-database artifact stays under
+the repository `tmp/` directory. The synthetic fixture has no supported
+business-failure response.
 The terminal success and pending-state key-preservation checks below are the
 required assertions for this flow; the synthetic transaction generator does not
 promise manual-sync transaction-count idempotency.
@@ -18,11 +19,13 @@ REPO_ROOT="$PWD"
 E2E_ROOT="$REPO_ROOT/tmp/jobs-system-simplification-028-e2e/synthetic-bank"
 rm -rf "$E2E_ROOT"
 mkdir -p "$E2E_ROOT"
-export APP_DATADIR="$E2E_ROOT/data"
-export APP_APPLICATION_DATABASE_DSN="$E2E_ROOT/application.db"
+RUN_ID="$(date +%s)"
+# Stop the normal PM2 start-all backend before resetting its shared database.
+pm2 stop sumweave-api
+docker compose down -v
+make postgres-bootstrap
 
 cd "$REPO_ROOT/apps/sumweave"
-go run ./cmd/sumweave db-migrate --env local
 IFS=: read -r USER PASS < "$REPO_ROOT/.local-users"
 go run ./cmd/sumweave --env local user add \
   --username "$USER" --password "$PASS" --if-not-exists
@@ -36,7 +39,7 @@ LOGIN_JSON=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/auth/login \
 ACCESS_TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])' <<<"$LOGIN_JSON")
 TENANT_ID=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/finance/tenants \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  --data '{"name":"synthetic-bank-022","displayCurrency":"USD","seedDefaults":false}' |
+  --data "{\"name\":\"synthetic-bank-$RUN_ID\",\"displayCurrency\":\"USD\",\"seedDefaults\":false}" |
   python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 ```
 
@@ -171,4 +174,8 @@ provider transactions.
 ```bash
 kill "$API_PID" 2>/dev/null || true
 wait "$API_PID" 2>/dev/null || true
+cd "$REPO_ROOT"
+pm2 start ecosystem.config.js
 ```
+
+This guide owns restoring the normal PM2 backend after its API-only run.

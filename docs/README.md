@@ -5,6 +5,8 @@
 - Implementation snapshot: [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)
 - Finance provider sync: [finance-provider-sync-architecture.md](finance-provider-sync-architecture.md)
 - Database-backed application state: [database-backed-state-plan.md](database-backed-state-plan.md)
+- Local PostgreSQL setup and verification:
+  [manual-e2e/postgres-local-verification.md](manual-e2e/postgres-local-verification.md)
 - Release and deployment: [release-and-deployment-plan.md](release-and-deployment-plan.md)
 - PostgreSQL dispatch schema upgrade: [appdispatch-postgres-topic-upgrade.sql](appdispatch-postgres-topic-upgrade.sql)
 - Local HTTPS: [local-https.md](local-https.md)

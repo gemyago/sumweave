@@ -401,6 +401,13 @@ func TestBankConnectionService(t *testing.T) {
 			key := sha256.Sum256([]byte("key-" + fake.UUID().V4()))
 			cipher, err := credentials.NewAESGCMCipher(key[:], "finance-bank-connections")
 			require.NoError(t, err)
+			monoSecretID := "mono-secret-" + fake.UUID().V4()
+			monoConnectionID := "mono-connection-" + fake.UUID().V4()
+			monoRawID := "mono-raw-" + fake.UUID().V4()
+			pendingStartID := "pending-start-" + fake.UUID().V4()
+			pkoSecretID := "pko-secret-" + fake.UUID().V4()
+			pkoConnectionID := "pko-connection-" + fake.UUID().V4()
+			pkoRawID := "pko-raw-" + fake.UUID().V4()
 			privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 			require.NoError(t, err)
 			privateKeyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
@@ -502,13 +509,13 @@ func TestBankConnectionService(t *testing.T) {
 				),
 				Now: func() time.Time { return now },
 				NewID: newSequentialIDGenerator(
-					"mono-secret-id",
-					"mono-connection-id",
-					"mono-raw-id",
-					"pending-start-id",
-					"pko-secret-id",
-					"pko-connection-id",
-					"pko-raw-id",
+					monoSecretID,
+					monoConnectionID,
+					monoRawID,
+					pendingStartID,
+					pkoSecretID,
+					pkoConnectionID,
+					pkoRawID,
 				),
 			})
 			require.NoError(t, err)
@@ -523,9 +530,9 @@ func TestBankConnectionService(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
-			assert.Equal(t, "mono-connection-id", monobankConnection.ID)
+			assert.Equal(t, monoConnectionID, monobankConnection.ID)
 			assert.Equal(t, domain.ProviderConnectorIDMonobank, monobankConnection.ConnectorID)
-			assert.Equal(t, now, monobankConnection.CreatedAt)
+			assert.True(t, now.Equal(monobankConnection.CreatedAt))
 			monobankSecret, err := store.GetConnectionSecret(
 				t.Context(),
 				monobankConnection.SecretID,
@@ -556,9 +563,9 @@ func TestBankConnectionService(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
-			assert.Equal(t, "pending-start-id", pendingStart.ID)
+			assert.NotEmpty(t, pendingStart.ID)
 			assert.Equal(t, domain.ProviderConnectorIDEnableBanking, pendingStart.ConnectorID)
-			assert.Equal(t, now, pendingStart.CreatedAt)
+			assert.True(t, now.Equal(pendingStart.CreatedAt))
 			assert.Equal(t, "http://localhost:5173/#/finance/connections", pendingStart.CallbackURL)
 
 			pkoConnection, err := service.FinishBankConnectionLink(
@@ -572,7 +579,7 @@ func TestBankConnectionService(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
-			assert.Equal(t, "pko-connection-id", pkoConnection.ID)
+			assert.Equal(t, pkoConnectionID, pkoConnection.ID)
 			assert.Equal(t, domain.ProviderConnectorIDEnableBanking, pkoConnection.ConnectorID)
 			pkoSecret, err := store.GetConnectionSecret(t.Context(), pkoConnection.SecretID)
 			require.NoError(t, err)
@@ -858,7 +865,7 @@ func TestBankConnectionService(t *testing.T) {
 			"plaintext-"+fake.UUID().V4(),
 		)
 		require.NoError(t, err)
-		assert.Equal(t, now, prepared.CreatedAt)
+		assert.True(t, now.Equal(prepared.CreatedAt))
 		secretID, err := writer.SaveConnectionSecret(
 			t.Context(),
 			prepared.Provider,

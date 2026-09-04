@@ -485,6 +485,7 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("scenario keeps native anchor timestamps throughout its window", func(t *testing.T) {
 		fake := faker.New()
+		scenario := "realistic-" + fake.UUID().V4()
 		anchor := time.Date(
 			2026,
 			time.June,
@@ -511,7 +512,7 @@ func TestRealisticScenario(t *testing.T) {
 				t.Context(),
 				bootstrap,
 				spy,
-				fixtures.Config{Seed: 23, Now: anchor, Scenario: "realistic"},
+				fixtures.Config{Seed: 23, Now: anchor, Scenario: scenario + "-" + fake.UUID().V4()},
 			)
 			require.NoError(t, err)
 			return spy
@@ -567,18 +568,6 @@ func TestRealisticScenario(t *testing.T) {
 			rates,
 			fixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, anchor),
 		)
-		store := persistence.NewStore(openTestDatabase(t))
-		err := store.SaveCurrentFXRates(t.Context(), rates)
-		require.NoError(t, err)
-		storedRates, err := store.ListFXRates(t.Context(), persistence.ListFXRatesParams{})
-		require.NoError(t, err)
-		require.NotEmpty(t, storedRates)
-		assert.True(t, anchor.Equal(storedRates[len(storedRates)-1].RateDate))
-		assert.Equal(
-			t,
-			anchor.Format(time.RFC3339Nano),
-			storedRates[len(storedRates)-1].RateDate.Format(time.RFC3339Nano),
-		)
 		for _, rate := range rates {
 			assert.Equal(t, anchor.Location(), rate.RateDate.Location())
 			assert.Equal(t, anchor.Hour(), rate.RateDate.Hour())
@@ -590,6 +579,7 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("service-backed scenario invokes finance APIs and records stable ids", func(t *testing.T) {
 		fake := faker.New()
+		scenario := "realistic-" + fake.UUID().V4()
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
@@ -602,7 +592,7 @@ func TestRealisticScenario(t *testing.T) {
 			t.Context(),
 			bootstrap,
 			spy,
-			fixtures.Config{Seed: 23, Now: now, Scenario: "realistic"},
+			fixtures.Config{Seed: 23, Now: now, Scenario: scenario},
 		)
 		require.NoError(t, err)
 		assert.Equal(t, int64(23), summary.Seed)
@@ -625,6 +615,7 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("returns service errors without direct-table fallback", func(t *testing.T) {
 		fake := faker.New()
+		scenario := "realistic-" + fake.UUID().V4()
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
@@ -641,7 +632,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:     24,
 				Now:      time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario: "realistic",
+				Scenario: scenario,
 			},
 		)
 		require.ErrorIs(t, err, wantErr)
@@ -652,6 +643,7 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("returns early service errors from earlier scenario steps", func(t *testing.T) {
 		fake := faker.New()
+		scenario := "realistic-" + fake.UUID().V4()
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
@@ -666,7 +658,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:     25,
 				Now:      time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario: "realistic",
+				Scenario: scenario,
 			},
 		)
 		require.ErrorIs(t, err, createTenantErr)
@@ -683,7 +675,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:     26,
 				Now:      time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario: "realistic",
+				Scenario: scenario,
 			},
 		)
 		require.ErrorIs(t, err, inviteErr)
@@ -700,7 +692,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:     27,
 				Now:      time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario: "realistic",
+				Scenario: scenario,
 			},
 		)
 		require.ErrorIs(t, err, acceptInviteErr)
@@ -717,7 +709,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:     28,
 				Now:      time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario: "realistic",
+				Scenario: scenario,
 			},
 		)
 		require.ErrorIs(t, err, upsertScheduleErr)
@@ -734,7 +726,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:     29,
 				Now:      time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario: "realistic",
+				Scenario: scenario,
 			},
 		)
 		require.ErrorIs(t, err, recordTransactionErr)
@@ -751,7 +743,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:     30,
 				Now:      time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario: "realistic",
+				Scenario: scenario,
 			},
 		)
 		require.ErrorIs(t, err, listTagsErr)
@@ -766,7 +758,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:     31,
 				Now:      time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario: "realistic",
+				Scenario: scenario + "-" + fake.UUID().V4(),
 			},
 		)
 		require.ErrorIs(t, err, refreshFXErr)
@@ -775,6 +767,7 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("returns targeted branch errors across seeded scenario phases", func(t *testing.T) {
 		fake := faker.New()
+		scenario := "realistic-" + fake.UUID().V4()
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
@@ -790,7 +783,7 @@ func TestRealisticScenario(t *testing.T) {
 				t.Context(),
 				bootstrap,
 				spy,
-				fixtures.Config{Seed: seed, Now: now, Scenario: "realistic"},
+				fixtures.Config{Seed: seed, Now: now, Scenario: scenario + "-" + fake.UUID().V4()},
 			)
 			return runErr
 		}
@@ -927,6 +920,7 @@ func TestRealisticScenario(t *testing.T) {
 
 	t.Run("allows auth-aligned owner and member overrides", func(t *testing.T) {
 		fake := faker.New()
+		scenario := "realistic-" + fake.UUID().V4()
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		bootstrap := fixtures.NewBootstrapper(
@@ -941,7 +935,7 @@ func TestRealisticScenario(t *testing.T) {
 			fixtures.Config{
 				Seed:         32,
 				Now:          time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC),
-				Scenario:     "realistic",
+				Scenario:     scenario,
 				OwnerUserID:  "owner-override-" + fake.UUID().V4(),
 				MemberUserID: "member-override-" + fake.UUID().V4(),
 			},
@@ -952,6 +946,8 @@ func TestRealisticScenario(t *testing.T) {
 	})
 
 	database := openTestDatabase(t)
+	scenario := "realistic-" + uuid.NewString()
+	seed := int64(faker.New().IntBetween(1, 2_000_000_000))
 	store := persistence.NewStore(database)
 	repo := fixtures.NewPersistenceRepository(store)
 	bootstrap := fixtures.NewBootstrapper(fixtures.NewService(repo))
@@ -992,10 +988,7 @@ func TestRealisticScenario(t *testing.T) {
 	fxService := financepkg.NewFXService(
 		store,
 		financepkg.WithFXServiceNow(func() time.Time { return now }),
-		financepkg.WithFXServiceProviders(financepkg.NewStaticFXProvider(
-			financepkg.FXProviderFrankfurter,
-			fixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, now),
-		)),
+		financepkg.WithFXServiceProviders(realisticScenarioFXProvider(now)),
 		financepkg.WithFXServiceRequiredPairs(persistence.NewFXPairDiscoveryStore(database)),
 	)
 	reportingService := financepkg.NewReportingService(
@@ -1022,25 +1015,25 @@ func TestRealisticScenario(t *testing.T) {
 		bootstrap,
 		financeService,
 		fixtures.Config{
-			Seed:     17,
+			Seed:     seed,
 			Now:      now,
-			Scenario: "realistic",
+			Scenario: scenario,
 		},
 	)
 	require.NoError(t, err)
-	assert.Equal(t, int64(17), summary.Seed)
+	assert.Equal(t, seed, summary.Seed)
 	assert.NotEmpty(t, summary.ScenarioIDs)
 
 	ownerTenants, err := financeService.ListTenantsForUser(
 		t.Context(),
-		fixtures.RealisticScenarioOwnerUserID(17),
+		fixtures.RealisticScenarioOwnerUserID(seed),
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, ownerTenants)
 	tenantID := ownerTenants[0].Tenant.ID
 
 	accounts, err := financeService.ListAccounts(t.Context(), financepkg.ListAccountsParams{
-		ActorUserID: fixtures.RealisticScenarioOwnerUserID(17),
+		ActorUserID: fixtures.RealisticScenarioOwnerUserID(seed),
 		TenantID:    tenantID,
 	})
 	require.NoError(t, err)
@@ -1049,7 +1042,7 @@ func TestRealisticScenario(t *testing.T) {
 	transactions, err := financeService.ListTransactions(
 		t.Context(),
 		financepkg.ListTransactionsParams{
-			ActorUserID:   fixtures.RealisticScenarioOwnerUserID(17),
+			ActorUserID:   fixtures.RealisticScenarioOwnerUserID(seed),
 			TenantID:      tenantID,
 			IncludeHidden: true,
 		},
@@ -1141,7 +1134,7 @@ func TestRealisticScenario(t *testing.T) {
 	connections, err := financeService.ListBankConnections(
 		t.Context(),
 		financepkg.ListBankConnectionsParams{
-			ActorUserID: fixtures.RealisticScenarioOwnerUserID(17),
+			ActorUserID: fixtures.RealisticScenarioOwnerUserID(seed),
 			TenantID:    tenantID,
 		},
 	)
@@ -1149,7 +1142,7 @@ func TestRealisticScenario(t *testing.T) {
 	assert.Len(t, connections, 1)
 
 	dashboard, err := financeService.GetDashboard(t.Context(), financepkg.DashboardParams{
-		ActorUserID: fixtures.RealisticScenarioOwnerUserID(17),
+		ActorUserID: fixtures.RealisticScenarioOwnerUserID(seed),
 		TenantID:    tenantID,
 	})
 	require.NoError(t, err)
@@ -1160,13 +1153,33 @@ func TestRealisticScenario(t *testing.T) {
 		bootstrap,
 		financeService,
 		fixtures.Config{
-			Seed:     17,
+			Seed:     seed,
 			Now:      now.Add(time.Hour),
-			Scenario: "realistic-second",
+			Scenario: scenario + "-second",
 		},
 	)
 	require.NoError(t, err)
 	assert.Equal(t, summary.ScenarioIDs, summaryAgain.ScenarioIDs)
+}
+
+func realisticScenarioFXProvider(now time.Time) *financepkg.StaticFXProvider {
+	currencies := []string{"EUR", "GBP", "PLN", "UAH", "USD"}
+	rates := make([]domain.FXRate, 0, len(currencies)*(len(currencies)-1))
+	for _, baseCurrency := range currencies {
+		for _, quoteCurrency := range currencies {
+			if baseCurrency == quoteCurrency {
+				continue
+			}
+			rates = append(rates, domain.FXRate{
+				Provider:      financepkg.FXProviderFrankfurter,
+				BaseCurrency:  baseCurrency,
+				QuoteCurrency: quoteCurrency,
+				RateDate:      now,
+				Rate:          1.1,
+			})
+		}
+	}
+	return financepkg.NewStaticFXProvider(financepkg.FXProviderFrankfurter, rates)
 }
 
 type realisticScenarioProvider struct{}

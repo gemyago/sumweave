@@ -41,13 +41,9 @@ const (
 	fixtureMonobankProviderName  = "monobank"
 	fixturesEnableBankingBaseURL = "https://example.test"
 	fixturesPSUTypePersonal      = "personal"
+	fixtureFXBaseCurrency        = "EUR"
+	fixtureFXQuoteCurrency       = "USD"
 )
-
-type financeFixturesCommandDeps struct {
-	Generate             func(context.Context, financeFixturesRuntimeConfig, financeFixturesGenerateParams) (financefixtures.Summary, error)
-	ResolveRuntimeConfig func(*cobra.Command) (financeFixturesRuntimeConfig, error)
-	Now                  func() time.Time
-}
 
 type financeFixturesRuntimeConfig struct {
 	Database        *persistence.Database
@@ -57,21 +53,19 @@ type financeFixturesRuntimeConfig struct {
 	close           func() error
 }
 
-func newFinanceCmd(deps financeFixturesCommandDeps) *cobra.Command {
+func newFinanceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: financeCommandName, Short: "Finance utilities"}
-	cmd.AddCommand(newFinanceFixturesCmd(deps))
+	cmd.AddCommand(newFinanceFixturesCmd())
 	return cmd
 }
 
-func newFinanceFixturesCmd(deps financeFixturesCommandDeps) *cobra.Command {
+func newFinanceFixturesCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: financeFixturesCommandName, Short: "Finance fixtures helpers"}
-	cmd.AddCommand(newFinanceFixturesGenerateCmd(deps))
+	cmd.AddCommand(newFinanceFixturesGenerateCmd())
 	return cmd
 }
 
-func newFinanceFixturesGenerateCmd(
-	deps financeFixturesCommandDeps,
-) *cobra.Command {
+func newFinanceFixturesGenerateCmd() *cobra.Command {
 	seed := int64(1)
 	scenario := realisticScenarioName
 	ownerUserID := ""
@@ -81,31 +75,18 @@ func newFinanceFixturesGenerateCmd(
 		Use:   financeGenerateCommandName,
 		Short: "Generate realistic finance fixtures",
 		RunE: func(cmd *cobra.Command, _ []string) (err error) {
-			now := time.Now()
-			if deps.Now != nil {
-				now = deps.Now()
-			}
-			resolveRuntimeConfig := deps.ResolveRuntimeConfig
-			runtimeConfig := financeFixturesRuntimeConfig{}
-			if resolveRuntimeConfig != nil {
-				resolvedRuntimeConfig, resolveErr := resolveRuntimeConfig(cmd)
-				if resolveErr != nil {
-					return resolveErr
-				}
-				runtimeConfig = resolvedRuntimeConfig
-			}
-			generate := deps.Generate
-			if generate == nil {
-				generate = runFinanceFixturesGenerate
+			runtimeConfig, err := resolveFinanceFixturesRuntimeConfig(cmd.Root())
+			if err != nil {
+				return err
 			}
 			defer func() { err = closeFinanceFixturesRuntimeConfig(err, runtimeConfig) }()
-			summary, err := generate(
+			summary, err := runFinanceFixturesGenerate(
 				cmd.Context(),
 				runtimeConfig,
 				financeFixturesGenerateParams{
 					Seed:               seed,
 					Scenario:           scenario,
-					Now:                now,
+					Now:                time.Now(),
 					OwnerUserID:        ownerUserID,
 					MemberUserID:       memberUserID,
 					ConnectionProvider: connectionProvider,
@@ -139,7 +120,6 @@ func newFinanceFixturesGenerateCmd(
 	)
 	return cmd
 }
-
 func runFinanceFixturesGenerate(
 	ctx context.Context,
 	runtimeConfig financeFixturesRuntimeConfig,
@@ -172,9 +152,6 @@ func runFinanceFixturesGenerate(
 			params.ConnectionProvider,
 		)
 	}
-	bootstrap := financefixtures.NewBootstrapper(
-		financefixtures.NewService(financefixtures.NewPersistenceRepository(store)),
-	)
 	if params.Scenario != realisticScenarioName {
 		return financefixtures.Summary{}, fmt.Errorf(
 			"unsupported finance fixture scenario: %s",
@@ -184,6 +161,9 @@ func runFinanceFixturesGenerate(
 	if strings.TrimSpace(params.ConnectionProvider) == fixtureScenarioProviderName {
 		params.ConnectionProvider = fixtureMonobankProviderName
 	}
+	bootstrap := financefixtures.NewBootstrapper(
+		financefixtures.NewService(financefixtures.NewPersistenceRepository(store)),
+	)
 	monobankServer := newFinanceFixturesMonobankServer()
 	defer monobankServer.Close()
 	financeModule, err := newFinanceFixturesModule(
@@ -206,7 +186,11 @@ func runFinanceFixturesGenerate(
 			csvImportService:      financeModule.CSVImportService,
 			bankConnectionService: financeModule.BankConnectionService,
 			bankSyncService:       financeModule.BankSyncService,
-			fxService:             financeModule.FXService,
+			fxRefreshService: newFinanceFixturesFXRefreshService(
+				persistence.NewCurrentFXRateStore(runtimeConfig.Database),
+				financeFixturesFXProvider{now: func() time.Time { return params.Now }},
+				func() time.Time { return params.Now },
+			),
 		},
 		financefixtures.Config{
 			Seed:               params.Seed,
@@ -236,10 +220,9 @@ func newFinanceFixturesModule(
 		NewID:                  uuid.NewString,
 		HTTPClient:             httpClient,
 		ConnectionSecretCipher: cipher,
-		FXProviders: []financepkg.FXRatesProvider{financepkg.NewStaticFXProvider(
-			financepkg.FXProviderFrankfurter,
-			financefixtures.RealisticScenarioStaticFXRates(financepkg.FXProviderFrankfurter, params.Now),
-		)},
+		FXProviders: []financepkg.FXRatesProvider{
+			financeFixturesFXProvider{now: func() time.Time { return params.Now }},
+		},
 		DefaultFXProvider: financepkg.FXProviderFrankfurter,
 		Monobank: financepkg.MonobankConfig{
 			BaseURL: monobankBaseURL,
@@ -266,7 +249,7 @@ type financeFixturesScenarioService struct {
 	csvImportService      *financepkg.CSVImportService
 	bankConnectionService *financepkg.BankConnectionService
 	bankSyncService       *financepkg.BankSyncService
-	fxService             *financepkg.FXService
+	fxRefreshService      *financepkg.FXService
 }
 
 func (s financeFixturesScenarioService) CreateTenant(
@@ -357,7 +340,7 @@ func (s financeFixturesScenarioService) RefreshRequiredFXRates(
 	ctx context.Context,
 	params financepkg.RefreshFXRatesParams,
 ) (financepkg.RefreshFXRatesResult, error) {
-	return s.fxService.RefreshRequiredFXRates(ctx, params)
+	return s.fxRefreshService.RefreshRequiredFXRates(ctx, params)
 }
 
 func newFinanceFixturesMonobankServer() *httptest.Server {
@@ -370,6 +353,68 @@ func newFinanceFixturesMonobankServer() *httptest.Server {
 			`{"name":"Fixture Connection","accounts":[{"id":"fixture-external","type":"black","currencyCode":980,"balance":101}]}`,
 		))
 	}))
+}
+
+type financeFixturesFXProvider struct{ now func() time.Time }
+
+func (financeFixturesFXProvider) Name() string { return financepkg.FXProviderFrankfurter }
+
+func (p financeFixturesFXProvider) FetchLatestRates(
+	ctx context.Context,
+	query financepkg.FXProviderQuery,
+) ([]domain.FXRate, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	baseCurrency := strings.ToUpper(strings.TrimSpace(query.BaseCurrency))
+	rates := make([]domain.FXRate, 0, len(query.QuoteCurrencies))
+	for _, quoteCurrency := range query.QuoteCurrencies {
+		rates = append(rates, domain.FXRate{
+			Provider:      p.Name(),
+			BaseCurrency:  baseCurrency,
+			QuoteCurrency: strings.ToUpper(strings.TrimSpace(quoteCurrency)),
+			RateDate:      p.now(),
+			Rate:          1.1,
+		})
+	}
+	return rates, nil
+}
+
+type financeFixturesFXRateStore struct {
+	store *persistence.CurrentFXRateStore
+}
+
+func (s financeFixturesFXRateStore) SaveCurrentFXRates(ctx context.Context, rates []domain.FXRate) error {
+	return s.store.SaveCurrentFXRatesIfAbsent(ctx, rates)
+}
+
+func (s financeFixturesFXRateStore) ListCurrentFXRates(
+	ctx context.Context,
+	params persistence.ListCurrentFXRatesParams,
+) ([]domain.FXRate, error) {
+	return s.store.ListCurrentFXRates(ctx, params)
+}
+
+type financeFixturesFXPairLister struct{}
+
+func (financeFixturesFXPairLister) ListRequiredFXPairs(context.Context) ([]persistence.RequiredFXPair, error) {
+	return []persistence.RequiredFXPair{{
+		BaseCurrency: fixtureFXBaseCurrency, QuoteCurrency: fixtureFXQuoteCurrency,
+	}}, nil
+}
+
+func newFinanceFixturesFXRefreshService(
+	rateStore *persistence.CurrentFXRateStore,
+	provider financeFixturesFXProvider,
+	now func() time.Time,
+) *financepkg.FXService {
+	return financepkg.NewFXService(
+		financeFixturesFXRateStore{store: rateStore},
+		financepkg.WithFXServiceNow(now),
+		financepkg.WithFXServiceProviders(provider),
+		financepkg.WithFXServiceDefaultProvider(provider.Name()),
+		financepkg.WithFXServiceRequiredPairs(financeFixturesFXPairLister{}),
+	)
 }
 
 func resolveFinanceFixturesRuntimeConfig(root *cobra.Command) (financeFixturesRuntimeConfig, error) {
@@ -400,37 +445,4 @@ func closeFinanceFixturesRuntimeConfig(commandErr error, runtimeConfig financeFi
 		return errors.Join(commandErr, fmt.Errorf("close finance fixtures root: %w", closeErr))
 	}
 	return commandErr
-}
-
-type financeFixturesProvider struct{}
-
-func (financeFixturesProvider) Name() string { return fixtureMonobankProviderName }
-
-func (financeFixturesProvider) StartLink(
-	context.Context,
-	financepkg.ProviderStartLinkParams,
-) (financepkg.ProviderLinkStart, error) {
-	return financepkg.ProviderLinkStart{}, nil
-}
-
-func (financeFixturesProvider) FinishLink(
-	context.Context,
-	financepkg.ProviderFinishLinkParams,
-) (financepkg.ProviderLinkResult, error) {
-	return financepkg.ProviderLinkResult{}, nil
-}
-
-func (financeFixturesProvider) LinkToken(
-	ctx context.Context,
-	_ financepkg.ProviderTokenLinkParams,
-) (financepkg.ProviderTokenLinkResult, error) {
-	if err := ctx.Err(); err != nil {
-		return financepkg.ProviderTokenLinkResult{}, err
-	}
-	return financepkg.ProviderTokenLinkResult{
-		DisplayName:       "Fixture Connection",
-		ProviderReference: "fixture-reference",
-		Secret:            "fixture-secret",
-		State:             domain.BankConnectionStateActive,
-	}, nil
 }

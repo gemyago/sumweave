@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -14,9 +15,9 @@ func TestNewDatabaseSessionsStorage(t *testing.T) {
 	t.Parallel()
 	fake := faker.New()
 
-	t.Run(":memory: DSN returns storage without error", func(t *testing.T) {
+	t.Run("prepared PostgreSQL schema returns storage without error", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsumweave.GormSumweaveTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(postgresTestDSN(t), postgresTestTablesOpts())
 		require.NoError(t, err)
 		require.NotNil(t, s)
 	})
@@ -28,18 +29,23 @@ func TestNewDatabaseSessionsStorage(t *testing.T) {
 		require.Nil(t, s)
 	})
 
-	t.Run("AutoMigrate with :memory: succeeds", func(t *testing.T) {
+	t.Run("invalid PostgreSQL DSN returns constructor errors", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsumweave.GormSumweaveTablesOpts{})
-		require.NoError(t, err)
-		require.NoError(t, s.AutoMigrate())
+		badDSN := "postgres://localhost:" + strconv.Itoa(fake.RandomNumber(10000)) + "/" + fake.Lorem().Word()
+
+		metadata, err := NewDatabaseSessionMetadataStore(badDSN, postgresTestTablesOpts())
+		require.Error(t, err)
+		require.Nil(t, metadata)
+
+		storage, err := NewDatabaseSessionsStorage(badDSN, postgresTestTablesOpts())
+		require.Error(t, err)
+		require.Nil(t, storage)
 	})
 
-	t.Run("after AutoMigrate Create succeeds", func(t *testing.T) {
+	t.Run("prepared schema Create succeeds", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsumweave.GormSumweaveTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(postgresTestDSN(t), postgresTestTablesOpts())
 		require.NoError(t, err)
-		require.NoError(t, s.AutoMigrate())
 
 		ctx := t.Context()
 		resp, err := s.Create(ctx, &session.CreateRequest{
@@ -53,7 +59,7 @@ func TestNewDatabaseSessionsStorage(t *testing.T) {
 
 	t.Run("meta is DatabaseSessionMetadataStore", func(t *testing.T) {
 		t.Parallel()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsumweave.GormSumweaveTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(postgresTestDSN(t), postgresTestTablesOpts())
 		require.NoError(t, err)
 		require.NotNil(t, s.meta)
 		_, ok := any(s.meta).(*DatabaseSessionMetadataStore)
@@ -63,14 +69,13 @@ func TestNewDatabaseSessionsStorage(t *testing.T) {
 	t.Run("SaveMetadata ListMetadata DeleteMetadata delegate to database store", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
-		s, err := NewDatabaseSessionsStorage(":memory:", gormsumweave.GormSumweaveTablesOpts{})
+		s, err := NewDatabaseSessionsStorage(postgresTestDSN(t), postgresTestTablesOpts())
 		require.NoError(t, err)
-		require.NoError(t, s.AutoMigrate())
 
-		app := "app-db"
-		user := "user-db"
-		sid := "sess-db"
-		now := time.Now().UTC().Truncate(time.Second)
+		app := fake.Lorem().Word() + "-app"
+		user := fake.UUID().V4()
+		sid := fake.UUID().V4()
+		now := time.Now().Truncate(time.Second)
 		meta := SessionMetadata{
 			SessionID: sid,
 			AppName:   app,

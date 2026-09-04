@@ -250,15 +250,14 @@ Use the same persistence approach as the rest of the product direction:
 
 - GORM
 - GORM auto-migrate for finance-owned tables
-- SQLite for local development
-- PostgreSQL for production when needed
+- PostgreSQL for local development, ordinary tests, and production
 - Preserve timestamps as produced by the application/provider contracts; do not
   impose a separate UTC-normalization rule in the finance persistence design.
 
 Use `finance_` table prefixes for the first implementation. This keeps table
-ownership obvious and works consistently across SQLite and PostgreSQL. A future
-PostgreSQL-only deployment may additionally schema-scope finance tables, but the
-portable baseline is table prefixes.
+ownership explicit within the PostgreSQL application database. Do not add a
+SQLite compatibility path or alter date/timestamp normalization as part of this
+database contract.
 
 Persistence models must stay separate from domain models. Current provider source
 data is stored as sanitized, schema-derived typed snapshots; successful raw HTTP

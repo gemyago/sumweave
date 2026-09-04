@@ -5,38 +5,41 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/ThreeDotsLabs/watermill"
 	wmsql "github.com/ThreeDotsLabs/watermill-sql/v4/pkg/sql"
 	wmmessage "github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const testTopic = "topic"
 
 func TestAppDispatch(t *testing.T) {
 	fake := faker.New()
 	logger := slog.New(slog.DiscardHandler)
 	makeConfig := func(t *testing.T) Config {
 		t.Helper()
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
 		return Config{
-			DatabaseDSN:  filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
-			TablePrefix:  "dispatch_",
+			DatabaseDSN:  dsn,
+			TablePrefix:  "sumweave_",
 			PollInterval: 10 * time.Millisecond,
 		}
 	}
-	openMigrated := func(t *testing.T, config Config) *sql.DB {
+	openPrepared := func(t *testing.T, config Config) *sql.DB {
 		t.Helper()
-		db, err := sqlconn.Open(config.DatabaseDSN)
+		db, err := sql.Open("pgx", config.DatabaseDSN)
 		require.NoError(t, err)
-		require.NoError(t, AutoMigrate(t.Context(), config, db))
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		return db
 	}
@@ -58,92 +61,9 @@ func TestAppDispatch(t *testing.T) {
 		}
 	}
 
-	t.Run("prepares a topic-aware schema explicitly", func(t *testing.T) {
-		config := makeConfig(t)
-		db, err := sqlconn.Open(config.DatabaseDSN)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-		publisher, err := NewPublisher(config, db, logger)
-		require.NoError(t, err)
-		require.Error(t, publisher.Publish(t.Context(), NewMessage("topic."+fake.UUID().V4(), []byte("payload"))))
-
-		require.NoError(t, AutoMigrate(t.Context(), config, db))
-		require.NoError(t, AutoMigrate(t.Context(), config, db))
-
-		columns := make(map[string]int)
-		rows, err := db.QueryContext(t.Context(), `PRAGMA table_info(`+quoteIdentifier(config.OffsetsTable())+`)`)
-		require.NoError(t, err)
-		defer func() { require.NoError(t, rows.Close()) }()
-		for rows.Next() {
-			var cid, notNull, primaryKey int
-			var name, columnType string
-			var defaultValue sql.NullString
-			require.NoError(t, rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey))
-			columns[name] = primaryKey
-		}
-		require.NoError(t, rows.Err())
-		assert.Equal(t, 1, columns["topic"])
-		assert.Equal(t, 2, columns["consumer_group"])
-
-		queries, err := buildPostgresMigrationQueries(Config{TablePrefix: "dispatch_"})
-		require.NoError(t, err)
-		require.Len(t, queries, 4)
-	})
-
-	t.Run("upgrades an existing sqlite transport schema", func(t *testing.T) {
-		config := makeConfig(t)
-		db, err := sqlconn.Open(config.DatabaseDSN)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		legacyMessageID := fake.UUID().V4()
-		_, err = db.ExecContext(t.Context(), `CREATE TABLE `+quoteIdentifier(config.MessagesTable())+` (
-			"offset" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-			uuid TEXT NOT NULL,
-			topic TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			payload BLOB,
-			metadata JSON NOT NULL
-		)`)
-		require.NoError(t, err)
-		for range 2 {
-			_, err = db.ExecContext(
-				t.Context(),
-				`INSERT INTO `+quoteIdentifier(config.MessagesTable())+
-					` (uuid, topic, created_at, payload, metadata) VALUES (?, ?, ?, ?, ?)`,
-				legacyMessageID,
-				"topic."+fake.UUID().V4(),
-				time.Now().Format(time.RFC3339),
-				[]byte("payload-"+fake.UUID().V4()),
-				[]byte(`{}`),
-			)
-			require.NoError(t, err)
-		}
-
-		migrator, err := NewMigrator(config, db)
-		require.NoError(t, err)
-		require.NoError(t, migrator.Migrate(t.Context()))
-		require.NoError(t, migrator.Migrate(t.Context()))
-
-		var messageCount int
-		require.NoError(t, db.QueryRowContext(
-			t.Context(),
-			`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid=?`,
-			legacyMessageID,
-		).Scan(&messageCount))
-		assert.Equal(t, 1, messageCount)
-
-		publisher := makePublisher(t, config, db)
-		require.ErrorIs(t, publisher.Publish(t.Context(), Message{
-			ID:      legacyMessageID,
-			Topic:   "topic." + fake.UUID().V4(),
-			Payload: []byte("payload-" + fake.UUID().V4()),
-		}), ErrDuplicateMessageID)
-	})
-
 	t.Run("publishes explicit messages and preserves transaction boundaries", func(t *testing.T) {
 		config := makeConfig(t)
-		db := openMigrated(t, config)
+		db := openPrepared(t, config)
 		publisher := makePublisher(t, config, db)
 		topic := "topic." + fake.UUID().V4()
 		message := NewMessage(topic, []byte("payload-"+fake.UUID().V4()))
@@ -153,7 +73,7 @@ func TestAppDispatch(t *testing.T) {
 		var storedTopic, storedID string
 		require.NoError(t, db.QueryRowContext(
 			t.Context(),
-			`SELECT topic, uuid FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid=?`,
+			`SELECT topic, uuid FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid=$1`,
 			message.ID,
 		).Scan(&storedTopic, &storedID))
 		assert.Equal(t, message.Topic, storedTopic)
@@ -174,7 +94,7 @@ func TestAppDispatch(t *testing.T) {
 		var count int
 		require.NoError(t, db.QueryRowContext(
 			t.Context(),
-			`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid IN (?, ?)`,
+			`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid IN ($1, $2)`,
 			committed.ID,
 			rolledBack.ID,
 		).Scan(&count))
@@ -191,7 +111,7 @@ func TestAppDispatch(t *testing.T) {
 
 	t.Run("publishes generic requests with stable idempotent references", func(t *testing.T) {
 		config := makeConfig(t)
-		db := openMigrated(t, config)
+		db := openPrepared(t, config)
 		publisher := makePublisher(t, config, db)
 		topic := "topic." + fake.UUID().V4()
 		key := "key." + fake.UUID().V4()
@@ -277,7 +197,7 @@ func TestAppDispatch(t *testing.T) {
 		var count int
 		require.NoError(t, db.QueryRowContext(
 			t.Context(),
-			`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid IN (?, ?)`,
+			`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid IN ($1, $2)`,
 			committedReference.MessageID,
 			rolledBackReference.MessageID,
 		).Scan(&count))
@@ -305,13 +225,6 @@ func TestAppDispatch(t *testing.T) {
 		group := "group." + fake.UUID().V4()
 		wmMessage := wmmessage.NewMessage(fake.UUID().V4(), []byte("payload"))
 		wmMessage.Metadata.Set("traceId", fake.UUID().V4())
-		sqliteInsert, err := makeSQLitePublisherSchema(config).InsertQuery(wmsql.InsertQueryParams{
-			Topic: topic,
-			Msgs:  wmmessage.Messages{wmMessage},
-		})
-		require.NoError(t, err)
-		assert.Equal(t, topic, sqliteInsert.Args[1])
-
 		insert, err := postgresSchema(config).InsertQuery(wmsql.InsertQueryParams{
 			Topic: topic,
 			Msgs:  wmmessage.Messages{wmMessage},
@@ -348,7 +261,7 @@ func TestAppDispatch(t *testing.T) {
 
 	t.Run("isolates topics and consumer groups and resumes offsets", func(t *testing.T) {
 		config := makeConfig(t)
-		db := openMigrated(t, config)
+		db := openPrepared(t, config)
 		publisher := makePublisher(t, config, db)
 		factory, err := NewRouterFactory(config, db, publisher, logger)
 		require.NoError(t, err)
@@ -362,7 +275,7 @@ func TestAppDispatch(t *testing.T) {
 		require.NoError(t, publisher.Publish(t.Context(), messageA))
 		require.NoError(t, publisher.Publish(t.Context(), messageB))
 
-		subscribe := func(t *testing.T, group string, topic string) (<-chan *Message, context.CancelFunc) {
+		subscribe := func(t *testing.T, group string, topic string) (<-chan *Message, func()) {
 			t.Helper()
 			router, routerErr := factory.NewRouter(group)
 			require.NoError(t, routerErr)
@@ -376,11 +289,13 @@ func TestAppDispatch(t *testing.T) {
 			require.NoError(t, router.Handle(handler))
 			ctx, cancel := context.WithCancel(t.Context())
 			go func() { _ = router.Run(ctx) }()
-			t.Cleanup(func() {
+			<-router.router.Running()
+			stop := func() {
 				cancel()
 				require.NoError(t, router.Close())
-			})
-			return results, cancel
+			}
+			t.Cleanup(stop)
+			return results, stop
 		}
 
 		groupAMessages, stopGroupA := subscribe(t, groupA, topicA)
@@ -392,14 +307,15 @@ func TestAppDispatch(t *testing.T) {
 
 		stopGroupA()
 		second := NewMessage(topicA, []byte("second"))
-		require.NoError(t, publisher.Publish(t.Context(), second))
 		resumed, _ := subscribe(t, groupA, topicA)
-		assert.Equal(t, second.ID, receive(t, resumed).ID)
+		require.NoError(t, publisher.Publish(t.Context(), second))
+		resumedMessage := receive(t, resumed)
+		assert.Equal(t, second.ID, resumedMessage.ID)
 	})
 
 	t.Run("coordinates same-group router instances", func(t *testing.T) {
 		config := makeConfig(t)
-		db := openMigrated(t, config)
+		db := openPrepared(t, config)
 		publisher := makePublisher(t, config, db)
 		factory, err := NewRouterFactory(config, db, publisher, logger)
 		require.NoError(t, err)
@@ -418,6 +334,7 @@ func TestAppDispatch(t *testing.T) {
 			require.NoError(t, handlerErr)
 			require.NoError(t, router.Handle(handler))
 			go func() { _ = router.Run(ctx) }()
+			<-router.router.Running()
 			t.Cleanup(func() { require.NoError(t, router.Close()) })
 		}
 		require.NoError(t, publisher.Publish(t.Context(), NewMessage(topic, []byte("payload"))))
@@ -426,66 +343,9 @@ func TestAppDispatch(t *testing.T) {
 		assert.Equal(t, int32(1), handled.Load())
 	})
 
-	t.Run("does not let a stale lease holder release its successor", func(t *testing.T) {
-		config := makeConfig(t)
-		db := openMigrated(t, config)
-		publisher := makePublisher(t, config, db)
-		topic := "topic." + fake.UUID().V4()
-		group := "group." + fake.UUID().V4()
-		require.NoError(t, publisher.Publish(t.Context(), NewMessage(topic, []byte("payload-"+fake.UUID().V4()))))
-		_, err := db.ExecContext(
-			t.Context(),
-			`INSERT INTO `+quoteIdentifier(config.OffsetsTable())+
-				` (topic, consumer_group, offset_acked, locked_until, lease_id) VALUES (?, ?, 0, 0, '')`,
-			topic,
-			group,
-		)
-		require.NoError(t, err)
-
-		first := newSQLiteSubscription(config, db, group, topic, watermill.NewSlogLogger(logger))
-		t.Cleanup(func() {
-			first.pollTicker.Stop()
-			first.lockTicker.Stop()
-		})
-		firstBatch, err := first.NextBatch(t.Context())
-		require.NoError(t, err)
-		require.Len(t, firstBatch, 1)
-		_, err = db.ExecContext(
-			t.Context(),
-			`UPDATE `+quoteIdentifier(config.OffsetsTable())+` SET locked_until=0 WHERE topic=? AND consumer_group=?`,
-			topic,
-			group,
-		)
-		require.NoError(t, err)
-
-		second := newSQLiteSubscription(config, db, group, topic, watermill.NewSlogLogger(logger))
-		t.Cleanup(func() {
-			second.pollTicker.Stop()
-			second.lockTicker.Stop()
-		})
-		secondBatch, err := second.NextBatch(t.Context())
-		require.NoError(t, err)
-		require.Len(t, secondBatch, 1)
-		first.lastAckedOffset = firstBatch[0].Offset
-		require.ErrorIs(t, first.ReleaseLock(t.Context()), errSQLiteDeliveryLeaseLost)
-
-		var offset int64
-		var leaseID string
-		require.NoError(t, db.QueryRowContext(
-			t.Context(),
-			`SELECT offset_acked, lease_id FROM `+quoteIdentifier(config.OffsetsTable())+
-				` WHERE topic=? AND consumer_group=?`,
-			topic,
-			group,
-		).Scan(&offset, &leaseID))
-		assert.Zero(t, offset)
-		assert.Equal(t, second.leaseID, leaseID)
-		assert.NotEqual(t, first.leaseID, leaseID)
-	})
-
 	t.Run("routes topics with bounded retry panic recovery and dead letters", func(t *testing.T) {
 		config := makeConfig(t)
-		db := openMigrated(t, config)
+		db := openPrepared(t, config)
 		publisher := makePublisher(t, config, db)
 		factory, err := NewRouterFactory(config, db, publisher, logger)
 		require.NoError(t, err)
@@ -523,6 +383,7 @@ func TestAppDispatch(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		go func() { _ = router.Run(ctx) }()
+		<-router.router.Running()
 		retryMessage := NewMessage(topicRetry, []byte("retry"))
 		panicMessage := NewMessage(topicPanic, []byte("panic"))
 		healthyMessage := NewMessage(topicHealthy, []byte("healthy"))
@@ -534,9 +395,10 @@ func TestAppDispatch(t *testing.T) {
 			var count int
 			queryErr := db.QueryRowContext(
 				t.Context(),
-				`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE topic=? AND `+
-					`json_extract(metadata, '$.`+originalMessageIDMetadataKey+`')=?`,
+				`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE topic=$1 AND `+
+					`metadata->>$2=$3`,
 				DeadLetterTopic,
+				originalMessageIDMetadataKey,
 				panicMessage.ID,
 			).Scan(&count)
 			return queryErr == nil && count == 1
@@ -546,11 +408,11 @@ func TestAppDispatch(t *testing.T) {
 		var poisonedTopic, reason, originalMessageID string
 		require.NoError(t, db.QueryRowContext(
 			t.Context(),
-			`SELECT json_extract(metadata, '$.`+middleware.PoisonedTopicKey+`'),`+
-				` json_extract(metadata, '$.`+middleware.ReasonForPoisonedKey+`'),`+
-				` json_extract(metadata, '$.`+originalMessageIDMetadataKey+`') FROM `+
-				quoteIdentifier(config.MessagesTable())+` WHERE topic=? AND `+
-				`json_extract(metadata, '$.`+originalMessageIDMetadataKey+`')=?`,
+			`SELECT metadata->>$1, metadata->>$2, metadata->>$3 FROM `+
+				quoteIdentifier(config.MessagesTable())+` WHERE topic=$4 AND metadata->>$3=$5`,
+			middleware.PoisonedTopicKey,
+			middleware.ReasonForPoisonedKey,
+			originalMessageIDMetadataKey,
 			DeadLetterTopic,
 			panicMessage.ID,
 		).Scan(&poisonedTopic, &reason, &originalMessageID))
@@ -561,7 +423,7 @@ func TestAppDispatch(t *testing.T) {
 
 	t.Run("keeps a failed dead-letter publication unacknowledged", func(t *testing.T) {
 		config := makeConfig(t)
-		db := openMigrated(t, config)
+		db := openPrepared(t, config)
 		publisher := makePublisher(t, config, db)
 		factory, err := NewRouterFactory(config, db, publisher, logger)
 		require.NoError(t, err)
@@ -577,18 +439,19 @@ func TestAppDispatch(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.NoError(t, router.Handle(handler))
-		message := NewMessage(topic, []byte("payload"))
-		require.NoError(t, publisher.Publish(t.Context(), message))
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		go func() { _ = router.Run(ctx) }()
+		<-router.router.Running()
+		message := NewMessage(topic, []byte("payload"))
+		require.NoError(t, publisher.Publish(t.Context(), message))
 		<-started
 		require.NoError(t, publisher.Close())
 
 		require.Eventually(t, func() bool {
 			var offset int
 			query := `SELECT offset_acked FROM ` + quoteIdentifier(config.OffsetsTable()) +
-				` WHERE topic=? AND consumer_group=?`
+				` WHERE topic=$1 AND consumer_group=$2`
 			queryErr := db.QueryRowContext(
 				t.Context(),
 				query,
@@ -600,8 +463,6 @@ func TestAppDispatch(t *testing.T) {
 	})
 
 	t.Run("validates constructors and driver selection", func(t *testing.T) {
-		assert.Equal(t, TransportDriverSQLite, Config{DatabaseDSN: ":memory:"}.Driver())
-		assert.Equal(t, TransportDriverPostgres, Config{DatabaseDSN: "postgres://example.invalid/db"}.Driver())
 		_, err := NewPublisher(Config{}, nil, logger)
 		require.EqualError(t, err, "sql database is required")
 		_, err = NewPublisher(Config{}, &sql.DB{}, nil)
@@ -611,9 +472,9 @@ func TestAppDispatch(t *testing.T) {
 		require.NoError(t, (*Publisher)(nil).Close())
 		require.NoError(t, (*Router)(nil).Close())
 		assert.Equal(t, `"a""b"`, quoteIdentifier(`a"b`))
-		postgresPublisher := &Publisher{config: Config{DatabaseDSN: "postgres://example.invalid/database"}}
-		assert.Equal(t, "$1", postgresPublisher.publicationPlaceholder(1))
-		assert.Equal(t, "($1, $2)", postgresPublisher.publicationPlaceholders(2))
+		publisher := &Publisher{}
+		assert.Equal(t, "$1", publisher.publicationPlaceholder(1))
+		assert.Equal(t, "($1, $2)", publisher.publicationPlaceholders(2))
 		assert.Equal(
 			t,
 			Message{
@@ -628,6 +489,27 @@ func TestAppDispatch(t *testing.T) {
 		privateMetadataMessage.Metadata.Set(transportPayloadHashMetadataKey, fake.UUID().V4())
 		assert.Empty(t, makeMessage(testTopic, privateMetadataMessage).Metadata)
 		assert.Empty(t, transportMessagePayloadHash(&wmmessage.Message{}))
+	})
+
+	t.Run("rejects concurrent calls to a running PostgreSQL router", func(t *testing.T) {
+		config := makeConfig(t)
+		db := openPrepared(t, config)
+		publisher := makePublisher(t, config, db)
+		factory, err := NewRouterFactory(config, db, publisher, logger)
+		require.NoError(t, err)
+		router, err := factory.NewRouter("concurrent-run-group-" + fake.UUID().V4())
+		require.NoError(t, err)
+		handler, err := NewHandler(testTopic, func(context.Context, Message) error { return nil })
+		require.NoError(t, err)
+		require.NoError(t, router.Handle(handler))
+		firstCtx, cancelFirst := context.WithCancel(t.Context())
+		t.Cleanup(cancelFirst)
+		firstRun := make(chan error, 1)
+		go func() { firstRun <- router.Run(firstCtx) }()
+		<-router.router.Running()
+		require.ErrorContains(t, router.Run(t.Context()), "run message router")
+		cancelFirst()
+		<-firstRun
 	})
 
 	t.Run("does not leak Watermill into domain or runtime packages", func(t *testing.T) {

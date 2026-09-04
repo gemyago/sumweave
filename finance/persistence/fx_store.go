@@ -72,6 +72,36 @@ func (s *CurrentFXRateStore) SaveCurrentFXRates(ctx context.Context, rates []dom
 	return nil
 }
 
+func (s *CurrentFXRateStore) SaveCurrentFXRatesIfAbsent(ctx context.Context, rates []domain.FXRate) error {
+	for index := range rates {
+		if rates[index].EffectiveAt.IsZero() {
+			rates[index].EffectiveAt = rates[index].RateDate
+		}
+		if rates[index].LastSuccessfulRefreshAt.IsZero() {
+			rates[index].LastSuccessfulRefreshAt = rates[index].EffectiveAt
+		}
+		if rates[index].EffectiveAt.IsZero() || rates[index].LastSuccessfulRefreshAt.IsZero() {
+			return errors.New("save current fx rates if absent: effective and refresh timestamps are required")
+		}
+	}
+	for _, rate := range rates {
+		model := newCurrentFXRateModel(rate)
+		if model.CreatedAt.IsZero() {
+			model.CreatedAt = s.now()
+		}
+		if model.UpdatedAt.IsZero() {
+			model.UpdatedAt = s.now()
+		}
+		if err := s.db.db.WithContext(ctx).Table(model.TableName()).Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: columnProvider}, {Name: "base_currency"}, {Name: "quote_currency"}},
+			DoNothing: true,
+		}).Create(&model).Error; err != nil {
+			return fmt.Errorf("save current fx rates if absent: %w", err)
+		}
+	}
+	return nil
+}
+
 func (s *Store) SaveFXRates(ctx context.Context, rates []domain.FXRate) error {
 	return NewCurrentFXRateStoreFromStore(s).SaveCurrentFXRates(ctx, rates)
 }

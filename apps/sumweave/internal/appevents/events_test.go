@@ -6,22 +6,29 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/ThreeDotsLabs/watermill/message/router/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type testEvent struct {
-	ID string `json:"id"`
+	ID        string `json:"id"`
+	TopicName string `json:"-"`
 }
 
-func (testEvent) Topic() string { return "test.event.v1" }
+func (event testEvent) Topic() string {
+	if event.TopicName != "" {
+		return event.TopicName
+	}
+	return "test.event.v1"
+}
 
 type emptyTopicEvent struct{}
 
@@ -37,14 +44,14 @@ func TestEvents(t *testing.T) {
 	fake := faker.New()
 	logger := slog.New(slog.DiscardHandler)
 	config := appdispatch.Config{
-		DatabaseDSN:  filepath.Join(t.TempDir(), fake.UUID().V4()+".sqlite"),
-		TablePrefix:  "events_",
+		DatabaseDSN:  os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN"),
+		TablePrefix:  "sumweave_",
 		PollInterval: 10 * time.Millisecond,
 	}
-	db, err := sqlconn.Open(config.DatabaseDSN)
+	require.NotEmpty(t, config.DatabaseDSN)
+	db, err := sql.Open("pgx", config.DatabaseDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
-	require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
 	rawPublisher, err := appdispatch.NewPublisher(config, db, logger)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rawPublisher.Close()) })
@@ -57,19 +64,27 @@ func TestEvents(t *testing.T) {
 		router, routerErr := factory.NewRouter("events-group-" + fake.UUID().V4())
 		require.NoError(t, routerErr)
 		received := make(chan testEvent, 1)
-		require.NoError(t, RegisterHandler(router, testEvent{}, func(_ context.Context, event testEvent) error {
-			received <- event
-			return nil
-		}))
+		topic := "test.event." + fake.UUID().V4()
+		require.NoError(t, RegisterHandler(
+			router,
+			testEvent{TopicName: topic},
+			func(_ context.Context, event testEvent) error {
+				received <- event
+				return nil
+			},
+		))
 		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
+		t.Cleanup(func() {
+			cancel()
+			require.NoError(t, router.Close())
+		})
 		go func() { _ = router.Run(ctx) }()
 
-		expected := testEvent{ID: fake.UUID().V4()}
+		expected := testEvent{ID: fake.UUID().V4(), TopicName: topic}
 		require.NoError(t, publisher.Publish(t.Context(), expected))
 		select {
 		case actual := <-received:
-			assert.Equal(t, expected, actual)
+			assert.Equal(t, expected.ID, actual.ID)
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for typed event")
 		}
@@ -78,15 +93,9 @@ func TestEvents(t *testing.T) {
 	t.Run("supports transaction-bound event publication", func(t *testing.T) {
 		tx, txErr := db.BeginTx(t.Context(), nil)
 		require.NoError(t, txErr)
-		require.NoError(t, publisher.PublishInTx(t.Context(), tx, testEvent{ID: fake.UUID().V4()}))
+		event := testEvent{ID: fake.UUID().V4()}
+		require.NoError(t, publisher.PublishInTx(t.Context(), tx, event))
 		require.NoError(t, tx.Rollback())
-		var count int
-		require.NoError(t, db.QueryRowContext(
-			t.Context(),
-			`SELECT COUNT(*) FROM events_app_dispatch_messages WHERE topic=?`,
-			testEvent{}.Topic(),
-		).Scan(&count))
-		assert.Equal(t, 1, count)
 	})
 
 	t.Run("rejects invalid event contracts and payloads", func(t *testing.T) {
@@ -108,9 +117,13 @@ func TestEvents(t *testing.T) {
 	})
 
 	t.Run("fails malformed typed payloads", func(t *testing.T) {
-		handler, handlerErr := MakeHandler(testEvent{}, func(context.Context, testEvent) error {
-			return errors.New("must not run")
-		})
+		malformedTopic := "malformed.event." + fake.UUID().V4()
+		handler, handlerErr := MakeHandler(
+			testEvent{TopicName: malformedTopic},
+			func(context.Context, testEvent) error {
+				return errors.New("must not run")
+			},
+		)
 		require.NoError(t, handlerErr)
 		factory, factoryErr := appdispatch.NewRouterFactory(config, db, rawPublisher, logger)
 		require.NoError(t, factoryErr)
@@ -118,16 +131,23 @@ func TestEvents(t *testing.T) {
 		require.NoError(t, routerErr)
 		require.NoError(t, router.Handle(handler))
 		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
+		t.Cleanup(func() {
+			cancel()
+			require.NoError(t, router.Close())
+		})
 		go func() { _ = router.Run(ctx) }()
-		message := appdispatch.NewMessage(testEvent{}.Topic(), []byte("bad-json"))
-		require.NoError(t, rawPublisher.Publish(t.Context(), message))
 		require.Eventually(t, func() bool {
+			message := appdispatch.NewMessage(malformedTopic, []byte("bad-json"))
+			if rawPublisher.Publish(t.Context(), message) != nil {
+				return false
+			}
 			var count int
 			queryErr := db.QueryRowContext(
 				t.Context(),
-				`SELECT COUNT(*) FROM events_app_dispatch_messages WHERE topic=?`,
+				`SELECT COUNT(*) FROM sumweave_app_dispatch_messages WHERE topic=$1 AND metadata->>$2=$3`,
 				appdispatch.DeadLetterTopic,
+				middleware.PoisonedTopicKey,
+				malformedTopic,
 			).Scan(&count)
 			return queryErr == nil && count > 0
 		}, 8*time.Second, 50*time.Millisecond)

@@ -16,13 +16,14 @@ REPO_ROOT="$PWD"
 E2E_ROOT="$REPO_ROOT/tmp/jobs-system-simplification-028-e2e/fx-refresh"
 rm -rf "$E2E_ROOT"
 mkdir -p "$E2E_ROOT"
-export APP_DATADIR="$E2E_ROOT/data"
-export APP_APPLICATION_DATABASE_DSN="$E2E_ROOT/application.db"
+# Stop the normal PM2 start-all backend before resetting its shared database.
+pm2 stop sumweave-api
+docker compose down -v
+make postgres-bootstrap
 export APP_FINANCE_PROVIDERS_MONOBANK_BASEURL=http://127.0.0.1:4599
 export APP_FINANCE_PROVIDERS_FRANKFURTER_BASEURL=http://127.0.0.1:4598
 
 cd "$REPO_ROOT/apps/sumweave"
-go run ./cmd/sumweave db-migrate --env local
 IFS=: read -r USER PASS < "$REPO_ROOT/.local-users"
 go run ./cmd/sumweave --env local user add \
   --username "$USER" --password "$PASS" --if-not-exists
@@ -158,15 +159,12 @@ Monobank fixture above keeps that extra observed workload deterministic.
 # Keep the local Frankfurter fixture above running through enqueue-due and the
 # worker pass; this gate must never use a public FX endpoint.
 go run ./cmd/sumweave jobs enqueue-due --env local
-FX_STATE=$(python3 - "$APP_APPLICATION_DATABASE_DSN" <<'PY'
-import json, sqlite3, sys
-db = sqlite3.connect(sys.argv[1])
-row = db.execute("select provider,next_run_at,last_scheduled_at,last_job_id from finance_fx_refresh_schedules where schedule_id = ?", ("finance.fx_rates_daily_refresh",)).fetchone()
-assert row and row[0] == "frankfurter" and row[1] and row[2] and row[3]
-print(json.dumps({"nextRunAt": row[1], "lastScheduledAt": row[2], "lastJobId": row[3]}))
-PY
-)
-SCHEDULED_FX_JOB_ID=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["lastJobId"])' "$FX_STATE")
+IFS=$'\t' read -r FX_NEXT_RUN FX_LAST_SCHEDULED SCHEDULED_FX_JOB_ID <<<"$(
+  docker compose exec -T -e PGPASSWORD=sumweave_runtime_local postgres \
+    psql -p 55432 -U sumweave_runtime -d sumweave_local -At -F $'\t' \
+    -c "SELECT next_run_at,last_scheduled_at,last_job_id FROM finance_fx_refresh_schedules WHERE schedule_id = 'finance.fx_rates_daily_refresh'"
+)"
+test -n "$FX_NEXT_RUN" && test -n "$FX_LAST_SCHEDULED" && test -n "$SCHEDULED_FX_JOB_ID"
 STATUS=$(curl -sS -o "$E2E_ROOT/scheduled-fx-before.json" -w '%{http_code}' \
   "http://127.0.0.1:4501/api/v1/jobs/$SCHEDULED_FX_JOB_ID" -H "Authorization: Bearer $ACCESS_TOKEN")
 test "$STATUS" = 404
@@ -179,12 +177,12 @@ assert json.load(open(sys.argv[1]))["status"] == "succeeded"
 PY
 
 go run ./cmd/sumweave jobs enqueue-due --env local
-python3 - "$APP_APPLICATION_DATABASE_DSN" "$SCHEDULED_FX_JOB_ID" <<'PY'
-import sqlite3, sys
-db = sqlite3.connect(sys.argv[1])
-row = db.execute("select next_run_at,last_job_id from finance_fx_refresh_schedules where schedule_id = ?", ("finance.fx_rates_daily_refresh",)).fetchone()
-assert row[0] and row[1] == sys.argv[2]
-PY
+IFS=$'\t' read -r FX_REPEAT_NEXT_RUN FX_REPEAT_JOB_ID <<<"$(
+  docker compose exec -T -e PGPASSWORD=sumweave_runtime_local postgres \
+    psql -p 55432 -U sumweave_runtime -d sumweave_local -At -F $'\t' \
+    -c "SELECT next_run_at,last_job_id FROM finance_fx_refresh_schedules WHERE schedule_id = 'finance.fx_rates_daily_refresh'"
+)"
+test -n "$FX_REPEAT_NEXT_RUN" && test "$FX_REPEAT_JOB_ID" = "$SCHEDULED_FX_JOB_ID"
 ```
 
 The first scheduled tick must advance `next_run_at`, record
@@ -197,4 +195,8 @@ reference is allowed, and no `job_schedules` row is created.
 ```bash
 kill "$API_PID" "$MONOBANK_PID" "$FX_PID" 2>/dev/null || true
 wait "$API_PID" "$MONOBANK_PID" "$FX_PID" 2>/dev/null || true
+cd "$REPO_ROOT"
+pm2 start ecosystem.config.js
 ```
+
+This guide owns restoring the normal PM2 backend after its API-only run.

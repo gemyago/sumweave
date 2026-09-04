@@ -36,6 +36,17 @@ func TestNewGormConfigForSumweaveTables(t *testing.T) {
 		require.Empty(t, ns.TablePrefix)
 	})
 
+	t.Run("NowFunc returns microsecond-precise values without changing location", func(t *testing.T) {
+		location := time.FixedZone(fake.Lorem().Word(), 2*60*60)
+		clockValue := time.Date(2026, time.September, 3, 19, 20, 30, 123456789, location)
+		cfg := NewGormConfigForSumweaveTables(GormSumweaveTablesOpts{
+			NowFunc: func() time.Time { return clockValue },
+		})
+
+		require.Equal(t, clockValue.Truncate(time.Microsecond), cfg.NowFunc())
+		require.Same(t, location, cfg.NowFunc().Location())
+	})
+
 	t.Run("logger enables slog-backed GORM logging", func(t *testing.T) {
 		var logs bytes.Buffer
 		logger := slog.New(slog.NewJSONHandler(&logs, nil))

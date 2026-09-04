@@ -47,7 +47,7 @@ func TestFinanceComposition(t *testing.T) {
 		assert.Contains(t, services.FXService.fxProviders, "custom-fx")
 	})
 
-	t.Run("New composes orchestrated synthetic first sync through SQLite", func(t *testing.T) {
+	t.Run("New composes orchestrated synthetic first sync through PostgreSQL", func(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		now := time.Date(2026, time.August, 18, 11, 0, 0, 0, time.FixedZone("CEST", 2*60*60))

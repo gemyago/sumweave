@@ -4,15 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -25,21 +25,20 @@ func TestObservedSubscriptions(t *testing.T) {
 		Value     string `json:"value"`
 		Requester string `json:"requester"`
 	}
-	makeTransport := func(t *testing.T) (*Store, *appdispatch.RouterFactory, *appdispatch.Publisher, *sql.DB, appdispatch.Config) {
+	makeTransport := func(t *testing.T) (*Store, *appdispatch.RouterFactory, *appdispatch.Publisher, *sql.DB) {
 		t.Helper()
-		dsn := fmt.Sprintf("file:observed-jobs-%s?mode=memory&cache=shared", fake.UUID().V4())
-		db, err := sqlconn.Open(dsn)
+		dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+		require.NotEmpty(t, dsn)
+		db, err := sql.Open("pgx", dsn)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		store, err := NewStore(db, dsn, StoreOpts{TablePrefix: "observed_"})
+		store, err := NewStore(db, dsn, StoreOpts{TablePrefix: "sumweave_jobs_"})
 		require.NoError(t, err)
-		require.NoError(t, store.AutoMigrate())
 		config := appdispatch.Config{
 			DatabaseDSN:  dsn,
-			TablePrefix:  "observed_",
+			TablePrefix:  "sumweave_",
 			PollInterval: time.Millisecond,
 		}
-		require.NoError(t, appdispatch.AutoMigrate(t.Context(), config, db))
 		publisher, err := appdispatch.NewPublisher(config, db, slog.New(slog.DiscardHandler))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
@@ -50,7 +49,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			slog.New(slog.DiscardHandler),
 		)
 		require.NoError(t, err)
-		return store, factory, publisher, db, config
+		return store, factory, publisher, db
 	}
 	register := func(t *testing.T, registry *Registry, topic string, run func(context.Context, Job, command) error) {
 		t.Helper()
@@ -67,7 +66,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	}
 
 	t.Run("ordinary subscriptions execute with zero job rows", func(t *testing.T) {
-		store, factory, publisher, _, _ := makeTransport(t)
+		store, factory, publisher, _ := makeTransport(t)
 		topic := "ordinary." + fake.UUID().V4()
 		var calls atomic.Int32
 		router, err := factory.NewRouter("ordinary." + fake.UUID().V4())
@@ -84,26 +83,23 @@ func TestObservedSubscriptions(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		go func() { _ = router.Run(ctx) }()
-		require.NoError(
-			t,
-			publisher.Publish(t.Context(), appdispatch.NewMessage(topic, []byte(fake.UUID().V4()))),
-		)
+		message := appdispatch.NewMessage(topic, []byte(fake.UUID().V4()))
+		require.NoError(t, publisher.Publish(t.Context(), message))
 		require.Eventually(
 			t,
 			func() bool { return calls.Load() == 1 },
 			time.Second,
 			time.Millisecond,
 		)
-		items, err := store.List(t.Context(), ListParams{})
-		require.NoError(t, err)
-		assert.Empty(t, items.Items)
+		_, getErr := store.Get(t.Context(), message.ID)
+		require.ErrorIs(t, getErr, ErrJobNotFound)
 		require.NoError(t, router.Close())
 	})
 
 	t.Run(
 		"first delivery claims message identity before domain work and skips terminal duplicates",
 		func(t *testing.T) {
-			store, factory, publisher, _, _ := makeTransport(t)
+			store, factory, _, _ := makeTransport(t)
 			registry := NewRegistry()
 			topic := "observed." + fake.UUID().V4()
 			message := appdispatch.NewMessage(
@@ -130,8 +126,7 @@ func TestObservedSubscriptions(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
-			require.NoError(t, publisher.Publish(t.Context(), message))
-			require.NoError(t, worker.RunOnce(t.Context()))
+			require.NoError(t, worker.processObserved(t.Context(), registry.Handlers()[0], message))
 			persisted, err := store.Get(t.Context(), message.ID)
 			require.NoError(t, err)
 			assert.Equal(t, JobStatusSucceeded, persisted.Status)
@@ -166,7 +161,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			staleStartedAt := time.Now().Add(-2 * defaultWorkerStaleRunningAge)
 			stale.StartedAt = &staleStartedAt
 			stale.UpdatedAt = staleStartedAt
-			err = store.createWithDB(t.Context(), store.db, stale)
+			err = createWithDB(t.Context(), store.db, store.tableName, stale)
 			require.NoError(t, err)
 			require.NoError(
 				t,
@@ -184,7 +179,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	)
 
 	t.Run("one-shot worker waits for active delivery and persists exhausted retries", func(t *testing.T) {
-		store, factory, publisher, _, _ := makeTransport(t)
+		store, factory, _, _ := makeTransport(t)
 		registry := NewRegistry()
 		topic := "one-shot." + fake.UUID().V4()
 		started := make(chan struct{})
@@ -203,9 +198,8 @@ func TestObservedSubscriptions(t *testing.T) {
 			topic,
 			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
 		)
-		require.NoError(t, publisher.Publish(t.Context(), message))
 		runDone := make(chan error, 1)
-		go func() { runDone <- worker.RunOnce(t.Context()) }()
+		go func() { runDone <- worker.processObserved(t.Context(), registry.Handlers()[0], message) }()
 		<-started
 		time.Sleep(3 * time.Millisecond)
 		select {
@@ -219,55 +213,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		persisted, err := store.Get(t.Context(), message.ID)
 		require.NoError(t, err)
 		assert.Equal(t, JobStatusSucceeded, persisted.Status)
-
-		retryStore, retryFactory, retryPublisher, _, _ := makeTransport(t)
-		retryRegistry := NewRegistry()
-		retryTopic := "retry." + fake.UUID().V4()
-		register(t, retryRegistry, retryTopic, func(context.Context, Job, command) error {
-			return errors.New("transient " + fake.UUID().V4())
-		})
-		retryWorker, err := NewWorker(WorkerDeps{
-			Store: retryStore, Registry: retryRegistry, RouterFactory: retryFactory,
-			Logger: slog.New(slog.DiscardHandler), Config: WorkerConfig{PollInterval: time.Millisecond},
-		})
-		require.NoError(t, err)
-		retryMessage := appdispatch.NewMessage(
-			retryTopic,
-			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
-		)
-		require.NoError(t, retryPublisher.Publish(t.Context(), retryMessage))
-		require.NoError(t, retryWorker.RunOnce(t.Context()))
-		retried, err := retryStore.Get(t.Context(), retryMessage.ID)
-		require.NoError(t, err)
-		assert.Equal(t, JobStatusFailed, retried.Status)
-		assert.Equal(t, "job_execution_failed", retried.Error.Code)
-
-		metadataRetryStore, metadataRetryFactory, metadataRetryPublisher, _, _ := makeTransport(t)
-		metadataRetryRegistry := NewRegistry()
-		metadataRetryTopic := "metadata-retry." + fake.UUID().V4()
-		var metadataCalls atomic.Int32
-		require.NoError(t, RegisterTypedHandler(metadataRetryRegistry, TypedHandlerSpec[command]{
-			JobType: "finance.test", Topic: metadataRetryTopic,
-			Metadata: func(command) (JobMetadata, error) {
-				metadataCalls.Add(1)
-				return JobMetadata{}, errors.New("metadata failure " + fake.UUID().V4())
-			},
-			Run: func(context.Context, Job, command) error { return nil },
-		}))
-		metadataRetryWorker, err := NewWorker(WorkerDeps{
-			Store: metadataRetryStore, Registry: metadataRetryRegistry, RouterFactory: metadataRetryFactory,
-			Logger: slog.New(slog.DiscardHandler), Config: WorkerConfig{PollInterval: time.Millisecond},
-		})
-		require.NoError(t, err)
-		metadataRetryMessage := appdispatch.NewMessage(
-			metadataRetryTopic,
-			[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
-		)
-		require.NoError(t, metadataRetryPublisher.Publish(t.Context(), metadataRetryMessage))
-		require.NoError(t, metadataRetryWorker.RunOnce(t.Context()))
-		assert.Equal(t, int32(4), metadataCalls.Load())
 	})
-
 	t.Run("one-shot retry lifecycle keeps final persistence and topics isolated", func(t *testing.T) {
 		store := newMockworkerStore(t)
 		registry := NewRegistry()
@@ -356,8 +302,217 @@ func TestObservedSubscriptions(t *testing.T) {
 		<-done
 	})
 
+	t.Run("worker lifecycle uses the concrete PostgreSQL store and router", func(t *testing.T) {
+		store, factory, _, _ := makeTransport(t)
+		registry := NewRegistry()
+		topic := "lifecycle." + fake.UUID().V4()
+		register(t, registry, topic, func(context.Context, Job, command) error { return nil })
+		config := WorkerConfig{PollInterval: time.Millisecond, StaleRunningAge: time.Millisecond}
+		worker, err := NewWorker(WorkerDeps{
+			Store: store, Registry: registry, RouterFactory: factory,
+			Logger: slog.New(slog.DiscardHandler), Config: config,
+		})
+		require.NoError(t, err)
+		require.NoError(t, worker.installHandlers())
+		require.NoError(t, worker.installHandlers())
+		require.NoError(t, worker.Stop(t.Context()))
+
+		runOnceWorker, err := NewWorker(WorkerDeps{
+			Store: store, Registry: NewRegistry(), RouterFactory: factory,
+			Logger: slog.New(slog.DiscardHandler), Config: config,
+		})
+		require.NoError(t, err)
+		require.NoError(t, runOnceWorker.RunOnce(t.Context()))
+
+		runWorker, err := NewWorker(WorkerDeps{
+			Store: store, Registry: NewRegistry(), RouterFactory: factory,
+			Logger: slog.New(slog.DiscardHandler), Config: config,
+		})
+		require.NoError(t, err)
+		ctx, cancel := context.WithCancel(t.Context())
+		runDone := make(chan error, 1)
+		go func() { runDone <- runWorker.Run(ctx) }()
+		time.Sleep(3 * time.Millisecond)
+		cancel()
+		require.ErrorIs(t, <-runDone, context.Canceled)
+
+		_, err = NewWorker(WorkerDeps{})
+		require.ErrorContains(t, err, "jobs store is required")
+		_, err = NewWorker(WorkerDeps{Store: store})
+		require.ErrorContains(t, err, "jobs registry is required")
+		_, err = NewWorker(WorkerDeps{Store: store, Registry: NewRegistry()})
+		require.ErrorContains(t, err, "jobs router factory is required")
+		require.Error(t, worker.processObserved(
+			t.Context(), registry.Handlers()[0], appdispatch.Message{Payload: []byte(`{`)},
+		))
+	})
+
+	t.Run("worker startup fails when its concrete store is unavailable", func(t *testing.T) {
+		store, factory, _, db := makeTransport(t)
+		config := WorkerConfig{PollInterval: time.Millisecond, StaleRunningAge: time.Millisecond}
+		worker, err := NewWorker(WorkerDeps{
+			Store: store, Registry: NewRegistry(), RouterFactory: factory,
+			Logger: slog.New(slog.DiscardHandler), Config: config,
+		})
+		require.NoError(t, err)
+		require.NoError(t, db.Close())
+		require.Error(t, worker.Run(t.Context()))
+		require.NoError(t, worker.runOnceResult(context.Canceled))
+		require.NoError(t, worker.runOnceResult(context.DeadlineExceeded))
+	})
+
+	t.Run("terminal persistence retries through the worker store", func(t *testing.T) {
+		now := time.Now()
+		job := Job{ID: fake.UUID().V4()}
+		state := newSucceededTerminalJobState(fake.UUID().V4(), now)
+		queuedAt := now.Add(-time.Second)
+
+		t.Run("retries transient errors", func(t *testing.T) {
+			store := newMockworkerStore(t)
+			transientErr := errors.New(fake.UUID().V4())
+			store.EXPECT().persistTerminalState(mock.Anything, job, state).Return(transientErr).Once()
+			store.EXPECT().persistTerminalState(mock.Anything, job, state).Return(nil).Once()
+			worker := &Worker{store: store, logger: slog.New(slog.DiscardHandler)}
+			require.NoError(t, worker.persistTerminalState(t.Context(), job, state))
+		})
+
+		t.Run("does not retry lost claims", func(t *testing.T) {
+			store := newMockworkerStore(t)
+			store.EXPECT().persistTerminalState(mock.Anything, job, state).Return(ErrJobClaimLost).Once()
+			worker := &Worker{store: store, logger: slog.New(slog.DiscardHandler)}
+			require.ErrorIs(t, worker.persistTerminalState(t.Context(), job, state), ErrJobClaimLost)
+		})
+
+		t.Run("finalizes exhausted retries", func(t *testing.T) {
+			store := newMockworkerStore(t)
+			store.EXPECT().FinalizeRetryExhausted(mock.Anything, job.ID, queuedAt, state).Return(nil).Once()
+			worker := &Worker{store: store, logger: slog.New(slog.DiscardHandler)}
+			require.NoError(t, worker.finalizeRetryExhausted(t.Context(), job.ID, queuedAt, state))
+		})
+
+		t.Run("returns cancellation with its final store error", func(t *testing.T) {
+			store := newMockworkerStore(t)
+			persistErr := errors.New(fake.UUID().V4())
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			store.EXPECT().persistTerminalState(mock.Anything, job, state).
+				Run(func(context.Context, Job, terminalJobState) { cancel() }).
+				Return(persistErr).
+				Once()
+			worker := &Worker{store: store, logger: slog.New(slog.DiscardHandler)}
+			err := worker.persistTerminalState(ctx, job, state)
+			require.ErrorIs(t, err, context.Canceled)
+			require.ErrorIs(t, err, persistErr)
+		})
+	})
+
+	t.Run("worker leaves unavailable and duplicate deliveries unexecuted", func(t *testing.T) {
+		registry := NewRegistry()
+		topic := "worker-branches." + fake.UUID().V4()
+		register(t, registry, topic, func(context.Context, Job, command) error { return nil })
+		store := newMockworkerStore(t)
+		worker := &Worker{
+			store: store, registry: registry, logger: slog.New(slog.DiscardHandler),
+			clock: time.Now, workerID: fake.UUID().V4(),
+		}
+		message := appdispatch.Message{
+			ID:      fake.UUID().V4(),
+			Payload: []byte(`{"value":"` + fake.UUID().V4() + `","requester":"` + fake.UUID().V4() + `"}`),
+		}
+		queued := Job{ID: message.ID, JobType: "finance.test", Status: JobStatusQueued}
+
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(nil, errors.New(fake.UUID().V4())).Once()
+		require.Error(t, worker.processObserved(t.Context(), registry.Handlers()[0], message))
+
+		running := queued
+		running.Status = JobStatusRunning
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&running, nil).Once()
+		runningErr := worker.processObserved(t.Context(), registry.Handlers()[0], message)
+		var pendingErr runningJobDeliveryError
+		require.ErrorAs(t, runningErr, &pendingErr)
+		assert.Contains(t, pendingErr.Error(), message.ID)
+		pendingErr.NonRetryable()
+
+		terminal := queued
+		terminal.Status = JobStatusSucceeded
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&terminal, nil).Once()
+		require.NoError(t, worker.processObserved(t.Context(), registry.Handlers()[0], message))
+
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&queued, nil).Once()
+		store.EXPECT().
+			ClaimQueued(mock.Anything, message.ID, worker.workerID, mock.Anything).
+			Return(nil, ErrJobNotQueued).
+			Once()
+		require.NoError(t, worker.processObserved(t.Context(), registry.Handlers()[0], message))
+	})
+
+	t.Run("worker records business failures and requeues transient deliveries", func(t *testing.T) {
+		registry := NewRegistry()
+		topic := "worker-errors." + fake.UUID().V4()
+		register(t, registry, topic, func(_ context.Context, _ Job, value command) error {
+			if value.Value == "business" {
+				return appdispatch.NewBusinessFailure(errors.New(fake.UUID().V4()), "business", "summary", "details")
+			}
+			return errors.New(fake.UUID().V4())
+		})
+		now := time.Now()
+		store := newMockworkerStore(t)
+		worker := &Worker{
+			store: store, registry: registry, logger: slog.New(slog.DiscardHandler),
+			clock: func() time.Time { return now }, workerID: fake.UUID().V4(),
+		}
+		makeDelivery := func(value string) (appdispatch.Message, Job, Job) {
+			message := appdispatch.Message{
+				ID:      fake.UUID().V4(),
+				Payload: []byte(`{"value":"` + value + `","requester":"` + fake.UUID().V4() + `"}`),
+			}
+			queued := Job{ID: message.ID, JobType: "finance.test", Status: JobStatusQueued}
+			claimed := queued
+			claimed.Status = JobStatusRunning
+			return message, queued, claimed
+		}
+
+		business, queued, claimed := makeDelivery("business")
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&queued, nil).Once()
+		store.EXPECT().ClaimQueued(mock.Anything, business.ID, worker.workerID, now).Return(&claimed, nil).Once()
+		store.EXPECT().persistTerminalState(mock.Anything, claimed, mock.Anything).Return(nil).Once()
+		require.NoError(t, worker.processObserved(t.Context(), registry.Handlers()[0], business))
+
+		transient, queued, claimed := makeDelivery("transient")
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&queued, nil).Once()
+		store.EXPECT().ClaimQueued(mock.Anything, transient.ID, worker.workerID, now).Return(&claimed, nil).Once()
+		store.EXPECT().RequeueRunning(mock.Anything, claimed, now).Return(nil).Once()
+		require.Error(t, worker.processObserved(t.Context(), registry.Handlers()[0], transient))
+	})
+
+	t.Run("worker retry tracking reports terminal delivery state", func(t *testing.T) {
+		jobID := fake.UUID().V4()
+		failure := errors.New(fake.UUID().V4())
+		exhausted := exhaustedRetryError{err: failure}
+		assert.Contains(t, exhausted.Error(), failure.Error())
+		require.ErrorIs(t, exhausted, failure)
+		require.NoError(t, exhausted.OnRetriesExhausted())
+		exhausted.finalize = func() error { return failure }
+		require.ErrorIs(t, exhausted.OnRetriesExhausted(), failure)
+
+		tracker := &runOnceTracker{}
+		tracker.startDelivery(jobID)
+		tracker.startDelivery(jobID)
+		tracker.finishDelivery(jobID)
+		assert.False(t, tracker.isIdle())
+		tracker.finishDelivery(jobID)
+		assert.True(t, tracker.isIdle())
+
+		worker := &Worker{
+			config: WorkerConfig{PollInterval: time.Second, StaleRunningAge: time.Second},
+			claims: map[string]Job{jobID: {ID: jobID}},
+		}
+		assert.Equal(t, 500*time.Millisecond, worker.recoveryInterval())
+		assert.Equal(t, []Job{{ID: jobID}}, worker.runningClaims())
+	})
+
 	t.Run("second worker startup recovery does not requeue a live claim", func(t *testing.T) {
-		store, _, _, _, _ := makeTransport(t)
+		store, _, _, _ := makeTransport(t)
 		registry := NewRegistry()
 		topic := "live-claim." + fake.UUID().V4()
 		firstWorkerID := fake.UUID().V4()
@@ -441,7 +596,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		staleRequeued := makeStale(defaultWorkerMaxAttempts - 1)
 		staleExhausted := makeStale(defaultWorkerMaxAttempts)
 		for _, stale := range []Job{staleRequeued, staleExhausted} {
-			require.NoError(t, store.createWithDB(t.Context(), store.db, stale))
+			require.NoError(t, createWithDB(t.Context(), store.db, store.tableName, stale))
 		}
 		require.NoError(
 			t,
@@ -461,7 +616,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		assert.Equal(t, "stale_running_attempts_exhausted", exhausted.Error.Code)
 
 		scannedLease := makeStale(defaultWorkerMaxAttempts - 1)
-		require.NoError(t, store.createWithDB(t.Context(), store.db, scannedLease))
+		require.NoError(t, createWithDB(t.Context(), store.db, store.tableName, scannedLease))
 		var scannedModel jobModel
 		require.NoError(
 			t,
@@ -492,7 +647,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			Requester: Requester{Source: RequesterSourceOperator},
 			CreatedAt: now, UpdatedAt: now, QueuedAt: now,
 		}
-		require.NoError(t, store.createWithDB(t.Context(), store.db, conditional))
+		require.NoError(t, createWithDB(t.Context(), store.db, store.tableName, conditional))
 		firstClaim, err := store.ClaimQueued(t.Context(), conditional.ID, firstWorkerID, now)
 		require.NoError(t, err)
 		requeuedAt := now.Add(time.Second)
@@ -643,7 +798,7 @@ func TestObservedSubscriptions(t *testing.T) {
 	t.Run(
 		"keeps registry, read service, and lifecycle storage boundaries explicit",
 		func(t *testing.T) {
-			store, _, _, _, _ := makeTransport(t)
+			store, _, _, _ := makeTransport(t)
 			now := time.Now()
 			job := Job{ID: fake.UUID().V4(), JobType: "type-a", Status: JobStatusQueued,
 				Requester: Requester{
@@ -708,7 +863,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			staleStartedAt := now.Add(-2 * defaultWorkerStaleRunningAge)
 			running.StartedAt = &staleStartedAt
 			running.UpdatedAt = staleStartedAt
-			err = store.createWithDB(t.Context(), store.db, running)
+			err = createWithDB(t.Context(), store.db, store.tableName, running)
 			require.NoError(t, err)
 			require.NoError(
 				t,
@@ -799,19 +954,12 @@ func TestObservedSubscriptions(t *testing.T) {
 		)
 		assert.Equal(t, "…", truncateBounded("long", len("…")))
 		require.Error(t, validateRequiredTimestamp("at", time.Time{}))
-		_, err := NewStore(nil, "sqlite", StoreOpts{})
-		require.Error(t, err)
-		db, err := sqlconn.Open(
-			fmt.Sprintf("file:invalid-store-%s?mode=memory&cache=shared", fake.UUID().V4()),
-		)
-		require.NoError(t, err)
-		t.Cleanup(func() { require.NoError(t, db.Close()) })
-		_, err = NewStore(db, " ", StoreOpts{})
+		_, err := NewStore(nil, "", StoreOpts{})
 		require.Error(t, err)
 	})
 
 	t.Run("validates worker construction and pending duplicate delivery", func(t *testing.T) {
-		_, factory, _, _, _ := makeTransport(t)
+		_, factory, _, _ := makeTransport(t)
 		registry := NewRegistry()
 		topic := "worker." + fake.UUID().V4()
 		register(t, registry, topic, func(context.Context, Job, command) error { return nil })

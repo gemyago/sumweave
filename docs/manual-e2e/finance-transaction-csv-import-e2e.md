@@ -2,9 +2,9 @@
 
 This is the deterministic API-only gate for `finance.csv_import`. It verifies
 the fixed seven-column contract, confirmation publication, lazy job observation,
-audit completion, and repeat safety. Use an isolated SQLite database under
-`tmp/`; do not use PM2 `start-all` for this gate because it can consume the
-message before the expected `404`.
+audit completion, and repeat safety. Use the prepared local PostgreSQL database
+with fresh scoped data; do not use PM2 `start-all` for this gate because it can
+consume the message before the expected `404`.
 
 ## Isolated setup
 
@@ -16,11 +16,13 @@ REPO_ROOT="$PWD"
 E2E_ROOT="$REPO_ROOT/tmp/jobs-system-simplification-028-e2e/transaction-csv"
 rm -rf "$E2E_ROOT"
 mkdir -p "$E2E_ROOT"
-export APP_DATADIR="$E2E_ROOT/data"
-export APP_APPLICATION_DATABASE_DSN="$E2E_ROOT/application.db"
+RUN_ID="$(date +%s)"
+# Stop the normal PM2 start-all backend before resetting its shared database.
+pm2 stop sumweave-api
+docker compose down -v
+make postgres-bootstrap
 
 cd "$REPO_ROOT/apps/sumweave"
-go run ./cmd/sumweave db-migrate --env local
 IFS=: read -r USER PASS < "$REPO_ROOT/.local-users"
 go run ./cmd/sumweave --env local user add \
   --username "$USER" --password "$PASS" --if-not-exists
@@ -34,7 +36,7 @@ LOGIN_JSON=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/auth/login \
 ACCESS_TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])' <<<"$LOGIN_JSON")
 TENANT_ID=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/finance/tenants \
   -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
-  --data '{"name":"transaction-import-022","displayCurrency":"USD","seedDefaults":false}' |
+  --data "{\"name\":\"transaction-import-$RUN_ID\",\"displayCurrency\":\"USD\",\"seedDefaults\":false}" |
   python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 ```
 
@@ -169,4 +171,8 @@ manual-E2E setup, not the isolated API process.
 ```bash
 kill "$API_PID" 2>/dev/null || true
 wait "$API_PID" 2>/dev/null || true
+cd "$REPO_ROOT"
+pm2 start ecosystem.config.js
 ```
+
+This guide owns restoring the normal PM2 backend after its API-only run.

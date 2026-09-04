@@ -22,9 +22,10 @@ the worker creates the job projection on first delivery. The normal PM2
 `start-all` shape may materialize the row immediately and therefore does not test
 that window.
 
-Optional local verification helpers:
+Local database setup:
 
-- [postgres-local-verification.md](./postgres-local-verification.md) — optional local-only Postgres compose/runbook for backend verification without changing the default SQLite local workflow.
+- [postgres-local-verification.md](./postgres-local-verification.md) — local
+  Compose PostgreSQL bootstrap, ordinary backend-test, and clean-volume runbook.
 
 ## Setup
 
@@ -46,10 +47,11 @@ and backend CLI commands from `apps/sumweave`.
      `apps/sumweave-ui/.env.local`; retain `VITE_AGENT_API_BASE_URL=/api/v1/runtime/`
    - see [local HTTPS](../local-https.md#return-to-the-standard-local-http-workflow)
      for the full switch-back procedure
-4. Prepare backend tables before starting or restarting backend processes:
-    - `cd apps/sumweave`
-    - `go run ./cmd/sumweave db-migrate --env local`
-    - `cd ../..`
+4. Prepare the mandatory local PostgreSQL environment before starting or
+   restarting backend processes: `make postgres-bootstrap`. This starts the
+   repository Compose service, provisions `sumweave_local` and `sumweave_test`,
+   runs the two explicit migrations through `sumweave_migrator`, and grants the
+   runtime role access to the prepared schemas.
 5. From the repo root, recreate both PM2 services when switching protocols or
    when a fresh ecosystem shape is required:
    - `pm2 status`
@@ -62,12 +64,19 @@ and backend CLI commands from `apps/sumweave`.
    - `curl -I http://127.0.0.1:5173/`
 7. If backend startup reports `bind: address already in use`, stop the stray process already listening on `127.0.0.1:4501` before retrying. A common cause is an older direct `go run ./cmd/sumweave start ...` process launched from the app root.
 
-The four-workload API-only gate guides create their own isolated database and
-write evidence below `tmp/jobs-system-simplification-028-e2e/`. The FX guides
-set `APP_FINANCE_PROVIDERS_FRANKFURTER_BASEURL` to a local static
+The API-only gate guides deliberately replace the repo-scoped Compose volume,
+then use the freshly prepared local PostgreSQL database and write non-database
+evidence below `tmp/jobs-system-simplification-028-e2e/`. Do not run one while
+another developer needs the local database. Each guide starts an API-only process
+before its bounded worker step. The FX guides set
+`APP_FINANCE_PROVIDERS_FRANKFURTER_BASEURL` to a local static
 Frankfurter-compatible fixture; they do not call public FX endpoints.
 
-**Note**: Always use repo scoped data/users and other dirs as if you just started all services using documented pm2 instruction. Do not try to use other dirs (like system temp or similar). If some data feels incorrect or missing - it's dev env, not production so you can drop local sqlite DB and recreate it using standard approach.
+**Note**: Always use repo-scoped data/users and other directories as if you just
+started services through the documented PM2 workflow. If local data is incorrect
+or a clean environment is required, recreate the repository Compose volume and
+run `make postgres-bootstrap`; no SQLite data migration or compatibility copy is
+supported.
 
 ## Local e2e user
 

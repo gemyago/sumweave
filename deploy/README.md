@@ -20,7 +20,8 @@ Runtime workloads require a DML/query database identity; the migration Job must
 receive a separate DDL-capable identity. At minimum, consumer configuration must
 provide PostgreSQL DSNs for the finance application database and agent runtime,
 non-colliding table prefixes, a JWT signing key, enabled finance-provider
-credentials, and externally correct callback URLs. SQLite is local-development-only.
+credentials, and externally correct callback URLs. PostgreSQL is the sole
+supported product database.
 
 For a new PostgreSQL application database, the pre-install migration Job runs
 `db-migrate` and creates the topic-aware app dispatch tables. Before upgrading an

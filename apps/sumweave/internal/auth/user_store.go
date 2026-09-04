@@ -9,9 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gemyago/sumweave/apps/sumweave/internal/sqlconn"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
-	"github.com/glebarez/sqlite"
+	"github.com/jackc/pgx/v5"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -57,6 +56,7 @@ type UserStore struct {
 	db     *gorm.DB
 	idGen  ident.Generator
 	logger *slog.Logger
+	now    func() time.Time
 }
 
 func NewUserStore(deps UserStoreDeps) (*UserStore, error) {
@@ -70,7 +70,7 @@ func NewUserStore(deps UserStoreDeps) (*UserStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open auth user store database: %w", err)
 	}
-	return &UserStore{db: db, idGen: deps.IDGen, logger: deps.Logger}, nil
+	return &UserStore{db: db, idGen: deps.IDGen, logger: deps.Logger, now: time.Now}, nil
 }
 
 func (s *UserStore) AutoMigrate() error {
@@ -81,7 +81,7 @@ func (s *UserStore) AutoMigrate() error {
 }
 
 func (s *UserStore) Create(ctx context.Context, params CreateUserParams) (*User, error) {
-	now := time.Now().Round(0)
+	now := s.now().Truncate(time.Microsecond)
 	model := authUserModel{
 		ID:           s.idGen.MustNewV7().String(),
 		Username:     params.Username,
@@ -139,7 +139,7 @@ func (s *UserStore) List(ctx context.Context) ([]User, error) {
 func (s *UserStore) UpdatePassword(ctx context.Context, id string, newHash string) error {
 	result := s.db.WithContext(ctx).Model(&authUserModel{}).
 		Where("id = ?", id).
-		Updates(map[string]any{"password_hash": newHash, "updated_at": time.Now().Round(0)})
+		Updates(map[string]any{"password_hash": newHash, "updated_at": s.now().Truncate(time.Microsecond)})
 	if result.Error != nil {
 		return fmt.Errorf("update auth user password: %w", result.Error)
 	}
@@ -165,16 +165,15 @@ func openAuthDatabase(sqlDB *sql.DB, dsn, tablePrefix string) (*gorm.DB, error) 
 		return nil, err
 	}
 
-	var dialector gorm.Dialector
-	if sqlconn.IsSQLiteDSN(dsn) {
-		dialector = sqlite.Dialector{Conn: sqlDB}
-	} else {
-		dialector = postgres.New(postgres.Config{Conn: sqlDB})
+	if _, err := pgx.ParseConfig(dsn); err != nil {
+		return nil, fmt.Errorf("parse auth database dsn: %w", err)
 	}
-	db, err := gorm.Open(dialector, &gorm.Config{
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{
 		NamingStrategy: schema.NamingStrategy{TablePrefix: tablePrefix},
 		TranslateError: true,
-		NowFunc:        time.Now,
+		NowFunc: func() time.Time {
+			return time.Now().Truncate(time.Microsecond)
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open gorm database: %w", err)

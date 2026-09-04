@@ -1,14 +1,11 @@
 package persistence
 
 import (
-	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/gemyago/sumweave/finance/credentials"
 	"github.com/gemyago/sumweave/finance/domain"
-	"github.com/gemyago/sumweave/finance/internal/sqlconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,8 +54,8 @@ func TestProviderSyncStore(t *testing.T) {
 	t.Run("orders provider synchronization records by canonical timestamps", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
-		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 		require.True(t, earlier.Before(later))
 		tenantID := "tenant-" + fake.UUID().V4()
 
@@ -110,7 +107,7 @@ func TestProviderSyncStore(t *testing.T) {
 		}
 		snapshots, err := store.ListBalanceSnapshots(t.Context(), connectionID)
 		require.NoError(t, err)
-		require.Equal(t, later.Format(time.RFC3339Nano), snapshots[0].CapturedAt.Format(time.RFC3339Nano))
+		require.True(t, later.Equal(snapshots[0].CapturedAt))
 
 		fingerprint := "fingerprint-" + fake.UUID().V4()
 		earlierMatch := domain.ProviderTransactionMatch{
@@ -133,14 +130,14 @@ func TestProviderSyncStore(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.Equal(t, laterMatch.ID, resolved.ID)
-		require.Equal(t, later.Format(time.RFC3339Nano), resolved.UpdatedAt.Format(time.RFC3339Nano))
+		require.True(t, later.Equal(resolved.UpdatedAt))
 	})
 
 	t.Run("chooses pending link start creation and expiry by canonical timestamps", func(t *testing.T) {
 		fake := faker.New()
 		store := makeStore(t)
-		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123, time.UTC)
-		later := time.Date(2026, time.January, 1, 0, 0, 0, 456, time.FixedZone("zero", 0))
+		earlier := time.Date(2025, time.December, 31, 23, 30, 0, 123000, time.UTC)
+		later := time.Date(2026, time.January, 1, 0, 0, 0, 456000, time.FixedZone("zero", 0))
 		now := later.Add(15 * time.Minute)
 		require.True(t, earlier.Before(later))
 		state := "state-" + fake.UUID().V4()
@@ -711,16 +708,10 @@ func TestProviderSyncStore(t *testing.T) {
 	})
 
 	t.Run("surfaces write failures on read only databases", func(t *testing.T) {
-		fake := faker.New()
-		path := fmt.Sprintf("%s/%s.db", t.TempDir(), fake.UUID().V4())
-		require.NoError(t, os.WriteFile(path, []byte{}, 0o600))
-		dsn := "file:" + path + "?mode=ro"
-		sqlDB, err := sqlconn.Open(dsn)
+		store := makeStore(t)
+		sqlDB, err := store.DB().DB()
 		require.NoError(t, err)
-		defer func() { require.NoError(t, sqlDB.Close()) }()
-		database, err := NewDatabase(sqlDB, dsn)
-		require.NoError(t, err)
-		store := NewStore(database)
+		require.NoError(t, sqlDB.Close())
 
 		_, err = store.SaveBankConnection(t.Context(), domain.BankConnection{ID: "id"})
 		require.Error(t, err)

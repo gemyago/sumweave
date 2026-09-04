@@ -107,8 +107,9 @@ agentRuntime:
 
 application:
   database:
-    # Shared application database for finance, auth, jobs, and dispatch.
-    dsn: "data/application.db"
+    # Shared PostgreSQL database for finance, auth, jobs, and dispatch. Local,
+    # test, and production profiles or APP_APPLICATION_DATABASE_DSN provide it.
+    dsn: ""
     tablePrefix: "sumweave_"
 
 jobs:
