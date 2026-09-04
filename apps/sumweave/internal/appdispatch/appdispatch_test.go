@@ -60,6 +60,26 @@ func TestAppDispatch(t *testing.T) {
 			return Message{}
 		}
 	}
+	awaitAcknowledgement := func(t *testing.T, db *sql.DB, config Config, topic, group, messageID string) {
+		t.Helper()
+		var messageOffset int64
+		require.NoError(t, db.QueryRowContext(
+			t.Context(),
+			`SELECT "offset" FROM `+quoteIdentifier(config.MessagesTable())+` WHERE uuid=$1`,
+			messageID,
+		).Scan(&messageOffset))
+		require.Eventually(t, func() bool {
+			var acknowledgedOffset int64
+			err := db.QueryRowContext(
+				t.Context(),
+				`SELECT offset_acked FROM `+quoteIdentifier(config.OffsetsTable())+
+					` WHERE topic=$1 AND consumer_group=$2`,
+				topic,
+				group,
+			).Scan(&acknowledgedOffset)
+			return err == nil && acknowledgedOffset >= messageOffset
+		}, 5*time.Second, 10*time.Millisecond)
+	}
 
 	t.Run("publishes explicit messages and preserves transaction boundaries", func(t *testing.T) {
 		config := makeConfig(t)
@@ -302,6 +322,7 @@ func TestAppDispatch(t *testing.T) {
 		groupBMessages, _ := subscribe(t, groupB, topicA)
 		groupATopicBMessages, _ := subscribe(t, groupA, topicB)
 		assert.Equal(t, messageA.ID, receive(t, groupAMessages).ID)
+		awaitAcknowledgement(t, db, config, topicA, groupA, messageA.ID)
 		assert.Equal(t, messageA.ID, receive(t, groupBMessages).ID)
 		assert.Equal(t, messageB.ID, receive(t, groupATopicBMessages).ID)
 

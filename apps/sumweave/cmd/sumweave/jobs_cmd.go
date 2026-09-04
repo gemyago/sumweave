@@ -151,7 +151,7 @@ func jobsOptionsFromRoot(root *cobra.Command) (wireup.WorkerOptions, error) { //
 	}
 	return wireup.WorkerOptions{
 		Environment: options.Environment, DefaultLogLevel: options.DefaultLogLevel,
-		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile,
+		JSONLogs: options.JSONLogs, LogsFile: options.LogsFile, DisablePProf: true,
 	}, nil
 }
 

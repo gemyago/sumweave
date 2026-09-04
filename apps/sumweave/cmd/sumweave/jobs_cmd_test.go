@@ -104,3 +104,9 @@ func TestJobsCommandErrorHandling(t *testing.T) {
 		require.NoError(t, cmd.ExecuteContext(ctx))
 	})
 }
+
+func TestJobsOptionsFromRoot(t *testing.T) {
+	options, err := jobsOptionsFromRoot(newRootCmd())
+	require.NoError(t, err)
+	require.True(t, options.DisablePProf)
+}
