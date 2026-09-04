@@ -105,6 +105,10 @@ The following are not required for Phase 0:
 - silently overwriting manually selected categories
 - transfer detection or matching as part of the category classifier
 
+## Potential future extension
+
+Transaction enrichment may later include transfer matching across tracked accounts. It may share classification orchestration and re-run workflows, while remaining separate from category classification.
+
 ## Open product questions
 
 The following should be resolved before moving to system design:
