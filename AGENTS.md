@@ -75,10 +75,13 @@ PM2 is repo scoped too: `.envrc` exports `PM2_HOME=$PWD/.pm2`, so run `pm2` from
 **PM2 usage notes**
 - From the repository root, run `make postgres-bootstrap` before starting or restarting backend PM2 processes that rely on persisted tables.
 - Standard local workflow is `make postgres-bootstrap`, then `pm2 start ecosystem.config.js` from the repository root.
+- PM2 starts `api` (`start`), `worker` (`jobs worker`), and `ui`.
 - Use direct `go run ./cmd/sumweave start-all --env local` only to diagnose a local startup problem.
-- PM2 is invoked from the repository root, but its backend process uses `apps/sumweave` as its working directory.
+- PM2 is invoked from the repository root, but both backend processes use `apps/sumweave` as their working directory.
 - Run `pm2 start ecosystem.config.js` to create the PM2 apps from the current ecosystem file.
-- If the ecosystem command/args changed or you need a guaranteed fresh backend shape, recreate the app with `pm2 delete sumweave-api && pm2 start ecosystem.config.js`; PM2 can otherwise keep an older command definition.
+- The API and worker use the `backend` PM2 namespace; UI uses PM2's default namespace.
+- Use `pm2 start|stop|restart|delete backend` or `pm2 logs backend` for backend lifecycle and combined logs; PM2 accepts a namespace as the positional target.
+- If the ecosystem command/args changed or you need a guaranteed fresh backend shape, recreate it with `pm2 delete backend && pm2 start ecosystem.config.js`; PM2 can otherwise keep an older command definition.
 - Run `pm2 status` to see the status of all processes
 - Run `pm2 start|stop|restart id|name` to control specific processes
 - Run `pm2 logs id|name` to see the logs of specific processes
@@ -90,7 +93,8 @@ Durable jobs workflow:
 - Run `make postgres-bootstrap` before ordinary backend tests; each core
   module's `make test` runs normally selected tests.
 - `sumweave start` is API-only: it publishes appdispatch messages but does not run a worker or execute finance work inline.
-- `sumweave start-all` explicitly combines HTTP, the appdispatch worker, and the finance scheduler loop for local operation.
+- PM2 runs `sumweave start` and `sumweave jobs worker` as separate local backend processes; run `sumweave jobs enqueue-due` separately when a scheduler tick is needed.
+- `sumweave start-all` explicitly combines HTTP, the appdispatch worker, and the finance scheduler loop for diagnostics only.
 - `sumweave jobs worker [--once]` is the split consumer; `--once` drains a bounded isolated/reseeded database and materializes observed jobs on delivery.
 - `sumweave jobs enqueue-due` publishes due bank and FX semantic commands and advances finance-owned schedule state; it does not execute work or create job rows.
 - Producers publish through appdispatch first and receive a message ID; observed job rows are created lazily with that same ID on first delivery.
@@ -164,6 +168,8 @@ The rules are:
 - Jobs add opt-in product visibility to background processing.
 - Do not create job records for invisible background processing.
 - Jobs never replace appdispatch as the execution transport.
+- PM2 local apps are `api`, `worker`, and `ui`; backend operations target `backend`.
+- Use direct PM2 commands rather than root npm PM2 wrapper scripts.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

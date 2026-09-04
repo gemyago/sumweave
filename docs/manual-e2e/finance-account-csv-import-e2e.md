@@ -2,7 +2,7 @@
 
 This is the deterministic API-only gate for `finance.account_import`. It uses
 the prepared local PostgreSQL database with fresh scoped data. Do not use the
-normal PM2 `start-all` process for this gate: it would consume the message before
+normal PM2 worker process for this gate: it would consume the message before
 the expected pre-materialization `404` check.
 
 ## Isolated setup
@@ -17,8 +17,8 @@ E2E_ROOT="$REPO_ROOT/tmp/jobs-system-simplification-028-e2e/account-csv"
 rm -rf "$E2E_ROOT"
 mkdir -p "$E2E_ROOT"
 RUN_ID="$(date +%s)"
-# Stop the normal PM2 start-all backend before resetting its shared database.
-pm2 stop sumweave-api
+# Stop the normal PM2 API and worker before resetting their shared database.
+pm2 stop backend
 docker compose down -v
 make postgres-bootstrap
 

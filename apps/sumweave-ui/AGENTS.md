@@ -38,7 +38,7 @@ Bootstrapped from the official Vite + Svelte TypeScript template (toolchain/boot
 
 From the repo root:
 
-- **`pm2 start sumweave-ui`** — Vite dev server on **127.0.0.1:5173** (pair with **`pm2 start sumweave-api`** on port **4501** for full stack).
+- **`pm2 start ui`** — Vite dev server on **127.0.0.1:5173** (pair with **`pm2 start backend`** for the full stack).
 - **`npx nx dev sumweave-ui`** — same dev server via Nx (runs `install-deps` first). Note: this is blocking, prefer pm2 in most cases.
 
 In order to use the web UI you have to also make sure to start the backend server. See root AGENTS.md for more details.

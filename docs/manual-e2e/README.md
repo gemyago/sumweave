@@ -15,12 +15,11 @@ Manual guides:
 - [synthetic-provider-ui-e2e.md](./synthetic-provider-ui-e2e.md) — sign in to the UI, start synthetic setup from Finance connections, save duplicate configured accounts, reload pending state, finish the link, and confirm the new connection card appears.
 - [finance-scheduled-sync-lifecycle-e2e.md](./finance-scheduled-sync-lifecycle-e2e.md) — isolated scheduled bank/FX publication with local Monobank and static FX fixtures, due-state checks, expected `404`s, bounded worker-once, terminal jobs, and repeat no-op assertions.
 
-For job-observation checks, use an API-only `start` process before publishing,
-then query the returned ID before starting `jobs worker --once`. A `404` is
-expected in that window because publication creates only the appdispatch message;
-the worker creates the job projection on first delivery. The normal PM2
-`start-all` shape may materialize the row immediately and therefore does not test
-that window.
+For job-observation checks, stop the normal PM2 worker and use an API-only
+`start` process before publishing, then query the returned ID before starting
+`jobs worker --once`. A `404` is expected in that window because publication
+creates only the appdispatch message; the worker creates the job projection on
+first delivery.
 
 Local database setup:
 
@@ -54,9 +53,9 @@ and backend CLI commands from `apps/sumweave`.
    runtime role access to the prepared schemas.
 5. From the repo root, recreate both PM2 services when switching protocols or
    when a fresh ecosystem shape is required:
-   - `pm2 status`
-   - `pm2 delete sumweave-api`
-   - `pm2 delete sumweave-ui`
+    - `pm2 status`
+    - `pm2 delete backend`
+    - `pm2 delete ui`
    - `pm2 start ecosystem.config.js`
    - `pm2 status`
 6. Verify both HTTP services before the browser run:
