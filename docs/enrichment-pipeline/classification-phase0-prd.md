@@ -19,7 +19,7 @@ The governing rule is simple: a transaction with a category is already classifie
 
 ### 2. Bank-synced transactions
 
-- Successful scheduled or user-triggered bank synchronization starts automatic classification over the tenant's synchronized date range.
+- Each successfully committed window of scheduled or user-triggered bank synchronization starts automatic classification over that tenant and date range, even if a later window fails.
 - Automatic classification applies only to transactions eligible for ordinary category classification.
 - If no classification rule matches, the transaction remains unclassified.
 
@@ -28,7 +28,7 @@ The governing rule is simple: a transaction with a category is already classifie
 The following eligibility requirements apply to both automatic and explicit classification:
 
 - The transaction has no category.
-- The transaction is booked/settled and is either a regular transaction or a refund.
+- The transaction is booked/settled and has kind `regular`, `expense`, `income`, or `refund`; all four represent ordinary transactions and refunds for classification.
 - Hidden or deleted transactions are excluded.
 - Pending/hold transactions are excluded; a bank-synced transaction becomes eligible when it is booked/settled, provided it still has no category.
 - Transfers, including matched internal and unmatched/external transfers, are excluded from Phase 0 category classification. They may still be categorized manually where applicable.
@@ -98,13 +98,15 @@ Automatic classification and explicit classification of existing transactions ar
 
 Automatic classification is primarily intended for newly synchronized bank transactions.
 
-A successful bank sync emits a completion event with the synchronized transaction range. Classification responds by processing eligible transactions in that tenant and range. Automatic and explicit operations use the same selection and classification behavior, including eligible manual, bank-synced, and CSV transactions across the tenant's accounts.
+Each successfully committed bank-sync window emits a completion event with that window's transaction range. Classification responds by processing eligible transactions in that tenant and range and may begin before the overall sync finishes. Automatic and explicit operations use the same selection and classification behavior, including eligible manual, bank-synced, and CSV transactions across the tenant's accounts.
 
 - An unclassified eligible transaction may receive a category when a rule matches.
 - Any categorized transaction is skipped, whether its category was assigned manually, imported, or assigned automatically.
 - Repeated bank synchronization must not change an existing category.
 - A bank-synced transaction first observed as pending may be classified when it becomes booked/settled.
 - A classification failure must preserve transactions already imported successfully.
+- Committed windows must retain their automatic classification trigger across later sync failures and process crashes, including when a retry resumes beyond those windows.
+- The bank-sync job reports the overall sync outcome independently of classification outcomes.
 
 #### Explicit classification
 
@@ -116,7 +118,7 @@ Users must be able to explicitly run classification over existing uncategorized 
 - Reject an invalid range whose start date is after its end date.
 - Apply the same eligibility requirements throughout the selected range; choosing a wider range never permits overwriting a category.
 - Use existing jobs to show processing, completion, or failure feedback. On failure, explain that some transactions may already have been classified.
-- Log counts of newly classified, unmatched, and skipped transactions for diagnostics.
+- Log per-attempt counts of newly classified transactions, eligible unmatched transactions, and selected transactions skipped during processing. Rows filtered out by selection are excluded from these diagnostic counts; they are not totals for the whole date range.
 
 Classification skips categories present when checked, including categories assigned by a user or a previous attempt. Simultaneous edits and stale saves are an accepted Phase 0 risk. Retrying an operation checks the current transaction state again.
 
@@ -124,7 +126,7 @@ Classification skips categories present when checked, including categories assig
 
 - Creating, editing, reordering, or deleting a rule does not change existing transaction categories or automatically start a historical classification run.
 - Rules are fetched when classification execution starts and kept in memory for that attempt. Changes apply to later attempts, including retries; active attempts continue using their loaded rules.
-- A category referenced by any classification rule cannot be deleted. The UI must explain which rules reference it; users must retarget or delete those rules before removing the category.
+- Category removal uses logical hiding and retains records referenced by ledger transactions. A category referenced by any classification rule cannot be hidden, including through internal hide paths. The UI must explain which rules reference it; users must retarget or delete those rules before removing the category.
 - Deleting a rule does not clear categories previously assigned by that rule.
 
 ## Classification ownership / provenance
@@ -138,13 +140,14 @@ If a user manually clears a category, the transaction becomes uncategorized and 
 - The first matching rule in the visible list wins, including when a contains rule appears before a matching exact rule. Move-up/down controls change that order.
 - Matching ignores casing and surrounding whitespace, but preserves internal whitespace and punctuation and treats contains conditions literally.
 - An existing category survives repeated syncs, explicit runs, and rule edits or deletion, regardless of how it was assigned.
-- A pending transaction is skipped; once booked, it can receive a category if still uncategorized. A booked refund is eligible, while hidden/deleted transactions, transfers, reconciliations, and opening balances are skipped.
+- A pending transaction is skipped; once booked, it can receive a category if still uncategorized. Booked `regular`, `expense`, `income`, and `refund` transactions are eligible, while hidden/deleted transactions, transfers, reconciliations, and opening balances are skipped.
+- An early committed sync window triggers classification even if a later window fails and a retry resumes beyond it, or the process crashes before overall sync completion.
 - Manual and CSV-imported uncategorized transactions can be classified in an explicit run; their existing categories are preserved.
 - An explicit run defaults to the last 30 days, including today, and touches only eligible transactions within the chosen inclusive dates and current tenant.
 - A manual category assignment offers optional rule creation with editable description, match type, and category; cancelling leaves the assignment intact, while saving appends the rule to the list.
 - Classification skips an existing category, including on retry. Simultaneous edits and stale saves remain an accepted concurrency risk in Phase 0.
-- Explicit classification uses existing job lifecycle feedback; outcome counts are logged for diagnostics.
-- Deleting a referenced category is blocked until its rules are retargeted or deleted.
+- Explicit classification uses existing job lifecycle feedback; logged attempt counts distinguish classified, unmatched, and skipped-during-processing rows and exclude rows filtered out by selection.
+- Removing a category logically hides it and preserves historical ledger references; hiding a referenced category is blocked until its rules are retargeted or deleted.
 
 ## Phase 0 non-goals
 

@@ -11,7 +11,7 @@ rule to eligible transactions.
 
 - Add one finance table for classification rules.
 - Use appdispatch and the existing worker for background execution.
-- React to bank-sync completion events with the same range-based classifier.
+- React to bank-sync window completion events with the same range classifier.
 - Use existing jobs to show explicit classification lifecycle to the user.
 - Keep classified, unmatched, and skipped counts in memory and log them.
 - Treat concurrent edits as a recognized Phase 0 risk.
@@ -60,7 +60,7 @@ a deterministic tie-breaker if positions collide.
 
 ### Category lifecycle and manual assignment
 
-Proposed `DELETE /categories/{categoryId}` → `204` uses the existing logical
+`DELETE /categories/{categoryId}` → `204` uses the existing logical
 hide lifecycle, retaining records referenced by ledger transactions. Check live
 rule references before removal, including through internal hide paths.
 
@@ -148,9 +148,9 @@ changes.
 ## Execution model
 
 ```text
-Explicit request                   Successful bank sync
+Explicit request                   Committed bank-sync window
        |                                    |
-Classification command             Bank-sync-completed event
+Classification command             Window-completed event
        |                                    |
        +------------ Appdispatch -----------+
        |                                    |
@@ -171,14 +171,14 @@ Job-observed handler               Classification subscriber
 Explicit request feedback: existing job lifecycle
 ```
 
-### Explicit command and bank-sync completion event
+### Explicit command and bank-sync window completion event
 
 `finance.classification.explicit.v1` carries `tenantId`, `rangeStart`,
 `rangeEndExclusive`, and existing requester metadata. Its observed handler uses
 job type `finance.classification` and calls the finance classifier.
 
-After a bank-connection sync succeeds, publish a `BankSyncCompleted` domain event
-on `finance.bank-sync-completed.v1`:
+For each successfully committed bank-sync window, publish a
+`BankSyncWindowCompleted` domain event on `finance.bank-sync-window-completed.v1`:
 
 ```json
 {
@@ -190,27 +190,33 @@ on `finance.bank-sync-completed.v1`:
 }
 ```
 
-The range describes the resolved transaction window covered by the successful
-sync. Use the orchestrator's `TargetWindow` start and exclusive end, including
-when the caller lets sync choose its window. These are ledger selection bounds.
+The range is the start and exclusive end of the individual requested window
+whose successful checkpoint is committed with the ledger writes. These are
+ledger selection bounds, including when sync chooses and splits its target
+range into multiple windows.
 
-Commit the completion event with the connection/schedule success state after
-the sync's ledger writes have committed. Use the typed `appevents` adapter over
-appdispatch and its transaction-bound publication. A publication failure follows
-the existing bank-sync retry policy. Previously committed ledger data remains
-intact.
+Commit the window's ledger writes, successful checkpoint, and completion event
+in one database transaction. Use the typed `appevents` adapter over appdispatch
+and its transaction-bound publication. A publication failure rolls back that
+window's writes and successful checkpoint and follows the existing bank-sync
+retry policy. Previously committed windows and their events remain intact.
+
+Each committed window triggers classification even if a later window fails or
+the process crashes before the overall connection/schedule completion is saved.
+A retry may resume at a later window: earlier committed windows already have
+durable events. Classification can begin before the overall sync finishes.
+Duplicate event deliveries use the same uncategorized-only classifier behavior.
 
 Register an ordinary classification subscriber in consumer group
 `finance.classification.v1`. It maps the event's tenant and range directly to
 the same classifier call as the explicit handler. Other event subscribers can
 react independently through their own consumer groups.
 
-The bank-sync job reports sync completion. Classification failures are handled
-by the event subscriber's retry policy and logging. A failed sync leaves its
-committed transactions available for a later successful sync or explicit
-classification request.
+The bank-sync job reports the overall sync outcome. Classification failures are
+handled by the event subscriber's retry policy and logging; they preserve the
+window's committed imports and do not change the bank-sync job outcome.
 
-Finance owns matching, category assignment, and the sync-completion fact. The
+Finance owns matching, category assignment, and the window-completion fact. The
 app owns typed event publication, subscriptions, and job adapters. Inject the
 completion publisher through a narrow finance interface implemented by the app;
 register the subscriber in the existing worker lifecycle.
@@ -225,13 +231,13 @@ provide logging context.
 
 The range may include eligible manual, bank-synced, and CSV transactions across
 the tenant's accounts. Manual creation, CSV import, and rule edits keep their
-existing behavior; a successful bank sync or explicit request starts a pass.
+existing behavior; a committed bank-sync window or explicit request starts a pass.
 
 ### Processing an attempt
 
 1. Fetch the tenant's ordered rules once into memory when execution starts.
-2. Read scoped transactions in bounded batches, initially 200 rows.
-3. Check eligibility, match the current description, and choose the first rule.
+2. Read eligible scoped transactions in bounded batches, initially 200 rows.
+3. Recheck eligibility, match the current description, and choose the first rule.
 4. Update only the category and modification timestamp. Retain a simple
    `category_id IS NULL` write predicate, tenant scope, and eligibility checks.
 5. Accumulate counts in memory and log batch summaries and completion/failure.
@@ -248,14 +254,11 @@ redeliveries fetch rules again and may use newer rules.
 
 ### Eligibility and matching
 
-Eligible rows have no category, are booked, and are ordinary transactions or
-refunds. Exclude hidden/deleted rows, transfers, reconciliation, and opening
-balances. Both entry points include eligible manual, bank-synced, and CSV
-transactions. Date ranges use ledger `effectiveAt`.
-
-The existing model includes `expense` and `income` alongside `regular` and
-`refund`. Proposed interpretation: include all four as ordinary classification
-candidates, subject to confirmation of the PRD terminology.
+Eligible rows have no category, are booked, and have kind `regular`, `expense`,
+`income`, or `refund`. These four kinds represent ordinary transactions and
+refunds for classification. Exclude hidden/deleted rows, transfers,
+reconciliation, and opening balances. Both entry points include eligible manual,
+bank-synced, and CSV transactions. Date ranges use ledger `effectiveAt`.
 
 Trim surrounding whitespace and compare case-insensitively. Exact matching
 compares the whole description; contains matching searches a literal substring.
@@ -273,10 +276,19 @@ Explicit failures use existing failed-job feedback; automatic failures use logs
 and ordinary dispatch handling.
 
 A retry starts selection and counting again and reloads rules. Transactions
-already categorized by earlier attempts are skipped. Counts describe only that
-attempt: classified commits, eligible unmatched rows, and ineligible/skipped
-rows encountered. A process crash can lose the latest in-memory counts;
-ledger commits remain intact.
+already categorized by earlier attempts are excluded from selection. Counts
+describe only rows processed during that attempt:
+
+- `classified`: category assignments with confirmed commits.
+- `unmatched`: eligible rows for which no rule matches.
+- `skipped`: selected rows skipped during processing because an eligibility
+  recheck fails or a conditional category update affects no row.
+
+Rows filtered out by selection are excluded from all three counts. These are
+diagnostic attempt counts, not totals for every transaction in the range; do not
+scan or count excluded rows separately. Failed or rolled-back assignments do
+not increment `classified`. A process crash can lose the latest in-memory
+counts; ledger commits remain intact.
 
 Log `tenantId`, `messageId`, `sourceSyncMessageId` where applicable, counts,
 elapsed time, and ordinary errors. Log partial counts on handled failures when
@@ -294,23 +306,29 @@ Expose a small rule-management service and classification service through
 focused scoped-read/category-update operation.
 
 Implement rules and matching, then command handling and explicit submission,
-then the bank-sync completion event/subscriber and the management/job-feedback UI.
+then the bank-sync window completion event/subscriber and the management and
+job-feedback UI.
 
 Verify matching order, eligibility, tenant isolation, date boundaries, rule
-CRUD, and category reference checks. Verify that rules load once per attempt,
-retries reload them and skip existing categories, failed classification leaves
+CRUD, all four eligible transaction kinds, and category reference checks through
+both the removal API and internal hide paths. Verify that rules load once per
+attempt, retries reload them and skip existing categories, failed classification leaves
 imported data intact, and the UI uses existing job feedback. Verify that the
 command and event handlers pass identical range parameters to the same service,
-the sync event uses the completed transaction window, and date selection handles
+each sync event uses its committed window's bounds, and date selection handles
 exclusive boundaries and differing offsets across DST. Test the simple
-conditional category write.
+conditional category write and the distinction between rows excluded by
+selection and rows counted as skipped during processing.
+
+Verify that an early committed window remains scheduled for classification when
+a later window fails and retry resumes beyond it. Cover a crash after a window
+commit but before overall sync completion, publication failure rolling back the
+window's writes and successful checkpoint, and duplicate event delivery skipping
+existing categories.
 
 Use generated Mockery mocks where needed and one shallow migration smoke test.
 Bootstrap PostgreSQL before backend tests and run required module checks when
 code changes.
-
-Remaining product interpretations: inclusion of `expense`/`income` and logical
-hiding as category removal.
 
 ## Existing implementation references
 
@@ -320,6 +338,7 @@ hiding as category removal.
 - [Category lifecycle](../../finance/service_catalog.go)
 - [Bank-sync completion](../../finance/service_bank_sync.go)
 - [Resolved sync window](../../finance/internal/providers/sync_orchestrator.go)
+- [Window writes and checkpoint commit](../../finance/internal/providers/window_sync_store.go)
 - [Typed domain events](../../apps/sumweave/internal/appevents/events.go)
 - [Finance command contracts](../../finance/semantic_commands.go)
 - [Finance dispatch/job adapter](../../apps/sumweave/internal/financeapp/register.go)
