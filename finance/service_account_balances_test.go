@@ -18,6 +18,7 @@ func TestAccountBalanceReadStoreAssignmentAndFallback(t *testing.T) {
 
 		service := NewCatalogService(
 			store,
+			persistence.NewClassificationRuleStoreFromStore(store),
 			WithCatalogServiceAccountBalanceStore(explicit),
 		)
 

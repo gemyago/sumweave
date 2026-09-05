@@ -61,7 +61,7 @@ func TestFocusedPublicServices(t *testing.T) {
 	t.Run("catalog service handles catalog workflows without root service", func(t *testing.T) {
 		store := makeStore(t)
 		tenantService := NewTenantService(store)
-		service := NewCatalogService(store)
+		service := NewCatalogService(store, persistence.NewClassificationRuleStoreFromStore(store))
 		fake := faker.New()
 
 		ownerUserID := "owner-" + fake.UUID().V4()
@@ -95,7 +95,7 @@ func TestFocusedPublicServices(t *testing.T) {
 	t.Run("ledger service handles ledger workflows without root service", func(t *testing.T) {
 		store := makeStore(t)
 		tenantService := NewTenantService(store)
-		catalogService := NewCatalogService(store)
+		catalogService := NewCatalogService(store, persistence.NewClassificationRuleStoreFromStore(store))
 		service := NewLedgerService(store)
 		fake := faker.New()
 
@@ -135,7 +135,7 @@ func TestFocusedPublicServices(t *testing.T) {
 	t.Run("reporting service handles dashboard workflows without root service", func(t *testing.T) {
 		store := makeStore(t)
 		tenantService := NewTenantService(store)
-		catalogService := NewCatalogService(store)
+		catalogService := NewCatalogService(store, persistence.NewClassificationRuleStoreFromStore(store))
 		ledgerService := NewLedgerService(store)
 		now := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)
 		fake := faker.New()
@@ -235,7 +235,7 @@ func TestFocusedPublicServices(t *testing.T) {
 	t.Run("csv import service handles preview confirm run and audit without root service", func(t *testing.T) {
 		store := makeStore(t)
 		tenantService := NewTenantService(store)
-		catalogService := NewCatalogService(store)
+		catalogService := NewCatalogService(store, persistence.NewClassificationRuleStoreFromStore(store))
 		ledgerService := NewLedgerService(store)
 		publisher := NewMockSemanticCommandPublisher(t)
 		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).Return(

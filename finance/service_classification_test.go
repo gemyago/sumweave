@@ -1,0 +1,338 @@
+package finance
+
+import (
+	"errors"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/gemyago/sumweave/finance/domain"
+	"github.com/gemyago/sumweave/finance/persistence"
+	"github.com/jaswdr/faker/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestMatchClassificationRule(t *testing.T) {
+	t.Run("uses the first normalized literal match and preserves internal text", func(t *testing.T) {
+		rules := []domain.ClassificationRule{
+			{ID: "contains", MatchType: domain.ClassificationMatchTypeContains, Condition: "NETFLIX"},
+			{ID: "exact", MatchType: domain.ClassificationMatchTypeExact, Condition: "NETFLIX.COM"},
+		}
+		match := matchClassificationRule("  netflix.com payment  ", rules)
+		if assert.NotNil(t, match) {
+			assert.Equal(t, "contains", match.ID)
+		}
+		assert.Nil(t, matchClassificationRule("NETFLIX COM", []domain.ClassificationRule{{
+			MatchType: domain.ClassificationMatchTypeExact, Condition: "NETFLIX.COM",
+		}}))
+		assert.Nil(t, matchClassificationRule("   ", rules))
+	})
+
+	t.Run("matches Unicode contains conditions and skips blank rule conditions", func(t *testing.T) {
+		fake := faker.New()
+		condition := "ŻÓŁĆ-" + fake.Lorem().Word()
+		rules := []domain.ClassificationRule{
+			{
+				ID:        "blank-" + fake.UUID().V4(),
+				MatchType: domain.ClassificationMatchTypeContains,
+				Condition: "  ",
+			},
+			{
+				ID:        "contains-" + fake.UUID().V4(),
+				MatchType: domain.ClassificationMatchTypeContains,
+				Condition: condition,
+			},
+		}
+		match := matchClassificationRule(" payment żółć-"+condition[len("ŻÓŁĆ-"):]+"! ", rules)
+		if assert.NotNil(t, match) {
+			assert.Equal(t, rules[1].ID, match.ID)
+		}
+		assert.Nil(t, matchClassificationRule("plain", []domain.ClassificationRule{{
+			MatchType: domain.ClassificationMatchTypeContains, Condition: "",
+		}}))
+	})
+}
+
+func TestClassificationService(t *testing.T) {
+	t.Run("loads rules once, advances keyset batches, and counts committed assignments", func(t *testing.T) {
+		rules := newMockclassificationRuleStore(t)
+		transactions := newMockclassificationTransactionStore(t)
+		categories := newMockclassificationCategoryStore(t)
+		now := time.Date(2026, time.September, 6, 12, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		params := ClassificationParams{
+			TenantID:          "tenant-a",
+			RangeStart:        now.Add(-time.Hour),
+			RangeEndExclusive: now,
+			MessageID:         "message-a",
+		}
+		rules.EXPECT().ListClassificationRules(t.Context(), params.TenantID, "").Return([]domain.ClassificationRule{{
+			ID: "rule-a", TenantID: params.TenantID, MatchType: domain.ClassificationMatchTypeContains,
+			Condition: "match", CategoryID: "category-a",
+		}}, nil).Once()
+		first := domain.Transaction{ID: "transaction-a", TenantID: params.TenantID, Description: "matching description"}
+		second := domain.Transaction{ID: "transaction-b", TenantID: params.TenantID, Description: "other description"}
+		transactions.EXPECT().
+			ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+				TenantID: params.TenantID, RangeStart: params.RangeStart, RangeEndExclusive: params.RangeEndExclusive,
+			}).
+			Return([]domain.Transaction{first, second}, nil).
+			Once()
+		categories.EXPECT().
+			GetCategory(t.Context(), "category-a").
+			Return(&domain.Category{ID: "category-a", TenantID: params.TenantID}, nil).
+			Once()
+		transactions.EXPECT().AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+			TenantID: params.TenantID, TransactionID: first.ID, CategoryID: "category-a", UpdatedAt: now,
+		}).Return(true, nil).Once()
+		transactions.EXPECT().
+			ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+				TenantID:          params.TenantID,
+				RangeStart:        params.RangeStart,
+				RangeEndExclusive: params.RangeEndExclusive,
+				AfterID:           second.ID,
+			}).
+			Return(nil, nil).
+			Once()
+		service, err := NewClassificationService(ClassificationServiceArgs{
+			Rules: rules, Transactions: transactions, Categories: categories,
+			Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
+		})
+		if assert.NoError(t, err) {
+			counts, classifyErr := service.Classify(t.Context(), params)
+			assert.NoError(t, classifyErr)
+			assert.Equal(t, ClassificationAttemptCounts{Classified: 1, Unmatched: 1}, counts)
+		}
+	})
+
+	t.Run("enforces all required dependencies", func(t *testing.T) {
+		rules := newMockclassificationRuleStore(t)
+		transactions := newMockclassificationTransactionStore(t)
+		categories := newMockclassificationCategoryStore(t)
+		_, err := NewClassificationService(ClassificationServiceArgs{})
+		require.ErrorContains(t, err, "rule store is required")
+		_, err = NewClassificationService(ClassificationServiceArgs{Rules: rules})
+		require.ErrorContains(t, err, "transaction store is required")
+		_, err = NewClassificationService(ClassificationServiceArgs{Rules: rules, Transactions: transactions})
+		require.ErrorContains(t, err, "category store is required")
+		_, err = NewClassificationService(ClassificationServiceArgs{
+			Rules: rules, Transactions: transactions, Categories: categories,
+		})
+		require.ErrorContains(t, err, "logger is required")
+		_, err = NewClassificationService(ClassificationServiceArgs{
+			Rules: rules, Transactions: transactions, Categories: categories, Logger: slog.New(slog.DiscardHandler),
+		})
+		require.ErrorContains(t, err, "clock is required")
+	})
+
+	t.Run("retains counts when a later operation fails", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.September, 6, 18, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		params := ClassificationParams{
+			TenantID: "tenant-" + fake.UUID().V4(), RangeStart: now.Add(-time.Hour), RangeEndExclusive: now,
+		}
+		makeService := func(t *testing.T) (*ClassificationService, *mockclassificationRuleStore, *mockclassificationTransactionStore, *mockclassificationCategoryStore) {
+			t.Helper()
+			rules := newMockclassificationRuleStore(t)
+			transactions := newMockclassificationTransactionStore(t)
+			categories := newMockclassificationCategoryStore(t)
+			service, err := NewClassificationService(ClassificationServiceArgs{
+				Rules: rules, Transactions: transactions, Categories: categories, Logger: slog.New(slog.DiscardHandler),
+				Now: func() time.Time { return now },
+			})
+			require.NoError(t, err)
+			return service, rules, transactions, categories
+		}
+
+		t.Run("reports rule load failures", func(t *testing.T) {
+			service, rules, _, _ := makeService(t)
+			loadErr := errors.New("load failed")
+			rules.EXPECT().ListClassificationRules(t.Context(), params.TenantID, "").Return(nil, loadErr).Once()
+			counts, err := service.Classify(t.Context(), params)
+			require.ErrorIs(t, err, loadErr)
+			assert.Equal(t, ClassificationAttemptCounts{}, counts)
+		})
+
+		t.Run("reports selection failures", func(t *testing.T) {
+			service, rules, transactions, _ := makeService(t)
+			listErr := errors.New("selection failed")
+			rules.EXPECT().ListClassificationRules(t.Context(), params.TenantID, "").Return(nil, nil).Once()
+			transactions.EXPECT().
+				ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+					TenantID:          params.TenantID,
+					RangeStart:        params.RangeStart,
+					RangeEndExclusive: params.RangeEndExclusive,
+				}).
+				Return(nil, listErr).
+				Once()
+			counts, err := service.Classify(t.Context(), params)
+			require.ErrorIs(t, err, listErr)
+			assert.Equal(t, ClassificationAttemptCounts{}, counts)
+		})
+
+		t.Run("reports unavailable categories as terminal after prior committed assignments", func(t *testing.T) {
+			service, rules, transactions, categories := makeService(t)
+			firstCategoryID, secondCategoryID := "category-"+fake.UUID().V4(), "category-"+fake.UUID().V4()
+			rules.EXPECT().ListClassificationRules(t.Context(), params.TenantID, "").Return([]domain.ClassificationRule{
+				{
+					ID:         "rule-" + fake.UUID().V4(),
+					MatchType:  domain.ClassificationMatchTypeExact,
+					Condition:  "first",
+					CategoryID: firstCategoryID,
+				},
+				{
+					ID:         "rule-" + fake.UUID().V4(),
+					MatchType:  domain.ClassificationMatchTypeExact,
+					Condition:  "second",
+					CategoryID: secondCategoryID,
+				},
+			}, nil).Once()
+			first := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "first"}
+			second := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "second"}
+			transactions.EXPECT().
+				ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+					TenantID:          params.TenantID,
+					RangeStart:        params.RangeStart,
+					RangeEndExclusive: params.RangeEndExclusive,
+				}).
+				Return([]domain.Transaction{first, second}, nil).
+				Once()
+			categories.EXPECT().
+				GetCategory(t.Context(), firstCategoryID).
+				Return(&domain.Category{ID: firstCategoryID, TenantID: params.TenantID}, nil).
+				Once()
+			transactions.EXPECT().
+				AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+					TenantID: params.TenantID, TransactionID: first.ID, CategoryID: firstCategoryID, UpdatedAt: now,
+				}).
+				Return(true, nil).
+				Once()
+			categories.EXPECT().
+				GetCategory(t.Context(), secondCategoryID).
+				Return(nil, errors.New("missing category")).
+				Once()
+			counts, err := service.Classify(t.Context(), params)
+			require.Error(t, err)
+			_, terminal := TerminalFailureFrom(err)
+			assert.True(t, terminal)
+			assert.Equal(t, ClassificationAttemptCounts{Classified: 1}, counts)
+		})
+
+		t.Run("counts a conditional-write race as skipped", func(t *testing.T) {
+			service, rules, transactions, categories := makeService(t)
+			categoryID := "category-" + fake.UUID().V4()
+			rules.EXPECT().
+				ListClassificationRules(t.Context(), params.TenantID, "").
+				Return([]domain.ClassificationRule{
+					{
+						ID: "rule-" + fake.UUID().
+							V4(),
+						MatchType:  domain.ClassificationMatchTypeExact,
+						Condition:  "match",
+						CategoryID: categoryID,
+					},
+				}, nil).
+				Once()
+			transaction := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "match"}
+			transactions.EXPECT().
+				ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+					TenantID:          params.TenantID,
+					RangeStart:        params.RangeStart,
+					RangeEndExclusive: params.RangeEndExclusive,
+				}).
+				Return([]domain.Transaction{transaction}, nil).
+				Once()
+			categories.EXPECT().
+				GetCategory(t.Context(), categoryID).
+				Return(&domain.Category{ID: categoryID, TenantID: params.TenantID}, nil).
+				Once()
+			transactions.EXPECT().
+				AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+					TenantID: params.TenantID, TransactionID: transaction.ID, CategoryID: categoryID, UpdatedAt: now,
+				}).
+				Return(false, nil).
+				Once()
+			transactions.EXPECT().
+				ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+					TenantID:          params.TenantID,
+					RangeStart:        params.RangeStart,
+					RangeEndExclusive: params.RangeEndExclusive,
+					AfterID:           transaction.ID,
+				}).
+				Return(nil, nil).
+				Once()
+			counts, err := service.Classify(t.Context(), params)
+			require.NoError(t, err)
+			assert.Equal(t, ClassificationAttemptCounts{Skipped: 1}, counts)
+		})
+	})
+
+	t.Run("reloads current rules on retry and leaves previously categorized rows excluded", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.September, 7, 11, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		params := ClassificationParams{
+			TenantID: "tenant-" + fake.UUID().V4(), RangeStart: now.Add(-time.Hour), RangeEndExclusive: now,
+		}
+		rules := newMockclassificationRuleStore(t)
+		transactions := newMockclassificationTransactionStore(t)
+		categories := newMockclassificationCategoryStore(t)
+		service, err := NewClassificationService(ClassificationServiceArgs{
+			Rules: rules, Transactions: transactions, Categories: categories, Logger: slog.New(slog.DiscardHandler),
+			Now: func() time.Time { return now },
+		})
+		require.NoError(t, err)
+		categoryID := "category-" + fake.UUID().V4()
+		firstRule := domain.ClassificationRule{
+			ID: "rule-" + fake.UUID().V4(), MatchType: domain.ClassificationMatchTypeExact,
+			Condition: "first", CategoryID: categoryID,
+		}
+		secondRule := domain.ClassificationRule{
+			ID: "rule-" + fake.UUID().V4(), MatchType: domain.ClassificationMatchTypeExact,
+			Condition: "changed", CategoryID: categoryID,
+		}
+		transaction := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: firstRule.Condition}
+		rules.EXPECT().
+			ListClassificationRules(t.Context(), params.TenantID, "").
+			Return([]domain.ClassificationRule{firstRule}, nil).
+			Once()
+		transactions.EXPECT().
+			ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+				TenantID: params.TenantID, RangeStart: params.RangeStart, RangeEndExclusive: params.RangeEndExclusive,
+			}).
+			Return([]domain.Transaction{transaction}, nil).
+			Once()
+		categories.EXPECT().
+			GetCategory(t.Context(), categoryID).
+			Return(&domain.Category{ID: categoryID, TenantID: params.TenantID}, nil).
+			Once()
+		transactions.EXPECT().AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+			TenantID: params.TenantID, TransactionID: transaction.ID, CategoryID: categoryID, UpdatedAt: now,
+		}).Return(true, nil).Once()
+		transactions.EXPECT().
+			ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+				TenantID:          params.TenantID,
+				RangeStart:        params.RangeStart,
+				RangeEndExclusive: params.RangeEndExclusive,
+				AfterID:           transaction.ID,
+			}).
+			Return(nil, nil).
+			Once()
+		firstCounts, err := service.Classify(t.Context(), params)
+		require.NoError(t, err)
+		assert.Equal(t, ClassificationAttemptCounts{Classified: 1}, firstCounts)
+
+		rules.EXPECT().
+			ListClassificationRules(t.Context(), params.TenantID, "").
+			Return([]domain.ClassificationRule{secondRule}, nil).
+			Once()
+		transactions.EXPECT().
+			ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+				TenantID: params.TenantID, RangeStart: params.RangeStart, RangeEndExclusive: params.RangeEndExclusive,
+			}).
+			Return(nil, nil).
+			Once()
+		secondCounts, err := service.Classify(t.Context(), params)
+		require.NoError(t, err)
+		assert.Equal(t, ClassificationAttemptCounts{}, secondCounts)
+	})
+}

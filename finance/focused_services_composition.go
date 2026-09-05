@@ -10,13 +10,15 @@ import (
 )
 
 type focusedServices struct {
-	TenantService    *TenantService
-	CatalogService   *CatalogService
-	LedgerService    *LedgerService
-	ReportingService *ReportingService
-	FXService        *FXService
-	CSVImportService *CSVImportService
-	BankSyncService  *BankSyncService
+	TenantService             *TenantService
+	CatalogService            *CatalogService
+	LedgerService             *LedgerService
+	ReportingService          *ReportingService
+	FXService                 *FXService
+	CSVImportService          *CSVImportService
+	BankSyncService           *BankSyncService
+	ClassificationRuleService *ClassificationRuleService
+	ClassificationService     *ClassificationService
 }
 
 type focusedServicesConfig struct {
@@ -105,7 +107,9 @@ func newFocusedServices(
 		fxOpts = append(fxOpts, WithFXServiceCommandPublisher(cfg.commandPublisher))
 	}
 	tenantService := NewTenantService(store, tenantOpts...)
-	catalogService := NewCatalogService(store, catalogOpts...)
+	ruleStore := persistence.NewClassificationRuleStoreFromStore(store)
+	classificationRuleService, classificationService := newClassificationServices(store, ruleStore, cfg)
+	catalogService := NewCatalogService(store, ruleStore, catalogOpts...)
 	ledgerService := NewLedgerService(store, ledgerOpts...)
 	reportingService := NewReportingService(store, reportingOpts...)
 	fxOpts = append(fxOpts, WithFXServiceRequiredPairs(fxPairDiscoveryStore))
@@ -131,12 +135,35 @@ func newFocusedServices(
 		bankSyncOpts = append(bankSyncOpts, WithBankSyncServiceLogger(cfg.logger))
 	}
 	return focusedServices{
-		TenantService:    tenantService,
-		CatalogService:   catalogService,
-		LedgerService:    ledgerService,
-		ReportingService: reportingService,
-		FXService:        fxService,
-		CSVImportService: csvImportService,
-		BankSyncService:  NewBankSyncService(store, cfg.bankSyncOrchestrator, bankSyncOpts...),
+		TenantService:             tenantService,
+		CatalogService:            catalogService,
+		LedgerService:             ledgerService,
+		ReportingService:          reportingService,
+		FXService:                 fxService,
+		CSVImportService:          csvImportService,
+		BankSyncService:           NewBankSyncService(store, cfg.bankSyncOrchestrator, bankSyncOpts...),
+		ClassificationRuleService: classificationRuleService,
+		ClassificationService:     classificationService,
 	}
+}
+
+func newClassificationServices(
+	store *persistence.Store,
+	ruleStore *persistence.ClassificationRuleStore,
+	cfg focusedServicesConfig,
+) (*ClassificationRuleService, *ClassificationService) {
+	ruleService, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
+		Access: store, Categories: store, Rules: ruleStore, Now: cfg.now, NewID: cfg.newID,
+	})
+	if err != nil {
+		panic(err)
+	}
+	service, err := NewClassificationService(ClassificationServiceArgs{
+		Rules: ruleStore, Transactions: persistence.NewClassificationTransactionStoreFromStore(store),
+		Categories: store, Logger: cfg.logger, Now: cfg.now,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return ruleService, service
 }

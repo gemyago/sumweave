@@ -29,6 +29,7 @@ const (
 	columnFingerprint       = "fingerprint"
 	columnProviderObjectID  = "provider_object_id"
 	columnCapturedAt        = "captured_at"
+	columnCategoryID        = "category_id"
 	columnIntervalSeconds   = "interval_seconds"
 	columnNextRunAt         = "next_run_at"
 	columnLastScheduledAt   = "last_scheduled_at"

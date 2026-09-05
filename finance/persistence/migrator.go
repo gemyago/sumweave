@@ -25,6 +25,7 @@ func financeSchemaModels() []any {
 		&tenantInviteModel{},
 		&accountModel{},
 		&categoryModel{},
+		&classificationRuleModel{},
 		&tagModel{},
 		&transactionModel{},
 		&transactionTagModel{},

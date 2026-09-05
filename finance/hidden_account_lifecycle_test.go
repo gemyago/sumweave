@@ -29,7 +29,7 @@ func TestHiddenAccountLifecycle(t *testing.T) {
 			SeedDefaults:    true,
 		})
 		require.NoError(t, err)
-		catalog := NewCatalogService(store)
+		catalog := NewCatalogService(store, persistence.NewClassificationRuleStoreFromStore(store))
 		ledger := NewLedgerService(store)
 		reporting := NewReportingService(
 			store,

@@ -15,6 +15,10 @@ packages:
       ScheduledSemanticCommandPublisher:
       FXRatesProvider:
       requiredFXPairLister:
+      classificationRuleStore:
+      classificationCategoryStore:
+      classificationTransactionStore:
+      categoryRuleReferenceFinder:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:

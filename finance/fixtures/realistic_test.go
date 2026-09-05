@@ -965,6 +965,7 @@ func TestRealisticScenario(t *testing.T) {
 	)
 	catalogService := financepkg.NewCatalogService(
 		store,
+		persistence.NewClassificationRuleStoreFromStore(store),
 		financepkg.WithCatalogServiceNow(func() time.Time { return now }),
 		financepkg.WithCatalogServiceIDGenerator(uuid.NewString),
 	)

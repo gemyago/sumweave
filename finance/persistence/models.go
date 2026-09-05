@@ -104,6 +104,19 @@ type categoryModel struct {
 
 func (categoryModel) TableName() string { return "finance_categories" }
 
+type classificationRuleModel struct {
+	ID         string    `gorm:"column:id;size:255;not null;primaryKey;index:idx_finance_classification_rules_order,priority:3"`
+	TenantID   string    `gorm:"column:tenant_id;size:255;not null;index:idx_finance_classification_rules_order,priority:1;index:idx_finance_classification_rules_category,priority:1"`
+	Position   int       `gorm:"column:position;not null;index:idx_finance_classification_rules_order,priority:2"`
+	MatchType  string    `gorm:"column:match_type;size:64;not null"`
+	Condition  string    `gorm:"column:condition;type:text;not null"`
+	CategoryID string    `gorm:"column:category_id;size:255;not null;index:idx_finance_classification_rules_category,priority:2"`
+	CreatedAt  time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt  time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (classificationRuleModel) TableName() string { return "finance_classification_rules" }
+
 type tagModel struct {
 	ID        string     `gorm:"column:id;size:255;not null;primaryKey"`
 	TenantID  string     `gorm:"column:tenant_id;size:255;not null;index:idx_finance_tags_created_order,priority:1"`
@@ -660,6 +673,22 @@ func categoryFromModel(model categoryModel) domain.Category {
 		HiddenAt:      model.HiddenAt,
 		CreatedAt:     model.CreatedAt,
 		UpdatedAt:     model.UpdatedAt,
+	}
+}
+
+func newClassificationRuleModel(rule domain.ClassificationRule) classificationRuleModel {
+	return classificationRuleModel{
+		ID: rule.ID, TenantID: rule.TenantID, Position: rule.Position,
+		MatchType: string(rule.MatchType), Condition: rule.Condition, CategoryID: rule.CategoryID,
+		CreatedAt: rule.CreatedAt, UpdatedAt: rule.UpdatedAt,
+	}
+}
+
+func classificationRuleFromModel(model classificationRuleModel) domain.ClassificationRule {
+	return domain.ClassificationRule{
+		ID: model.ID, TenantID: model.TenantID, Position: model.Position,
+		MatchType: domain.ClassificationMatchType(model.MatchType), Condition: model.Condition,
+		CategoryID: model.CategoryID, CreatedAt: model.CreatedAt, UpdatedAt: model.UpdatedAt,
 	}
 }
 
