@@ -14,12 +14,12 @@ The governing rule is simple: a transaction with a category is already classifie
 
 - Fully manually entered transactions are not automatically classified when they are created.
 - The user is responsible for selecting a category for a manually entered transaction.
-- Uncategorized manual transactions may later be included in an explicit classification operation.
+- Uncategorized manual transactions may later be included in a classification pass covering their transaction date.
 - Neither automatic nor explicit classification may overwrite an existing category.
 
 ### 2. Bank-synced transactions
 
-- Transactions discovered through scheduled or user-triggered bank synchronization are subject to automatic classification.
+- Successful scheduled or user-triggered bank synchronization starts automatic classification over the tenant's synchronized date range.
 - Automatic classification applies only to transactions eligible for ordinary category classification.
 - If no classification rule matches, the transaction remains unclassified.
 
@@ -34,7 +34,7 @@ The following eligibility requirements apply to both automatic and explicit clas
 - Transfers, including matched internal and unmatched/external transfers, are excluded from Phase 0 category classification. They may still be categorized manually where applicable.
 - Reconciliation and opening-balance transactions are excluded.
 
-CSV-imported transactions with a category are already classified. Uncategorized CSV-imported transactions may be included in an explicit classification operation; CSV import does not trigger automatic classification in Phase 0.
+CSV-imported transactions with a category are already classified. Uncategorized CSV-imported transactions may be included in a classification pass covering their transaction date; CSV import does not trigger automatic classification in Phase 0.
 
 ### 4. Deterministic classification rules
 
@@ -98,6 +98,8 @@ Automatic classification and explicit classification of existing transactions ar
 
 Automatic classification is primarily intended for newly synchronized bank transactions.
 
+A successful bank sync emits a completion event with the synchronized transaction range. Classification responds by processing eligible transactions in that tenant and range. Automatic and explicit operations use the same selection and classification behavior, including eligible manual, bank-synced, and CSV transactions across the tenant's accounts.
+
 - An unclassified eligible transaction may receive a category when a rule matches.
 - Any categorized transaction is skipped, whether its category was assigned manually, imported, or assigned automatically.
 - Repeated bank synchronization must not change an existing category.
@@ -113,14 +115,15 @@ Users must be able to explicitly run classification over existing uncategorized 
 - Apply the range to the transaction date shown in the ledger, including both selected boundary dates.
 - Reject an invalid range whose start date is after its end date.
 - Apply the same eligibility requirements throughout the selected range; choosing a wider range never permits overwriting a category.
-- Show completion or failure feedback and counts of newly classified, unmatched, and skipped transactions. If processing fails after partial progress, make that partial outcome clear.
+- Use existing jobs to show processing, completion, or failure feedback. On failure, explain that some transactions may already have been classified.
+- Log counts of newly classified, unmatched, and skipped transactions for diagnostics.
 
-Classification must preserve a category assigned by a user while an operation is running. Retrying an operation skips transactions that already received a category, including those classified by a previous attempt.
+Classification skips categories present when checked, including categories assigned by a user or a previous attempt. Simultaneous edits and stale saves are an accepted Phase 0 risk. Retrying an operation checks the current transaction state again.
 
 ### 7. Rule and category lifecycle
 
 - Creating, editing, reordering, or deleting a rule does not change existing transaction categories or automatically start a historical classification run.
-- Rule changes apply to subsequent classification operations, which still target only eligible uncategorized transactions.
+- Rules are fetched when classification execution starts and kept in memory for that attempt. Changes apply to later attempts, including retries; active attempts continue using their loaded rules.
 - A category referenced by any classification rule cannot be deleted. The UI must explain which rules reference it; users must retarget or delete those rules before removing the category.
 - Deleting a rule does not clear categories previously assigned by that rule.
 
@@ -139,7 +142,8 @@ If a user manually clears a category, the transaction becomes uncategorized and 
 - Manual and CSV-imported uncategorized transactions can be classified in an explicit run; their existing categories are preserved.
 - An explicit run defaults to the last 30 days, including today, and touches only eligible transactions within the chosen inclusive dates and current tenant.
 - A manual category assignment offers optional rule creation with editable description, match type, and category; cancelling leaves the assignment intact, while saving appends the rule to the list.
-- A user assigning a category while classification is running keeps that assignment, including after a retry.
+- Classification skips an existing category, including on retry. Simultaneous edits and stale saves remain an accepted concurrency risk in Phase 0.
+- Explicit classification uses existing job lifecycle feedback; outcome counts are logged for diagnostics.
 - Deleting a referenced category is blocked until its rules are retargeted or deleted.
 
 ## Phase 0 non-goals

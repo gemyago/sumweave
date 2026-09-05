@@ -4,6 +4,7 @@
 - Product vocabulary: [domain-terminology.md](domain-terminology.md)
 - Implementation snapshot: [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)
 - Finance provider sync: [finance-provider-sync-architecture.md](finance-provider-sync-architecture.md)
+- Transaction enrichment: [requirements and system design](enrichment-pipeline/README.md)
 - Database-backed application state: [database-backed-state-plan.md](database-backed-state-plan.md)
 - Local PostgreSQL setup and verification:
   [manual-e2e/postgres-local-verification.md](manual-e2e/postgres-local-verification.md)
