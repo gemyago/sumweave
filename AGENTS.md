@@ -168,6 +168,17 @@ The rules are:
 - Jobs add opt-in product visibility to background processing.
 - Do not create job records for invisible background processing.
 - Jobs never replace appdispatch as the execution transport.
+- Phase 0 classification loads rules into memory per attempt.
+- Phase 0 classification uses jobs for feedback and logs counts.
+- Classification counts exclude rows filtered out by selection.
+- Commit sync-window events atomically with ledger writes and checkpoints.
+- Classification includes regular, expense, income, and refund kinds.
+- Category removal hides records and blocks live classification references.
+- Treat concurrent classification updates as an accepted Phase 0 risk.
+- Describe chosen designs; omit rejected alternatives and their history.
+- Use plain ASCII diagrams in system design documentation.
+- Classification range APIs accept full timestamps with offsets.
+- Jobs and sync-window events use the same range classifier.
 - PM2 local apps are `api`, `worker`, and `ui`; backend operations target `backend`.
 - Use direct PM2 commands rather than root npm PM2 wrapper scripts.
 
