@@ -94,6 +94,7 @@ describe('FinanceShell', () => {
     expect(screen.getByRole('link', { name: 'Transactions' })).toHaveAttribute('href', '#/finance/transactions')
     expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '#/finance/accounts')
     expect(screen.getByRole('link', { name: 'Categories' })).toHaveAttribute('href', '#/finance/categories')
+    expect(screen.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', '#/finance/rules')
     expect(screen.getByRole('link', { name: 'Connections & sync' })).toHaveAttribute('href', '#/finance/connections')
     expect(screen.getByRole('link', { name: 'Imports' })).toHaveAttribute('href', '#/finance/imports')
     expect(screen.getByRole('link', { name: 'Tenants' })).toHaveAttribute('href', '#/finance/tenants')
@@ -115,6 +116,7 @@ describe('FinanceShell', () => {
       'Transactions',
       'Accounts',
       'Categories',
+      'Rules',
       'Connections & sync',
       'Imports',
       'Tenants',

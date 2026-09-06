@@ -25,6 +25,7 @@
     { href: '/finance/transactions', label: 'Transactions' },
     { href: '/finance/accounts', label: 'Accounts' },
     { href: '/finance/categories', label: 'Categories' },
+    { href: '/finance/rules', label: 'Rules' },
     { href: '/finance/connections', label: 'Connections & sync' },
     { href: '/finance/imports', label: 'Imports' },
     { href: '/finance/tenants', label: 'Tenants' },

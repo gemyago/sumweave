@@ -8,8 +8,9 @@ const mocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listCategories: vi.fn(),
   listTags: vi.fn(),
-  listTransactions: vi.fn(),
-  updateTransaction: vi.fn(),
+   listTransactions: vi.fn(),
+   updateTransaction: vi.fn(),
+   createClassificationRule: vi.fn(),
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => ({
@@ -32,6 +33,7 @@ describe('Finance transactions page', () => {
     ])
     mocks.listCategories.mockResolvedValue([
       { id: 'cat-1', tenantId: 'tenant-1', name: 'Groceries', kind: 'expense', seededDefault: true, hiddenAt: null, createdAt: now, updatedAt: now },
+      { id: 'cat-2', tenantId: 'tenant-1', name: 'Dining', kind: 'expense', seededDefault: false, hiddenAt: null, createdAt: now, updatedAt: now },
     ])
     mocks.listTags.mockResolvedValue([
       { id: 'tag-1', tenantId: 'tenant-1', name: 'Household', hiddenAt: null, createdAt: now, updatedAt: now },
@@ -65,6 +67,7 @@ describe('Finance transactions page', () => {
       id: params.transactionId,
       categoryId: params.categoryId ?? null,
     }))
+    mocks.createClassificationRule.mockResolvedValue({ id: 'rule-1' })
   })
 
   it('renders the shared transaction list and full-editor navigation link', async () => {
@@ -256,6 +259,22 @@ describe('Finance transactions page', () => {
       categoryId: null, description: 'Refund', tagIds: ['tag-1', 'tag-2'],
     })))
     expect(await screen.findByText('No category')).toBeInTheDocument()
+  })
+
+  it('offers optional explicit rule creation after an inline category assignment', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+    await user.click(screen.getByRole('button', { name: 'Edit category' }))
+    await user.selectOptions(screen.getByLabelText('Category'), 'cat-2')
+    await user.click(screen.getByRole('button', { name: 'Save category' }))
+
+    expect(await screen.findByRole('form', { name: 'Create classification rule' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Rule condition')).toHaveValue('Refund')
+    expect(screen.getByLabelText('Rule category')).toHaveValue('cat-2')
+    await user.click(screen.getByRole('button', { name: 'Cancel rule' }))
+    expect(screen.getByText('Dining')).toBeInTheDocument()
+    expect(mocks.createClassificationRule).not.toHaveBeenCalled()
   })
 
   it('cancels an inline tag edit without calling the API', async () => {

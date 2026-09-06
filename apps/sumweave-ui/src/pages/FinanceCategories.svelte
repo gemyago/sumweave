@@ -4,9 +4,11 @@
   import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
   import Pencil from '@lucide/svelte/icons/pencil'
+  import Trash2 from '@lucide/svelte/icons/trash-2'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
     createSignalFinanceApiForAuth,
+    CategoryReferencedByClassificationRulesError,
     type FinanceCategory,
     type FinanceTag,
   } from '../lib/finance/api'
@@ -32,6 +34,11 @@
   let categoryEditKind = $state('expense')
   let editingTagId = $state<string | null>(null)
   let tagEditName = $state('')
+  let removeConfirmationCategoryId = $state<string | null>(null)
+  let removingCategoryId = $state<string | null>(null)
+  let removalMessage = $state<string | null>(null)
+  let referencedRuleIds = $state<string[]>([])
+  let referencedCategoryId = $state<string | null>(null)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
 
@@ -145,6 +152,43 @@
     }
   }
 
+  function startCategoryRemoval(categoryId: string) {
+    error = null
+    removalMessage = null
+    referencedRuleIds = []
+    referencedCategoryId = null
+    removeConfirmationCategoryId = categoryId
+  }
+
+  function cancelCategoryRemoval() {
+    removeConfirmationCategoryId = null
+  }
+
+  async function removeCategory(category: FinanceCategory) {
+    if (!financeShell.selectedTenantId || removingCategoryId) return
+    removingCategoryId = category.id
+    error = null
+    removalMessage = null
+    referencedRuleIds = []
+    referencedCategoryId = null
+    try {
+      await financeApi.deleteCategory({ tenantId: financeShell.selectedTenantId, categoryId: category.id })
+      removeConfirmationCategoryId = null
+      removalMessage = `${category.name} was removed from active category choices.`
+      categories = await loadCategories()
+    } catch (removeError) {
+      if (removeError instanceof CategoryReferencedByClassificationRulesError) {
+        referencedRuleIds = removeError.ruleIds
+        referencedCategoryId = category.id
+        removeConfirmationCategoryId = null
+      } else {
+        error = removeError instanceof Error ? removeError.message : 'Failed to remove category'
+      }
+    } finally {
+      removingCategoryId = null
+    }
+  }
+
   function startTagEdit(tag: FinanceTag) {
     error = null
     editingTagId = tag.id
@@ -201,6 +245,21 @@
 
     {#if error}
       <div class="alert alert-danger mb-0" role="alert">{error}</div>
+    {/if}
+
+    {#if removalMessage}
+      <div class="alert alert-success mb-0" role="status">{removalMessage}</div>
+    {/if}
+
+    {#if referencedRuleIds.length}
+      <div class="alert alert-warning mb-0 d-grid gap-2" role="alert">
+        <strong>This category cannot be removed while classification rules reference it.</strong>
+        <span>Retarget or delete the referenced rules, then try again.</span>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <a href={`/finance/rules?categoryId=${encodeURIComponent(referencedCategoryId ?? '')}`} use:link>View referenced rules</a>
+          <span class="small text-body-secondary">Rule IDs: {referencedRuleIds.join(', ')}</span>
+        </div>
+      </div>
     {/if}
 
     {#if loading}
@@ -300,8 +359,18 @@
                         <span class="badge text-bg-secondary">{category.kind}</span>
                         {#if category.seededDefault}<span class="badge text-bg-light border">Starter default</span>{/if}
                       </div>
-                      <button class="btn btn-outline-secondary btn-sm align-self-end align-self-sm-auto" type="button" onclick={() => startCategoryEdit(category)} aria-label={`Edit ${category.name}`} title={`Edit ${category.name}`}><Pencil size={14} /></button>
+                      <div class="d-flex gap-2 align-self-end align-self-sm-auto">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => startCategoryEdit(category)} aria-label={`Edit ${category.name}`} title={`Edit ${category.name}`}><Pencil size={14} /></button>
+                        <button class="btn btn-outline-danger btn-sm" type="button" onclick={() => startCategoryRemoval(category.id)} disabled={removingCategoryId === category.id} aria-label={`Remove ${category.name}`} title={`Remove ${category.name}`}><Trash2 size={14} /></button>
+                      </div>
                     </div>
+                    {#if removeConfirmationCategoryId === category.id}
+                      <div class="alert alert-warning mt-3 mb-0 d-grid gap-2" aria-label={`Confirm removal of ${category.name}`}>
+                        <strong>Remove {category.name} from active category choices?</strong>
+                        <span>Historical transactions keep their category reference.</span>
+                        <div class="d-flex flex-wrap gap-2"><button class="btn btn-danger btn-sm" type="button" onclick={() => void removeCategory(category)} disabled={removingCategoryId === category.id}>{removingCategoryId === category.id ? 'Removing…' : 'Confirm remove'}</button><button class="btn btn-outline-secondary btn-sm" type="button" onclick={cancelCategoryRemoval} disabled={removingCategoryId === category.id}>Cancel</button></div>
+                      </div>
+                    {/if}
                   {/if}
                 </article>
               {/each}

@@ -17,7 +17,8 @@ const mocks = vi.hoisted(() => ({
   createTransaction: vi.fn(),
   updateTransaction: vi.fn(),
   listTransactionProviderSnapshots: vi.fn(),
-  getTransactionProviderSnapshot: vi.fn(),
+    getTransactionProviderSnapshot: vi.fn(),
+    createClassificationRule: vi.fn(),
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => ({
@@ -123,6 +124,7 @@ describe('Finance transaction editor page', () => {
     })
     mocks.listTransactionProviderSnapshots.mockResolvedValue([])
     mocks.getTransactionProviderSnapshot.mockResolvedValue({})
+    mocks.createClassificationRule.mockResolvedValue({ id: 'rule-1' })
   })
 
   it('initializes create mode with a blank editable record and submits through the shared editor', async () => {
@@ -395,6 +397,29 @@ describe('Finance transaction editor page', () => {
       }),
     )
     expect(await screen.findByRole('status')).toHaveTextContent('Transaction updated.')
+  })
+
+  it('offers an independent rule after a saved detail-category change and never after a clear', async () => {
+    const user = userEvent.setup()
+    mocks.updateTransaction.mockResolvedValueOnce({
+      ...(await mocks.getTransaction()), categoryId: 'cat-2', description: 'Refund', tagIds: [],
+    })
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
+    await screen.findByLabelText('Transaction category')
+    await user.selectOptions(screen.getByLabelText('Transaction category'), 'cat-2')
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+    expect(await screen.findByRole('form', { name: 'Create classification rule' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Rule condition')).toHaveValue('Refund')
+    await user.click(screen.getByRole('button', { name: 'Cancel rule' }))
+    expect(screen.getByText('Transaction updated.')).toBeInTheDocument()
+
+    mocks.updateTransaction.mockResolvedValueOnce({
+      ...(await mocks.getTransaction()), categoryId: null, description: 'Refund', tagIds: [],
+    })
+    await user.selectOptions(screen.getByLabelText('Transaction category'), '')
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+    await waitFor(() => expect(mocks.updateTransaction).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('form', { name: 'Create classification rule' })).not.toBeInTheDocument()
   })
 
   it('submits a negative major-unit decimal as exact minor units', async () => {

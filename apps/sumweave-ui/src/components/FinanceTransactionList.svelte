@@ -13,6 +13,7 @@
     type FinanceTransaction,
   } from '../lib/finance/api'
   import { formatFinanceDateTime, formatFinanceMoney } from '../lib/finance/format'
+  import FinanceRuleCreationForm from './FinanceRuleCreationForm.svelte'
 
   type EditableField = 'description' | 'category' | 'tags'
   type CatalogLoadState = 'loading' | 'ready' | 'error'
@@ -46,6 +47,7 @@
   let saving = $state(false)
   let error = $state<string | null>(null)
   let descriptionInput = $state<HTMLInputElement | null>(null)
+  let ruleOffer = $state<{ transactionId: string; description: string; categoryId: string } | null>(null)
 
   const categoryNameById = $derived(new Map(categories.map((category) => [category.id, category.name])))
   const tagNameById = $derived(new Map(tags.map((tag) => [tag.id, tag.name])))
@@ -158,6 +160,11 @@
         tagIds: editing.field === 'tags' ? tagDraft : (item.tagIds ?? []),
       })
       onTransactionUpdated(updated)
+      if (editing.field === 'category' && updated.categoryId) {
+        ruleOffer = { transactionId: updated.id, description: updated.description, categoryId: updated.categoryId }
+      } else if (editing.field === 'category') {
+        ruleOffer = null
+      }
       editing = null
     } catch (saveError) {
       error = saveError instanceof Error ? saveError.message : 'Could not save this transaction change.'
@@ -272,6 +279,18 @@
         </div>
       </div>
       {#if error && editing?.transactionId === item.id}<div class="alert alert-danger py-2 px-3 mt-3 mb-0" role="alert">{error}</div>{/if}
+      {#if ruleOffer?.transactionId === item.id}
+        <div class="mt-3">
+          <FinanceRuleCreationForm
+            {tenantId}
+            description={ruleOffer.description}
+            categoryId={ruleOffer.categoryId}
+            {categories}
+            onCancel={() => ruleOffer = null}
+            onSaved={() => ruleOffer = null}
+          />
+        </div>
+      {/if}
     </article>
   {/each}
 </div>
