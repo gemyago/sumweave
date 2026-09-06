@@ -71,6 +71,16 @@ type FinanceController interface {
 		*FinanceCategory,
 	]) http.Handler
 
+	// POST /api/v1/finance/tenants/{tenantId}/classification-rules
+	//
+	// Request type: CreateFinanceClassificationRuleParams,
+	//
+	// Response type: FinanceIDentifierResponse
+	CreateFinanceClassificationRule(HandlerBuilder[
+		*CreateFinanceClassificationRuleParams,
+		*FinanceIDentifierResponse,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/tags
 	//
 	// Request type: CreateFinanceTagParams,
@@ -109,6 +119,24 @@ type FinanceController interface {
 	CreateFinanceTransaction(HandlerBuilder[
 		*CreateFinanceTransactionParams,
 		*FinanceTransaction,
+	]) http.Handler
+
+	// DELETE /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+	//
+	// Request type: DeleteFinanceCategoryParams,
+	//
+	// Response type: none
+	DeleteFinanceCategory(NoResponseHandlerBuilder[
+		*DeleteFinanceCategoryParams,
+	]) http.Handler
+
+	// DELETE /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}
+	//
+	// Request type: DeleteFinanceClassificationRuleParams,
+	//
+	// Response type: none
+	DeleteFinanceClassificationRule(NoResponseHandlerBuilder[
+		*DeleteFinanceClassificationRuleParams,
 	]) http.Handler
 
 	// DELETE /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
@@ -297,6 +325,16 @@ type FinanceController interface {
 		*FinanceCategoriesResponse,
 	]) http.Handler
 
+	// GET /api/v1/finance/tenants/{tenantId}/classification-rules
+	//
+	// Request type: ListFinanceClassificationRulesParams,
+	//
+	// Response type: FinanceClassificationRulesResponse
+	ListFinanceClassificationRules(HandlerBuilder[
+		*ListFinanceClassificationRulesParams,
+		*FinanceClassificationRulesResponse,
+	]) http.Handler
+
 	// GET /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts
 	//
 	// Request type: ListFinanceConnectionSyncedAccountsParams,
@@ -396,6 +434,15 @@ type FinanceController interface {
 		*FinanceCsvImportAuditsResponse,
 	]) http.Handler
 
+	// POST /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}/move
+	//
+	// Request type: MoveFinanceClassificationRuleParams,
+	//
+	// Response type: none
+	MoveFinanceClassificationRule(NoResponseHandlerBuilder[
+		*MoveFinanceClassificationRuleParams,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/account-imports/preview
 	//
 	// Request type: PreviewFinanceAccountCsvImportParams,
@@ -434,6 +481,16 @@ type FinanceController interface {
 	StartFinanceConnectionRedirectLink(HandlerBuilder[
 		*StartFinanceConnectionRedirectLinkParams,
 		*FinanceConnectionLinkRedirectStartResponse,
+	]) http.Handler
+
+	// POST /api/v1/finance/tenants/{tenantId}/transactions/classify
+	//
+	// Request type: SubmitFinanceTransactionClassificationParams,
+	//
+	// Response type: FinanceClassificationJobResponse
+	SubmitFinanceTransactionClassification(HandlerBuilder[
+		*SubmitFinanceTransactionClassificationParams,
+		*FinanceClassificationJobResponse,
 	]) http.Handler
 
 	// POST /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync
@@ -492,6 +549,15 @@ type FinanceController interface {
 		*UpdateFinanceCategoryParams,
 	]) http.Handler
 
+	// PUT /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}
+	//
+	// Request type: UpdateFinanceClassificationRuleParams,
+	//
+	// Response type: none
+	UpdateFinanceClassificationRule(NoResponseHandlerBuilder[
+		*UpdateFinanceClassificationRuleParams,
+	]) http.Handler
+
 	// PATCH /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
 	//
 	// Request type: UpdateFinanceConnectionParams,
@@ -544,6 +610,8 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/categories
 // 
+// - POST /api/v1/finance/tenants/{tenantId}/classification-rules
+// 
 // - POST /api/v1/finance/tenants/{tenantId}/tags
 // 
 // - POST /api/v1/finance/tenants
@@ -551,6 +619,10 @@ type FinanceController interface {
 // - POST /api/v1/finance/tenants/{tenantId}/invites
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/transactions
+// 
+// - DELETE /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+// 
+// - DELETE /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}
 // 
 // - DELETE /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
 // 
@@ -590,6 +662,8 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/categories
 // 
+// - GET /api/v1/finance/tenants/{tenantId}/classification-rules
+// 
 // - GET /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/connections
@@ -610,6 +684,8 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/imports
 // 
+// - POST /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}/move
+// 
 // - POST /api/v1/finance/tenants/{tenantId}/account-imports/preview
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/imports/preview
@@ -617,6 +693,8 @@ type FinanceController interface {
 // - PUT /api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/link-redirect/start
+// 
+// - POST /api/v1/finance/tenants/{tenantId}/transactions/classify
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync
 // 
@@ -629,6 +707,8 @@ type FinanceController interface {
 // - PATCH /api/v1/finance/tenants/{tenantId}/accounts/{accountId}
 // 
 // - PATCH /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+// 
+// - PUT /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}
 // 
 // - PATCH /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
 // 
@@ -647,10 +727,13 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/imports/{importId}/confirm", controller.ConfirmFinanceCsvImport(builder.ConfirmFinanceCsvImport))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/accounts", controller.CreateFinanceAccount(builder.CreateFinanceAccount))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/categories", controller.CreateFinanceCategory(builder.CreateFinanceCategory))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/classification-rules", controller.CreateFinanceClassificationRule(builder.CreateFinanceClassificationRule))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/tags", controller.CreateFinanceTag(builder.CreateFinanceTag))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants", controller.CreateFinanceTenant(builder.CreateFinanceTenant))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/invites", controller.CreateFinanceTenantInvite(builder.CreateFinanceTenantInvite))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/transactions", controller.CreateFinanceTransaction(builder.CreateFinanceTransaction))
+	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/categories/{categoryId}", controller.DeleteFinanceCategory(builder.DeleteFinanceCategory))
+	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}", controller.DeleteFinanceClassificationRule(builder.DeleteFinanceClassificationRule))
 	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}", controller.DeleteFinanceConnection(builder.DeleteFinanceConnection))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/finish", controller.FinishFinanceConnectionRedirectLink(builder.FinishFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.GetFinanceAccount(builder.GetFinanceAccount))
@@ -670,6 +753,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots", controller.ListFinanceAccountProviderSnapshots(builder.ListFinanceAccountProviderSnapshots))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts", controller.ListFinanceAccounts(builder.ListFinanceAccounts))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/categories", controller.ListFinanceCategories(builder.ListFinanceCategories))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/classification-rules", controller.ListFinanceClassificationRules(builder.ListFinanceClassificationRules))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts", controller.ListFinanceConnectionSyncedAccounts(builder.ListFinanceConnectionSyncedAccounts))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/connections", controller.ListFinanceConnections(builder.ListFinanceConnections))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/tags", controller.ListFinanceTags(builder.ListFinanceTags))
@@ -680,16 +764,19 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions", controller.ListFinanceTransactions(builder.ListFinanceTransactions))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-candidates", controller.ListFinanceTransferCandidates(builder.ListFinanceTransferCandidates))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports", controller.ListRecentFinanceCsvImportAudits(builder.ListRecentFinanceCsvImportAudits))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}/move", controller.MoveFinanceClassificationRule(builder.MoveFinanceClassificationRule))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/account-imports/preview", controller.PreviewFinanceAccountCsvImport(builder.PreviewFinanceAccountCsvImport))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/imports/preview", controller.PreviewFinanceCsvImport(builder.PreviewFinanceCsvImport))
 	rootHandler.router.HandleRoute("PUT", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}", controller.PutFinanceSyntheticLinkState(builder.PutFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/start", controller.StartFinanceConnectionRedirectLink(builder.StartFinanceConnectionRedirectLink))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/transactions/classify", controller.SubmitFinanceTransactionClassification(builder.SubmitFinanceTransactionClassification))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync", controller.TriggerFinanceConnectionSync(builder.TriggerFinanceConnectionSync))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/fx/sync", controller.TriggerFinanceFxRefresh(builder.TriggerFinanceFxRefresh))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/unhide", controller.UnhideFinanceAccount(builder.UnhideFinanceAccount))
 	rootHandler.router.HandleRoute("DELETE", "/api/v1/finance/tenants/{tenantId}/transactions/transfer-links", controller.UnlinkFinanceTransferPair(builder.UnlinkFinanceTransferPair))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.UpdateFinanceAccount(builder.UpdateFinanceAccount))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/categories/{categoryId}", controller.UpdateFinanceCategory(builder.UpdateFinanceCategory))
+	rootHandler.router.HandleRoute("PUT", "/api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}", controller.UpdateFinanceClassificationRule(builder.UpdateFinanceClassificationRule))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}", controller.UpdateFinanceConnection(builder.UpdateFinanceConnection))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}/tags/{tagId}", controller.UpdateFinanceTag(builder.UpdateFinanceTag))
 	rootHandler.router.HandleRoute("PATCH", "/api/v1/finance/tenants/{tenantId}", controller.UpdateFinanceTenant(builder.UpdateFinanceTenant))

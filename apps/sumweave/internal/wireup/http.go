@@ -303,6 +303,8 @@ func buildHTTP(
 			TenantService:                financeModule.TenantService,
 			UserDirectory:                userDirectory,
 			CatalogService:               financeModule.CatalogService,
+			ClassificationRuleService:    financeModule.ClassificationRuleService,
+			ClassificationService:        financeModule.ClassificationService,
 			LedgerService:                financeModule.LedgerService,
 			TransferDetailService:        financeModule.TransferDetailService,
 			BankSyncService:              financeModule.BankSyncService,

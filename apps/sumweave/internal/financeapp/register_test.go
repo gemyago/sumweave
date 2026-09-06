@@ -3,6 +3,7 @@ package financeapp
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -56,7 +57,7 @@ func TestFinanceModuleHelpers(t *testing.T) {
 		"keeps FX generic scheduling while registering only error-returning handlers",
 		func(t *testing.T) {
 			registry := jobspkg.NewRegistry()
-			require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil))
+			require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil, nil))
 			_, err := registry.Handler(financepkg.FXRatesRefreshCommandTopic)
 			require.ErrorIs(t, err, jobspkg.ErrHandlerNotRegistered)
 		},
@@ -67,8 +68,8 @@ func TestFinanceJobRegistrationAdapters(t *testing.T) {
 	fake := faker.New()
 	t.Run("registers the four workload names once and maps bank metadata", func(t *testing.T) {
 		registry := jobspkg.NewRegistry()
-		require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil))
-		require.NoError(t, registerFinanceJobHandlers(nil, nil, nil, nil))
+		require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil, nil))
+		require.NoError(t, registerFinanceJobHandlers(nil, nil, nil, nil, nil))
 		job := jobspkg.Job{ID: fake.UUID().V4()}
 		input := financepkg.BankConnectionSyncCommand{
 			ConnectionID: fake.UUID().V4(),
@@ -105,6 +106,32 @@ func TestFinanceJobRegistrationAdapters(t *testing.T) {
 				func() error { return assert.AnError },
 			),
 		)
+	})
+
+	t.Run("registers explicit classification as an observed job and preserves its range", func(t *testing.T) {
+		registry := jobspkg.NewRegistry()
+		service := newMockclassificationJobService(t)
+		job := jobspkg.Job{ID: fake.UUID().V4()}
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		input := financepkg.ClassificationExplicitCommand{
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        start,
+			RangeEndExclusive: start.Add(time.Hour),
+			Requester: financepkg.CommandRequester{
+				UserID: "user-" + fake.UUID().V4(),
+				Source: financepkg.CommandRequesterSourceOperator,
+			},
+		}
+		service.EXPECT().Classify(mock.Anything, financepkg.ClassificationParams{
+			TenantID:          input.TenantID,
+			RangeStart:        input.RangeStart,
+			RangeEndExclusive: input.RangeEndExclusive,
+			MessageID:         job.ID,
+		}).Return(financepkg.ClassificationAttemptCounts{}, nil).Once()
+		require.NoError(t, registerClassificationJobHandler(registry, service))
+		_, err := registry.Handler(financepkg.ClassificationExplicitCommandTopic)
+		require.NoError(t, err)
+		require.NoError(t, runClassificationJob(t.Context(), service, job, input))
 	})
 
 	t.Run("rejects incomplete native module dependencies before registration", func(t *testing.T) {
@@ -261,7 +288,9 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, db.Close()) })
 		database, err := persistence.NewDatabase(db, dsn)
 		require.NoError(t, err)
-		return db, database, appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "sumweave_"}
+		return db, database, appdispatch.Config{
+			DatabaseDSN: dsn, TablePrefix: "sumweave_", PollInterval: time.Millisecond,
+		}
 	}
 	newPublisher := func(t *testing.T, config appdispatch.Config, db *sql.DB) *appdispatch.Publisher {
 		t.Helper()
@@ -269,6 +298,40 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, publisher.Close()) })
 		return publisher
+	}
+	newWorker := func(
+		t *testing.T,
+		config appdispatch.Config,
+		db *sql.DB,
+		publisher *appdispatch.Publisher,
+		store *jobspkg.Store,
+		registry *jobspkg.Registry,
+	) *jobspkg.Worker {
+		t.Helper()
+		factory, err := appdispatch.NewRouterFactory(config, db, publisher, slog.New(slog.DiscardHandler))
+		require.NoError(t, err)
+		worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
+			Store:         store,
+			Registry:      registry,
+			RouterFactory: factory,
+			Logger:        slog.New(slog.DiscardHandler),
+			Config:        jobspkg.WorkerConfig{PollInterval: time.Millisecond},
+			WorkerID:      fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, worker.Stop(context.WithoutCancel(t.Context()))) })
+		return worker
+	}
+	runWorker := func(t *testing.T, worker *jobspkg.Worker) func() {
+		t.Helper()
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- worker.Run(ctx) }()
+		time.Sleep(3 * time.Millisecond)
+		return func() {
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+		}
 	}
 	assertPublishedMessage := func(
 		t *testing.T,
@@ -287,8 +350,25 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		).Scan(&count))
 		assert.Equal(t, 1, count)
 	}
+	clearClassificationMessages := func(t *testing.T, db *sql.DB, config appdispatch.Config) {
+		t.Helper()
+		_, err := db.ExecContext(
+			t.Context(),
+			`DELETE FROM "`+config.MessagesTable()+`" WHERE topic=$1`,
+			financepkg.ClassificationExplicitCommandTopic,
+		)
+		require.NoError(t, err)
+	}
 	makeScheduleNow := func() time.Time {
 		return time.Date(1, time.January, 1, 0, 0, 0, fake.IntBetween(1, 999999999), time.UTC)
+	}
+	makeClassificationPayload := func() []byte {
+		return []byte(
+			`{"tenantId":"tenant-` + fake.UUID().V4() + `",` +
+				`"rangeStart":"2026-09-06T09:30:00+03:00",` +
+				`"rangeEndExclusive":"2026-09-06T10:30:00+03:00",` +
+				`"requester":{"userId":"user-` + fake.UUID().V4() + `","source":"operator"}}`,
+		)
 	}
 	cleanupBankSchedule := func(t *testing.T, db *sql.DB, connectionID string) {
 		t.Helper()
@@ -324,6 +404,9 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		now := time.Now()
 		commands := []financepkg.SemanticCommand{
 			{
+				Topic: financepkg.ClassificationExplicitCommandTopic, Payload: makeClassificationPayload(),
+			},
+			{
 				Topic:   financepkg.TransactionCSVImportCommandTopic,
 				Payload: []byte(`{"importId":"` + fake.UUID().V4() + `"}`),
 			},
@@ -349,9 +432,9 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		}
 
 		command := financepkg.SemanticCommand{
-			Topic:          financepkg.TransactionCSVImportCommandTopic,
-			Payload:        []byte(`{"importId":"` + fake.UUID().V4() + `"}`),
-			IdempotencyKey: "finance.csv-import:" + fake.UUID().V4(),
+			Topic:          financepkg.ClassificationExplicitCommandTopic,
+			Payload:        makeClassificationPayload(),
+			IdempotencyKey: "finance.classification.explicit:" + fake.UUID().V4(),
 		}
 		first, err := adapter.PublishSemanticCommand(t.Context(), command)
 		require.NoError(t, err)
@@ -361,6 +444,190 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		command.Payload = []byte(`{"importId":"` + fake.UUID().V4() + `"}`)
 		_, err = adapter.PublishSemanticCommand(t.Context(), command)
 		require.ErrorIs(t, err, appdispatch.ErrPublicationConflict)
+		clearClassificationMessages(t, db, config)
+	})
+
+	t.Run("delivers registered classification commands through the observed lifecycle", func(t *testing.T) {
+		db, _, config := openPrepared(t)
+		clearClassificationMessages(t, db, config)
+		publisher := newPublisher(t, config, db)
+		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
+		require.NoError(t, err)
+		service := newMockclassificationJobService(t)
+		registry := jobspkg.NewRegistry()
+		require.NoError(t, registerClassificationJobHandler(registry, service))
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		input := financepkg.ClassificationExplicitCommand{
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        start,
+			RangeEndExclusive: start.Add(time.Hour),
+			Requester: financepkg.CommandRequester{
+				UserID: "user-" + fake.UUID().V4(), Source: financepkg.CommandRequesterSourceOperator,
+			},
+		}
+		payload, err := json.Marshal(input)
+		require.NoError(t, err)
+		adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
+		reference, err := adapter.PublishSemanticCommand(t.Context(), financepkg.SemanticCommand{
+			Topic: financepkg.ClassificationExplicitCommandTopic, Payload: payload,
+			IdempotencyKey: "finance.classification.explicit:" + fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		_, err = store.Get(t.Context(), reference.MessageID)
+		require.ErrorIs(t, err, jobspkg.ErrJobNotFound)
+		service.EXPECT().Classify(mock.Anything, mock.MatchedBy(func(params financepkg.ClassificationParams) bool {
+			return params.TenantID == input.TenantID &&
+				params.RangeStart.Equal(input.RangeStart) &&
+				params.RangeStart.Format(time.RFC3339Nano) == input.RangeStart.Format(time.RFC3339Nano) &&
+				params.RangeEndExclusive.Equal(input.RangeEndExclusive) &&
+				params.RangeEndExclusive.Format(time.RFC3339Nano) == input.RangeEndExclusive.Format(time.RFC3339Nano) &&
+				params.MessageID == reference.MessageID
+		})).Return(financepkg.ClassificationAttemptCounts{}, nil).Once()
+		worker := newWorker(t, config, db, publisher, store, registry)
+		stop := runWorker(t, worker)
+		var job *jobspkg.Job
+		require.Eventually(t, func() bool {
+			job, err = store.Get(t.Context(), reference.MessageID)
+			return err == nil && job.Status == jobspkg.JobStatusSucceeded
+		}, time.Second, time.Millisecond)
+		stop()
+		assert.Equal(t, jobspkg.JobType(financepkg.ClassificationJobType), job.JobType)
+		assert.Equal(t, input.Requester.UserID, job.Requester.UserID)
+		assert.Equal(t, jobspkg.RequesterSourceOperator, job.Requester.Source)
+		assert.Equal(t, jobspkg.JobStatusSucceeded, job.Status)
+
+		_, err = db.ExecContext(
+			t.Context(),
+			`UPDATE "`+config.OffsetsTable()+`" SET offset_acked=0, last_processed_transaction_id='0'::xid8 WHERE topic=$1 AND consumer_group=$2`,
+			financepkg.ClassificationExplicitCommandTopic,
+			"jobs.workers.v1",
+		)
+		require.NoError(t, err)
+		duplicateWorker := newWorker(t, config, db, publisher, store, registry)
+		stopDuplicate := runWorker(t, duplicateWorker)
+		require.Eventually(t, func() bool {
+			var offset int
+			err = db.QueryRowContext(
+				t.Context(),
+				`SELECT offset_acked FROM "`+config.OffsetsTable()+`" WHERE topic=$1 AND consumer_group=$2`,
+				financepkg.ClassificationExplicitCommandTopic,
+				"jobs.workers.v1",
+			).Scan(&offset)
+			return err == nil && offset > 0
+		}, time.Second, time.Millisecond)
+		stopDuplicate()
+		job, err = store.Get(t.Context(), reference.MessageID)
+		require.NoError(t, err)
+		assert.Equal(t, 1, job.AttemptCount)
+	})
+
+	t.Run("keeps malformed classification commands job-row-free", func(t *testing.T) {
+		db, _, config := openPrepared(t)
+		clearClassificationMessages(t, db, config)
+		publisher := newPublisher(t, config, db)
+		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
+		require.NoError(t, err)
+		registry := jobspkg.NewRegistry()
+		require.NoError(t, registerClassificationJobHandler(registry, newMockclassificationJobService(t)))
+		message := appdispatch.NewMessage(financepkg.ClassificationExplicitCommandTopic, []byte(`{`))
+		worker := newWorker(t, config, db, publisher, store, registry)
+		stop := runWorker(t, worker)
+		require.NoError(t, publisher.Publish(t.Context(), message))
+		require.Eventually(t, func() bool {
+			var count int
+			err = db.QueryRowContext(
+				t.Context(),
+				`SELECT COUNT(*) FROM "`+config.MessagesTable()+`" WHERE topic=$1 AND metadata->>$2=$3`,
+				appdispatch.DeadLetterTopic,
+				"originalMessageId",
+				message.ID,
+			).Scan(&count)
+			return err == nil && count == 1
+		}, 2*time.Second, time.Millisecond)
+		_, err = store.Get(t.Context(), message.ID)
+		require.ErrorIs(t, err, jobspkg.ErrJobNotFound)
+		stop()
+	})
+
+	t.Run("persists a terminal classification failure as a failed observed job", func(t *testing.T) {
+		db, _, config := openPrepared(t)
+		clearClassificationMessages(t, db, config)
+		publisher := newPublisher(t, config, db)
+		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
+		require.NoError(t, err)
+		service := newMockclassificationJobService(t)
+		registry := jobspkg.NewRegistry()
+		require.NoError(t, registerClassificationJobHandler(registry, service))
+		input := financepkg.ClassificationExplicitCommand{
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60)),
+			RangeEndExclusive: time.Date(2026, time.September, 6, 10, 30, 0, 0, time.FixedZone("east", 3*60*60)),
+			Requester: financepkg.CommandRequester{
+				UserID: "user-" + fake.UUID().V4(), Source: financepkg.CommandRequesterSourceOperator,
+			},
+		}
+		payload, err := json.Marshal(input)
+		require.NoError(t, err)
+		message := appdispatch.NewMessage(financepkg.ClassificationExplicitCommandTopic, payload)
+		failure := financepkg.NewTerminalFailure(
+			errors.New(fake.UUID().V4()),
+			"classification_failed",
+			"failed",
+			"details",
+		)
+		service.EXPECT().Classify(mock.Anything, mock.MatchedBy(func(params financepkg.ClassificationParams) bool {
+			return params.TenantID == input.TenantID && params.MessageID == message.ID
+		})).Return(financepkg.ClassificationAttemptCounts{}, failure).Once()
+		worker := newWorker(t, config, db, publisher, store, registry)
+		stop := runWorker(t, worker)
+		require.NoError(t, publisher.Publish(t.Context(), message))
+		var job *jobspkg.Job
+		require.Eventually(t, func() bool {
+			job, err = store.Get(t.Context(), message.ID)
+			return err == nil && job.Status == jobspkg.JobStatusFailed
+		}, time.Second, time.Millisecond)
+		stop()
+		assert.Equal(t, 1, job.AttemptCount)
+	})
+
+	t.Run("retries transient classification delivery through the observed lifecycle", func(t *testing.T) {
+		db, _, config := openPrepared(t)
+		clearClassificationMessages(t, db, config)
+		publisher := newPublisher(t, config, db)
+		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
+		require.NoError(t, err)
+		service := newMockclassificationJobService(t)
+		registry := jobspkg.NewRegistry()
+		require.NoError(t, registerClassificationJobHandler(registry, service))
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		input := financepkg.ClassificationExplicitCommand{
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        start,
+			RangeEndExclusive: start.Add(time.Hour),
+			Requester: financepkg.CommandRequester{
+				UserID: "user-" + fake.UUID().V4(), Source: financepkg.CommandRequesterSourceOperator,
+			},
+		}
+		payload, err := json.Marshal(input)
+		require.NoError(t, err)
+		message := appdispatch.NewMessage(financepkg.ClassificationExplicitCommandTopic, payload)
+		service.EXPECT().Classify(mock.Anything, mock.MatchedBy(func(params financepkg.ClassificationParams) bool {
+			return params.TenantID == input.TenantID && params.MessageID == message.ID
+		})).Return(financepkg.ClassificationAttemptCounts{}, errors.New(fake.UUID().V4())).Once()
+		service.EXPECT().Classify(mock.Anything, mock.MatchedBy(func(params financepkg.ClassificationParams) bool {
+			return params.TenantID == input.TenantID && params.MessageID == message.ID
+		})).Return(financepkg.ClassificationAttemptCounts{}, nil).Once()
+		worker := newWorker(t, config, db, publisher, store, registry)
+		stop := runWorker(t, worker)
+		require.NoError(t, publisher.Publish(t.Context(), message))
+		var job *jobspkg.Job
+		require.Eventually(t, func() bool {
+			job, err = store.Get(t.Context(), message.ID)
+			return err == nil && job.Status == jobspkg.JobStatusSucceeded
+		}, time.Second, time.Millisecond)
+		stop()
+		assert.Equal(t, jobspkg.JobStatusSucceeded, job.Status)
+		assert.Equal(t, 2, job.AttemptCount)
 	})
 
 	t.Run("bank schedules commit scoped dispatch state and roll back a publication conflict", func(t *testing.T) {

@@ -29,6 +29,8 @@ type ClassificationAttemptCounts struct {
 	Skipped    int
 }
 
+const ClassificationJobType = "finance.classification"
+
 type ClassificationParams struct {
 	TenantID            string
 	RangeStart          time.Time
@@ -38,6 +40,7 @@ type ClassificationParams struct {
 }
 
 type ClassificationServiceArgs struct {
+	Access       accessGuardStore
 	Rules        classificationRuleStore
 	Transactions classificationTransactionStore
 	Categories   classificationCategoryStore
@@ -46,14 +49,30 @@ type ClassificationServiceArgs struct {
 }
 
 type ClassificationService struct {
+	access       *accessGuard
 	rules        classificationRuleStore
 	transactions classificationTransactionStore
 	categories   classificationCategoryStore
 	logger       *slog.Logger
 	now          func() time.Time
+	publisher    SemanticCommandPublisher
 }
 
-func NewClassificationService(args ClassificationServiceArgs) (*ClassificationService, error) {
+type ClassificationServiceOption func(*ClassificationService)
+
+// WithClassificationServiceCommandPublisher enables explicit classification
+// submission for a process root that owns semantic command publication.
+func WithClassificationServiceCommandPublisher(publisher SemanticCommandPublisher) ClassificationServiceOption {
+	return func(service *ClassificationService) { service.publisher = publisher }
+}
+
+func NewClassificationService(
+	args ClassificationServiceArgs,
+	options ...ClassificationServiceOption,
+) (*ClassificationService, error) {
+	if args.Access == nil {
+		return nil, errors.New("classification access store is required")
+	}
 	if args.Rules == nil {
 		return nil, errors.New("classification rule store is required")
 	}
@@ -69,10 +88,71 @@ func NewClassificationService(args ClassificationServiceArgs) (*ClassificationSe
 	if args.Now == nil {
 		return nil, errors.New("classification clock is required")
 	}
-	return &ClassificationService{
-		rules: args.Rules, transactions: args.Transactions, categories: args.Categories,
-		logger: args.Logger, now: args.Now,
-	}, nil
+	service := &ClassificationService{
+		access:       newAccessGuard(args.Access),
+		rules:        args.Rules,
+		transactions: args.Transactions,
+		categories:   args.Categories,
+		logger:       args.Logger,
+		now:          args.Now,
+	}
+	for _, option := range options {
+		option(service)
+	}
+	return service, nil
+}
+
+type SubmitClassificationParams struct {
+	ActorUserID       string
+	TenantID          string
+	RangeStart        time.Time
+	RangeEndExclusive time.Time
+}
+
+type ClassificationJobRef struct {
+	ID string
+}
+
+// Submit publishes explicit classification as observed durable work. It never
+// executes classification in the caller's request path.
+func (s *ClassificationService) Submit(
+	ctx context.Context,
+	params SubmitClassificationParams,
+) (ClassificationJobRef, error) {
+	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
+		return ClassificationJobRef{}, err
+	}
+	if !params.RangeStart.Before(params.RangeEndExclusive) {
+		return ClassificationJobRef{}, fmt.Errorf(
+			"%w: start timestamp must be before end timestamp",
+			ErrInvalidTimestampRange,
+		)
+	}
+	if s.publisher == nil {
+		return ClassificationJobRef{}, errors.New("classification command publisher is required")
+	}
+	command, err := newSemanticCommand(
+		ClassificationExplicitCommandTopic,
+		ClassificationExplicitCommand{
+			TenantID:          params.TenantID,
+			RangeStart:        params.RangeStart,
+			RangeEndExclusive: params.RangeEndExclusive,
+			Requester: CommandRequester{
+				UserID: params.ActorUserID,
+				Source: CommandRequesterSourceOperator,
+			},
+		},
+		"finance.classification.explicit:"+params.TenantID+":"+params.ActorUserID+":"+
+			params.RangeStart.Format(time.RFC3339Nano)+":"+params.RangeEndExclusive.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return ClassificationJobRef{}, err
+	}
+	reference, err := s.publisher.PublishSemanticCommand(ctx, command)
+	if err != nil {
+		return ClassificationJobRef{}, fmt.Errorf("publish explicit classification: %w", err)
+	}
+	return ClassificationJobRef{ID: reference.MessageID}, nil
 }
 
 func (s *ClassificationService) Classify(

@@ -36,6 +36,8 @@ packages:
       providerSnapshotService:
       transferDetailService:
       syntheticLinkStateService:
+      classificationRuleService:
+      classificationService:
       jobsService:
       userDirectory:
   github.com/gemyago/sumweave/apps/sumweave/internal/app:
@@ -49,6 +51,7 @@ packages:
       fxRefreshJobService:
       csvImportJobService:
       bankSyncJobService:
+      classificationJobService:
   github.com/ThreeDotsLabs/watermill/message:
     interfaces:
       Subscriber:

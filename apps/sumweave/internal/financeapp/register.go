@@ -60,6 +60,10 @@ type bankSyncJobService interface {
 	) (financepkg.BankConnectionSyncResult, error)
 }
 
+type classificationJobService interface {
+	Classify(context.Context, financepkg.ClassificationParams) (financepkg.ClassificationAttemptCounts, error)
+}
+
 // NewDatabase opens the finance persistence adapter over the application SQL
 // database. The application currently shares this database with jobs.
 func NewDatabase(
@@ -126,6 +130,7 @@ func NewModule(deps ModuleDeps) (*financepkg.Finance, error) {
 			financeModule.FXService,
 			financeModule.CSVImportService,
 			financeModule.BankSyncService,
+			financeModule.ClassificationService,
 		)
 		if registerErr != nil { // coverage-ignore // Registry behavior is exercised through the worker root.
 			return nil, registerErr
@@ -195,6 +200,7 @@ func registerFinanceJobHandlers(
 	fxService fxRefreshJobService,
 	csvImportService csvImportJobService,
 	bankSyncService bankSyncJobService,
+	classificationService classificationJobService,
 ) error {
 	if registry == nil {
 		return nil
@@ -212,6 +218,7 @@ func registerFinanceJobHandlers(
 		),
 		registerBankSyncJobHandler(registry, bankSyncService),
 		registerFXRefreshJobHandler(registry, fxService),
+		registerClassificationJobHandler(registry, classificationService),
 	)
 }
 
@@ -233,6 +240,27 @@ func registerFXRefreshJobHandler(registry *jobspkg.Registry, service fxRefreshJo
 				},
 				Run: func(ctx context.Context, _ jobspkg.Job, input financepkg.FXRatesRefreshCommand) error { // coverage-ignore // Invoked through worker integration after finance composition.
 					return runFXRefreshJob(ctx, service, input)
+				},
+			},
+		)
+	})
+}
+
+func registerClassificationJobHandler(registry *jobspkg.Registry, service classificationJobService) error {
+	if service == nil {
+		return nil
+	}
+	return registerFinanceJobHandler(registry, financepkg.ClassificationExplicitCommandTopic, func() error {
+		return jobspkg.RegisterTypedHandler(
+			registry,
+			jobspkg.TypedHandlerSpec[financepkg.ClassificationExplicitCommand]{
+				JobType: jobspkg.JobType(financepkg.ClassificationJobType),
+				Topic:   financepkg.ClassificationExplicitCommandTopic,
+				Metadata: func(input financepkg.ClassificationExplicitCommand) (jobspkg.JobMetadata, error) {
+					return jobMetadata(jobspkg.JobType(financepkg.ClassificationJobType), input.Requester)
+				},
+				Run: func(ctx context.Context, job jobspkg.Job, input financepkg.ClassificationExplicitCommand) error {
+					return runClassificationJob(ctx, service, job, input)
 				},
 			},
 		)
@@ -329,6 +357,19 @@ func runBankSyncJob(
 	input financepkg.BankConnectionSyncCommand,
 ) error {
 	_, err := service.RunBankConnectionSync(ctx, makeRunBankConnectionSyncParams(job, input))
+	return handledFinanceFailure(err)
+}
+
+func runClassificationJob(
+	ctx context.Context,
+	service classificationJobService,
+	job jobspkg.Job,
+	input financepkg.ClassificationExplicitCommand,
+) error {
+	_, err := service.Classify(ctx, financepkg.ClassificationParams{
+		TenantID: input.TenantID, RangeStart: input.RangeStart, RangeEndExclusive: input.RangeEndExclusive,
+		MessageID: job.ID,
+	})
 	return handledFinanceFailure(err)
 }
 

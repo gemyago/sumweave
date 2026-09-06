@@ -1,6 +1,7 @@
 package finance
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,10 +57,118 @@ func TestMatchClassificationRule(t *testing.T) {
 }
 
 func TestClassificationService(t *testing.T) {
+	t.Run("submits an offset-bearing range as future observed work", func(t *testing.T) {
+		fake := faker.New()
+		access := newMockaccessGuardStore(t)
+		rules := newMockclassificationRuleStore(t)
+		transactions := newMockclassificationTransactionStore(t)
+		categories := newMockclassificationCategoryStore(t)
+		publisher := NewMockSemanticCommandPublisher(t)
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		end := start.Add(2 * time.Hour)
+		params := SubmitClassificationParams{
+			ActorUserID:       "user-" + fake.UUID().V4(),
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        start,
+			RangeEndExclusive: end,
+		}
+		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
+		expected := DispatchReference{MessageID: fake.UUID().V4()}
+		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.MatchedBy(func(command SemanticCommand) bool {
+			if command.Topic != ClassificationExplicitCommandTopic {
+				return false
+			}
+			var payload ClassificationExplicitCommand
+			return json.Unmarshal(command.Payload, &payload) == nil &&
+				payload.TenantID == params.TenantID &&
+				payload.RangeStart.Equal(start) &&
+				payload.RangeStart.Format(time.RFC3339Nano) == start.Format(time.RFC3339Nano) &&
+				payload.RangeEndExclusive.Equal(end) &&
+				payload.Requester == (CommandRequester{
+					UserID: params.ActorUserID,
+					Source: CommandRequesterSourceOperator,
+				})
+		})).Return(expected, nil).Once()
+		service, err := NewClassificationService(ClassificationServiceArgs{
+			Access:       access,
+			Rules:        rules,
+			Transactions: transactions,
+			Categories:   categories,
+			Logger:       slog.New(slog.DiscardHandler),
+			Now:          time.Now,
+		}, WithClassificationServiceCommandPublisher(publisher))
+		require.NoError(t, err)
+		result, err := service.Submit(t.Context(), params)
+		require.NoError(t, err)
+		assert.Equal(t, ClassificationJobRef{ID: expected.MessageID}, result)
+	})
+
+	t.Run("rejects invalid explicit ranges before publication", func(t *testing.T) {
+		fake := faker.New()
+		access := newMockaccessGuardStore(t)
+		now := time.Now()
+		params := SubmitClassificationParams{
+			ActorUserID:       fake.UUID().V4(),
+			TenantID:          fake.UUID().V4(),
+			RangeStart:        now,
+			RangeEndExclusive: now,
+		}
+		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
+		service, err := NewClassificationService(ClassificationServiceArgs{
+			Access:       access,
+			Rules:        newMockclassificationRuleStore(t),
+			Transactions: newMockclassificationTransactionStore(t),
+			Categories:   newMockclassificationCategoryStore(t),
+			Logger:       slog.New(slog.DiscardHandler),
+			Now:          time.Now,
+		}, WithClassificationServiceCommandPublisher(NewMockSemanticCommandPublisher(t)))
+		require.NoError(t, err)
+		_, err = service.Submit(t.Context(), params)
+		require.ErrorIs(t, err, ErrInvalidTimestampRange)
+	})
+
+	t.Run("uses one idempotency key when explicit publication is retried", func(t *testing.T) {
+		fake := faker.New()
+		access := newMockaccessGuardStore(t)
+		publisher := NewMockSemanticCommandPublisher(t)
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		params := SubmitClassificationParams{
+			ActorUserID:       "user-" + fake.UUID().V4(),
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        start,
+			RangeEndExclusive: start.Add(time.Hour),
+		}
+		expected := DispatchReference{MessageID: fake.UUID().V4()}
+		access.EXPECT().IsTenantMember(mock.Anything, params.TenantID, params.ActorUserID).Return(true, nil).Twice()
+		var idempotencyKey string
+		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.MatchedBy(func(command SemanticCommand) bool {
+			if idempotencyKey == "" {
+				idempotencyKey = command.IdempotencyKey
+			}
+			return command.Topic == ClassificationExplicitCommandTopic && command.IdempotencyKey == idempotencyKey
+		})).Return(expected, nil).Twice()
+		service, err := NewClassificationService(ClassificationServiceArgs{
+			Access:       access,
+			Rules:        newMockclassificationRuleStore(t),
+			Transactions: newMockclassificationTransactionStore(t),
+			Categories:   newMockclassificationCategoryStore(t),
+			Logger:       slog.New(slog.DiscardHandler),
+			Now:          time.Now,
+		}, WithClassificationServiceCommandPublisher(publisher))
+		require.NoError(t, err)
+		first, err := service.Submit(t.Context(), params)
+		require.NoError(t, err)
+		second, err := service.Submit(t.Context(), params)
+		require.NoError(t, err)
+		assert.NotEmpty(t, idempotencyKey)
+		assert.Equal(t, first, second)
+	})
+
 	t.Run("loads rules once, advances keyset batches, and counts committed assignments", func(t *testing.T) {
 		rules := newMockclassificationRuleStore(t)
 		transactions := newMockclassificationTransactionStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		access := newMockaccessGuardStore(t)
 		now := time.Date(2026, time.September, 6, 12, 0, 0, 0, time.FixedZone("test", 2*60*60))
 		params := ClassificationParams{
 			TenantID:          "tenant-a",
@@ -95,7 +205,7 @@ func TestClassificationService(t *testing.T) {
 			Return(nil, nil).
 			Once()
 		service, err := NewClassificationService(ClassificationServiceArgs{
-			Rules: rules, Transactions: transactions, Categories: categories,
+			Access: access, Rules: rules, Transactions: transactions, Categories: categories,
 			Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
 		})
 		if assert.NoError(t, err) {
@@ -110,17 +220,31 @@ func TestClassificationService(t *testing.T) {
 		transactions := newMockclassificationTransactionStore(t)
 		categories := newMockclassificationCategoryStore(t)
 		_, err := NewClassificationService(ClassificationServiceArgs{})
+		require.ErrorContains(t, err, "access store is required")
+		access := newMockaccessGuardStore(t)
+		_, err = NewClassificationService(ClassificationServiceArgs{Access: access})
 		require.ErrorContains(t, err, "rule store is required")
-		_, err = NewClassificationService(ClassificationServiceArgs{Rules: rules})
+		_, err = NewClassificationService(ClassificationServiceArgs{Access: access, Rules: rules})
 		require.ErrorContains(t, err, "transaction store is required")
-		_, err = NewClassificationService(ClassificationServiceArgs{Rules: rules, Transactions: transactions})
+		_, err = NewClassificationService(ClassificationServiceArgs{
+			Access:       access,
+			Rules:        rules,
+			Transactions: transactions,
+		})
 		require.ErrorContains(t, err, "category store is required")
 		_, err = NewClassificationService(ClassificationServiceArgs{
-			Rules: rules, Transactions: transactions, Categories: categories,
+			Access:       access,
+			Rules:        rules,
+			Transactions: transactions,
+			Categories:   categories,
 		})
 		require.ErrorContains(t, err, "logger is required")
 		_, err = NewClassificationService(ClassificationServiceArgs{
-			Rules: rules, Transactions: transactions, Categories: categories, Logger: slog.New(slog.DiscardHandler),
+			Access:       access,
+			Rules:        rules,
+			Transactions: transactions,
+			Categories:   categories,
+			Logger:       slog.New(slog.DiscardHandler),
 		})
 		require.ErrorContains(t, err, "clock is required")
 	})
@@ -136,9 +260,14 @@ func TestClassificationService(t *testing.T) {
 			rules := newMockclassificationRuleStore(t)
 			transactions := newMockclassificationTransactionStore(t)
 			categories := newMockclassificationCategoryStore(t)
+			access := newMockaccessGuardStore(t)
 			service, err := NewClassificationService(ClassificationServiceArgs{
-				Rules: rules, Transactions: transactions, Categories: categories, Logger: slog.New(slog.DiscardHandler),
-				Now: func() time.Time { return now },
+				Access:       access,
+				Rules:        rules,
+				Transactions: transactions,
+				Categories:   categories,
+				Logger:       slog.New(slog.DiscardHandler),
+				Now:          func() time.Time { return now },
 			})
 			require.NoError(t, err)
 			return service, rules, transactions, categories
@@ -276,9 +405,14 @@ func TestClassificationService(t *testing.T) {
 		rules := newMockclassificationRuleStore(t)
 		transactions := newMockclassificationTransactionStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		access := newMockaccessGuardStore(t)
 		service, err := NewClassificationService(ClassificationServiceArgs{
-			Rules: rules, Transactions: transactions, Categories: categories, Logger: slog.New(slog.DiscardHandler),
-			Now: func() time.Time { return now },
+			Access:       access,
+			Rules:        rules,
+			Transactions: transactions,
+			Categories:   categories,
+			Logger:       slog.New(slog.DiscardHandler),
+			Now:          func() time.Time { return now },
 		})
 		require.NoError(t, err)
 		categoryID := "category-" + fake.UUID().V4()

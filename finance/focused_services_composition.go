@@ -158,10 +158,17 @@ func newClassificationServices(
 	if err != nil {
 		panic(err)
 	}
+	classificationOptions := []ClassificationServiceOption{}
+	if cfg.commandPublisher != nil {
+		classificationOptions = append(
+			classificationOptions,
+			WithClassificationServiceCommandPublisher(cfg.commandPublisher),
+		)
+	}
 	service, err := NewClassificationService(ClassificationServiceArgs{
-		Rules: ruleStore, Transactions: persistence.NewClassificationTransactionStoreFromStore(store),
+		Access: store, Rules: ruleStore, Transactions: persistence.NewClassificationTransactionStoreFromStore(store),
 		Categories: store, Logger: cfg.logger, Now: cfg.now,
-	})
+	}, classificationOptions...)
 	if err != nil {
 		panic(err)
 	}

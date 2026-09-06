@@ -55,6 +55,12 @@ func TestFinanceController(t *testing.T) {
 	withUserDirectory := func(directory userDirectory) controllerOption {
 		return func(deps *FinanceControllerDeps) { deps.UserDirectory = directory }
 	}
+	withClassificationService := func(service classificationService) controllerOption {
+		return func(deps *FinanceControllerDeps) { deps.ClassificationService = service }
+	}
+	withClassificationRuleService := func(service classificationRuleService) controllerOption {
+		return func(deps *FinanceControllerDeps) { deps.ClassificationRuleService = service }
+	}
 	newHandler := func(
 		service financeService,
 		bankConnections bankConnectionService,
@@ -119,6 +125,169 @@ func TestFinanceController(t *testing.T) {
 		}
 	})
 
+	t.Run("submits an offset-bearing explicit classification range", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		service := newMockclassificationService(t)
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		end := start.Add(time.Hour)
+		jobID := fake.UUID().V4()
+		body := `{"rangeStart":"` + start.Format(time.RFC3339Nano) +
+			`","rangeEndExclusive":"` + end.Format(time.RFC3339Nano) + `"}`
+		service.EXPECT().Submit(mock.Anything, mock.MatchedBy(func(params financepkg.SubmitClassificationParams) bool {
+			return params.ActorUserID == userID &&
+				params.TenantID == tenantID &&
+				params.RangeStart.Equal(start) &&
+				params.RangeStart.Format(time.RFC3339Nano) == start.Format(time.RFC3339Nano) &&
+				params.RangeEndExclusive.Equal(end) &&
+				params.RangeEndExclusive.Format(time.RFC3339Nano) == end.Format(time.RFC3339Nano)
+		})).Return(financepkg.ClassificationJobRef{ID: jobID}, nil).Once()
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withClassificationService(service),
+		)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/transactions/classify",
+			body,
+			true,
+		))
+		require.Equal(t, http.StatusAccepted, response.Code)
+		assert.Equal(t, jobID, decode(t, response)["jobId"])
+	})
+
+	t.Run("rejects an invalid explicit classification range", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		service := newMockclassificationService(t)
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		body := `{"rangeStart":"` + start.Format(time.RFC3339Nano) +
+			`","rangeEndExclusive":"` + start.Format(time.RFC3339Nano) + `"}`
+		service.EXPECT().Submit(mock.Anything, mock.MatchedBy(func(params financepkg.SubmitClassificationParams) bool {
+			return params.ActorUserID == userID &&
+				params.TenantID == tenantID &&
+				params.RangeStart.Equal(start) &&
+				params.RangeEndExclusive.Equal(start)
+		})).Return(financepkg.ClassificationJobRef{}, financepkg.ErrInvalidTimestampRange).Once()
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withClassificationService(service),
+		)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/transactions/classify",
+			body,
+			true,
+		))
+		assert.Equal(t, http.StatusBadRequest, response.Code)
+	})
+
+	t.Run("manages ordered classification rules through registered routes", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		ruleID := "rule-" + fake.UUID().V4()
+		categoryID := "category-" + fake.UUID().V4()
+		rules := newMockclassificationRuleService(t)
+		now := time.Now()
+		rule := domain.ClassificationRule{
+			ID: ruleID, TenantID: tenantID, Position: 1, MatchType: domain.ClassificationMatchTypeContains,
+			Condition: "merchant-" + fake.Letter(), CategoryID: categoryID, CreatedAt: now, UpdatedAt: now,
+		}
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withClassificationRuleService(rules),
+		)
+		rules.EXPECT().List(mock.Anything, financepkg.ListClassificationRulesParams{
+			ActorUserID: userID, TenantID: tenantID, CategoryID: categoryID,
+		}).Return([]domain.ClassificationRule{rule}, nil).Once()
+		listResponse := httptest.NewRecorder()
+		handler.ServeHTTP(listResponse, newRequest(
+			http.MethodGet,
+			"/api/v1/finance/tenants/"+tenantID+"/classification-rules?categoryId="+categoryID,
+			"",
+			true,
+		))
+		require.Equal(t, http.StatusOK, listResponse.Code)
+		assert.Equal(t, ruleID, decode(t, listResponse)["items"].([]any)[0].(map[string]any)["id"])
+
+		body := `{"matchType":"contains","condition":"` + rule.Condition + `","categoryId":"` + categoryID + `"}`
+		rules.EXPECT().Create(mock.Anything, financepkg.CreateClassificationRuleParams{
+			ActorUserID: userID,
+			TenantID:    tenantID,
+			MatchType:   rule.MatchType,
+			Condition:   rule.Condition,
+			CategoryID:  categoryID,
+		}).Return(rule, nil).Once()
+		createResponse := httptest.NewRecorder()
+		handler.ServeHTTP(createResponse, newRequest(
+			http.MethodPost, "/api/v1/finance/tenants/"+tenantID+"/classification-rules", body, true,
+		))
+		require.Equal(t, http.StatusCreated, createResponse.Code)
+		assert.Equal(t, ruleID, decode(t, createResponse)["id"])
+
+		rules.EXPECT().Update(mock.Anything, mock.Anything).Return(nil).Once()
+		updateResponse := httptest.NewRecorder()
+		handler.ServeHTTP(updateResponse, newRequest(
+			http.MethodPut, "/api/v1/finance/tenants/"+tenantID+"/classification-rules/"+ruleID, body, true,
+		))
+		require.Equal(t, http.StatusNoContent, updateResponse.Code)
+		rules.EXPECT().Move(mock.Anything, mock.Anything).Return(nil).Once()
+		moveResponse := httptest.NewRecorder()
+		handler.ServeHTTP(moveResponse, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/classification-rules/"+ruleID+"/move",
+			`{"direction":"up"}`,
+			true,
+		))
+		require.Equal(t, http.StatusNoContent, moveResponse.Code)
+		rules.EXPECT().Delete(mock.Anything, mock.Anything).Return(nil).Once()
+		deleteResponse := httptest.NewRecorder()
+		handler.ServeHTTP(deleteResponse, newRequest(
+			http.MethodDelete, "/api/v1/finance/tenants/"+tenantID+"/classification-rules/"+ruleID, "", true,
+		))
+		require.Equal(t, http.StatusNoContent, deleteResponse.Code)
+	})
+
+	t.Run("returns the documented category rule conflict body", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		categoryID := "category-" + fake.UUID().V4()
+		ruleIDs := []string{"rule-" + fake.UUID().V4()}
+		service := newMockfinanceService(t)
+		service.EXPECT().HideCategory(mock.Anything, financepkg.HideCategoryParams{
+			ActorUserID: userID, TenantID: tenantID, CategoryID: categoryID,
+		}).Return(&financepkg.CategoryReferencedByClassificationRulesError{RuleIDs: ruleIDs}).Once()
+		handler := newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, newRequest(
+			http.MethodDelete, "/api/v1/finance/tenants/"+tenantID+"/categories/"+categoryID, "", true,
+		))
+		require.Equal(t, http.StatusConflict, response.Code)
+		payload := decode(t, response)
+		assert.Equal(t, "category_referenced_by_classification_rules", payload["code"])
+		assert.Equal(t, ruleIDs[0], payload["ruleIds"].([]any)[0])
+
+		service.EXPECT().HideCategory(mock.Anything, financepkg.HideCategoryParams{
+			ActorUserID: userID, TenantID: tenantID, CategoryID: categoryID,
+		}).Return(nil).Once()
+		successResponse := httptest.NewRecorder()
+		handler.ServeHTTP(successResponse, newRequest(
+			http.MethodDelete,
+			"/api/v1/finance/tenants/"+tenantID+"/categories/"+categoryID,
+			"",
+			true,
+		))
+		assert.Equal(t, http.StatusNoContent, successResponse.Code)
+	})
+
 	t.Run("finance routes reject missing caller identity", func(t *testing.T) {
 		service := newMockfinanceService(t)
 		handler := newHandler(
@@ -150,6 +319,13 @@ func TestFinanceController(t *testing.T) {
 			{name: "list categories", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/categories?includeHidden=true"},
 			{name: "create category", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/categories", body: `{"name":"Groceries","kind":"expense"}`},
 			{name: "update category", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/categories/category-a", body: `{"name":"Groceries updated","kind":"income"}`},
+			{name: "delete category", method: http.MethodDelete, target: "/api/v1/finance/tenants/tenant-a/categories/category-a"},
+			{name: "list classification rules", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/classification-rules"},
+			{name: "create classification rule", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/classification-rules", body: `{"matchType":"contains","condition":"coffee","categoryId":"category-a"}`},
+			{name: "update classification rule", method: http.MethodPut, target: "/api/v1/finance/tenants/tenant-a/classification-rules/rule-a", body: `{"matchType":"exact","condition":"coffee","categoryId":"category-a"}`},
+			{name: "delete classification rule", method: http.MethodDelete, target: "/api/v1/finance/tenants/tenant-a/classification-rules/rule-a"},
+			{name: "move classification rule", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/classification-rules/rule-a/move", body: `{"direction":"up"}`},
+			{name: "submit transaction classification", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/transactions/classify", body: `{"rangeStart":"2026-06-20T00:00:00+03:00","rangeEndExclusive":"2026-06-21T00:00:00+03:00"}`},
 			{name: "list tags", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/tags?includeHidden=true"},
 			{name: "create tag", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/tags", body: `{"name":"Household"}`},
 			{name: "rename tag", method: http.MethodPatch, target: "/api/v1/finance/tenants/tenant-a/tags/tag-a", body: `{"name":"Household updated"}`},
