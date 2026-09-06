@@ -26,12 +26,13 @@ func TestConfig(t *testing.T) {
 		require.NoError(t, err)
 
 		return &Config{
-			Database:               openTestDatabase(t),
-			Logger:                 slog.New(slog.DiscardHandler),
-			Now:                    func() time.Time { return time.Now().UTC() },
-			NewID:                  uuid.NewString,
-			HTTPClient:             &http.Client{},
-			ConnectionSecretCipher: cipher,
+			Database:                openTestDatabase(t),
+			Logger:                  slog.New(slog.DiscardHandler),
+			Now:                     func() time.Time { return time.Now().UTC() },
+			NewID:                   uuid.NewString,
+			HTTPClient:              &http.Client{},
+			ConnectionSecretCipher:  cipher,
+			BankSyncWindowPublisher: NewMockBankSyncWindowCompletionPublisher(t),
 			Monobank: MonobankConfig{
 				BaseURL: "https://" + fake.Internet().Domain(),
 			},

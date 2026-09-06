@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/gemyago/sumweave/finance/domain"
 )
@@ -118,6 +119,7 @@ type WindowSyncSnapshotReader interface {
 }
 
 type WindowSyncApplyStore interface {
+	SQLTransaction() (*sql.Tx, error)
 	AppendSyncState(ctx context.Context, state domain.ProviderSyncState) error
 	GetBankConnection(ctx context.Context, connectionID string) (*domain.BankConnection, error)
 	GetAccount(ctx context.Context, accountID string) (*domain.Account, error)
@@ -142,6 +144,12 @@ type WindowSyncApplyStore interface {
 		ctx context.Context,
 		match domain.ProviderTransactionMatch,
 	) (domain.ProviderTransactionMatch, error)
+}
+
+// BankSyncWindowCompletionPublisher persists the finance-owned completion fact
+// on the exact transaction that applied the requested window.
+type BankSyncWindowCompletionPublisher interface {
+	PublishBankSyncWindowCompleted(context.Context, *sql.Tx, domain.BankSyncWindowCompleted) error
 }
 
 type WindowSyncTransactor interface {

@@ -19,6 +19,7 @@ packages:
       classificationCategoryStore:
       classificationTransactionStore:
       categoryRuleReferenceFinder:
+      BankSyncWindowCompletionPublisher:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:
@@ -28,6 +29,7 @@ packages:
       SyncStateJournal:
       TargetWindowPolicy:
       WindowSyncApplyStore:
+      BankSyncWindowCompletionPublisher:
       WindowSyncPersistence:
       WindowChunkPolicy:
       WindowExecutor:

@@ -109,7 +109,7 @@ func resolveStartAllRuntime(
 	return &startAllRuntime{
 		logger:    httpRoot.Logger(),
 		engine:    startAllHTTPRoot{root: httpRoot, noop: params.noop},
-		worker:    workerRoot.Worker,
+		worker:    workerRoot,
 		scheduler: schedulerRoot, schedulerLoopInterval: schedulerRoot.SchedulerLoopInterval,
 		noop: params.noop,
 		close: func(shutdownCtx context.Context) error {

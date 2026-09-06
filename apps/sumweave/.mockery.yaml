@@ -52,6 +52,13 @@ packages:
       csvImportJobService:
       bankSyncJobService:
       classificationJobService:
+  github.com/gemyago/sumweave/finance:
+    interfaces:
+      BankSyncWindowCompletionPublisher:
+        config:
+          dir: internal/financeapp/
+          pkgname: financeapp
+          filename: mock_bank_sync_window_completion_publisher_test.go
   github.com/ThreeDotsLabs/watermill/message:
     interfaces:
       Subscriber:

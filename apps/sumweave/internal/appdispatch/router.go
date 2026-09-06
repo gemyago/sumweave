@@ -263,6 +263,7 @@ type Router struct {
 	finishCloseOnce sync.Once
 	closeErr        error
 	retryLifecycle  *retryLifecycleState
+	runOnce         *routerRunOnceTracker
 }
 
 // SetRetryLifecycle sets callbacks for retryable delivery failures. It must be
@@ -292,10 +293,71 @@ func (r *Router) Handle(handler Handler) error {
 		handler.topic,
 		r.subscriber,
 		func(message *wmmessage.Message) error {
+			tracker := r.runOnceTracker()
+			if tracker != nil {
+				tracker.startDelivery(message.UUID)
+				defer tracker.finishDelivery(message.UUID)
+			}
 			return handler.run(message.Context(), makeMessage(handler.topic, message))
 		},
 	)
 	return nil
+}
+
+// RunOnce drains configured handlers until two consecutive polls observe no
+// active delivery. It preserves a delivery that takes longer than one poll.
+func (r *Router) RunOnce(ctx context.Context, pollInterval time.Duration) error {
+	if pollInterval <= 0 {
+		return errors.New("router poll interval must be positive")
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	tracker := &routerRunOnceTracker{}
+	r.mu.Lock()
+	r.runOnce = tracker
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.runOnce = nil
+		r.mu.Unlock()
+	}()
+	runDone := make(chan error, 1)
+	go func() { runDone <- r.Run(runCtx) }()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	idlePolls := 0
+	for {
+		select {
+		case err := <-runDone:
+			return normalizeRunOnceError(err)
+		case <-ticker.C:
+			if !tracker.isIdle() {
+				idlePolls = 0
+				continue
+			}
+			idlePolls++
+			if idlePolls < 2 {
+				continue
+			}
+			cancel()
+			return normalizeRunOnceError(<-runDone)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (r *Router) runOnceTracker() *routerRunOnceTracker {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.runOnce
+}
+
+func normalizeRunOnceError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	return err
 }
 
 // Run starts subscriptions and blocks until cancellation or closure.
@@ -478,4 +540,30 @@ func closedMessageChannel() <-chan *wmmessage.Message {
 	messages := make(chan *wmmessage.Message)
 	close(messages)
 	return messages
+}
+
+type routerRunOnceTracker struct {
+	mu         sync.Mutex
+	deliveries map[string]struct{}
+}
+
+func (t *routerRunOnceTracker) startDelivery(messageID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.deliveries == nil {
+		t.deliveries = make(map[string]struct{})
+	}
+	t.deliveries[messageID] = struct{}{}
+}
+
+func (t *routerRunOnceTracker) finishDelivery(messageID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.deliveries, messageID)
+}
+
+func (t *routerRunOnceTracker) isIdle() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.deliveries) == 0
 }

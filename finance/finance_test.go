@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,13 +63,19 @@ func TestFinance(t *testing.T) {
 		cipher, err := credentials.NewAESGCMCipher(key[:], "finance-new")
 		require.NoError(t, err)
 
+		windowPublisher := NewMockBankSyncWindowCompletionPublisher(t)
+		windowPublisher.EXPECT().
+			PublishBankSyncWindowCompleted(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil).
+			Once()
 		financeModule, err := New(&Config{
-			Database:               database,
-			Logger:                 slog.New(slog.DiscardHandler),
-			Now:                    func() time.Time { return now },
-			NewID:                  uuid.NewString,
-			HTTPClient:             monobankServer.Client(),
-			ConnectionSecretCipher: cipher,
+			Database:                database,
+			Logger:                  slog.New(slog.DiscardHandler),
+			Now:                     func() time.Time { return now },
+			NewID:                   uuid.NewString,
+			HTTPClient:              monobankServer.Client(),
+			ConnectionSecretCipher:  cipher,
+			BankSyncWindowPublisher: windowPublisher,
 			Monobank: MonobankConfig{
 				BaseURL: monobankServer.URL,
 			},

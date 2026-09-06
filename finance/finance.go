@@ -54,6 +54,7 @@ func New(cfg *Config) (*Finance, error) {
 		windowPersistence,
 		internalproviders.WithWindowSyncStoreIDGenerator(cfg.NewID),
 		internalproviders.WithWindowSyncStoreNow(cfg.Now),
+		internalproviders.WithBankSyncWindowCompletionPublisher(cfg.BankSyncWindowPublisher),
 	)
 	if err != nil { // coverage-ignore // Static production wireup always supplies persistence.
 		return nil, fmt.Errorf("create provider window sync store: %w", err)

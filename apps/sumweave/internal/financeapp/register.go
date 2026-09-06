@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appevents"
 	apphttpclient "github.com/gemyago/sumweave/apps/sumweave/internal/infrastructure/httpclient"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	financepkg "github.com/gemyago/sumweave/finance"
@@ -119,6 +120,11 @@ func NewModule(deps ModuleDeps) (*financepkg.Finance, error) {
 		publisher := appdispatchSemanticCommandPublisher{publisher: deps.CommandPublisher}
 		financeConfig.CommandPublisher = publisher
 		financeConfig.ScheduledCommandPublisher = publisher
+		eventPublisher, publisherErr := appevents.NewPublisher(deps.CommandPublisher)
+		if publisherErr != nil {
+			return nil, fmt.Errorf("create finance event publisher: %w", publisherErr)
+		}
+		financeConfig.BankSyncWindowPublisher = bankSyncWindowEventPublisher{publisher: eventPublisher}
 	}
 	financeModule, err := financepkg.New(financeConfig)
 	if err != nil {

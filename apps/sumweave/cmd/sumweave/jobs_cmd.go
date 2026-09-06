@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/wireup"
 	"github.com/spf13/cobra"
 )
@@ -113,7 +112,7 @@ func resolveJobsWorker(cmd *cobra.Command) (jobsWorkerCommandRunner, error) { //
 	if err != nil {
 		return nil, fmt.Errorf("build worker root: %w", err)
 	}
-	return &jobsWorkerRuntime{worker: root.Worker, close: root.Close}, nil
+	return &jobsWorkerRuntime{worker: root, close: root.Close}, nil
 }
 
 //nolint:ireturn
@@ -156,7 +155,7 @@ func jobsOptionsFromRoot(root *cobra.Command) (wireup.WorkerOptions, error) { //
 }
 
 type jobsWorkerRuntime struct {
-	worker *jobspkg.Worker
+	worker jobsWorkerRunner
 	close  func(context.Context) error
 }
 

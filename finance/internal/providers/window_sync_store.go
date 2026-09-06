@@ -21,8 +21,17 @@ type ProviderWindowSyncStoreOption func(*ProviderWindowSyncStore)
 
 type ProviderWindowSyncStore struct {
 	persistence WindowSyncPersistence
+	publisher   BankSyncWindowCompletionPublisher
 	idGenerator func() string
 	now         func() time.Time
+}
+
+func WithBankSyncWindowCompletionPublisher(
+	publisher BankSyncWindowCompletionPublisher,
+) ProviderWindowSyncStoreOption {
+	return func(store *ProviderWindowSyncStore) {
+		store.publisher = publisher
+	}
 }
 
 func WithWindowSyncStoreIDGenerator(idGenerator func() string) ProviderWindowSyncStoreOption {
@@ -206,12 +215,45 @@ func (s *ProviderWindowSyncStore) ApplySync(
 		); saveErr != nil {
 			return saveErr
 		}
-		return appendSuccessfulSyncState(ctx, store, successStates, stats)
+		if saveErr = appendSuccessfulSyncState(ctx, store, successStates, stats); saveErr != nil {
+			return saveErr
+		}
+		return s.publishBankSyncWindowCompleted(ctx, store, bankConnection, successStates)
 	})
 	if err != nil {
 		return domain.ProviderSyncStats{}, err
 	}
 	return stats, nil
+}
+
+func (s *ProviderWindowSyncStore) publishBankSyncWindowCompleted(
+	ctx context.Context,
+	store WindowSyncApplyStore,
+	connection *domain.BankConnection,
+	successStates []domain.ProviderSyncState,
+) error {
+	if len(successStates) == 0 {
+		return nil
+	}
+	if s.publisher == nil {
+		return nil
+	}
+	tx, err := store.SQLTransaction()
+	if err != nil {
+		return fmt.Errorf("get bank sync apply transaction: %w", err)
+	}
+	for _, state := range successStates {
+		if err = s.publisher.PublishBankSyncWindowCompleted(ctx, tx, domain.BankSyncWindowCompleted{
+			TenantID:            connection.TenantID,
+			ConnectionID:        connection.ID,
+			RangeStart:          state.Window.Start,
+			RangeEndExclusive:   state.Window.End,
+			SourceSyncMessageID: state.JobID,
+		}); err != nil {
+			return fmt.Errorf("publish bank sync window completion: %w", err)
+		}
+	}
+	return nil
 }
 
 func appendSuccessfulSyncState(
