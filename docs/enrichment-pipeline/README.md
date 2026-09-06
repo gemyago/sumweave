@@ -13,3 +13,6 @@ The enrichment pipeline is intended to cover two major parts:
   API contracts, database schema, execution model, and decisions for discussion.
 - [Transfer Matching Phase 0 PRD](transfer-matching-phase0-prd.md) — approved;
   automatic pairing rules, sync and explicit-run behavior, and manual correction.
+- [Transfer Matching Phase 0 system design](transfer-matching-phase0-design.md) —
+  draft; one bulk load, in-memory matching, atomic pair writes, exact schema
+  change, API, and independent sync-event execution.

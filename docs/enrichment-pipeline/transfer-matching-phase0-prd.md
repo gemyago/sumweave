@@ -1,7 +1,9 @@
 # Transfer Matching Phase 0
 
 Status: approved. Product requirements approved on 2026-09-06; implementation
-is pending.
+is pending. Concurrency requirements revised on 2026-09-07 following design
+review: match against data loaded at attempt start and accept concurrent-update
+races in Phase 0.
 System design, API contracts, and storage changes are outside this PRD.
 [Architecture](../ARCHITECTURE.md) remains the source of truth for product direction.
 
@@ -68,9 +70,10 @@ A candidate pair must have:
 - Exactly one possible partner for each transaction: each other's only eligible
   candidate under all of the above requirements.
 
-Use current ledger amounts, currencies, and effective timestamps, including
-user edits. Compare timestamps as instants with their supplied offsets. The
-72-hour tolerance is a fixed elapsed duration, including across DST changes.
+Use ledger amounts, currencies, and effective timestamps loaded at attempt
+start, including user edits already saved. Compare timestamps as instants with
+their supplied offsets. The 72-hour tolerance is a fixed elapsed duration,
+including across DST changes.
 
 Descriptions, names, provider snapshots, account identifiers from payment
 descriptions, and exchange rates are not matching inputs in Phase 0. There are
@@ -86,7 +89,7 @@ Examples:
 - `-500.00 PLN` and `+495.00 PLN`, or `-500.00 PLN` and `+120.00 EUR`,
   remain unmatched. Manual linking remains available.
 
-Uniqueness is evaluated against all currently eligible transactions in each
+Uniqueness is evaluated against all eligible transactions loaded for each
 leg's full matching window, including outside the requested processing range.
 Candidate paging or processing order must not manufacture a unique match by
 hiding competing transactions.
@@ -101,11 +104,13 @@ hiding competing transactions.
 - Keep the two ledger rows and their account-balance effects. Their income and
   expense treatment follows existing matched-transfer reporting behavior.
 - Save both legs together or neither; never leave a half-linked pair.
-- Existing pairs are protected. Repeated runs and duplicate delivery must not
-  replace a partner, create another pair, or let two matching runs claim the
-  same transaction for different pairs.
-- Recheck that both legs remain eligible when linking. A conflict leaves that
-  proposed pair unchanged and allows the run to continue.
+- Each attempt excludes pairs and user exclusions already present when its
+  input is loaded. Sequential reruns and redeliveries preserve completed pairs.
+- Decide eligibility and matching from the loaded data. Save each pair
+  atomically; a missing leg leaves that proposed pair unchanged and allows the
+  run to continue. Concurrent matching or manual edits after loading are an
+  accepted Phase 0 risk; fresh eligibility checks and optimistic locking are
+  deferred.
 
 Once matched, a pair is not automatically reconsidered when another transaction
 arrives or an amount/date is later edited. Corrections use manual unlinking.
@@ -203,8 +208,9 @@ management screen, original-kind history, or manual/automatic pair provenance.
   cannot create a pair whose two legs are both outside the range.
 - Running classification before matching does not prevent a pair or erase its
   category; running classification after matching skips the transfer.
-- A duplicate event or repeated explicit run preserves existing pairs. A
-  competing matching run cannot reuse a leg already committed to another pair.
+- A subsequent event delivery or explicit run preserves pairs present when it
+  loads data. Overlapping attempts and manual edits have no concurrency
+  guarantee in Phase 0.
 - A write failure leaves neither leg linked; earlier completed pairs and
   imported transactions survive and retries can continue with remaining rows.
 - Unlinking preserves categories/tags and excludes both legs from future runs;
@@ -219,6 +225,12 @@ excluded even when all other matching conditions hold. This keeps Phase 0
 aligned with existing booked-transfer reporting and avoids a pending-pair
 settlement lifecycle. Explicit unlinking is respected silently by excluding
 both legs from subsequent matching.
+
+Matching loads its inputs once per attempt and decides pairs in memory. Pair
+writes remain atomic, while concurrent-update protection is deferred. A pass
+already in flight can race with another match or manual unlink, overwrite pair
+metadata, or use stale eligibility. Such races may require manual correction.
+Consider optimistic locking later if observed issues justify it.
 
 ### Matching limitations
 
