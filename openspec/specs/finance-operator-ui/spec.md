@@ -170,6 +170,12 @@ The Finance UI SHALL let the active tenant manage deterministic classification r
 - **AND** the operator MUST be able to select exact or contains matching and edit the condition before an explicit save
 - **AND** canceling or failing rule creation MUST leave the successful category assignment intact.
 
+#### Scenario: Replacement manual-rule offer refreshes the draft
+- **WHEN** another successful category assignment replaces an optional rule offer while its form remains visible
+- **THEN** the form MUST initialize a new draft with the latest offer's default match type, current user-visible description, and selected category
+- **AND** edits or unrelated rerenders during the lifetime of the same offer MUST NOT reset that draft
+- **AND** replacement MUST refresh the draft even when the new offer's description and category equal the prior offer's values.
+
 #### Scenario: Explicit classification defaults to thirty local dates
 - **WHEN** the rules page first presents explicit classification controls
 - **THEN** it MUST show today and the preceding 29 local calendar dates as the selected inclusive start and end dates

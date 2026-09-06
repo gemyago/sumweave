@@ -79,8 +79,14 @@ Automatic and explicit classification SHALL use the same finance-owned range cla
 - **AND** the classified count MUST increase only after the write commits.
 
 #### Scenario: Matching category is unavailable
-- **WHEN** a loaded rule's category is no longer visible or available before assignment
+- **WHEN** a loaded rule's category is missing, hidden, nil, or owned by another tenant before assignment
 - **THEN** the classifier MUST return a finance-owned terminal failure and retain every assignment that already committed.
+
+#### Scenario: Matching category lookup fails transiently
+- **WHEN** loading a matched rule's category fails for a reason other than the persistence not-found state
+- **THEN** the classifier MUST return an ordinary wrapped error rather than a finance-owned terminal failure
+- **AND** existing appdispatch retry and dead-letter behavior MUST remain applicable
+- **AND** every assignment that already committed and its available attempt count MUST be retained.
 
 ### Requirement: Bounded Attempt Execution And Diagnostics
 Each classification delivery attempt SHALL load rules once, process eligible rows in bounded stable pages, and log diagnostic outcomes without persisting result payloads.
@@ -116,6 +122,11 @@ The backend application SHALL let a tenant member submit a valid classification 
 #### Scenario: Explicit range is invalid
 - **WHEN** either range value is not a full RFC 3339 timestamp with an offset or the start is not before the exclusive end
 - **THEN** the API MUST reject the request without publishing a command.
+
+#### Scenario: Explicit tenant access is denied
+- **WHEN** an authenticated caller submits classification for a tenant they have not joined
+- **THEN** the API MUST return the standard empty `401 Unauthorized` finance response
+- **AND** it MUST NOT publish a classification command.
 
 #### Scenario: Explicit command is delivered
 - **WHEN** the worker receives the explicit command through its one job-observed consumer
