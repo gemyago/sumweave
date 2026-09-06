@@ -58,10 +58,23 @@ type catalogService interface {
 	ListAccounts(context.Context, financepkg.ListAccountsParams) ([]domain.Account, error)
 	CreateCategory(context.Context, financepkg.CreateCategoryParams) (domain.Category, error)
 	UpdateCategory(context.Context, financepkg.UpdateCategoryParams) (domain.Category, error)
+	HideCategory(context.Context, financepkg.HideCategoryParams) error
 	ListCategories(context.Context, financepkg.ListCategoriesParams) ([]domain.Category, error)
 	CreateTag(context.Context, financepkg.CreateTagParams) (domain.Tag, error)
 	UpdateTag(context.Context, financepkg.UpdateTagParams) (domain.Tag, error)
 	ListTags(context.Context, financepkg.ListTagsParams) ([]domain.Tag, error)
+}
+
+type classificationRuleService interface {
+	List(context.Context, financepkg.ListClassificationRulesParams) ([]domain.ClassificationRule, error)
+	Create(context.Context, financepkg.CreateClassificationRuleParams) (domain.ClassificationRule, error)
+	Update(context.Context, financepkg.UpdateClassificationRuleParams) error
+	Delete(context.Context, financepkg.DeleteClassificationRuleParams) error
+	Move(context.Context, financepkg.MoveClassificationRuleParams) error
+}
+
+type classificationService interface {
+	Submit(context.Context, financepkg.SubmitClassificationParams) (financepkg.ClassificationJobRef, error)
 }
 
 type ledgerService interface {
@@ -197,6 +210,8 @@ type FinanceControllerDeps struct {
 	TenantService                tenantService
 	UserDirectory                userDirectory
 	CatalogService               catalogService
+	ClassificationRuleService    classificationRuleService
+	ClassificationService        classificationService
 	LedgerService                ledgerService
 	TransferDetailService        transferDetailService
 	BankSyncService              bankSyncService
@@ -462,6 +477,188 @@ func (c *FinanceController) UpdateFinanceCategory(
 		return mapCatalogError(err)
 	})
 
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) DeleteFinanceCategory(
+	builder handlers.NoResponseHandlerBuilder[*models.DeleteFinanceCategoryParams],
+) http.Handler {
+	inner := builder.HandleWithHTTP(func(
+		w http.ResponseWriter,
+		req *http.Request,
+		params *models.DeleteFinanceCategoryParams,
+	) error {
+		userID, err := operatorUserIDFromContext(req.Context())
+		if err != nil {
+			return err
+		}
+		err = c.deps.CatalogService.HideCategory(req.Context(), financepkg.HideCategoryParams{
+			ActorUserID: userID, TenantID: params.TenantID, CategoryID: params.CategoryID,
+		})
+		var referenced *financepkg.CategoryReferencedByClassificationRulesError
+		if errors.As(err, &referenced) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusConflict)
+			return json.NewEncoder(w).Encode(models.FinanceCategoryRuleConflict{
+				Code:    models.FinanceCategoryRuleConflictCodeCategoryReferencedByClassificationRules,
+				RuleIDs: referenced.RuleIDs,
+			})
+		}
+		return mapCatalogError(err)
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) ListFinanceClassificationRules(
+	builder handlers.HandlerBuilder[*models.ListFinanceClassificationRulesParams, *models.FinanceClassificationRulesResponse],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.ListFinanceClassificationRulesParams,
+	) (*models.FinanceClassificationRulesResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		items, err := c.deps.ClassificationRuleService.List(ctx, financepkg.ListClassificationRulesParams{
+			ActorUserID: userID, TenantID: params.TenantID, CategoryID: params.CategoryID,
+		})
+		if err != nil {
+			return nil, mapClassificationRuleError(err)
+		}
+		response := models.FinanceClassificationRulesResponse{
+			Items: make([]*models.FinanceClassificationRule, 0, len(items)),
+		}
+		for _, item := range items {
+			mapped := mapClassificationRule(item)
+			response.Items = append(response.Items, &mapped)
+		}
+		return &response, nil
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) CreateFinanceClassificationRule(
+	builder handlers.HandlerBuilder[*models.CreateFinanceClassificationRuleParams, *models.FinanceIDentifierResponse],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.CreateFinanceClassificationRuleParams,
+	) (*models.FinanceIDentifierResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		item, err := c.deps.ClassificationRuleService.Create(ctx, financepkg.CreateClassificationRuleParams{
+			ActorUserID: userID,
+			TenantID:    params.TenantID,
+			MatchType:   domain.ClassificationMatchType(params.Payload.MatchType),
+			Condition:   params.Payload.Condition,
+			CategoryID:  params.Payload.CategoryID,
+		})
+		if err != nil {
+			return nil, mapClassificationRuleError(err)
+		}
+		return &models.FinanceIDentifierResponse{ID: item.ID}, nil
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) UpdateFinanceClassificationRule(
+	builder handlers.NoResponseHandlerBuilder[*models.UpdateFinanceClassificationRuleParams],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.UpdateFinanceClassificationRuleParams,
+	) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		return mapClassificationRuleError(c.deps.ClassificationRuleService.Update(
+			ctx,
+			financepkg.UpdateClassificationRuleParams{
+				ActorUserID: userID,
+				TenantID:    params.TenantID,
+				RuleID:      params.RuleID,
+				MatchType:   domain.ClassificationMatchType(params.Payload.MatchType),
+				Condition:   params.Payload.Condition,
+				CategoryID:  params.Payload.CategoryID,
+			},
+		))
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) DeleteFinanceClassificationRule(
+	builder handlers.NoResponseHandlerBuilder[*models.DeleteFinanceClassificationRuleParams],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.DeleteFinanceClassificationRuleParams,
+	) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		return mapClassificationRuleError(c.deps.ClassificationRuleService.Delete(
+			ctx,
+			financepkg.DeleteClassificationRuleParams{
+				ActorUserID: userID,
+				TenantID:    params.TenantID,
+				RuleID:      params.RuleID,
+			},
+		))
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) MoveFinanceClassificationRule(
+	builder handlers.NoResponseHandlerBuilder[*models.MoveFinanceClassificationRuleParams],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.MoveFinanceClassificationRuleParams,
+	) error {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		return mapClassificationRuleError(c.deps.ClassificationRuleService.Move(
+			ctx,
+			financepkg.MoveClassificationRuleParams{
+				ActorUserID: userID,
+				TenantID:    params.TenantID,
+				RuleID:      params.RuleID,
+				Direction:   financepkg.ClassificationRuleMoveDirection(params.Payload.Direction),
+			},
+		))
+	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) SubmitFinanceTransactionClassification(
+	builder handlers.HandlerBuilder[*models.SubmitFinanceTransactionClassificationParams, *models.FinanceClassificationJobResponse],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.SubmitFinanceTransactionClassificationParams,
+	) (*models.FinanceClassificationJobResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		job, err := c.deps.ClassificationService.Submit(ctx, financepkg.SubmitClassificationParams{
+			ActorUserID:       userID,
+			TenantID:          params.TenantID,
+			RangeStart:        params.Payload.RangeStart,
+			RangeEndExclusive: params.Payload.RangeEndExclusive,
+		})
+		if err != nil {
+			return nil, mapFinanceRangeError(err)
+		}
+		return &models.FinanceClassificationJobResponse{JobID: job.ID}, nil
+	})
 	return c.deps.AuthMiddleware(inner)
 }
 
@@ -2008,8 +2205,10 @@ func operatorUserIDFromContext(ctx context.Context) (string, error) {
 }
 
 func mapFinanceRangeError(err error) error {
-	if errors.Is(err, financepkg.ErrInvalidTimestampRange) ||
-		errors.Is(err, financepkg.ErrInvalidDashboardPeriod) {
+	if errors.Is(err, financepkg.ErrTenantAccessDenied) {
+		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+	}
+	if errors.Is(err, financepkg.ErrInvalidTimestampRange) || errors.Is(err, financepkg.ErrInvalidDashboardPeriod) {
 		return app.NewErrInvalidInput("dateRange", err.Error())
 	}
 	return err
@@ -2036,6 +2235,21 @@ func mapCatalogError(err error) error {
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("tag", "requested resource"), err)
 	case errors.Is(err, financepkg.ErrHiddenAccount):
 		return fmt.Errorf("%w: %w", app.NewErrConflict("account", "account is hidden"), err)
+	default:
+		return err
+	}
+}
+
+func mapClassificationRuleError(err error) error {
+	switch {
+	case errors.Is(err, financepkg.ErrTenantAccessDenied):
+		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+	case errors.Is(err, financepkg.ErrClassificationRuleNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("classification rule", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrInvalidClassificationRule):
+		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("classificationRule", err.Error()), err)
+	case errors.Is(err, financepkg.ErrCategoryNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("category", "requested resource"), err)
 	default:
 		return err
 	}
@@ -2211,6 +2425,19 @@ func mapCategory(item domain.Category) models.FinanceCategory {
 		HiddenAt:      item.HiddenAt,
 		CreatedAt:     item.CreatedAt,
 		UpdatedAt:     item.UpdatedAt,
+	}
+}
+
+func mapClassificationRule(item domain.ClassificationRule) models.FinanceClassificationRule {
+	return models.FinanceClassificationRule{
+		ID:         item.ID,
+		TenantID:   item.TenantID,
+		MatchType:  string(item.MatchType),
+		Condition:  item.Condition,
+		CategoryID: item.CategoryID,
+		Position:   int64(item.Position),
+		CreatedAt:  item.CreatedAt,
+		UpdatedAt:  item.UpdatedAt,
 	}
 }
 

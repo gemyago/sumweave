@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSignalFinanceApi, createSignalFinanceApiForAuth, FinanceResponseError } from './api'
+import {
+  CategoryReferencedByClassificationRulesError,
+  createSignalFinanceApi,
+  createSignalFinanceApiForAuth,
+  FinanceResponseError,
+} from './api'
 
 vi.mock('../auth/auth-fetch', () => ({
   createAuthFetch: vi.fn(() => vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ items: [] }) }) as Response)),
@@ -770,6 +775,92 @@ describe('finance api', () => {
     expect(new URL(String(calls[0].input)).pathname).toBe('/api/v1/finance/tenants/tenant%201/archive')
     expect(calls[0].init?.method).toBe('POST')
     expect(calls[0].init?.body).toBeUndefined()
+  })
+
+  it('manages ordered classification rules and decodes only documented category conflicts', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const rule = {
+      id: 'rule-1', matchType: 'contains', condition: 'Coffee', categoryId: 'category-1', position: 1,
+      createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
+    }
+    const responses = [
+      { ok: true, status: 200, json: { items: [rule] } },
+      { ok: true, status: 201, json: { id: 'rule-2' } },
+      { ok: true, status: 204, json: undefined },
+      { ok: true, status: 204, json: undefined },
+      { ok: true, status: 204, json: undefined },
+      { ok: false, status: 409, statusText: 'Conflict', json: { code: 'category_referenced_by_classification_rules', ruleIds: ['rule-1', 'rule-2'] } },
+    ]
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init })
+      const next = responses.shift()
+      return {
+        ok: next?.ok ?? true,
+        status: next?.status ?? 200,
+        statusText: next?.statusText ?? 'OK',
+        json: async () => next?.json,
+      } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    const rules = await api.listClassificationRules({ tenantId: 'tenant / 1', categoryId: 'category / 1' })
+    const created = await api.createClassificationRule({ tenantId: 'tenant / 1', matchType: 'exact', condition: 'Coffee', categoryId: 'category / 1' })
+    await api.updateClassificationRule({ tenantId: 'tenant / 1', ruleId: 'rule / 1', matchType: 'contains', condition: 'Cafe', categoryId: 'category / 1' })
+    await api.moveClassificationRule({ tenantId: 'tenant / 1', ruleId: 'rule / 1', direction: 'up' })
+    await api.deleteClassificationRule({ tenantId: 'tenant / 1', ruleId: 'rule / 1' })
+
+    await expect(api.deleteCategory({ tenantId: 'tenant / 1', categoryId: 'category / 1' })).rejects.toEqual(
+      new CategoryReferencedByClassificationRulesError({ ruleIds: ['rule-1', 'rule-2'] }),
+    )
+    expect(rules[0]).toMatchObject({ id: 'rule-1', position: 1, createdAt: new Date('2026-06-20T12:00:00Z') })
+    expect(created.id).toBe('rule-2')
+    expect(calls.map((call) => [call.init?.method, new URL(String(call.input)).pathname])).toEqual([
+      ['GET', '/api/v1/finance/tenants/tenant%20%2F%201/classification-rules'],
+      ['POST', '/api/v1/finance/tenants/tenant%20%2F%201/classification-rules'],
+      ['PUT', '/api/v1/finance/tenants/tenant%20%2F%201/classification-rules/rule%20%2F%201'],
+      ['POST', '/api/v1/finance/tenants/tenant%20%2F%201/classification-rules/rule%20%2F%201/move'],
+      ['DELETE', '/api/v1/finance/tenants/tenant%20%2F%201/classification-rules/rule%20%2F%201'],
+      ['DELETE', '/api/v1/finance/tenants/tenant%20%2F%201/categories/category%20%2F%201'],
+    ])
+    expect(new URL(String(calls[0].input)).searchParams.get('categoryId')).toBe('category / 1')
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({ matchType: 'exact', condition: 'Coffee', categoryId: 'category / 1' })
+    expect(JSON.parse(String(calls[3].init?.body))).toEqual({ direction: 'up' })
+  })
+
+  it('submits explicit classification with the displayed RFC3339 offset bounds', async () => {
+    let call: { input: RequestInfo | URL; init?: RequestInit } | undefined
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      call = { input, init }
+      return { ok: true, status: 202, statusText: 'Accepted', json: async () => ({ jobId: 'classification-job-1' }) } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await expect(api.submitTransactionClassification({
+      tenantId: 'tenant / 1',
+      rangeStart: '2026-03-07T00:00:00-05:00',
+      rangeEndExclusive: '2026-03-09T00:00:00-04:00',
+    })).resolves.toEqual({ jobId: 'classification-job-1' })
+
+    expect(new URL(String(call?.input)).pathname).toBe('/api/v1/finance/tenants/tenant%20%2F%201/transactions/classify')
+    expect(call?.init?.method).toBe('POST')
+    expect(JSON.parse(String(call?.init?.body))).toEqual({
+      rangeStart: '2026-03-07T00:00:00-05:00',
+      rangeEndExclusive: '2026-03-09T00:00:00-04:00',
+    })
+  })
+
+  it('does not expose undocumented category-removal error bodies', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      statusText: 'Conflict',
+      json: async () => ({ detail: 'sensitive internal error' }),
+    }) as Response)
+
+    await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch }).deleteCategory({ tenantId: 'tenant-1', categoryId: 'category-1' }))
+      .rejects.toThrow('Conflict')
+    await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch }).deleteCategory({ tenantId: 'tenant-1', categoryId: 'category-1' }))
+      .rejects.not.toThrow('sensitive internal error')
   })
 
   it('covers the remaining finance endpoints while preserving omitted optional fields', async () => {

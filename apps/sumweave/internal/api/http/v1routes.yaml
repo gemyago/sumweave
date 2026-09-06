@@ -673,6 +673,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+    delete:
+      summary: Remove finance category
+      operationId: deleteFinanceCategory
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: categoryId
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Removed finance category }
+        '409':
+          description: Category is referenced by classification rules
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinanceCategoryRuleConflict" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/v1/finance/tenants/{tenantId}/tags:
     get:
       summary: List finance tags
@@ -881,7 +906,128 @@ paths:
           content:
             application/json:
               schema:
-                  $ref: "#/components/schemas/Error"
+                $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/classification-rules:
+    get:
+      summary: List ordered finance classification rules
+      operationId: listFinanceClassificationRules
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: categoryId
+          schema: { type: string }
+      responses:
+        '200':
+          description: Ordered classification rules
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinanceClassificationRulesResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      summary: Create finance classification rule
+      operationId: createFinanceClassificationRule
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FinanceClassificationRuleRequest" }
+      responses:
+        '201':
+          description: Created classification rule identifier
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinanceIdentifierResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}:
+    put:
+      summary: Update finance classification rule
+      operationId: updateFinanceClassificationRule
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: ruleId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FinanceClassificationRuleRequest" }
+      responses:
+        '204': { description: Updated classification rule }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      summary: Delete finance classification rule
+      operationId: deleteFinanceClassificationRule
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: ruleId
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Deleted classification rule }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}/move:
+    post:
+      summary: Move finance classification rule one position
+      operationId: moveFinanceClassificationRule
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: ruleId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FinanceClassificationRuleMoveRequest" }
+      responses:
+        '204': { description: Moved classification rule }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-candidates:
     get:
       summary: List visible in-range finance transfer candidates
@@ -924,6 +1070,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/transactions/classify:
+    post:
+      summary: Submit explicit transaction classification
+      operationId: submitFinanceTransactionClassification
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FinanceTransactionClassificationRequest" }
+      responses:
+        '202':
+          description: Classification is queued. The returned job ID can initially return 404 until first delivery materializes the observed job.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinanceClassificationJobResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner:
     get:
       summary: Get the exact matched finance transfer partner
@@ -1891,6 +2063,61 @@ components:
       properties:
         name: { type: string }
         kind: { type: string }
+    FinanceIdentifierResponse:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+    FinanceCategoryRuleConflict:
+      type: object
+      required: [code, ruleIds]
+      properties:
+        code: { type: string, enum: [category_referenced_by_classification_rules] }
+        ruleIds:
+          type: array
+          items: { type: string }
+    FinanceClassificationRuleRequest:
+      type: object
+      required: [matchType, condition, categoryId]
+      properties:
+        matchType: { type: string, enum: [exact, contains] }
+        condition: { type: string }
+        categoryId: { type: string }
+    FinanceClassificationRuleMoveRequest:
+      type: object
+      required: [direction]
+      properties:
+        direction: { type: string, enum: [up, down] }
+    FinanceClassificationRule:
+      type: object
+      required: [id, tenantId, matchType, condition, categoryId, position, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tenantId: { type: string }
+        matchType: { type: string }
+        condition: { type: string }
+        categoryId: { type: string }
+        position: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FinanceClassificationRulesResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceClassificationRule" }
+    FinanceTransactionClassificationRequest:
+      type: object
+      required: [rangeStart, rangeEndExclusive]
+      properties:
+        rangeStart: { type: string, format: date-time }
+        rangeEndExclusive: { type: string, format: date-time }
+    FinanceClassificationJobResponse:
+      type: object
+      required: [jobId]
+      properties:
+        jobId: { type: string }
     FinanceCategory:
       type: object
       required: [id, tenantId, name, kind, seededDefault, createdAt, updatedAt]

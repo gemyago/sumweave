@@ -22,6 +22,7 @@
   } from '../lib/finance/transfer-range'
   import FinanceProviderSourceData from '../components/FinanceProviderSourceData.svelte'
   import FinancePager from '../components/FinancePager.svelte'
+  import FinanceRuleCreationForm from '../components/FinanceRuleCreationForm.svelte'
 
   let { params = {} } = $props<{ params?: { transactionId?: string } }>()
 
@@ -58,6 +59,8 @@
   let transferMessage = $state<string | null>(null)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+  let nextRuleOfferId = 0
+  let ruleOffer = $state<{ offerId: number; description: string; categoryId: string } | null>(null)
 
   const candidatePageSize = 20
   const hasMatchedTransfer = $derived(transaction ? isMatchedTransfer(transaction) : false)
@@ -108,6 +111,7 @@
     loading = true
     error = null
     saveMessage = null
+    ruleOffer = null
     reactiveReady = false
 
     try {
@@ -352,6 +356,7 @@
 
     try {
       const amountMinor = parseMajorAmountToMinor(form.amount)
+      const categoryChanged = transaction?.categoryId !== (form.categoryId || null)
       if (isCreateMode) {
         const created = await financeApi.createTransaction({
           tenantId: financeShell.selectedTenantId,
@@ -369,6 +374,9 @@
         transaction = created
         saveMessage = 'Transaction recorded.'
         fillFormFromTransaction(created)
+        if (created.categoryId) {
+          ruleOffer = { offerId: ++nextRuleOfferId, description: created.description, categoryId: created.categoryId }
+        }
       } else {
         transaction = await financeApi.updateTransaction({
           tenantId: financeShell.selectedTenantId,
@@ -382,6 +390,9 @@
         saveMessage = 'Transaction updated.'
         if (transaction) {
           fillFormFromTransaction(transaction)
+          if (categoryChanged && transaction.categoryId) {
+            ruleOffer = { offerId: ++nextRuleOfferId, description: transaction.description, categoryId: transaction.categoryId }
+          }
         }
       }
       await tick()
@@ -493,6 +504,17 @@
           <div class="d-flex flex-wrap gap-2"><button class="btn btn-primary" type="submit" disabled={saving || !financeShell.selectedTenantId}>{#if saving}Saving…{:else}Save transaction{/if}</button><a class="btn btn-outline-secondary" href="/finance/transactions" use:link>Cancel</a></div>
           {#if saveError}<div class="alert alert-danger mb-0" role="alert">{saveError}</div>{/if}
           {#if saveMessage}<div class="alert alert-success mb-0" role="status" tabindex="-1" bind:this={saveStatus}>{saveMessage}</div>{/if}
+          {#if ruleOffer}
+            <FinanceRuleCreationForm
+              tenantId={financeShell.selectedTenantId}
+              offerId={ruleOffer.offerId}
+              description={ruleOffer.description}
+              categoryId={ruleOffer.categoryId}
+              {categories}
+              onCancel={() => ruleOffer = null}
+              onSaved={() => ruleOffer = null}
+            />
+          {/if}
         </div>
       </form>
 

@@ -42,6 +42,7 @@ type Config struct {
 	DefaultFXProvider         string
 	CommandPublisher          SemanticCommandPublisher
 	ScheduledCommandPublisher ScheduledSemanticCommandPublisher
+	BankSyncWindowPublisher   BankSyncWindowCompletionPublisher
 	Monobank                  MonobankConfig
 	EnableBanking             EnableBankingConfig
 }

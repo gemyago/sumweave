@@ -86,6 +86,24 @@ type Category struct {
 	UpdatedAt     time.Time
 }
 
+type ClassificationMatchType string
+
+const (
+	ClassificationMatchTypeExact    ClassificationMatchType = "exact"
+	ClassificationMatchTypeContains ClassificationMatchType = "contains"
+)
+
+type ClassificationRule struct {
+	ID         string
+	TenantID   string
+	Position   int
+	MatchType  ClassificationMatchType
+	Condition  string
+	CategoryID string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type Tag struct {
 	ID        string
 	TenantID  string

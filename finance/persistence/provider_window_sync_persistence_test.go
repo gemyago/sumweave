@@ -14,6 +14,12 @@ import (
 
 var _ providers.WindowSyncPersistence = (*ProviderWindowSyncPersistence)(nil)
 
+func TestProviderWindowSyncApplyStoreSQLTransaction(t *testing.T) {
+	store := &providerWindowSyncApplyStore{Store: NewStore(openTestDatabase(t))}
+	_, err := store.SQLTransaction()
+	require.EqualError(t, err, "provider window apply SQL transaction is required")
+}
+
 func TestProviderWindowSyncPersistence(t *testing.T) {
 	makeStore := func(t *testing.T) *Store {
 		t.Helper()
@@ -487,6 +493,8 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			UpdatedAt:         now,
 		})
 		require.NoError(t, err)
+		window := domain.ProviderSyncWindow{Start: now.Add(-24 * time.Hour), End: now}
+		jobID := "job-" + fake.UUID().V4()
 
 		syncStore, err := providers.NewProviderWindowSyncStore(
 			adapter,
@@ -515,16 +523,13 @@ func TestProviderWindowSyncPersistence(t *testing.T) {
 			Connection:  connection,
 			AttemptedAt: &attemptedAt,
 			SucceededAt: &completedAt,
-			Window: domain.ProviderSyncWindow{
-				Start: now.Add(-24 * time.Hour),
-				End:   now,
-			},
-			RunID: "run-" + fake.UUID().V4(),
-			JobID: "job-" + fake.UUID().V4(),
+			Window:      window,
+			RunID:       "run-" + fake.UUID().V4(),
+			JobID:       jobID,
 		}
 		stats, err := syncStore.ApplySync(t.Context(), providers.ProviderDiffPlan{
 			Connection:     connection,
-			SnapshotWindow: domain.ProviderSyncWindow{Start: now.Add(-24 * time.Hour), End: now},
+			SnapshotWindow: window,
 			AccountObservations: []domain.ProviderAccountObservation{{
 				Connection:        connection,
 				ProviderAccountID: providerAccountID,

@@ -67,6 +67,18 @@ export interface FinanceTag {
   updatedAt: Date
 }
 
+export type FinanceClassificationMatchType = 'exact' | 'contains'
+
+export interface FinanceClassificationRule {
+  id: string
+  matchType: FinanceClassificationMatchType
+  condition: string
+  categoryId: string
+  position: number
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface FinanceTransaction {
   id: string
   tenantId: string
@@ -301,6 +313,10 @@ export interface FinanceJobRef {
   provider?: string
 }
 
+export interface FinanceClassificationJob {
+  jobId: string
+}
+
 export interface FinanceConnectionRedirectStart {
   provider: string
   authorizationUrl: string
@@ -341,6 +357,13 @@ export interface SignalFinanceApi {
   listCategories(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceCategory[]>
   createCategory(params: { tenantId: string; name: string; kind: string }): Promise<FinanceCategory>
   updateCategory(params: { tenantId: string; categoryId: string; name: string; kind: string }): Promise<void>
+  deleteCategory(params: { tenantId: string; categoryId: string }): Promise<void>
+  listClassificationRules(params: { tenantId: string; categoryId?: string }): Promise<FinanceClassificationRule[]>
+  createClassificationRule(params: { tenantId: string; matchType: FinanceClassificationMatchType; condition: string; categoryId: string }): Promise<{ id: string }>
+  updateClassificationRule(params: { tenantId: string; ruleId: string; matchType: FinanceClassificationMatchType; condition: string; categoryId: string }): Promise<void>
+  deleteClassificationRule(params: { tenantId: string; ruleId: string }): Promise<void>
+  moveClassificationRule(params: { tenantId: string; ruleId: string; direction: 'up' | 'down' }): Promise<void>
+  submitTransactionClassification(params: { tenantId: string; rangeStart: string; rangeEndExclusive: string }): Promise<FinanceClassificationJob>
   listTags(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceTag[]>
   createTag(params: { tenantId: string; name: string }): Promise<FinanceTag>
   renameTag(params: { tenantId: string; tagId: string; name: string }): Promise<void>
@@ -446,6 +469,16 @@ export class FinanceResponseError extends Error {
   constructor(params: { field: string; issue: string }) {
     super(`Finance API response contract violation: ${params.field} ${params.issue}`)
     this.name = 'FinanceResponseError'
+  }
+}
+
+export class CategoryReferencedByClassificationRulesError extends Error {
+  readonly ruleIds: string[]
+
+  constructor(params: { ruleIds: string[] }) {
+    super('This category is still referenced by classification rules.')
+    this.name = 'CategoryReferencedByClassificationRulesError'
+    this.ruleIds = params.ruleIds
   }
 }
 
@@ -604,6 +637,53 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/categories/${encodeURIComponent(categoryId)}`,
         body: { name, kind },
       })
+    },
+    async deleteCategory({ tenantId, categoryId }) {
+      const path = `/finance/tenants/${encodeURIComponent(tenantId)}/categories/${encodeURIComponent(categoryId)}`
+      const response = await params.fetch(new URL(`${params.baseUrl}${path}`, window.location.origin).toString(), {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
+      })
+      if (response.ok) return
+      if (response.status === 409) {
+        const payload = await response.json().catch(() => undefined)
+        if (isCategoryRuleConflict(payload)) {
+          throw new CategoryReferencedByClassificationRulesError({ ruleIds: payload.ruleIds })
+        }
+      }
+      throw new FinanceApiError({ status: response.status, method: 'DELETE', path, message: response.statusText || 'Request failed' })
+    },
+    async listClassificationRules({ tenantId, categoryId }) {
+      const json = await request<{ items?: RawClassificationRule[] }>({
+        method: 'GET',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/classification-rules`,
+        query: buildSearchParams({ categoryId }),
+      })
+      return requireItems<RawClassificationRule>(json, 'finance.classificationRules.items').map(mapClassificationRule)
+    },
+    async createClassificationRule({ tenantId, matchType, condition, categoryId }) {
+      const result = await request<RawIdentifier>({
+        method: 'POST',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/classification-rules`,
+        body: { matchType, condition, categoryId },
+      })
+      return mapIdentifier(result, 'finance.classificationRule')
+    },
+    async updateClassificationRule({ tenantId, ruleId, matchType, condition, categoryId }) {
+      await request<void>({ method: 'PUT', path: `/finance/tenants/${encodeURIComponent(tenantId)}/classification-rules/${encodeURIComponent(ruleId)}`, body: { matchType, condition, categoryId } })
+    },
+    async deleteClassificationRule({ tenantId, ruleId }) {
+      await request<void>({ method: 'DELETE', path: `/finance/tenants/${encodeURIComponent(tenantId)}/classification-rules/${encodeURIComponent(ruleId)}` })
+    },
+    async moveClassificationRule({ tenantId, ruleId, direction }) {
+      await request<void>({ method: 'POST', path: `/finance/tenants/${encodeURIComponent(tenantId)}/classification-rules/${encodeURIComponent(ruleId)}/move`, body: { direction } })
+    },
+    async submitTransactionClassification({ tenantId, rangeStart, rangeEndExclusive }) {
+      return mapClassificationJob(await request<RawClassificationJob>({
+        method: 'POST',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/classify`,
+        body: { rangeStart, rangeEndExclusive },
+      }))
     },
     async listTags({ tenantId, includeHidden }) {
       const json = await request<{ items?: RawTag[] }>({
@@ -889,6 +969,9 @@ interface RawTenantInvite { id: string; tenantId: string; code: string; recipien
 interface RawAccount { id: string; tenantId: string; name: string; currency: string; kind: string; bookedBalanceMinor: number; pendingBalanceMinor: number; provider?: string; providerAccountId?: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawCategory { id: string; tenantId: string; name: string; kind: string; seededDefault: boolean; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawTag { id: string; tenantId: string; name: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
+interface RawClassificationRule { id: string; matchType: FinanceClassificationMatchType; condition: string; categoryId: string; position: number; createdAt: string; updatedAt: string }
+interface RawIdentifier { id: string }
+interface RawClassificationJob { jobId: string }
 interface RawTransactionProviderOriginal { amountMinor: number; currency: string; description: string; effectiveAt?: string | null }
 interface RawProviderSnapshotMetadata { id: string; kind: string; providerObjectId: string; capturedAt: string }
 interface RawProviderSnapshot extends RawProviderSnapshotMetadata { data?: Record<string, unknown> }
@@ -947,6 +1030,25 @@ function mapCategory(item: RawCategory): FinanceCategory {
 function mapTag(item: RawTag): FinanceTag {
   requireFields(item, 'finance.tag', ['id', 'tenantId', 'name', 'createdAt', 'updatedAt'])
   return { ...item, hiddenAt: parseOptionalDate(item.hiddenAt, 'finance.tag.hiddenAt'), createdAt: parseRequiredDate(item.createdAt, 'finance.tag.createdAt'), updatedAt: parseRequiredDate(item.updatedAt, 'finance.tag.updatedAt') }
+}
+function mapClassificationRule(item: RawClassificationRule): FinanceClassificationRule {
+  requireFields(item, 'finance.classificationRule', ['id', 'matchType', 'condition', 'categoryId', 'position', 'createdAt', 'updatedAt'])
+  if (item.matchType !== 'exact' && item.matchType !== 'contains') {
+    throw new FinanceResponseError({ field: 'finance.classificationRule.matchType', issue: 'must be exact or contains' })
+  }
+  return {
+    ...item,
+    createdAt: parseRequiredDate(item.createdAt, 'finance.classificationRule.createdAt'),
+    updatedAt: parseRequiredDate(item.updatedAt, 'finance.classificationRule.updatedAt'),
+  }
+}
+function mapIdentifier(item: RawIdentifier, field: string): { id: string } {
+  requireFields(item, field, ['id'])
+  return { id: item.id }
+}
+function mapClassificationJob(item: RawClassificationJob): FinanceClassificationJob {
+  requireFields(item, 'finance.classificationJob', ['jobId'])
+  return { jobId: item.jobId }
 }
 function mapTransaction(item: RawTransaction): FinanceTransaction {
   requireFields(item, 'finance.transaction', ['id', 'tenantId', 'accountId', 'source', 'status', 'kind', 'amountMinor', 'currency', 'description', 'effectiveAt', 'tagIds', 'createdAt', 'updatedAt'])
@@ -1193,4 +1295,13 @@ function buildSearchParams(values: Record<string, string | number | boolean | un
     params.set(key, String(value))
   }
   return params
+}
+
+function isCategoryRuleConflict(value: unknown): value is { code: 'category_referenced_by_classification_rules'; ruleIds: string[] } {
+  return Boolean(
+    value && typeof value === 'object' &&
+    (value as { code?: unknown }).code === 'category_referenced_by_classification_rules' &&
+    Array.isArray((value as { ruleIds?: unknown }).ruleIds) &&
+    (value as { ruleIds: unknown[] }).ruleIds.every((ruleId) => typeof ruleId === 'string'),
+  )
 }

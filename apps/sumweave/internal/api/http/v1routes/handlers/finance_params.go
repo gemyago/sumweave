@@ -210,6 +210,42 @@ func newParamsParserFinanceCreateFinanceCategory(rootHandler *RootHandler) param
 	}
 }
 
+type paramsParserFinanceCreateFinanceClassificationRule struct {
+	bindTenantID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceClassificationRuleRequest]
+}
+
+func (p *paramsParserFinanceCreateFinanceClassificationRule) parse(router httpRouter, req *http.Request) (*CreateFinanceClassificationRuleParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &CreateFinanceClassificationRuleParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceCreateFinanceClassificationRule(rootHandler *RootHandler) paramsParser[*CreateFinanceClassificationRuleParams] {
+	return &paramsParserFinanceCreateFinanceClassificationRule{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceClassificationRuleRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceClassificationRuleRequest],
+			),
+			validateValue: NewFinanceClassificationRuleRequestValidator(),
+		}),
+	}
+}
+
 type paramsParserFinanceCreateFinanceTag struct {
 	bindTenantID requestParamBinder[string, string]
 	bindPayload requestParamBinder[*http.Request, *FinanceTagCreateRequest]
@@ -338,6 +374,78 @@ func newParamsParserFinanceCreateFinanceTransaction(rootHandler *RootHandler) pa
 				parseJSONPayload[*FinanceTransactionCreateRequest],
 			),
 			validateValue: NewFinanceTransactionCreateRequestValidator(),
+		}),
+	}
+}
+
+type paramsParserFinanceDeleteFinanceCategory struct {
+	bindTenantID requestParamBinder[string, string]
+	bindCategoryID requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceDeleteFinanceCategory) parse(router httpRouter, req *http.Request) (*DeleteFinanceCategoryParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &DeleteFinanceCategoryParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindCategoryID(pathParamsCtx.Fork("categoryId"), readPathValue("categoryId", router, req), &reqParams.CategoryID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceDeleteFinanceCategory(rootHandler *RootHandler) paramsParser[*DeleteFinanceCategoryParams] {
+	return &paramsParserFinanceDeleteFinanceCategory{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindCategoryID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
+type paramsParserFinanceDeleteFinanceClassificationRule struct {
+	bindTenantID requestParamBinder[string, string]
+	bindRuleID requestParamBinder[string, string]
+}
+
+func (p *paramsParserFinanceDeleteFinanceClassificationRule) parse(router httpRouter, req *http.Request) (*DeleteFinanceClassificationRuleParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &DeleteFinanceClassificationRuleParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindRuleID(pathParamsCtx.Fork("ruleId"), readPathValue("ruleId", router, req), &reqParams.RuleID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceDeleteFinanceClassificationRule(rootHandler *RootHandler) paramsParser[*DeleteFinanceClassificationRuleParams] {
+	return &paramsParserFinanceDeleteFinanceClassificationRule{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindRuleID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
 		}),
 	}
 }
@@ -1029,6 +1137,45 @@ func newParamsParserFinanceListFinanceCategories(rootHandler *RootHandler) param
 	}
 }
 
+type paramsParserFinanceListFinanceClassificationRules struct {
+	bindTenantID requestParamBinder[string, string]
+	bindCategoryID requestParamBinder[[]string, string]
+}
+
+func (p *paramsParserFinanceListFinanceClassificationRules) parse(router httpRouter, req *http.Request) (*ListFinanceClassificationRulesParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &ListFinanceClassificationRulesParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	// query params
+	query := req.URL.Query()
+	queryParamsCtx := bindingCtx.Fork("query")
+	p.bindCategoryID(queryParamsCtx.Fork("categoryId"), readQueryValue("categoryId", query), &reqParams.CategoryID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceListFinanceClassificationRules(rootHandler *RootHandler) paramsParser[*ListFinanceClassificationRulesParams] {
+	return &paramsParserFinanceListFinanceClassificationRules{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindCategoryID: newRequestParamBinder(binderParams[[]string, string]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
 type paramsParserFinanceListFinanceConnectionSyncedAccounts struct {
 	bindTenantID requestParamBinder[string, string]
 	bindConnectionID requestParamBinder[string, string]
@@ -1417,6 +1564,52 @@ func newParamsParserFinanceListRecentFinanceCsvImportAudits(rootHandler *RootHan
 	}
 }
 
+type paramsParserFinanceMoveFinanceClassificationRule struct {
+	bindTenantID requestParamBinder[string, string]
+	bindRuleID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceClassificationRuleMoveRequest]
+}
+
+func (p *paramsParserFinanceMoveFinanceClassificationRule) parse(router httpRouter, req *http.Request) (*MoveFinanceClassificationRuleParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &MoveFinanceClassificationRuleParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindRuleID(pathParamsCtx.Fork("ruleId"), readPathValue("ruleId", router, req), &reqParams.RuleID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceMoveFinanceClassificationRule(rootHandler *RootHandler) paramsParser[*MoveFinanceClassificationRuleParams] {
+	return &paramsParserFinanceMoveFinanceClassificationRule{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindRuleID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceClassificationRuleMoveRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceClassificationRuleMoveRequest],
+			),
+			validateValue: NewFinanceClassificationRuleMoveRequestValidator(),
+		}),
+	}
+}
+
 type paramsParserFinancePreviewFinanceAccountCsvImport struct {
 	bindTenantID requestParamBinder[string, string]
 	bindPayload requestParamBinder[*http.Request, *FinanceCsvImportPreviewRequest]
@@ -1567,6 +1760,42 @@ func newParamsParserFinanceStartFinanceConnectionRedirectLink(rootHandler *RootH
 				parseJSONPayload[*FinanceConnectionLinkRedirectStartRequest],
 			),
 			validateValue: NewFinanceConnectionLinkRedirectStartRequestValidator(),
+		}),
+	}
+}
+
+type paramsParserFinanceSubmitFinanceTransactionClassification struct {
+	bindTenantID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceTransactionClassificationRequest]
+}
+
+func (p *paramsParserFinanceSubmitFinanceTransactionClassification) parse(router httpRouter, req *http.Request) (*SubmitFinanceTransactionClassificationParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &SubmitFinanceTransactionClassificationParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceSubmitFinanceTransactionClassification(rootHandler *RootHandler) paramsParser[*SubmitFinanceTransactionClassificationParams] {
+	return &paramsParserFinanceSubmitFinanceTransactionClassification{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceTransactionClassificationRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceTransactionClassificationRequest],
+			),
+			validateValue: NewFinanceTransactionClassificationRequestValidator(),
 		}),
 	}
 }
@@ -1801,6 +2030,52 @@ func newParamsParserFinanceUpdateFinanceCategory(rootHandler *RootHandler) param
 				parseJSONPayload[*FinanceCategoryUpdateRequest],
 			),
 			validateValue: NewFinanceCategoryUpdateRequestValidator(),
+		}),
+	}
+}
+
+type paramsParserFinanceUpdateFinanceClassificationRule struct {
+	bindTenantID requestParamBinder[string, string]
+	bindRuleID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceClassificationRuleRequest]
+}
+
+func (p *paramsParserFinanceUpdateFinanceClassificationRule) parse(router httpRouter, req *http.Request) (*UpdateFinanceClassificationRuleParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &UpdateFinanceClassificationRuleParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	p.bindRuleID(pathParamsCtx.Fork("ruleId"), readPathValue("ruleId", router, req), &reqParams.RuleID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceUpdateFinanceClassificationRule(rootHandler *RootHandler) paramsParser[*UpdateFinanceClassificationRuleParams] {
+	return &paramsParserFinanceUpdateFinanceClassificationRule{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindRuleID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceClassificationRuleRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceClassificationRuleRequest],
+			),
+			validateValue: NewFinanceClassificationRuleRequestValidator(),
 		}),
 	}
 }
@@ -2052,6 +2327,18 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*CreateFinanceCategoryParams, *FinanceCategory],
 	]
 
+	// POST /api/v1/finance/tenants/{tenantId}/classification-rules
+	//
+	// Request type: CreateFinanceClassificationRuleParams,
+	//
+	// Response type: FinanceIDentifierResponse
+	CreateFinanceClassificationRule genericHandlerBuilder[
+		*CreateFinanceClassificationRuleParams,
+		*FinanceIDentifierResponse,
+		handlerActionFunc[*CreateFinanceClassificationRuleParams, *FinanceIDentifierResponse],
+		httpHandlerActionFunc[*CreateFinanceClassificationRuleParams, *FinanceIDentifierResponse],
+	]
+
 	// POST /api/v1/finance/tenants/{tenantId}/tags
 	//
 	// Request type: CreateFinanceTagParams,
@@ -2098,6 +2385,30 @@ type financeControllerBuilder struct {
 		*FinanceTransaction,
 		handlerActionFunc[*CreateFinanceTransactionParams, *FinanceTransaction],
 		httpHandlerActionFunc[*CreateFinanceTransactionParams, *FinanceTransaction],
+	]
+
+	// DELETE /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+	//
+	// Request type: DeleteFinanceCategoryParams,
+	//
+	// Response type: none
+	DeleteFinanceCategory genericHandlerBuilder[
+		*DeleteFinanceCategoryParams,
+		void,
+		handlerActionFuncNoResponse[*DeleteFinanceCategoryParams, void],
+		httpHandlerActionFuncNoResponse[*DeleteFinanceCategoryParams, void],
+	]
+
+	// DELETE /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}
+	//
+	// Request type: DeleteFinanceClassificationRuleParams,
+	//
+	// Response type: none
+	DeleteFinanceClassificationRule genericHandlerBuilder[
+		*DeleteFinanceClassificationRuleParams,
+		void,
+		handlerActionFuncNoResponse[*DeleteFinanceClassificationRuleParams, void],
+		httpHandlerActionFuncNoResponse[*DeleteFinanceClassificationRuleParams, void],
 	]
 
 	// DELETE /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
@@ -2328,6 +2639,18 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*ListFinanceCategoriesParams, *FinanceCategoriesResponse],
 	]
 
+	// GET /api/v1/finance/tenants/{tenantId}/classification-rules
+	//
+	// Request type: ListFinanceClassificationRulesParams,
+	//
+	// Response type: FinanceClassificationRulesResponse
+	ListFinanceClassificationRules genericHandlerBuilder[
+		*ListFinanceClassificationRulesParams,
+		*FinanceClassificationRulesResponse,
+		handlerActionFunc[*ListFinanceClassificationRulesParams, *FinanceClassificationRulesResponse],
+		httpHandlerActionFunc[*ListFinanceClassificationRulesParams, *FinanceClassificationRulesResponse],
+	]
+
 	// GET /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts
 	//
 	// Request type: ListFinanceConnectionSyncedAccountsParams,
@@ -2448,6 +2771,18 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*ListRecentFinanceCsvImportAuditsParams, *FinanceCsvImportAuditsResponse],
 	]
 
+	// POST /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}/move
+	//
+	// Request type: MoveFinanceClassificationRuleParams,
+	//
+	// Response type: none
+	MoveFinanceClassificationRule genericHandlerBuilder[
+		*MoveFinanceClassificationRuleParams,
+		void,
+		handlerActionFuncNoResponse[*MoveFinanceClassificationRuleParams, void],
+		httpHandlerActionFuncNoResponse[*MoveFinanceClassificationRuleParams, void],
+	]
+
 	// POST /api/v1/finance/tenants/{tenantId}/account-imports/preview
 	//
 	// Request type: PreviewFinanceAccountCsvImportParams,
@@ -2494,6 +2829,18 @@ type financeControllerBuilder struct {
 		*FinanceConnectionLinkRedirectStartResponse,
 		handlerActionFunc[*StartFinanceConnectionRedirectLinkParams, *FinanceConnectionLinkRedirectStartResponse],
 		httpHandlerActionFunc[*StartFinanceConnectionRedirectLinkParams, *FinanceConnectionLinkRedirectStartResponse],
+	]
+
+	// POST /api/v1/finance/tenants/{tenantId}/transactions/classify
+	//
+	// Request type: SubmitFinanceTransactionClassificationParams,
+	//
+	// Response type: FinanceClassificationJobResponse
+	SubmitFinanceTransactionClassification genericHandlerBuilder[
+		*SubmitFinanceTransactionClassificationParams,
+		*FinanceClassificationJobResponse,
+		handlerActionFunc[*SubmitFinanceTransactionClassificationParams, *FinanceClassificationJobResponse],
+		httpHandlerActionFunc[*SubmitFinanceTransactionClassificationParams, *FinanceClassificationJobResponse],
 	]
 
 	// POST /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync
@@ -2566,6 +2913,18 @@ type financeControllerBuilder struct {
 		void,
 		handlerActionFuncNoResponse[*UpdateFinanceCategoryParams, void],
 		httpHandlerActionFuncNoResponse[*UpdateFinanceCategoryParams, void],
+	]
+
+	// PUT /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}
+	//
+	// Request type: UpdateFinanceClassificationRuleParams,
+	//
+	// Response type: none
+	UpdateFinanceClassificationRule genericHandlerBuilder[
+		*UpdateFinanceClassificationRuleParams,
+		void,
+		handlerActionFuncNoResponse[*UpdateFinanceClassificationRuleParams, void],
+		httpHandlerActionFuncNoResponse[*UpdateFinanceClassificationRuleParams, void],
 	]
 
 	// PATCH /api/v1/finance/tenants/{tenantId}/connections/{connectionId}
@@ -2740,6 +3099,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
+		// POST /api/v1/finance/tenants/{tenantId}/classification-rules
+		CreateFinanceClassificationRule: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*CreateFinanceClassificationRuleParams,
+				*FinanceIDentifierResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*CreateFinanceClassificationRuleParams,
+				*FinanceIDentifierResponse,
+			](),
+			makeActionBuilderParams[
+				*CreateFinanceClassificationRuleParams,
+				*FinanceIDentifierResponse,
+			]{
+				defaultStatus: 201,
+				paramsParser:  newParamsParserFinanceCreateFinanceClassificationRule(app),
+			},
+		),
+
 		// POST /api/v1/finance/tenants/{tenantId}/tags
 		CreateFinanceTag: newGenericHandlerBuilder(
 			app,
@@ -2817,6 +3196,48 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinanceCreateFinanceTransaction(app),
+			},
+		),
+
+		// DELETE /api/v1/finance/tenants/{tenantId}/categories/{categoryId}
+		DeleteFinanceCategory: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*DeleteFinanceCategoryParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*DeleteFinanceCategoryParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*DeleteFinanceCategoryParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceDeleteFinanceCategory(app),
+			},
+		),
+
+		// DELETE /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}
+		DeleteFinanceClassificationRule: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*DeleteFinanceClassificationRuleParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*DeleteFinanceClassificationRuleParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*DeleteFinanceClassificationRuleParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceDeleteFinanceClassificationRule(app),
 			},
 		),
 
@@ -3203,6 +3624,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
+		// GET /api/v1/finance/tenants/{tenantId}/classification-rules
+		ListFinanceClassificationRules: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*ListFinanceClassificationRulesParams,
+				*FinanceClassificationRulesResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*ListFinanceClassificationRulesParams,
+				*FinanceClassificationRulesResponse,
+			](),
+			makeActionBuilderParams[
+				*ListFinanceClassificationRulesParams,
+				*FinanceClassificationRulesResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserFinanceListFinanceClassificationRules(app),
+			},
+		),
+
 		// GET /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/accounts
 		ListFinanceConnectionSyncedAccounts: newGenericHandlerBuilder(
 			app,
@@ -3403,6 +3844,27 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			},
 		),
 
+		// POST /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}/move
+		MoveFinanceClassificationRule: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*MoveFinanceClassificationRuleParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*MoveFinanceClassificationRuleParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*MoveFinanceClassificationRuleParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceMoveFinanceClassificationRule(app),
+			},
+		),
+
 		// POST /api/v1/finance/tenants/{tenantId}/account-imports/preview
 		PreviewFinanceAccountCsvImport: newGenericHandlerBuilder(
 			app,
@@ -3480,6 +3942,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinanceStartFinanceConnectionRedirectLink(app),
+			},
+		),
+
+		// POST /api/v1/finance/tenants/{tenantId}/transactions/classify
+		SubmitFinanceTransactionClassification: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*SubmitFinanceTransactionClassificationParams,
+				*FinanceClassificationJobResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*SubmitFinanceTransactionClassificationParams,
+				*FinanceClassificationJobResponse,
+			](),
+			makeActionBuilderParams[
+				*SubmitFinanceTransactionClassificationParams,
+				*FinanceClassificationJobResponse,
+			]{
+				defaultStatus: 202,
+				paramsParser:  newParamsParserFinanceSubmitFinanceTransactionClassification(app),
 			},
 		),
 
@@ -3604,6 +4086,27 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 				defaultStatus: 204,
 				voidResult:    true,
 				paramsParser:  newParamsParserFinanceUpdateFinanceCategory(app),
+			},
+		),
+
+		// PUT /api/v1/finance/tenants/{tenantId}/classification-rules/{ruleId}
+		UpdateFinanceClassificationRule: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*UpdateFinanceClassificationRuleParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*UpdateFinanceClassificationRuleParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*UpdateFinanceClassificationRuleParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserFinanceUpdateFinanceClassificationRule(app),
 			},
 		),
 

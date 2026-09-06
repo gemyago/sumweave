@@ -28,6 +28,8 @@ type Finance struct {
 	FXRefreshScheduleService      *FXRefreshScheduleService
 	ProviderSnapshotService       *ProviderSnapshotService
 	TransferDetailService         *TransferDetailService
+	ClassificationRuleService     *ClassificationRuleService
+	ClassificationService         *ClassificationService
 }
 
 func New(cfg *Config) (*Finance, error) {
@@ -52,6 +54,7 @@ func New(cfg *Config) (*Finance, error) {
 		windowPersistence,
 		internalproviders.WithWindowSyncStoreIDGenerator(cfg.NewID),
 		internalproviders.WithWindowSyncStoreNow(cfg.Now),
+		internalproviders.WithBankSyncWindowCompletionPublisher(cfg.BankSyncWindowPublisher),
 	)
 	if err != nil { // coverage-ignore // Static production wireup always supplies persistence.
 		return nil, fmt.Errorf("create provider window sync store: %w", err)
@@ -123,8 +126,10 @@ func New(cfg *Config) (*Finance, error) {
 			WithFXRefreshScheduleServiceNow(cfg.Now),
 			WithFXRefreshScheduleServicePublisher(cfg.ScheduledCommandPublisher),
 		),
-		ProviderSnapshotService: NewProviderSnapshotService(providerSnapshotStore),
-		TransferDetailService:   NewTransferDetailService(transferCandidateStore),
+		ProviderSnapshotService:   NewProviderSnapshotService(providerSnapshotStore),
+		TransferDetailService:     NewTransferDetailService(transferCandidateStore),
+		ClassificationRuleService: services.ClassificationRuleService,
+		ClassificationService:     services.ClassificationService,
 	}, nil
 }
 

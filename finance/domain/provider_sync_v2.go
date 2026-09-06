@@ -30,6 +30,16 @@ type ProviderSyncWindow struct {
 	End   time.Time
 }
 
+// BankSyncWindowCompleted is the finance-owned fact that one requested bank
+// sync window and its checkpoint committed successfully.
+type BankSyncWindowCompleted struct {
+	TenantID            string
+	ConnectionID        string
+	RangeStart          time.Time
+	RangeEndExclusive   time.Time
+	SourceSyncMessageID string
+}
+
 type ProviderAccountObservation struct {
 	Connection        ProviderConnectionRef
 	ProviderAccountID string

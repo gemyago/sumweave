@@ -37,7 +37,7 @@ func TestCSVImport(t *testing.T) {
 		t.Helper()
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
-		catalog := NewCatalogService(store)
+		catalog := NewCatalogService(store, persistence.NewClassificationRuleStoreFromStore(store))
 		ledger := NewLedgerService(
 			store,
 			WithLedgerServiceTransactionStore(persistence.NewTransactionTagStore(database)),

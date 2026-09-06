@@ -18,6 +18,7 @@
   import FinanceTransactions from './pages/FinanceTransactions.svelte'
   import FinanceTransactionEditor from './pages/FinanceTransactionEditor.svelte'
   import FinanceCategories from './pages/FinanceCategories.svelte'
+  import FinanceRules from './pages/FinanceRules.svelte'
   import FinanceConnections from './pages/FinanceConnections.svelte'
   import FinanceSyntheticConnectionSetup from './pages/FinanceSyntheticConnectionSetup.svelte'
   import FinanceImports from './pages/FinanceImports.svelte'
@@ -85,6 +86,10 @@
     }),
     '/finance/categories': wrap({
       component: FinanceCategories,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/finance/rules': wrap({
+      component: FinanceRules,
       conditions: [() => authStore.isAuthenticated],
     }),
     '/finance/imports': wrap({

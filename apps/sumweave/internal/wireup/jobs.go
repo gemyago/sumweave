@@ -40,8 +40,10 @@ type SchedulerOptions struct {
 // WorkerRoot owns the message router, observed lifecycle store, and finance
 // command handlers. It deliberately exposes no HTTP or scheduler capability.
 type WorkerRoot struct {
-	Worker   *jobspkg.Worker
-	Registry *jobspkg.Registry
+	Worker                        *jobspkg.Worker
+	Registry                      *jobspkg.Registry
+	automaticClassificationRouter *appdispatch.Router
+	pollInterval                  time.Duration
 
 	shutdownHooks *lifecycle.ShutdownHooks
 }
@@ -226,6 +228,7 @@ func newProcessInfrastructure(
 	}, nil
 }
 
+//nolint:funlen // Worker composition intentionally stays centralized.
 func buildWorker(
 	ctx context.Context,
 	rootConfig config.WorkerRootConfig,
@@ -239,12 +242,12 @@ func buildWorker(
 	if err != nil {
 		return nil, err
 	}
-	var worker *jobspkg.Worker
+	var root *WorkerRoot
 	var publisher *appdispatch.Publisher
 	infrastructure.shutdownHooks.Register("worker-router-and-application-db", func(shutdownCtx context.Context) error {
 		var routerErr error
-		if worker != nil {
-			routerErr = worker.Stop(shutdownCtx)
+		if root != nil {
+			routerErr = root.Stop(shutdownCtx)
 		}
 		var publisherErr error
 		if publisher != nil {
@@ -288,7 +291,7 @@ func buildWorker(
 		return nil, fmt.Errorf("build worker router factory: %w", err)
 	}
 	registry := jobspkg.NewRegistry()
-	worker, err = jobspkg.NewWorker(jobspkg.WorkerDeps{
+	worker, err := jobspkg.NewWorker(jobspkg.WorkerDeps{
 		Store: store, Registry: registry, Logger: infrastructure.rootLogger,
 		Config: jobspkg.WorkerConfig{
 			PollInterval: rootConfig.Jobs.Worker.PollInterval, MaxAttempts: rootConfig.Jobs.Worker.MaxAttempts,
@@ -309,8 +312,9 @@ func buildWorker(
 		RootLogger: infrastructure.rootLogger, RetryAfterFallbackDelay: rootConfig.HTTPClient.RetryAfterFallbackDelay,
 		OtelHTTPTransportFactory: infrastructure.httpTransportFactory,
 	})
-	_, err = buildFinanceModule(financeModuleBuildDeps{
+	financeModule, err := buildFinanceModule(financeModuleBuildDeps{
 		Database:          financeDatabase,
+		CommandPublisher:  publisher,
 		Registry:          registry,
 		HTTPClientFactory: httpClientFactory,
 		Logger:            infrastructure.rootLogger,
@@ -319,7 +323,22 @@ func buildWorker(
 	if err != nil {
 		return nil, fmt.Errorf("build worker finance handlers: %w", err)
 	}
-	return &WorkerRoot{Worker: worker, Registry: registry, shutdownHooks: infrastructure.shutdownHooks}, nil
+	automaticRouter, err := routerFactory.NewRouter(financeapp.ClassificationConsumerGroup)
+	if err != nil {
+		return nil, fmt.Errorf("build automatic classification router: %w", err)
+	}
+	if err = financeapp.RegisterAutomaticClassificationHandler(
+		automaticRouter,
+		financeModule.ClassificationService,
+		infrastructure.rootLogger,
+	); err != nil {
+		return nil, fmt.Errorf("register automatic classification handler: %w", err)
+	}
+	root = &WorkerRoot{
+		Worker: worker, Registry: registry, automaticClassificationRouter: automaticRouter,
+		pollInterval: rootConfig.Jobs.Worker.PollInterval, shutdownHooks: infrastructure.shutdownHooks,
+	}
+	return root, nil
 }
 
 func buildScheduler(
@@ -408,6 +427,44 @@ func (root *SchedulerRoot) EnqueueDue(ctx context.Context) (int, error) {
 // Close releases resources registered while constructing this worker root.
 func (root *WorkerRoot) Close(ctx context.Context) error { // coverage-ignore
 	return root.shutdownHooks.PerformShutdown(context.WithoutCancel(ctx))
+}
+
+// Run serves observed jobs and automatic classification events independently.
+func (root *WorkerRoot) Run(ctx context.Context) error { // coverage-ignore
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errorsByRouter := make(chan error, 2)
+	go func() { errorsByRouter <- root.Worker.Run(runCtx) }()
+	go func() { errorsByRouter <- root.automaticClassificationRouter.Run(runCtx) }()
+	firstErr := <-errorsByRouter
+	cancel()
+	secondErr := <-errorsByRouter
+	return joinRouterRunErrors(firstErr, secondErr)
+}
+
+// RunOnce drains observed commands before automatic events so each produced
+// committed window is available to the second consumer pass.
+func (root *WorkerRoot) RunOnce(ctx context.Context) error { // coverage-ignore
+	if err := root.Worker.RunOnce(ctx); err != nil {
+		return err
+	}
+	return root.automaticClassificationRouter.RunOnce(ctx, root.pollInterval)
+}
+
+// Stop closes both consumer routers before their shared publisher and database.
+func (root *WorkerRoot) Stop(ctx context.Context) error { // coverage-ignore
+	return errors.Join(root.automaticClassificationRouter.Close(), root.Worker.Stop(ctx))
+}
+
+func joinRouterRunErrors(firstErr, secondErr error) error { // coverage-ignore
+	return errors.Join(normalizeRouterRunError(firstErr), normalizeRouterRunError(secondErr))
+}
+
+func normalizeRouterRunError(err error) error { // coverage-ignore
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	return err
 }
 
 // Close releases resources registered while constructing this scheduler root.

@@ -63,6 +63,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		t.Helper()
 		persistence := NewMockWindowSyncPersistence(t)
 		applyStore := NewMockWindowSyncApplyStore(t)
+		applyStore.EXPECT().SQLTransaction().Return(nil, nil).Maybe()
 
 		persistence.EXPECT().
 			ListConnectionProviderAccounts(mock.Anything, mock.Anything).
@@ -1403,6 +1404,65 @@ func TestProviderWindowSyncStore(t *testing.T) {
 			fixture.savedSyncStates[0].AggregateStats,
 		)
 		assert.Equal(t, "appendSyncState", fixture.operationOrder[len(fixture.operationOrder)-1])
+	})
+
+	t.Run("publishes each successful requested window using the apply transaction", func(t *testing.T) {
+		fake := faker.New()
+		connection := makeRandomProviderConnectionRef(
+			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
+		)
+		state := domain.ProviderSyncState{
+			Connection: connection, Window: makeRandomProviderSyncWindow(fake),
+			JobID: "job-" + fake.UUID().V4(),
+		}
+		fixture := &persistenceFixture{}
+		persistence := makePersistence(t, fixture)
+		publisher := NewMockBankSyncWindowCompletionPublisher(t)
+		publisher.EXPECT().PublishBankSyncWindowCompleted(
+			mock.Anything,
+			mock.Anything,
+			domain.BankSyncWindowCompleted{
+				TenantID: "tenant-" + connection.ConnectionID, ConnectionID: connection.ConnectionID,
+				RangeStart: state.Window.Start, RangeEndExclusive: state.Window.End,
+				SourceSyncMessageID: state.JobID,
+			},
+		).Return(nil).Once()
+		store, err := NewProviderWindowSyncStore(
+			persistence,
+			WithBankSyncWindowCompletionPublisher(publisher),
+		)
+		require.NoError(t, err)
+
+		_, err = store.ApplySync(t.Context(), ProviderDiffPlan{
+			Connection: connection, SnapshotWindow: state.Window,
+		}, ApplyPlan{}, state)
+		require.NoError(t, err)
+	})
+
+	t.Run("does not publish when loading or checkpointing the requested window fails", func(t *testing.T) {
+		fake := faker.New()
+		connection := makeRandomProviderConnectionRef(
+			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
+		)
+		state := domain.ProviderSyncState{
+			Connection: connection, Window: makeRandomProviderSyncWindow(fake), JobID: "job-" + fake.UUID().V4(),
+		}
+		for _, fixture := range []*persistenceFixture{
+			{listAccountsErr: errors.New("load-" + fake.UUID().V4())},
+			{appendSyncStateErr: errors.New("checkpoint-" + fake.UUID().V4())},
+		} {
+			persistence := makePersistence(t, fixture)
+			publisher := NewMockBankSyncWindowCompletionPublisher(t)
+			store, err := NewProviderWindowSyncStore(
+				persistence,
+				WithBankSyncWindowCompletionPublisher(publisher),
+			)
+			require.NoError(t, err)
+			_, err = store.ApplySync(t.Context(), ProviderDiffPlan{
+				Connection: connection, SnapshotWindow: state.Window,
+			}, ApplyPlan{}, state)
+			require.Error(t, err)
+		}
 	})
 
 	t.Run("returns journal failures after applying window writes", func(t *testing.T) {

@@ -78,6 +78,20 @@ func MakeHandler[EventType Event](
 	if run == nil {
 		return appdispatch.Handler{}, errors.New("event handler run func is required")
 	}
+	return MakeMessageHandler(example, func(ctx context.Context, _ appdispatch.Message, event EventType) error {
+		return run(ctx, event)
+	})
+}
+
+// MakeMessageHandler creates a raw transport handler that also exposes the
+// delivery metadata needed by consumers for idempotency and diagnostics.
+func MakeMessageHandler[EventType Event](
+	example EventType,
+	run func(context.Context, appdispatch.Message, EventType) error,
+) (appdispatch.Handler, error) {
+	if run == nil {
+		return appdispatch.Handler{}, errors.New("event handler run func is required")
+	}
 	topic := example.Topic()
 	if topic == "" {
 		return appdispatch.Handler{}, errors.New("domain event topic is required")
@@ -87,8 +101,24 @@ func MakeHandler[EventType Event](
 		if err := json.Unmarshal(message.Payload, &event); err != nil {
 			return fmt.Errorf("decode domain event on topic %s: %w", topic, err)
 		}
-		return run(ctx, event)
+		return run(ctx, message, event)
 	})
+}
+
+// RegisterMessageHandler binds one typed event handler with delivery metadata.
+func RegisterMessageHandler[EventType Event](
+	router *appdispatch.Router,
+	example EventType,
+	run func(context.Context, appdispatch.Message, EventType) error,
+) error {
+	if router == nil {
+		return errors.New("event router is required")
+	}
+	handler, err := MakeMessageHandler(example, run)
+	if err != nil {
+		return err
+	}
+	return router.Handle(handler)
 }
 
 // RegisterHandler binds one typed event handler to a named appdispatch router.

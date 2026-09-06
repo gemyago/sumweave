@@ -36,6 +36,8 @@ packages:
       providerSnapshotService:
       transferDetailService:
       syntheticLinkStateService:
+      classificationRuleService:
+      classificationService:
       jobsService:
       userDirectory:
   github.com/gemyago/sumweave/apps/sumweave/internal/app:
@@ -49,6 +51,14 @@ packages:
       fxRefreshJobService:
       csvImportJobService:
       bankSyncJobService:
+      classificationJobService:
+  github.com/gemyago/sumweave/finance:
+    interfaces:
+      BankSyncWindowCompletionPublisher:
+        config:
+          dir: internal/financeapp/
+          pkgname: financeapp
+          filename: mock_bank_sync_window_completion_publisher_test.go
   github.com/ThreeDotsLabs/watermill/message:
     interfaces:
       Subscriber:

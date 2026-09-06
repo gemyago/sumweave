@@ -2,6 +2,8 @@ package persistence
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -157,6 +159,16 @@ var _ providers.WindowSyncApplyStore = (*providerWindowSyncApplyStore)(nil)
 
 type providerWindowSyncApplyStore struct {
 	*Store
+}
+
+func (s *providerWindowSyncApplyStore) SQLTransaction() (*sql.Tx, error) {
+	if tx, ok := s.Store.db.Statement.ConnPool.(*sql.Tx); ok && tx != nil {
+		return tx, nil
+	}
+	if tx, ok := s.Store.db.ConnPool.(*sql.Tx); ok && tx != nil {
+		return tx, nil
+	}
+	return nil, errors.New("provider window apply SQL transaction is required")
 }
 
 func (s *providerWindowSyncApplyStore) AppendSyncState(

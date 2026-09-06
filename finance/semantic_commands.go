@@ -12,8 +12,12 @@ const (
 	AccountCSVImportCommandTopic     = "finance.csv-import.accounts.v1"
 	BankConnectionSyncCommandTopic   = "finance.bank-connection-sync.v1"
 	FXRatesRefreshCommandTopic       = "finance.fx-rates-refresh.v1"
-	CommandRequesterSourceOperator   = "operator"
-	CommandRequesterSourceSystem     = "system"
+
+	ClassificationExplicitCommandTopic = "finance.classification.explicit.v1"
+
+	CommandRequesterSourceOperator = "operator"
+
+	CommandRequesterSourceSystem = "system"
 )
 
 // SemanticCommandPublisher publishes finance-owned commands without coupling
@@ -64,6 +68,15 @@ type BankConnectionSyncCommand struct {
 type FXRatesRefreshCommand struct {
 	Provider  string           `json:"provider"`
 	Requester CommandRequester `json:"requester"`
+}
+
+// ClassificationExplicitCommand is the safe observed-work input for one
+// explicitly requested transaction classification range.
+type ClassificationExplicitCommand struct {
+	TenantID          string           `json:"tenantId"`
+	RangeStart        time.Time        `json:"rangeStart"`
+	RangeEndExclusive time.Time        `json:"rangeEndExclusive"`
+	Requester         CommandRequester `json:"requester"`
 }
 
 func newSemanticCommand(topic string, payload any, idempotencyKey string) (SemanticCommand, error) {

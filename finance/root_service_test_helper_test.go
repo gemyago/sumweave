@@ -10,6 +10,7 @@ import (
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/mock"
 )
 
 type serviceStore interface {
@@ -125,7 +126,19 @@ func (s *Service) bindServices() {
 	}
 	s.access = newAccessGuard(s.store)
 	s.tenants = NewTenantService(s.store, WithTenantServiceNow(s.now), WithTenantServiceIDGenerator(s.newID))
-	s.catalog = NewCatalogService(s.store, WithCatalogServiceNow(s.now), WithCatalogServiceIDGenerator(s.newID))
+	ruleReferences := &mockcategoryRuleReferenceFinder{}
+	ruleReferences.On(
+		"ListClassificationRuleIDsReferencingCategory",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return([]string(nil), nil).Maybe()
+	s.catalog = NewCatalogService(
+		s.store,
+		ruleReferences,
+		WithCatalogServiceNow(s.now),
+		WithCatalogServiceIDGenerator(s.newID),
+	)
 	s.ledger = NewLedgerService(s.store, WithLedgerServiceNow(s.now), WithLedgerServiceIDGenerator(s.newID))
 	s.reporting = NewReportingService(
 		s.store,

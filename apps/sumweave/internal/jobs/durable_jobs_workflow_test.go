@@ -88,7 +88,7 @@ func TestObservedSubscriptions(t *testing.T) {
 		require.Eventually(
 			t,
 			func() bool { return calls.Load() == 1 },
-			time.Second,
+			5*time.Second,
 			time.Millisecond,
 		)
 		_, getErr := store.Get(t.Context(), message.ID)

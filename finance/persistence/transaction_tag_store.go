@@ -160,9 +160,9 @@ func saveTransactionModel(db *gorm.DB, model transactionModel) error {
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			columnTenantID, "account_id", "source", "status", "kind", "amount_minor", columnCurrency,
-			"description", columnEffectiveAt, "category_id", "transfer_group_id", "transfer_matched_at",
+			"description", columnEffectiveAt, columnCategoryID, "transfer_group_id", "transfer_matched_at",
 			"hidden_at", "original_amount_minor", "original_currency", "original_description",
-			"original_effective_at", "updated_at",
+			"original_effective_at", columnUpdatedAt,
 		}),
 	}).Create(&model).Error
 }

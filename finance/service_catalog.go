@@ -29,12 +29,21 @@ type catalogServiceStore interface {
 	ListTags(ctx context.Context, tenantID string, includeHidden bool) ([]domain.Tag, error)
 }
 
+type categoryRuleReferenceFinder interface {
+	ListClassificationRuleIDsReferencingCategory(
+		ctx context.Context,
+		tenantID string,
+		categoryID string,
+	) ([]string, error)
+}
+
 type CatalogService struct {
-	store        catalogServiceStore
-	balanceStore accountBalanceReadStore
-	access       *accessGuard
-	now          func() time.Time
-	newID        func() string
+	store          catalogServiceStore
+	balanceStore   accountBalanceReadStore
+	access         *accessGuard
+	now            func() time.Time
+	newID          func() string
+	ruleReferences categoryRuleReferenceFinder
 }
 
 type CatalogServiceOption func(*CatalogService)
@@ -57,12 +66,20 @@ func WithCatalogServiceIDGenerator(newID func() string) CatalogServiceOption {
 	}
 }
 
-func NewCatalogService(store catalogServiceStore, opts ...CatalogServiceOption) *CatalogService {
+func NewCatalogService(
+	store catalogServiceStore,
+	ruleReferences categoryRuleReferenceFinder,
+	opts ...CatalogServiceOption,
+) *CatalogService {
+	if ruleReferences == nil {
+		panic("catalog classification rule reference guard is required")
+	}
 	service := &CatalogService{
-		store:  store,
-		access: newAccessGuard(store),
-		now:    time.Now,
-		newID:  uuid.NewString,
+		store:          store,
+		access:         newAccessGuard(store),
+		now:            time.Now,
+		newID:          uuid.NewString,
+		ruleReferences: ruleReferences,
 	}
 	for _, opt := range opts {
 		opt(service)
@@ -336,6 +353,17 @@ func (s *CatalogService) HideCategory(ctx context.Context, params HideCategoryPa
 	category, err := s.requireTenantCategory(ctx, params.TenantID, params.ActorUserID, params.CategoryID)
 	if err != nil {
 		return err
+	}
+	ruleIDs, err := s.ruleReferences.ListClassificationRuleIDsReferencingCategory(
+		ctx,
+		category.TenantID,
+		category.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("check category classification rule references: %w", err)
+	}
+	if len(ruleIDs) > 0 {
+		return &CategoryReferencedByClassificationRulesError{RuleIDs: ruleIDs}
 	}
 	now := s.now()
 	category.HiddenAt = &now

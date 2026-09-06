@@ -33,6 +33,7 @@ type WorkerDeps struct {
 	Clock         func() time.Time
 	Config        WorkerConfig
 	WorkerID      string
+	ConsumerGroup string
 	RouterFactory *appdispatch.RouterFactory
 }
 
@@ -69,7 +70,11 @@ func NewWorker(deps WorkerDeps) (*Worker, error) {
 	if deps.WorkerID == "" {
 		deps.WorkerID = "jobs-worker"
 	}
-	router, err := deps.RouterFactory.NewRouter(jobConsumerGroup)
+	consumerGroup := deps.ConsumerGroup
+	if consumerGroup == "" {
+		consumerGroup = jobConsumerGroup
+	}
+	router, err := deps.RouterFactory.NewRouter(consumerGroup)
 	if err != nil {
 		return nil, fmt.Errorf("create jobs router: %w", err)
 	}

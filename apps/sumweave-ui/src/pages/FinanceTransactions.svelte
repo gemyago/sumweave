@@ -10,6 +10,7 @@
     type FinanceTransaction,
   } from '../lib/finance/api'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
+  import { subscribeToFinanceLedgerRefresh } from '../lib/finance/ledger-refresh'
   import FinancePager from '../components/FinancePager.svelte'
   import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
 
@@ -49,6 +50,11 @@
 
   onMount(() => {
     void loadPage()
+    return subscribeToFinanceLedgerRefresh((tenantId) => {
+      if (financeShell.selectedTenantId !== tenantId) return
+      transactionOffset = 0
+      void loadTenantData(0)
+    })
   })
 
   async function loadPage() {

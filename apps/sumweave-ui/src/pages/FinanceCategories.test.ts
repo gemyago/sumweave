@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceCategories from './FinanceCategories.svelte'
+import { CategoryReferencedByClassificationRulesError } from '../lib/finance/api'
 
-const mocks = vi.hoisted(() => ({ listTenants: vi.fn(), listCategories: vi.fn(), listTags: vi.fn(), createCategory: vi.fn(), createTag: vi.fn(), updateCategory: vi.fn(), renameTag: vi.fn() }))
+const mocks = vi.hoisted(() => ({ listTenants: vi.fn(), listCategories: vi.fn(), listTags: vi.fn(), createCategory: vi.fn(), createTag: vi.fn(), updateCategory: vi.fn(), renameTag: vi.fn(), deleteCategory: vi.fn() }))
 vi.mock('../lib/finance/api', async (importOriginal) => ({ ...(await importOriginal<typeof import('../lib/finance/api')>()), createSignalFinanceApiForAuth: vi.fn(() => ({ ...mocks })) }))
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
 
@@ -15,6 +16,7 @@ describe('Finance categories page', () => {
     mocks.listTags.mockResolvedValue([{ id: 'tag-1', tenantId: 'tenant-1', name: 'Budget', hiddenAt: null, createdAt: now, updatedAt: now }])
     mocks.createCategory.mockResolvedValue({})
     mocks.createTag.mockResolvedValue({})
+    mocks.deleteCategory.mockResolvedValue(undefined)
   })
 
   it('renders independent category and tag stacks with category context', async () => {
@@ -195,5 +197,29 @@ describe('Finance categories page', () => {
     mocks.listTenants.mockRejectedValueOnce(new Error('categories exploded'))
     render(FinanceCategories)
     expect(await screen.findByRole('alert')).toHaveTextContent('categories exploded')
+  })
+
+  it('removes an unreferenced category after explicit confirmation and refreshes the active list', async () => {
+    const user = userEvent.setup()
+    render(FinanceCategories)
+    await user.click(await screen.findByRole('button', { name: 'Remove Groceries' }))
+    expect(screen.getByLabelText('Confirm removal of Groceries')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Confirm remove' }))
+    await waitFor(() => expect(mocks.deleteCategory).toHaveBeenCalledWith({ tenantId: 'tenant-1', categoryId: 'cat-1' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Groceries was removed from active category choices.')
+    expect(mocks.listCategories).toHaveBeenLastCalledWith({ tenantId: 'tenant-1' })
+  })
+
+  it('keeps a referenced category visible and links to its filtered rules after a conflict', async () => {
+    const user = userEvent.setup()
+    mocks.deleteCategory.mockRejectedValueOnce(new CategoryReferencedByClassificationRulesError({ ruleIds: ['rule-1', 'rule-2'] }))
+    render(FinanceCategories)
+    await user.click(await screen.findByRole('button', { name: 'Remove Groceries' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm remove' }))
+    const conflict = await screen.findByRole('alert')
+    expect(conflict).toHaveTextContent('Retarget or delete the referenced rules')
+    expect(conflict).toHaveTextContent('rule-1, rule-2')
+    expect(screen.getByText('Groceries')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View referenced rules' })).toHaveAttribute('href', '#/finance/rules?categoryId=cat-1')
   })
 })

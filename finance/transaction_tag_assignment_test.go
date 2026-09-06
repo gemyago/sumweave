@@ -17,7 +17,7 @@ func TestLedgerServiceTransactionTagAssignments(t *testing.T) {
 		database := openTestDatabase(t)
 		store := persistence.NewStore(database)
 		tenantService := NewTenantService(store)
-		catalogService := NewCatalogService(store)
+		catalogService := NewCatalogService(store, persistence.NewClassificationRuleStoreFromStore(store))
 		ledgerService := NewLedgerService(
 			store,
 			WithLedgerServiceAccountBalanceStore(persistence.NewAccountBalanceStore(database)),
