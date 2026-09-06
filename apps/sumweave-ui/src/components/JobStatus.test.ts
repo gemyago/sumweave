@@ -82,6 +82,17 @@ describe('JobStatus', () => {
     expect(screen.getByText('Completed.')).toBeInTheDocument()
   })
 
+  it('notifies its owner once when a job reaches a terminal state', async () => {
+    const onTerminal = vi.fn()
+    mocks.getJob.mockResolvedValue(job('succeeded'))
+
+    render(JobStatus, { jobId: 'job-1', openHref: '/finance/jobs/job-1', onTerminal })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(onTerminal).toHaveBeenCalledTimes(1)
+    expect(onTerminal).toHaveBeenCalledWith(expect.objectContaining({ id: 'job-1', status: 'succeeded' }))
+  })
+
   it('shows an arbitrary 404 as a recoverable error', async () => {
     const { JobsApiError } = await import('../lib/jobs/api')
     mocks.getJob.mockRejectedValue(new JobsApiError({ status: 404, method: 'GET', path: '/jobs/job-404', message: 'Not Found' }))

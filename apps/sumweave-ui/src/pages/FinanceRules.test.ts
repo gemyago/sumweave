@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceRules from './FinanceRules.svelte'
 
@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(), listCategories: vi.fn(), listClassificationRules: vi.fn(),
   createClassificationRule: vi.fn(), updateClassificationRule: vi.fn(),
   deleteClassificationRule: vi.fn(), moveClassificationRule: vi.fn(),
+  submitTransactionClassification: vi.fn(),
+  getJob: vi.fn(), requestFinanceLedgerRefresh: vi.fn(),
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => ({
@@ -14,6 +16,11 @@ vi.mock('../lib/finance/api', async (importOriginal) => ({
   createSignalFinanceApiForAuth: vi.fn(() => ({ ...mocks })),
 }))
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
+vi.mock('../lib/jobs/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/jobs/api')>()),
+  createSignalJobsApiForAuth: vi.fn(() => ({ getJob: mocks.getJob })),
+}))
+vi.mock('../lib/finance/ledger-refresh', () => ({ requestFinanceLedgerRefresh: mocks.requestFinanceLedgerRefresh }))
 
 describe('Finance rules page', () => {
   beforeEach(() => {
@@ -34,6 +41,8 @@ describe('Finance rules page', () => {
     mocks.updateClassificationRule.mockResolvedValue(undefined)
     mocks.deleteClassificationRule.mockResolvedValue(undefined)
     mocks.moveClassificationRule.mockResolvedValue(undefined)
+    mocks.submitTransactionClassification.mockResolvedValue({ jobId: 'classification-job-1' })
+    mocks.getJob.mockResolvedValue({ id: 'classification-job-1', status: 'queued', jobType: 'finance.classification' })
   })
 
   it('shows ordered rules with category names and edge-aware move controls', async () => {
@@ -127,5 +136,65 @@ describe('Finance rules page', () => {
     expect(await screen.findByText('Showing rules that reference this category.')).toBeInTheDocument()
     expect(mocks.listClassificationRules).toHaveBeenCalledWith({ tenantId: 'tenant-1', categoryId: 'category-1' })
     expect(screen.getByRole('link', { name: 'Clear filter' })).toHaveAttribute('href', '#/finance/rules')
+  })
+
+  it('shows the local thirty-date default and submits an inclusive range as explicit classification', async () => {
+    vi.setSystemTime(new Date(2026, 5, 20, 12))
+    const user = userEvent.setup()
+    render(FinanceRules)
+
+    expect(await screen.findByLabelText('Classification start date')).toHaveValue('2026-05-22')
+    expect(screen.getByLabelText('Classification end date')).toHaveValue('2026-06-20')
+    await user.click(screen.getByRole('button', { name: 'Run classification' }))
+
+    await waitFor(() => expect(mocks.submitTransactionClassification).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      rangeStart: expect.stringMatching(/^2026-05-22T00:00:00[+-]\d{2}:\d{2}$/),
+      rangeEndExclusive: expect.stringMatching(/^2026-06-21T00:00:00[+-]\d{2}:\d{2}$/),
+    }))
+    expect(screen.getByRole('link', { name: 'Open finance job' })).toHaveAttribute('href', '#/finance/jobs/classification-job-1')
+  })
+
+  it('keeps an invalid date range local and recoverable without publication', async () => {
+    const user = userEvent.setup()
+    render(FinanceRules)
+    const start = await screen.findByLabelText('Classification start date')
+    const end = screen.getByLabelText('Classification end date')
+
+    await fireEvent.input(start, { target: { value: '2026-06-21' } })
+    await fireEvent.input(end, { target: { value: '2026-06-20' } })
+    await user.click(screen.getByRole('button', { name: 'Run classification' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Start date must be on or before end date.')
+    expect(mocks.submitTransactionClassification).not.toHaveBeenCalled()
+  })
+
+  it('keeps failure feedback and retry submission available when partial classification may have committed', async () => {
+    const user = userEvent.setup()
+    mocks.getJob.mockResolvedValue({
+      id: 'classification-job-1', status: 'failed', jobType: 'finance.classification', error: { summary: 'A rule category was removed.' },
+    })
+    mocks.submitTransactionClassification
+      .mockResolvedValueOnce({ jobId: 'classification-job-1' })
+      .mockResolvedValueOnce({ jobId: 'classification-job-2' })
+    render(FinanceRules)
+    await screen.findByRole('button', { name: 'Run classification' })
+
+    await user.click(screen.getByRole('button', { name: 'Run classification' }))
+    expect(await screen.findByText(/Some transactions may already have been classified/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Run classification again' }))
+    await waitFor(() => expect(mocks.submitTransactionClassification).toHaveBeenCalledTimes(2))
+  })
+
+  it('signals a ledger refresh after the initiating job succeeds', async () => {
+    const user = userEvent.setup()
+    mocks.getJob.mockResolvedValue({ id: 'classification-job-1', status: 'succeeded', jobType: 'finance.classification' })
+    render(FinanceRules)
+    await screen.findByRole('button', { name: 'Run classification' })
+
+    await user.click(screen.getByRole('button', { name: 'Run classification' }))
+
+    expect(await screen.findByText('Classification completed. Ledger data has been refreshed.')).toBeInTheDocument()
+    expect(mocks.requestFinanceLedgerRefresh).toHaveBeenCalledWith('tenant-1')
   })
 })

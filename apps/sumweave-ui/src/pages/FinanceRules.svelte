@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { link, router } from 'svelte-spa-router'
   import DocumentTitle from '../components/DocumentTitle.svelte'
+  import JobStatus from '../components/JobStatus.svelte'
   import { documentTitle } from '../lib/document-title'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -11,6 +12,9 @@
     type FinanceClassificationRule,
   } from '../lib/finance/api'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
+  import { classificationRangeFromDateInputs, defaultClassificationDateRange } from '../lib/finance/classification-range'
+  import { requestFinanceLedgerRefresh } from '../lib/finance/ledger-refresh'
+  import type { JobDetail } from '../lib/jobs/api'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
@@ -27,6 +31,13 @@
   let categoryId = $state('')
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+  const defaultClassificationRange = defaultClassificationDateRange()
+  let classificationStartDate = $state(defaultClassificationRange.startDate)
+  let classificationEndDate = $state(defaultClassificationRange.endDate)
+  let classificationBusy = $state(false)
+  let classificationError = $state<string | null>(null)
+  let classificationOutcome = $state<string | null>(null)
+  let classificationJobId = $state('')
 
   const categoryFilter = $derived.by(() => {
     void router.location
@@ -140,6 +151,39 @@
     }
   }
 
+  async function submitClassification(event: SubmitEvent) {
+    event.preventDefault()
+    if (!financeShell.selectedTenantId || classificationBusy) return
+
+    classificationError = null
+    classificationOutcome = null
+    try {
+      const range = classificationRangeFromDateInputs(classificationStartDate, classificationEndDate)
+      classificationBusy = true
+      const result = await financeApi.submitTransactionClassification({
+        tenantId: financeShell.selectedTenantId,
+        rangeStart: range.rangeStart,
+        rangeEndExclusive: range.rangeEndExclusive,
+      })
+      classificationJobId = result.jobId
+    } catch (submitError) {
+      classificationError = submitError instanceof Error ? submitError.message : 'Could not start classification.'
+    } finally {
+      classificationBusy = false
+    }
+  }
+
+  function handleClassificationTerminal(job: JobDetail) {
+    if (job.status === 'succeeded') {
+      classificationOutcome = 'Classification completed. Ledger data has been refreshed.'
+      requestFinanceLedgerRefresh(financeShell.selectedTenantId)
+      return
+    }
+    if (job.status === 'failed') {
+      classificationOutcome = 'Classification failed. Some transactions may already have been classified; running it again is safe.'
+    }
+  }
+
   $effect(() => {
     if (financeShell.loading || !reactiveReady) return
     void financeShell.selectedTenantId
@@ -182,6 +226,23 @@
           <a href="/finance/rules" use:link>Clear filter</a>
         </div>
       {/if}
+
+      <form class="card shadow-sm" onsubmit={submitClassification} aria-labelledby="finance-classification-run-heading">
+        <div class="card-body p-4 d-grid gap-3">
+          <div>
+            <h2 id="finance-classification-run-heading" class="h5 mb-1">Run classification</h2>
+            <p class="text-body-secondary mb-0">Classify eligible uncategorized transactions from the selected inclusive local dates.</p>
+          </div>
+          <div class="row g-3">
+            <div class="col-12 col-md-6"><label class="form-label" for="finance-classification-start-date">Classification start date</label><input id="finance-classification-start-date" class="form-control" type="date" bind:value={classificationStartDate} disabled={classificationBusy} required /></div>
+            <div class="col-12 col-md-6"><label class="form-label" for="finance-classification-end-date">Classification end date</label><input id="finance-classification-end-date" class="form-control" type="date" bind:value={classificationEndDate} disabled={classificationBusy} required /></div>
+          </div>
+          <div class="d-flex flex-wrap gap-2"><button class="btn btn-primary" type="submit" disabled={classificationBusy}>{classificationBusy ? 'Starting classification…' : classificationJobId ? 'Run classification again' : 'Run classification'}</button></div>
+          {#if classificationError}<div class="alert alert-danger mb-0" role="alert">{classificationError}</div>{/if}
+          {#if classificationOutcome}<div class={`alert ${classificationOutcome.startsWith('Classification completed') ? 'alert-success' : 'alert-warning'} mb-0`} role="status">{classificationOutcome}</div>{/if}
+          {#if classificationJobId}<JobStatus jobId={classificationJobId} openHref={`/finance/jobs/${encodeURIComponent(classificationJobId)}`} label="Classification" linkLabel="Open finance job" observedDispatch onTerminal={handleClassificationTerminal} />{/if}
+        </div>
+      </form>
 
       {#if creating || editingId}
         <form class="card shadow-sm" onsubmit={saveRule}>

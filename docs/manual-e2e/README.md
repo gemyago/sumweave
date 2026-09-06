@@ -11,8 +11,8 @@ Manual guides:
 - [finance-ui-shell-smoke-e2e.md](./finance-ui-shell-smoke-e2e.md) — smoke canonical Bootstrap login, default Finance landing, Finance shell/dashboard and route groups, responsive behavior, and a quick non-finance regression path.
 - [bank-linking-e2e.md](./bank-linking-e2e.md) — bank-linking API e2e guide.
 - [enable-banking-mock-aspsp-ui-e2e.md](./enable-banking-mock-aspsp-ui-e2e.md) — headed-browser PKO linking through Enable Banking Mock ASPSP, including mock accounts, transactions, authorization, and sync.
-- [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) — isolated synthetic redirect linking, stable pending-account keys, API-only sync publication, expected `404`, bounded worker, terminal job, and provider transaction assertions.
-- [synthetic-provider-ui-e2e.md](./synthetic-provider-ui-e2e.md) — sign in to the UI, start synthetic setup from Finance connections, save duplicate configured accounts, reload pending state, finish the link, and confirm the new connection card appears.
+- [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) — isolated synthetic redirect linking, deterministic automatic and explicit classification fixtures, expected initiating `404`s, bounded delivery, and category-preservation assertions.
+- [synthetic-provider-ui-e2e.md](./synthetic-provider-ui-e2e.md) — sign in to the UI, configure a synthetic connection, and verify explicit classification range, job feedback, and ledger refresh behavior.
 - [finance-scheduled-sync-lifecycle-e2e.md](./finance-scheduled-sync-lifecycle-e2e.md) — isolated scheduled bank/FX publication with local Monobank and static FX fixtures, due-state checks, expected `404`s, bounded worker-once, terminal jobs, and repeat no-op assertions.
 
 For job-observation checks, stop the normal PM2 worker and use an API-only
@@ -65,7 +65,7 @@ and backend CLI commands from `apps/sumweave`.
 
 The API-only gate guides deliberately replace the repo-scoped Compose volume,
 then use the freshly prepared local PostgreSQL database and write non-database
-evidence below `tmp/jobs-system-simplification-028-e2e/`. Do not run one while
+evidence below `tmp/classification-phase0-033-e2e/`. Do not run one while
 another developer needs the local database. Each guide starts an API-only process
 before its bounded worker step. The FX guides set
 `APP_FINANCE_PROVIDERS_FRANKFURTER_BASEURL` to a local static

@@ -5,11 +5,13 @@
   import { createSignalJobsApiForAuth, JobsApiError, type JobDetail } from '../lib/jobs/api'
   import { rememberObservedDispatch } from '../lib/jobs/observed-dispatch'
 
-  let { jobId, openHref, label = 'Job', observedDispatch = false } = $props<{
+  let { jobId, openHref, label = 'Job', linkLabel = 'Open job', observedDispatch = false, onTerminal } = $props<{
     jobId: string
     openHref: string
     label?: string
+    linkLabel?: string
     observedDispatch?: boolean
+    onTerminal?: (job: JobDetail) => void
   }>()
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
@@ -23,12 +25,14 @@
   let error = $state<string | null>(null)
   let requestToken = 0
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
+  let terminalNotifiedForJobId = ''
 
   $effect(() => {
     const activeJobId = jobId
     job = null
     error = null
     waitingForMaterialization = false
+    terminalNotifiedForJobId = ''
     clearRefreshTimer()
     if (activeJobId) {
       if (observedDispatch) rememberObservedDispatch(activeJobId)
@@ -55,6 +59,9 @@
       job = loaded
       if (pollingStatuses.has(loaded.status)) {
         refreshTimer = setTimeout(() => void loadJob(activeJobId), pollingIntervalMs)
+      } else if (terminalNotifiedForJobId !== activeJobId) {
+        terminalNotifiedForJobId = activeJobId
+        onTerminal?.(loaded)
       }
     } catch (loadError) {
       if (token !== requestToken || activeJobId !== jobId) return
@@ -109,6 +116,6 @@
     {#if error}
       <button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => void loadJob(jobId)}>Retry status</button>
     {/if}
-    <a href={openHref} use:link>Open job</a>
+    <a href={openHref} use:link>{linkLabel}</a>
   </div>
 </div>

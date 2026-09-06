@@ -266,6 +266,9 @@
 - Each row provides **Move up**, **Move down**, **Edit**, and **Delete** actions. Move buttons are disabled only at the applicable first/last edge. All mutations keep the current route, expose pending/error states, and refetch the rule list after success.
 - Add/edit uses one local form with match type, editable condition, target-category select, explicit save, and cancel. Empty, loading, tenant-selection, and recoverable error states remain bounded to the page.
 - A `?categoryId=` link from Categories filters the list to rules referencing that category and presents a clear-filter link. The Rules rail destination, active state, tenant resolution, breadcrumb, and document title are shell/route owned like the other tenant-scoped Finance pages.
+- **Run classification** is a separate Bootstrap panel above the ordered list. It uses native `date` controls, initially shows today and the preceding 29 local calendar dates, exposes both inclusive dates before submission, accepts wider history, and blocks a start date after the end date without publishing a request.
+- Submission converts the displayed inclusive dates to local start-of-day and the next local calendar day's start-of-day, using calendar arithmetic rather than duration arithmetic. The request carries full RFC3339 timestamps with the boundary offsets, including when the range crosses daylight-saving time.
+- After submission, the panel retains its selected dates and dispatch ID. Its local job status treats a pre-materialization `404` as pending only for this just-submitted ID, then shows queued, running, succeeded, or failed feedback and retains a **Open finance job** link. Success signals a ledger refresh; failure warns that some category assignments may already have committed and keeps **Run classification again** available.
 
 **Connections (`/finance/connections`)**
 

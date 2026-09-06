@@ -313,6 +313,10 @@ export interface FinanceJobRef {
   provider?: string
 }
 
+export interface FinanceClassificationJob {
+  jobId: string
+}
+
 export interface FinanceConnectionRedirectStart {
   provider: string
   authorizationUrl: string
@@ -359,6 +363,7 @@ export interface SignalFinanceApi {
   updateClassificationRule(params: { tenantId: string; ruleId: string; matchType: FinanceClassificationMatchType; condition: string; categoryId: string }): Promise<void>
   deleteClassificationRule(params: { tenantId: string; ruleId: string }): Promise<void>
   moveClassificationRule(params: { tenantId: string; ruleId: string; direction: 'up' | 'down' }): Promise<void>
+  submitTransactionClassification(params: { tenantId: string; rangeStart: string; rangeEndExclusive: string }): Promise<FinanceClassificationJob>
   listTags(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceTag[]>
   createTag(params: { tenantId: string; name: string }): Promise<FinanceTag>
   renameTag(params: { tenantId: string; tagId: string; name: string }): Promise<void>
@@ -673,6 +678,13 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
     async moveClassificationRule({ tenantId, ruleId, direction }) {
       await request<void>({ method: 'POST', path: `/finance/tenants/${encodeURIComponent(tenantId)}/classification-rules/${encodeURIComponent(ruleId)}/move`, body: { direction } })
     },
+    async submitTransactionClassification({ tenantId, rangeStart, rangeEndExclusive }) {
+      return mapClassificationJob(await request<RawClassificationJob>({
+        method: 'POST',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/classify`,
+        body: { rangeStart, rangeEndExclusive },
+      }))
+    },
     async listTags({ tenantId, includeHidden }) {
       const json = await request<{ items?: RawTag[] }>({
         method: 'GET',
@@ -959,6 +971,7 @@ interface RawCategory { id: string; tenantId: string; name: string; kind: string
 interface RawTag { id: string; tenantId: string; name: string; hiddenAt?: string | null; createdAt: string; updatedAt: string }
 interface RawClassificationRule { id: string; matchType: FinanceClassificationMatchType; condition: string; categoryId: string; position: number; createdAt: string; updatedAt: string }
 interface RawIdentifier { id: string }
+interface RawClassificationJob { jobId: string }
 interface RawTransactionProviderOriginal { amountMinor: number; currency: string; description: string; effectiveAt?: string | null }
 interface RawProviderSnapshotMetadata { id: string; kind: string; providerObjectId: string; capturedAt: string }
 interface RawProviderSnapshot extends RawProviderSnapshotMetadata { data?: Record<string, unknown> }
@@ -1032,6 +1045,10 @@ function mapClassificationRule(item: RawClassificationRule): FinanceClassificati
 function mapIdentifier(item: RawIdentifier, field: string): { id: string } {
   requireFields(item, field, ['id'])
   return { id: item.id }
+}
+function mapClassificationJob(item: RawClassificationJob): FinanceClassificationJob {
+  requireFields(item, 'finance.classificationJob', ['jobId'])
+  return { jobId: item.jobId }
 }
 function mapTransaction(item: RawTransaction): FinanceTransaction {
   requireFields(item, 'finance.transaction', ['id', 'tenantId', 'accountId', 'source', 'status', 'kind', 'amountMinor', 'currency', 'description', 'effectiveAt', 'tagIds', 'createdAt', 'updatedAt'])

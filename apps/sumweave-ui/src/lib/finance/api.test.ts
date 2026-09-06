@@ -827,6 +827,28 @@ describe('finance api', () => {
     expect(JSON.parse(String(calls[3].init?.body))).toEqual({ direction: 'up' })
   })
 
+  it('submits explicit classification with the displayed RFC3339 offset bounds', async () => {
+    let call: { input: RequestInfo | URL; init?: RequestInit } | undefined
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      call = { input, init }
+      return { ok: true, status: 202, statusText: 'Accepted', json: async () => ({ jobId: 'classification-job-1' }) } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await expect(api.submitTransactionClassification({
+      tenantId: 'tenant / 1',
+      rangeStart: '2026-03-07T00:00:00-05:00',
+      rangeEndExclusive: '2026-03-09T00:00:00-04:00',
+    })).resolves.toEqual({ jobId: 'classification-job-1' })
+
+    expect(new URL(String(call?.input)).pathname).toBe('/api/v1/finance/tenants/tenant%20%2F%201/transactions/classify')
+    expect(call?.init?.method).toBe('POST')
+    expect(JSON.parse(String(call?.init?.body))).toEqual({
+      rangeStart: '2026-03-07T00:00:00-05:00',
+      rangeEndExclusive: '2026-03-09T00:00:00-04:00',
+    })
+  })
+
   it('does not expose undocumented category-removal error bodies', async () => {
     const fetch = vi.fn(async () => ({
       ok: false,
