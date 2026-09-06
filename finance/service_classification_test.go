@@ -1,6 +1,7 @@
 package finance
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -127,7 +128,7 @@ func TestClassificationService(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidTimestampRange)
 	})
 
-	t.Run("uses one idempotency key when explicit publication is retried", func(t *testing.T) {
+	t.Run("creates a new publication identity for each explicit submission", func(t *testing.T) {
 		fake := faker.New()
 		access := newMockaccessGuardStore(t)
 		publisher := NewMockSemanticCommandPublisher(t)
@@ -138,15 +139,14 @@ func TestClassificationService(t *testing.T) {
 			RangeStart:        start,
 			RangeEndExclusive: start.Add(time.Hour),
 		}
-		expected := DispatchReference{MessageID: fake.UUID().V4()}
 		access.EXPECT().IsTenantMember(mock.Anything, params.TenantID, params.ActorUserID).Return(true, nil).Twice()
-		var idempotencyKey string
+		commands := make([]SemanticCommand, 0, 2)
 		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.MatchedBy(func(command SemanticCommand) bool {
-			if idempotencyKey == "" {
-				idempotencyKey = command.IdempotencyKey
-			}
-			return command.Topic == ClassificationExplicitCommandTopic && command.IdempotencyKey == idempotencyKey
-		})).Return(expected, nil).Twice()
+			return command.Topic == ClassificationExplicitCommandTopic
+		})).RunAndReturn(func(_ context.Context, command SemanticCommand) (DispatchReference, error) {
+			commands = append(commands, command)
+			return DispatchReference{MessageID: "message-" + fake.UUID().V4()}, nil
+		}).Twice()
 		service, err := NewClassificationService(ClassificationServiceArgs{
 			Access:       access,
 			Rules:        newMockclassificationRuleStore(t),
@@ -160,8 +160,11 @@ func TestClassificationService(t *testing.T) {
 		require.NoError(t, err)
 		second, err := service.Submit(t.Context(), params)
 		require.NoError(t, err)
-		assert.NotEmpty(t, idempotencyKey)
-		assert.Equal(t, first, second)
+		assert.NotEqual(t, first, second)
+		require.Len(t, commands, 2)
+		assert.NotEmpty(t, commands[0].IdempotencyKey)
+		assert.NotEqual(t, commands[0].IdempotencyKey, commands[1].IdempotencyKey)
+		assert.Equal(t, commands[0].Payload, commands[1].Payload)
 	})
 
 	t.Run("loads rules once, advances keyset batches, and counts committed assignments", func(t *testing.T) {
@@ -396,7 +399,75 @@ func TestClassificationService(t *testing.T) {
 		})
 	})
 
-	t.Run("reloads current rules on retry and leaves previously categorized rows excluded", func(t *testing.T) {
+	t.Run("classifies newly eligible same-range rows without overwriting earlier assignments", func(t *testing.T) {
+		fake := faker.New()
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
+		ruleStore := persistence.NewClassificationRuleStore(database)
+		transactionStore := persistence.NewClassificationTransactionStore(database)
+		now := time.Date(2026, time.September, 7, 11, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		tenantID := "tenant-" + fake.UUID().V4()
+		categoryID := "category-" + fake.UUID().V4()
+		condition := "merchant-" + fake.Lorem().Word()
+		_, err := store.SaveCategory(t.Context(), domain.Category{
+			ID: categoryID, TenantID: tenantID, Name: "category-" + fake.Lorem().Word(),
+			Kind: domain.CategoryKindExpense, CreatedAt: now, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+		_, err = ruleStore.AppendClassificationRule(t.Context(), domain.ClassificationRule{
+			ID: "rule-" + fake.UUID().V4(), TenantID: tenantID,
+			MatchType: domain.ClassificationMatchTypeExact, Condition: condition, CategoryID: categoryID,
+			CreatedAt: now, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+		makeTransaction := func() domain.Transaction {
+			return domain.Transaction{
+				ID: "transaction-" + fake.UUID().V4(), TenantID: tenantID, AccountID: "account-" + fake.UUID().V4(),
+				Source: domain.TransactionSourceManual, Status: domain.TransactionStatusBooked,
+				Kind: domain.TransactionKindExpense, AmountMinor: -1, Currency: "USD", Description: condition,
+				EffectiveAt: now, CreatedAt: now, UpdatedAt: now,
+			}
+		}
+		firstTransaction := makeTransaction()
+		_, err = store.SaveTransaction(t.Context(), firstTransaction)
+		require.NoError(t, err)
+		service, err := NewClassificationService(ClassificationServiceArgs{
+			Access: store, Rules: ruleStore, Transactions: transactionStore, Categories: store,
+			Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
+		})
+		require.NoError(t, err)
+		params := ClassificationParams{
+			TenantID: tenantID, RangeStart: now.Add(-time.Hour), RangeEndExclusive: now.Add(time.Hour),
+			MessageID: "message-" + fake.UUID().V4(),
+		}
+		firstCounts, err := service.Classify(t.Context(), params)
+		require.NoError(t, err)
+		assert.Equal(t, ClassificationAttemptCounts{Classified: 1}, firstCounts)
+
+		secondTransaction := makeTransaction()
+		_, err = store.SaveTransaction(t.Context(), secondTransaction)
+		require.NoError(t, err)
+		params.MessageID = "message-" + fake.UUID().V4()
+		secondCounts, err := service.Classify(t.Context(), params)
+		require.NoError(t, err)
+		assert.Equal(t, ClassificationAttemptCounts{Classified: 1}, secondCounts)
+		for _, transactionID := range []string{firstTransaction.ID, secondTransaction.ID} {
+			stored, getErr := store.GetTransaction(t.Context(), transactionID)
+			require.NoError(t, getErr)
+			require.NotNil(t, stored.CategoryID)
+			assert.Equal(t, categoryID, *stored.CategoryID)
+		}
+		remaining, err := transactionStore.ListEligibleClassificationTransactions(
+			t.Context(),
+			persistence.ListEligibleClassificationTransactionsParams{
+				TenantID: tenantID, RangeStart: now.Add(-time.Hour), RangeEndExclusive: now.Add(time.Hour),
+			},
+		)
+		require.NoError(t, err)
+		assert.Empty(t, remaining)
+	})
+
+	t.Run("reloads current rules to classify new same-range rows while excluding categorized rows", func(t *testing.T) {
 		fake := faker.New()
 		now := time.Date(2026, time.September, 7, 11, 0, 0, 0, time.FixedZone("test", 2*60*60))
 		params := ClassificationParams{
@@ -425,6 +496,7 @@ func TestClassificationService(t *testing.T) {
 			Condition: "changed", CategoryID: categoryID,
 		}
 		transaction := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: firstRule.Condition}
+		newTransaction := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: secondRule.Condition}
 		rules.EXPECT().
 			ListClassificationRules(t.Context(), params.TenantID, "").
 			Return([]domain.ClassificationRule{firstRule}, nil).
@@ -459,14 +531,34 @@ func TestClassificationService(t *testing.T) {
 			ListClassificationRules(t.Context(), params.TenantID, "").
 			Return([]domain.ClassificationRule{secondRule}, nil).
 			Once()
+		secondParams := params
+		secondParams.MessageID = "message-" + fake.UUID().V4()
 		transactions.EXPECT().
 			ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
-				TenantID: params.TenantID, RangeStart: params.RangeStart, RangeEndExclusive: params.RangeEndExclusive,
+				TenantID:          secondParams.TenantID,
+				RangeStart:        secondParams.RangeStart,
+				RangeEndExclusive: secondParams.RangeEndExclusive,
+			}).
+			Return([]domain.Transaction{newTransaction}, nil).
+			Once()
+		categories.EXPECT().
+			GetCategory(t.Context(), categoryID).
+			Return(&domain.Category{ID: categoryID, TenantID: secondParams.TenantID}, nil).
+			Once()
+		transactions.EXPECT().AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+			TenantID: secondParams.TenantID, TransactionID: newTransaction.ID, CategoryID: categoryID, UpdatedAt: now,
+		}).Return(true, nil).Once()
+		transactions.EXPECT().
+			ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+				TenantID:          secondParams.TenantID,
+				RangeStart:        secondParams.RangeStart,
+				RangeEndExclusive: secondParams.RangeEndExclusive,
+				AfterID:           newTransaction.ID,
 			}).
 			Return(nil, nil).
 			Once()
-		secondCounts, err := service.Classify(t.Context(), params)
+		secondCounts, err := service.Classify(t.Context(), secondParams)
 		require.NoError(t, err)
-		assert.Equal(t, ClassificationAttemptCounts{}, secondCounts)
+		assert.Equal(t, ClassificationAttemptCounts{Classified: 1}, secondCounts)
 	})
 }

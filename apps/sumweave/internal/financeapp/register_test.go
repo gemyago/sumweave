@@ -521,6 +521,91 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		assert.Equal(t, 1, job.AttemptCount)
 	})
 
+	t.Run("delivers each same-range publication once with a distinct observed job", func(t *testing.T) {
+		db, _, config := openPrepared(t)
+		clearClassificationMessages(t, db, config)
+		publisher := newPublisher(t, config, db)
+		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
+		require.NoError(t, err)
+		service := newMockclassificationJobService(t)
+		registry := jobspkg.NewRegistry()
+		require.NoError(t, registerClassificationJobHandler(registry, service))
+		input := financepkg.ClassificationExplicitCommand{
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60)),
+			RangeEndExclusive: time.Date(2026, time.September, 6, 10, 30, 0, 0, time.FixedZone("east", 3*60*60)),
+			Requester: financepkg.CommandRequester{
+				UserID: "user-" + fake.UUID().V4(), Source: financepkg.CommandRequesterSourceOperator,
+			},
+		}
+		payload, err := json.Marshal(input)
+		require.NoError(t, err)
+		adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
+		firstCommand := financepkg.SemanticCommand{
+			Topic:          financepkg.ClassificationExplicitCommandTopic,
+			Payload:        payload,
+			IdempotencyKey: "finance.classification.explicit:" + fake.UUID().V4(),
+		}
+		first, err := adapter.PublishSemanticCommand(t.Context(), firstCommand)
+		require.NoError(t, err)
+		firstRetry, err := adapter.PublishSemanticCommand(t.Context(), firstCommand)
+		require.NoError(t, err)
+		assert.Equal(t, first, firstRetry)
+		second, err := adapter.PublishSemanticCommand(t.Context(), financepkg.SemanticCommand{
+			Topic:          financepkg.ClassificationExplicitCommandTopic,
+			Payload:        payload,
+			IdempotencyKey: "finance.classification.explicit:" + fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		assert.NotEqual(t, first.MessageID, second.MessageID)
+
+		classifierMessageIDs := make([]string, 0, 2)
+		service.EXPECT().Classify(mock.Anything, mock.MatchedBy(func(params financepkg.ClassificationParams) bool {
+			return params.TenantID == input.TenantID &&
+				params.RangeStart.Equal(input.RangeStart) &&
+				params.RangeEndExclusive.Equal(input.RangeEndExclusive) &&
+				(params.MessageID == first.MessageID || params.MessageID == second.MessageID)
+		})).Run(func(_ context.Context, params financepkg.ClassificationParams) {
+			classifierMessageIDs = append(classifierMessageIDs, params.MessageID)
+		}).Return(financepkg.ClassificationAttemptCounts{}, nil).Twice()
+		worker := newWorker(t, config, db, publisher, store, registry)
+		stop := runWorker(t, worker)
+		for _, reference := range []financepkg.DispatchReference{first, second} {
+			require.Eventually(t, func() bool {
+				job, getErr := store.Get(t.Context(), reference.MessageID)
+				return getErr == nil && job.Status == jobspkg.JobStatusSucceeded
+			}, time.Second, time.Millisecond)
+		}
+		stop()
+		assert.ElementsMatch(t, []string{first.MessageID, second.MessageID}, classifierMessageIDs)
+
+		_, err = db.ExecContext(
+			t.Context(),
+			`UPDATE "`+config.OffsetsTable()+`" SET offset_acked=0, last_processed_transaction_id='0'::xid8 WHERE topic=$1 AND consumer_group=$2`,
+			financepkg.ClassificationExplicitCommandTopic,
+			"jobs.workers.v1",
+		)
+		require.NoError(t, err)
+		duplicateWorker := newWorker(t, config, db, publisher, store, registry)
+		stopDuplicate := runWorker(t, duplicateWorker)
+		require.Eventually(t, func() bool {
+			var offset int
+			offsetErr := db.QueryRowContext(
+				t.Context(),
+				`SELECT offset_acked FROM "`+config.OffsetsTable()+`" WHERE topic=$1 AND consumer_group=$2`,
+				financepkg.ClassificationExplicitCommandTopic,
+				"jobs.workers.v1",
+			).Scan(&offset)
+			return offsetErr == nil && offset > 0
+		}, time.Second, time.Millisecond)
+		stopDuplicate()
+		for _, reference := range []financepkg.DispatchReference{first, second} {
+			job, getErr := store.Get(t.Context(), reference.MessageID)
+			require.NoError(t, getErr)
+			assert.Equal(t, 1, job.AttemptCount)
+		}
+	})
+
 	t.Run("keeps malformed classification commands job-row-free", func(t *testing.T) {
 		db, _, config := openPrepared(t)
 		clearClassificationMessages(t, db, config)

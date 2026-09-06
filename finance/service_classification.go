@@ -10,6 +10,7 @@ import (
 
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/persistence"
+	"github.com/google/uuid"
 )
 
 type classificationTransactionStore interface {
@@ -142,8 +143,7 @@ func (s *ClassificationService) Submit(
 				Source: CommandRequesterSourceOperator,
 			},
 		},
-		"finance.classification.explicit:"+params.TenantID+":"+params.ActorUserID+":"+
-			params.RangeStart.Format(time.RFC3339Nano)+":"+params.RangeEndExclusive.Format(time.RFC3339Nano),
+		"finance.classification.explicit:"+uuid.NewString(),
 	)
 	if err != nil {
 		return ClassificationJobRef{}, err

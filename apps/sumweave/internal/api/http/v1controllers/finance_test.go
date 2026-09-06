@@ -159,6 +159,55 @@ func TestFinanceController(t *testing.T) {
 		assert.Equal(t, jobID, decode(t, response)["jobId"])
 	})
 
+	t.Run("returns a new job reference for each same-range submission", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		service := newMockclassificationService(t)
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		end := start.Add(time.Hour)
+		body := `{"rangeStart":"` + start.Format(time.RFC3339Nano) +
+			`","rangeEndExclusive":"` + end.Format(time.RFC3339Nano) + `"}`
+		jobIDs := []string{fake.UUID().V4(), fake.UUID().V4()}
+		submissionIndex := 0
+		service.EXPECT().Submit(mock.Anything, mock.MatchedBy(func(params financepkg.SubmitClassificationParams) bool {
+			return params.ActorUserID == userID &&
+				params.TenantID == tenantID &&
+				params.RangeStart.Equal(start) &&
+				params.RangeEndExclusive.Equal(end)
+		})).RunAndReturn(func(context.Context, financepkg.SubmitClassificationParams) (financepkg.ClassificationJobRef, error) {
+			job := financepkg.ClassificationJobRef{ID: jobIDs[submissionIndex]}
+			submissionIndex++
+			return job, nil
+		}).Twice()
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withClassificationService(service),
+		)
+
+		first := httptest.NewRecorder()
+		handler.ServeHTTP(first, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/transactions/classify",
+			body,
+			true,
+		))
+		second := httptest.NewRecorder()
+		handler.ServeHTTP(second, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/transactions/classify",
+			body,
+			true,
+		))
+
+		require.Equal(t, http.StatusAccepted, first.Code)
+		require.Equal(t, http.StatusAccepted, second.Code)
+		assert.Equal(t, jobIDs[0], decode(t, first)["jobId"])
+		assert.Equal(t, jobIDs[1], decode(t, second)["jobId"])
+		assert.NotEqual(t, jobIDs[0], jobIDs[1])
+	})
+
 	t.Run("rejects an invalid explicit classification range", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()
