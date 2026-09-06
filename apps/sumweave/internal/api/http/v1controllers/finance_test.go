@@ -237,6 +237,33 @@ func TestFinanceController(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, response.Code)
 	})
 
+	t.Run("returns an empty unauthorized response for explicit classification tenant denial", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		service := newMockclassificationService(t)
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		body := `{"rangeStart":"` + start.Format(time.RFC3339Nano) +
+			`","rangeEndExclusive":"` + start.Add(time.Hour).Format(time.RFC3339Nano) + `"}`
+		service.EXPECT().Submit(mock.Anything, mock.MatchedBy(func(params financepkg.SubmitClassificationParams) bool {
+			return params.ActorUserID == userID && params.TenantID == tenantID
+		})).Return(financepkg.ClassificationJobRef{}, financepkg.ErrTenantAccessDenied).Once()
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withClassificationService(service),
+		)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/transactions/classify",
+			body,
+			true,
+		))
+		assert.Equal(t, http.StatusUnauthorized, response.Code)
+		assert.Empty(t, response.Body.String())
+	})
+
 	t.Run("manages ordered classification rules through registered routes", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()

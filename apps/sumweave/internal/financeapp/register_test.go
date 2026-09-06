@@ -258,6 +258,32 @@ func TestFinanceObservedHandlerFailureClassification(t *testing.T) {
 		}
 	})
 
+	t.Run("classification terminal and infrastructure failures", func(t *testing.T) {
+		job := jobspkg.Job{ID: fake.UUID().V4()}
+		input := financepkg.ClassificationExplicitCommand{
+			TenantID: "tenant-" + fake.UUID().V4(),
+			RangeStart: time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone(
+				"east", 3*60*60,
+			)),
+			RangeEndExclusive: time.Date(2026, time.September, 6, 10, 30, 0, 0, time.FixedZone(
+				"east", 3*60*60,
+			)),
+		}
+		for name, failure := range map[string]error{
+			"terminal":       terminalFailure(),
+			"infrastructure": errors.New("database unavailable " + fake.UUID().V4()),
+		} {
+			t.Run(name, func(t *testing.T) {
+				service := newMockclassificationJobService(t)
+				service.EXPECT().Classify(mock.Anything, financepkg.ClassificationParams{
+					TenantID: input.TenantID, RangeStart: input.RangeStart, RangeEndExclusive: input.RangeEndExclusive,
+					MessageID: job.ID,
+				}).Return(financepkg.ClassificationAttemptCounts{}, failure)
+				assertClassification(t, runClassificationJob(t.Context(), service, job, input), name == "terminal")
+			})
+		}
+	})
+
 	t.Run("FX refresh terminal and infrastructure failures", func(t *testing.T) {
 		input := financepkg.FXRatesRefreshCommand{Provider: "provider-" + fake.Letter()}
 		for name, failure := range map[string]error{

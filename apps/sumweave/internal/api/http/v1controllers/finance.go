@@ -2205,8 +2205,10 @@ func operatorUserIDFromContext(ctx context.Context) (string, error) {
 }
 
 func mapFinanceRangeError(err error) error {
-	if errors.Is(err, financepkg.ErrInvalidTimestampRange) ||
-		errors.Is(err, financepkg.ErrInvalidDashboardPeriod) {
+	if errors.Is(err, financepkg.ErrTenantAccessDenied) {
+		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+	}
+	if errors.Is(err, financepkg.ErrInvalidTimestampRange) || errors.Is(err, financepkg.ErrInvalidDashboardPeriod) {
 		return app.NewErrInvalidInput("dateRange", err.Error())
 	}
 	return err

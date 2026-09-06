@@ -219,11 +219,17 @@ func (s *ClassificationService) classifyTransaction(
 		return ClassificationAttemptCounts{Unmatched: 1}, nil
 	}
 	category, err := s.categories.GetCategory(ctx, rule.CategoryID)
-	if err != nil || category == nil || category.TenantID != tenantID || category.HiddenAt != nil {
-		if err == nil {
-			err = errors.New("category not found")
+	if err != nil {
+		if errors.Is(err, persistence.ErrCategoryNotFound) {
+			return ClassificationAttemptCounts{}, unavailableClassificationCategoryFailure(rule.CategoryID, err)
 		}
-		return ClassificationAttemptCounts{}, unavailableClassificationCategoryFailure(rule.CategoryID, err)
+		return ClassificationAttemptCounts{}, fmt.Errorf("get classification rule category: %w", err)
+	}
+	if category == nil || category.TenantID != tenantID || category.HiddenAt != nil {
+		return ClassificationAttemptCounts{}, unavailableClassificationCategoryFailure(
+			rule.CategoryID,
+			errors.New("category not found"),
+		)
 	}
 	assigned, err := s.transactions.AssignClassificationCategory(
 		ctx,

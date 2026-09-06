@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -275,6 +276,14 @@ func TestClassificationService(t *testing.T) {
 			require.NoError(t, err)
 			return service, rules, transactions, categories
 		}
+		makeRule := func(condition, categoryID string) domain.ClassificationRule {
+			return domain.ClassificationRule{
+				ID:         "rule-" + fake.UUID().V4(),
+				MatchType:  domain.ClassificationMatchTypeExact,
+				Condition:  condition,
+				CategoryID: categoryID,
+			}
+		}
 
 		t.Run("reports rule load failures", func(t *testing.T) {
 			service, rules, _, _ := makeService(t)
@@ -302,23 +311,102 @@ func TestClassificationService(t *testing.T) {
 			assert.Equal(t, ClassificationAttemptCounts{}, counts)
 		})
 
-		t.Run("reports unavailable categories as terminal after prior committed assignments", func(t *testing.T) {
+		t.Run("reports unavailable category states as terminal after prior committed assignments", func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				category func(categoryID string) (*domain.Category, error)
+				cause    error
+			}{
+				{
+					name: "persistence not found",
+					category: func(string) (*domain.Category, error) {
+						return nil, persistence.ErrCategoryNotFound
+					},
+					cause: persistence.ErrCategoryNotFound,
+				},
+				{
+					name: "nil category",
+					category: func(string) (*domain.Category, error) {
+						return nil, nil //nolint:nilnil // The store contract permits a nil category without an error.
+					},
+				},
+				{
+					name: "hidden category",
+					category: func(categoryID string) (*domain.Category, error) {
+						hiddenAt := now
+						return &domain.Category{ID: categoryID, TenantID: params.TenantID, HiddenAt: &hiddenAt}, nil
+					},
+				},
+				{
+					name: "cross tenant category",
+					category: func(categoryID string) (*domain.Category, error) {
+						return &domain.Category{ID: categoryID, TenantID: "tenant-" + fake.UUID().V4()}, nil
+					},
+				},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					service, rules, transactions, categories := makeService(t)
+					firstCategoryID := "category-" + fake.UUID().V4()
+					secondCategoryID := "category-" + fake.UUID().V4()
+					rules.EXPECT().
+						ListClassificationRules(t.Context(), params.TenantID, "").
+						Return([]domain.ClassificationRule{
+							makeRule("first", firstCategoryID),
+							makeRule("second", secondCategoryID),
+						}, nil).
+						Once()
+					first := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "first"}
+					second := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "second"}
+					transactions.EXPECT().
+						ListEligibleClassificationTransactions(t.Context(), persistence.ListEligibleClassificationTransactionsParams{
+							TenantID:          params.TenantID,
+							RangeStart:        params.RangeStart,
+							RangeEndExclusive: params.RangeEndExclusive,
+						}).
+						Return([]domain.Transaction{first, second}, nil).
+						Once()
+					categories.EXPECT().
+						GetCategory(t.Context(), firstCategoryID).
+						Return(&domain.Category{ID: firstCategoryID, TenantID: params.TenantID}, nil).
+						Once()
+					transactions.EXPECT().
+						AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+							TenantID:      params.TenantID,
+							TransactionID: first.ID,
+							CategoryID:    firstCategoryID,
+							UpdatedAt:     now,
+						}).
+						Return(true, nil).
+						Once()
+					category, categoryErr := tc.category(secondCategoryID)
+					categories.EXPECT().
+						GetCategory(t.Context(), secondCategoryID).
+						Return(category, categoryErr).
+						Once()
+
+					counts, err := service.Classify(t.Context(), params)
+					require.Error(t, err)
+					_, terminal := TerminalFailureFrom(err)
+					assert.True(t, terminal)
+					if tc.cause != nil {
+						require.ErrorIs(t, err, tc.cause)
+					}
+					assert.Equal(t, ClassificationAttemptCounts{Classified: 1}, counts)
+				})
+			}
+		})
+
+		t.Run("returns a transient category lookup error after prior committed assignments", func(t *testing.T) {
 			service, rules, transactions, categories := makeService(t)
-			firstCategoryID, secondCategoryID := "category-"+fake.UUID().V4(), "category-"+fake.UUID().V4()
-			rules.EXPECT().ListClassificationRules(t.Context(), params.TenantID, "").Return([]domain.ClassificationRule{
-				{
-					ID:         "rule-" + fake.UUID().V4(),
-					MatchType:  domain.ClassificationMatchTypeExact,
-					Condition:  "first",
-					CategoryID: firstCategoryID,
-				},
-				{
-					ID:         "rule-" + fake.UUID().V4(),
-					MatchType:  domain.ClassificationMatchTypeExact,
-					Condition:  "second",
-					CategoryID: secondCategoryID,
-				},
-			}, nil).Once()
+			firstCategoryID := "category-" + fake.UUID().V4()
+			secondCategoryID := "category-" + fake.UUID().V4()
+			rules.EXPECT().
+				ListClassificationRules(t.Context(), params.TenantID, "").
+				Return([]domain.ClassificationRule{
+					makeRule("first", firstCategoryID),
+					makeRule("second", secondCategoryID),
+				}, nil).
+				Once()
 			first := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "first"}
 			second := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "second"}
 			transactions.EXPECT().
@@ -339,14 +427,17 @@ func TestClassificationService(t *testing.T) {
 				}).
 				Return(true, nil).
 				Once()
+			lookupCause := errors.New("database unavailable")
+			lookupErr := fmt.Errorf("load category: %w", lookupCause)
 			categories.EXPECT().
 				GetCategory(t.Context(), secondCategoryID).
-				Return(nil, errors.New("missing category")).
+				Return(nil, lookupErr).
 				Once()
+
 			counts, err := service.Classify(t.Context(), params)
-			require.Error(t, err)
+			require.ErrorIs(t, err, lookupCause)
 			_, terminal := TerminalFailureFrom(err)
-			assert.True(t, terminal)
+			assert.False(t, terminal)
 			assert.Equal(t, ClassificationAttemptCounts{Classified: 1}, counts)
 		})
 
