@@ -277,6 +277,43 @@ describe('Finance transactions page', () => {
     expect(mocks.createClassificationRule).not.toHaveBeenCalled()
   })
 
+  it('submits the latest inline assignment when a second rule offer replaces the visible first offer', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.updateTransaction
+      .mockResolvedValueOnce({
+        id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'pending', kind: 'refund', amountMinor: 900,
+        currency: 'USD', description: 'First assigned description', effectiveAt: now, categoryId: 'cat-2', tagIds: ['tag-1', 'tag-2'], transferGroupId: 'transfer-1', transferMatchedAt: null, hiddenAt: now, providerOriginal: null, createdAt: now, updatedAt: now,
+      })
+      .mockResolvedValueOnce({
+        id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'pending', kind: 'refund', amountMinor: 900,
+        currency: 'USD', description: 'Second assigned description', effectiveAt: now, categoryId: 'cat-1', tagIds: ['tag-1', 'tag-2'], transferGroupId: 'transfer-1', transferMatchedAt: null, hiddenAt: now, providerOriginal: null, createdAt: now, updatedAt: now,
+      })
+    render(FinanceTransactions)
+    await screen.findByText('Refund')
+
+    await user.click(screen.getByRole('button', { name: 'Edit category' }))
+    await user.selectOptions(screen.getByLabelText('Category'), 'cat-2')
+    await user.click(screen.getByRole('button', { name: 'Save category' }))
+    expect(await screen.findByRole('form', { name: 'Create classification rule' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Rule condition')).toHaveValue('First assigned description')
+    expect(screen.getByLabelText('Rule category')).toHaveValue('cat-2')
+
+    await user.click(screen.getByRole('button', { name: 'Edit category' }))
+    await user.selectOptions(screen.getByLabelText('Category'), 'cat-1')
+    await user.click(screen.getByRole('button', { name: 'Save category' }))
+
+    await waitFor(() => expect(screen.getByLabelText('Rule condition')).toHaveValue('Second assigned description'))
+    expect(screen.getByLabelText('Rule category')).toHaveValue('cat-1')
+    await user.click(screen.getByRole('button', { name: 'Save rule' }))
+    await waitFor(() => expect(mocks.createClassificationRule).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      matchType: 'contains',
+      condition: 'Second assigned description',
+      categoryId: 'cat-1',
+    }))
+  })
+
   it('cancels an inline tag edit without calling the API', async () => {
     const user = userEvent.setup()
     render(FinanceTransactions)

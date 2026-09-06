@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
     createSignalFinanceApiForAuth,
@@ -9,6 +8,7 @@
 
   let {
     tenantId,
+    offerId,
     description,
     categoryId,
     categories,
@@ -16,6 +16,7 @@
     onSaved,
   }: {
     tenantId: string
+    offerId: number
     description: string
     categoryId: string
     categories: FinanceCategory[]
@@ -30,8 +31,12 @@
   let targetCategoryId = $state('')
   let saving = $state(false)
   let error = $state<string | null>(null)
+  let initializedOfferId = $state<number | null>(null)
 
-  onMount(() => {
+  $effect(() => {
+    if (offerId === initializedOfferId) return
+    initializedOfferId = offerId
+    matchType = 'contains'
     condition = description
     targetCategoryId = categoryId
   })

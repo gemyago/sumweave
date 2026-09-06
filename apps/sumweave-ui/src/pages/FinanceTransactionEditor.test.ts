@@ -422,6 +422,46 @@ describe('Finance transaction editor page', () => {
     expect(screen.queryByRole('form', { name: 'Create classification rule' })).not.toBeInTheDocument()
   })
 
+  it('submits the latest detail assignment when a second rule offer replaces the visible first offer', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    mocks.updateTransaction
+      .mockResolvedValueOnce({
+        id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'pending', kind: 'refund', amountMinor: 900,
+        currency: 'USD', description: 'First detail assignment', effectiveAt: now, categoryId: 'cat-2', tagIds: ['tag-1', 'tag-2'], transferGroupId: 'transfer-1', transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+      })
+      .mockResolvedValueOnce({
+        id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'provider', status: 'pending', kind: 'refund', amountMinor: 900,
+        currency: 'USD', description: 'Second detail assignment', effectiveAt: now, categoryId: 'cat-1', tagIds: ['tag-1', 'tag-2'], transferGroupId: 'transfer-1', transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+      })
+    render(FinanceTransactionEditor, { params: { transactionId: 'tx-1' } })
+
+    await screen.findByLabelText('Transaction category')
+    await user.clear(screen.getByLabelText('Transaction description'))
+    await user.type(screen.getByLabelText('Transaction description'), 'First detail assignment')
+    await user.selectOptions(screen.getByLabelText('Transaction category'), 'cat-2')
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    expect(await screen.findByRole('form', { name: 'Create classification rule' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Rule condition')).toHaveValue('First detail assignment')
+    expect(screen.getByLabelText('Rule category')).toHaveValue('cat-2')
+
+    await user.clear(screen.getByLabelText('Transaction description'))
+    await user.type(screen.getByLabelText('Transaction description'), 'Second detail assignment')
+    await user.selectOptions(screen.getByLabelText('Transaction category'), 'cat-1')
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(screen.getByLabelText('Rule condition')).toHaveValue('Second detail assignment'))
+    expect(screen.getByLabelText('Rule category')).toHaveValue('cat-1')
+    await user.click(screen.getByRole('button', { name: 'Save rule' }))
+    await waitFor(() => expect(mocks.createClassificationRule).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      matchType: 'contains',
+      condition: 'Second detail assignment',
+      categoryId: 'cat-1',
+    }))
+  })
+
   it('submits a negative major-unit decimal as exact minor units', async () => {
     const user = userEvent.setup()
     render(FinanceTransactionEditor, { params: {} })

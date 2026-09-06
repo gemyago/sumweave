@@ -47,7 +47,8 @@
   let saving = $state(false)
   let error = $state<string | null>(null)
   let descriptionInput = $state<HTMLInputElement | null>(null)
-  let ruleOffer = $state<{ transactionId: string; description: string; categoryId: string } | null>(null)
+  let nextRuleOfferId = 0
+  let ruleOffer = $state<{ offerId: number; transactionId: string; description: string; categoryId: string } | null>(null)
 
   const categoryNameById = $derived(new Map(categories.map((category) => [category.id, category.name])))
   const tagNameById = $derived(new Map(tags.map((tag) => [tag.id, tag.name])))
@@ -161,7 +162,7 @@
       })
       onTransactionUpdated(updated)
       if (editing.field === 'category' && updated.categoryId) {
-        ruleOffer = { transactionId: updated.id, description: updated.description, categoryId: updated.categoryId }
+        ruleOffer = { offerId: ++nextRuleOfferId, transactionId: updated.id, description: updated.description, categoryId: updated.categoryId }
       } else if (editing.field === 'category') {
         ruleOffer = null
       }
@@ -283,6 +284,7 @@
         <div class="mt-3">
           <FinanceRuleCreationForm
             {tenantId}
+            offerId={ruleOffer.offerId}
             description={ruleOffer.description}
             categoryId={ruleOffer.categoryId}
             {categories}

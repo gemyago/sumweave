@@ -59,7 +59,8 @@
   let transferMessage = $state<string | null>(null)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
-  let ruleOffer = $state<{ description: string; categoryId: string } | null>(null)
+  let nextRuleOfferId = 0
+  let ruleOffer = $state<{ offerId: number; description: string; categoryId: string } | null>(null)
 
   const candidatePageSize = 20
   const hasMatchedTransfer = $derived(transaction ? isMatchedTransfer(transaction) : false)
@@ -374,7 +375,7 @@
         saveMessage = 'Transaction recorded.'
         fillFormFromTransaction(created)
         if (created.categoryId) {
-          ruleOffer = { description: created.description, categoryId: created.categoryId }
+          ruleOffer = { offerId: ++nextRuleOfferId, description: created.description, categoryId: created.categoryId }
         }
       } else {
         transaction = await financeApi.updateTransaction({
@@ -390,7 +391,7 @@
         if (transaction) {
           fillFormFromTransaction(transaction)
           if (categoryChanged && transaction.categoryId) {
-            ruleOffer = { description: transaction.description, categoryId: transaction.categoryId }
+            ruleOffer = { offerId: ++nextRuleOfferId, description: transaction.description, categoryId: transaction.categoryId }
           }
         }
       }
@@ -506,6 +507,7 @@
           {#if ruleOffer}
             <FinanceRuleCreationForm
               tenantId={financeShell.selectedTenantId}
+              offerId={ruleOffer.offerId}
               description={ruleOffer.description}
               categoryId={ruleOffer.categoryId}
               {categories}
