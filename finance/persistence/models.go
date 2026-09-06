@@ -129,26 +129,27 @@ type tagModel struct {
 func (tagModel) TableName() string { return "finance_tags" }
 
 type transactionModel struct {
-	ID                  string     `gorm:"column:id;size:255;not null;primaryKey"`
-	TenantID            string     `gorm:"column:tenant_id;size:255;not null;index:idx_finance_transactions_list_order,priority:1"`
-	AccountID           string     `gorm:"column:account_id;size:255;not null"`
-	Source              string     `gorm:"column:source;size:64;not null"`
-	Status              string     `gorm:"column:status;size:64;not null"`
-	Kind                string     `gorm:"column:kind;size:64;not null"`
-	AmountMinor         int64      `gorm:"column:amount_minor;not null"`
-	Currency            string     `gorm:"column:currency;size:16;not null"`
-	Description         string     `gorm:"column:description;type:text;not null"`
-	EffectiveAt         time.Time  `gorm:"column:effective_at;not null;index:idx_finance_transactions_provider_window,priority:1;index:idx_finance_transactions_list_order,priority:2"`
-	CategoryID          *string    `gorm:"column:category_id;size:255"`
-	TransferGroupID     *string    `gorm:"column:transfer_group_id;size:255"`
-	TransferMatchedAt   *time.Time `gorm:"column:transfer_matched_at"`
-	HiddenAt            *time.Time `gorm:"column:hidden_at"`
-	OriginalAmountMinor *int64     `gorm:"column:original_amount_minor"`
-	OriginalCurrency    *string    `gorm:"column:original_currency;size:16"`
-	OriginalDescription *string    `gorm:"column:original_description;type:text"`
-	OriginalEffectiveAt *time.Time `gorm:"column:original_effective_at"`
-	CreatedAt           time.Time  `gorm:"column:created_at;not null;index:idx_finance_transactions_provider_window,priority:2;index:idx_finance_transactions_list_order,priority:3"`
-	UpdatedAt           time.Time  `gorm:"column:updated_at;not null"`
+	ID                       string     `gorm:"column:id;size:255;not null;primaryKey"`
+	TenantID                 string     `gorm:"column:tenant_id;size:255;not null;index:idx_finance_transactions_list_order,priority:1"`
+	AccountID                string     `gorm:"column:account_id;size:255;not null"`
+	Source                   string     `gorm:"column:source;size:64;not null"`
+	Status                   string     `gorm:"column:status;size:64;not null"`
+	Kind                     string     `gorm:"column:kind;size:64;not null"`
+	AmountMinor              int64      `gorm:"column:amount_minor;not null"`
+	Currency                 string     `gorm:"column:currency;size:16;not null"`
+	Description              string     `gorm:"column:description;type:text;not null"`
+	EffectiveAt              time.Time  `gorm:"column:effective_at;not null;index:idx_finance_transactions_provider_window,priority:1;index:idx_finance_transactions_list_order,priority:2"`
+	CategoryID               *string    `gorm:"column:category_id;size:255"`
+	TransferGroupID          *string    `gorm:"column:transfer_group_id;size:255"`
+	TransferMatchedAt        *time.Time `gorm:"column:transfer_matched_at"`
+	TransferMatchingExcluded bool       `gorm:"column:transfer_matching_excluded;type:boolean;not null;default:false"`
+	HiddenAt                 *time.Time `gorm:"column:hidden_at"`
+	OriginalAmountMinor      *int64     `gorm:"column:original_amount_minor"`
+	OriginalCurrency         *string    `gorm:"column:original_currency;size:16"`
+	OriginalDescription      *string    `gorm:"column:original_description;type:text"`
+	OriginalEffectiveAt      *time.Time `gorm:"column:original_effective_at"`
+	CreatedAt                time.Time  `gorm:"column:created_at;not null;index:idx_finance_transactions_provider_window,priority:2;index:idx_finance_transactions_list_order,priority:3"`
+	UpdatedAt                time.Time  `gorm:"column:updated_at;not null"`
 }
 
 func (transactionModel) TableName() string { return "finance_transactions" }
@@ -716,22 +717,23 @@ func tagFromModel(model tagModel) domain.Tag {
 
 func newTransactionModel(transaction domain.Transaction) transactionModel {
 	model := transactionModel{
-		ID:                transaction.ID,
-		TenantID:          transaction.TenantID,
-		AccountID:         transaction.AccountID,
-		Source:            string(transaction.Source),
-		Status:            string(transaction.Status),
-		Kind:              string(transaction.Kind),
-		AmountMinor:       transaction.AmountMinor,
-		Currency:          transaction.Currency,
-		Description:       transaction.Description,
-		EffectiveAt:       transaction.EffectiveAt,
-		CategoryID:        transaction.CategoryID,
-		TransferGroupID:   transaction.TransferGroupID,
-		TransferMatchedAt: transaction.TransferMatchedAt,
-		HiddenAt:          transaction.HiddenAt,
-		CreatedAt:         transaction.CreatedAt,
-		UpdatedAt:         transaction.UpdatedAt,
+		ID:                       transaction.ID,
+		TenantID:                 transaction.TenantID,
+		AccountID:                transaction.AccountID,
+		Source:                   string(transaction.Source),
+		Status:                   string(transaction.Status),
+		Kind:                     string(transaction.Kind),
+		AmountMinor:              transaction.AmountMinor,
+		Currency:                 transaction.Currency,
+		Description:              transaction.Description,
+		EffectiveAt:              transaction.EffectiveAt,
+		CategoryID:               transaction.CategoryID,
+		TransferGroupID:          transaction.TransferGroupID,
+		TransferMatchedAt:        transaction.TransferMatchedAt,
+		TransferMatchingExcluded: transaction.TransferMatchingExcluded,
+		HiddenAt:                 transaction.HiddenAt,
+		CreatedAt:                transaction.CreatedAt,
+		UpdatedAt:                transaction.UpdatedAt,
 	}
 	if transaction.ProviderOriginal != nil {
 		original := transaction.ProviderOriginal
@@ -751,22 +753,23 @@ func newTransactionModel(transaction domain.Transaction) transactionModel {
 
 func transactionFromModel(model transactionModel) domain.Transaction {
 	transaction := domain.Transaction{
-		ID:                model.ID,
-		TenantID:          model.TenantID,
-		AccountID:         model.AccountID,
-		Source:            domain.TransactionSource(model.Source),
-		Status:            domain.TransactionStatus(model.Status),
-		Kind:              domain.TransactionKind(model.Kind),
-		AmountMinor:       model.AmountMinor,
-		Currency:          model.Currency,
-		Description:       model.Description,
-		EffectiveAt:       model.EffectiveAt,
-		CategoryID:        model.CategoryID,
-		TransferGroupID:   model.TransferGroupID,
-		TransferMatchedAt: model.TransferMatchedAt,
-		HiddenAt:          model.HiddenAt,
-		CreatedAt:         model.CreatedAt,
-		UpdatedAt:         model.UpdatedAt,
+		ID:                       model.ID,
+		TenantID:                 model.TenantID,
+		AccountID:                model.AccountID,
+		Source:                   domain.TransactionSource(model.Source),
+		Status:                   domain.TransactionStatus(model.Status),
+		Kind:                     domain.TransactionKind(model.Kind),
+		AmountMinor:              model.AmountMinor,
+		Currency:                 model.Currency,
+		Description:              model.Description,
+		EffectiveAt:              model.EffectiveAt,
+		CategoryID:               model.CategoryID,
+		TransferGroupID:          model.TransferGroupID,
+		TransferMatchedAt:        model.TransferMatchedAt,
+		TransferMatchingExcluded: model.TransferMatchingExcluded,
+		HiddenAt:                 model.HiddenAt,
+		CreatedAt:                model.CreatedAt,
+		UpdatedAt:                model.UpdatedAt,
 	}
 	if model.OriginalAmountMinor != nil ||
 		model.OriginalCurrency != nil ||

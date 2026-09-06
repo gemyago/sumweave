@@ -11,6 +11,7 @@ func TestMigrate(t *testing.T) {
 	database := openTestDatabase(t)
 
 	require.NoError(t, NewMigrator(database).Migrate(t.Context()))
+	require.True(t, database.db.Migrator().HasColumn(&transactionModel{}, "transfer_matching_excluded"))
 
 	canceledContext, cancel := context.WithCancel(t.Context())
 	cancel()

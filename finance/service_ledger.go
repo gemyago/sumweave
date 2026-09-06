@@ -20,11 +20,6 @@ type ledgerServiceStore interface {
 	GetCategory(ctx context.Context, categoryID string) (*domain.Category, error)
 	GetTag(ctx context.Context, tagID string) (*domain.Tag, error)
 	SaveTransaction(ctx context.Context, transaction domain.Transaction) (domain.Transaction, error)
-	SaveLinkedTransferPair(
-		ctx context.Context,
-		firstTransaction domain.Transaction,
-		secondTransaction domain.Transaction,
-	) error
 	GetTransaction(ctx context.Context, transactionID string) (*domain.Transaction, error)
 	ListTransactions(
 		ctx context.Context,
@@ -35,6 +30,11 @@ type ledgerServiceStore interface {
 		includeHidden bool,
 		page ...persistence.ListTransactionsPage,
 	) ([]domain.Transaction, error)
+}
+
+type ledgerTransferPairStore interface {
+	LinkTransferPair(ctx context.Context, params persistence.TransferPairLinkParams) error
+	UnlinkTransferPair(ctx context.Context, params persistence.TransferPairUnlinkParams) error
 }
 
 type ledgerTransactionStore interface {
@@ -54,6 +54,7 @@ type ledgerTransactionStore interface {
 type LedgerService struct {
 	store        ledgerServiceStore
 	transactions ledgerTransactionStore
+	pairs        ledgerTransferPairStore
 	balanceStore accountBalanceReadStore
 	access       *accessGuard
 	now          func() time.Time
@@ -86,6 +87,12 @@ func WithLedgerServiceTransactionStore(store ledgerTransactionStore) LedgerServi
 	}
 }
 
+func WithLedgerServiceTransferPairStore(store ledgerTransferPairStore) LedgerServiceOption {
+	return func(service *LedgerService) {
+		service.pairs = store
+	}
+}
+
 func NewLedgerService(store ledgerServiceStore, opts ...LedgerServiceOption) *LedgerService {
 	service := &LedgerService{
 		store:        store,
@@ -94,8 +101,17 @@ func NewLedgerService(store ledgerServiceStore, opts ...LedgerServiceOption) *Le
 		now:          time.Now,
 		newID:        uuid.NewString,
 	}
+	switch typedStore := store.(type) {
+	case ledgerTransferPairStore:
+		service.pairs = typedStore
+	case *persistence.Store:
+		service.pairs = persistence.NewTransferPairStoreFromStore(typedStore)
+	}
 	for _, opt := range opts {
 		opt(service)
+	}
+	if service.pairs == nil {
+		panic("ledger transfer pair store is required")
 	}
 	assignAccountBalanceReadStore(store, &service.balanceStore)
 	return service
@@ -367,15 +383,14 @@ func (s *LedgerService) LinkTransfers(ctx context.Context, params LinkTransfersP
 
 	transferGroupID := s.newID()
 	now := s.now()
-	firstTransaction.Kind = domain.TransactionKindTransfer
-	firstTransaction.TransferGroupID = &transferGroupID
-	firstTransaction.TransferMatchedAt = &now
-	firstTransaction.UpdatedAt = now
-	secondTransaction.Kind = domain.TransactionKindTransfer
-	secondTransaction.TransferGroupID = &transferGroupID
-	secondTransaction.TransferMatchedAt = &now
-	secondTransaction.UpdatedAt = now
-	if saveErr := s.store.SaveLinkedTransferPair(ctx, firstTransaction, secondTransaction); saveErr != nil {
+	if saveErr := s.pairs.LinkTransferPair(ctx, persistence.TransferPairLinkParams{
+		TenantID:            params.TenantID,
+		FirstTransactionID:  firstTransaction.ID,
+		SecondTransactionID: secondTransaction.ID,
+		TransferGroupID:     transferGroupID,
+		TransferMatchedAt:   now,
+		UpdatedAt:           now,
+	}); saveErr != nil {
 		return fmt.Errorf("link transfers: %w", saveErr)
 	}
 
@@ -407,15 +422,12 @@ func (s *LedgerService) UnlinkTransfers(ctx context.Context, params UnlinkTransf
 	}
 
 	now := s.now()
-	firstTransaction.Kind = domain.TransactionKindRegular
-	firstTransaction.TransferGroupID = nil
-	firstTransaction.TransferMatchedAt = nil
-	firstTransaction.UpdatedAt = now
-	secondTransaction.Kind = domain.TransactionKindRegular
-	secondTransaction.TransferGroupID = nil
-	secondTransaction.TransferMatchedAt = nil
-	secondTransaction.UpdatedAt = now
-	if saveErr := s.store.SaveLinkedTransferPair(ctx, firstTransaction, secondTransaction); saveErr != nil {
+	if saveErr := s.pairs.UnlinkTransferPair(ctx, persistence.TransferPairUnlinkParams{
+		TenantID:            params.TenantID,
+		FirstTransactionID:  firstTransaction.ID,
+		SecondTransactionID: secondTransaction.ID,
+		UpdatedAt:           now,
+	}); saveErr != nil {
 		return fmt.Errorf("unlink transfers: %w", saveErr)
 	}
 

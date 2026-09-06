@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
 	"gorm.io/gorm"
@@ -36,7 +37,7 @@ func (s *TransactionTagStore) SaveTransaction(
 		if validationErr := validateTransactionTags(tx, transaction.TenantID, tagIDs); validationErr != nil {
 			return validationErr
 		}
-		if saveErr := saveTransactionModel(tx, model); saveErr != nil {
+		if saveErr := saveTransactionModel(tx, &model); saveErr != nil {
 			return fmt.Errorf("save transaction record: %w", saveErr)
 		}
 		if deleteErr := tx.Where("transaction_id = ?", transaction.ID).
@@ -155,16 +156,35 @@ func normalizedTransactionTagIDs(tagIDs []string) ([]string, error) {
 	return result, nil
 }
 
-func saveTransactionModel(db *gorm.DB, model transactionModel) error {
-	return db.Table(model.TableName()).Clauses(clause.OnConflict{
+func saveTransactionModel(db *gorm.DB, model *transactionModel) error {
+	if err := db.Table(model.TableName()).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			columnTenantID, "account_id", "source", "status", "kind", "amount_minor", columnCurrency,
-			"description", columnEffectiveAt, columnCategoryID, "transfer_group_id", "transfer_matched_at",
+			columnTenantID, "account_id", "source", "status", "amount_minor", columnCurrency,
+			"description", columnEffectiveAt, columnCategoryID,
 			"hidden_at", "original_amount_minor", "original_currency", "original_description",
 			"original_effective_at", columnUpdatedAt,
 		}),
-	}).Create(&model).Error
+	}).Create(model).Error; err != nil {
+		return err
+	}
+	var storedPairState struct {
+		Kind                     string
+		TransferGroupID          *string
+		TransferMatchedAt        *time.Time
+		TransferMatchingExcluded bool
+	}
+	if err := db.Table(model.TableName()).
+		Select("kind, transfer_group_id, transfer_matched_at, transfer_matching_excluded").
+		Where("id = ?", model.ID).
+		First(&storedPairState).Error; err != nil {
+		return fmt.Errorf("load saved transaction record: %w", err)
+	}
+	model.Kind = storedPairState.Kind
+	model.TransferGroupID = storedPairState.TransferGroupID
+	model.TransferMatchedAt = storedPairState.TransferMatchedAt
+	model.TransferMatchingExcluded = storedPairState.TransferMatchingExcluded
+	return nil
 }
 
 func (s *TransactionTagStore) hydrateTransactionTags(

@@ -134,6 +134,103 @@ func TestTransactionTagStore(t *testing.T) {
 		assert.NotEqual(t, transaction.Description, loaded.Description)
 	})
 
+	t.Run("preserves pair-owned state while replacing ordinary transaction data", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.July, 13, 13, 0, 0, 0, time.FixedZone("test", -4*60*60))
+		database := openTestDatabase(t)
+		coreStore := NewStore(database)
+		transactionStore := NewTransactionTagStore(database)
+		tenantID := "tenant-" + fake.UUID().V4()
+		firstTag := domain.Tag{
+			ID:        "tag-first-" + fake.UUID().V4(),
+			TenantID:  tenantID,
+			Name:      fake.Lorem().Word(),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		secondTag := domain.Tag{
+			ID:        "tag-second-" + fake.UUID().V4(),
+			TenantID:  tenantID,
+			Name:      fake.Lorem().Word(),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		for _, tag := range []domain.Tag{firstTag, secondTag} {
+			_, err := coreStore.SaveTag(t.Context(), tag)
+			require.NoError(t, err)
+		}
+
+		groupID := "group-" + fake.UUID().V4()
+		matchedAt := now.Add(-time.Minute)
+		linked := makeTransaction(fake, tenantID, now)
+		linked.Kind = domain.TransactionKindTransfer
+		linked.TransferGroupID = &groupID
+		linked.TransferMatchedAt = &matchedAt
+		linked.TransferMatchingExcluded = true
+		linked.TagIDs = []string{firstTag.ID}
+		linked.ProviderOriginal = &domain.ProviderTransactionOriginal{
+			AmountMinor: linked.AmountMinor,
+			Currency:    linked.Currency,
+			Description: linked.Description,
+			EffectiveAt: &linked.EffectiveAt,
+		}
+		_, err := transactionStore.SaveTransaction(t.Context(), linked)
+		require.NoError(t, err)
+
+		refresh := linked
+		refresh.Kind = domain.TransactionKindRegular
+		refresh.TransferGroupID = nil
+		refresh.TransferMatchedAt = nil
+		refresh.TransferMatchingExcluded = false
+		refresh.Description = "provider-refresh-" + fake.Lorem().Word()
+		refresh.TagIDs = []string{secondTag.ID}
+		refresh.UpdatedAt = now.Add(time.Minute)
+		refresh.ProviderOriginal = &domain.ProviderTransactionOriginal{
+			AmountMinor: refresh.AmountMinor,
+			Currency:    refresh.Currency,
+			Description: refresh.Description,
+			EffectiveAt: &refresh.EffectiveAt,
+		}
+
+		saved, err := transactionStore.SaveTransaction(t.Context(), refresh)
+		require.NoError(t, err)
+		assert.Equal(t, domain.TransactionKindTransfer, saved.Kind)
+		assert.Equal(t, linked.TransferGroupID, saved.TransferGroupID)
+		require.NotNil(t, linked.TransferMatchedAt)
+		require.NotNil(t, saved.TransferMatchedAt)
+		assert.True(t, linked.TransferMatchedAt.Equal(*saved.TransferMatchedAt))
+		assert.True(t, saved.TransferMatchingExcluded)
+		assert.Equal(t, refresh.Description, saved.Description)
+		assert.Equal(t, []string{secondTag.ID}, saved.TagIDs)
+		require.NotNil(t, saved.ProviderOriginal)
+		require.NotNil(t, refresh.ProviderOriginal)
+		assert.Equal(t, refresh.ProviderOriginal.AmountMinor, saved.ProviderOriginal.AmountMinor)
+		assert.Equal(t, refresh.ProviderOriginal.Currency, saved.ProviderOriginal.Currency)
+		assert.Equal(t, refresh.ProviderOriginal.Description, saved.ProviderOriginal.Description)
+		require.NotNil(t, refresh.ProviderOriginal.EffectiveAt)
+		require.NotNil(t, saved.ProviderOriginal.EffectiveAt)
+		assert.True(t, refresh.ProviderOriginal.EffectiveAt.Equal(*saved.ProviderOriginal.EffectiveAt))
+
+		stored, err := transactionStore.GetTransaction(t.Context(), linked.ID)
+		require.NoError(t, err)
+		assert.Equal(t, saved.Kind, stored.Kind)
+		assert.Equal(t, saved.TransferGroupID, stored.TransferGroupID)
+		require.NotNil(t, saved.TransferMatchedAt)
+		require.NotNil(t, stored.TransferMatchedAt)
+		assert.True(t, saved.TransferMatchedAt.Equal(*stored.TransferMatchedAt))
+		assert.Equal(t, saved.TransferMatchingExcluded, stored.TransferMatchingExcluded)
+		assert.Equal(t, saved.Description, stored.Description)
+		assert.Equal(t, saved.TagIDs, stored.TagIDs)
+		require.NotNil(t, saved.ProviderOriginal)
+		require.NotNil(t, stored.ProviderOriginal)
+		assert.Equal(t, saved.ProviderOriginal.AmountMinor, stored.ProviderOriginal.AmountMinor)
+		assert.Equal(t, saved.ProviderOriginal.Currency, stored.ProviderOriginal.Currency)
+		assert.Equal(t, saved.ProviderOriginal.Description, stored.ProviderOriginal.Description)
+		require.NotNil(t, saved.ProviderOriginal.EffectiveAt)
+		require.NotNil(t, stored.ProviderOriginal.EffectiveAt)
+		assert.True(t, saved.ProviderOriginal.EffectiveAt.Equal(*stored.ProviderOriginal.EffectiveAt))
+	})
+
 	t.Run("rejects duplicate IDs and handles absent or empty transaction reads", func(t *testing.T) {
 		fake := faker.New()
 		now := time.Date(2026, time.July, 12, 16, 0, 0, 0, time.FixedZone("test", 5*60*60))
