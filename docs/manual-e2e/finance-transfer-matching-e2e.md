@@ -31,9 +31,41 @@ make postgres-bootstrap
 cd "$REPO_ROOT/apps/sumweave"
 IFS=: read -r USER PASS < "$REPO_ROOT/.local-users"
 go run ./cmd/sumweave --env local user add --username "$USER" --password "$PASS" --if-not-exists
-go run ./cmd/sumweave start --env local >"$E2E_ROOT/api.log" 2>&1 &
+
+# Build and launch the server binary directly so API_PID is the listening
+# process, rather than the `go run` parent. The binary is isolated run evidence.
+go build -o "$E2E_ROOT/sumweave-api" ./cmd/sumweave
+"$E2E_ROOT/sumweave-api" start --env local >"$E2E_ROOT/api.log" 2>&1 &
 API_PID=$!
-trap 'kill "$API_PID" 2>/dev/null || true' EXIT
+stop_api_only() {
+  if kill -0 "$API_PID" 2>/dev/null; then
+    kill "$API_PID"
+  fi
+  wait "$API_PID" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    if ! lsof -nP -iTCP:4501 -sTCP:LISTEN >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  lsof -nP -iTCP:4501 -sTCP:LISTEN >&2 || true
+  return 1
+}
+restore_pm2() {
+  cd "$REPO_ROOT"
+  pm2 start ecosystem.config.js
+  pm2 jlist | python3 -c 'import json,sys; apps={app["name"]:app["pm2_env"]["status"] for app in json.load(sys.stdin)}; assert {name:apps.get(name) for name in ("api","worker","ui")} == {"api":"online","worker":"online","ui":"online"}, apps'
+  curl --fail --silent http://127.0.0.1:4501/health >/dev/null
+}
+cleanup_api_only() {
+  local original_status="$1" cleanup_status=0
+  stop_api_only || cleanup_status=1
+  restore_pm2 || cleanup_status=1
+  if [ "$original_status" -ne 0 ] || [ "$cleanup_status" -ne 0 ]; then
+    return 1
+  fi
+}
+trap 'cleanup_api_only "$?"' EXIT
 until curl --fail --silent http://127.0.0.1:4501/health >/dev/null; do sleep 1; done
 
 LOGIN_JSON=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/auth/login \
@@ -208,8 +240,47 @@ create_fixture "$TENANT_ID" "$ACCOUNT_A" -1300 'pending-out' '2026-06-02T08:00:0
 create_fixture "$TENANT_ID" "$ACCOUNT_B" 1300 'pending-in' '2026-06-02T09:00:00-04:00' USD booked regular '' '[]' >"$E2E_ROOT/pending-in.json"
 create_fixture "$TENANT_ID" "$ACCOUNT_A" -1400 'refund-out' '2026-06-02T08:00:00-04:00' USD booked refund '' '[]' >"$E2E_ROOT/refund-out.json"
 create_fixture "$TENANT_ID" "$ACCOUNT_B" 1400 'refund-in' '2026-06-02T09:00:00-04:00' USD booked regular '' '[]' >"$E2E_ROOT/refund-in.json"
-create_fixture "$TENANT_ID" "$ACCOUNT_A" 0 'zero-a' '2026-06-02T08:00:00-04:00' USD booked regular '' '[]' >"$E2E_ROOT/zero-a.json"
-create_fixture "$TENANT_ID" "$ACCOUNT_B" 0 'zero-b' '2026-06-02T09:00:00-04:00' USD booked regular '' '[]' >"$E2E_ROOT/zero-b.json"
+
+# The public create contract intentionally rejects amountMinor zero. Prove that
+# contract first; it must not be relaxed to support this verification fixture.
+ZERO_PUBLIC_BODY=$(python3 - "$ACCOUNT_A" <<'PY'
+import json, sys
+print(json.dumps({
+    "accountId": sys.argv[1], "source": "manual", "status": "booked",
+    "kind": "regular", "amountMinor": 0, "currency": "USD",
+    "description": "zero-public-rejection",
+    "effectiveAt": "2026-06-02T08:00:00-04:00", "tagIds": [],
+}))
+PY
+)
+printf '%s\n' "$ZERO_PUBLIC_BODY" >"$E2E_ROOT/zero-public-request.json"
+ZERO_PUBLIC_STATUS=$(curl -sS -o "$E2E_ROOT/zero-public-response.json" -w '%{http_code}' \
+  -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/transactions" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
+  --data "$ZERO_PUBLIC_BODY")
+test "$ZERO_PUBLIC_STATUS" = 400
+
+# Only the two zero-amount eligibility rows bypass public creation. This uses the
+# documented local PostgreSQL runtime role (not owner or migrator), tenant and
+# account IDs created above, and one tenant-scoped INSERT ... SELECT per row. It
+# is valid only after this guide's isolated/reseeded `make postgres-bootstrap`.
+# All matching and verification below still use product HTTP/worker surfaces.
+create_zero_fixture() {
+  local account_id="$1" description="$2" effective_at="$3" transaction_id row_id
+  transaction_id=$(python3 -c 'import uuid; print(uuid.uuid4())')
+  row_id=$(printf '%s\n' "INSERT INTO finance_transactions (id, tenant_id, account_id, source, status, kind, amount_minor, currency, description, effective_at, transfer_matching_excluded, created_at, updated_at)
+          SELECT :'transaction_id', a.tenant_id, a.id, 'manual', 'booked', 'regular', 0, 'USD', :'description', (:'effective_at')::timestamptz, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          FROM finance_accounts AS a
+          WHERE a.id = :'account_id' AND a.tenant_id = :'tenant_id'
+          RETURNING id;" | docker compose exec -T -e PGPASSWORD=sumweave_runtime postgres \
+    psql -X -v ON_ERROR_STOP=1 -qAt -p 55432 -U sumweave_runtime -d sumweave_local \
+      -v transaction_id="$transaction_id" -v tenant_id="$TENANT_ID" \
+      -v account_id="$account_id" -v description="$description" -v effective_at="$effective_at")
+  test "$row_id" = "$transaction_id"
+  printf '{"id":"%s"}\n' "$transaction_id" >"$E2E_ROOT/$description.json"
+}
+create_zero_fixture "$ACCOUNT_A" 'zero-a' '2026-06-02T08:00:00-04:00'
+create_zero_fixture "$ACCOUNT_B" 'zero-b' '2026-06-02T09:00:00-04:00'
 
 # Link one pair manually. Link then unlink a second pair, which is the supported
 # way to create the hidden automatic-matching exclusion without exposing it.
@@ -290,12 +361,17 @@ curl -sS "http://127.0.0.1:4501/api/v1/jobs/$CLASSIFY_BEFORE_JOB_ID" \
 test "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' <"$E2E_ROOT/classify-before-job.json")" = succeeded
 ```
 
-Before matching, capture:
+Before matching, capture the ledger and a fixed custom June reporting range. The
+RFC 3339 bounds cover every fixture timestamp through the June 7 outer row; do
+not use `current_month` or date-only values because the guide can run in any
+calendar month.
 
 ```bash
+JUNE_DASHBOARD_QUERY='preset=custom&startDate=2026-06-01T00%3A00%3A00-04%3A00&endDate=2026-06-08T00%3A00%3A00-04%3A00'
+printf '%s\n' "$JUNE_DASHBOARD_QUERY" >"$E2E_ROOT/june-dashboard-query.txt"
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/transactions?limit=100" \
   -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/ledger-before.json"
-curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/dashboard?preset=current_month" \
+curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/dashboard?$JUNE_DASHBOARD_QUERY" \
   -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/dashboard-before.json"
 ```
 
@@ -339,6 +415,8 @@ curl -sS "http://127.0.0.1:4501/api/v1/jobs/$MATCH_JOB_ID" \
   -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/explicit-job.json"
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/transactions?limit=100" \
   -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/ledger-after-explicit.json"
+curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/dashboard?$JUNE_DASHBOARD_QUERY" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/dashboard-after-explicit.json"
 
 fetch_fixture() {
   local name="$1" id
@@ -375,7 +453,7 @@ import json, sys
 path, kind, status = sys.argv[1:]
 row = json.load(open(path))
 assert row["kind"] == kind and row["status"] == status
-assert row["transferGroupId"] is None and row["transferMatchedAt"] is None
+assert row.get("transferGroupId") is None and row.get("transferMatchedAt") is None
 PY
 }
 assert_category() {
@@ -466,6 +544,14 @@ for name in same-account-out same-account-in cross-tenant-out cross-tenant-in \
     *) assert_unpaired "$E2E_ROOT/after-$name.json" regular booked ;;
   esac
 done
+python3 - "$E2E_ROOT/dashboard-before.json" "$E2E_ROOT/dashboard-after-explicit.json" <<'PY'
+import json, sys
+before, after = (json.load(open(path)) for path in sys.argv[1:])
+assert before["period"]["preset"] == after["period"]["preset"] == "custom"
+assert before["accountBalances"] == after["accountBalances"]
+assert after["settled"]["incomeMinor"] < before["settled"]["incomeMinor"]
+assert after["settled"]["expenseMinor"] < before["settled"]["expenseMinor"]
+PY
 ```
 
 The pre-delivery `404` is valid only for `MATCH_JOB_ID` from this initiating
@@ -493,7 +579,7 @@ fetch_fixture classify-after-in
 assert_transfer_pair classify-after-out classify-after-in
 python3 - "$E2E_ROOT/after-classify-after-out.json" "$E2E_ROOT/after-classify-after-in.json" <<'PY'
 import json, sys
-assert all(json.load(open(path))["categoryId"] is None for path in sys.argv[1:])
+assert all(json.load(open(path)).get("categoryId") is None for path in sys.argv[1:])
 PY
 ```
 
@@ -595,10 +681,8 @@ trace under `$E2E_ROOT/browser/`.
 ## 7. Cleanup and report
 
 ```bash
-kill "$API_PID" 2>/dev/null || true
-wait "$API_PID" 2>/dev/null || true
-cd "$REPO_ROOT"
-pm2 start ecosystem.config.js
+cleanup_api_only 0
+trap - EXIT
 ```
 
 Report the run directory, tenant/job IDs, selected ranges, terminal jobs,
