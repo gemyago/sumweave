@@ -72,7 +72,6 @@ func TestReportingAndFXInternals(t *testing.T) {
 		_, err = service.GetDashboard(t.Context(), DashboardParams{
 			ActorUserID: "user",
 			TenantID:    "tenant",
-			Preset:      DashboardPeriodPresetCustom,
 			StartDate:   laterDate,
 			EndDate:     validDate,
 		})
@@ -318,202 +317,15 @@ func TestReportingAndFXInternals(t *testing.T) {
 		require.Error(t, err)
 	})
 
-	t.Run("covers dashboard helper branches", func(t *testing.T) {
-		now := time.Date(2026, time.June, 20, 12, 0, 0, 0, time.UTC)
-		assert.Equal(
+	t.Run("uses the requested dashboard range without server-side period derivation", func(t *testing.T) {
+		startDate := time.Date(2026, time.June, 10, 0, 0, 0, 0, time.FixedZone("UTC+02", 2*60*60))
+		endDate := time.Date(2026, time.June, 12, 23, 59, 59, 999999999, time.FixedZone("UTC+02", 2*60*60))
+		require.NoError(t, ValidateDashboardParams(DashboardParams{StartDate: startDate, EndDate: endDate}))
+		require.ErrorIs(
 			t,
-			DashboardPeriodPresetCurrentMonth,
-			resolveDashboardPeriod(now, DashboardParams{}).Preset,
+			ValidateDashboardParams(DashboardParams{StartDate: endDate, EndDate: startDate}),
+			ErrInvalidTimestampRange,
 		)
-		for _, testCase := range []struct {
-			name      string
-			now       time.Time
-			preset    DashboardPeriodPreset
-			startDate time.Time
-			endDate   time.Time
-			previous  DashboardPeriodWindow
-			next      DashboardPeriodWindow
-		}{
-			{
-				name: "current month uses complete month in service location",
-				now: time.Date(2026, time.January, 15, 18, 30, 0, 0,
-					time.FixedZone("UTC+14", 14*60*60)),
-				preset: DashboardPeriodPresetCurrentMonth,
-				startDate: time.Date(2026, time.January, 1, 0, 0, 0, 0,
-					time.FixedZone("UTC+14", 14*60*60)),
-				endDate: time.Date(2026, time.January, 31, 23, 59, 59, 999999999,
-					time.FixedZone("UTC+14", 14*60*60)),
-				previous: DashboardPeriodWindow{
-					StartDate: time.Date(2025, time.December, 1, 0, 0, 0, 0,
-						time.FixedZone("UTC+14", 14*60*60)),
-					EndDate: time.Date(2025, time.December, 31, 23, 59, 59, 999999999,
-						time.FixedZone("UTC+14", 14*60*60)),
-				},
-				next: DashboardPeriodWindow{
-					StartDate: time.Date(2026, time.February, 1, 0, 0, 0, 0,
-						time.FixedZone("UTC+14", 14*60*60)),
-					EndDate: time.Date(2026, time.February, 28, 23, 59, 59, 999999999,
-						time.FixedZone("UTC+14", 14*60*60)),
-				},
-			},
-			{
-				name:      "previous month crosses year boundary",
-				now:       time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC),
-				preset:    DashboardPeriodPresetPreviousMonth,
-				startDate: time.Date(2025, time.December, 1, 0, 0, 0, 0, time.UTC),
-				endDate:   time.Date(2025, time.December, 31, 23, 59, 59, 999999999, time.UTC),
-				previous: DashboardPeriodWindow{
-					StartDate: time.Date(2025, time.November, 1, 0, 0, 0, 0, time.UTC),
-					EndDate:   time.Date(2025, time.November, 30, 23, 59, 59, 999999999, time.UTC),
-				},
-				next: DashboardPeriodWindow{
-					StartDate: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
-					EndDate:   time.Date(2026, time.January, 31, 23, 59, 59, 999999999, time.UTC),
-				},
-			},
-			{
-				name:      "next month resolves leap February",
-				now:       time.Date(2024, time.January, 31, 12, 0, 0, 0, time.UTC),
-				preset:    DashboardPeriodPresetNextMonth,
-				startDate: time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC),
-				endDate:   time.Date(2024, time.February, 29, 23, 59, 59, 999999999, time.UTC),
-				previous: DashboardPeriodWindow{
-					StartDate: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
-					EndDate:   time.Date(2024, time.January, 31, 23, 59, 59, 999999999, time.UTC),
-				},
-				next: DashboardPeriodWindow{
-					StartDate: time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC),
-					EndDate:   time.Date(2024, time.March, 31, 23, 59, 59, 999999999, time.UTC),
-				},
-			},
-		} {
-			t.Run(testCase.name, func(t *testing.T) {
-				period := resolveDashboardPeriod(testCase.now, DashboardParams{Preset: testCase.preset})
-				assert.Equal(t, testCase.startDate, period.StartDate)
-				assert.Equal(t, testCase.endDate, period.EndDate)
-				assert.Equal(t, testCase.previous, period.Previous)
-				assert.Equal(t, testCase.next, period.Next)
-			})
-		}
-		t.Run("anchors repeated calendar month navigation", func(t *testing.T) {
-			for _, testCase := range []struct {
-				name        string
-				now         time.Time
-				preset      DashboardPeriodPreset
-				monthAnchor time.Time
-				startDate   time.Time
-				endDate     time.Time
-			}{
-				{
-					name:        "previous month crosses year boundary",
-					now:         time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC),
-					preset:      DashboardPeriodPresetPreviousMonth,
-					monthAnchor: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
-					startDate:   time.Date(2025, time.December, 1, 0, 0, 0, 0, time.UTC),
-					endDate:     time.Date(2025, time.December, 31, 23, 59, 59, 999999999, time.UTC),
-				},
-				{
-					name:        "next month resolves leap February",
-					now:         time.Date(2024, time.January, 31, 12, 0, 0, 0, time.UTC),
-					preset:      DashboardPeriodPresetNextMonth,
-					monthAnchor: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
-					startDate:   time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC),
-					endDate:     time.Date(2024, time.February, 29, 23, 59, 59, 999999999, time.UTC),
-				},
-			} {
-				t.Run(testCase.name, func(t *testing.T) {
-					period := resolveDashboardPeriod(testCase.now, DashboardParams{
-						Preset:      testCase.preset,
-						MonthAnchor: testCase.monthAnchor,
-					})
-					assert.Equal(t, testCase.startDate, period.StartDate)
-					assert.Equal(t, testCase.endDate, period.EndDate)
-				})
-			}
-		})
-		t.Run("keeps month boundaries in the service location", func(t *testing.T) {
-			serviceLocation := time.FixedZone("UTC+02", 2*60*60)
-			period := resolveDashboardPeriod(
-				time.Date(2026, time.September, 7, 12, 0, 0, 0, serviceLocation),
-				DashboardParams{
-					Preset:      DashboardPeriodPresetPreviousMonth,
-					MonthAnchor: time.Date(2026, time.July, 31, 22, 0, 0, 0, time.UTC),
-				},
-			)
-			assert.Equal(t, time.Date(2026, time.July, 1, 0, 0, 0, 0, serviceLocation), period.StartDate)
-			assert.Equal(t, time.Date(2026, time.July, 31, 23, 59, 59, 999999999, serviceLocation), period.EndDate)
-		})
-		assert.Equal(
-			t,
-			time.Date(2026, time.March, 20, 12, 0, 0, 0, time.UTC),
-			resolveDashboardPeriod(
-				now,
-				DashboardParams{Preset: DashboardPeriodPresetLast3Months},
-			).StartDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2025, time.December, 20, 12, 0, 0, 0, time.UTC),
-			resolveDashboardPeriod(
-				now,
-				DashboardParams{Preset: DashboardPeriodPresetLast6Months},
-			).StartDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
-			resolveDashboardPeriod(
-				now,
-				DashboardParams{Preset: DashboardPeriodPresetThisYear},
-			).StartDate,
-		)
-		assert.Equal(
-			t,
-			time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC),
-			resolveDashboardPeriod(
-				now,
-				DashboardParams{Preset: DashboardPeriodPresetPreviousYear},
-			).StartDate,
-		)
-		currentMonth := resolveDashboardPeriod(
-			now,
-			DashboardParams{Preset: DashboardPeriodPresetCurrentMonth},
-		)
-		assert.Equal(t, time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC), currentMonth.StartDate)
-		assert.Equal(t, time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC), currentMonth.EndDate)
-		assert.Equal(t, time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC), currentMonth.Previous.EndDate)
-		assert.Equal(t, time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC), currentMonth.Next.StartDate)
-		lastThreeMonths := resolveDashboardPeriod(
-			now,
-			DashboardParams{Preset: DashboardPeriodPresetLast3Months},
-		)
-		assert.Equal(t, lastThreeMonths.StartDate.Add(-time.Nanosecond), lastThreeMonths.Previous.EndDate)
-		assert.Equal(t, lastThreeMonths.EndDate.Add(time.Nanosecond), lastThreeMonths.Next.StartDate)
-		assert.Equal(
-			t,
-			lastThreeMonths.EndDate.Sub(lastThreeMonths.StartDate),
-			lastThreeMonths.Previous.EndDate.Sub(lastThreeMonths.Previous.StartDate),
-		)
-		assert.Equal(
-			t,
-			lastThreeMonths.EndDate.Sub(lastThreeMonths.StartDate),
-			lastThreeMonths.Next.EndDate.Sub(lastThreeMonths.Next.StartDate),
-		)
-		thisYear := resolveDashboardPeriod(
-			now,
-			DashboardParams{Preset: DashboardPeriodPresetThisYear},
-		)
-		assert.Equal(t, time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC), thisYear.StartDate)
-		assert.Equal(t, now, thisYear.EndDate)
-		previousStart, previousEnd, nextStart, nextEnd := shiftPeriodWindow(
-			time.Date(2026, time.June, 10, 0, 0, 0, 0, time.UTC),
-			time.Date(2026, time.June, 12, 0, 0, 0, 0, time.UTC),
-		)
-		assert.Equal(t, time.Date(2026, time.June, 7, 23, 59, 59, 999999999, time.UTC), previousStart)
-		assert.Equal(t, time.Date(2026, time.June, 14, 0, 0, 0, 1, time.UTC), nextEnd)
-		assert.Equal(t, time.Date(2026, time.June, 9, 23, 59, 59, 999999999, time.UTC), previousEnd)
-		assert.Equal(t, time.Date(2026, time.June, 12, 0, 0, 0, 1, time.UTC), nextStart)
-
 		income, expense, ok := reportingContribution(
 			domain.Transaction{Kind: domain.TransactionKindOpeningBalance},
 		)

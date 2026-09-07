@@ -143,6 +143,8 @@ func TestHiddenAccountLifecycle(t *testing.T) {
 		assert.Equal(t, domain.TransactionSummary{IncomeMinor: 500, NetMinor: 500}, summary)
 		dashboard, err := reporting.GetDashboard(t.Context(), DashboardParams{
 			ActorUserID: ownerID, TenantID: tenant.ID,
+			StartDate: time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC),
+			EndDate:   time.Date(2030, time.December, 31, 23, 59, 59, 999999999, time.UTC),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, int64(500), dashboard.Settled.IncomeMinor)

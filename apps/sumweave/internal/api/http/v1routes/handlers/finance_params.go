@@ -678,10 +678,8 @@ func newParamsParserFinanceGetFinanceCsvImportAudit(rootHandler *RootHandler) pa
 
 type paramsParserFinanceGetFinanceDashboard struct {
 	bindTenantID requestParamBinder[string, string]
-	bindPreset requestParamBinder[[]string, GetFinanceDashboardParamsPreset]
-	bindStartDate requestParamBinder[[]string, string]
-	bindEndDate requestParamBinder[[]string, string]
-	bindMonthAnchor requestParamBinder[[]string, string]
+	bindStartDate requestParamBinder[[]string, time.Time]
+	bindEndDate requestParamBinder[[]string, time.Time]
 }
 
 func (p *paramsParserFinanceGetFinanceDashboard) parse(router httpRouter, req *http.Request) (*GetFinanceDashboardParams, error) {
@@ -693,10 +691,8 @@ func (p *paramsParserFinanceGetFinanceDashboard) parse(router httpRouter, req *h
 	// query params
 	query := req.URL.Query()
 	queryParamsCtx := bindingCtx.Fork("query")
-	p.bindPreset(queryParamsCtx.Fork("preset"), readQueryValue("preset", query), &reqParams.Preset)
 	p.bindStartDate(queryParamsCtx.Fork("startDate"), readQueryValue("startDate", query), &reqParams.StartDate)
 	p.bindEndDate(queryParamsCtx.Fork("endDate"), readQueryValue("endDate", query), &reqParams.EndDate)
-	p.bindMonthAnchor(queryParamsCtx.Fork("monthAnchor"), readQueryValue("monthAnchor", query), &reqParams.MonthAnchor)
 	return reqParams, bindingCtx.AggregatedError()
 }
 
@@ -710,36 +706,20 @@ func newParamsParserFinanceGetFinanceDashboard(rootHandler *RootHandler) paramsP
 			validateValue: NewSimpleFieldValidator[string](
 			),
 		}),
-		bindPreset: newRequestParamBinder(binderParams[[]string, GetFinanceDashboardParamsPreset]{
-			required: false,
+		bindStartDate: newRequestParamBinder(binderParams[[]string, time.Time]{
+			required: true,
 			parseValue: parseMultiValueParamAsSoloValue(
-				ParseGetFinanceDashboardParamsPreset,
+				rootHandler.knownParsers.timeParser,
 			),
-			validateValue: NewSimpleFieldValidator[GetFinanceDashboardParamsPreset](
+			validateValue: NewSimpleFieldValidator[time.Time](
 			),
 		}),
-		bindStartDate: newRequestParamBinder(binderParams[[]string, string]{
-			required: false,
+		bindEndDate: newRequestParamBinder(binderParams[[]string, time.Time]{
+			required: true,
 			parseValue: parseMultiValueParamAsSoloValue(
-				rootHandler.knownParsers.stringParser,
+				rootHandler.knownParsers.timeParser,
 			),
-			validateValue: NewSimpleFieldValidator[string](
-			),
-		}),
-		bindEndDate: newRequestParamBinder(binderParams[[]string, string]{
-			required: false,
-			parseValue: parseMultiValueParamAsSoloValue(
-				rootHandler.knownParsers.stringParser,
-			),
-			validateValue: NewSimpleFieldValidator[string](
-			),
-		}),
-		bindMonthAnchor: newRequestParamBinder(binderParams[[]string, string]{
-			required: false,
-			parseValue: parseMultiValueParamAsSoloValue(
-				rootHandler.knownParsers.stringParser,
-			),
-			validateValue: NewSimpleFieldValidator[string](
+			validateValue: NewSimpleFieldValidator[time.Time](
 			),
 		}),
 	}

@@ -174,7 +174,6 @@ func TestFinanceCommand(t *testing.T) {
 		reportingService := financepkg.NewReportingService(store)
 		dashboard, err := reportingService.GetDashboard(t.Context(), financepkg.DashboardParams{
 			ActorUserID: ownerID, TenantID: ownerTenants[0].Tenant.ID,
-			Preset:    financepkg.DashboardPeriodPresetCustom,
 			StartDate: time.Now().AddDate(-5, 0, 0), EndDate: time.Now().AddDate(1, 0, 0),
 		})
 		require.NoError(t, err)
@@ -241,7 +240,6 @@ func TestFinanceCommand(t *testing.T) {
 		dashboard, err := reportingService.GetDashboard(t.Context(), financepkg.DashboardParams{
 			ActorUserID: ownerID,
 			TenantID:    ownerTenants[0].Tenant.ID,
-			Preset:      financepkg.DashboardPeriodPresetCustom,
 			StartDate:   time.Now().AddDate(-5, 0, 0),
 			EndDate:     time.Now().AddDate(1, 0, 0),
 		})

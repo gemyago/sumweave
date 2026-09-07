@@ -288,10 +288,11 @@ func TestReportingAndFX(t *testing.T) {
 			dashboard, err := service.GetDashboard(t.Context(), DashboardParams{
 				ActorUserID: ownerUserID,
 				TenantID:    tenant.ID,
+				StartDate:   time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
+				EndDate:     time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC),
 			})
 			require.NoError(t, err)
 
-			assert.Equal(t, DashboardPeriodPresetCurrentMonth, dashboard.Period.Preset)
 			assert.Equal(
 				t,
 				time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
@@ -302,27 +303,6 @@ func TestReportingAndFX(t *testing.T) {
 				time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC),
 				dashboard.Period.EndDate,
 			)
-			assert.Equal(
-				t,
-				time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC),
-				dashboard.Period.Previous.StartDate,
-			)
-			assert.Equal(
-				t,
-				time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC),
-				dashboard.Period.Previous.EndDate,
-			)
-			assert.Equal(
-				t,
-				time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
-				dashboard.Period.Next.StartDate,
-			)
-			assert.Equal(
-				t,
-				time.Date(2026, time.July, 31, 23, 59, 59, 999999999, time.UTC),
-				dashboard.Period.Next.EndDate,
-			)
-
 			assert.Equal(t, "PLN", dashboard.Settled.DisplayCurrency)
 			assert.Equal(t, int64(420_00), dashboard.Settled.IncomeMinor)
 			assert.Equal(t, int64(176_00), dashboard.Settled.ExpenseMinor)
@@ -436,7 +416,8 @@ func TestReportingAndFX(t *testing.T) {
 			previousMonth, err := service.GetDashboard(t.Context(), DashboardParams{
 				ActorUserID: ownerUserID,
 				TenantID:    tenant.ID,
-				Preset:      DashboardPeriodPresetPreviousMonth,
+				StartDate:   time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC),
+				EndDate:     time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC),
 			})
 			require.NoError(t, err)
 			assert.Equal(
@@ -449,33 +430,12 @@ func TestReportingAndFX(t *testing.T) {
 				time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC),
 				previousMonth.Period.EndDate,
 			)
-			assert.Equal(
-				t,
-				time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC),
-				previousMonth.Period.Previous.StartDate,
-			)
-			assert.Equal(
-				t,
-				time.Date(2026, time.April, 30, 23, 59, 59, 999999999, time.UTC),
-				previousMonth.Period.Previous.EndDate,
-			)
-			assert.Equal(
-				t,
-				time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
-				previousMonth.Period.Next.StartDate,
-			)
-			assert.Equal(
-				t,
-				time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC),
-				previousMonth.Period.Next.EndDate,
-			)
 			assert.Equal(t, int64(420_00), previousMonth.Settled.IncomeMinor)
 			assert.Equal(t, int64(420_00), previousMonth.Settled.NetMinor)
 
 			customRange, err := service.GetDashboard(t.Context(), DashboardParams{
 				ActorUserID: ownerUserID,
 				TenantID:    tenant.ID,
-				Preset:      DashboardPeriodPresetCustom,
 				StartDate:   time.Date(2026, time.June, 2, 0, 0, 0, 0, time.UTC),
 				EndDate:     time.Date(2026, time.June, 4, 0, 0, 0, 0, time.UTC),
 			})
@@ -836,6 +796,8 @@ func TestReportingAndFX(t *testing.T) {
 
 		dashboard, err := service.GetDashboard(t.Context(), DashboardParams{
 			ActorUserID: firstOwnerID, TenantID: firstTenant.ID,
+			StartDate: time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
+			EndDate:   time.Date(2026, time.July, 31, 23, 59, 59, 999999999, time.UTC),
 		})
 		require.NoError(t, err)
 		require.Len(t, dashboard.CurrentFXRates, 1)

@@ -367,7 +367,7 @@ not use `current_month` or date-only values because the guide can run in any
 calendar month.
 
 ```bash
-JUNE_DASHBOARD_QUERY='preset=custom&startDate=2026-06-01T00%3A00%3A00-04%3A00&endDate=2026-06-08T00%3A00%3A00-04%3A00'
+JUNE_DASHBOARD_QUERY='startDate=2026-06-01T00%3A00%3A00-04%3A00&endDate=2026-06-08T00%3A00%3A00-04%3A00'
 printf '%s\n' "$JUNE_DASHBOARD_QUERY" >"$E2E_ROOT/june-dashboard-query.txt"
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/transactions?limit=100" \
   -H "Authorization: Bearer $ACCESS_TOKEN" >"$E2E_ROOT/ledger-before.json"
@@ -547,7 +547,8 @@ done
 python3 - "$E2E_ROOT/dashboard-before.json" "$E2E_ROOT/dashboard-after-explicit.json" <<'PY'
 import json, sys
 before, after = (json.load(open(path)) for path in sys.argv[1:])
-assert before["period"]["preset"] == after["period"]["preset"] == "custom"
+assert before["period"]["startDate"] == after["period"]["startDate"]
+assert before["period"]["endDate"] == after["period"]["endDate"]
 assert before["accountBalances"] == after["accountBalances"]
 assert after["settled"]["incomeMinor"] < before["settled"]["incomeMinor"]
 assert after["settled"]["expenseMinor"] < before["settled"]["expenseMinor"]

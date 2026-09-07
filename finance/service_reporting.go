@@ -142,7 +142,7 @@ func (s *ReportingService) loadDashboardData(
 	if err != nil {
 		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)
 	}
-	period := resolveDashboardPeriod(s.now(), params)
+	period := DashboardPeriod{StartDate: params.StartDate, EndDate: params.EndDate}
 	transactions, err := s.store.ListTransactions(ctx, tenant.ID, "", "", "", false)
 	if err != nil {
 		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)

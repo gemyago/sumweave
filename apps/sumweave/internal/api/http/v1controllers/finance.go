@@ -1239,40 +1239,11 @@ func (c *FinanceController) GetFinanceDashboard(
 			return nil, err
 		}
 
-		var startDate, endDate, monthAnchor time.Time
-		parsedStart, startSupplied, err := parseOptionalTimestampQuery(req, "startDate", params.StartDate)
-		if err != nil {
-			return nil, err
-		}
-		if startSupplied {
-			startDate = parsedStart
-		}
-		parsedEnd, endSupplied, err := parseOptionalTimestampQuery(req, "endDate", params.EndDate)
-		if err != nil {
-			return nil, err
-		}
-		if endSupplied {
-			endDate = parsedEnd
-		}
-		parsedMonthAnchor, monthAnchorSupplied, err := parseOptionalTimestampQuery(
-			req,
-			"monthAnchor",
-			params.MonthAnchor,
-		)
-		if err != nil {
-			return nil, err
-		}
-		if monthAnchorSupplied {
-			monthAnchor = parsedMonthAnchor
-		}
-
 		dashboardParams := financepkg.DashboardParams{
 			ActorUserID: userID,
 			TenantID:    params.TenantID,
-			Preset:      financepkg.DashboardPeriodPreset(params.Preset),
-			StartDate:   startDate,
-			EndDate:     endDate,
-			MonthAnchor: monthAnchor,
+			StartDate:   params.StartDate,
+			EndDate:     params.EndDate,
 		}
 		if validationErr := financepkg.ValidateDashboardParams(dashboardParams); validationErr != nil {
 			return nil, mapFinanceRangeError(validationErr)
@@ -2249,7 +2220,7 @@ func mapFinanceRangeError(err error) error {
 	if errors.Is(err, financepkg.ErrTenantAccessDenied) {
 		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
 	}
-	if errors.Is(err, financepkg.ErrInvalidTimestampRange) || errors.Is(err, financepkg.ErrInvalidDashboardPeriod) {
+	if errors.Is(err, financepkg.ErrInvalidTimestampRange) {
 		return app.NewErrInvalidInput("dateRange", err.Error())
 	}
 	return err
@@ -2666,17 +2637,8 @@ func mapSyntheticLinkStateAccountsRequest(
 func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { //nolint:funlen
 	response := models.FinanceDashboardResponse{
 		Period: &models.FinanceDashboardPeriod{
-			Preset:    string(item.Period.Preset),
 			StartDate: item.Period.StartDate,
 			EndDate:   item.Period.EndDate,
-			Previous: &models.FinanceDashboardPeriodWindow{
-				StartDate: item.Period.Previous.StartDate,
-				EndDate:   item.Period.Previous.EndDate,
-			},
-			Next: &models.FinanceDashboardPeriodWindow{
-				StartDate: item.Period.Next.StartDate,
-				EndDate:   item.Period.Next.EndDate,
-			},
 		},
 		Settled: &models.FinanceDashboardMoneySummary{
 			DisplayCurrency:  item.Settled.DisplayCurrency,
