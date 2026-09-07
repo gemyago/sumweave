@@ -54,7 +54,7 @@ Expected:
    - category or spending summary section
    - recent transactions section
    - compact needs-attention or follow-up states
-3. Select each month button and confirm its matching direct preset request updates the page without deriving dates from the prior response. Use **Custom range** separately; for custom date-only values, confirm the selected start is reported from local start-of-day and the selected end through local end-of-day, including any imported row recorded at local midnight on the first day.
+3. Click **Previous month** twice and **Next month** twice, waiting for each dashboard load to complete because all period actions disable during loading. Confirm every completed click advances exactly one calendar month. The first direct request uses its matching preset; each repeated previous/next request keeps that preset and includes the visible period start as `monthAnchor`. If the shell offers another tenant, switch it and confirm the retained previous/next preset displays that tenant's replacement period, then confirm the first following previous/next click advances one additional month without a stale cross-tenant anchor. Click **Current month** and confirm its direct request omits `monthAnchor`. Use **Custom range** separately; for custom date-only values, confirm the selected start is reported from local start-of-day and the selected end through local end-of-day, including any imported row recorded at local midnight on the first day.
 
 Expected:
 

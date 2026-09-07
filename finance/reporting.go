@@ -33,6 +33,7 @@ type DashboardParams struct {
 	Preset      DashboardPeriodPreset
 	StartDate   time.Time
 	EndDate     time.Time
+	MonthAnchor time.Time
 }
 
 type Dashboard struct {
@@ -303,6 +304,9 @@ func resolveDashboardPeriod(now time.Time, params DashboardParams) DashboardPeri
 		preset = DashboardPeriodPresetCurrentMonth
 	}
 	current := now
+	if isCalendarMonthPreset(preset) && !params.MonthAnchor.IsZero() {
+		current = params.MonthAnchor.In(now.Location())
+	}
 	currentMonthStart, _ := calendarMonthWindow(current)
 	var startDate time.Time
 	var endDate time.Time
@@ -350,6 +354,12 @@ func resolveDashboardPeriod(now time.Time, params DashboardParams) DashboardPeri
 		Previous:  DashboardPeriodWindow{StartDate: previousStart, EndDate: previousEnd},
 		Next:      DashboardPeriodWindow{StartDate: nextStart, EndDate: nextEnd},
 	}
+}
+
+func isCalendarMonthPreset(preset DashboardPeriodPreset) bool {
+	return preset == DashboardPeriodPresetCurrentMonth ||
+		preset == DashboardPeriodPresetPreviousMonth ||
+		preset == DashboardPeriodPresetNextMonth
 }
 
 func calendarMonthWindow(date time.Time) (time.Time, time.Time) {

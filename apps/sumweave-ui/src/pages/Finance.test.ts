@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import Finance from './Finance.svelte'
+import { FinanceShellState } from '../lib/finance/shell-state.svelte'
 
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listTransactions: vi.fn(),
   listConnections: vi.fn(),
+  shellState: null as FinanceShellState | null,
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => {
@@ -27,6 +29,11 @@ vi.mock('../lib/finance/api', async (importOriginal) => {
 
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
 
+vi.mock('../lib/finance/shell-state.svelte', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/finance/shell-state.svelte')>()),
+  useFinanceShellState: vi.fn(() => mocks.shellState!),
+}))
+
 describe('Finance dashboard page', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -36,6 +43,7 @@ describe('Finance dashboard page', () => {
     mocks.listAccounts.mockReset()
     mocks.listTransactions.mockReset()
     mocks.listConnections.mockReset()
+    mocks.shellState = new FinanceShellState()
     mocks.listTenants.mockResolvedValue([
       { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
     ])
@@ -226,77 +234,176 @@ describe('Finance dashboard page', () => {
     expect(await screen.findByText('Select an active tenant to continue on this finance route.')).toBeInTheDocument()
   })
 
-  it('calls the exact previous-month preset without deriving a custom window', async () => {
+  it('navigates backward one calendar month per click with an anchored preset', async () => {
     const user = userEvent.setup()
+    const dashboardForMonth = (month: number, preset: string) => ({
+      period: {
+        preset,
+        startDate: new Date(2026, month, 1),
+        endDate: new Date(2026, month + 1, 0),
+        previous: { startDate: new Date(2026, month - 1, 1), endDate: new Date(2026, month, 0) },
+        next: { startDate: new Date(2026, month + 1, 1), endDate: new Date(2026, month + 2, 0) },
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
     mocks.getDashboard
-      .mockResolvedValueOnce({
-        period: {
-          preset: 'current_month',
-          startDate: new Date(2026, 5, 20),
-          endDate: new Date(2026, 5, 20),
-          previous: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31) },
-          next: { startDate: new Date(2026, 6, 1), endDate: new Date(2026, 6, 31) },
-        },
-        settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
-        pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
-        categoryBreakdowns: [],
-        accountBalances: [],
-        alerts: [],
-        fxCoverage: [],
-        nativeSettledTotals: [],
-      })
-      .mockResolvedValueOnce({
-        period: {
-          preset: '',
-          startDate: new Date(2026, 4, 1),
-          endDate: new Date(2026, 4, 31),
-          previous: { startDate: new Date(2026, 3, 1), endDate: new Date(2026, 3, 30) },
-          next: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30) },
-        },
-        settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
-        pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
-        categoryBreakdowns: [],
-        accountBalances: [],
-        alerts: [],
-        fxCoverage: [],
-        nativeSettledTotals: [],
-      })
-      .mockResolvedValueOnce({
-        period: {
-          preset: '',
-          startDate: new Date(2026, 5, 1),
-          endDate: new Date(2026, 5, 30),
-          previous: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31) },
-          next: { startDate: new Date(2026, 6, 1), endDate: new Date(2026, 6, 31) },
-        },
-        settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
-        pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
-        categoryBreakdowns: [],
-        accountBalances: [],
-        alerts: [],
-        fxCoverage: [],
-        nativeSettledTotals: [],
-      })
+      .mockResolvedValueOnce(dashboardForMonth(5, 'current_month'))
+      .mockResolvedValueOnce(dashboardForMonth(4, 'previous_month'))
+      .mockResolvedValueOnce(dashboardForMonth(3, 'previous_month'))
 
     render(Finance)
 
     await user.click(await screen.findByRole('button', { name: 'Previous month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
-    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'previous_month', startDate: undefined, endDate: undefined })
+    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'previous_month', startDate: undefined, endDate: undefined, monthAnchor: undefined })
+
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+    expect(mocks.getDashboard.mock.calls[2][0]).toEqual({ tenantId: 'tenant-1', preset: 'previous_month', startDate: undefined, endDate: undefined, monthAnchor: new Date(2026, 4, 1) })
+
+    await user.click(screen.getByText('Custom range'))
+    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-04-01')
+    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-04-30')
+  })
+
+  it('navigates forward one calendar month per click with an anchored preset', async () => {
+    const user = userEvent.setup()
+    const dashboardForMonth = (month: number, preset: string) => ({
+      period: {
+        preset,
+        startDate: new Date(2026, month, 1),
+        endDate: new Date(2026, month + 1, 0),
+        previous: { startDate: new Date(2026, month - 1, 1), endDate: new Date(2026, month, 0) },
+        next: { startDate: new Date(2026, month + 1, 1), endDate: new Date(2026, month + 2, 0) },
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    mocks.getDashboard
+      .mockResolvedValueOnce(dashboardForMonth(5, 'current_month'))
+      .mockResolvedValueOnce(dashboardForMonth(6, 'next_month'))
+      .mockResolvedValueOnce(dashboardForMonth(7, 'next_month'))
+
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Next month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'next_month', startDate: undefined, endDate: undefined, monthAnchor: undefined })
+
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+    expect(mocks.getDashboard.mock.calls[2][0]).toEqual({ tenantId: 'tenant-1', preset: 'next_month', startDate: undefined, endDate: undefined, monthAnchor: new Date(2026, 6, 1) })
+
+    await user.click(screen.getByText('Custom range'))
+    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-08-01')
+    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-08-31')
+  })
+
+  it('disables period actions until a delayed previous-month request completes', async () => {
+    const user = userEvent.setup()
+    const dashboardForMonth = (month: number, preset: string) => ({
+      period: {
+        preset,
+        startDate: new Date(2026, month, 1),
+        endDate: new Date(2026, month + 1, 0),
+        previous: { startDate: new Date(2026, month - 1, 1), endDate: new Date(2026, month, 0) },
+        next: { startDate: new Date(2026, month + 1, 1), endDate: new Date(2026, month + 2, 0) },
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    let resolveDelayedDashboard: (dashboard: ReturnType<typeof dashboardForMonth>) => void
+    const delayedDashboard = new Promise<ReturnType<typeof dashboardForMonth>>((resolve) => {
+      resolveDelayedDashboard = resolve
+    })
+    mocks.getDashboard
+      .mockResolvedValueOnce(dashboardForMonth(5, 'current_month'))
+      .mockReturnValueOnce(delayedDashboard)
+
+    render(Finance)
+
+    const previousButton = await screen.findByRole('button', { name: 'Previous month' })
+    await user.click(previousButton)
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    expect(previousButton).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Current month' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next month' })).toBeDisabled()
+
+    await user.click(previousButton)
+    expect(mocks.getDashboard).toHaveBeenCalledTimes(2)
+    expect(mocks.getDashboard.mock.calls[1][0].monthAnchor).toBeUndefined()
+
+    resolveDelayedDashboard!(dashboardForMonth(4, 'previous_month'))
+    await waitFor(() => expect(previousButton).toBeEnabled())
+  })
+
+  it('keeps tenant-local month navigation successive and ignores a stale dashboard response', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    const dashboardForMonth = (month: number, preset: string) => ({
+      period: {
+        preset,
+        startDate: new Date(2026, month, 1),
+        endDate: new Date(2026, month + 1, 0),
+        previous: { startDate: new Date(2026, month - 1, 1), endDate: new Date(2026, month, 0) },
+        next: { startDate: new Date(2026, month + 1, 1), endDate: new Date(2026, month + 2, 0) },
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    window.localStorage.setItem('sumweave-ui-finance-tenant-id', 'tenant-1')
+    mocks.listTenants.mockResolvedValueOnce([
+      { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
+      { id: 'tenant-2', name: 'Travel', displayCurrency: 'EUR', joinedAt: now, createdAt: now, updatedAt: now },
+    ])
+    let resolveStaleDashboard: (dashboard: ReturnType<typeof dashboardForMonth>) => void
+    const staleDashboard = new Promise<ReturnType<typeof dashboardForMonth>>((resolve) => {
+      resolveStaleDashboard = resolve
+    })
+    mocks.getDashboard
+      .mockResolvedValueOnce(dashboardForMonth(5, 'current_month'))
+      .mockResolvedValueOnce(dashboardForMonth(4, 'previous_month'))
+      .mockReturnValueOnce(staleDashboard)
+      .mockResolvedValueOnce(dashboardForMonth(4, 'previous_month'))
+      .mockResolvedValueOnce(dashboardForMonth(3, 'previous_month'))
+      .mockResolvedValueOnce(dashboardForMonth(2, 'previous_month'))
+
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    expect(mocks.getDashboard.mock.calls[1][0].monthAnchor).toBeUndefined()
+
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+
+    mocks.shellState!.selectTenant('tenant-2')
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(4))
+    expect(mocks.getDashboard.mock.calls[3][0]).toMatchObject({ tenantId: 'tenant-2', preset: 'previous_month', monthAnchor: undefined })
 
     await user.click(screen.getByText('Custom range'))
     expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-05-01')
     expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-05-31')
 
-    await user.clear(screen.getByLabelText('Custom start date'))
-    await user.type(screen.getByLabelText('Custom start date'), '2026-06-01')
-    await user.clear(screen.getByLabelText('Custom end date'))
-    await user.type(screen.getByLabelText('Custom end date'), '2026-06-30')
-    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(5))
+    expect(mocks.getDashboard.mock.calls[4][0]).toEqual({ tenantId: 'tenant-2', preset: 'previous_month', startDate: undefined, endDate: undefined, monthAnchor: new Date(2026, 4, 1) })
+    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-04-01')
+    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-04-30')
 
-    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
-    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-06-01')
-    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-06-30')
+    resolveStaleDashboard!(dashboardForMonth(1, 'previous_month'))
+    await waitFor(() => expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-04-01'))
+
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(6))
+    expect(mocks.getDashboard.mock.calls[5][0]).toEqual({ tenantId: 'tenant-2', preset: 'previous_month', startDate: undefined, endDate: undefined, monthAnchor: new Date(2026, 3, 1) })
+    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-03-01')
+    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-03-31')
   })
 
   it('calls the exact current- and next-month presets', async () => {
@@ -305,7 +412,7 @@ describe('Finance dashboard page', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Current month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
-    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'current_month', startDate: undefined, endDate: undefined })
+    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'current_month', startDate: undefined, endDate: undefined, monthAnchor: undefined })
 
     await user.click(screen.getByText('Custom range'))
     expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-06-20')
@@ -313,7 +420,23 @@ describe('Finance dashboard page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Next month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
-    expect(mocks.getDashboard.mock.calls[2][0]).toEqual({ tenantId: 'tenant-1', preset: 'next_month', startDate: undefined, endDate: undefined })
+    expect(mocks.getDashboard.mock.calls[2][0]).toEqual({ tenantId: 'tenant-1', preset: 'next_month', startDate: undefined, endDate: undefined, monthAnchor: undefined })
+  })
+
+  it('clears the month navigation anchor after applying a custom range', async () => {
+    const user = userEvent.setup()
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+
+    await user.click(screen.getByText('Custom range'))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(4))
+    expect(mocks.getDashboard.mock.calls[3][0]).toEqual({ tenantId: 'tenant-1', preset: 'next_month', startDate: undefined, endDate: undefined, monthAnchor: undefined })
   })
 
   it('keeps dashboard custom range instants until the date control changes them', async () => {

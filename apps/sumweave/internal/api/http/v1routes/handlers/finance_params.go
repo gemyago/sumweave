@@ -681,6 +681,7 @@ type paramsParserFinanceGetFinanceDashboard struct {
 	bindPreset requestParamBinder[[]string, GetFinanceDashboardParamsPreset]
 	bindStartDate requestParamBinder[[]string, string]
 	bindEndDate requestParamBinder[[]string, string]
+	bindMonthAnchor requestParamBinder[[]string, string]
 }
 
 func (p *paramsParserFinanceGetFinanceDashboard) parse(router httpRouter, req *http.Request) (*GetFinanceDashboardParams, error) {
@@ -695,6 +696,7 @@ func (p *paramsParserFinanceGetFinanceDashboard) parse(router httpRouter, req *h
 	p.bindPreset(queryParamsCtx.Fork("preset"), readQueryValue("preset", query), &reqParams.Preset)
 	p.bindStartDate(queryParamsCtx.Fork("startDate"), readQueryValue("startDate", query), &reqParams.StartDate)
 	p.bindEndDate(queryParamsCtx.Fork("endDate"), readQueryValue("endDate", query), &reqParams.EndDate)
+	p.bindMonthAnchor(queryParamsCtx.Fork("monthAnchor"), readQueryValue("monthAnchor", query), &reqParams.MonthAnchor)
 	return reqParams, bindingCtx.AggregatedError()
 }
 
@@ -725,6 +727,14 @@ func newParamsParserFinanceGetFinanceDashboard(rootHandler *RootHandler) paramsP
 			),
 		}),
 		bindEndDate: newRequestParamBinder(binderParams[[]string, string]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindMonthAnchor: newRequestParamBinder(binderParams[[]string, string]{
 			required: false,
 			parseValue: parseMultiValueParamAsSoloValue(
 				rootHandler.knownParsers.stringParser,

@@ -2247,7 +2247,7 @@ func TestFinanceController(t *testing.T) {
 		assert.InDelta(t, 1, coverage["affectedAccountCount"], 0)
 	})
 
-	t.Run("registered dashboard route accepts next month preset", func(t *testing.T) {
+	t.Run("registered dashboard route passes month navigation anchor", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()
 		service := newMockfinanceService(t)
@@ -2255,6 +2255,7 @@ func TestFinanceController(t *testing.T) {
 			GetDashboard(mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, params financepkg.DashboardParams) (financepkg.Dashboard, error) {
 				require.Equal(t, financepkg.DashboardPeriodPresetNextMonth, params.Preset)
+				require.Equal(t, time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC), params.MonthAnchor)
 				return financepkg.Dashboard{
 					Period: financepkg.DashboardPeriod{
 						Preset:   params.Preset,
@@ -2268,7 +2269,7 @@ func TestFinanceController(t *testing.T) {
 			resp,
 			newRequest(
 				http.MethodGet,
-				"/api/v1/finance/tenants/"+tenantID+"/dashboard?preset=next_month",
+				"/api/v1/finance/tenants/"+tenantID+"/dashboard?preset=next_month&monthAnchor=2024-01-01T00:00:00Z",
 				"",
 				true,
 			),

@@ -24,7 +24,9 @@ describe('finance api', () => {
       { ok: true, json: { importId: 'import-1', importableCount: 1, headers: ['Date'], duplicateRows: [], rejectedRows: [], wouldCreateAccounts: ['Checking'], wouldCreateCategories: [], wouldCreateTags: [], accountOptions: [{ name: 'Checking', sourceRowCount: 1, selected: true }] } },
       { ok: true, json: { jobId: 'job-1', jobType: 'finance.fx_rates_refresh', provider: 'frankfurter' } },
     ]
-    const fetch = vi.fn(async () => {
+    const requests: Array<RequestInfo | URL> = []
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(input)
       const next = responses.shift()
       return {
         ok: next?.ok ?? true,
@@ -36,7 +38,7 @@ describe('finance api', () => {
 
     const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
     const tenants = await api.listTenants()
-    const dashboard = await api.getDashboard({ tenantId: 'tenant-1', preset: 'current_month' })
+    const dashboard = await api.getDashboard({ tenantId: 'tenant-1', preset: 'current_month', monthAnchor: new Date('2026-06-01T00:00:00-07:00') })
     const connections = await api.listConnections({ tenantId: 'tenant-1' })
     const preview = await api.previewCSVImport({ tenantId: 'tenant-1', fileName: 'demo.csv', csv: 'Date\n29.05.26' })
     const job = await api.triggerFXSync({ provider: 'frankfurter' })
@@ -48,6 +50,7 @@ describe('finance api', () => {
     expect(dashboard.accountBalances[0].missingFx).toBe(false)
     expect(dashboard.fxCoverage[0]).toMatchObject({ baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 3, affectedAccountCount: 2 })
     expect(dashboard.currentFxRates[0].lastSuccessfulRefreshAt).toEqual(new Date('2026-06-20T12:00:00Z'))
+    expect(new URL(String(requests[1])).searchParams.get('monthAnchor')).toBe('2026-06-01T07:00:00.000Z')
     expect(connections[0].schedule?.intervalSeconds).toBe(900)
     expect(preview.wouldCreateAccounts).toEqual(['Checking'])
     expect(preview.accountOptions).toEqual([{ name: 'Checking', sourceRowCount: 1, selected: true }])

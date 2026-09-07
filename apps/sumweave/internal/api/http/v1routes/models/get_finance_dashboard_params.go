@@ -128,4 +128,5 @@ type GetFinanceDashboardParams struct {
 	Preset GetFinanceDashboardParamsPreset `json:"preset,omitempty"`
 	StartDate string `json:"startDate,omitempty"`
 	EndDate string `json:"endDate,omitempty"`
+	MonthAnchor string `json:"monthAnchor,omitempty"`
 }

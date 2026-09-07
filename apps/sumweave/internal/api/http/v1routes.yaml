@@ -1557,6 +1557,10 @@ paths:
         - in: query
           name: endDate
           schema: { type: string }
+        - in: query
+          name: monthAnchor
+          description: Reporting-period timestamp used as the calendar-month anchor for current, previous, and next month presets.
+          schema: { type: string }
       responses:
         '200':
           description: Finance dashboard

@@ -195,7 +195,7 @@
 - Header: **Finance dashboard** heading + short workspace-oriented copy.
 - This is the default authenticated landing when there is no remembered protected route.
 - Top area: compact dashboard header plus direct links into accounts and transactions.
-- Controls area: date-only reporting-period summary, direct **Previous month**, **Current month**, and **Next month** preset controls, and a compact custom date-range disclosure with an **Apply** action. Tenant control is not repeated here. Month controls call only their matching preset and never derive a range from a response window.
+- Controls area: date-only reporting-period summary, direct **Previous month**, **Current month**, and **Next month** preset controls, and a compact custom date-range disclosure with an **Apply** action. Tenant control is not repeated here. Period controls disable while a dashboard request is active. The first direct previous/next request sends only its preset; repeated navigation keeps that preset and sends the active period start as `monthAnchor`, so the API advances a whole calendar month. A tenant change retains the selected previous/next preset, reloads it without an anchor, then seeds a tenant-local cursor from that successful replacement period so the first following click advances one month. Responses from an old tenant cannot replace the new tenant's dashboard or cursor. **Current month** clears that anchor. Custom ranges remain separate.
 - In `current_month` mode, the visible start/end date controls stay populated with the active month bounds on first load and after **Current month** is clicked.
 - Direct month controls and the custom-range action keep the visible date inputs synchronized with the reporting window returned by the dashboard API.
 - Body order:

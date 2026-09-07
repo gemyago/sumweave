@@ -55,8 +55,10 @@
   let dashboardPreset = $state('current_month')
   let customStartDate = $state<Date | undefined>(undefined)
   let customEndDate = $state<Date | undefined>(undefined)
+  let monthNavigationAnchor = $state<Date | undefined>(undefined)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+  let dashboardLoadRevision = 0
 
   const financeShell = useFinanceShellState()
 
@@ -396,14 +398,16 @@
     }
   }
 
-  async function loadDashboard(overrides: { preset?: string; startDate?: Date; endDate?: Date } = {}) {
-    if (!financeShell.selectedTenantId) {
+  async function loadDashboard(overrides: { preset?: string; startDate?: Date; endDate?: Date; monthAnchor?: Date } = {}): Promise<boolean> {
+    const tenantId = financeShell.selectedTenantId
+    if (!tenantId) {
       dashboard = null
       historyAccounts = []
       recentTransactions = []
       recentConnections = []
-      return
+      return false
     }
+    const requestRevision = ++dashboardLoadRevision
 
     loadingDashboard = true
     error = null
@@ -411,16 +415,18 @@
     try {
       const [loadedDashboard, loadedAccounts, loadedTransactions, loadedConnections] = await Promise.all([
         financeApi.getDashboard({
-          tenantId: financeShell.selectedTenantId,
+          tenantId,
           preset: overrides.preset ?? dashboardPreset,
           startDate: overrides.preset && overrides.preset !== 'custom' ? undefined : overrides.startDate ?? customStartDate,
           endDate: overrides.preset && overrides.preset !== 'custom' ? undefined : overrides.endDate ?? customEndDate,
+          monthAnchor: overrides.monthAnchor,
         }),
-        financeApi.listAccounts({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
-        financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, includeHidden: true, limit: TRANSACTION_SECTION_LIMIT }),
-        financeApi.listConnections({ tenantId: financeShell.selectedTenantId }),
+        financeApi.listAccounts({ tenantId, includeHidden: true }),
+        financeApi.listTransactions({ tenantId, includeHidden: true, limit: TRANSACTION_SECTION_LIMIT }),
+        financeApi.listConnections({ tenantId }),
       ])
 
+      if (financeShell.selectedTenantId !== tenantId || dashboardLoadRevision !== requestRevision) return false
       dashboard = loadedDashboard
       historyAccounts = loadedAccounts
       recentTransactions = [...loadedTransactions]
@@ -434,13 +440,18 @@
       dashboardPreset = loadedDashboard.period.preset
       customStartDate = loadedDashboard.period.startDate
       customEndDate = loadedDashboard.period.endDate
+      return true
     } catch (loadError) {
+      if (financeShell.selectedTenantId !== tenantId || dashboardLoadRevision !== requestRevision) return false
       recentTransactions = []
       historyAccounts = []
       recentConnections = []
       error = loadError instanceof Error ? loadError.message : 'Failed to load dashboard'
+      return false
     } finally {
-      loadingDashboard = false
+      if (dashboardLoadRevision === requestRevision) {
+        loadingDashboard = false
+      }
     }
   }
 
@@ -451,33 +462,52 @@
       skipNextReactiveLoad = false
       return
     }
-    void untrack(() => loadDashboard())
+    const tenantId = financeShell.selectedTenantId
+    monthNavigationAnchor = undefined
+    void untrack(async () => {
+      if (!await loadDashboard()) return
+      if (financeShell.selectedTenantId !== tenantId) return
+      if (dashboardPreset === 'previous_month' || dashboardPreset === 'next_month') {
+        monthNavigationAnchor = dashboard?.period.startDate
+      }
+    })
   })
 
   async function openPreviousPeriod() {
+    if (loadingDashboard) return
     dashboardPreset = 'previous_month'
-    await loadDashboard({ preset: 'previous_month' })
+    if (await loadDashboard({ preset: 'previous_month', monthAnchor: monthNavigationAnchor })) {
+      monthNavigationAnchor = dashboard?.period.startDate
+    }
   }
 
   async function openCurrentMonth() {
+    if (loadingDashboard) return
     dashboardPreset = 'current_month'
+    monthNavigationAnchor = undefined
     await loadDashboard({ preset: 'current_month' })
   }
 
   async function openNextPeriod() {
+    if (loadingDashboard) return
     dashboardPreset = 'next_month'
-    await loadDashboard({ preset: 'next_month' })
+    if (await loadDashboard({ preset: 'next_month', monthAnchor: monthNavigationAnchor })) {
+      monthNavigationAnchor = dashboard?.period.startDate
+    }
   }
 
   async function applyCustomRange(event: SubmitEvent) {
     event.preventDefault()
+    if (loadingDashboard) return
     dashboardPreset = 'custom'
     if (!customStartDate || !customEndDate ||
       Number.isNaN(customStartDate.getTime()) || Number.isNaN(customEndDate.getTime())) {
       error = 'Choose valid start and end dates.'
       return
     }
-    await loadDashboard({ preset: 'custom', startDate: customStartDate, endDate: customEndDate })
+    if (await loadDashboard({ preset: 'custom', startDate: customStartDate, endDate: customEndDate })) {
+      monthNavigationAnchor = undefined
+    }
   }
 
   function applyTransactionUpdate(updated: FinanceTransaction) {
@@ -550,13 +580,13 @@
 
           <div class="col-12 col-xl-7">
             <div class="d-flex flex-wrap gap-2 mb-3">
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openPreviousPeriod()} disabled={!dashboard}>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openPreviousPeriod()} disabled={!dashboard || loadingDashboard}>
                 Previous month
               </button>
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openCurrentMonth()} disabled={!financeShell.selectedTenantId}>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openCurrentMonth()} disabled={!financeShell.selectedTenantId || loadingDashboard}>
                 Current month
               </button>
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openNextPeriod()} disabled={!dashboard}>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openNextPeriod()} disabled={!dashboard || loadingDashboard}>
                 Next month
               </button>
             </div>
@@ -587,7 +617,7 @@
                   />
                 </div>
                 <div class="col-12 col-md-2 d-grid align-content-end">
-                  <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId}>
+                  <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId || loadingDashboard}>
                     Apply
                   </button>
                 </div>

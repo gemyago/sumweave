@@ -395,6 +395,54 @@ func TestReportingAndFXInternals(t *testing.T) {
 				assert.Equal(t, testCase.next, period.Next)
 			})
 		}
+		t.Run("anchors repeated calendar month navigation", func(t *testing.T) {
+			for _, testCase := range []struct {
+				name        string
+				now         time.Time
+				preset      DashboardPeriodPreset
+				monthAnchor time.Time
+				startDate   time.Time
+				endDate     time.Time
+			}{
+				{
+					name:        "previous month crosses year boundary",
+					now:         time.Date(2026, time.January, 15, 12, 0, 0, 0, time.UTC),
+					preset:      DashboardPeriodPresetPreviousMonth,
+					monthAnchor: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+					startDate:   time.Date(2025, time.December, 1, 0, 0, 0, 0, time.UTC),
+					endDate:     time.Date(2025, time.December, 31, 23, 59, 59, 999999999, time.UTC),
+				},
+				{
+					name:        "next month resolves leap February",
+					now:         time.Date(2024, time.January, 31, 12, 0, 0, 0, time.UTC),
+					preset:      DashboardPeriodPresetNextMonth,
+					monthAnchor: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+					startDate:   time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC),
+					endDate:     time.Date(2024, time.February, 29, 23, 59, 59, 999999999, time.UTC),
+				},
+			} {
+				t.Run(testCase.name, func(t *testing.T) {
+					period := resolveDashboardPeriod(testCase.now, DashboardParams{
+						Preset:      testCase.preset,
+						MonthAnchor: testCase.monthAnchor,
+					})
+					assert.Equal(t, testCase.startDate, period.StartDate)
+					assert.Equal(t, testCase.endDate, period.EndDate)
+				})
+			}
+		})
+		t.Run("keeps month boundaries in the service location", func(t *testing.T) {
+			serviceLocation := time.FixedZone("UTC+02", 2*60*60)
+			period := resolveDashboardPeriod(
+				time.Date(2026, time.September, 7, 12, 0, 0, 0, serviceLocation),
+				DashboardParams{
+					Preset:      DashboardPeriodPresetPreviousMonth,
+					MonthAnchor: time.Date(2026, time.July, 31, 22, 0, 0, 0, time.UTC),
+				},
+			)
+			assert.Equal(t, time.Date(2026, time.July, 1, 0, 0, 0, 0, serviceLocation), period.StartDate)
+			assert.Equal(t, time.Date(2026, time.July, 31, 23, 59, 59, 999999999, serviceLocation), period.EndDate)
+		})
 		assert.Equal(
 			t,
 			time.Date(2026, time.March, 20, 12, 0, 0, 0, time.UTC),

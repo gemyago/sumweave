@@ -1239,7 +1239,7 @@ func (c *FinanceController) GetFinanceDashboard(
 			return nil, err
 		}
 
-		var startDate, endDate time.Time
+		var startDate, endDate, monthAnchor time.Time
 		parsedStart, startSupplied, err := parseOptionalTimestampQuery(req, "startDate", params.StartDate)
 		if err != nil {
 			return nil, err
@@ -1254,6 +1254,17 @@ func (c *FinanceController) GetFinanceDashboard(
 		if endSupplied {
 			endDate = parsedEnd
 		}
+		parsedMonthAnchor, monthAnchorSupplied, err := parseOptionalTimestampQuery(
+			req,
+			"monthAnchor",
+			params.MonthAnchor,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if monthAnchorSupplied {
+			monthAnchor = parsedMonthAnchor
+		}
 
 		dashboardParams := financepkg.DashboardParams{
 			ActorUserID: userID,
@@ -1261,6 +1272,7 @@ func (c *FinanceController) GetFinanceDashboard(
 			Preset:      financepkg.DashboardPeriodPreset(params.Preset),
 			StartDate:   startDate,
 			EndDate:     endDate,
+			MonthAnchor: monthAnchor,
 		}
 		if validationErr := financepkg.ValidateDashboardParams(dashboardParams); validationErr != nil {
 			return nil, mapFinanceRangeError(validationErr)

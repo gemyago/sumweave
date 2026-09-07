@@ -441,7 +441,7 @@ export interface SignalFinanceApi {
     windowStart?: Date
     windowEnd?: Date
   }): Promise<FinanceJobRef>
-  getDashboard(params: { tenantId: string; preset?: string; startDate?: Date; endDate?: Date }): Promise<FinanceDashboard>
+  getDashboard(params: { tenantId: string; preset?: string; startDate?: Date; endDate?: Date; monthAnchor?: Date }): Promise<FinanceDashboard>
   getFXDiagnostics(): Promise<FinanceFXDiagnostics>
   triggerFXSync(params: {
     provider?: string
@@ -909,7 +909,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       })
       return mapJobRef(json)
     },
-    async getDashboard({ tenantId, preset, startDate, endDate }) {
+    async getDashboard({ tenantId, preset, startDate, endDate, monthAnchor }) {
       return mapDashboard(
         await request<RawDashboard>({
           method: 'GET',
@@ -918,6 +918,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
             preset,
             startDate: startDate === undefined ? undefined : serializeRequestTimestamp(startDate),
             endDate: endDate === undefined ? undefined : serializeRequestTimestamp(endDate),
+            monthAnchor: monthAnchor === undefined ? undefined : serializeRequestTimestamp(monthAnchor),
           }),
         }),
       )
