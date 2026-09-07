@@ -57,7 +57,7 @@ func TestFinanceModuleHelpers(t *testing.T) {
 		"keeps FX generic scheduling while registering only error-returning handlers",
 		func(t *testing.T) {
 			registry := jobspkg.NewRegistry()
-			require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil, nil))
+			require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil, nil, nil))
 			_, err := registry.Handler(financepkg.FXRatesRefreshCommandTopic)
 			require.ErrorIs(t, err, jobspkg.ErrHandlerNotRegistered)
 		},
@@ -68,8 +68,8 @@ func TestFinanceJobRegistrationAdapters(t *testing.T) {
 	fake := faker.New()
 	t.Run("registers the four workload names once and maps bank metadata", func(t *testing.T) {
 		registry := jobspkg.NewRegistry()
-		require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil, nil))
-		require.NoError(t, registerFinanceJobHandlers(nil, nil, nil, nil, nil))
+		require.NoError(t, registerFinanceJobHandlers(registry, nil, nil, nil, nil, nil))
+		require.NoError(t, registerFinanceJobHandlers(nil, nil, nil, nil, nil, nil))
 		job := jobspkg.Job{ID: fake.UUID().V4()}
 		input := financepkg.BankConnectionSyncCommand{
 			ConnectionID: fake.UUID().V4(),
@@ -376,12 +376,12 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		).Scan(&count))
 		assert.Equal(t, 1, count)
 	}
-	clearClassificationMessages := func(t *testing.T, db *sql.DB, config appdispatch.Config) {
+	clearMessages := func(t *testing.T, db *sql.DB, config appdispatch.Config, topic string) {
 		t.Helper()
 		_, err := db.ExecContext(
 			t.Context(),
 			`DELETE FROM "`+config.MessagesTable()+`" WHERE topic=$1`,
-			financepkg.ClassificationExplicitCommandTopic,
+			topic,
 		)
 		require.NoError(t, err)
 	}
@@ -470,12 +470,12 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		command.Payload = []byte(`{"importId":"` + fake.UUID().V4() + `"}`)
 		_, err = adapter.PublishSemanticCommand(t.Context(), command)
 		require.ErrorIs(t, err, appdispatch.ErrPublicationConflict)
-		clearClassificationMessages(t, db, config)
+		clearMessages(t, db, config, financepkg.ClassificationExplicitCommandTopic)
 	})
 
 	t.Run("delivers registered classification commands through the observed lifecycle", func(t *testing.T) {
 		db, _, config := openPrepared(t)
-		clearClassificationMessages(t, db, config)
+		clearMessages(t, db, config, financepkg.ClassificationExplicitCommandTopic)
 		publisher := newPublisher(t, config, db)
 		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
 		require.NoError(t, err)
@@ -547,9 +547,55 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		assert.Equal(t, 1, job.AttemptCount)
 	})
 
+	t.Run("delivers registered transfer matching commands through the observed lifecycle", func(t *testing.T) {
+		db, _, config := openPrepared(t)
+		clearMessages(t, db, config, financepkg.TransferMatchingExplicitCommandTopic)
+		publisher := newPublisher(t, config, db)
+		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
+		require.NoError(t, err)
+		service := newMocktransferMatchingJobService(t)
+		registry := jobspkg.NewRegistry()
+		require.NoError(t, registerTransferMatchingJobHandler(registry, service))
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		input := financepkg.TransferMatchingExplicitCommand{
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        start,
+			RangeEndExclusive: start.Add(time.Hour),
+			Requester: financepkg.CommandRequester{
+				UserID: "user-" + fake.UUID().V4(), Source: financepkg.CommandRequesterSourceOperator,
+			},
+		}
+		payload, err := json.Marshal(input)
+		require.NoError(t, err)
+		adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
+		reference, err := adapter.PublishSemanticCommand(t.Context(), financepkg.SemanticCommand{
+			Topic: financepkg.TransferMatchingExplicitCommandTopic, Payload: payload,
+			IdempotencyKey: "finance.transfer-matching.explicit:" + fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		_, err = store.Get(t.Context(), reference.MessageID)
+		require.ErrorIs(t, err, jobspkg.ErrJobNotFound)
+		service.EXPECT().Match(mock.Anything, mock.MatchedBy(func(params financepkg.TransferMatchingParams) bool {
+			return params.TenantID == input.TenantID &&
+				params.RangeStart.Equal(input.RangeStart) && params.RangeEndExclusive.Equal(input.RangeEndExclusive) &&
+				params.MessageID == reference.MessageID && params.SourceSyncMessageID == ""
+		})).Return(financepkg.TransferMatchingAttemptCounts{}, nil).Once()
+		worker := newWorker(t, config, db, publisher, store, registry)
+		stop := runWorker(t, worker)
+		var job *jobspkg.Job
+		require.Eventually(t, func() bool {
+			job, err = store.Get(t.Context(), reference.MessageID)
+			return err == nil && job.Status == jobspkg.JobStatusSucceeded
+		}, time.Second, time.Millisecond)
+		stop()
+		assert.Equal(t, jobspkg.JobType(financepkg.TransferMatchingJobType), job.JobType)
+		assert.Equal(t, input.Requester.UserID, job.Requester.UserID)
+		assert.Equal(t, jobspkg.RequesterSourceOperator, job.Requester.Source)
+	})
+
 	t.Run("delivers each same-range publication once with a distinct observed job", func(t *testing.T) {
 		db, _, config := openPrepared(t)
-		clearClassificationMessages(t, db, config)
+		clearMessages(t, db, config, financepkg.ClassificationExplicitCommandTopic)
 		publisher := newPublisher(t, config, db)
 		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
 		require.NoError(t, err)
@@ -634,7 +680,7 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 
 	t.Run("keeps malformed classification commands job-row-free", func(t *testing.T) {
 		db, _, config := openPrepared(t)
-		clearClassificationMessages(t, db, config)
+		clearMessages(t, db, config, financepkg.ClassificationExplicitCommandTopic)
 		publisher := newPublisher(t, config, db)
 		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
 		require.NoError(t, err)
@@ -662,7 +708,7 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 
 	t.Run("persists a terminal classification failure as a failed observed job", func(t *testing.T) {
 		db, _, config := openPrepared(t)
-		clearClassificationMessages(t, db, config)
+		clearMessages(t, db, config, financepkg.ClassificationExplicitCommandTopic)
 		publisher := newPublisher(t, config, db)
 		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
 		require.NoError(t, err)
@@ -703,7 +749,7 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 
 	t.Run("retries transient classification delivery through the observed lifecycle", func(t *testing.T) {
 		db, _, config := openPrepared(t)
-		clearClassificationMessages(t, db, config)
+		clearMessages(t, db, config, financepkg.ClassificationExplicitCommandTopic)
 		publisher := newPublisher(t, config, db)
 		store, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
 		require.NoError(t, err)

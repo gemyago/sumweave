@@ -58,6 +58,25 @@ func TestBankSyncWindowCompletedEvent(t *testing.T) {
 		require.NoError(t, routerErr)
 		return router
 	}
+	checkpointTopic := func(t *testing.T, consumerGroup string) {
+		t.Helper()
+		var (
+			offset        int64
+			transactionID string
+		)
+		require.NoError(t, db.QueryRowContext(t.Context(), `
+			SELECT COALESCE(MAX("offset"), 0), COALESCE(MAX(transaction_id), '0'::xid8)::text
+			FROM sumweave_app_dispatch_messages WHERE topic=$1`, BankSyncWindowCompletedEventTopic,
+		).Scan(&offset, &transactionID))
+		_, execErr := db.ExecContext(t.Context(), `
+			INSERT INTO sumweave_app_dispatch_offsets (consumer_group, topic, offset_acked, last_processed_transaction_id)
+			VALUES ($1, $2, $3, $4::xid8)
+			ON CONFLICT (consumer_group, topic) DO UPDATE
+			SET offset_acked=EXCLUDED.offset_acked, last_processed_transaction_id=EXCLUDED.last_processed_transaction_id`,
+			consumerGroup, BankSyncWindowCompletedEventTopic, offset, transactionID,
+		)
+		require.NoError(t, execErr)
+	}
 	jobCount := func(t *testing.T) int {
 		t.Helper()
 		var tableName sql.NullString
@@ -263,6 +282,54 @@ func TestBankSyncWindowCompletedEvent(t *testing.T) {
 			}
 		}
 
+		assert.Equal(t, jobCountBefore, jobCount(t))
+	})
+
+	t.Run("matches exact requested bounds for every independent automatic delivery without jobs", func(t *testing.T) {
+		event := makeEvent()
+		service := newMocktransferMatchingJobService(t)
+		delivered := make(chan financepkg.TransferMatchingParams, 2)
+		service.EXPECT().
+			Match(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, params financepkg.TransferMatchingParams) (financepkg.TransferMatchingAttemptCounts, error) {
+				if params.SourceSyncMessageID == event.SourceSyncMessageID {
+					delivered <- params
+				}
+				return financepkg.TransferMatchingAttemptCounts{}, nil
+			}).
+			Maybe()
+		factory, factoryErr := appdispatch.NewRouterFactory(config, db, rawPublisher, logger)
+		require.NoError(t, factoryErr)
+		consumerGroup := TransferMatchingConsumerGroup + ".phase3-test." + fake.UUID().V4()
+		router, routerErr := factory.NewRouter(consumerGroup)
+		require.NoError(t, routerErr)
+		checkpointTopic(t, consumerGroup)
+		jobCountBefore := jobCount(t)
+		require.NoError(t, RegisterAutomaticTransferMatchingHandler(router, service, logger))
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(func() {
+			cancel()
+			require.NoError(t, router.Close())
+		})
+		go func() { _ = router.Run(ctx) }()
+		time.Sleep(100 * time.Millisecond)
+		publisher, publisherErr := appevents.NewPublisher(rawPublisher)
+		require.NoError(t, publisherErr)
+		require.NoError(t, publisher.Publish(t.Context(), event))
+		require.NoError(t, publisher.Publish(t.Context(), event))
+
+		for range 2 {
+			select {
+			case params := <-delivered:
+				assert.Equal(t, event.TenantID, params.TenantID)
+				assert.True(t, event.RangeStart.Equal(params.RangeStart))
+				assert.True(t, event.RangeEndExclusive.Equal(params.RangeEndExclusive))
+				assert.Equal(t, event.SourceSyncMessageID, params.SourceSyncMessageID)
+				assert.NotEmpty(t, params.MessageID)
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for automatic transfer matching")
+			}
+		}
 		assert.Equal(t, jobCountBefore, jobCount(t))
 	})
 

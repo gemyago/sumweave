@@ -149,24 +149,25 @@ type ProviderTransactionOriginal struct {
 }
 
 type Transaction struct {
-	ID                string
-	TenantID          string
-	AccountID         string
-	Source            TransactionSource
-	Status            TransactionStatus
-	Kind              TransactionKind
-	AmountMinor       int64
-	Currency          string
-	Description       string
-	EffectiveAt       time.Time
-	CategoryID        *string
-	TagIDs            []string
-	TransferGroupID   *string
-	TransferMatchedAt *time.Time
-	HiddenAt          *time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	ProviderOriginal  *ProviderTransactionOriginal
+	ID                       string
+	TenantID                 string
+	AccountID                string
+	Source                   TransactionSource
+	Status                   TransactionStatus
+	Kind                     TransactionKind
+	AmountMinor              int64
+	Currency                 string
+	Description              string
+	EffectiveAt              time.Time
+	CategoryID               *string
+	TagIDs                   []string
+	TransferGroupID          *string
+	TransferMatchedAt        *time.Time
+	TransferMatchingExcluded bool
+	HiddenAt                 *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+	ProviderOriginal         *ProviderTransactionOriginal
 }
 
 type AccountBalance struct {

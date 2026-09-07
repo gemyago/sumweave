@@ -175,6 +175,9 @@ The rules are:
 - Classification includes regular, expense, income, and refund kinds.
 - Category removal hides records and blocks live classification references.
 - Treat concurrent classification updates as an accepted Phase 0 risk.
+- Phase 0 transfer matching loads candidates once and matches in memory.
+- Accept transfer-matching races and defer locking in Phase 0.
+- State exact schema additions and changes in system designs.
 - Describe chosen designs; omit rejected alternatives and their history.
 - Use plain ASCII diagrams in system design documentation.
 - Classification range APIs accept full timestamps with offsets.

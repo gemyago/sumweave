@@ -65,6 +65,10 @@ type classificationJobService interface {
 	Classify(context.Context, financepkg.ClassificationParams) (financepkg.ClassificationAttemptCounts, error)
 }
 
+type transferMatchingJobService interface {
+	Match(context.Context, financepkg.TransferMatchingParams) (financepkg.TransferMatchingAttemptCounts, error)
+}
+
 // NewDatabase opens the finance persistence adapter over the application SQL
 // database. The application currently shares this database with jobs.
 func NewDatabase(
@@ -137,6 +141,7 @@ func NewModule(deps ModuleDeps) (*financepkg.Finance, error) {
 			financeModule.CSVImportService,
 			financeModule.BankSyncService,
 			financeModule.ClassificationService,
+			financeModule.TransferMatchingService,
 		)
 		if registerErr != nil { // coverage-ignore // Registry behavior is exercised through the worker root.
 			return nil, registerErr
@@ -207,6 +212,7 @@ func registerFinanceJobHandlers(
 	csvImportService csvImportJobService,
 	bankSyncService bankSyncJobService,
 	classificationService classificationJobService,
+	transferMatchingService transferMatchingJobService,
 ) error {
 	if registry == nil {
 		return nil
@@ -225,7 +231,40 @@ func registerFinanceJobHandlers(
 		registerBankSyncJobHandler(registry, bankSyncService),
 		registerFXRefreshJobHandler(registry, fxService),
 		registerClassificationJobHandler(registry, classificationService),
+		registerTransferMatchingJobHandler(registry, transferMatchingService),
 	)
+}
+
+func registerTransferMatchingJobHandler(registry *jobspkg.Registry, service transferMatchingJobService) error {
+	if service == nil {
+		return nil
+	}
+	return registerFinanceJobHandler(registry, financepkg.TransferMatchingExplicitCommandTopic, func() error {
+		return jobspkg.RegisterTypedHandler(
+			registry,
+			jobspkg.TypedHandlerSpec[financepkg.TransferMatchingExplicitCommand]{
+				JobType: jobspkg.JobType(
+					financepkg.TransferMatchingJobType,
+				),
+				Topic: financepkg.TransferMatchingExplicitCommandTopic,
+				Metadata: func(input financepkg.TransferMatchingExplicitCommand) (jobspkg.JobMetadata, error) {
+					return jobMetadata(jobspkg.JobType(financepkg.TransferMatchingJobType), input.Requester)
+				},
+				Run: func(ctx context.Context, job jobspkg.Job, input financepkg.TransferMatchingExplicitCommand) error {
+					_, err := service.Match(
+						ctx,
+						financepkg.TransferMatchingParams{
+							TenantID:          input.TenantID,
+							RangeStart:        input.RangeStart,
+							RangeEndExclusive: input.RangeEndExclusive,
+							MessageID:         job.ID,
+						},
+					)
+					return handledFinanceFailure(err)
+				},
+			},
+		)
+	})
 }
 
 func registerFXRefreshJobHandler(registry *jobspkg.Registry, service fxRefreshJobService) error {

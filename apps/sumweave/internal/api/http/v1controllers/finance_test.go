@@ -58,6 +58,9 @@ func TestFinanceController(t *testing.T) {
 	withClassificationService := func(service classificationService) controllerOption {
 		return func(deps *FinanceControllerDeps) { deps.ClassificationService = service }
 	}
+	withTransferMatchingService := func(service transferMatchingService) controllerOption {
+		return func(deps *FinanceControllerDeps) { deps.TransferMatchingService = service }
+	}
 	withClassificationRuleService := func(service classificationRuleService) controllerOption {
 		return func(deps *FinanceControllerDeps) { deps.ClassificationRuleService = service }
 	}
@@ -155,6 +158,39 @@ func TestFinanceController(t *testing.T) {
 			body,
 			true,
 		))
+		require.Equal(t, http.StatusAccepted, response.Code)
+		assert.Equal(t, jobID, decode(t, response)["jobId"])
+	})
+
+	t.Run("submits an offset-bearing explicit transfer matching range", func(t *testing.T) {
+		userID, tenantID := "user-"+fake.UUID().V4(), "tenant-"+fake.UUID().V4()
+		service := newMocktransferMatchingService(t)
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		end, jobID := start.Add(time.Hour), fake.UUID().V4()
+		service.EXPECT().Submit(mock.Anything, mock.MatchedBy(func(params financepkg.TransferMatchingSubmission) bool {
+			return params.ActorUserID == userID && params.TenantID == tenantID && params.RangeStart.Equal(start) &&
+				params.RangeEndExclusive.Equal(end)
+		})).Return(financepkg.TransferMatchingJobRef{ID: jobID}, nil).Once()
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withTransferMatchingService(service),
+		)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(
+			response,
+			newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions/match-transfers",
+				`{"rangeStart":"`+start.Format(
+					time.RFC3339Nano,
+				)+`","rangeEndExclusive":"`+end.Format(
+					time.RFC3339Nano,
+				)+`"}`,
+				true,
+			),
+		)
 		require.Equal(t, http.StatusAccepted, response.Code)
 		assert.Equal(t, jobID, decode(t, response)["jobId"])
 	})

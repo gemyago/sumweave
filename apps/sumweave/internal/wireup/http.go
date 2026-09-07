@@ -305,6 +305,7 @@ func buildHTTP(
 			CatalogService:               financeModule.CatalogService,
 			ClassificationRuleService:    financeModule.ClassificationRuleService,
 			ClassificationService:        financeModule.ClassificationService,
+			TransferMatchingService:      financeModule.TransferMatchingService,
 			LedgerService:                financeModule.LedgerService,
 			TransferDetailService:        financeModule.TransferDetailService,
 			BankSyncService:              financeModule.BankSyncService,

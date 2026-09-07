@@ -20,6 +20,8 @@ packages:
       classificationTransactionStore:
       categoryRuleReferenceFinder:
       BankSyncWindowCompletionPublisher:
+      ledgerTransferPairStore:
+      transferMatchingPairStore:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:

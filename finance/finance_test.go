@@ -104,6 +104,7 @@ func TestFinance(t *testing.T) {
 		require.NotNil(t, financeModule.BankSyncService)
 		require.NotNil(t, financeModule.ProviderSnapshotService)
 		require.NotNil(t, financeModule.TransferDetailService)
+		require.NotNil(t, financeModule.TransferMatchingService)
 
 		connection, err := financeModule.BankConnectionService.LinkTokenBankConnection(
 			t.Context(),

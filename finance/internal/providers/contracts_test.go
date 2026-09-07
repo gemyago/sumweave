@@ -758,16 +758,17 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 			EffectiveAt:       time.Date(2026, time.June, 24, 18, 0, 0, 0, time.UTC),
 		}
 		existing := domain.Transaction{
-			ID:          "transaction-" + fake.UUID().V4(),
-			TenantID:    "tenant-" + fake.UUID().V4(),
-			AccountID:   "finance-account-" + fake.UUID().V4(),
-			Source:      domain.TransactionSourceProvider,
-			Status:      domain.TransactionStatusPending,
-			Kind:        domain.TransactionKindRegular,
-			AmountMinor: -10_00,
-			Currency:    "USD",
-			Description: "user-edited-" + fake.Lorem().Word(),
-			EffectiveAt: time.Date(2026, time.June, 24, 18, 30, 0, 0, time.UTC),
+			ID:                       "transaction-" + fake.UUID().V4(),
+			TenantID:                 "tenant-" + fake.UUID().V4(),
+			AccountID:                "finance-account-" + fake.UUID().V4(),
+			Source:                   domain.TransactionSourceProvider,
+			Status:                   domain.TransactionStatusPending,
+			Kind:                     domain.TransactionKindRegular,
+			AmountMinor:              -10_00,
+			Currency:                 "USD",
+			Description:              "user-edited-" + fake.Lorem().Word(),
+			EffectiveAt:              time.Date(2026, time.June, 24, 18, 30, 0, 0, time.UTC),
+			TransferMatchingExcluded: true,
 		}
 
 		plan := planner.Plan(ProviderDiffPlan{
@@ -789,6 +790,7 @@ func TestProviderSyncV2Contracts(t *testing.T) {
 		merged := plan.TransactionWrites[1].MergedTransaction
 		assert.Equal(t, existing.AmountMinor, merged.AmountMinor)
 		assert.Equal(t, existing.Description, merged.Description)
+		assert.Equal(t, existing.TransferMatchingExcluded, merged.TransferMatchingExcluded)
 		require.NotNil(t, merged.ProviderOriginal)
 		assert.Equal(t, updateObservation.Description, merged.ProviderOriginal.Description)
 		assert.Equal(t, updateObservation.EffectiveAt, *merged.ProviderOriginal.EffectiveAt)

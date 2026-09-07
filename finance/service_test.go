@@ -11,6 +11,7 @@ import (
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +26,56 @@ func TestService(t *testing.T) {
 			RecordTransactionParams{EffectiveAt: time.Time{}},
 		)
 		require.Error(t, err)
+	})
+
+	t.Run("ledger constructor requires and uses a transfer pair store", func(t *testing.T) {
+		fake := faker.New()
+		tenantID := "tenant-" + fake.UUID().V4()
+		firstTransaction := domain.Transaction{
+			ID:          "transaction-first-" + fake.UUID().V4(),
+			TenantID:    tenantID,
+			AccountID:   "account-first-" + fake.UUID().V4(),
+			Status:      domain.TransactionStatusBooked,
+			AmountMinor: -int64(fake.IntBetween(1, 10_000)),
+		}
+		secondTransaction := domain.Transaction{
+			ID:          "transaction-second-" + fake.UUID().V4(),
+			TenantID:    tenantID,
+			AccountID:   "account-second-" + fake.UUID().V4(),
+			Status:      domain.TransactionStatusBooked,
+			AmountMinor: -firstTransaction.AmountMinor,
+		}
+		transactionStore := stubStore{
+			isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
+			getTransactionFn: func(_ context.Context, transactionID string) (*domain.Transaction, error) {
+				if transactionID == firstTransaction.ID {
+					return &firstTransaction, nil
+				}
+				return &secondTransaction, nil
+			},
+		}
+
+		withoutPairStore := struct{ ledgerServiceStore }{ledgerServiceStore: transactionStore}
+		require.PanicsWithValue(t, "ledger transfer pair store is required", func() {
+			NewLedgerService(withoutPairStore)
+		})
+
+		pairStore := newMockledgerTransferPairStore(t)
+		pairStore.EXPECT().LinkTransferPair(mock.Anything, mock.Anything).Return(nil)
+		store := struct {
+			ledgerServiceStore
+			ledgerTransferPairStore
+		}{
+			ledgerServiceStore:      transactionStore,
+			ledgerTransferPairStore: pairStore,
+		}
+		service := NewLedgerService(store)
+		require.NoError(t, service.LinkTransfers(t.Context(), LinkTransfersParams{
+			ActorUserID:         "user-" + fake.UUID().V4(),
+			TenantID:            tenantID,
+			FirstTransactionID:  firstTransaction.ID,
+			SecondTransactionID: secondTransaction.ID,
+		}))
 	})
 
 	timePointer := func(value time.Time) *time.Time { return &value }
@@ -1041,20 +1092,33 @@ func TestService(t *testing.T) {
 	t.Run(
 		"does not leave one-sided transfer links when atomic persistence fails",
 		func(t *testing.T) {
+			fake := faker.New()
 			now := time.Date(2026, time.June, 20, 17, 30, 0, 0, time.UTC)
 			sentinel := errors.New("atomic link failed")
 			firstTransfer := domain.Transaction{
-				ID: "transaction-1", TenantID: "tenant-1", AccountID: "account-1",
-				Status: domain.TransactionStatusBooked, AmountMinor: -1,
+				ID: "transaction-" + fake.UUID().
+					V4(),
+				TenantID:    "tenant-" + fake.UUID().V4(),
+				AccountID:   "account-" + fake.UUID().V4(),
+				Status:      domain.TransactionStatusBooked,
+				AmountMinor: -1,
 			}
 			secondTransfer := domain.Transaction{
-				ID: "transaction-2", TenantID: "tenant-1", AccountID: "account-2",
-				Status: domain.TransactionStatusBooked, AmountMinor: 1,
+				ID: "transaction-" + fake.UUID().
+					V4(),
+				TenantID:    firstTransfer.TenantID,
+				AccountID:   "account-" + fake.UUID().V4(),
+				Status:      domain.TransactionStatusBooked,
+				AmountMinor: 1,
 			}
 			var saveTransactionCalled bool
-			var savedPairs [][2]domain.Transaction
+			pairStore := newMockledgerTransferPairStore(t)
+			var savedParams persistence.TransferPairLinkParams
+			pairStore.EXPECT().LinkTransferPair(mock.Anything, mock.Anything).Run(
+				func(_ context.Context, params persistence.TransferPairLinkParams) { savedParams = params },
+			).Return(sentinel)
 
-			err := NewService(stubStore{
+			err := NewLedgerService(stubStore{
 				isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
 				getTransactionFn: func(_ context.Context, transactionID string) (*domain.Transaction, error) {
 					if transactionID == firstTransfer.ID {
@@ -1066,27 +1130,21 @@ func TestService(t *testing.T) {
 					saveTransactionCalled = true
 					return domain.Transaction{}, nil
 				},
-				saveLinkedTransferPairFn: func(_ context.Context, first domain.Transaction, second domain.Transaction) error {
-					savedPairs = append(savedPairs, [2]domain.Transaction{first, second})
-					return sentinel
-				},
-			}, WithNow(func() time.Time { return now })).LinkTransfers(t.Context(), LinkTransfersParams{
-				ActorUserID:         "user-1",
-				TenantID:            "tenant-1",
+			}, WithLedgerServiceNow(func() time.Time { return now }), WithLedgerServiceTransferPairStore(pairStore)).LinkTransfers(t.Context(), LinkTransfersParams{
+				ActorUserID:         "user-" + fake.UUID().V4(),
+				TenantID:            firstTransfer.TenantID,
 				FirstTransactionID:  firstTransfer.ID,
 				SecondTransactionID: secondTransfer.ID,
 			})
 
 			require.ErrorIs(t, err, sentinel)
 			assert.False(t, saveTransactionCalled)
-			require.Len(t, savedPairs, 1)
-			require.NotNil(t, savedPairs[0][0].TransferGroupID)
-			require.NotNil(t, savedPairs[0][1].TransferGroupID)
-			require.NotNil(t, savedPairs[0][0].TransferMatchedAt)
-			require.NotNil(t, savedPairs[0][1].TransferMatchedAt)
-			assert.Equal(t, *savedPairs[0][0].TransferGroupID, *savedPairs[0][1].TransferGroupID)
-			assert.True(t, now.Equal(*savedPairs[0][0].TransferMatchedAt))
-			assert.True(t, now.Equal(*savedPairs[0][1].TransferMatchedAt))
+			assert.Equal(t, firstTransfer.TenantID, savedParams.TenantID)
+			assert.Equal(t, firstTransfer.ID, savedParams.FirstTransactionID)
+			assert.Equal(t, secondTransfer.ID, savedParams.SecondTransactionID)
+			assert.NotEmpty(t, savedParams.TransferGroupID)
+			assert.True(t, now.Equal(savedParams.TransferMatchedAt))
+			assert.Equal(t, now, savedParams.UpdatedAt)
 		},
 	)
 
@@ -1160,10 +1218,6 @@ func TestService(t *testing.T) {
 							return &first, nil
 						}
 						return &second, nil
-					},
-					saveLinkedTransferPairFn: func(context.Context, domain.Transaction, domain.Transaction) error {
-						t.Fatal("invalid pair must not be persisted")
-						return nil
 					},
 				})
 
@@ -1614,7 +1668,9 @@ func TestService(t *testing.T) {
 		}).HideTransaction(t.Context(), HideTransactionParams{ActorUserID: "user-1", TenantID: "tenant-1", TransactionID: "transaction-1"})
 		require.ErrorIs(t, err, sentinel)
 
-		err = NewService(stubStore{
+		pairStore := newMockledgerTransferPairStore(t)
+		pairStore.EXPECT().LinkTransferPair(mock.Anything, mock.Anything).Return(sentinel)
+		err = NewLedgerService(stubStore{
 			isTenantMemberFn: func(context.Context, string, string) (bool, error) { return true, nil },
 			getTransactionFn: func(_ context.Context, transactionID string) (*domain.Transaction, error) {
 				if transactionID == "transaction-2" {
@@ -1628,10 +1684,7 @@ func TestService(t *testing.T) {
 					Status: domain.TransactionStatusBooked, AmountMinor: -1,
 				}, nil
 			},
-			saveLinkedTransferPairFn: func(context.Context, domain.Transaction, domain.Transaction) error {
-				return sentinel
-			},
-		}).LinkTransfers(t.Context(), LinkTransfersParams{
+		}, WithLedgerServiceTransferPairStore(pairStore)).LinkTransfers(t.Context(), LinkTransfersParams{
 			ActorUserID:         "user-1",
 			TenantID:            "tenant-1",
 			FirstTransactionID:  "transaction-1",
@@ -1675,33 +1728,34 @@ func TestService(t *testing.T) {
 }
 
 type stubStore struct {
-	saveTenantFn             func(context.Context, domain.Tenant) (domain.Tenant, error)
-	saveTenantMembershipFn   func(context.Context, domain.TenantMembership) (domain.TenantMembership, error)
-	listTenantsForUserFn     func(context.Context, string) ([]domain.TenantMembershipView, error)
-	isTenantMemberFn         func(context.Context, string, string) (bool, error)
-	saveTenantInviteFn       func(context.Context, domain.TenantInvite) (domain.TenantInvite, error)
-	getTenantInviteByCodeFn  func(context.Context, string) (*domain.TenantInvite, error)
-	updateTenantInviteFn     func(context.Context, domain.TenantInvite) (domain.TenantInvite, error)
-	listTenantMembersFn      func(context.Context, string) ([]domain.TenantMember, error)
-	listTenantInvitesFn      func(context.Context, string) ([]domain.TenantInvite, error)
-	saveAccountFn            func(context.Context, domain.Account) (domain.Account, error)
-	getAccountFn             func(context.Context, string) (*domain.Account, error)
-	listAccountsFn           func(context.Context, string, bool) ([]domain.Account, error)
-	saveCategoryFn           func(context.Context, domain.Category) (domain.Category, error)
-	getCategoryFn            func(context.Context, string) (*domain.Category, error)
-	listCategoriesFn         func(context.Context, string, bool) ([]domain.Category, error)
-	saveTagFn                func(context.Context, domain.Tag) (domain.Tag, error)
-	getTagFn                 func(context.Context, string) (*domain.Tag, error)
-	listTagsFn               func(context.Context, string, bool) ([]domain.Tag, error)
-	saveTransactionFn        func(context.Context, domain.Transaction) (domain.Transaction, error)
-	saveLinkedTransferPairFn func(context.Context, domain.Transaction, domain.Transaction) error
-	getTransactionFn         func(context.Context, string) (*domain.Transaction, error)
-	listTransactionsFn       func(context.Context, string, string, domain.TransactionSource, domain.TransactionStatus, bool) ([]domain.Transaction, error)
-	getTenantFn              func(context.Context, string) (*domain.Tenant, error)
-	saveCurrentFXRatesFn     func(context.Context, []domain.FXRate) error
-	listCurrentFXRatesFn     func(context.Context, persistence.ListCurrentFXRatesParams) ([]domain.FXRate, error)
-	saveCSVImportFn          func(context.Context, domain.CSVImportRecord) (domain.CSVImportRecord, error)
-	getCSVImportFn           func(context.Context, string) (*domain.CSVImportRecord, error)
+	saveTenantFn            func(context.Context, domain.Tenant) (domain.Tenant, error)
+	saveTenantMembershipFn  func(context.Context, domain.TenantMembership) (domain.TenantMembership, error)
+	listTenantsForUserFn    func(context.Context, string) ([]domain.TenantMembershipView, error)
+	isTenantMemberFn        func(context.Context, string, string) (bool, error)
+	saveTenantInviteFn      func(context.Context, domain.TenantInvite) (domain.TenantInvite, error)
+	getTenantInviteByCodeFn func(context.Context, string) (*domain.TenantInvite, error)
+	updateTenantInviteFn    func(context.Context, domain.TenantInvite) (domain.TenantInvite, error)
+	listTenantMembersFn     func(context.Context, string) ([]domain.TenantMember, error)
+	listTenantInvitesFn     func(context.Context, string) ([]domain.TenantInvite, error)
+	saveAccountFn           func(context.Context, domain.Account) (domain.Account, error)
+	getAccountFn            func(context.Context, string) (*domain.Account, error)
+	listAccountsFn          func(context.Context, string, bool) ([]domain.Account, error)
+	saveCategoryFn          func(context.Context, domain.Category) (domain.Category, error)
+	getCategoryFn           func(context.Context, string) (*domain.Category, error)
+	listCategoriesFn        func(context.Context, string, bool) ([]domain.Category, error)
+	saveTagFn               func(context.Context, domain.Tag) (domain.Tag, error)
+	getTagFn                func(context.Context, string) (*domain.Tag, error)
+	listTagsFn              func(context.Context, string, bool) ([]domain.Tag, error)
+	saveTransactionFn       func(context.Context, domain.Transaction) (domain.Transaction, error)
+	linkTransferPairFn      func(context.Context, persistence.TransferPairLinkParams) error
+	unlinkTransferPairFn    func(context.Context, persistence.TransferPairUnlinkParams) error
+	getTransactionFn        func(context.Context, string) (*domain.Transaction, error)
+	listTransactionsFn      func(context.Context, string, string, domain.TransactionSource, domain.TransactionStatus, bool) ([]domain.Transaction, error)
+	getTenantFn             func(context.Context, string) (*domain.Tenant, error)
+	saveCurrentFXRatesFn    func(context.Context, []domain.FXRate) error
+	listCurrentFXRatesFn    func(context.Context, persistence.ListCurrentFXRatesParams) ([]domain.FXRate, error)
+	saveCSVImportFn         func(context.Context, domain.CSVImportRecord) (domain.CSVImportRecord, error)
+	getCSVImportFn          func(context.Context, string) (*domain.CSVImportRecord, error)
 }
 
 var errStubStoreNotConfigured = errors.New("stub store function not configured")
@@ -1885,15 +1939,18 @@ func (s stubStore) SaveTransaction(
 	return s.saveTransactionFn(ctx, transaction)
 }
 
-func (s stubStore) SaveLinkedTransferPair(
-	ctx context.Context,
-	firstTransaction domain.Transaction,
-	secondTransaction domain.Transaction,
-) error {
-	if s.saveLinkedTransferPairFn == nil {
-		return nil
+func (s stubStore) LinkTransferPair(ctx context.Context, params persistence.TransferPairLinkParams) error {
+	if s.linkTransferPairFn == nil {
+		return errStubStoreNotConfigured
 	}
-	return s.saveLinkedTransferPairFn(ctx, firstTransaction, secondTransaction)
+	return s.linkTransferPairFn(ctx, params)
+}
+
+func (s stubStore) UnlinkTransferPair(ctx context.Context, params persistence.TransferPairUnlinkParams) error {
+	if s.unlinkTransferPairFn == nil {
+		return errStubStoreNotConfigured
+	}
+	return s.unlinkTransferPairFn(ctx, params)
 }
 
 func (s stubStore) GetTransaction(

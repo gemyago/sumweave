@@ -428,35 +428,10 @@ func (s *Store) SaveTransaction(
 	transaction domain.Transaction,
 ) (domain.Transaction, error) {
 	model := newTransactionModel(transaction)
-	if err := s.saveTransactionWithDB(s.db.WithContext(ctx), model); err != nil {
+	if err := saveTransactionModel(s.db.WithContext(ctx), &model); err != nil {
 		return domain.Transaction{}, fmt.Errorf("save transaction: %w", err)
 	}
 	return transactionFromModel(model), nil
-}
-
-func (s *Store) SaveLinkedTransferPair(
-	ctx context.Context,
-	firstTransaction domain.Transaction,
-	secondTransaction domain.Transaction,
-) error {
-	firstModel := newTransactionModel(firstTransaction)
-	secondModel := newTransactionModel(secondTransaction)
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := s.saveTransactionWithDB(tx, firstModel); err != nil {
-			return err
-		}
-		if err := s.saveTransactionWithDB(tx, secondModel); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("save linked transfer pair: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) saveTransactionWithDB(db *gorm.DB, model transactionModel) error {
-	return saveTransactionModel(db, model)
 }
 
 func (s *Store) GetTransaction(

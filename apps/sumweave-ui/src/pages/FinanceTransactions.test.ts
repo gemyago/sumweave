@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
+import { faker } from '@faker-js/faker'
 import FinanceTransactions from './FinanceTransactions.svelte'
+import { isFinanceLedgerRefreshPending } from '../lib/finance/ledger-refresh'
 
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
@@ -9,8 +11,11 @@ const mocks = vi.hoisted(() => ({
   listCategories: vi.fn(),
   listTags: vi.fn(),
    listTransactions: vi.fn(),
-   updateTransaction: vi.fn(),
-   createClassificationRule: vi.fn(),
+    updateTransaction: vi.fn(),
+    createClassificationRule: vi.fn(),
+    submitTransferMatching: vi.fn(),
+    getJob: vi.fn(),
+    requestFinanceLedgerRefresh: vi.fn(),
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => ({
@@ -19,6 +24,20 @@ vi.mock('../lib/finance/api', async (importOriginal) => ({
 }))
 
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
+vi.mock('../lib/jobs/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/jobs/api')>()),
+  createSignalJobsApiForAuth: vi.fn(() => ({ getJob: mocks.getJob })),
+}))
+vi.mock('../lib/finance/ledger-refresh', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/finance/ledger-refresh')>()
+  return {
+    ...actual,
+    requestFinanceLedgerRefresh: (...args: [string]) => {
+      mocks.requestFinanceLedgerRefresh(...args)
+      actual.requestFinanceLedgerRefresh(...args)
+    },
+  }
+})
 
 describe('Finance transactions page', () => {
   beforeEach(() => {
@@ -68,6 +87,8 @@ describe('Finance transactions page', () => {
       categoryId: params.categoryId ?? null,
     }))
     mocks.createClassificationRule.mockResolvedValue({ id: 'rule-1' })
+    mocks.submitTransferMatching.mockResolvedValue({ jobId: 'transfer-matching-job-1' })
+    mocks.getJob.mockResolvedValue({ id: 'transfer-matching-job-1', status: 'queued', jobType: 'finance.transfer-matching' })
   })
 
   it('renders the shared transaction list and full-editor navigation link', async () => {
@@ -80,6 +101,139 @@ describe('Finance transactions page', () => {
     expect(screen.getAllByText('pending').length).toBeGreaterThan(0)
     expect(screen.getByText('hidden')).toBeInTheDocument()
     expect(screen.getAllByText('refund').length).toBeGreaterThan(0)
+  })
+
+  it('submits Match transfers for the selected tenant rather than current ledger filters or page', async () => {
+    vi.setSystemTime(new Date(2026, 5, 20, 12))
+    const user = userEvent.setup()
+    const tenantId = faker.string.alphanumeric(12)
+    mocks.listTenants.mockResolvedValueOnce([{ id: tenantId, name: 'Household', displayCurrency: 'USD', joinedAt: new Date(), createdAt: new Date(), updatedAt: new Date() }])
+    render(FinanceTransactions)
+
+    expect(await screen.findByLabelText('Transfer matching start date')).toHaveValue('2026-05-22')
+    expect(screen.getByLabelText('Transfer matching end date')).toHaveValue('2026-06-20')
+    expect(screen.getByText('Searches all accounts in this tenant. A matching partner may be up to 72 hours outside the selected dates.')).toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Account filter' }), 'account-1')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction status filter' }), 'booked')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction source filter' }), 'provider')
+    await user.click(screen.getByRole('button', { name: 'Match transfers' }))
+
+    await waitFor(() => expect(mocks.submitTransferMatching).toHaveBeenCalledWith({
+      tenantId,
+      rangeStart: expect.stringMatching(/^2026-05-22T00:00:00[+-]\d{2}:\d{2}$/),
+      rangeEndExclusive: expect.stringMatching(/^2026-06-21T00:00:00[+-]\d{2}:\d{2}$/),
+    }))
+    expect(screen.getByRole('link', { name: 'Open finance job' })).toHaveAttribute('href', '#/finance/jobs/transfer-matching-job-1')
+  })
+
+  it('keeps invalid matching dates local without publishing a request', async () => {
+    const user = userEvent.setup()
+    render(FinanceTransactions)
+    const start = await screen.findByLabelText('Transfer matching start date')
+    const end = screen.getByLabelText('Transfer matching end date')
+
+    await fireEvent.input(start, { target: { value: '2026-06-21' } })
+    await fireEvent.input(end, { target: { value: '2026-06-20' } })
+    await user.click(screen.getByRole('button', { name: 'Match transfers' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Start date must be on or before end date.')
+    expect(mocks.submitTransferMatching).not.toHaveBeenCalled()
+  })
+
+  it('observes only its initiating job through pending, queued, running, and completed feedback', async () => {
+    vi.useFakeTimers()
+    const { JobsApiError } = await import('../lib/jobs/api')
+    mocks.getJob
+      .mockRejectedValueOnce(new JobsApiError({ status: 404, method: 'GET', path: '/jobs/transfer-matching-job-1', message: 'Not Found' }))
+      .mockResolvedValueOnce({ id: 'transfer-matching-job-1', status: 'queued', jobType: 'finance.transfer-matching' })
+      .mockResolvedValueOnce({ id: 'transfer-matching-job-1', status: 'running', jobType: 'finance.transfer-matching' })
+      .mockResolvedValueOnce({ id: 'transfer-matching-job-1', status: 'succeeded', jobType: 'finance.transfer-matching' })
+    render(FinanceTransactions)
+    await screen.findByRole('button', { name: 'Match transfers' })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Match transfers' }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByText('Waiting for a worker to receive this transfer matching…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Match transfers' })).toBeDisabled()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(screen.getByText('Queued — waiting for a worker.')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(screen.getByText('Running now.')).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(await screen.findByText('Transfer matching completed.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Run matching again' })).toBeEnabled()
+    expect(mocks.requestFinanceLedgerRefresh).toHaveBeenCalledWith('tenant-1')
+    vi.useRealTimers()
+  })
+
+  it('invalidates the initiating tenant after matching succeeds while another tenant stays displayed', async () => {
+    const user = userEvent.setup()
+    const tenantA = faker.string.uuid()
+    const tenantB = faker.string.uuid()
+    const accountA = faker.string.uuid()
+    const accountB = faker.string.uuid()
+    let resolveJob!: (value: { id: string; status: string; jobType: string }) => void
+    mocks.listTenants.mockResolvedValueOnce([
+      { id: tenantA, name: 'Household', displayCurrency: 'USD', joinedAt: new Date(), createdAt: new Date(), updatedAt: new Date() },
+      { id: tenantB, name: 'Travel', displayCurrency: 'EUR', joinedAt: new Date(), createdAt: new Date(), updatedAt: new Date() },
+    ])
+    window.localStorage.setItem('sumweave-ui-finance-tenant-id', tenantA)
+    mocks.listAccounts.mockImplementation(async ({ tenantId }) => [{
+      id: tenantId === tenantA ? accountA : accountB, tenantId, name: tenantId === tenantA ? 'Household checking' : 'Travel checking', currency: 'USD', kind: 'manual', provider: '', providerAccountId: '', hiddenAt: null, createdAt: new Date(), updatedAt: new Date(),
+    }])
+    mocks.listTransactions.mockImplementation(async ({ tenantId }) => [{
+      id: faker.string.uuid(), tenantId, accountId: tenantId === tenantA ? accountA : accountB, source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100, currency: 'USD', description: tenantId === tenantA ? 'Tenant A transaction' : 'Tenant B transaction', effectiveAt: new Date(), categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: new Date(), updatedAt: new Date(),
+    }])
+    mocks.getJob.mockImplementationOnce(() => new Promise((resolve) => { resolveJob = resolve }))
+    render(FinanceTransactions)
+    await screen.findByRole('button', { name: 'Match transfers' })
+
+    await user.click(screen.getByRole('button', { name: 'Match transfers' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), tenantB)
+    expect(await screen.findByText('Tenant B transaction')).toBeInTheDocument()
+    const transactionCallsBeforeTerminal = mocks.listTransactions.mock.calls.length
+    resolveJob({ id: 'transfer-matching-job-1', status: 'succeeded', jobType: 'finance.transfer-matching' })
+
+    expect(await screen.findByText('Transfer matching completed.')).toBeInTheDocument()
+    expect(screen.getByText('Tenant B transaction')).toBeInTheDocument()
+    expect(mocks.listTransactions).toHaveBeenCalledTimes(transactionCallsBeforeTerminal)
+    expect(isFinanceLedgerRefreshPending(tenantA)).toBe(true)
+    expect(isFinanceLedgerRefreshPending(tenantB)).toBe(false)
+    expect(mocks.requestFinanceLedgerRefresh).toHaveBeenCalledWith(tenantA)
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), tenantA)
+    expect(await screen.findByText('Tenant A transaction')).toBeInTheDocument()
+    await waitFor(() => expect(isFinanceLedgerRefreshPending(tenantA)).toBe(false))
+    expect(screen.getByRole('button', { name: 'Run matching again' })).toBeEnabled()
+  })
+
+  it('invalidates the initiating tenant after matching fails while another tenant stays displayed', async () => {
+    const user = userEvent.setup()
+    const tenantA = faker.string.uuid()
+    const tenantB = faker.string.uuid()
+    let resolveJob!: (value: { id: string; status: string; jobType: string }) => void
+    mocks.listTenants.mockResolvedValueOnce([
+      { id: tenantA, name: 'Household', displayCurrency: 'USD', joinedAt: new Date(), createdAt: new Date(), updatedAt: new Date() },
+      { id: tenantB, name: 'Travel', displayCurrency: 'EUR', joinedAt: new Date(), createdAt: new Date(), updatedAt: new Date() },
+    ])
+    window.localStorage.setItem('sumweave-ui-finance-tenant-id', tenantA)
+    mocks.getJob.mockImplementationOnce(() => new Promise((resolve) => { resolveJob = resolve }))
+    render(FinanceTransactions)
+    await screen.findByRole('button', { name: 'Match transfers' })
+
+    await user.click(screen.getByRole('button', { name: 'Match transfers' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), tenantB)
+    const transactionCallsBeforeTerminal = mocks.listTransactions.mock.calls.length
+    resolveJob({ id: 'transfer-matching-job-1', status: 'failed', jobType: 'finance.transfer-matching' })
+
+    expect(await screen.findByText('Transfer matching failed. Some pairs may already have been matched. Running it again preserves existing pairs.')).toBeInTheDocument()
+    expect(mocks.listTransactions).toHaveBeenCalledTimes(transactionCallsBeforeTerminal)
+    expect(isFinanceLedgerRefreshPending(tenantA)).toBe(true)
+    expect(isFinanceLedgerRefreshPending(tenantB)).toBe(false)
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), tenantA)
+    await waitFor(() => expect(isFinanceLedgerRefreshPending(tenantA)).toBe(false))
+    expect(screen.getByRole('button', { name: 'Run matching again' })).toBeEnabled()
   })
 
   it('keeps hidden-account names and badges in transaction history and filters', async () => {

@@ -38,6 +38,7 @@ packages:
       syntheticLinkStateService:
       classificationRuleService:
       classificationService:
+      transferMatchingService:
       jobsService:
       userDirectory:
   github.com/gemyago/sumweave/apps/sumweave/internal/app:
@@ -52,6 +53,7 @@ packages:
       csvImportJobService:
       bankSyncJobService:
       classificationJobService:
+      transferMatchingJobService:
   github.com/gemyago/sumweave/finance:
     interfaces:
       BankSyncWindowCompletionPublisher:

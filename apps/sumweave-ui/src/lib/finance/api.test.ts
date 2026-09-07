@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { faker } from '@faker-js/faker'
 import {
   CategoryReferencedByClassificationRulesError,
   createSignalFinanceApi,
@@ -842,6 +843,30 @@ describe('finance api', () => {
     })).resolves.toEqual({ jobId: 'classification-job-1' })
 
     expect(new URL(String(call?.input)).pathname).toBe('/api/v1/finance/tenants/tenant%20%2F%201/transactions/classify')
+    expect(call?.init?.method).toBe('POST')
+    expect(JSON.parse(String(call?.init?.body))).toEqual({
+      rangeStart: '2026-03-07T00:00:00-05:00',
+      rangeEndExclusive: '2026-03-09T00:00:00-04:00',
+    })
+  })
+
+  it('submits transfer matching with encoded tenant ID, camelCase bounds, and a job-only response', async () => {
+    let call: { input: RequestInfo | URL; init?: RequestInit } | undefined
+    const tenantId = `${faker.string.alphanumeric(8)} / ${faker.string.alphanumeric(8)}`
+    const jobId = faker.string.uuid()
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      call = { input, init }
+      return { ok: true, status: 202, statusText: 'Accepted', json: async () => ({ jobId }) } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await expect(api.submitTransferMatching({
+      tenantId,
+      rangeStart: '2026-03-07T00:00:00-05:00',
+      rangeEndExclusive: '2026-03-09T00:00:00-04:00',
+    })).resolves.toEqual({ jobId })
+
+    expect(new URL(String(call?.input)).pathname).toBe(`/api/v1/finance/tenants/${encodeURIComponent(tenantId)}/transactions/match-transfers`)
     expect(call?.init?.method).toBe('POST')
     expect(JSON.parse(String(call?.init?.body))).toEqual({
       rangeStart: '2026-03-07T00:00:00-05:00',

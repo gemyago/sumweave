@@ -30,6 +30,7 @@ type Finance struct {
 	TransferDetailService         *TransferDetailService
 	ClassificationRuleService     *ClassificationRuleService
 	ClassificationService         *ClassificationService
+	TransferMatchingService       *TransferMatchingService
 }
 
 func New(cfg *Config) (*Finance, error) {
@@ -46,6 +47,7 @@ func New(cfg *Config) (*Finance, error) {
 	csvImportStore := persistence.NewCSVImportStore(cfg.Database)
 	providerSnapshotStore := persistence.NewProviderSnapshotStore(cfg.Database)
 	transferCandidateStore := persistence.NewTransferCandidateStore(cfg.Database)
+	transferPairStore := persistence.NewTransferPairStore(cfg.Database)
 	connectors := newConnectors(cfg, store)
 	connectorRegistry := internalproviders.NewStaticConnectorRegistry(connectors...)
 	profileRegistry := newProviderProfileRegistry(cfg)
@@ -58,6 +60,10 @@ func New(cfg *Config) (*Finance, error) {
 	)
 	if err != nil { // coverage-ignore // Static production wireup always supplies persistence.
 		return nil, fmt.Errorf("create provider window sync store: %w", err)
+	}
+	transferMatchingService, err := newTransferMatchingService(cfg, store, transferPairStore)
+	if err != nil { // coverage-ignore // Config-validated production wireup always supplies required dependencies.
+		return nil, fmt.Errorf("create transfer matching service: %w", err)
 	}
 	windowExecutor, err := internalproviders.NewWindowSyncExecutor(
 		internalproviders.WithConnectorRegistry(connectorRegistry),
@@ -130,7 +136,18 @@ func New(cfg *Config) (*Finance, error) {
 		TransferDetailService:     NewTransferDetailService(transferCandidateStore),
 		ClassificationRuleService: services.ClassificationRuleService,
 		ClassificationService:     services.ClassificationService,
+		TransferMatchingService:   transferMatchingService,
 	}, nil
+}
+
+func newTransferMatchingService(
+	cfg *Config,
+	access accessGuardStore,
+	pairs transferMatchingPairStore,
+) (*TransferMatchingService, error) {
+	return NewTransferMatchingService(TransferMatchingServiceArgs{
+		Access: access, Pairs: pairs, Logger: cfg.Logger, Now: cfg.Now, NewID: cfg.NewID,
+	}, WithTransferMatchingServiceSubmissionPublisher(cfg.CommandPublisher))
 }
 
 func newConnectors(

@@ -77,6 +77,10 @@ type classificationService interface {
 	Submit(context.Context, financepkg.SubmitClassificationParams) (financepkg.ClassificationJobRef, error)
 }
 
+type transferMatchingService interface {
+	Submit(context.Context, financepkg.TransferMatchingSubmission) (financepkg.TransferMatchingJobRef, error)
+}
+
 type ledgerService interface {
 	RecordTransaction(
 		context.Context,
@@ -212,6 +216,7 @@ type FinanceControllerDeps struct {
 	CatalogService               catalogService
 	ClassificationRuleService    classificationRuleService
 	ClassificationService        classificationService
+	TransferMatchingService      transferMatchingService
 	LedgerService                ledgerService
 	TransferDetailService        transferDetailService
 	BankSyncService              bankSyncService
@@ -659,6 +664,30 @@ func (c *FinanceController) SubmitFinanceTransactionClassification(
 		}
 		return &models.FinanceClassificationJobResponse{JobID: job.ID}, nil
 	})
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) SubmitFinanceTransferMatching(
+	builder handlers.HandlerBuilder[*models.SubmitFinanceTransferMatchingParams, *models.FinanceTransferMatchingJobResponse],
+) http.Handler {
+	inner := builder.HandleWith(
+		func(ctx context.Context, params *models.SubmitFinanceTransferMatchingParams) (*models.FinanceTransferMatchingJobResponse, error) {
+			userID, err := operatorUserIDFromContext(ctx)
+			if err != nil {
+				return nil, err
+			}
+			job, err := c.deps.TransferMatchingService.Submit(ctx, financepkg.TransferMatchingSubmission{
+				ActorUserID:       userID,
+				TenantID:          params.TenantID,
+				RangeStart:        params.Payload.RangeStart,
+				RangeEndExclusive: params.Payload.RangeEndExclusive,
+			})
+			if err != nil {
+				return nil, mapFinanceRangeError(err)
+			}
+			return &models.FinanceTransferMatchingJobResponse{JobID: job.ID}, nil
+		},
+	)
 	return c.deps.AuthMiddleware(inner)
 }
 

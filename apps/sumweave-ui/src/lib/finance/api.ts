@@ -317,6 +317,10 @@ export interface FinanceClassificationJob {
   jobId: string
 }
 
+export interface FinanceTransferMatchingJob {
+  jobId: string
+}
+
 export interface FinanceConnectionRedirectStart {
   provider: string
   authorizationUrl: string
@@ -364,6 +368,7 @@ export interface SignalFinanceApi {
   deleteClassificationRule(params: { tenantId: string; ruleId: string }): Promise<void>
   moveClassificationRule(params: { tenantId: string; ruleId: string; direction: 'up' | 'down' }): Promise<void>
   submitTransactionClassification(params: { tenantId: string; rangeStart: string; rangeEndExclusive: string }): Promise<FinanceClassificationJob>
+  submitTransferMatching(params: { tenantId: string; rangeStart: string; rangeEndExclusive: string }): Promise<FinanceTransferMatchingJob>
   listTags(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceTag[]>
   createTag(params: { tenantId: string; name: string }): Promise<FinanceTag>
   renameTag(params: { tenantId: string; tagId: string; name: string }): Promise<void>
@@ -685,6 +690,13 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         body: { rangeStart, rangeEndExclusive },
       }))
     },
+    async submitTransferMatching({ tenantId, rangeStart, rangeEndExclusive }) {
+      return mapTransferMatchingJob(await request<RawTransferMatchingJob>({
+        method: 'POST',
+        path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions/match-transfers`,
+        body: { rangeStart, rangeEndExclusive },
+      }))
+    },
     async listTags({ tenantId, includeHidden }) {
       const json = await request<{ items?: RawTag[] }>({
         method: 'GET',
@@ -972,6 +984,7 @@ interface RawTag { id: string; tenantId: string; name: string; hiddenAt?: string
 interface RawClassificationRule { id: string; matchType: FinanceClassificationMatchType; condition: string; categoryId: string; position: number; createdAt: string; updatedAt: string }
 interface RawIdentifier { id: string }
 interface RawClassificationJob { jobId: string }
+interface RawTransferMatchingJob { jobId: string }
 interface RawTransactionProviderOriginal { amountMinor: number; currency: string; description: string; effectiveAt?: string | null }
 interface RawProviderSnapshotMetadata { id: string; kind: string; providerObjectId: string; capturedAt: string }
 interface RawProviderSnapshot extends RawProviderSnapshotMetadata { data?: Record<string, unknown> }
@@ -1048,6 +1061,10 @@ function mapIdentifier(item: RawIdentifier, field: string): { id: string } {
 }
 function mapClassificationJob(item: RawClassificationJob): FinanceClassificationJob {
   requireFields(item, 'finance.classificationJob', ['jobId'])
+  return { jobId: item.jobId }
+}
+function mapTransferMatchingJob(item: RawTransferMatchingJob): FinanceTransferMatchingJob {
+  requireFields(item, 'finance.transferMatchingJob', ['jobId'])
   return { jobId: item.jobId }
 }
 function mapTransaction(item: RawTransaction): FinanceTransaction {

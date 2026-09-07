@@ -2,7 +2,6 @@ package persistence
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -13,7 +12,6 @@ import (
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 )
 
 func TestStore(t *testing.T) {
@@ -963,130 +961,6 @@ func TestStore(t *testing.T) {
 			assert.Equal(t, firstRecordID, secondRecordID)
 		},
 	)
-
-	t.Run("saves linked transfer pairs atomically and persists matched marker", func(t *testing.T) {
-		store := makeStore(t)
-		fake := faker.New()
-		now := time.Date(2026, time.June, 20, 19, 0, 0, 0, time.UTC)
-		tenantID := fmt.Sprintf("tenant-%s", fake.Lorem().Word())
-		accountID := fmt.Sprintf("account-%s", fake.Lorem().Word())
-		groupID := fmt.Sprintf("group-%s", fake.Lorem().Word())
-
-		_, err := store.SaveTenant(t.Context(), domain.Tenant{
-			ID:              tenantID,
-			Name:            fmt.Sprintf("tenant-%s", fake.Company().Name()),
-			DisplayCurrency: "USD",
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		})
-		require.NoError(t, err)
-
-		_, err = store.SaveAccount(t.Context(), domain.Account{
-			ID:        accountID,
-			TenantID:  tenantID,
-			Name:      fmt.Sprintf("account-%s", fake.Lorem().Word()),
-			Currency:  "USD",
-			Kind:      domain.AccountKindManual,
-			CreatedAt: now,
-			UpdatedAt: now,
-		})
-		require.NoError(t, err)
-
-		firstTransfer := domain.Transaction{
-			ID:          fmt.Sprintf("transaction-first-%s", fake.Lorem().Word()),
-			TenantID:    tenantID,
-			AccountID:   accountID,
-			Source:      domain.TransactionSourceManual,
-			Status:      domain.TransactionStatusBooked,
-			Kind:        domain.TransactionKindTransfer,
-			AmountMinor: -12_00,
-			Currency:    "USD",
-			Description: fmt.Sprintf("transfer-first-%s", fake.Lorem().Word()),
-			EffectiveAt: now,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		secondTransfer := domain.Transaction{
-			ID:          fmt.Sprintf("transaction-second-%s", fake.Lorem().Word()),
-			TenantID:    tenantID,
-			AccountID:   accountID,
-			Source:      domain.TransactionSourceManual,
-			Status:      domain.TransactionStatusBooked,
-			Kind:        domain.TransactionKindTransfer,
-			AmountMinor: 9_00,
-			Currency:    "USD",
-			Description: fmt.Sprintf("transfer-second-%s", fake.Lorem().Word()),
-			EffectiveAt: now.Add(time.Minute),
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		_, err = store.SaveTransaction(t.Context(), firstTransfer)
-		require.NoError(t, err)
-		_, err = store.SaveTransaction(t.Context(), secondTransfer)
-		require.NoError(t, err)
-
-		firstTransfer.TransferGroupID = &groupID
-		secondTransfer.TransferGroupID = &groupID
-		firstTransfer.TransferMatchedAt = &now
-		secondTransfer.TransferMatchedAt = &now
-		firstTransfer.UpdatedAt = now.Add(2 * time.Minute)
-		secondTransfer.UpdatedAt = now.Add(2 * time.Minute)
-
-		err = store.SaveLinkedTransferPair(t.Context(), firstTransfer, secondTransfer)
-		require.NoError(t, err)
-
-		storedMatchedFirst, err := store.GetTransaction(t.Context(), firstTransfer.ID)
-		require.NoError(t, err)
-		storedMatchedSecond, err := store.GetTransaction(t.Context(), secondTransfer.ID)
-		require.NoError(t, err)
-		require.NotNil(t, storedMatchedFirst.TransferMatchedAt)
-		require.NotNil(t, storedMatchedSecond.TransferMatchedAt)
-		assert.True(t, now.Equal(*storedMatchedFirst.TransferMatchedAt))
-		assert.True(t, now.Equal(*storedMatchedSecond.TransferMatchedAt))
-
-		firstTransfer.TransferMatchedAt = nil
-		secondTransfer.TransferMatchedAt = nil
-		firstTransfer.TransferGroupID = nil
-		secondTransfer.TransferGroupID = nil
-		firstTransfer.UpdatedAt = now.Add(3 * time.Minute)
-		secondTransfer.UpdatedAt = now.Add(3 * time.Minute)
-		_, err = store.SaveTransaction(t.Context(), firstTransfer)
-		require.NoError(t, err)
-		_, err = store.SaveTransaction(t.Context(), secondTransfer)
-		require.NoError(t, err)
-
-		callbackName := fmt.Sprintf("test:fail-second-linked-transfer-%s", fake.Lorem().Word())
-		var createCalls int
-		sentinel := errors.New("second write failed")
-		require.NoError(
-			t,
-			store.db.Callback().
-				Create().
-				Before("gorm:create").
-				Register(callbackName, func(tx *gorm.DB) {
-					if tx.Statement.Table != (transactionModel{}).TableName() {
-						return
-					}
-					createCalls++
-					if createCalls == 2 {
-						tx.AddError(sentinel)
-					}
-				}),
-		)
-		defer func() {
-			store.db.Callback().Create().Remove(callbackName)
-		}()
-
-		err = store.SaveLinkedTransferPair(t.Context(), firstTransfer, secondTransfer)
-		require.ErrorIs(t, err, sentinel)
-
-		storedFirst, err := store.GetTransaction(t.Context(), firstTransfer.ID)
-		require.NoError(t, err)
-		storedSecond, err := store.GetTransaction(t.Context(), secondTransfer.ID)
-		require.NoError(t, err)
-		assert.Nil(t, storedFirst.TransferGroupID)
-		assert.Nil(t, storedSecond.TransferGroupID)
-	})
 
 	t.Run("returns persistence errors when tables are missing", func(t *testing.T) {
 		fake := faker.New()

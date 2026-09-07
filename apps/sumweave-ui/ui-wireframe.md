@@ -237,6 +237,26 @@
 **Transactions (`/finance/transactions`, `/finance/transactions/new`, `/finance/transactions/:transactionId`)**
 
 - Transactions browse route: Bootstrap filter card, tenant/account/status/source/sort filters, route-level action links, and visible summary chips.
+- The tenant ledger includes a compact Bootstrap **Match transfers** action near
+  the ledger. It defaults to today and the preceding 29 local calendar dates,
+  displays inclusive start/end values, allows wider history, and rejects invalid
+  or reversed dates before publishing. Submission converts the inclusive range
+  to local start-of-first-day through local start-of-day-after-last with each
+  RFC3339 boundary offset preserved across DST calendar changes.
+- Matching always searches all tenant accounts regardless of the displayed
+  account, status, source, sort, search, or page state. It states: **Searches
+  all accounts in this tenant. A matching partner may be up to 72 hours outside
+  the selected dates.** The active submission disables duplicates while it
+  starts or observes its returned ID. Its job widget treats an initial `404` as
+  pending only for that initiating ID, retains **Open finance job**, and shows
+  queued/running/succeeded/failed feedback.
+- Terminal matching refreshes the initiating tenant's ledger even if the active
+  tenant changes during observation. Success says **Transfer matching
+  completed.** Failure says **Transfer matching failed. Some pairs may already
+  have been matched. Running it again preserves existing pairs.** Rerun remains
+  available after either terminal state. Existing manual partner/link/unlink
+  detail behavior remains silent; it shows no matching-exclusion warning or
+  indicator.
 - Transaction browse loads an include-hidden account lookup solely for account names and history filters. Hidden account filters and rows are explicitly labeled **Hidden**; hidden accounts are not selectable in the new-transaction editor.
 - All transaction-list surfaces (browse ledger, dashboard recent activity, and account-detail recent activity) use one responsive stacked transaction-list component. Each row leads with amount, effective date, account, description, and any exceptional state labels; routine `booked` and `regular` labels are omitted. Matched internal transfers surface as a single transfer badge. Category and tag values follow in compact unboxed fields. The same shape stays readable at narrow widths without a horizontal table scan.
 - Each shared row supports independent inline description, category, and tag edits. A labeled icon-only pencil enters one field edit at a time; icon-only save/cancel controls confirm or discard it. Description editing autofocuses, submits on Enter (except during IME composition), and cancels on Escape. Category and tag use equal Bootstrap grid cells (`col-12 col-md-6`): they stack on narrow screens and split evenly on desktop so entering either edit mode does not move the other field horizontally. Active category and tag editors keep their field content beside save/cancel actions in one non-wrapping row at desktop and narrow widths; only the flexible tag-choice area may wrap. On narrow screens, the icon-only edit, save, cancel, and full-detail actions have 44px minimum touch targets while desktop stays compact. Saves stay on the current route, preserve all non-edited transaction values, show pending/inline error states, and replace the visible row from the API response. Category can be cleared and tags are selected only from the tenant catalog. A compact icon-only **Open full transaction details** link uses an edit/detail icon for advanced changes.

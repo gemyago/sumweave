@@ -1800,6 +1800,42 @@ func newParamsParserFinanceSubmitFinanceTransactionClassification(rootHandler *R
 	}
 }
 
+type paramsParserFinanceSubmitFinanceTransferMatching struct {
+	bindTenantID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *FinanceTransferMatchingRequest]
+}
+
+func (p *paramsParserFinanceSubmitFinanceTransferMatching) parse(router httpRouter, req *http.Request) (*SubmitFinanceTransferMatchingParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &SubmitFinanceTransferMatchingParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceSubmitFinanceTransferMatching(rootHandler *RootHandler) paramsParser[*SubmitFinanceTransferMatchingParams] {
+	return &paramsParserFinanceSubmitFinanceTransferMatching{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *FinanceTransferMatchingRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*FinanceTransferMatchingRequest],
+			),
+			validateValue: NewFinanceTransferMatchingRequestValidator(),
+		}),
+	}
+}
+
 type paramsParserFinanceTriggerFinanceConnectionSync struct {
 	bindTenantID requestParamBinder[string, string]
 	bindConnectionID requestParamBinder[string, string]
@@ -2841,6 +2877,18 @@ type financeControllerBuilder struct {
 		*FinanceClassificationJobResponse,
 		handlerActionFunc[*SubmitFinanceTransactionClassificationParams, *FinanceClassificationJobResponse],
 		httpHandlerActionFunc[*SubmitFinanceTransactionClassificationParams, *FinanceClassificationJobResponse],
+	]
+
+	// POST /api/v1/finance/tenants/{tenantId}/transactions/match-transfers
+	//
+	// Request type: SubmitFinanceTransferMatchingParams,
+	//
+	// Response type: FinanceTransferMatchingJobResponse
+	SubmitFinanceTransferMatching genericHandlerBuilder[
+		*SubmitFinanceTransferMatchingParams,
+		*FinanceTransferMatchingJobResponse,
+		handlerActionFunc[*SubmitFinanceTransferMatchingParams, *FinanceTransferMatchingJobResponse],
+		httpHandlerActionFunc[*SubmitFinanceTransferMatchingParams, *FinanceTransferMatchingJobResponse],
 	]
 
 	// POST /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync
@@ -3962,6 +4010,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 202,
 				paramsParser:  newParamsParserFinanceSubmitFinanceTransactionClassification(app),
+			},
+		),
+
+		// POST /api/v1/finance/tenants/{tenantId}/transactions/match-transfers
+		SubmitFinanceTransferMatching: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*SubmitFinanceTransferMatchingParams,
+				*FinanceTransferMatchingJobResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*SubmitFinanceTransferMatchingParams,
+				*FinanceTransferMatchingJobResponse,
+			](),
+			makeActionBuilderParams[
+				*SubmitFinanceTransferMatchingParams,
+				*FinanceTransferMatchingJobResponse,
+			]{
+				defaultStatus: 202,
+				paramsParser:  newParamsParserFinanceSubmitFinanceTransferMatching(app),
 			},
 		),
 
