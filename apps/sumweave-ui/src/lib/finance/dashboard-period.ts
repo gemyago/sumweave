@@ -1,5 +1,7 @@
 export interface DashboardPeriodRange {
+  /** Inclusive range boundary. */
   startDate: Date
+  /** Exclusive range boundary. */
   endDate: Date
 }
 
@@ -23,6 +25,6 @@ function dashboardMonthContaining(value: Date): DashboardPeriodRange {
     throw new TypeError('Dashboard month must be a valid local date.')
   }
   const startDate = new Date(value.getFullYear(), value.getMonth(), 1)
-  const nextMonthStart = new Date(value.getFullYear(), value.getMonth() + 1, 1)
-  return { startDate, endDate: new Date(nextMonthStart.getTime() - 1) }
+  const endDate = new Date(value.getFullYear(), value.getMonth() + 1, 1)
+  return { startDate, endDate }
 }

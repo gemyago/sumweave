@@ -537,6 +537,10 @@
       error = 'Choose valid start and end dates.'
       return
     }
+    if (customStartDate.getTime() >= customEndDate.getTime()) {
+      error = 'Choose an end date after the start date.'
+      return
+    }
     dashboardPeriodMode = 'custom'
     await loadDashboard({ startDate: customStartDate, endDate: customEndDate })
   }
@@ -555,8 +559,22 @@
   function customRangeEndDate(value: string): Date | undefined {
     const date = withDateInput(undefined, value)
     if (!date) return undefined
-    date.setHours(23, 59, 59, 999)
+    date.setDate(date.getDate() + 1)
+    date.setHours(0, 0, 0, 0)
     return date
+  }
+
+  function inclusiveDashboardEndDate(value: Date | undefined): Date | undefined {
+    if (!value) return undefined
+    if (value.getHours() !== 0 || value.getMinutes() !== 0 ||
+      value.getSeconds() !== 0 || value.getMilliseconds() !== 0) {
+      return value
+    }
+    return new Date(
+      value.getFullYear(),
+      value.getMonth(),
+      value.getDate() - 1,
+    )
   }
 </script>
 
@@ -597,7 +615,7 @@
             <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Reporting period</p>
             {#if dashboard}
               <h2 class="h5 mb-1">
-                {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(dashboard.period.endDate)}
+                {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(inclusiveDashboardEndDate(dashboard.period.endDate)!)}
               </h2>
               <p class="text-body-secondary mb-2">Period: {dashboardPeriodModeLabel()}</p>
               {#if isHistoricalPeriod}
@@ -642,7 +660,7 @@
                     id="finance-end-date"
                     class="form-control"
                     type="date"
-                    value={dateInputValue(customEndDate)}
+                    value={dateInputValue(inclusiveDashboardEndDate(customEndDate))}
                     oninput={(event) => customEndDate = customRangeEndDate(event.currentTarget.value)}
                     aria-label="Custom end date"
                   />

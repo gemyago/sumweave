@@ -1549,10 +1549,12 @@ paths:
         - in: query
           name: startDate
           required: true
+          description: Inclusive dashboard range start. The dashboard range is [startDate, endDate).
           schema: { type: string, format: date-time }
         - in: query
           name: endDate
           required: true
+          description: Exclusive dashboard range end. It must be later than startDate.
           schema: { type: string, format: date-time }
       responses:
         '200':
@@ -2422,8 +2424,14 @@ components:
       additionalProperties: false
       required: [startDate, endDate]
       properties:
-        startDate: { type: string, format: date-time }
-        endDate: { type: string, format: date-time }
+        startDate:
+          type: string
+          format: date-time
+          description: Inclusive dashboard range start.
+        endDate:
+          type: string
+          format: date-time
+          description: Exclusive dashboard range end.
     FinanceDashboardMoneySummary:
       type: object
       additionalProperties: false

@@ -18,6 +18,10 @@ func applyInstantAtOrBefore(query *gorm.DB, column string, value time.Time) *gor
 	return query.Where(column+" <= ?", value)
 }
 
+func applyInstantBefore(query *gorm.DB, column string, value time.Time) *gorm.DB {
+	return query.Where(column+" < ?", value)
+}
+
 func expiresAfterPredicate() string {
 	return "expires_at > ?"
 }

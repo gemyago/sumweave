@@ -14,8 +14,8 @@ const dashboardAlertsCapacity = 2
 type DashboardParams struct {
 	ActorUserID string
 	TenantID    string
-	StartDate   time.Time
-	EndDate     time.Time
+	StartDate   time.Time // Inclusive dashboard range boundary.
+	EndDate     time.Time // Exclusive dashboard range boundary.
 }
 
 type Dashboard struct {
@@ -132,7 +132,13 @@ type dashboardComputation struct {
 }
 
 func ValidateDashboardParams(params DashboardParams) error {
-	return ValidateRequiredTimestampRange(params.StartDate, params.EndDate)
+	if err := ValidateRequiredTimestampRange(params.StartDate, params.EndDate); err != nil {
+		return err
+	}
+	if !params.StartDate.Before(params.EndDate) {
+		return fmt.Errorf("%w: start timestamp must be before end timestamp", ErrInvalidTimestampRange)
+	}
+	return nil
 }
 
 func buildDashboardAlerts(
@@ -260,7 +266,7 @@ func transactionInPeriod(
 	startDate time.Time,
 	endDate time.Time,
 ) bool {
-	return !transaction.EffectiveAt.Before(startDate) && !transaction.EffectiveAt.After(endDate)
+	return !transaction.EffectiveAt.Before(startDate) && transaction.EffectiveAt.Before(endDate)
 }
 
 func reportingContribution(transaction domain.Transaction) (int64, int64, bool) {

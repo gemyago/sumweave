@@ -289,7 +289,7 @@ func TestReportingAndFX(t *testing.T) {
 				ActorUserID: ownerUserID,
 				TenantID:    tenant.ID,
 				StartDate:   time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
-				EndDate:     time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC),
+				EndDate:     time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
 			})
 			require.NoError(t, err)
 
@@ -300,7 +300,7 @@ func TestReportingAndFX(t *testing.T) {
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC),
+				time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
 				dashboard.Period.EndDate,
 			)
 			assert.Equal(t, "PLN", dashboard.Settled.DisplayCurrency)
@@ -417,7 +417,7 @@ func TestReportingAndFX(t *testing.T) {
 				ActorUserID: ownerUserID,
 				TenantID:    tenant.ID,
 				StartDate:   time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC),
-				EndDate:     time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC),
+				EndDate:     time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
 			})
 			require.NoError(t, err)
 			assert.Equal(
@@ -427,7 +427,7 @@ func TestReportingAndFX(t *testing.T) {
 			)
 			assert.Equal(
 				t,
-				time.Date(2026, time.May, 31, 23, 59, 59, 999999999, time.UTC),
+				time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
 				previousMonth.Period.EndDate,
 			)
 			assert.Equal(t, int64(420_00), previousMonth.Settled.IncomeMinor)
@@ -450,9 +450,9 @@ func TestReportingAndFX(t *testing.T) {
 			aggregateBalances, err := aggregateStore.ListAccountBalances(
 				t.Context(),
 				persistence.ListAccountBalancesParams{
-					TenantID:              tenant.ID,
-					AccountIDs:            []string{usdAccount.ID, plnAccount.ID, eurAccount.ID, gbpAccount.ID},
-					EffectiveAtOnOrBefore: &dashboard.Period.EndDate,
+					TenantID:          tenant.ID,
+					AccountIDs:        []string{usdAccount.ID, plnAccount.ID, eurAccount.ID, gbpAccount.ID},
+					EffectiveAtBefore: &dashboard.Period.EndDate,
 				},
 			)
 			require.NoError(t, err)
@@ -467,6 +467,61 @@ func TestReportingAndFX(t *testing.T) {
 			}
 		},
 	)
+
+	t.Run("dashboard uses matching nanosecond-exclusive transaction and balance boundaries", func(t *testing.T) {
+		fake := faker.New()
+		store := makeStore(t)
+		service := NewService(store)
+		ownerUserID := "owner-" + fake.UUID().V4()
+		tenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     ownerUserID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "USD",
+			SeedDefaults:    false,
+		})
+		require.NoError(t, err)
+		account, err := service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+			Name:        "account-" + fake.Lorem().Word(),
+			Currency:    "USD",
+			Kind:        domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+
+		endDate := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+		record := func(effectiveAt time.Time, amountMinor int64) {
+			t.Helper()
+			_, recordErr := service.RecordTransaction(t.Context(), RecordTransactionParams{
+				ActorUserID: ownerUserID,
+				TenantID:    tenant.ID,
+				AccountID:   account.ID,
+				Source:      domain.TransactionSourceManual,
+				Status:      domain.TransactionStatusBooked,
+				Kind:        domain.TransactionKindRegular,
+				AmountMinor: amountMinor,
+				Currency:    "USD",
+				Description: "transaction-" + fake.Lorem().Word(),
+				EffectiveAt: effectiveAt,
+			})
+			require.NoError(t, recordErr)
+		}
+		record(endDate.Add(-time.Nanosecond), -100)
+		record(endDate, -200)
+
+		dashboard, err := service.GetDashboard(t.Context(), DashboardParams{
+			ActorUserID: ownerUserID,
+			TenantID:    tenant.ID,
+			StartDate:   endDate.Add(-24 * time.Hour),
+			EndDate:     endDate,
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, dashboard.Settled.TransactionCount)
+		assert.Equal(t, int64(100), dashboard.Settled.ExpenseMinor)
+		require.Len(t, dashboard.AccountBalances, 1)
+		assert.Equal(t, int64(-100), dashboard.AccountBalances[0].NativeBookedMinor)
+	})
 
 	t.Run(
 		"syncs persisted fx rates and exposes generic job seams and safe diagnostics",

@@ -153,9 +153,9 @@ func (s *ReportingService) loadDashboardData(
 	}
 	transactions = transactionsForAccounts(transactions, accounts)
 	balanceItems, err := s.balanceStore.ListAccountBalances(ctx, persistence.ListAccountBalancesParams{
-		TenantID:              tenant.ID,
-		AccountIDs:            accountIDs(accounts),
-		EffectiveAtOnOrBefore: &period.EndDate,
+		TenantID:          tenant.ID,
+		AccountIDs:        accountIDs(accounts),
+		EffectiveAtBefore: &period.EndDate,
 	})
 	if err != nil {
 		return dashboardData{}, fmt.Errorf("get dashboard: %w", err)

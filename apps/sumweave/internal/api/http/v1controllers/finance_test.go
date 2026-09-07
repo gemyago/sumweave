@@ -2193,7 +2193,7 @@ func TestFinanceController(t *testing.T) {
 		zero := int64(0)
 		service := newMockfinanceService(t)
 		service.EXPECT().GetDashboard(mock.Anything, mock.Anything).Return(financepkg.Dashboard{
-			Period:  financepkg.DashboardPeriod{StartDate: date, EndDate: date},
+			Period:  financepkg.DashboardPeriod{StartDate: date, EndDate: date.Add(time.Nanosecond)},
 			Settled: financepkg.DashboardMoneySummary{DisplayCurrency: "USD", Complete: false},
 			Pending: financepkg.DashboardMoneySummary{DisplayCurrency: "USD", Complete: false},
 			AccountBalances: []financepkg.DashboardAccountBalance{{
@@ -2209,7 +2209,7 @@ func TestFinanceController(t *testing.T) {
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, newRequest(
 			http.MethodGet,
-			"/api/v1/finance/tenants/"+tenantID+"/dashboard?startDate=2026-03-29T13:47:11.000000123%2B14:00&endDate=2026-03-29T13:47:11.000000123%2B14:00",
+			"/api/v1/finance/tenants/"+tenantID+"/dashboard?startDate=2026-03-29T13:47:11.000000123%2B14:00&endDate=2026-03-29T13:47:11.000000124%2B14:00",
 			"",
 			true,
 		))
@@ -2218,6 +2218,7 @@ func TestFinanceController(t *testing.T) {
 		payload := decode(t, resp)
 		period := payload["period"].(map[string]any)
 		assert.Equal(t, "2026-03-29T13:47:11.000000123+14:00", period["startDate"])
+		assert.Equal(t, "2026-03-29T13:47:11.000000124+14:00", period["endDate"])
 		balance := payload["accountBalances"].([]any)[0].(map[string]any)
 		assert.Contains(t, balance, "displayBookedMinor")
 		assert.Nil(t, balance["displayBookedMinor"])
@@ -2236,7 +2237,7 @@ func TestFinanceController(t *testing.T) {
 			GetDashboard(mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, params financepkg.DashboardParams) (financepkg.Dashboard, error) {
 				require.Equal(t, time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC), params.StartDate)
-				require.Equal(t, time.Date(2024, time.February, 29, 23, 59, 59, 999999999, time.UTC), params.EndDate)
+				require.Equal(t, time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC), params.EndDate)
 				return financepkg.Dashboard{
 					Period: financepkg.DashboardPeriod{StartDate: params.StartDate, EndDate: params.EndDate},
 				}, nil
@@ -2246,7 +2247,7 @@ func TestFinanceController(t *testing.T) {
 			resp,
 			newRequest(
 				http.MethodGet,
-				"/api/v1/finance/tenants/"+tenantID+"/dashboard?startDate=2024-02-01T00:00:00Z&endDate=2024-02-29T23:59:59.999999999Z",
+				"/api/v1/finance/tenants/"+tenantID+"/dashboard?startDate=2024-02-01T00:00:00Z&endDate=2024-03-01T00:00:00Z",
 				"",
 				true,
 			),
@@ -2786,6 +2787,10 @@ func TestFinanceController(t *testing.T) {
 			{
 				name: "dashboard reversed", method: http.MethodGet,
 				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?startDate=2026-06-02T00:00:00Z&endDate=2026-06-01T00:00:00Z",
+			},
+			{
+				name: "dashboard empty", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?startDate=2026-06-01T00:00:00Z&endDate=2026-06-01T00:00:00Z",
 			},
 			{
 				name: "dashboard missing range", method: http.MethodGet,

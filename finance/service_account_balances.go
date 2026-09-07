@@ -64,7 +64,9 @@ func (s *accountBalanceFromTransactionStore) ListAccountBalances(
 		}
 		balance := domain.AccountBalance{AccountID: accountID}
 		for _, item := range transactions {
-			if item.HiddenAt != nil || effectiveAtAfterCutoff(item.EffectiveAt, params.EffectiveAtOnOrBefore) {
+			if item.HiddenAt != nil ||
+				effectiveAtAfterCutoff(item.EffectiveAt, params.EffectiveAtOnOrBefore) ||
+				effectiveAtAtOrAfterCutoff(item.EffectiveAt, params.EffectiveAtBefore) {
 				continue
 			}
 			if item.Status == domain.TransactionStatusBooked {
@@ -83,4 +85,11 @@ func effectiveAtAfterCutoff(effectiveAt time.Time, cutoff *time.Time) bool {
 		return false
 	}
 	return effectiveAt.After(*cutoff)
+}
+
+func effectiveAtAtOrAfterCutoff(effectiveAt time.Time, cutoff *time.Time) bool {
+	if cutoff == nil {
+		return false
+	}
+	return !effectiveAt.Before(*cutoff)
 }

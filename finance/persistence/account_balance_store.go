@@ -13,6 +13,7 @@ type ListAccountBalancesParams struct {
 	TenantID              string
 	AccountIDs            []string
 	EffectiveAtOnOrBefore *time.Time
+	EffectiveAtBefore     *time.Time
 }
 
 type accountBalanceRow struct {
@@ -53,6 +54,9 @@ func (s *AccountBalanceStore) ListAccountBalances(
 		Where("hidden_at IS NULL")
 	if params.EffectiveAtOnOrBefore != nil {
 		query = applyInstantAtOrBefore(query, "effective_at", *params.EffectiveAtOnOrBefore)
+	}
+	if params.EffectiveAtBefore != nil {
+		query = applyInstantBefore(query, "effective_at", *params.EffectiveAtBefore)
 	}
 	if len(params.AccountIDs) > 0 {
 		query = query.Where("account_id IN ?", params.AccountIDs)

@@ -121,4 +121,43 @@ func TestAccountBalanceReadStoreAssignmentAndFallback(t *testing.T) {
 		require.Len(t, balances, 1)
 		assert.Zero(t, balances[0].BookedBalanceMinor)
 	})
+
+	t.Run("fallback excludes the exclusive cutoff instant", func(t *testing.T) {
+		endDate := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+		fallbackStore := stubStore{
+			listTransactionsFn: func(
+				_ context.Context,
+				_ string,
+				accountID string,
+				_ domain.TransactionSource,
+				_ domain.TransactionStatus,
+				_ bool,
+			) ([]domain.Transaction, error) {
+				return []domain.Transaction{
+					{
+						AccountID:   accountID,
+						Status:      domain.TransactionStatusBooked,
+						AmountMinor: 120,
+						EffectiveAt: endDate.Add(-time.Nanosecond),
+					},
+					{
+						AccountID:   accountID,
+						Status:      domain.TransactionStatusBooked,
+						AmountMinor: 45,
+						EffectiveAt: endDate,
+					},
+				}, nil
+			},
+		}
+
+		balances, err := (&accountBalanceFromTransactionStore{store: fallbackStore}).ListAccountBalances(
+			t.Context(),
+			persistence.ListAccountBalancesParams{
+				TenantID: "tenant-1", AccountIDs: []string{"account-1"}, EffectiveAtBefore: &endDate,
+			},
+		)
+
+		require.NoError(t, err)
+		require.Equal(t, []domain.AccountBalance{{AccountID: "account-1", BookedBalanceMinor: 120}}, balances)
+	})
 }
