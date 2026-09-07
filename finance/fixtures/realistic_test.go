@@ -1145,6 +1145,8 @@ func TestRealisticScenario(t *testing.T) {
 	dashboard, err := financeService.GetDashboard(t.Context(), financepkg.DashboardParams{
 		ActorUserID: fixtures.RealisticScenarioOwnerUserID(seed),
 		TenantID:    tenantID,
+		StartDate:   now.AddDate(-1, 0, 0),
+		EndDate:     now.AddDate(1, 0, 0),
 	})
 	require.NoError(t, err)
 	assert.NotZero(t, dashboard.Settled.TransactionCount)

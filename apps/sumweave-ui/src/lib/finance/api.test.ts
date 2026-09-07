@@ -19,12 +19,14 @@ describe('finance api', () => {
   it('maps tenant, dashboard, connection, import, and fx responses', async () => {
     const responses = [
       { ok: true, json: { items: [{ id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: '2026-06-20T12:00:00Z', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' }] } },
-      { ok: true, json: { period: { preset: 'current_month', startDate: '2026-06-01T00:00:00-07:00', endDate: '2026-06-30T00:00:00-07:00', previous: { startDate: '2026-05-01T00:00:00-07:00', endDate: '2026-05-31T00:00:00-07:00' }, next: { startDate: '2026-07-01T00:00:00-07:00', endDate: '2026-07-31T00:00:00-07:00' } }, settled: { displayCurrency: 'USD', incomeMinor: 10, expenseMinor: 5, netMinor: 5, transactionCount: 1, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1, netMinor: -1, transactionCount: 1, complete: true }, categoryBreakdowns: [], accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 10, nativePendingMinor: 1, displayBookedMinor: null, displayPendingMinor: 0, missingFx: false }], alerts: [], fxCoverage: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 3, affectedAccountCount: 2 }], currentFxRates: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', effectiveAt: '2026-06-20T00:00:00Z', lastSuccessfulRefreshAt: '2026-06-20T12:00:00Z', stale: false }], nativeSettledTotals: [] } },
+		{ ok: true, json: { period: { startDate: '2026-06-01T00:00:00-07:00', endDate: '2026-06-30T00:00:00-07:00' }, settled: { displayCurrency: 'USD', incomeMinor: 10, expenseMinor: 5, netMinor: 5, transactionCount: 1, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 1, netMinor: -1, transactionCount: 1, complete: true }, categoryBreakdowns: [], accountBalances: [{ accountId: 'acc-1', accountName: 'Checking', currency: 'USD', nativeBookedMinor: 10, nativePendingMinor: 1, displayBookedMinor: null, displayPendingMinor: 0, missingFx: false }], alerts: [], fxCoverage: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 3, affectedAccountCount: 2 }], currentFxRates: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', effectiveAt: '2026-06-20T00:00:00Z', lastSuccessfulRefreshAt: '2026-06-20T12:00:00Z', stale: false }], nativeSettledTotals: [] } },
       { ok: true, json: { items: [{ id: 'connection-1', tenantId: 'tenant-1', provider: 'monobank', displayName: 'Mono', providerReference: 'ref', state: 'active', createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z', schedule: { connectionId: 'connection-1', intervalSeconds: 900, enabled: true, createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z' } }] } },
       { ok: true, json: { importId: 'import-1', importableCount: 1, headers: ['Date'], duplicateRows: [], rejectedRows: [], wouldCreateAccounts: ['Checking'], wouldCreateCategories: [], wouldCreateTags: [], accountOptions: [{ name: 'Checking', sourceRowCount: 1, selected: true }] } },
       { ok: true, json: { jobId: 'job-1', jobType: 'finance.fx_rates_refresh', provider: 'frankfurter' } },
     ]
-    const fetch = vi.fn(async () => {
+    const requests: Array<RequestInfo | URL> = []
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(input)
       const next = responses.shift()
       return {
         ok: next?.ok ?? true,
@@ -36,7 +38,7 @@ describe('finance api', () => {
 
     const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
     const tenants = await api.listTenants()
-    const dashboard = await api.getDashboard({ tenantId: 'tenant-1', preset: 'current_month' })
+	const dashboard = await api.getDashboard({ tenantId: 'tenant-1', startDate: new Date('2026-06-01T00:00:00-07:00'), endDate: new Date('2026-06-30T00:00:00-07:00') })
     const connections = await api.listConnections({ tenantId: 'tenant-1' })
     const preview = await api.previewCSVImport({ tenantId: 'tenant-1', fileName: 'demo.csv', csv: 'Date\n29.05.26' })
     const job = await api.triggerFXSync({ provider: 'frankfurter' })
@@ -48,6 +50,7 @@ describe('finance api', () => {
     expect(dashboard.accountBalances[0].missingFx).toBe(false)
     expect(dashboard.fxCoverage[0]).toMatchObject({ baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 3, affectedAccountCount: 2 })
     expect(dashboard.currentFxRates[0].lastSuccessfulRefreshAt).toEqual(new Date('2026-06-20T12:00:00Z'))
+	expect(new URL(String(requests[1])).searchParams).toMatchObject(new URLSearchParams({ startDate: '2026-06-01T07:00:00.000Z', endDate: '2026-06-30T07:00:00.000Z' }))
     expect(connections[0].schedule?.intervalSeconds).toBe(900)
     expect(preview.wouldCreateAccounts).toEqual(['Checking'])
     expect(preview.accountOptions).toEqual([{ name: 'Checking', sourceRowCount: 1, selected: true }])
@@ -239,19 +242,20 @@ describe('finance api', () => {
   })
 
   it('rejects malformed or missing required dashboard timestamps and nested fields', async () => {
-    const dashboard = {
-      period: { preset: 'current_month', startDate: '2026-03-29T00:00:00+14:00', endDate: '2026-03-31', previous: { startDate: '2026-02-01', endDate: '2026-02-28' }, next: { startDate: '2026-04-01', endDate: '2026-04-30' } },
+	const dashboard = {
+		period: { startDate: '2026-03-29T00:00:00+14:00', endDate: '2026-03-31' },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: false },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: false },
       categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], currentFxRates: [], nativeSettledTotals: [],
     }
     const malformedDateFetch = vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => dashboard }) as Response)
-    await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch: malformedDateFetch }).getDashboard({ tenantId: 'tenant-1' })).rejects.toBeInstanceOf(FinanceResponseError)
+	const range = { tenantId: 'tenant-1', startDate: new Date('2026-03-01T00:00:00Z'), endDate: new Date('2026-03-31T00:00:00Z') }
+	await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch: malformedDateFetch }).getDashboard(range)).rejects.toBeInstanceOf(FinanceResponseError)
 
     const incompleteSettled: Partial<typeof dashboard.settled> = { ...dashboard.settled }
     delete incompleteSettled.complete
     const missingNestedFieldFetch = vi.fn(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ ...dashboard, period: { ...dashboard.period, startDate: '2026-03-29' }, settled: incompleteSettled }) }) as Response)
-    await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch: missingNestedFieldFetch }).getDashboard({ tenantId: 'tenant-1' })).rejects.toBeInstanceOf(FinanceResponseError)
+	await expect(createSignalFinanceApi({ baseUrl: '/api/v1', fetch: missingNestedFieldFetch }).getDashboard(range)).rejects.toBeInstanceOf(FinanceResponseError)
   })
 
   it('raises a typed error from status metadata without parsing an error body', async () => {

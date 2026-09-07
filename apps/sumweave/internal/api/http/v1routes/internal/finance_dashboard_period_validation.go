@@ -11,29 +11,15 @@ import (
 var _ = time.Time{}
 
 func NewFinanceDashboardPeriodValidator() FieldValidator[*FinanceDashboardPeriod] {
-	validatePreset := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
-	)
 	validateStartDate := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
 	validateEndDate := NewSimpleFieldValidator[time.Time](
 		EnsureNonDefault[time.Time],
 	)
-	validatePrevious := NewObjectFieldValidator(
-		ObjectFieldValidatorParams{Required: true, Nullable: false},
-		NewFinanceDashboardPeriodWindowValidator(),
-	)
-	validateNext := NewObjectFieldValidator(
-		ObjectFieldValidatorParams{Required: true, Nullable: false},
-		NewFinanceDashboardPeriodWindowValidator(),
-	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceDashboardPeriod) {
-		validatePreset(bindingCtx.Fork("preset"), value.Preset)
 		validateStartDate(bindingCtx.Fork("startDate"), value.StartDate)
 		validateEndDate(bindingCtx.Fork("endDate"), value.EndDate)
-		validatePrevious(bindingCtx.Fork("previous"), value.Previous)
-		validateNext(bindingCtx.Fork("next"), value.Next)
 	}
 }

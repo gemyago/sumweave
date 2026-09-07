@@ -1547,16 +1547,15 @@ paths:
           required: true
           schema: { type: string }
         - in: query
-          name: preset
-          schema:
-            type: string
-            enum: [current_month, previous_month, next_month, last_3_months, last_6_months, this_year, previous_year, custom]
-        - in: query
           name: startDate
-          schema: { type: string }
+          required: true
+          description: Inclusive dashboard range start. The dashboard range is [startDate, endDate).
+          schema: { type: string, format: date-time }
         - in: query
           name: endDate
-          schema: { type: string }
+          required: true
+          description: Exclusive dashboard range end. It must be later than startDate.
+          schema: { type: string, format: date-time }
       responses:
         '200':
           description: Finance dashboard
@@ -2423,20 +2422,16 @@ components:
     FinanceDashboardPeriod:
       type: object
       additionalProperties: false
-      required: [preset, startDate, endDate, previous, next]
-      properties:
-        preset: { type: string }
-        startDate: { type: string, format: date-time }
-        endDate: { type: string, format: date-time }
-        previous: { $ref: "#/components/schemas/FinanceDashboardPeriodWindow" }
-        next: { $ref: "#/components/schemas/FinanceDashboardPeriodWindow" }
-    FinanceDashboardPeriodWindow:
-      type: object
-      additionalProperties: false
       required: [startDate, endDate]
       properties:
-        startDate: { type: string, format: date-time }
-        endDate: { type: string, format: date-time }
+        startDate:
+          type: string
+          format: date-time
+          description: Inclusive dashboard range start.
+        endDate:
+          type: string
+          format: date-time
+          description: Exclusive dashboard range end.
     FinanceDashboardMoneySummary:
       type: object
       additionalProperties: false

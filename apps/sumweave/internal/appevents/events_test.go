@@ -131,11 +131,23 @@ func TestEvents(t *testing.T) {
 		require.NoError(t, routerErr)
 		require.NoError(t, router.Handle(handler))
 		ctx, cancel := context.WithCancel(t.Context())
+		runDone := make(chan struct{})
+		var runErr error
+		go func() {
+			runErr = router.Run(ctx)
+			close(runDone)
+		}()
 		t.Cleanup(func() {
 			cancel()
 			require.NoError(t, router.Close())
 		})
-		go func() { _ = router.Run(ctx) }()
+		select {
+		case <-router.SubscriptionsReady():
+		case <-runDone:
+			t.Fatalf("message router stopped before subscriptions became ready: %v", runErr)
+		case <-t.Context().Done():
+			t.Fatalf("message router subscriptions did not become ready: %v", t.Context().Err())
+		}
 		require.Eventually(t, func() bool {
 			message := appdispatch.NewMessage(malformedTopic, []byte("bad-json"))
 			if rawPublisher.Publish(t.Context(), message) != nil {

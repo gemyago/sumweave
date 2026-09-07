@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import Finance from './Finance.svelte'
+import { FinanceShellState } from '../lib/finance/shell-state.svelte'
+import { dateInputValue } from '../lib/date-range'
+import { formatFinanceDate } from '../lib/finance/format'
 
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
@@ -9,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listTransactions: vi.fn(),
   listConnections: vi.fn(),
+  shellState: null as FinanceShellState | null,
 }))
 
 vi.mock('../lib/finance/api', async (importOriginal) => {
@@ -27,6 +31,11 @@ vi.mock('../lib/finance/api', async (importOriginal) => {
 
 vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'token' } }))
 
+vi.mock('../lib/finance/shell-state.svelte', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/finance/shell-state.svelte')>()),
+  useFinanceShellState: vi.fn(() => mocks.shellState!),
+}))
+
 describe('Finance dashboard page', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -36,11 +45,12 @@ describe('Finance dashboard page', () => {
     mocks.listAccounts.mockReset()
     mocks.listTransactions.mockReset()
     mocks.listConnections.mockReset()
+    mocks.shellState = new FinanceShellState()
     mocks.listTenants.mockResolvedValue([
       { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
     ])
     mocks.getDashboard.mockResolvedValue({
-      period: { preset: 'current_month', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21) },
       settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
       categoryBreakdowns: [{ categoryId: 'cat-1', categoryName: 'Groceries', kind: 'expense', incomeMinor: 0, expenseMinor: 1000, transactionCount: 1 }],
@@ -141,7 +151,7 @@ describe('Finance dashboard page', () => {
   it('renders compact needs-attention items for pending, missing FX, failed sync, and failed import signals', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValue({
-      period: { preset: 'current_month', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) },
       settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 3, complete: true },
       categoryBreakdowns: [{ categoryId: 'cat-1', categoryName: 'Groceries', kind: 'expense', incomeMinor: 0, expenseMinor: 1000, transactionCount: 1 }],
@@ -183,7 +193,7 @@ describe('Finance dashboard page', () => {
 
   it('places an incomplete income and expense warning beside the totals with excluded count and FX diagnostics link', async () => {
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: 'current_month', startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30), previous: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31) }, next: { startDate: new Date(2026, 6, 1), endDate: new Date(2026, 6, 31) } },
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
       settled: { displayCurrency: 'PLN', incomeMinor: 100, expenseMinor: 200, netMinor: -100, transactionCount: 2, complete: false },
       pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       categoryBreakdowns: [], accountBalances: [], alerts: [],
@@ -226,86 +236,177 @@ describe('Finance dashboard page', () => {
     expect(await screen.findByText('Select an active tenant to continue on this finance route.')).toBeInTheDocument()
   })
 
-  it('calls the exact previous-month preset without deriving a custom window', async () => {
+  it('navigates backward one local calendar month per click', async () => {
     const user = userEvent.setup()
+    const dashboardForMonth = (month: number) => ({
+      period: {
+        startDate: new Date(2026, month, 1),
+        endDate: new Date(2026, month + 1, 1),
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
     mocks.getDashboard
-      .mockResolvedValueOnce({
-        period: {
-          preset: 'current_month',
-          startDate: new Date(2026, 5, 20),
-          endDate: new Date(2026, 5, 20),
-          previous: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31) },
-          next: { startDate: new Date(2026, 6, 1), endDate: new Date(2026, 6, 31) },
-        },
-        settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
-        pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
-        categoryBreakdowns: [],
-        accountBalances: [],
-        alerts: [],
-        fxCoverage: [],
-        nativeSettledTotals: [],
-      })
-      .mockResolvedValueOnce({
-        period: {
-          preset: '',
-          startDate: new Date(2026, 4, 1),
-          endDate: new Date(2026, 4, 31),
-          previous: { startDate: new Date(2026, 3, 1), endDate: new Date(2026, 3, 30) },
-          next: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30) },
-        },
-        settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
-        pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
-        categoryBreakdowns: [],
-        accountBalances: [],
-        alerts: [],
-        fxCoverage: [],
-        nativeSettledTotals: [],
-      })
-      .mockResolvedValueOnce({
-        period: {
-          preset: '',
-          startDate: new Date(2026, 5, 1),
-          endDate: new Date(2026, 5, 30),
-          previous: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31) },
-          next: { startDate: new Date(2026, 6, 1), endDate: new Date(2026, 6, 31) },
-        },
-        settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
-        pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
-        categoryBreakdowns: [],
-        accountBalances: [],
-        alerts: [],
-        fxCoverage: [],
-        nativeSettledTotals: [],
-      })
+      .mockResolvedValueOnce(dashboardForMonth(5))
+      .mockResolvedValueOnce(dashboardForMonth(4))
+      .mockResolvedValueOnce(dashboardForMonth(3))
 
     render(Finance)
 
     await user.click(await screen.findByRole('button', { name: 'Previous month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
-    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'previous_month', startDate: undefined, endDate: undefined })
+    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', startDate: new Date(2026, 4, 1), endDate: new Date(2026, 5, 1) })
+
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+    expect(mocks.getDashboard.mock.calls[2][0]).toEqual({ tenantId: 'tenant-1', startDate: new Date(2026, 3, 1), endDate: new Date(2026, 4, 1) })
+
+    await user.click(screen.getByText('Custom range'))
+    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-04-01')
+    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-04-30')
+  })
+
+  it('navigates forward one local calendar month per click', async () => {
+    const user = userEvent.setup()
+    const dashboardForMonth = (month: number) => ({
+      period: {
+        startDate: new Date(2026, month, 1),
+        endDate: new Date(2026, month + 1, 1),
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    mocks.getDashboard
+      .mockResolvedValueOnce(dashboardForMonth(5))
+      .mockResolvedValueOnce(dashboardForMonth(6))
+      .mockResolvedValueOnce(dashboardForMonth(7))
+
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Next month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', startDate: new Date(2026, 6, 1), endDate: new Date(2026, 7, 1) })
+
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+    expect(mocks.getDashboard.mock.calls[2][0]).toEqual({ tenantId: 'tenant-1', startDate: new Date(2026, 7, 1), endDate: new Date(2026, 8, 1) })
+
+    await user.click(screen.getByText('Custom range'))
+    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-08-01')
+    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-08-31')
+  })
+
+  it('disables period actions until a delayed previous-month request completes', async () => {
+    const user = userEvent.setup()
+    const dashboardForMonth = (month: number) => ({
+      period: {
+        startDate: new Date(2026, month, 1),
+        endDate: new Date(2026, month + 1, 1),
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    let resolveDelayedDashboard: (dashboard: ReturnType<typeof dashboardForMonth>) => void
+    const delayedDashboard = new Promise<ReturnType<typeof dashboardForMonth>>((resolve) => {
+      resolveDelayedDashboard = resolve
+    })
+    mocks.getDashboard
+      .mockResolvedValueOnce(dashboardForMonth(5))
+      .mockReturnValueOnce(delayedDashboard)
+
+    render(Finance)
+
+    const previousButton = await screen.findByRole('button', { name: 'Previous month' })
+    await user.click(previousButton)
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    expect(previousButton).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Current month' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next month' })).toBeDisabled()
+
+    await user.click(previousButton)
+    expect(mocks.getDashboard).toHaveBeenCalledTimes(2)
+    expect(mocks.getDashboard.mock.calls[1][0]).toMatchObject({ tenantId: 'tenant-1' })
+
+    resolveDelayedDashboard!(dashboardForMonth(4))
+    await waitFor(() => expect(previousButton).toBeEnabled())
+  })
+
+  it('keeps tenant-local month navigation successive and ignores a stale dashboard response', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    const dashboardForMonth = (month: number) => ({
+      period: {
+        startDate: new Date(2026, month, 1),
+        endDate: new Date(2026, month + 1, 1),
+      },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    window.localStorage.setItem('sumweave-ui-finance-tenant-id', 'tenant-1')
+    mocks.listTenants.mockResolvedValueOnce([
+      { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
+      { id: 'tenant-2', name: 'Travel', displayCurrency: 'EUR', joinedAt: now, createdAt: now, updatedAt: now },
+    ])
+    let resolveStaleDashboard: (dashboard: ReturnType<typeof dashboardForMonth>) => void
+    const staleDashboard = new Promise<ReturnType<typeof dashboardForMonth>>((resolve) => {
+      resolveStaleDashboard = resolve
+    })
+    mocks.getDashboard
+      .mockResolvedValueOnce(dashboardForMonth(5))
+      .mockResolvedValueOnce(dashboardForMonth(4))
+      .mockReturnValueOnce(staleDashboard)
+      .mockResolvedValueOnce(dashboardForMonth(4))
+      .mockResolvedValueOnce(dashboardForMonth(3))
+      .mockResolvedValueOnce(dashboardForMonth(2))
+
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+    expect(mocks.getDashboard.mock.calls[1][0]).toMatchObject({ tenantId: 'tenant-1' })
+
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+
+    mocks.shellState!.selectTenant('tenant-2')
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(4))
+    expect(mocks.getDashboard.mock.calls[3][0]).toEqual({
+      tenantId: 'tenant-2',
+      startDate: new Date(2026, 4, 1),
+      endDate: new Date(2026, 5, 1),
+    })
 
     await user.click(screen.getByText('Custom range'))
     expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-05-01')
     expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-05-31')
 
-    await user.clear(screen.getByLabelText('Custom start date'))
-    await user.type(screen.getByLabelText('Custom start date'), '2026-06-01')
-    await user.clear(screen.getByLabelText('Custom end date'))
-    await user.type(screen.getByLabelText('Custom end date'), '2026-06-30')
-    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(5))
+    expect(mocks.getDashboard.mock.calls[4][0]).toEqual({ tenantId: 'tenant-2', startDate: new Date(2026, 3, 1), endDate: new Date(2026, 4, 1) })
+    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-04-01')
+    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-04-30')
 
-    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
-    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-06-01')
-    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-06-30')
+    resolveStaleDashboard!(dashboardForMonth(1))
+    await waitFor(() => expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-04-01'))
+
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(6))
+    expect(mocks.getDashboard.mock.calls[5][0]).toEqual({ tenantId: 'tenant-2', startDate: new Date(2026, 2, 1), endDate: new Date(2026, 3, 1) })
+    expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-03-01')
+    expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-03-31')
   })
 
-  it('calls the exact current- and next-month presets', async () => {
+  it('requests explicit ranges for current and next month', async () => {
     const user = userEvent.setup()
     render(Finance)
 
     await user.click(await screen.findByRole('button', { name: 'Current month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
-    expect(mocks.getDashboard.mock.calls[1][0]).toEqual({ tenantId: 'tenant-1', preset: 'current_month', startDate: undefined, endDate: undefined })
+    expect(mocks.getDashboard.mock.calls[1][0]).toMatchObject({ tenantId: 'tenant-1', startDate: expect.any(Date), endDate: expect.any(Date) })
 
     await user.click(screen.getByText('Custom range'))
     expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-06-20')
@@ -313,15 +414,44 @@ describe('Finance dashboard page', () => {
 
     await user.click(screen.getByRole('button', { name: 'Next month' }))
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
-    expect(mocks.getDashboard.mock.calls[2][0]).toEqual({ tenantId: 'tenant-1', preset: 'next_month', startDate: undefined, endDate: undefined })
+    expect(mocks.getDashboard.mock.calls[2][0]).toMatchObject({ tenantId: 'tenant-1', startDate: expect.any(Date), endDate: expect.any(Date) })
   })
 
-  it('keeps dashboard custom range instants until the date control changes them', async () => {
+  it('returns to month navigation after applying a custom range', async () => {
     const user = userEvent.setup()
-    const startDate = new Date('2026-06-01T23:45:12.345-07:00')
-    const endDate = new Date('2026-06-30T01:15:42.987+05:30')
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
+
+    await user.click(screen.getByText('Custom range'))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(3))
+
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(4))
+    expect(mocks.getDashboard.mock.calls[3][0]).toMatchObject({ tenantId: 'tenant-1', startDate: expect.any(Date), endDate: expect.any(Date) })
+  })
+
+  it('shows the calendar day before an exclusive local-midnight dashboard end', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+
+    render(Finance)
+
+    expect(await screen.findByText('Jun 1, 2026 → Jun 30, 2026')).toBeInTheDocument()
+  })
+
+  it('keeps a non-midnight dashboard end date visible and unchanged until custom input changes it', async () => {
+    const user = userEvent.setup()
+    const startDate = new Date('2026-06-01T09:45:12.345Z')
+    const endDate = new Date('2026-06-30T13:15:42.987Z')
     const dashboard = {
-      period: { preset: 'custom', startDate, endDate, previous: { startDate, endDate }, next: { startDate, endDate } },
+      period: { startDate, endDate },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
@@ -329,7 +459,9 @@ describe('Finance dashboard page', () => {
     mocks.getDashboard.mockResolvedValueOnce(dashboard).mockResolvedValueOnce(dashboard)
 
     render(Finance)
+    expect(await screen.findByText(`${formatFinanceDate(startDate)} → ${formatFinanceDate(endDate)}`)).toBeInTheDocument()
     await user.click(await screen.findByText('Custom range'))
+    expect(screen.getByLabelText('Custom end date')).toHaveValue(dateInputValue(endDate))
     await user.click(screen.getByRole('button', { name: 'Apply' }))
 
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
@@ -340,16 +472,13 @@ describe('Finance dashboard page', () => {
     expect(request.endDate).toEqual(endDate)
   })
 
-  it('uses inclusive local calendar bounds for selected custom dates so midnight imported rows are included', async () => {
+  it('uses exclusive next-day bounds for selected inclusive custom dates', async () => {
     const user = userEvent.setup()
     const importedAtMidnight = new Date(2026, 4, 29, 0, 0, 0, 0)
     const initialDashboard = {
       period: {
-        preset: 'current_month',
         startDate: new Date(2026, 4, 1, 9, 40),
         endDate: new Date(2026, 5, 3, 9, 40),
-        previous: { startDate: new Date(2026, 3, 1), endDate: new Date(2026, 4, 1) },
-        next: { startDate: new Date(2026, 5, 4), endDate: new Date(2026, 6, 4) },
       },
       settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 830000, netMinor: -830000, transactionCount: 1, complete: true },
       pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
@@ -368,15 +497,15 @@ describe('Finance dashboard page', () => {
     await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledTimes(2))
     const request = mocks.getDashboard.mock.calls[1][0]
     expect(request.startDate).toEqual(new Date(2026, 4, 29, 0, 0, 0, 0))
-    expect(request.endDate).toEqual(new Date(2026, 5, 3, 23, 59, 59, 999))
+    expect(request.endDate).toEqual(new Date(2026, 5, 4, 0, 0, 0, 0))
     expect(importedAtMidnight.getTime()).toBeGreaterThanOrEqual(request.startDate.getTime())
-    expect(importedAtMidnight.getTime()).toBeLessThanOrEqual(request.endDate.getTime())
+    expect(importedAtMidnight.getTime()).toBeLessThan(request.endDate.getTime())
     expect(await screen.findByText('PLN')).toBeInTheDocument()
   })
 
   it('renders honest empty states when the dashboard has no activity', async () => {
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       categoryBreakdowns: [],
@@ -401,7 +530,7 @@ describe('Finance dashboard page', () => {
   it('routes native totals, sync issues, and import follow-up through the dashboard attention area', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) },
       settled: { displayCurrency: 'USD', incomeMinor: 220000, expenseMinor: 60000, netMinor: 160000, transactionCount: 14, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 10000, expenseMinor: 4000, netMinor: 6000, transactionCount: 2, complete: true },
       categoryBreakdowns: [{ categoryId: 'cat-income', categoryName: 'Salary', kind: 'income', incomeMinor: 220000, expenseMinor: 0, transactionCount: 1 }],
@@ -445,7 +574,7 @@ describe('Finance dashboard page', () => {
   it('shows account-level missing FX badges and tolerates mixed connection timestamp fallbacks', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) },
       settled: { displayCurrency: 'USD', incomeMinor: 5000, expenseMinor: 3000, netMinor: 2000, transactionCount: 2, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 1500, expenseMinor: 250, netMinor: 1250, transactionCount: 2, complete: true },
       categoryBreakdowns: [],
@@ -528,7 +657,7 @@ describe('Finance dashboard page', () => {
 
   it('does not add native foreign minor values into an unavailable display balance', async () => {
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: 'current_month', startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 30), previous: { startDate: new Date(), endDate: new Date() }, next: { startDate: new Date(), endDate: new Date() } },
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
       settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       categoryBreakdowns: [],
@@ -549,18 +678,18 @@ describe('Finance dashboard page', () => {
 
   it('explains that a prior period uses current FX valuation', async () => {
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: 'custom', startDate: new Date(2026, 4, 1), endDate: new Date(2026, 4, 31), previous: { startDate: new Date(), endDate: new Date() }, next: { startDate: new Date(), endDate: new Date() } },
+      period: { startDate: new Date(2026, 4, 1), endDate: new Date(2026, 5, 1) },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true }, pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], currentFxRates: [], nativeSettledTotals: [],
     })
     render(Finance)
-    expect(await screen.findByText('Past activity is valued using today’s latest FX rates, not an end-of-period rate.')).toBeInTheDocument()
+    expect(await screen.findByText('Display-currency balances, flows, categories, and pending values use current FX valuation and can change after a rate refresh.')).toBeInTheDocument()
   })
 
   it('shows fresh rate metadata and a prominent stale-rate warning', async () => {
     const user = userEvent.setup()
     mocks.getDashboard.mockResolvedValue({
-      period: { preset: 'current_month', startDate: new Date(), endDate: new Date(), previous: { startDate: new Date(), endDate: new Date() }, next: { startDate: new Date(), endDate: new Date() } },
+      period: { startDate: new Date(), endDate: new Date() },
       settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true }, pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
       categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
       currentFxRates: [
@@ -580,7 +709,7 @@ describe('Finance dashboard page', () => {
   it('caps account, category, and recent transaction sections to keep the dashboard scannable', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
-      period: { preset: '', startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20), previous: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) }, next: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) } },
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) },
       settled: { displayCurrency: 'USD', incomeMinor: 220000, expenseMinor: 60000, netMinor: 160000, transactionCount: 14, complete: true },
       pending: { displayCurrency: 'USD', incomeMinor: 10000, expenseMinor: 4000, netMinor: 6000, transactionCount: 2, complete: true },
       categoryBreakdowns: [

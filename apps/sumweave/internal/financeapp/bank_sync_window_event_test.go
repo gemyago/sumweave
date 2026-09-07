@@ -58,6 +58,27 @@ func TestBankSyncWindowCompletedEvent(t *testing.T) {
 		require.NoError(t, routerErr)
 		return router
 	}
+	startRouter := func(t *testing.T, router *appdispatch.Router) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(t.Context())
+		runDone := make(chan struct{})
+		var runErr error
+		go func() {
+			runErr = router.Run(ctx)
+			close(runDone)
+		}()
+		t.Cleanup(func() {
+			cancel()
+			require.NoError(t, router.Close())
+		})
+		select {
+		case <-router.SubscriptionsReady():
+		case <-runDone:
+			t.Fatalf("message router stopped before subscriptions became ready: %v", runErr)
+		case <-t.Context().Done():
+			t.Fatalf("message router subscriptions did not become ready: %v", t.Context().Err())
+		}
+	}
 	checkpointTopic := func(t *testing.T, consumerGroup string) {
 		t.Helper()
 		var (
@@ -257,13 +278,7 @@ func TestBankSyncWindowCompletedEvent(t *testing.T) {
 		router := makeRouter(t)
 		jobCountBefore := jobCount(t)
 		require.NoError(t, RegisterAutomaticClassificationHandler(router, service, logger))
-		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(func() {
-			cancel()
-			require.NoError(t, router.Close())
-		})
-		go func() { _ = router.Run(ctx) }()
-		time.Sleep(100 * time.Millisecond)
+		startRouter(t, router)
 		publisher, publisherErr := appevents.NewPublisher(rawPublisher)
 		require.NoError(t, publisherErr)
 		require.NoError(t, publisher.Publish(t.Context(), event))
@@ -306,13 +321,7 @@ func TestBankSyncWindowCompletedEvent(t *testing.T) {
 		checkpointTopic(t, consumerGroup)
 		jobCountBefore := jobCount(t)
 		require.NoError(t, RegisterAutomaticTransferMatchingHandler(router, service, logger))
-		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(func() {
-			cancel()
-			require.NoError(t, router.Close())
-		})
-		go func() { _ = router.Run(ctx) }()
-		time.Sleep(100 * time.Millisecond)
+		startRouter(t, router)
 		publisher, publisherErr := appevents.NewPublisher(rawPublisher)
 		require.NoError(t, publisherErr)
 		require.NoError(t, publisher.Publish(t.Context(), event))
@@ -349,13 +358,7 @@ func TestBankSyncWindowCompletedEvent(t *testing.T) {
 			}).
 			Maybe()
 		require.NoError(t, RegisterAutomaticClassificationHandler(router, service, logger))
-		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(func() {
-			cancel()
-			require.NoError(t, router.Close())
-		})
-		go func() { _ = router.Run(ctx) }()
-		time.Sleep(100 * time.Millisecond)
+		startRouter(t, router)
 		malformed := appdispatch.NewMessage(BankSyncWindowCompletedEventTopic, []byte("not-json"))
 		require.NoError(t, rawPublisher.Publish(t.Context(), malformed))
 		publisher, publisherErr := appevents.NewPublisher(rawPublisher)

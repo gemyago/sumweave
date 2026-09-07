@@ -74,7 +74,7 @@ Durable jobs workflow:
 - `sumweave start-all` combines the HTTP server, durable consumer, and scheduler loop for startup diagnostics only.
 - `sumweave start` starts only the API/server path; it must not execute durable jobs inline.
 - `sumweave jobs worker` runs the observed-job consumer plus independent `finance.classification.v1` and `finance.transfer-matching.v1` ordinary event routers. Each committed bank-sync window can trigger both enrichments for its exact range independently; automatic handling creates no job projection and does not alter the bank-sync job outcome.
-- `sumweave jobs worker --once` drains observed commands first, then attempts both ordinary enrichment drains using each router's bounded two-idle-poll behavior and joins their errors; use a reseeded or isolated local DB for a bounded E2E step.
+- `sumweave jobs worker --once` drains observed commands first, then attempts both ordinary enrichment drains after each router's configured subscription attempts return and through its existing two idle polls; it is not a generic-broker barrier; use a reseeded or isolated local DB for a bounded E2E step.
 - `sumweave jobs enqueue-due` performs one scheduler tick for finance-owned bank and FX schedules. It publishes semantic appdispatch commands and advances schedule state without running finance work or creating job rows; keep it for split or externally scheduled environments.
 - `APP_FINANCE_PROVIDERS_FRANKFURTER_BASEURL` overrides the Frankfurter provider endpoint for deterministic local fixtures; manual FX E2E must not use the public network.
 - Appdispatch is generic durable pub/sub for commands and domain events.

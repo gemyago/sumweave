@@ -288,6 +288,7 @@ func (r *Router) Handle(handler Handler) error {
 		return fmt.Errorf("handler already registered for topic: %s", handler.topic)
 	}
 	r.handlerTopics[handler.topic] = struct{}{}
+	r.subscriber.registerSubscription()
 	r.router.AddConsumerHandler(
 		"handler_"+handler.topic,
 		handler.topic,
@@ -323,6 +324,13 @@ func (r *Router) RunOnce(ctx context.Context, pollInterval time.Duration) error 
 	}()
 	runDone := make(chan error, 1)
 	go func() { runDone <- r.Run(runCtx) }()
+	select {
+	case err := <-runDone:
+		return normalizeRunOnceError(err)
+	case <-r.SubscriptionsReady():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	idlePolls := 0
@@ -342,9 +350,18 @@ func (r *Router) RunOnce(ctx context.Context, pollInterval time.Duration) error 
 			cancel()
 			return normalizeRunOnceError(<-runDone)
 		case <-ctx.Done():
+			cancel()
+			<-runDone
 			return ctx.Err()
 		}
 	}
+}
+
+// SubscriptionsReady closes after every configured subscription attempt has
+// returned, including attempts that reported an error. It is a startup boundary,
+// not a proof that a broker has no future delivery to offer.
+func (r *Router) SubscriptionsReady() <-chan struct{} {
+	return r.subscriber.SubscriptionsReady()
 }
 
 func (r *Router) runOnceTracker() *routerRunOnceTracker {
@@ -382,6 +399,7 @@ func (r *Router) Run(ctx context.Context) error {
 	r.started = true
 	r.runCancel = runCancel
 	r.mu.Unlock()
+	r.subscriber.beginSubscriptions()
 	r.logger.InfoContext(ctx, "starting message router")
 	runDone := make(chan struct{})
 	go func() {
@@ -474,38 +492,73 @@ func (r *Router) ensureCloseDone() {
 type lifecycleSubscriber struct {
 	subscriber wmmessage.Subscriber
 
-	mu           sync.Mutex
-	closing      bool
-	subscribeErr error
-	closeOnce    sync.Once
-	closeErr     error
+	mu                 sync.Mutex
+	closing            bool
+	subscribeErr       error
+	registered         int
+	started            int
+	begin              bool
+	subscriptionsReady chan struct{}
+	closeReadyOnce     sync.Once
+	closeOnce          sync.Once
+	closeErr           error
 }
 
 func newLifecycleSubscriber(subscriber wmmessage.Subscriber) *lifecycleSubscriber {
-	return &lifecycleSubscriber{subscriber: subscriber}
+	return &lifecycleSubscriber{subscriber: subscriber, subscriptionsReady: make(chan struct{})}
 }
 
 func (s *lifecycleSubscriber) Subscribe(ctx context.Context, topic string) (<-chan *wmmessage.Message, error) {
+	defer s.subscriptionStarted()
 	s.mu.Lock()
 	if s.closing || s.subscribeErr != nil {
 		s.mu.Unlock()
-		return s.drainedSubscription()
+		return closedMessageChannel(), nil
 	}
 	s.mu.Unlock()
 
 	messages, err := s.subscriber.Subscribe(ctx, topic)
-	if err == nil {
-		return messages, nil
+	if err != nil {
+		s.rememberSubscribeError(err)
+		// Watermill accounts for a handler only after Subscribe succeeds. Returning
+		// a closed channel lets every registered handler start and stop, so router
+		// shutdown cannot wait forever after a startup subscription error.
+		return closedMessageChannel(), nil
 	}
-	s.rememberSubscribeError(err)
-	// Watermill accounts for a handler only after Subscribe succeeds. Returning
-	// a closed channel lets every registered handler start and stop, so router
-	// shutdown cannot wait forever after a startup subscription error.
-	return s.drainedSubscription()
+	return messages, nil
 }
 
-func (*lifecycleSubscriber) drainedSubscription() (<-chan *wmmessage.Message, error) {
-	return closedMessageChannel(), nil
+func (s *lifecycleSubscriber) registerSubscription() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registered++
+}
+
+func (s *lifecycleSubscriber) beginSubscriptions() {
+	s.mu.Lock()
+	s.begin = true
+	registered := s.registered
+	started := s.started
+	s.mu.Unlock()
+	if registered == started {
+		s.closeReadyOnce.Do(func() { close(s.subscriptionsReady) })
+	}
+}
+
+func (s *lifecycleSubscriber) subscriptionStarted() {
+	s.mu.Lock()
+	s.started++
+	begin := s.begin
+	registered := s.registered
+	started := s.started
+	s.mu.Unlock()
+	if begin && registered == started {
+		s.closeReadyOnce.Do(func() { close(s.subscriptionsReady) })
+	}
+}
+
+func (s *lifecycleSubscriber) SubscriptionsReady() <-chan struct{} {
+	return s.subscriptionsReady
 }
 
 func (s *lifecycleSubscriber) rememberSubscribeError(err error) {

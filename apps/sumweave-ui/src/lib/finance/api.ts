@@ -158,17 +158,9 @@ export interface FinanceConnectionSyncedAccount {
   lastSuccessfulSyncAt?: Date | null
 }
 
-export interface FinanceDashboardPeriodWindow {
-  startDate: Date
-  endDate: Date
-}
-
 export interface FinanceDashboardPeriod {
-  preset: string
   startDate: Date
   endDate: Date
-  previous: FinanceDashboardPeriodWindow
-  next: FinanceDashboardPeriodWindow
 }
 
 export interface FinanceDashboardMoneySummary {
@@ -441,7 +433,7 @@ export interface SignalFinanceApi {
     windowStart?: Date
     windowEnd?: Date
   }): Promise<FinanceJobRef>
-  getDashboard(params: { tenantId: string; preset?: string; startDate?: Date; endDate?: Date }): Promise<FinanceDashboard>
+  getDashboard(params: { tenantId: string; startDate: Date; endDate: Date }): Promise<FinanceDashboard>
   getFXDiagnostics(): Promise<FinanceFXDiagnostics>
   triggerFXSync(params: {
     provider?: string
@@ -909,15 +901,14 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
       })
       return mapJobRef(json)
     },
-    async getDashboard({ tenantId, preset, startDate, endDate }) {
+    async getDashboard({ tenantId, startDate, endDate }) {
       return mapDashboard(
         await request<RawDashboard>({
           method: 'GET',
           path: `/finance/tenants/${encodeURIComponent(tenantId)}/dashboard`,
           query: buildSearchParams({
-            preset,
-            startDate: startDate === undefined ? undefined : serializeRequestTimestamp(startDate),
-            endDate: endDate === undefined ? undefined : serializeRequestTimestamp(endDate),
+            startDate: serializeRequestTimestamp(startDate),
+            endDate: serializeRequestTimestamp(endDate),
           }),
         }),
       )
@@ -1000,8 +991,7 @@ interface RawSyntheticLinkState {
   configuredAccounts: RawSyntheticLinkStateConfiguredAccount[]
   canFinish: boolean
 }
-interface RawDashboardPeriodWindow { startDate: string; endDate: string }
-interface RawDashboardPeriod { preset: string; startDate: string; endDate: string; previous: RawDashboardPeriodWindow; next: RawDashboardPeriodWindow }
+interface RawDashboardPeriod { startDate: string; endDate: string }
 interface RawMoneySummary { displayCurrency: string; incomeMinor: number; expenseMinor: number; netMinor: number; transactionCount: number; complete: boolean }
 interface RawCategoryBreakdown { categoryId: string; categoryName: string; kind: string; incomeMinor: number; expenseMinor: number; transactionCount: number }
 interface RawAccountBalance { accountId: string; accountName: string; currency: string; nativeBookedMinor: number; nativePendingMinor: number; displayBookedMinor: number | null; displayPendingMinor: number | null; missingFx: boolean }
@@ -1133,9 +1123,7 @@ function mapSyntheticLinkState(item: RawSyntheticLinkState): FinanceSyntheticLin
 }
 function mapDashboard(item: RawDashboard): FinanceDashboard {
   requireFields(item, 'finance.dashboard', ['period', 'settled', 'pending', 'categoryBreakdowns', 'accountBalances', 'alerts', 'fxCoverage', 'currentFxRates', 'nativeSettledTotals'])
-  requireFields(item.period, 'finance.dashboard.period', ['preset', 'startDate', 'endDate', 'previous', 'next'])
-  requireFields(item.period.previous, 'finance.dashboard.period.previous', ['startDate', 'endDate'])
-  requireFields(item.period.next, 'finance.dashboard.period.next', ['startDate', 'endDate'])
+  requireFields(item.period, 'finance.dashboard.period', ['startDate', 'endDate'])
   requireArray(item.categoryBreakdowns, 'finance.dashboard.categoryBreakdowns')
   requireArray(item.accountBalances, 'finance.dashboard.accountBalances')
   requireArray(item.alerts, 'finance.dashboard.alerts')
@@ -1157,17 +1145,8 @@ function mapDashboard(item: RawDashboard): FinanceDashboard {
   item.nativeSettledTotals.forEach((total, index) => requireFields(total, `finance.dashboard.nativeSettledTotals[${index}]`, ['currency', 'incomeMinor', 'expenseMinor', 'netMinor']))
   return {
     period: {
-      preset: item.period.preset,
       startDate: parseRequiredDate(item.period.startDate, 'finance.dashboard.period.startDate'),
       endDate: parseRequiredDate(item.period.endDate, 'finance.dashboard.period.endDate'),
-      previous: {
-        startDate: parseRequiredDate(item.period.previous.startDate, 'finance.dashboard.period.previous.startDate'),
-        endDate: parseRequiredDate(item.period.previous.endDate, 'finance.dashboard.period.previous.endDate'),
-      },
-      next: {
-        startDate: parseRequiredDate(item.period.next.startDate, 'finance.dashboard.period.next.startDate'),
-        endDate: parseRequiredDate(item.period.next.endDate, 'finance.dashboard.period.next.endDate'),
-      },
     },
     settled: item.settled,
     pending: item.pending,

@@ -14,9 +14,8 @@ var _ = json.Unmarshal
 var _ = fmt.Sprint
 
 type FinanceDashboardPeriod struct { 
-	Preset string `json:"preset"`
+	// Inclusive dashboard range start.
 	StartDate time.Time `json:"startDate"`
+	// Exclusive dashboard range end.
 	EndDate time.Time `json:"endDate"`
-	Previous *FinanceDashboardPeriodWindow `json:"previous"`
-	Next *FinanceDashboardPeriodWindow `json:"next"`
 }

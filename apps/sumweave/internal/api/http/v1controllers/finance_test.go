@@ -457,7 +457,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "start redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/start", body: `{"provider":"pko","callbackUrl":"https://app.example.test/#/finance/connections"}`},
 			{name: "finish redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/finish", body: `{"provider":"pko","state":"state-1","code":"code-1"}`},
 			{name: "trigger connection sync", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a/sync", body: `{"reason":"manual"}`},
-			{name: "dashboard", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/dashboard?preset=current_month&startDate=2026-06-01T00:00:00Z&endDate=2026-06-30T00:00:00Z"},
+			{name: "dashboard", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/dashboard?startDate=2026-06-01T00:00:00Z&endDate=2026-06-30T00:00:00Z"},
 			{name: "fx diagnostics", method: http.MethodGet, target: "/api/v1/finance/fx/diagnostics"},
 			{name: "fx sync", method: http.MethodPost, target: "/api/v1/finance/fx/sync", body: `{"provider":"nbp","baseCurrencies":["EUR"],"quoteCurrency":"USD","startDate":"2026-06-01T00:00:00Z","endDate":"2026-06-21T00:00:00Z"}`},
 			{name: "preview import", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/imports/preview", body: `{"importType":"transactions","fileName":"demo.csv","csv":"account,amount\nChecking,100"}`},
@@ -1679,23 +1679,10 @@ func TestFinanceController(t *testing.T) {
 			service.EXPECT().
 				GetDashboard(mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, params financepkg.DashboardParams) (financepkg.Dashboard, error) {
-					require.Equal(t, financepkg.DashboardPeriodPresetCurrentMonth, params.Preset)
 					require.Equal(t, "2026-06-01T00:00:00Z", params.StartDate.Format(time.RFC3339))
 					require.Equal(t, "2026-06-30T00:00:00Z", params.EndDate.Format(time.RFC3339))
 					return financepkg.Dashboard{
-						Period: financepkg.DashboardPeriod{
-							Preset:    params.Preset,
-							StartDate: params.StartDate,
-							EndDate:   params.EndDate,
-							Previous: financepkg.DashboardPeriodWindow{
-								StartDate: params.StartDate,
-								EndDate:   params.EndDate,
-							},
-							Next: financepkg.DashboardPeriodWindow{
-								StartDate: params.StartDate,
-								EndDate:   params.EndDate,
-							},
-						},
+						Period: financepkg.DashboardPeriod{StartDate: params.StartDate, EndDate: params.EndDate},
 						Settled: financepkg.DashboardMoneySummary{
 							DisplayCurrency:  "USD",
 							TransactionCount: 2,
@@ -1870,7 +1857,7 @@ func TestFinanceController(t *testing.T) {
 				},
 				{
 					method: http.MethodGet,
-					target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?preset=current_month&startDate=2026-06-01T00:00:00Z&endDate=2026-06-30T00:00:00Z",
+					target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?startDate=2026-06-01T00:00:00Z&endDate=2026-06-30T00:00:00Z",
 					field:  "settled",
 					want:   true,
 					status: http.StatusOK,
@@ -2206,13 +2193,7 @@ func TestFinanceController(t *testing.T) {
 		zero := int64(0)
 		service := newMockfinanceService(t)
 		service.EXPECT().GetDashboard(mock.Anything, mock.Anything).Return(financepkg.Dashboard{
-			Period: financepkg.DashboardPeriod{
-				Preset:    financepkg.DashboardPeriodPresetCurrentMonth,
-				StartDate: date,
-				EndDate:   date,
-				Previous:  financepkg.DashboardPeriodWindow{StartDate: date, EndDate: date},
-				Next:      financepkg.DashboardPeriodWindow{StartDate: date, EndDate: date},
-			},
+			Period:  financepkg.DashboardPeriod{StartDate: date, EndDate: date.Add(time.Nanosecond)},
 			Settled: financepkg.DashboardMoneySummary{DisplayCurrency: "USD", Complete: false},
 			Pending: financepkg.DashboardMoneySummary{DisplayCurrency: "USD", Complete: false},
 			AccountBalances: []financepkg.DashboardAccountBalance{{
@@ -2228,7 +2209,7 @@ func TestFinanceController(t *testing.T) {
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, newRequest(
 			http.MethodGet,
-			"/api/v1/finance/tenants/"+tenantID+"/dashboard?preset=current_month",
+			"/api/v1/finance/tenants/"+tenantID+"/dashboard?startDate=2026-03-29T13:47:11.000000123%2B14:00&endDate=2026-03-29T13:47:11.000000124%2B14:00",
 			"",
 			true,
 		))
@@ -2237,6 +2218,7 @@ func TestFinanceController(t *testing.T) {
 		payload := decode(t, resp)
 		period := payload["period"].(map[string]any)
 		assert.Equal(t, "2026-03-29T13:47:11.000000123+14:00", period["startDate"])
+		assert.Equal(t, "2026-03-29T13:47:11.000000124+14:00", period["endDate"])
 		balance := payload["accountBalances"].([]any)[0].(map[string]any)
 		assert.Contains(t, balance, "displayBookedMinor")
 		assert.Nil(t, balance["displayBookedMinor"])
@@ -2247,20 +2229,17 @@ func TestFinanceController(t *testing.T) {
 		assert.InDelta(t, 1, coverage["affectedAccountCount"], 0)
 	})
 
-	t.Run("registered dashboard route accepts next month preset", func(t *testing.T) {
+	t.Run("registered dashboard route passes explicit range", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()
 		service := newMockfinanceService(t)
 		service.EXPECT().
 			GetDashboard(mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, params financepkg.DashboardParams) (financepkg.Dashboard, error) {
-				require.Equal(t, financepkg.DashboardPeriodPresetNextMonth, params.Preset)
+				require.Equal(t, time.Date(2024, time.February, 1, 0, 0, 0, 0, time.UTC), params.StartDate)
+				require.Equal(t, time.Date(2024, time.March, 1, 0, 0, 0, 0, time.UTC), params.EndDate)
 				return financepkg.Dashboard{
-					Period: financepkg.DashboardPeriod{
-						Preset:   params.Preset,
-						Previous: financepkg.DashboardPeriodWindow{},
-						Next:     financepkg.DashboardPeriodWindow{},
-					},
+					Period: financepkg.DashboardPeriod{StartDate: params.StartDate, EndDate: params.EndDate},
 				}, nil
 			})
 		resp := httptest.NewRecorder()
@@ -2268,7 +2247,7 @@ func TestFinanceController(t *testing.T) {
 			resp,
 			newRequest(
 				http.MethodGet,
-				"/api/v1/finance/tenants/"+tenantID+"/dashboard?preset=next_month",
+				"/api/v1/finance/tenants/"+tenantID+"/dashboard?startDate=2024-02-01T00:00:00Z&endDate=2024-03-01T00:00:00Z",
 				"",
 				true,
 			),
@@ -2802,16 +2781,20 @@ func TestFinanceController(t *testing.T) {
 			body   string
 		}{
 			{
-				name: "custom dashboard missing end", method: http.MethodGet,
-				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?preset=custom&startDate=2026-06-01T00:00:00Z",
+				name: "dashboard missing end", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?startDate=2026-06-01T00:00:00Z",
 			},
 			{
-				name: "custom dashboard reversed", method: http.MethodGet,
-				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?preset=custom&startDate=2026-06-02T00:00:00Z&endDate=2026-06-01T00:00:00Z",
+				name: "dashboard reversed", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?startDate=2026-06-02T00:00:00Z&endDate=2026-06-01T00:00:00Z",
 			},
 			{
-				name: "dashboard unsupported preset", method: http.MethodGet,
-				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?preset=rolling_month",
+				name: "dashboard empty", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard?startDate=2026-06-01T00:00:00Z&endDate=2026-06-01T00:00:00Z",
+			},
+			{
+				name: "dashboard missing range", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard",
 			},
 		} {
 			t.Run(testCase.name, func(t *testing.T) {
@@ -3076,17 +3059,8 @@ func TestFinanceController(t *testing.T) {
 
 			mappedDashboard := mapDashboard(financepkg.Dashboard{
 				Period: financepkg.DashboardPeriod{
-					Preset:    financepkg.DashboardPeriodPresetCurrentMonth,
 					StartDate: now,
 					EndDate:   now.Add(24 * time.Hour),
-					Previous: financepkg.DashboardPeriodWindow{
-						StartDate: now.Add(-24 * time.Hour),
-						EndDate:   now.Add(-time.Hour),
-					},
-					Next: financepkg.DashboardPeriodWindow{
-						StartDate: now.Add(48 * time.Hour),
-						EndDate:   now.Add(72 * time.Hour),
-					},
 				},
 				Settled: financepkg.DashboardMoneySummary{
 					DisplayCurrency:  "USD",
@@ -3128,11 +3102,6 @@ func TestFinanceController(t *testing.T) {
 					{Currency: "USD", NetMinor: 100},
 				},
 			})
-			assert.Equal(
-				t,
-				string(financepkg.DashboardPeriodPresetCurrentMonth),
-				mappedDashboard.Period.Preset,
-			)
 			assert.Equal(t, now, mappedDashboard.Period.StartDate)
 			assert.Equal(t, "nbp", mappedDashboard.FxCoverage[0].Provider)
 			require.Len(t, mappedDashboard.CategoryBreakdowns, 1)

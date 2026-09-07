@@ -70,7 +70,6 @@ internal/finance_dashboard_current_fx_rate_validation.go
 internal/finance_dashboard_fx_coverage_validation.go
 internal/finance_dashboard_money_summary_validation.go
 internal/finance_dashboard_period_validation.go
-internal/finance_dashboard_period_window_validation.go
 internal/finance_dashboard_response_validation.go
 internal/finance_fx_diagnostics_response_validation.go
 internal/finance_fx_provider_diagnostic_validation.go
@@ -225,7 +224,6 @@ models/finance_dashboard_current_fx_rate.go
 models/finance_dashboard_fx_coverage.go
 models/finance_dashboard_money_summary.go
 models/finance_dashboard_period.go
-models/finance_dashboard_period_window.go
 models/finance_dashboard_response.go
 models/finance_fx_diagnostics_response.go
 models/finance_fx_provider_diagnostic.go

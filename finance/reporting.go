@@ -1,7 +1,6 @@
 package finance
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -10,29 +9,13 @@ import (
 	"github.com/gemyago/sumweave/finance/domain"
 )
 
-var ErrInvalidDashboardPeriod = errors.New("invalid dashboard period")
-
-type DashboardPeriodPreset string
-
-const (
-	DashboardPeriodPresetCurrentMonth  DashboardPeriodPreset = "current_month"
-	DashboardPeriodPresetPreviousMonth DashboardPeriodPreset = "previous_month"
-	DashboardPeriodPresetNextMonth     DashboardPeriodPreset = "next_month"
-	DashboardPeriodPresetLast3Months   DashboardPeriodPreset = "last_3_months"
-	DashboardPeriodPresetLast6Months   DashboardPeriodPreset = "last_6_months"
-	DashboardPeriodPresetThisYear      DashboardPeriodPreset = "this_year"
-	DashboardPeriodPresetPreviousYear  DashboardPeriodPreset = "previous_year"
-	DashboardPeriodPresetCustom        DashboardPeriodPreset = "custom"
-
-	dashboardAlertsCapacity = 2
-)
+const dashboardAlertsCapacity = 2
 
 type DashboardParams struct {
 	ActorUserID string
 	TenantID    string
-	Preset      DashboardPeriodPreset
-	StartDate   time.Time
-	EndDate     time.Time
+	StartDate   time.Time // Inclusive dashboard range boundary.
+	EndDate     time.Time // Exclusive dashboard range boundary.
 }
 
 type Dashboard struct {
@@ -56,14 +39,6 @@ const (
 )
 
 type DashboardPeriod struct {
-	Preset    DashboardPeriodPreset
-	StartDate time.Time
-	EndDate   time.Time
-	Previous  DashboardPeriodWindow
-	Next      DashboardPeriodWindow
-}
-
-type DashboardPeriodWindow struct {
 	StartDate time.Time
 	EndDate   time.Time
 }
@@ -157,24 +132,13 @@ type dashboardComputation struct {
 }
 
 func ValidateDashboardParams(params DashboardParams) error {
-	preset := params.Preset
-	if preset == "" {
-		preset = DashboardPeriodPresetCurrentMonth
+	if err := ValidateRequiredTimestampRange(params.StartDate, params.EndDate); err != nil {
+		return err
 	}
-	switch preset {
-	case DashboardPeriodPresetCurrentMonth,
-		DashboardPeriodPresetPreviousMonth,
-		DashboardPeriodPresetNextMonth,
-		DashboardPeriodPresetLast3Months,
-		DashboardPeriodPresetLast6Months,
-		DashboardPeriodPresetThisYear,
-		DashboardPeriodPresetPreviousYear:
-		return nil
-	case DashboardPeriodPresetCustom:
-		return ValidateRequiredTimestampRange(params.StartDate, params.EndDate)
-	default:
-		return fmt.Errorf("%w: %q", ErrInvalidDashboardPeriod, preset)
+	if !params.StartDate.Before(params.EndDate) {
+		return fmt.Errorf("%w: start timestamp must be before end timestamp", ErrInvalidTimestampRange)
 	}
+	return nil
 }
 
 func buildDashboardAlerts(
@@ -297,84 +261,12 @@ func sortCurrencyTotals(nativeTotals map[string]*DashboardCurrencyTotal) []Dashb
 	return items
 }
 
-func resolveDashboardPeriod(now time.Time, params DashboardParams) DashboardPeriod {
-	preset := params.Preset
-	if preset == "" {
-		preset = DashboardPeriodPresetCurrentMonth
-	}
-	current := now
-	currentMonthStart, _ := calendarMonthWindow(current)
-	var startDate time.Time
-	var endDate time.Time
-	switch preset {
-	case DashboardPeriodPresetCurrentMonth:
-		startDate, endDate = calendarMonthWindow(currentMonthStart)
-	case DashboardPeriodPresetPreviousMonth:
-		startDate, endDate = calendarMonthWindow(currentMonthStart.AddDate(0, -1, 0))
-	case DashboardPeriodPresetNextMonth:
-		startDate, endDate = calendarMonthWindow(currentMonthStart.AddDate(0, 1, 0))
-	case DashboardPeriodPresetLast3Months:
-		startDate = current.AddDate(0, -3, 0)
-		endDate = current
-	case DashboardPeriodPresetLast6Months:
-		startDate = current.AddDate(0, -6, 0)
-		endDate = current
-	case DashboardPeriodPresetThisYear:
-		startDate = time.Date(
-			current.Year(), time.January, 1,
-			current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location(),
-		)
-		endDate = current
-	case DashboardPeriodPresetPreviousYear:
-		currentYearStart := time.Date(
-			current.Year(), time.January, 1,
-			current.Hour(), current.Minute(), current.Second(), current.Nanosecond(), current.Location(),
-		)
-		startDate = currentYearStart.AddDate(-1, 0, 0)
-		endDate = currentYearStart.Add(-time.Nanosecond)
-	case DashboardPeriodPresetCustom:
-		startDate = params.StartDate
-		endDate = params.EndDate
-	}
-	previousStart, previousEnd, nextStart, nextEnd := shiftPeriodWindow(startDate, endDate)
-	if preset == DashboardPeriodPresetCurrentMonth ||
-		preset == DashboardPeriodPresetPreviousMonth ||
-		preset == DashboardPeriodPresetNextMonth {
-		previousStart, previousEnd = calendarMonthWindow(startDate.AddDate(0, -1, 0))
-		nextStart, nextEnd = calendarMonthWindow(startDate.AddDate(0, 1, 0))
-	}
-	return DashboardPeriod{
-		Preset:    preset,
-		StartDate: startDate,
-		EndDate:   endDate,
-		Previous:  DashboardPeriodWindow{StartDate: previousStart, EndDate: previousEnd},
-		Next:      DashboardPeriodWindow{StartDate: nextStart, EndDate: nextEnd},
-	}
-}
-
-func calendarMonthWindow(date time.Time) (time.Time, time.Time) {
-	startDate := time.Date(date.Year(), date.Month(), 1, 0, 0, 0, 0, date.Location())
-	return startDate, startDate.AddDate(0, 1, 0).Add(-time.Nanosecond)
-}
-
-func shiftPeriodWindow(
-	startDate time.Time,
-	endDate time.Time,
-) (time.Time, time.Time, time.Time, time.Time) {
-	span := endDate.Sub(startDate) + time.Nanosecond
-	previousStart := startDate.Add(-span)
-	previousEnd := startDate.Add(-time.Nanosecond)
-	nextStart := endDate.Add(time.Nanosecond)
-	nextEnd := endDate.Add(span)
-	return previousStart, previousEnd, nextStart, nextEnd
-}
-
 func transactionInPeriod(
 	transaction domain.Transaction,
 	startDate time.Time,
 	endDate time.Time,
 ) bool {
-	return !transaction.EffectiveAt.Before(startDate) && !transaction.EffectiveAt.After(endDate)
+	return !transaction.EffectiveAt.Before(startDate) && transaction.EffectiveAt.Before(endDate)
 }
 
 func reportingContribution(transaction domain.Transaction) (int64, int64, bool) {

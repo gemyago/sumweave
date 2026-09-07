@@ -189,6 +189,8 @@ func TestFocusedPublicServices(t *testing.T) {
 		dashboard, err := service.GetDashboard(t.Context(), DashboardParams{
 			ActorUserID: ownerUserID,
 			TenantID:    tenant.ID,
+			StartDate:   time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC),
+			EndDate:     time.Date(2026, time.June, 30, 23, 59, 59, 999999999, time.UTC),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, int64(400_00), dashboard.Settled.IncomeMinor)

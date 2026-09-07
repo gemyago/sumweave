@@ -186,7 +186,7 @@
 - Multi-tenant tenant selection is shell-owned and compact; dashboard/content routes do not repeat tenant picker panels or tenant-workspace explainer blocks.
 - Single-tenant tenant-scoped finance routes do not show a tenant selector in normal shell chrome.
 - Finance detail flows prefer separate routes over split panes; the first slice uses `/finance/accounts/:accountId` and `/finance/jobs/:jobId` for that purpose.
-- Finance timestamps render in browser-local date or date-time format instead of raw ISO strings. Native date controls create local JavaScript `Date` values and serialize them at the API boundary; dashboard custom date-only controls resolve selected starts to local start-of-day and ends to local end-of-day.
+- Finance timestamps render in browser-local date or date-time format instead of raw ISO strings. Native date controls create local JavaScript `Date` values and serialize them at the API boundary; dashboard date-only controls present inclusive calendar dates but send `[startDate, endDate)` boundaries from local start-of-first-day to local start-of-day-after-last.
 - At narrow widths, the finance rail remains fully visible but stacks above the utility header and route body as a full-width Bootstrap aside; there is no separate menu-toggle state.
 - At narrow mobile widths, the utility row keeps only compact route/tenant/auth controls and hides non-essential explainer copy.
 
@@ -195,7 +195,7 @@
 - Header: **Finance dashboard** heading + short workspace-oriented copy.
 - This is the default authenticated landing when there is no remembered protected route.
 - Top area: compact dashboard header plus direct links into accounts and transactions.
-- Controls area: date-only reporting-period summary, direct **Previous month**, **Current month**, and **Next month** preset controls, and a compact custom date-range disclosure with an **Apply** action. Tenant control is not repeated here. Month controls call only their matching preset and never derive a range from a response window.
+- Controls area: date-only reporting-period summary, direct **Previous month**, **Current month**, and **Next month** controls, and a compact custom date-range disclosure with an **Apply** action. Tenant control is not repeated here. Period controls disable while a dashboard request is active. The client calculates local calendar-month start and the next local month start for every direct month action and sends those explicit half-open `[startDate, endDate)` bounds. Inclusive end labels show the previous local calendar day for an exclusive end at local midnight; otherwise they show the exclusive end instant's local calendar date. A tenant change reloads the active client range; responses from an old tenant cannot replace the new tenant's dashboard or range. **Current month** restores the browser's current local month. Custom ranges remain separate.
 - In `current_month` mode, the visible start/end date controls stay populated with the active month bounds on first load and after **Current month** is clicked.
 - Direct month controls and the custom-range action keep the visible date inputs synchronized with the reporting window returned by the dashboard API.
 - Body order:

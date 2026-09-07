@@ -308,13 +308,27 @@ func TestAppDispatch(t *testing.T) {
 			require.NoError(t, handlerErr)
 			require.NoError(t, router.Handle(handler))
 			ctx, cancel := context.WithCancel(t.Context())
-			go func() { _ = router.Run(ctx) }()
-			<-router.router.Running()
+			runDone := make(chan struct{})
+			var runErr error
+			go func() {
+				runErr = router.Run(ctx)
+				close(runDone)
+			}()
+			var stopOnce sync.Once
 			stop := func() {
-				cancel()
-				require.NoError(t, router.Close())
+				stopOnce.Do(func() {
+					cancel()
+					require.NoError(t, router.Close())
+				})
 			}
 			t.Cleanup(stop)
+			select {
+			case <-router.SubscriptionsReady():
+			case <-runDone:
+				t.Fatalf("message router stopped before subscriptions became ready: %v", runErr)
+			case <-t.Context().Done():
+				t.Fatalf("message router subscriptions did not become ready: %v", t.Context().Err())
+			}
 			return results, stop
 		}
 

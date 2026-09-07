@@ -57,6 +57,8 @@ func TestDashboardTransactionKindRegression(t *testing.T) {
 		dashboard, err := service.GetDashboard(t.Context(), DashboardParams{
 			ActorUserID: ownerUserID,
 			TenantID:    tenant.ID,
+			StartDate:   time.Date(2026, time.July, 1, 0, 0, 0, 0, location),
+			EndDate:     time.Date(2026, time.July, 31, 23, 59, 59, 999999999, location),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, int64(1234), dashboard.Settled.ExpenseMinor)

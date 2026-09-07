@@ -15,10 +15,16 @@
     formatFinanceMoney,
   } from '../lib/finance/format'
   import { dateInputValue, withDateInput } from '../lib/date-range'
+  import {
+    currentDashboardMonth,
+    shiftDashboardMonth,
+    type DashboardPeriodRange,
+  } from '../lib/finance/dashboard-period'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
   import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
 
   type BootstrapTone = 'primary' | 'success' | 'warning' | 'danger' | 'secondary'
+  type DashboardPeriodMode = 'current_month' | 'previous_month' | 'next_month' | 'custom'
 
   interface VisualMetric {
     key: string
@@ -52,11 +58,13 @@
   let historyAccounts = $state<FinanceAccount[]>([])
   let recentTransactions = $state<FinanceTransaction[]>([])
   let recentConnections = $state<FinanceBankConnection[]>([])
-  let dashboardPreset = $state('current_month')
+  let dashboardPeriodMode = $state<DashboardPeriodMode>('current_month')
+  let activeDashboardRange = $state<DashboardPeriodRange | undefined>(undefined)
   let customStartDate = $state<Date | undefined>(undefined)
   let customEndDate = $state<Date | undefined>(undefined)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+  let dashboardLoadRevision = 0
 
   const financeShell = useFinanceShellState()
 
@@ -279,7 +287,7 @@
     fxCoverage.reduce((total, coverage) => total + coverage.affectedTransactionCount + coverage.affectedAccountCount, 0),
   )
   const hasFxCoverageDetails = $derived(currentFxRates.length > 0 || fxCoverage.length > 0)
-  const isHistoricalPeriod = $derived.by(() => dashboard?.period.preset !== 'current_month')
+  const isHistoricalPeriod = $derived.by(() => dashboardPeriodMode !== 'current_month')
 
   function fxCoveragePairList() {
     return fxCoverage.map((coverage) => `${coverage.baseCurrency} → ${coverage.quoteCurrency}`).join(', ')
@@ -381,7 +389,7 @@
     try {
       await financeShell.initialize()
       if (financeShell.selectedTenantId) {
-        await loadDashboard()
+        await loadDashboard(rangeForDashboardMode())
       } else {
         dashboard = null
         recentTransactions = []
@@ -396,14 +404,20 @@
     }
   }
 
-  async function loadDashboard(overrides: { preset?: string; startDate?: Date; endDate?: Date } = {}) {
-    if (!financeShell.selectedTenantId) {
+  async function loadDashboard(range: DashboardPeriodRange | undefined): Promise<boolean> {
+    const tenantId = financeShell.selectedTenantId
+    if (!tenantId) {
       dashboard = null
       historyAccounts = []
       recentTransactions = []
       recentConnections = []
-      return
+      return false
     }
+    if (!range) {
+      error = 'Choose valid start and end dates.'
+      return false
+    }
+    const requestRevision = ++dashboardLoadRevision
 
     loadingDashboard = true
     error = null
@@ -411,16 +425,16 @@
     try {
       const [loadedDashboard, loadedAccounts, loadedTransactions, loadedConnections] = await Promise.all([
         financeApi.getDashboard({
-          tenantId: financeShell.selectedTenantId,
-          preset: overrides.preset ?? dashboardPreset,
-          startDate: overrides.preset && overrides.preset !== 'custom' ? undefined : overrides.startDate ?? customStartDate,
-          endDate: overrides.preset && overrides.preset !== 'custom' ? undefined : overrides.endDate ?? customEndDate,
+          tenantId,
+          startDate: range.startDate,
+          endDate: range.endDate,
         }),
-        financeApi.listAccounts({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
-        financeApi.listTransactions({ tenantId: financeShell.selectedTenantId, includeHidden: true, limit: TRANSACTION_SECTION_LIMIT }),
-        financeApi.listConnections({ tenantId: financeShell.selectedTenantId }),
+        financeApi.listAccounts({ tenantId, includeHidden: true }),
+        financeApi.listTransactions({ tenantId, includeHidden: true, limit: TRANSACTION_SECTION_LIMIT }),
+        financeApi.listConnections({ tenantId }),
       ])
 
+      if (financeShell.selectedTenantId !== tenantId || dashboardLoadRevision !== requestRevision) return false
       dashboard = loadedDashboard
       historyAccounts = loadedAccounts
       recentTransactions = [...loadedTransactions]
@@ -431,16 +445,55 @@
         const rightTime = right.lastSyncStartedAt?.getTime() ?? right.updatedAt.getTime()
         return rightTime - leftTime
       })
-      dashboardPreset = loadedDashboard.period.preset
+      activeDashboardRange = {
+        startDate: loadedDashboard.period.startDate,
+        endDate: loadedDashboard.period.endDate,
+      }
       customStartDate = loadedDashboard.period.startDate
       customEndDate = loadedDashboard.period.endDate
+      return true
     } catch (loadError) {
+      if (financeShell.selectedTenantId !== tenantId || dashboardLoadRevision !== requestRevision) return false
       recentTransactions = []
       historyAccounts = []
       recentConnections = []
       error = loadError instanceof Error ? loadError.message : 'Failed to load dashboard'
+      return false
     } finally {
-      loadingDashboard = false
+      if (dashboardLoadRevision === requestRevision) {
+        loadingDashboard = false
+      }
+    }
+  }
+
+  function rangeForDashboardMode(): DashboardPeriodRange | undefined {
+    if (activeDashboardRange) return activeDashboardRange
+
+    if (dashboardPeriodMode === 'custom') {
+      if (!customStartDate || !customEndDate ||
+        Number.isNaN(customStartDate.getTime()) || Number.isNaN(customEndDate.getTime())) {
+        return undefined
+      }
+      return { startDate: customStartDate, endDate: customEndDate }
+    }
+
+    const currentMonth = currentDashboardMonth()
+    if (dashboardPeriodMode === 'previous_month') return shiftDashboardMonth(currentMonth, -1)
+    if (dashboardPeriodMode === 'next_month') return shiftDashboardMonth(currentMonth, 1)
+    return currentMonth
+  }
+
+  function rangeForMonthAction(months: number): DashboardPeriodRange {
+    const base = dashboardPeriodMode === 'custom' ? currentDashboardMonth() : activeDashboardRange ?? currentDashboardMonth()
+    return shiftDashboardMonth(base, months)
+  }
+
+  function dashboardPeriodModeLabel(): string {
+    switch (dashboardPeriodMode) {
+      case 'previous_month': return 'Previous month'
+      case 'next_month': return 'Next month'
+      case 'custom': return 'Custom range'
+      default: return 'Current month'
     }
   }
 
@@ -451,33 +504,45 @@
       skipNextReactiveLoad = false
       return
     }
-    void untrack(() => loadDashboard())
+    void untrack(async () => {
+      await loadDashboard(rangeForDashboardMode())
+    })
   })
 
   async function openPreviousPeriod() {
-    dashboardPreset = 'previous_month'
-    await loadDashboard({ preset: 'previous_month' })
+    if (loadingDashboard) return
+    const range = rangeForMonthAction(-1)
+    dashboardPeriodMode = 'previous_month'
+    await loadDashboard(range)
   }
 
   async function openCurrentMonth() {
-    dashboardPreset = 'current_month'
-    await loadDashboard({ preset: 'current_month' })
+    if (loadingDashboard) return
+    dashboardPeriodMode = 'current_month'
+    await loadDashboard(currentDashboardMonth())
   }
 
   async function openNextPeriod() {
-    dashboardPreset = 'next_month'
-    await loadDashboard({ preset: 'next_month' })
+    if (loadingDashboard) return
+    const range = rangeForMonthAction(1)
+    dashboardPeriodMode = 'next_month'
+    await loadDashboard(range)
   }
 
   async function applyCustomRange(event: SubmitEvent) {
     event.preventDefault()
-    dashboardPreset = 'custom'
+    if (loadingDashboard) return
     if (!customStartDate || !customEndDate ||
       Number.isNaN(customStartDate.getTime()) || Number.isNaN(customEndDate.getTime())) {
       error = 'Choose valid start and end dates.'
       return
     }
-    await loadDashboard({ preset: 'custom', startDate: customStartDate, endDate: customEndDate })
+    if (customStartDate.getTime() >= customEndDate.getTime()) {
+      error = 'Choose an end date after the start date.'
+      return
+    }
+    dashboardPeriodMode = 'custom'
+    await loadDashboard({ startDate: customStartDate, endDate: customEndDate })
   }
 
   function applyTransactionUpdate(updated: FinanceTransaction) {
@@ -494,8 +559,22 @@
   function customRangeEndDate(value: string): Date | undefined {
     const date = withDateInput(undefined, value)
     if (!date) return undefined
-    date.setHours(23, 59, 59, 999)
+    date.setDate(date.getDate() + 1)
+    date.setHours(0, 0, 0, 0)
     return date
+  }
+
+  function inclusiveDashboardEndDate(value: Date | undefined): Date | undefined {
+    if (!value) return undefined
+    if (value.getHours() !== 0 || value.getMinutes() !== 0 ||
+      value.getSeconds() !== 0 || value.getMilliseconds() !== 0) {
+      return value
+    }
+    return new Date(
+      value.getFullYear(),
+      value.getMonth(),
+      value.getDate() - 1,
+    )
   }
 </script>
 
@@ -536,9 +615,9 @@
             <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Reporting period</p>
             {#if dashboard}
               <h2 class="h5 mb-1">
-                {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(dashboard.period.endDate)}
+                {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(inclusiveDashboardEndDate(dashboard.period.endDate)!)}
               </h2>
-              <p class="text-body-secondary mb-2">Preset: {dashboard.period.preset || 'custom'}</p>
+              <p class="text-body-secondary mb-2">Period: {dashboardPeriodModeLabel()}</p>
               {#if isHistoricalPeriod}
                 <p class="text-body-secondary small mb-0">Past activity is valued using today’s latest FX rates, not an end-of-period rate.</p>
               {/if}
@@ -550,13 +629,13 @@
 
           <div class="col-12 col-xl-7">
             <div class="d-flex flex-wrap gap-2 mb-3">
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openPreviousPeriod()} disabled={!dashboard}>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openPreviousPeriod()} disabled={!dashboard || loadingDashboard}>
                 Previous month
               </button>
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openCurrentMonth()} disabled={!financeShell.selectedTenantId}>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openCurrentMonth()} disabled={!financeShell.selectedTenantId || loadingDashboard}>
                 Current month
               </button>
-              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openNextPeriod()} disabled={!dashboard}>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openNextPeriod()} disabled={!dashboard || loadingDashboard}>
                 Next month
               </button>
             </div>
@@ -581,13 +660,13 @@
                     id="finance-end-date"
                     class="form-control"
                     type="date"
-                    value={dateInputValue(customEndDate)}
+                    value={dateInputValue(inclusiveDashboardEndDate(customEndDate))}
                     oninput={(event) => customEndDate = customRangeEndDate(event.currentTarget.value)}
                     aria-label="Custom end date"
                   />
                 </div>
                 <div class="col-12 col-md-2 d-grid align-content-end">
-                  <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId}>
+                  <button class="btn btn-primary" type="submit" disabled={!financeShell.selectedTenantId || loadingDashboard}>
                     Apply
                   </button>
                 </div>
