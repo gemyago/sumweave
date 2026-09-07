@@ -51,6 +51,17 @@ func TestWorker(t *testing.T) {
 		require.NoError(t, newWorkerErr)
 		return worker
 	}
+	registerWorkerHandler := func(t *testing.T, registry *Registry, topic string) {
+		t.Helper()
+		require.NoError(t, RegisterTypedHandler(registry, TypedHandlerSpec[struct{}]{
+			JobType: JobType("finance." + fake.Letter()),
+			Topic:   topic,
+			Metadata: func(struct{}) (JobMetadata, error) {
+				return JobMetadata{}, nil
+			},
+			Run: func(context.Context, Job, struct{}) error { return nil },
+		}))
+	}
 
 	t.Run("runs once until two idle polls after startup recovery", func(t *testing.T) {
 		store := newMockworkerStore(t)
@@ -64,6 +75,74 @@ func TestWorker(t *testing.T) {
 		require.NoError(t, worker.RunOnce(t.Context()))
 		assert.True(t, worker.installed)
 		assert.GreaterOrEqual(t, recoveries, 1)
+	})
+
+	t.Run("waits for subscriptions before one-shot idle polling", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		router := newMockworkerRouter(t)
+		pollInterval := 10 * time.Millisecond
+		registry := NewRegistry()
+		registerWorkerHandler(t, registry, "worker."+fake.UUID().V4())
+		store.EXPECT().
+			RecoverStaleRunning(mock.Anything, mock.Anything, time.Second, defaultWorkerMaxAttempts).
+			Return(nil).
+			Maybe()
+		router.EXPECT().Handle(mock.Anything).Return(nil).Once()
+		runStarted := make(chan struct{}, 1)
+		runCanceled := make(chan struct{}, 1)
+		router.EXPECT().Run(mock.Anything).RunAndReturn(func(ctx context.Context) error {
+			runStarted <- struct{}{}
+			<-ctx.Done()
+			runCanceled <- struct{}{}
+			return ctx.Err()
+		}).Once()
+		subscriptionsReady := make(chan struct{})
+		router.EXPECT().SubscriptionsReady().Return(subscriptionsReady).Once()
+		worker := &Worker{
+			store: store, registry: registry, logger: slog.New(slog.DiscardHandler), clock: time.Now,
+			config: WorkerConfig{
+				PollInterval: pollInterval, StaleRunningAge: time.Second, MaxAttempts: defaultWorkerMaxAttempts,
+			},
+			workerID: fake.UUID().V4(), router: router, claims: make(map[string]Job),
+		}
+		runDone := make(chan error, 1)
+		go func() { runDone <- worker.RunOnce(t.Context()) }()
+		select {
+		case <-runStarted:
+		case <-time.After(time.Second):
+			t.Fatal("worker did not start its router")
+		}
+		select {
+		case runErr := <-runDone:
+			t.Fatalf("worker declared idle before subscription startup: %v", runErr)
+		case <-time.After(3 * pollInterval):
+		}
+		close(subscriptionsReady)
+		require.NoError(t, <-runDone)
+		<-runCanceled
+	})
+
+	t.Run("returns router completion before subscription readiness", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		router := newMockworkerRouter(t)
+		registry := NewRegistry()
+		registerWorkerHandler(t, registry, "worker."+fake.UUID().V4())
+		completionErr := errors.New(fake.UUID().V4())
+		store.EXPECT().
+			RecoverStaleRunning(mock.Anything, mock.Anything, time.Second, defaultWorkerMaxAttempts).
+			Return(nil).
+			Maybe()
+		router.EXPECT().Handle(mock.Anything).Return(nil).Once()
+		router.EXPECT().Run(mock.Anything).Return(completionErr).Once()
+		router.EXPECT().SubscriptionsReady().Return(make(chan struct{})).Once()
+		worker := &Worker{
+			store: store, registry: registry, logger: slog.New(slog.DiscardHandler), clock: time.Now,
+			config: WorkerConfig{
+				PollInterval: time.Millisecond, StaleRunningAge: time.Second, MaxAttempts: defaultWorkerMaxAttempts,
+			},
+			workerID: fake.UUID().V4(), router: router, claims: make(map[string]Job),
+		}
+		require.ErrorIs(t, worker.RunOnce(t.Context()), completionErr)
 	})
 
 	t.Run("returns startup recovery errors", func(t *testing.T) {

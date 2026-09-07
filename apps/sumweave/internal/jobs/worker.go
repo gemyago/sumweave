@@ -26,6 +26,13 @@ type workerStore interface {
 	RecoverStaleRunning(context.Context, time.Time, time.Duration, int) error
 }
 
+type workerRouter interface {
+	Handle(appdispatch.Handler) error
+	Run(context.Context) error
+	Close() error
+	SubscriptionsReady() <-chan struct{}
+}
+
 type WorkerDeps struct {
 	Store         workerStore
 	Registry      *Registry
@@ -44,7 +51,7 @@ type Worker struct {
 	clock     func() time.Time
 	config    WorkerConfig
 	workerID  string
-	router    *appdispatch.Router
+	router    workerRouter
 	mu        sync.Mutex
 	installed bool
 	runOnce   *runOnceTracker
@@ -132,6 +139,13 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	}()
 	runDone := make(chan error, 1)
 	go func() { runDone <- w.router.Run(runCtx) }()
+	select {
+	case err := <-runDone:
+		return w.runOnceResult(err)
+	case <-w.router.SubscriptionsReady():
+	case <-ctx.Done():
+		return w.runOnceResult(ctx.Err())
+	}
 	ticker := time.NewTicker(w.config.PollInterval)
 	defer ticker.Stop()
 	idlePolls := 0
@@ -150,6 +164,8 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			}
 			cancel()
 			return w.runOnceResult(<-runDone)
+		case <-ctx.Done():
+			return w.runOnceResult(ctx.Err())
 		}
 	}
 }

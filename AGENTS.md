@@ -134,6 +134,7 @@ AI must always follow the rules and conventions defined in this section. This se
 The rules are:
 - **DO NOT** over engineer or over-complicate. Address problems present now or explicitly requested.
 - Main rule to follow - the simpler the better.
+- Do not add complexity merely to satisfy coverage or theoretical cases.
 - Never go outside of the project root
 - Store temp files in a project scoped tmp directory (e.g ${PWD}/tmp/...)
 - Update project rules and conventions when user corrects the behavior of AI.
