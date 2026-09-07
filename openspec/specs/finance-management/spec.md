@@ -78,7 +78,17 @@ The finance module SHALL treat transactions as the explainable ledger source of 
 - **WHEN** an authenticated tenant member updates an existing transaction
 - **THEN** the system MUST allow edits to `description`, `amountMinor`, `effectiveAt`, and category assignment or category removal for that transaction
 - **AND** any replacement category MUST belong to the same tenant as the transaction
-- **AND** the system MUST preserve account identity, source, status, kind, currency, transfer linkage, hidden state, and provider-original values unless another dedicated workflow changes them
+- **AND** the system MUST preserve account identity, source, status, kind, currency, transfer linkage, automatic-matching exclusion, hidden state, and provider-original values unless another dedicated workflow changes them
+
+#### Scenario: Ordinary saves preserve transfer-owned state
+- **WHEN** an existing transaction passes through an ordinary user, CSV, provider-refresh, sync-apply, or shared-upsert save path
+- **THEN** the save MUST preserve its stored kind, transfer group, transfer matching timestamp, and automatic-matching exclusion rather than accepting stale incoming pair state
+- **AND** any returned saved transaction MUST carry the persisted pair values while preserving categories, tags, and provider data
+
+#### Scenario: Manual transfer correction retains ledger data
+- **WHEN** a tenant member unlinks a transfer pair through the existing correction workflow
+- **THEN** both rows MUST return to kind `regular`, clear pair metadata, preserve categories and tags, and become excluded from later automatic or explicit matching
+- **AND** either excluded row MUST remain available for the existing broader manual linking workflow without an exclusion warning or indicator.
 
 ### Requirement: Reproducible Finance Reporting And FX Conversion
 The finance module SHALL provide tenant display-currency reporting backed by persisted FX data.
