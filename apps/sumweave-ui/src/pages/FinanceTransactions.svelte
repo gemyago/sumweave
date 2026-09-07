@@ -10,7 +10,11 @@
     type FinanceTransaction,
   } from '../lib/finance/api'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
-  import { subscribeToFinanceLedgerRefresh } from '../lib/finance/ledger-refresh'
+  import {
+    acknowledgeFinanceLedgerRefresh,
+    financeLedgerRefreshRevision,
+    subscribeToFinanceLedgerRefresh,
+  } from '../lib/finance/ledger-refresh'
   import FinancePager from '../components/FinancePager.svelte'
   import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
   import JobStatus from '../components/JobStatus.svelte'
@@ -93,20 +97,22 @@
   }
 
   async function loadTenantData(offset = transactionOffset): Promise<boolean> {
-    if (!financeShell.selectedTenantId) {
+    const tenantId = financeShell.selectedTenantId
+    if (!tenantId) {
       accounts = []
       transactions = []
       return false
     }
+    const refreshRevision = financeLedgerRefreshRevision(tenantId)
 
     loadingList = true
     error = null
 
     try {
       const [loadedAccounts, loadedTransactions] = await Promise.all([
-        financeApi.listAccounts({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
+        financeApi.listAccounts({ tenantId, includeHidden: true }),
         financeApi.listTransactions({
-          tenantId: financeShell.selectedTenantId,
+          tenantId,
           accountId: accountFilter,
           status: statusFilter,
           source: sourceFilter,
@@ -115,8 +121,10 @@
         }),
       ])
 
+      if (financeShell.selectedTenantId !== tenantId) return false
       accounts = loadedAccounts
       transactions = loadedTransactions
+      acknowledgeFinanceLedgerRefresh(tenantId, refreshRevision)
       return true
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load transactions'
