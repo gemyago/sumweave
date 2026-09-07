@@ -239,4 +239,267 @@ func TestTransferPairStore(t *testing.T) {
 		assert.Equal(t, second.TransferMatchingExcluded, storedSecond.TransferMatchingExcluded)
 		assertLedgerDataPreserved(t, second, *storedSecond)
 	})
+
+	t.Run("loads one complete compact eligible transfer-matching projection", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.September, 7, 12, 0, 0, 0, time.FixedZone("matching", 2*60*60))
+		rangeStart := now.Add(-24 * time.Hour)
+		rangeEndExclusive := now.Add(24 * time.Hour)
+		_, coreStore, transactions, store := makeStores(t)
+		tenantID := "tenant-" + fake.UUID().V4()
+		otherTenantID := "tenant-other-" + fake.UUID().V4()
+		categoryID := "category-" + fake.UUID().V4()
+		visibleFirst := domain.Account{
+			ID: "account-first-" + fake.UUID().V4(), TenantID: tenantID,
+			Name: "account-" + fake.Lorem().Word(), Currency: "USD", Kind: domain.AccountKindManual,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		visibleSecond := domain.Account{
+			ID: "account-second-" + fake.UUID().V4(), TenantID: tenantID,
+			Name: "account-" + fake.Lorem().Word(), Currency: "USD", Kind: domain.AccountKindLinked,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		hiddenAt := now
+		hiddenAccount := domain.Account{
+			ID: "account-hidden-" + fake.UUID().V4(), TenantID: tenantID,
+			Name: "account-" + fake.Lorem().Word(), Currency: "USD", Kind: domain.AccountKindManual,
+			HiddenAt: &hiddenAt, CreatedAt: now, UpdatedAt: now,
+		}
+		otherAccount := domain.Account{
+			ID: "account-other-" + fake.UUID().V4(), TenantID: otherTenantID,
+			Name: "account-" + fake.Lorem().Word(), Currency: "USD", Kind: domain.AccountKindManual,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		for _, account := range []domain.Account{visibleFirst, visibleSecond, hiddenAccount, otherAccount} {
+			_, err := coreStore.SaveAccount(t.Context(), account)
+			require.NoError(t, err)
+		}
+
+		makeTransaction := func(id string, accountID string, source domain.TransactionSource, status domain.TransactionStatus, kind domain.TransactionKind, amount int64, effectiveAt time.Time) domain.Transaction {
+			return domain.Transaction{
+				ID: id, TenantID: tenantID, AccountID: accountID, Source: source, Status: status, Kind: kind,
+				AmountMinor: amount, Currency: "USD", Description: "transaction-" + fake.Lorem().Word(),
+				EffectiveAt: effectiveAt, CategoryID: &categoryID, CreatedAt: now, UpdatedAt: now,
+			}
+		}
+		eligible := []domain.Transaction{
+			makeTransaction(
+				"transaction-manual-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindRegular,
+				-101,
+				rangeStart,
+			),
+			makeTransaction(
+				"transaction-csv-"+fake.UUID().V4(),
+				visibleSecond.ID,
+				domain.TransactionSourceCSV,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindExpense,
+				202,
+				rangeEndExclusive.Add(-time.Microsecond),
+			),
+			makeTransaction(
+				"transaction-provider-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceProvider,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindIncome,
+				-303,
+				rangeStart.Add(-144*time.Hour),
+			),
+			makeTransaction(
+				"transaction-transfer-"+fake.UUID().V4(),
+				visibleSecond.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindTransfer,
+				404,
+				rangeEndExclusive.Add(144*time.Hour-time.Microsecond),
+			),
+		}
+		for index := range 201 {
+			accountID := visibleFirst.ID
+			if index%2 == 1 {
+				accountID = visibleSecond.ID
+			}
+			eligible = append(eligible, makeTransaction(
+				"transaction-uncapped-"+fake.UUID().V4(), accountID, domain.TransactionSourceManual,
+				domain.TransactionStatusBooked, domain.TransactionKindRegular, int64(index+500), now,
+			))
+		}
+		ineligible := []domain.Transaction{
+			makeTransaction(
+				"transaction-pending-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceProvider,
+				domain.TransactionStatusPending,
+				domain.TransactionKindRegular,
+				-1,
+				now,
+			),
+			makeTransaction(
+				"transaction-zero-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindRegular,
+				0,
+				now,
+			),
+			makeTransaction(
+				"transaction-refund-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindRefund,
+				-1,
+				now,
+			),
+			makeTransaction(
+				"transaction-reconciliation-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindReconciliation,
+				-1,
+				now,
+			),
+			makeTransaction(
+				"transaction-opening-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindOpeningBalance,
+				-1,
+				now,
+			),
+			makeTransaction(
+				"transaction-system-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceSystem,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindRegular,
+				-1,
+				now,
+			),
+			makeTransaction(
+				"transaction-hidden-account-"+fake.UUID().V4(),
+				hiddenAccount.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindRegular,
+				-1,
+				now,
+			),
+			makeTransaction(
+				"transaction-missing-account-"+fake.UUID().V4(),
+				"account-missing-"+fake.UUID().V4(),
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindRegular,
+				-1,
+				now,
+			),
+			makeTransaction(
+				"transaction-before-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindRegular,
+				-1,
+				rangeStart.Add(-144*time.Hour-time.Microsecond),
+			),
+			makeTransaction(
+				"transaction-end-"+fake.UUID().V4(),
+				visibleFirst.ID,
+				domain.TransactionSourceManual,
+				domain.TransactionStatusBooked,
+				domain.TransactionKindRegular,
+				-1,
+				rangeEndExclusive.Add(144*time.Hour),
+			),
+		}
+		excluded := makeTransaction(
+			"transaction-excluded-"+fake.UUID().V4(),
+			visibleFirst.ID,
+			domain.TransactionSourceManual,
+			domain.TransactionStatusBooked,
+			domain.TransactionKindRegular,
+			-1,
+			now,
+		)
+		excluded.TransferMatchingExcluded = true
+		ineligible = append(ineligible, excluded)
+		paired := makeTransaction(
+			"transaction-paired-"+fake.UUID().V4(),
+			visibleFirst.ID,
+			domain.TransactionSourceManual,
+			domain.TransactionStatusBooked,
+			domain.TransactionKindTransfer,
+			-1,
+			now,
+		)
+		groupID := "group-" + fake.UUID().V4()
+		paired.TransferGroupID = &groupID
+		paired.TransferMatchedAt = &now
+		ineligible = append(ineligible, paired)
+		hidden := makeTransaction(
+			"transaction-hidden-"+fake.UUID().V4(),
+			visibleFirst.ID,
+			domain.TransactionSourceManual,
+			domain.TransactionStatusBooked,
+			domain.TransactionKindRegular,
+			-1,
+			now,
+		)
+		hidden.HiddenAt = &hiddenAt
+		ineligible = append(ineligible, hidden)
+		otherTenant := makeTransaction(
+			"transaction-other-"+fake.UUID().V4(),
+			otherAccount.ID,
+			domain.TransactionSourceManual,
+			domain.TransactionStatusBooked,
+			domain.TransactionKindRegular,
+			-1,
+			now,
+		)
+		otherTenant.TenantID = otherTenantID
+		ineligible = append(ineligible, otherTenant)
+		for _, transaction := range append(eligible, ineligible...) {
+			_, err := transactions.SaveTransaction(t.Context(), transaction)
+			require.NoError(t, err)
+		}
+
+		actual, err := store.ListEligibleTransferMatchingTransactions(
+			t.Context(),
+			ListEligibleTransferMatchingTransactionsParams{
+				TenantID: tenantID, RangeStart: rangeStart, RangeEndExclusive: rangeEndExclusive,
+			},
+		)
+		require.NoError(t, err)
+		expected := make(map[string]TransferMatchingTransaction, len(eligible))
+		for _, transaction := range eligible {
+			expected[transaction.ID] = TransferMatchingTransaction{
+				ID: transaction.ID, AccountID: transaction.AccountID, Currency: transaction.Currency,
+				AmountMinor: transaction.AmountMinor, EffectiveAt: transaction.EffectiveAt,
+			}
+		}
+		actualByID := make(map[string]TransferMatchingTransaction, len(actual))
+		for _, transaction := range actual {
+			actualByID[transaction.ID] = transaction
+		}
+		require.Len(t, actualByID, len(expected))
+		for transactionID, expectedTransaction := range expected {
+			actualTransaction, found := actualByID[transactionID]
+			require.True(t, found)
+			assert.Equal(t, expectedTransaction.ID, actualTransaction.ID)
+			assert.Equal(t, expectedTransaction.AccountID, actualTransaction.AccountID)
+			assert.Equal(t, expectedTransaction.Currency, actualTransaction.Currency)
+			assert.Equal(t, expectedTransaction.AmountMinor, actualTransaction.AmountMinor)
+			assert.Equal(t, expectedTransaction.EffectiveAt.UnixNano(), actualTransaction.EffectiveAt.UnixNano())
+		}
+	})
 }

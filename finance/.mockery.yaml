@@ -21,6 +21,8 @@ packages:
       categoryRuleReferenceFinder:
       BankSyncWindowCompletionPublisher:
       ledgerTransferPairStore:
+      transferMatchingPairStore:
+      transferMatchingSubmissionPublisher:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:

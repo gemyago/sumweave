@@ -15,6 +15,8 @@ var (
 	ErrTransferPairTransactionNotFound      = errors.New("transfer pair transaction not found")
 )
 
+const transferMatchingLoadExtension = 144 * time.Hour
+
 // TransferPairLinkParams identifies two existing tenant transactions to link.
 type TransferPairLinkParams struct {
 	TenantID            string
@@ -33,6 +35,24 @@ type TransferPairUnlinkParams struct {
 	UpdatedAt           time.Time
 }
 
+// TransferMatchingTransaction is the compact immutable row used by one
+// transfer-matching attempt.
+type TransferMatchingTransaction struct {
+	ID          string
+	AccountID   string
+	Currency    string
+	AmountMinor int64
+	EffectiveAt time.Time
+}
+
+// ListEligibleTransferMatchingTransactionsParams bounds one complete matching
+// load. The caller owns validation of the original requested range.
+type ListEligibleTransferMatchingTransactionsParams struct {
+	TenantID          string
+	RangeStart        time.Time
+	RangeEndExclusive time.Time
+}
+
 // TransferPairStore owns narrow, atomic transfer pair state updates.
 type TransferPairStore struct {
 	db *gorm.DB
@@ -44,6 +64,49 @@ func NewTransferPairStore(database *Database) *TransferPairStore {
 
 func NewTransferPairStoreFromStore(store *Store) *TransferPairStore {
 	return &TransferPairStore{db: store.db}
+}
+
+// ListEligibleTransferMatchingTransactions loads every matching-eligible row
+// in the complete extended range, without pagination or a result cap.
+func (s *TransferPairStore) ListEligibleTransferMatchingTransactions(
+	ctx context.Context,
+	params ListEligibleTransferMatchingTransactionsParams,
+) ([]TransferMatchingTransaction, error) {
+	loadStart := params.RangeStart.Add(-transferMatchingLoadExtension)
+	loadEndExclusive := params.RangeEndExclusive.Add(transferMatchingLoadExtension)
+	var rows []TransferMatchingTransaction
+	err := s.db.WithContext(ctx).
+		Table((transactionModel{}).TableName()+" AS transactions").
+		Select([]string{
+			"transactions.id AS id",
+			"transactions.account_id AS account_id",
+			"transactions.currency AS currency",
+			"transactions.amount_minor AS amount_minor",
+			"transactions.effective_at AS effective_at",
+		}).
+		Joins(
+			"JOIN "+(accountModel{}).TableName()+
+				" AS accounts ON accounts.id = transactions.account_id AND accounts.tenant_id = transactions.tenant_id",
+		).
+		Where("transactions.tenant_id = ?", params.TenantID).
+		Where("transactions.effective_at >= ? AND transactions.effective_at < ?", loadStart, loadEndExclusive).
+		Where("transactions.hidden_at IS NULL AND accounts.hidden_at IS NULL").
+		Where("transactions.status = ?", string(domain.TransactionStatusBooked)).
+		Where("transactions.kind IN ?", []string{
+			string(domain.TransactionKindRegular),
+			string(domain.TransactionKindExpense),
+			string(domain.TransactionKindIncome),
+			string(domain.TransactionKindTransfer),
+		}).
+		Where("transactions.source <> ?", string(domain.TransactionSourceSystem)).
+		Where("transactions.amount_minor <> 0").
+		Where("transactions.transfer_matching_excluded = ?", false).
+		Where("transactions.transfer_group_id IS NULL AND transactions.transfer_matched_at IS NULL").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list eligible transfer matching transactions: %w", err)
+	}
+	return rows, nil
 }
 
 func (s *TransferPairStore) LinkTransferPair(ctx context.Context, params TransferPairLinkParams) error {
