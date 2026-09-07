@@ -40,10 +40,11 @@ type SchedulerOptions struct {
 // WorkerRoot owns the message router, observed lifecycle store, and finance
 // command handlers. It deliberately exposes no HTTP or scheduler capability.
 type WorkerRoot struct {
-	Worker                        *jobspkg.Worker
-	Registry                      *jobspkg.Registry
-	automaticClassificationRouter *appdispatch.Router
-	pollInterval                  time.Duration
+	Worker                          *jobspkg.Worker
+	Registry                        *jobspkg.Registry
+	automaticClassificationRouter   *appdispatch.Router
+	automaticTransferMatchingRouter *appdispatch.Router
+	pollInterval                    time.Duration
 
 	shutdownHooks *lifecycle.ShutdownHooks
 }
@@ -334,9 +335,24 @@ func buildWorker(
 	); err != nil {
 		return nil, fmt.Errorf("register automatic classification handler: %w", err)
 	}
+	matchingRouter, err := routerFactory.NewRouter(financeapp.TransferMatchingConsumerGroup)
+	if err != nil {
+		return nil, fmt.Errorf("build automatic transfer matching router: %w", err)
+	}
+	if err = financeapp.RegisterAutomaticTransferMatchingHandler(
+		matchingRouter,
+		financeModule.TransferMatchingService,
+		infrastructure.rootLogger,
+	); err != nil {
+		return nil, fmt.Errorf("register automatic transfer matching handler: %w", err)
+	}
 	root = &WorkerRoot{
-		Worker: worker, Registry: registry, automaticClassificationRouter: automaticRouter,
-		pollInterval: rootConfig.Jobs.Worker.PollInterval, shutdownHooks: infrastructure.shutdownHooks,
+		Worker:                          worker,
+		Registry:                        registry,
+		automaticClassificationRouter:   automaticRouter,
+		automaticTransferMatchingRouter: matchingRouter,
+		pollInterval:                    rootConfig.Jobs.Worker.PollInterval,
+		shutdownHooks:                   infrastructure.shutdownHooks,
 	}
 	return root, nil
 }
@@ -429,17 +445,31 @@ func (root *WorkerRoot) Close(ctx context.Context) error { // coverage-ignore
 	return root.shutdownHooks.PerformShutdown(context.WithoutCancel(ctx))
 }
 
-// Run serves observed jobs and automatic classification events independently.
+// Run serves observed jobs and independent automatic enrichment events.
 func (root *WorkerRoot) Run(ctx context.Context) error { // coverage-ignore
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errorsByRouter := make(chan error, 2)
+	routers := 2
+	if root.automaticTransferMatchingRouter != nil {
+		routers++
+	}
+	errorsByRouter := make(chan error, routers)
 	go func() { errorsByRouter <- root.Worker.Run(runCtx) }()
 	go func() { errorsByRouter <- root.automaticClassificationRouter.Run(runCtx) }()
+	if root.automaticTransferMatchingRouter != nil {
+		go func() { errorsByRouter <- root.automaticTransferMatchingRouter.Run(runCtx) }()
+	}
 	firstErr := <-errorsByRouter
 	cancel()
 	secondErr := <-errorsByRouter
-	return joinRouterRunErrors(firstErr, secondErr)
+	if routers == 2 {
+		return errors.Join(normalizeRouterRunError(firstErr), normalizeRouterRunError(secondErr))
+	}
+	return errors.Join(
+		normalizeRouterRunError(firstErr),
+		normalizeRouterRunError(secondErr),
+		normalizeRouterRunError(<-errorsByRouter),
+	)
 }
 
 // RunOnce drains observed commands before automatic events so each produced
@@ -448,16 +478,21 @@ func (root *WorkerRoot) RunOnce(ctx context.Context) error { // coverage-ignore
 	if err := root.Worker.RunOnce(ctx); err != nil {
 		return err
 	}
-	return root.automaticClassificationRouter.RunOnce(ctx, root.pollInterval)
+	classificationErr := root.automaticClassificationRouter.RunOnce(ctx, root.pollInterval)
+	var matchingErr error
+	if root.automaticTransferMatchingRouter != nil {
+		matchingErr = root.automaticTransferMatchingRouter.RunOnce(ctx, root.pollInterval)
+	}
+	return errors.Join(classificationErr, matchingErr)
 }
 
 // Stop closes both consumer routers before their shared publisher and database.
 func (root *WorkerRoot) Stop(ctx context.Context) error { // coverage-ignore
-	return errors.Join(root.automaticClassificationRouter.Close(), root.Worker.Stop(ctx))
-}
-
-func joinRouterRunErrors(firstErr, secondErr error) error { // coverage-ignore
-	return errors.Join(normalizeRouterRunError(firstErr), normalizeRouterRunError(secondErr))
+	var matchingErr error
+	if root.automaticTransferMatchingRouter != nil {
+		matchingErr = root.automaticTransferMatchingRouter.Close()
+	}
+	return errors.Join(root.automaticClassificationRouter.Close(), matchingErr, root.Worker.Stop(ctx))
 }
 
 func normalizeRouterRunError(err error) error { // coverage-ignore

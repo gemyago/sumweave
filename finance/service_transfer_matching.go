@@ -15,6 +15,7 @@ import (
 const (
 	transferMatchingWindow        = 72 * time.Hour
 	transferMatchingMaxCandidates = 2
+	TransferMatchingJobType       = "finance.transfer-matching"
 )
 
 type transferMatchingPairStore interface {
@@ -23,15 +24,6 @@ type transferMatchingPairStore interface {
 		params persistence.ListEligibleTransferMatchingTransactionsParams,
 	) ([]persistence.TransferMatchingTransaction, error)
 	LinkTransferPair(ctx context.Context, params persistence.TransferPairLinkParams) error
-}
-
-// transferMatchingSubmissionPublisher is a finance-owned port. Its durable
-// semantic-command adapter is intentionally wired by the next implementation chunk.
-type transferMatchingSubmissionPublisher interface {
-	PublishTransferMatching(
-		ctx context.Context,
-		params TransferMatchingSubmission,
-	) (TransferMatchingJobRef, error)
 }
 
 type TransferMatchingAttemptCounts struct {
@@ -74,7 +66,7 @@ type TransferMatchingService struct {
 	logger    *slog.Logger
 	now       func() time.Time
 	newID     func() string
-	publisher transferMatchingSubmissionPublisher
+	publisher SemanticCommandPublisher
 }
 
 type TransferMatchingServiceOption func(*TransferMatchingService)
@@ -82,7 +74,7 @@ type TransferMatchingServiceOption func(*TransferMatchingService)
 // WithTransferMatchingServiceSubmissionPublisher enables explicit submission
 // for process roots that own the later command publication adapter.
 func WithTransferMatchingServiceSubmissionPublisher(
-	publisher transferMatchingSubmissionPublisher,
+	publisher SemanticCommandPublisher,
 ) TransferMatchingServiceOption {
 	return func(service *TransferMatchingService) { service.publisher = publisher }
 }
@@ -128,13 +120,26 @@ func (s *TransferMatchingService) Submit(
 		return TransferMatchingJobRef{}, err
 	}
 	if s.publisher == nil {
-		return TransferMatchingJobRef{}, errors.New("transfer matching submission publisher is required")
+		return TransferMatchingJobRef{}, errors.New(
+			"transfer matching submission publisher is required",
+		) // coverage-ignore // Process roots always configure publication for submission.
 	}
-	reference, err := s.publisher.PublishTransferMatching(ctx, params)
+	command, err := newSemanticCommand(
+		TransferMatchingExplicitCommandTopic,
+		TransferMatchingExplicitCommand{
+			TenantID: params.TenantID, RangeStart: params.RangeStart, RangeEndExclusive: params.RangeEndExclusive,
+			Requester: CommandRequester{UserID: params.ActorUserID, Source: CommandRequesterSourceOperator},
+		},
+		"finance.transfer-matching.explicit:"+s.newID(),
+	)
+	if err != nil {
+		return TransferMatchingJobRef{}, err
+	}
+	reference, err := s.publisher.PublishSemanticCommand(ctx, command)
 	if err != nil {
 		return TransferMatchingJobRef{}, fmt.Errorf("publish transfer matching: %w", err)
 	}
-	return reference, nil
+	return TransferMatchingJobRef{ID: reference.MessageID}, nil
 }
 
 func (s *TransferMatchingService) Match(

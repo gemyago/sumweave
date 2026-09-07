@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -25,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//nolint:cyclop // Process-root integration keeps its coupled real fixture together.
 func TestBuildProcessRoots(t *testing.T) {
 	fake := faker.New()
 	t.Chdir("../..")
@@ -38,6 +41,13 @@ func TestBuildProcessRoots(t *testing.T) {
 		eventPublisher *appevents.Publisher
 		observedGroup  string
 		automaticGroup string
+		matchingGroup  string
+	}
+	type enrichmentFixture struct {
+		event            financeapp.BankSyncWindowCompletedEvent
+		classificationID string
+		firstMatchingID  string
+		secondMatchingID string
 	}
 	newTransport := func(t *testing.T) *phase3Transport {
 		t.Helper()
@@ -56,7 +66,8 @@ func TestBuildProcessRoots(t *testing.T) {
 		require.NoError(t, err)
 		return &phase3Transport{database: database, config: transportConfig, publisher: publisher,
 			eventPublisher: eventPublisher, observedGroup: "jobs.workers.v1.phase3." + fake.UUID().V4(),
-			automaticGroup: financeapp.ClassificationConsumerGroup + ".phase3." + fake.UUID().V4()}
+			automaticGroup: financeapp.ClassificationConsumerGroup + ".phase3." + fake.UUID().V4(),
+			matchingGroup:  financeapp.TransferMatchingConsumerGroup + ".phase3." + fake.UUID().V4()}
 	}
 	checkpointConsumer := func(t *testing.T, transport *phase3Transport, consumerGroup, topic string) {
 		t.Helper()
@@ -120,12 +131,21 @@ func TestBuildProcessRoots(t *testing.T) {
 		require.NoError(t, financeapp.RegisterAutomaticClassificationHandler(
 			automaticRouter, financeModule.ClassificationService, logger,
 		))
+		matchingRouter, err := routerFactory.NewRouter(transport.matchingGroup)
+		require.NoError(t, err)
+		require.NoError(t, financeapp.RegisterAutomaticTransferMatchingHandler(
+			matchingRouter, financeModule.TransferMatchingService, logger,
+		))
 		shutdownHooks := lifecycle.NewShutdownHooks(lifecycle.ShutdownHooksDeps{
 			RootLogger: logger, GracefulShutdownTimeout: time.Second,
 		})
 		root := &WorkerRoot{
-			Worker: worker, Registry: registry, automaticClassificationRouter: automaticRouter,
-			pollInterval: 20 * time.Millisecond, shutdownHooks: shutdownHooks,
+			Worker:                          worker,
+			Registry:                        registry,
+			automaticClassificationRouter:   automaticRouter,
+			automaticTransferMatchingRouter: matchingRouter,
+			pollInterval:                    20 * time.Millisecond,
+			shutdownHooks:                   shutdownHooks,
 		}
 		shutdownHooks.Register("phase3-worker-routers", root.Stop)
 		return root
@@ -176,6 +196,151 @@ func TestBuildProcessRoots(t *testing.T) {
 			SourceSyncMessageID: "sync-message-" + fake.UUID().V4(),
 		}, transaction.ID
 	}
+	seedEnrichments := func(t *testing.T, database *sql.DB) enrichmentFixture {
+		t.Helper()
+		event, classificationID := seedClassification(t, database)
+		financeDatabase, err := financeapp.NewDatabase(
+			database,
+			os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN"),
+			slog.New(slog.DiscardHandler),
+		)
+		require.NoError(t, err)
+		store := persistence.NewStore(financeDatabase)
+		classification, err := store.GetTransaction(t.Context(), classificationID)
+		require.NoError(t, err)
+		require.NotNil(t, classification)
+		account := domain.Account{
+			ID:        "account-" + fake.UUID().V4(),
+			TenantID:  classification.TenantID,
+			Name:      "account-" + fake.Lorem().Word(),
+			Currency:  classification.Currency,
+			Kind:      domain.AccountKindManual,
+			CreatedAt: classification.CreatedAt,
+			UpdatedAt: classification.UpdatedAt,
+		}
+		_, err = store.SaveAccount(t.Context(), account)
+		require.NoError(t, err)
+		firstMatching := domain.Transaction{
+			ID:          "transaction-" + fake.UUID().V4(),
+			TenantID:    classification.TenantID,
+			AccountID:   classification.AccountID,
+			Source:      domain.TransactionSourceProvider,
+			Status:      domain.TransactionStatusBooked,
+			Kind:        domain.TransactionKindRegular,
+			AmountMinor: -2,
+			Currency:    classification.Currency,
+			Description: "matching-" + fake.UUID().V4(),
+			EffectiveAt: classification.EffectiveAt,
+			CreatedAt:   classification.CreatedAt,
+			UpdatedAt:   classification.UpdatedAt,
+		}
+		_, err = store.SaveTransaction(t.Context(), firstMatching)
+		require.NoError(t, err)
+		secondMatching := domain.Transaction{
+			ID:          "transaction-" + fake.UUID().V4(),
+			TenantID:    classification.TenantID,
+			AccountID:   account.ID,
+			Source:      domain.TransactionSourceProvider,
+			Status:      domain.TransactionStatusBooked,
+			Kind:        domain.TransactionKindRegular,
+			AmountMinor: 2,
+			Currency:    classification.Currency,
+			Description: "matching-" + fake.UUID().V4(),
+			EffectiveAt: classification.EffectiveAt.Add(time.Hour),
+			CreatedAt:   classification.CreatedAt,
+			UpdatedAt:   classification.UpdatedAt,
+		}
+		_, err = store.SaveTransaction(t.Context(), secondMatching)
+		require.NoError(t, err)
+		eligible, err := persistence.NewTransferPairStore(financeDatabase).ListEligibleTransferMatchingTransactions(
+			t.Context(),
+			persistence.ListEligibleTransferMatchingTransactionsParams{
+				TenantID:          event.TenantID,
+				RangeStart:        event.RangeStart,
+				RangeEndExclusive: event.RangeEndExclusive,
+			},
+		)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []persistence.TransferMatchingTransaction{
+			{
+				ID:          classification.ID,
+				AccountID:   classification.AccountID,
+				Currency:    classification.Currency,
+				AmountMinor: classification.AmountMinor,
+				EffectiveAt: classification.EffectiveAt,
+			},
+			{
+				ID:          firstMatching.ID,
+				AccountID:   firstMatching.AccountID,
+				Currency:    firstMatching.Currency,
+				AmountMinor: firstMatching.AmountMinor,
+				EffectiveAt: firstMatching.EffectiveAt,
+			},
+			{
+				ID:          secondMatching.ID,
+				AccountID:   secondMatching.AccountID,
+				Currency:    secondMatching.Currency,
+				AmountMinor: secondMatching.AmountMinor,
+				EffectiveAt: secondMatching.EffectiveAt,
+			},
+		}, eligible)
+		return enrichmentFixture{
+			event:            event,
+			classificationID: classificationID,
+			firstMatchingID:  firstMatching.ID,
+			secondMatchingID: secondMatching.ID,
+		}
+	}
+	enrichmentsComplete := func(database *sql.DB, fixture enrichmentFixture) (bool, error) {
+		financeDatabase, err := financeapp.NewDatabase(
+			database,
+			os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN"),
+			slog.New(slog.DiscardHandler),
+		)
+		if err != nil {
+			return false, fmt.Errorf("open finance database: %w", err)
+		}
+		store := persistence.NewStore(financeDatabase)
+		classification, err := store.GetTransaction(t.Context(), fixture.classificationID)
+		if err != nil {
+			return false, fmt.Errorf("get classification transaction: %w", err)
+		}
+		if classification == nil {
+			return false, errors.New("classification transaction is missing")
+		}
+		firstMatching, err := store.GetTransaction(t.Context(), fixture.firstMatchingID)
+		if err != nil {
+			return false, fmt.Errorf("get first matching transaction: %w", err)
+		}
+		if firstMatching == nil {
+			return false, errors.New("first matching transaction is missing")
+		}
+		secondMatching, err := store.GetTransaction(t.Context(), fixture.secondMatchingID)
+		if err != nil {
+			return false, fmt.Errorf("get second matching transaction: %w", err)
+		}
+		if secondMatching == nil {
+			return false, errors.New("second matching transaction is missing")
+		}
+		return classification.CategoryID != nil && firstMatching.TransferGroupID != nil &&
+			secondMatching.TransferGroupID != nil && *firstMatching.TransferGroupID == *secondMatching.TransferGroupID, nil
+	}
+	waitForEnrichments := func(t *testing.T, database *sql.DB, fixture enrichmentFixture) {
+		t.Helper()
+		deadline := time.Now().Add(8 * time.Second)
+		var lastErr error
+		for time.Now().Before(deadline) {
+			complete, err := enrichmentsComplete(database, fixture)
+			if err != nil {
+				lastErr = err
+			} else if complete {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		require.NoError(t, lastErr)
+		t.Fatal("timed out waiting for classification and transfer matching")
+	}
 	registerObservedCommand := func(t *testing.T, root *WorkerRoot, topic string, run func(context.Context) error) {
 		t.Helper()
 		require.NoError(t, jobspkg.RegisterTypedHandler(root.Registry, jobspkg.TypedHandlerSpec[observedCommand]{
@@ -215,6 +380,7 @@ func TestBuildProcessRoots(t *testing.T) {
 		require.NotNil(t, root.Worker)
 		require.NotNil(t, root.Registry)
 		require.NotNil(t, root.automaticClassificationRouter)
+		require.NotNil(t, root.automaticTransferMatchingRouter)
 		for _, topic := range []string{
 			financepkg.FXRatesRefreshCommandTopic,
 			financepkg.TransactionCSVImportCommandTopic,
@@ -226,12 +392,14 @@ func TestBuildProcessRoots(t *testing.T) {
 	})
 
 	t.Run(
-		"normal lifecycle runs observed jobs and real automatic classification then closes both consumers",
+		"normal lifecycle runs observed jobs and both real automatic enrichments then closes consumers",
 		func(t *testing.T) {
 			transport := newTransport(t)
 			root := newPhase3WorkerRoot(t, transport)
 			t.Cleanup(func() { require.NoError(t, root.Close(t.Context())) })
-			event, transactionID := seedClassification(t, transport.database)
+			checkpointConsumer(t, transport, transport.automaticGroup, financeapp.BankSyncWindowCompletedEventTopic)
+			checkpointConsumer(t, transport, transport.matchingGroup, financeapp.BankSyncWindowCompletedEventTopic)
+			fixture := seedEnrichments(t, transport.database)
 			observedTopic := "finance.phase3.normal." + fake.UUID().V4()
 			observed := make(chan struct{}, 1)
 			closedTopic := "finance.phase3.closed." + fake.UUID().V4()
@@ -249,19 +417,13 @@ func TestBuildProcessRoots(t *testing.T) {
 			go func() { runDone <- root.Run(runCtx) }()
 			time.Sleep(100 * time.Millisecond)
 			publishObservedCommand(t, transport.publisher, observedTopic)
-			require.NoError(t, transport.eventPublisher.Publish(t.Context(), event))
-			observedRan := false
-			require.Eventually(t, func() bool {
-				if !observedRan {
-					select {
-					case <-observed:
-						observedRan = true
-					default:
-						return false
-					}
-				}
-				return storedTransaction(t, transport.database, transactionID).CategoryID != nil
-			}, 8*time.Second, 20*time.Millisecond)
+			require.NoError(t, transport.eventPublisher.Publish(t.Context(), fixture.event))
+			select {
+			case <-observed:
+			case <-time.After(8 * time.Second):
+				t.Fatal("observed worker did not process its command")
+			}
+			waitForEnrichments(t, transport.database, fixture)
 			cancel()
 			require.NoError(t, <-runDone)
 			require.NoError(t, root.Close(t.Context()))
@@ -281,16 +443,17 @@ func TestBuildProcessRoots(t *testing.T) {
 
 	t.Run("once drains observed work before its emitted automatic event", func(t *testing.T) {
 		transport := newTransport(t)
-		event, transactionID := seedClassification(t, transport.database)
+		fixture := seedEnrichments(t, transport.database)
 		observedTopic := "finance.phase3.once." + fake.UUID().V4()
 		checkpointConsumer(t, transport, transport.observedGroup, observedTopic)
 		checkpointConsumer(t, transport, transport.automaticGroup, financeapp.BankSyncWindowCompletedEventTopic)
+		checkpointConsumer(t, transport, transport.matchingGroup, financeapp.BankSyncWindowCompletedEventTopic)
 
 		root := newPhase3WorkerRoot(t, transport)
 		t.Cleanup(func() { require.NoError(t, root.Close(t.Context())) })
 		emitted := make(chan struct{}, 1)
 		registerObservedCommand(t, root, observedTopic, func(ctx context.Context) error {
-			if err := transport.eventPublisher.Publish(ctx, event); err != nil {
+			if err := transport.eventPublisher.Publish(ctx, fixture.event); err != nil {
 				return err
 			}
 			emitted <- struct{}{}
@@ -304,7 +467,9 @@ func TestBuildProcessRoots(t *testing.T) {
 		default:
 			t.Fatal("observed worker did not emit the automatic classification event")
 		}
-		require.NotNil(t, storedTransaction(t, transport.database, transactionID).CategoryID)
+		complete, err := enrichmentsComplete(transport.database, fixture)
+		require.NoError(t, err)
+		require.True(t, complete)
 	})
 
 	t.Run("once waits for a long automatic-classification router delivery before idle drain", func(t *testing.T) {

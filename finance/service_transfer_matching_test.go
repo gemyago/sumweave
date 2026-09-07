@@ -326,10 +326,13 @@ func TestTransferMatchingService(t *testing.T) {
 		_, err = service.Submit(t.Context(), params)
 		require.ErrorContains(t, err, "submission publisher is required")
 
-		publisher := newMocktransferMatchingSubmissionPublisher(t)
+		publisher := NewMockSemanticCommandPublisher(t)
 		reference := TransferMatchingJobRef{ID: "message-" + fake.UUID().V4()}
 		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
-		publisher.EXPECT().PublishTransferMatching(t.Context(), params).Return(reference, nil).Once()
+		publisher.EXPECT().
+			PublishSemanticCommand(t.Context(), mock.Anything).
+			Return(DispatchReference{MessageID: reference.ID}, nil).
+			Once()
 		service, err = NewTransferMatchingService(TransferMatchingServiceArgs{
 			Access: access, Pairs: pairs, Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
 			NewID: func() string { return "group-" + fake.UUID().V4() },
@@ -349,11 +352,27 @@ func TestTransferMatchingService(t *testing.T) {
 		_, err = service.Submit(t.Context(), invalid)
 		require.ErrorIs(t, err, ErrInvalidTimestampRange)
 
+		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
+		invalid = params
+		invalid.RangeStart = time.Time{}
+		_, err = service.Submit(t.Context(), invalid)
+		require.ErrorIs(t, err, ErrInvalidTimestampRange)
+		_, err = service.Match(t.Context(), TransferMatchingParams{
+			TenantID: params.TenantID, RangeStart: invalid.RangeStart, RangeEndExclusive: params.RangeEndExclusive,
+		})
+		require.ErrorIs(t, err, ErrInvalidTimestampRange)
+		canceled, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, _, err = decideTransferMatchingPairs(canceled, []persistence.TransferMatchingTransaction{{
+			ID: fake.UUID().V4(), AmountMinor: 1, Currency: "USD", EffectiveAt: params.RangeStart,
+		}}, params.RangeStart, params.RangeEndExclusive)
+		require.ErrorIs(t, err, context.Canceled)
+
 		publishErr := errors.New("publication failed")
 		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
 		publisher.EXPECT().
-			PublishTransferMatching(t.Context(), params).
-			Return(TransferMatchingJobRef{}, publishErr).
+			PublishSemanticCommand(t.Context(), mock.Anything).
+			Return(DispatchReference{}, publishErr).
 			Once()
 		_, err = service.Submit(t.Context(), params)
 		require.ErrorIs(t, err, publishErr)

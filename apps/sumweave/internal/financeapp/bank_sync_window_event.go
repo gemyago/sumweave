@@ -16,6 +16,7 @@ import (
 
 const BankSyncWindowCompletedEventTopic = "finance.bank-sync-window-completed.v1"
 const ClassificationConsumerGroup = "finance.classification.v1"
+const TransferMatchingConsumerGroup = "finance.transfer-matching.v1"
 
 // BankSyncWindowCompletedEvent is the transport representation of the
 // finance-owned committed-window fact.
@@ -25,6 +26,53 @@ type BankSyncWindowCompletedEvent struct {
 	RangeStart          time.Time `json:"rangeStart"`
 	RangeEndExclusive   time.Time `json:"rangeEndExclusive"`
 	SourceSyncMessageID string    `json:"sourceSyncMessageId"`
+}
+
+// RegisterAutomaticTransferMatchingHandler registers a job-free, independent
+// committed-window consumer for transfer matching.
+func RegisterAutomaticTransferMatchingHandler(
+	router *appdispatch.Router,
+	service transferMatchingJobService,
+	logger *slog.Logger,
+) error { // coverage-ignore
+	if service == nil {
+		return nil
+	}
+	if logger == nil {
+		return errors.New("automatic transfer matching logger is required")
+	}
+	return appevents.RegisterMessageHandler(
+		router,
+		BankSyncWindowCompletedEvent{},
+		func(ctx context.Context, message appdispatch.Message, event BankSyncWindowCompletedEvent) error {
+			_, err := service.Match(
+				ctx,
+				financepkg.TransferMatchingParams{
+					TenantID:            event.TenantID,
+					RangeStart:          event.RangeStart,
+					RangeEndExclusive:   event.RangeEndExclusive,
+					MessageID:           message.ID,
+					SourceSyncMessageID: event.SourceSyncMessageID,
+				},
+			)
+			if err != nil {
+				logger.ErrorContext(
+					ctx,
+					"automatic transfer matching failed",
+					"messageId",
+					message.ID,
+					"sourceSyncMessageId",
+					event.SourceSyncMessageID,
+					"connectionId",
+					event.ConnectionID,
+					"error",
+					err,
+				)
+				return fmt.Errorf("match completed bank sync window: %w", err)
+			}
+			return nil
+		},
+	)
 }
 
 func (BankSyncWindowCompletedEvent) Topic() string { // coverage-ignore

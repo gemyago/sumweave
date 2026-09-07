@@ -493,6 +493,16 @@ type FinanceController interface {
 		*FinanceClassificationJobResponse,
 	]) http.Handler
 
+	// POST /api/v1/finance/tenants/{tenantId}/transactions/match-transfers
+	//
+	// Request type: SubmitFinanceTransferMatchingParams,
+	//
+	// Response type: FinanceTransferMatchingJobResponse
+	SubmitFinanceTransferMatching(HandlerBuilder[
+		*SubmitFinanceTransferMatchingParams,
+		*FinanceTransferMatchingJobResponse,
+	]) http.Handler
+
 	// POST /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync
 	//
 	// Request type: TriggerFinanceConnectionSyncParams,
@@ -696,6 +706,8 @@ type FinanceController interface {
 // 
 // - POST /api/v1/finance/tenants/{tenantId}/transactions/classify
 // 
+// - POST /api/v1/finance/tenants/{tenantId}/transactions/match-transfers
+// 
 // - POST /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync
 // 
 // - POST /api/v1/finance/fx/sync
@@ -770,6 +782,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("PUT", "/api/v1/finance/tenants/{tenantId}/connections/synthetic-link-states/state/{state}", controller.PutFinanceSyntheticLinkState(builder.PutFinanceSyntheticLinkState))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/link-redirect/start", controller.StartFinanceConnectionRedirectLink(builder.StartFinanceConnectionRedirectLink))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/transactions/classify", controller.SubmitFinanceTransactionClassification(builder.SubmitFinanceTransactionClassification))
+	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/transactions/match-transfers", controller.SubmitFinanceTransferMatching(builder.SubmitFinanceTransferMatching))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync", controller.TriggerFinanceConnectionSync(builder.TriggerFinanceConnectionSync))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/fx/sync", controller.TriggerFinanceFxRefresh(builder.TriggerFinanceFxRefresh))
 	rootHandler.router.HandleRoute("POST", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/unhide", controller.UnhideFinanceAccount(builder.UnhideFinanceAccount))

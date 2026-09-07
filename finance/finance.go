@@ -147,7 +147,7 @@ func newTransferMatchingService(
 ) (*TransferMatchingService, error) {
 	return NewTransferMatchingService(TransferMatchingServiceArgs{
 		Access: access, Pairs: pairs, Logger: cfg.Logger, Now: cfg.Now, NewID: cfg.NewID,
-	})
+	}, WithTransferMatchingServiceSubmissionPublisher(cfg.CommandPublisher))
 }
 
 func newConnectors(

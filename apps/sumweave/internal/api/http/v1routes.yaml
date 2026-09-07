@@ -1095,6 +1095,32 @@ paths:
           description: unexpected error
           content:
             application/json:
+                schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/finance/tenants/{tenantId}/transactions/match-transfers:
+    post:
+      summary: Submit explicit transfer matching
+      operationId: submitFinanceTransferMatching
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FinanceTransferMatchingRequest" }
+      responses:
+        '202':
+          description: Transfer matching is queued. The returned job ID can initially return 404 until first delivery materializes the observed job.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FinanceTransferMatchingJobResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
               schema: { $ref: "#/components/schemas/Error" }
   /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/transfer-partner:
     get:
@@ -2114,6 +2140,17 @@ components:
         rangeStart: { type: string, format: date-time }
         rangeEndExclusive: { type: string, format: date-time }
     FinanceClassificationJobResponse:
+      type: object
+      required: [jobId]
+      properties:
+        jobId: { type: string }
+    FinanceTransferMatchingRequest:
+      type: object
+      required: [rangeStart, rangeEndExclusive]
+      properties:
+        rangeStart: { type: string, format: date-time }
+        rangeEndExclusive: { type: string, format: date-time }
+    FinanceTransferMatchingJobResponse:
       type: object
       required: [jobId]
       properties:

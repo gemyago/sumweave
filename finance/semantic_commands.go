@@ -13,7 +13,8 @@ const (
 	BankConnectionSyncCommandTopic   = "finance.bank-connection-sync.v1"
 	FXRatesRefreshCommandTopic       = "finance.fx-rates-refresh.v1"
 
-	ClassificationExplicitCommandTopic = "finance.classification.explicit.v1"
+	ClassificationExplicitCommandTopic   = "finance.classification.explicit.v1"
+	TransferMatchingExplicitCommandTopic = "finance.transfer-matching.explicit.v1"
 
 	CommandRequesterSourceOperator = "operator"
 
@@ -73,6 +74,15 @@ type FXRatesRefreshCommand struct {
 // ClassificationExplicitCommand is the safe observed-work input for one
 // explicitly requested transaction classification range.
 type ClassificationExplicitCommand struct {
+	TenantID          string           `json:"tenantId"`
+	RangeStart        time.Time        `json:"rangeStart"`
+	RangeEndExclusive time.Time        `json:"rangeEndExclusive"`
+	Requester         CommandRequester `json:"requester"`
+}
+
+// TransferMatchingExplicitCommand is the safe observed-work input for one
+// explicitly requested transfer-matching range.
+type TransferMatchingExplicitCommand struct {
 	TenantID          string           `json:"tenantId"`
 	RangeStart        time.Time        `json:"rangeStart"`
 	RangeEndExclusive time.Time        `json:"rangeEndExclusive"`
