@@ -13,6 +13,10 @@
   import { subscribeToFinanceLedgerRefresh } from '../lib/finance/ledger-refresh'
   import FinancePager from '../components/FinancePager.svelte'
   import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
+  import JobStatus from '../components/JobStatus.svelte'
+  import { defaultMatchingDateRange, matchingRangeFromDateInputs } from '../lib/finance/matching-range'
+  import { requestFinanceLedgerRefresh } from '../lib/finance/ledger-refresh'
+  import type { JobDetail } from '../lib/jobs/api'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const transactionPageSize = 20
@@ -31,6 +35,15 @@
   let loadingList = $state(false)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+  const defaultMatchingRange = defaultMatchingDateRange()
+  let matchingStartDate = $state(defaultMatchingRange.startDate)
+  let matchingEndDate = $state(defaultMatchingRange.endDate)
+  let matchingBusy = $state(false)
+  let matchingError = $state<string | null>(null)
+  let matchingOutcome = $state<string | null>(null)
+  let matchingJobId = $state('')
+  let matchingTenantId = $state('')
+  let matchingTerminal = $state(false)
 
   const visibleTransactions = $derived(
     [...transactions].sort((a, b) =>
@@ -140,6 +153,45 @@
   function selectTenant(tenantId: string) {
     transactionOffset = 0
     financeShell.selectTenant(tenantId)
+  }
+
+  async function submitTransferMatching(event: SubmitEvent) {
+    event.preventDefault()
+    if (!financeShell.selectedTenantId || matchingBusy || (matchingJobId && !matchingTerminal)) return
+
+    const tenantId = financeShell.selectedTenantId
+    matchingError = null
+    matchingOutcome = null
+    try {
+      const range = matchingRangeFromDateInputs(matchingStartDate, matchingEndDate)
+      matchingBusy = true
+      matchingTerminal = false
+      matchingJobId = ''
+      matchingTenantId = tenantId
+      const result = await financeApi.submitTransferMatching({
+        tenantId,
+        rangeStart: range.rangeStart,
+        rangeEndExclusive: range.rangeEndExclusive,
+      })
+      matchingJobId = result.jobId
+    } catch (submitError) {
+      matchingError = submitError instanceof Error ? submitError.message : 'Could not start transfer matching.'
+    } finally {
+      matchingBusy = false
+    }
+  }
+
+  function handleTransferMatchingTerminal(job: JobDetail) {
+    if (job.status === 'succeeded') {
+      matchingOutcome = 'Transfer matching completed.'
+    } else if (job.status === 'failed') {
+      matchingOutcome = 'Transfer matching failed. Some pairs may already have been matched. Running it again preserves existing pairs.'
+    } else {
+      return
+    }
+
+    matchingTerminal = true
+    requestFinanceLedgerRefresh(matchingTenantId)
   }
 
   $effect(() => {
@@ -288,6 +340,23 @@
           </div>
         </div>
       </section>
+
+      <form class="card shadow-sm" onsubmit={submitTransferMatching} aria-labelledby="finance-transfer-matching-heading">
+        <div class="card-body p-4 d-grid gap-3">
+          <div>
+            <h2 id="finance-transfer-matching-heading" class="h5 mb-1">Match transfers</h2>
+            <p class="text-body-secondary mb-0">Searches all accounts in this tenant. A matching partner may be up to 72 hours outside the selected dates.</p>
+          </div>
+          <div class="row g-3">
+            <div class="col-12 col-md-6"><label class="form-label" for="finance-transfer-matching-start-date">Transfer matching start date</label><input id="finance-transfer-matching-start-date" class="form-control" type="date" bind:value={matchingStartDate} disabled={matchingBusy || Boolean(matchingJobId && !matchingTerminal)} required /></div>
+            <div class="col-12 col-md-6"><label class="form-label" for="finance-transfer-matching-end-date">Transfer matching end date</label><input id="finance-transfer-matching-end-date" class="form-control" type="date" bind:value={matchingEndDate} disabled={matchingBusy || Boolean(matchingJobId && !matchingTerminal)} required /></div>
+          </div>
+          <div class="d-flex flex-wrap gap-2"><button class="btn btn-primary" type="submit" disabled={matchingBusy || Boolean(matchingJobId && !matchingTerminal)}>{matchingBusy ? 'Starting matching…' : matchingTerminal ? 'Run matching again' : 'Match transfers'}</button></div>
+          {#if matchingError}<div class="alert alert-danger mb-0" role="alert">{matchingError}</div>{/if}
+          {#if matchingOutcome}<div class={`alert ${matchingOutcome === 'Transfer matching completed.' ? 'alert-success' : 'alert-warning'} mb-0`} role="status">{matchingOutcome}</div>{/if}
+          {#if matchingJobId}<JobStatus jobId={matchingJobId} openHref={`/finance/jobs/${encodeURIComponent(matchingJobId)}`} label="Transfer matching" linkLabel="Open finance job" observedDispatch onTerminal={handleTransferMatchingTerminal} />{/if}
+        </div>
+      </form>
 
       <section id="finance-transactions-ledger" class="card shadow-sm" aria-busy={loadingList}>
         <div class="card-body p-4 d-grid gap-3">

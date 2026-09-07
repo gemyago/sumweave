@@ -1,8 +1,9 @@
 # Transfer Matching Phase 0 — system design
 
-Status: draft for review, revised on 2026-09-07. This design follows the
-[Phase 0 PRD](transfer-matching-phase0-prd.md), including the review decision to
-match in memory and accept concurrent-update races in Phase 0.
+Status: implemented through automated chunks on 2026-09-07; isolated manual E2E
+and independent UI design review remain recorded completion gates. This design
+follows the [Phase 0 PRD](transfer-matching-phase0-prd.md), including the review
+decision to match in memory and accept concurrent-update races in Phase 0.
 [Architecture](../ARCHITECTURE.md) remains authoritative.
 
 ## Design summary

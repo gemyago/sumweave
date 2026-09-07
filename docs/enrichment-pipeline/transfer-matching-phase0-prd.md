@@ -1,9 +1,11 @@
 # Transfer Matching Phase 0
 
-Status: approved. Product requirements approved on 2026-09-06; implementation
-is pending. Concurrency requirements revised on 2026-09-07 following design
-review: match against data loaded at attempt start and accept concurrent-update
-races in Phase 0.
+Status: implemented through the four automated implementation chunks on
+2026-09-07. The isolated manual E2E and independent UI design-review gates are
+recorded separately and remain to be run. Product requirements were approved on
+2026-09-06; concurrency requirements were revised on 2026-09-07 following
+design review: match against data loaded at attempt start and accept
+concurrent-update races in Phase 0.
 System design, API contracts, and storage changes are outside this PRD.
 [Architecture](../ARCHITECTURE.md) remains the source of truth for product direction.
 
