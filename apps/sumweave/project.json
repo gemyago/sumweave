@@ -14,6 +14,13 @@
     },
     "test": {
       "executor": "nx:run-commands",
+      "dependsOn": [
+        "install-deps",
+        {
+          "projects": ["finance"],
+          "target": "test"
+        }
+      ],
       "options": {
         "command": "make test",
         "cwd": "{projectRoot}"
