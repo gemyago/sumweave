@@ -2,7 +2,7 @@
 
 This file describes the current backend foundation in this repository. For product direction and naming, use the repository-level [../../../docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) as the source of truth.
 
-HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`sumweave`** binary built from `cmd/sumweave`. Local commands run with `apps/sumweave` as CWD (`go run ./cmd/sumweave db-migrate --env local`, `go run ./cmd/sumweave start-all --env local`, or `go run ./cmd/sumweave start --env local`). The app wires configuration, logging, OpenTelemetry, health, finance APIs, auth, durable jobs, and the generic **runtime** agent HTTP API. The long-term shape is a deployable backend that can serve or embed **`apps/sumweave-ui`** as one unit.
+HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`sumweave`** binary built from `cmd/sumweave`. Local commands run with `apps/sumweave` as CWD (`go run ./cmd/sumweave db-migrate --env local`, `go run ./cmd/sumweave start-all --env local`, `go run ./cmd/sumweave start --env local`, or `go run ./cmd/sumweave jobs scheduler --env local`). The app wires configuration, logging, OpenTelemetry, health, finance APIs, auth, durable jobs, and the generic **runtime** agent HTTP API. The long-term shape is a deployable backend that can serve or embed **`apps/sumweave-ui`** as one unit.
 
 ## Stack
 
@@ -34,7 +34,7 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 - **`db-migrate`** — loads typed configuration and eagerly builds only logging/lifecycle/telemetry, SQL/auth stores, runtime migration inputs, and `DatabaseMigrator`; it does not build finance services, jobs worker/service, JWT, routes, or HTTP. It migrates the finance schema itself. Local setup invokes it exactly once for each prepared PostgreSQL environment through `make postgres-bootstrap` before **`start-all`**.
 - **`start-all`** — diagnostic entrypoint that runs the HTTP server, appdispatch worker, and non-overlapping scheduler loop in one process using the same components as the split commands.
 - **`start`** — API-only HTTP server mode used by local PM2 and production-like environments.
-- **`sumweave jobs worker`** / **`sumweave jobs enqueue-due`** — dedicated split-environment appdispatch consumer and one-shot scheduler commands. The worker registers ordinary and job-observed finance consumers; the scheduler reads finance-owned bank and FX schedules, publishes due semantic commands, advances schedule state atomically with the publication, and does not run finance work or create job rows. Neither builds HTTP routes or a server.
+- **`sumweave jobs worker`** / **`sumweave jobs scheduler`** / **`sumweave jobs enqueue-due`** — dedicated split-environment appdispatch consumer, scheduler loop, and one-shot scheduler commands. The scheduler loop repeatedly invokes the same tick as `enqueue-due`: it reads finance-owned bank and FX schedules, publishes due semantic commands, advances schedule state atomically with the publication, and does not run finance work or create job rows. None builds HTTP routes or a server.
 - **`internal/wireup/`** — command-specific eager roots and explicit application wiring. HTTP, `start-all`, `db-migrate`, split jobs, user administration, and finance fixtures use direct construction.
 - **`internal/agent_runtime.go`** — constructs **`agent.Runner`** (LLM provider, **`workspacefs`** tools, filesystem storage under configurable data dir, and a required persisted agent profile service for runner-owned profile execution) and exposes **`httpapi`** as **`HTTPHandler`**.
 - **`internal/api/http/`** — HTTP composition: **`server/`** (router, HTTPServer, middleware chain), **`v1routes/`** (generated routes + handlers, e.g. health), **`v1controllers/`**, **`middleware/`**, plus embedded UI staging under **`embeddedui/`** (tracked placeholder + generated ignored `dist/`).
@@ -111,6 +111,10 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 - **Layers:** embedded **`default.yaml`**, then **`internal/config/<env>.yaml`** (from **`--env` / `-e`**, default **`local`**), then optional **`<env>-user.yaml`** for local secrets.
 - **Env:** keys map to **`APP_…`** (Viper `AutomaticEnv()`); nested keys use underscores (e.g. **`APP_OPENAI_APIKEY`** for OpenAI). The loader exact-decodes the layered values before roots validate and translate them to native component inputs.
 - **Database setup:** PostgreSQL is the only supported database. Startup commands never migrate app-owned schemas; run **`make postgres-bootstrap`** from the repository root before **`start-all`**, **`start`**, **`jobs worker`**, or **`jobs enqueue-due`**. It provisions local/test databases and roles, runs the two explicit `db-migrate` commands through the migrator role, then grants the runtime role access to the prepared schemas.
+- **Worker claims:** **`jobs.worker.staleRunningAge`** defaults to 30 minutes,
+  above the expected finance execution window. Active handlers renew their
+  claims before recovery; a canceled handler conditionally requeues its own
+  claim while leaving its dispatch message unacknowledged for retry.
 - **HTTP defaults:** e.g. **`httpServer.port`** **4501**, **`writeTimeout`** aligned with long SSE/agent runs (see comments in **`default.yaml`**). Set both `httpServer.tls.certFile` and `keyFile` (or their `APP_` equivalents) for local HTTPS; see [../../../docs/local-https.md](../../../docs/local-https.md). No secrets in repo.
 
 ## Repository integration

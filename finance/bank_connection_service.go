@@ -85,11 +85,12 @@ func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionSe
 			args.Now,
 			args.NewID,
 		),
-		ConnectionStore: linkPersistence,
-		Logger:          args.Logger,
-		Now:             args.Now,
-		NewID:           args.NewID,
-		PendingStartTTL: pendingBankConnectionLinkStartTTL,
+		ConnectionStore:         linkPersistence,
+		Logger:                  args.Logger,
+		Now:                     args.Now,
+		NewID:                   args.NewID,
+		PendingStartTTL:         pendingBankConnectionLinkStartTTL,
+		DefaultScheduleInterval: defaultBankConnectionScheduleInterval,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create bank connection link coordinator: %w", err)

@@ -41,7 +41,7 @@
 <nav class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center" aria-label={label} aria-busy={busy} tabindex="-1" bind:this={pager}>
   <span class="text-body-secondary small" role="status" aria-live="polite">{status}</span>
   <div class="btn-group" role="group" aria-label={`${label} controls`}>
-    <button class="btn btn-outline-secondary btn-sm" type="button" aria-label={`${label}: previous page`} aria-controls={controls} aria-busy={busy} onclick={() => void changePage(onPrevious)} disabled={busy || !hasPrevious}>Previous</button>
-    <button class="btn btn-outline-secondary btn-sm" type="button" aria-label={`${label}: next page`} aria-controls={controls} aria-busy={busy} onclick={() => void changePage(onNext)} disabled={busy || !hasNext}>Next</button>
+    <button class="btn btn-outline-secondary btn-sm" type="button" aria-label={`${label}: older page`} aria-controls={controls} aria-busy={busy} onclick={() => void changePage(onNext)} disabled={busy || !hasNext}>Older</button>
+    <button class="btn btn-outline-secondary btn-sm" type="button" aria-label={`${label}: newer page`} aria-controls={controls} aria-busy={busy} onclick={() => void changePage(onPrevious)} disabled={busy || !hasPrevious}>Newer</button>
   </div>
 </nav>

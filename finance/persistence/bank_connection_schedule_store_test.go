@@ -174,6 +174,8 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 
 		_, err = store.ListDue(t.Context(), now)
 		require.Error(t, err)
+		_, err = store.EnsureActiveDailySchedules(t.Context(), makeSchedule(now, &dueAt, true))
+		require.Error(t, err)
 		require.Error(t, store.Save(t.Context(), makeSchedule(now, &dueAt, true)))
 		_, err = store.Get(t.Context(), fake.UUID().V4())
 		require.Error(t, err)

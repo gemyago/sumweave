@@ -85,10 +85,53 @@ func TestTransactionTagStore(t *testing.T) {
 		require.Len(t, listed, 1)
 		assert.Equal(t, []string{thirdTag.ID}, listed[0].TagIDs)
 
+		filtered, err := transactionStore.ListTransactions(
+			t.Context(),
+			tenantID,
+			"",
+			"",
+			"",
+			true,
+			ListTransactionsPage{
+				Kind:      domain.TransactionKindRegular,
+				StartDate: now,
+				EndDate:   now.Add(time.Minute),
+			},
+		)
+		require.NoError(t, err)
+		require.Len(t, filtered, 1)
+		assert.Equal(t, transaction.ID, filtered[0].ID)
+
 		replaced.TagIDs = []string{}
 		cleared, err := transactionStore.SaveTransaction(t.Context(), replaced)
 		require.NoError(t, err)
 		assert.Empty(t, cleared.TagIDs)
+	})
+
+	t.Run("applies ascending order before the requested offset page", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.FixedZone("test", 3*60*60))
+		transactionStore := NewTransactionTagStore(openTestDatabase(t))
+		tenantID := "tenant-" + fake.UUID().V4()
+		earlier := makeTransaction(fake, tenantID, now.Add(-time.Minute))
+		later := makeTransaction(fake, tenantID, now)
+		_, err := transactionStore.SaveTransaction(t.Context(), earlier)
+		require.NoError(t, err)
+		_, err = transactionStore.SaveTransaction(t.Context(), later)
+		require.NoError(t, err)
+
+		page, err := transactionStore.ListTransactions(
+			t.Context(),
+			tenantID,
+			"",
+			"",
+			"",
+			true,
+			ListTransactionsPage{Limit: 1, Offset: 1, SortAscending: true},
+		)
+		require.NoError(t, err)
+		require.Len(t, page, 1)
+		assert.Equal(t, later.ID, page[0].ID)
 	})
 
 	t.Run("rolls back the transaction and associations when assignment validation fails", func(t *testing.T) {

@@ -34,7 +34,7 @@ func TestStartAllDocumentation(t *testing.T) {
 			assert.Contains(t, doc, "make postgres-bootstrap")
 			assert.Contains(t, doc, "start-all")
 			assert.Contains(t, doc, "pm2 start ecosystem.config.js")
-			assert.Contains(t, doc, "`api`, `worker`, and `ui`")
+			assert.Contains(t, doc, "`api`, `worker`, `scheduler`, and `ui`")
 			assert.Contains(t, doc, "pm2 start|stop|restart|delete backend")
 		},
 	)
@@ -47,7 +47,7 @@ func TestStartAllDocumentation(t *testing.T) {
 		assert.Contains(t, doc, "sumweave start")
 		assert.Contains(t, doc, "sumweave jobs worker")
 		assert.Contains(t, doc, "sumweave jobs enqueue-due")
-		assert.Contains(t, doc, "`backend` namespace as `api` and `worker`")
+		assert.Contains(t, doc, "`backend` namespace as `api`, `worker`, and `scheduler`")
 		assert.Contains(t, doc, "pm2 start|stop|restart|delete backend")
 	})
 
@@ -58,7 +58,15 @@ func TestStartAllDocumentation(t *testing.T) {
 		assert.Contains(t, doc, "diagnostic entrypoint")
 		assert.Contains(t, doc, "local PM2")
 		assert.Contains(t, doc, "sumweave jobs worker")
+		assert.Contains(t, doc, "sumweave jobs scheduler")
 		assert.Contains(t, doc, "sumweave jobs enqueue-due")
+	})
+
+	t.Run("PM2 configuration starts the split scheduler loop", func(t *testing.T) {
+		config := readFile(resolvePath("..", "..", "..", "..", "ecosystem.config.js"))
+
+		assert.Contains(t, config, "name: 'scheduler'")
+		assert.Contains(t, config, "jobs scheduler --env local")
 	})
 
 	t.Run("repo architecture doc keeps db-migrate before start-all guidance", func(t *testing.T) {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import { faker } from '@faker-js/faker'
+import { dateInputValue } from '../lib/date-range'
 import FinanceTransactions from './FinanceTransactions.svelte'
 import { isFinanceLedgerRefreshPending } from '../lib/finance/ledger-refresh'
 
@@ -43,6 +44,7 @@ describe('Finance transactions page', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    window.location.hash = '#/finance/transactions'
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTenants.mockResolvedValue([
       { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
@@ -114,8 +116,7 @@ describe('Finance transactions page', () => {
     expect(screen.getByLabelText('Transfer matching end date')).toHaveValue('2026-06-20')
     expect(screen.getByText('Searches all accounts in this tenant. A matching partner may be up to 72 hours outside the selected dates.')).toBeInTheDocument()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Account filter' }), 'account-1')
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction status filter' }), 'booked')
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction source filter' }), 'provider')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction type filter' }), 'expense')
     await user.click(screen.getByRole('button', { name: 'Match transfers' }))
 
     await waitFor(() => expect(mocks.submitTransferMatching).toHaveBeenCalledWith({
@@ -325,7 +326,6 @@ describe('Finance transactions page', () => {
     expect(screen.getByRole('button', { name: 'Edit category' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Edit tags' })).toBeInTheDocument()
     expect(screen.getAllByText('internal transfer')).toHaveLength(1)
-    expect(screen.queryByText('transfer', { exact: true })).not.toBeInTheDocument()
   })
 
   it('withholds unavailable category and tag edits, then retries each catalog without blocking description editing', async () => {
@@ -526,10 +526,9 @@ describe('Finance transactions page', () => {
   it('renders reconciliation state badges and oldest-first sorting', async () => {
     const earlier = new Date('2026-06-19T12:00:00Z')
     const later = new Date('2026-06-20T12:00:00Z')
-    mocks.listTransactions.mockResolvedValueOnce([
-      { id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 300, currency: 'USD', description: 'Later', effectiveAt: later, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: later, updatedAt: later },
-      { id: 'tx-2', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'reconciliation', amountMinor: 100, currency: 'USD', description: 'Earlier', effectiveAt: earlier, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: earlier, updatedAt: earlier },
-    ])
+    const laterTransaction = { id: 'tx-1', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 300, currency: 'USD', description: 'Later', effectiveAt: later, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: later, updatedAt: later }
+    const earlierTransaction = { id: 'tx-2', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'reconciliation', amountMinor: 100, currency: 'USD', description: 'Earlier', effectiveAt: earlier, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: earlier, updatedAt: earlier }
+    mocks.listTransactions.mockImplementation(({ sort }) => Promise.resolve(sort === 'asc' ? [earlierTransaction, laterTransaction] : [laterTransaction, earlierTransaction]))
     const user = userEvent.setup()
     const { container } = render(FinanceTransactions)
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Sort order' }), 'asc')
@@ -537,7 +536,6 @@ describe('Finance transactions page', () => {
       const rows = Array.from(container.querySelectorAll('article'))
       expect(rows[0]?.textContent).toContain('Earlier')
     })
-    expect(screen.getAllByText('booked').length).toBeGreaterThan(0)
     expect(screen.getAllByText('reconciliation').length).toBeGreaterThan(0)
   })
 
@@ -608,7 +606,7 @@ describe('Finance transactions page', () => {
     render(FinanceTransactions)
 
     await screen.findByText('Refund')
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction status filter' }), 'booked')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction type filter' }), 'expense')
 
     expect(await screen.findByText('No transactions matched the current filters.')).toBeInTheDocument()
     expect(screen.queryByLabelText('Selected transaction details')).not.toBeInTheDocument()
@@ -618,18 +616,68 @@ describe('Finance transactions page', () => {
     const user = userEvent.setup()
     render(FinanceTransactions)
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Account filter' }), 'account-1')
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction status filter' }), 'pending')
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction source filter' }), 'manual')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction type filter' }), 'expense')
     await waitFor(() =>
       expect(mocks.listTransactions).toHaveBeenLastCalledWith({
         tenantId: 'tenant-1',
         accountId: 'account-1',
-        status: 'pending',
-        source: 'manual',
+        kind: 'expense',
+        startDate: undefined,
+        endDate: undefined,
         limit: 20,
         offset: 0,
       }),
     )
+  })
+
+  it('restores direct transaction filters from the URL', async () => {
+    window.location.hash = '#/finance/transactions?accountId=account-1&type=expense&sort=asc&startDate=2026-06-01&endDate=2026-06-30'
+
+    render(FinanceTransactions)
+
+    expect(await screen.findByRole('combobox', { name: 'Transaction type filter' })).toHaveValue('expense')
+    expect(screen.getByLabelText('Transaction start date')).toHaveValue('2026-06-01')
+    expect(screen.getByLabelText('Transaction end date')).toHaveValue('2026-06-30')
+    const request = mocks.listTransactions.mock.calls[0][0]
+    expect(request).toMatchObject({ tenantId: 'tenant-1', accountId: 'account-1', kind: 'expense', limit: 20, offset: 0 })
+    expect(dateInputValue(request.startDate)).toBe('2026-06-01')
+    expect(dateInputValue(request.endDate)).toBe('2026-07-01')
+  })
+
+  it('keeps the visible inclusive end date in the URL while using its next local day only for the API', async () => {
+    render(FinanceTransactions)
+    const endDate = await screen.findByLabelText('Transaction end date')
+
+    await fireEvent.change(endDate, { target: { value: '2026-06-30' } })
+
+    await waitFor(() => expect(window.location.hash).toContain('endDate=2026-06-30'))
+    expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({
+      endDate: expect.any(Date),
+    }))
+    const request = mocks.listTransactions.mock.calls.at(-1)![0]
+    expect(dateInputValue(request.endDate)).toBe('2026-07-01')
+  })
+
+  it('uses API-sorted pages so oldest-first Newer advances through chronology', async () => {
+    const user = userEvent.setup()
+    const firstPageAt = new Date('2026-06-01T12:00:00Z')
+    const secondPageAt = new Date('2026-09-01T12:00:00Z')
+    const makePage = (prefix: string, effectiveAt: Date) => Array.from({ length: 20 }, (_, index) => ({
+      id: `${prefix}-${index}`, tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 100,
+      currency: 'USD', description: `${prefix} ${index}`, effectiveAt, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: effectiveAt, updatedAt: effectiveAt,
+    }))
+    mocks.listTransactions.mockImplementation(({ offset }) => Promise.resolve(offset === 20 ? makePage('Newer', secondPageAt) : makePage('Older', firstPageAt)))
+    render(FinanceTransactions)
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Sort order' }), 'asc')
+
+    expect(await screen.findByText('Older 0')).toBeInTheDocument()
+    expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'asc', offset: 0 }))
+    expect(screen.getByRole('button', { name: 'Transaction pages: older page' })).toBeDisabled()
+    const newer = screen.getByRole('button', { name: 'Transaction pages: newer page' })
+    expect(newer).toBeEnabled()
+    await user.click(newer)
+    expect(await screen.findByText('Newer 0')).toBeInTheDocument()
+    expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'asc', offset: 20 }))
   })
 
   it('loads the next fixed-size transaction page', async () => {
@@ -663,14 +711,15 @@ describe('Finance transactions page', () => {
     render(FinanceTransactions)
 
     expect(await screen.findByText('Transaction 1')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Transaction pages: next page' }))
+    await user.click(screen.getByRole('button', { name: 'Transaction pages: older page' }))
 
     expect(await screen.findByText('Transaction 21')).toBeInTheDocument()
     expect(mocks.listTransactions).toHaveBeenLastCalledWith({
       tenantId: 'tenant-1',
       accountId: '',
-      status: '',
-      source: '',
+       kind: '',
+       startDate: undefined,
+       endDate: undefined,
       limit: 20,
       offset: 20,
     })
@@ -689,7 +738,7 @@ describe('Finance transactions page', () => {
     render(FinanceTransactions)
 
     expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
-    const next = screen.getByRole('button', { name: 'Transaction pages: next page' })
+    const next = screen.getByRole('button', { name: 'Transaction pages: older page' })
     await user.click(next)
 
     await waitFor(() => expect(next).toBeDisabled())
@@ -713,7 +762,7 @@ describe('Finance transactions page', () => {
     render(FinanceTransactions)
 
     expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
-    const next = screen.getByRole('button', { name: 'Transaction pages: next page' })
+    const next = screen.getByRole('button', { name: 'Transaction pages: older page' })
     await user.click(next)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Page unavailable')
@@ -767,7 +816,7 @@ describe('Finance transactions page', () => {
     expect(await screen.findByText('Select an active tenant to continue on this finance route.')).toBeInTheDocument()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), 'tenant-2')
 
-    await waitFor(() => expect(mocks.listTransactions).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', accountId: '', status: '', source: '', limit: 20, offset: 0 }))
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', accountId: '', kind: '', startDate: undefined, endDate: undefined, limit: 20, offset: 0 }))
     expect(await screen.findByText('Hotel')).toBeInTheDocument()
   })
 

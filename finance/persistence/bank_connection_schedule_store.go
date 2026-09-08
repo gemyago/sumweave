@@ -44,6 +44,46 @@ func (s *BankConnectionScheduleStore) Get(
 	return getBankConnectionSchedule(ctx, s.db, connectionID)
 }
 
+// EnsureActiveDailySchedules inserts the supplied initial schedule for every
+// active connection that does not already have schedule state. Existing
+// schedules are never updated.
+func (s *BankConnectionScheduleStore) EnsureActiveDailySchedules(
+	ctx context.Context,
+	initial domain.BankConnectionSchedule,
+) (int, error) {
+	created := 0
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var connections []bankConnectionModel
+		if err := tx.Table((bankConnectionModel{}).TableName()).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(columnState+" = ?", string(domain.BankConnectionStateActive)).
+			Order("id ASC").
+			Find(&connections).Error; err != nil {
+			return fmt.Errorf("list active bank connections: %w", err)
+		}
+		for _, connection := range connections {
+			schedule := initial
+			schedule.ConnectionID = connection.ID
+			model := newBankConnectionScheduleModel(schedule)
+			result := tx.Table(model.TableName()).
+				Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: columnConnectionID}},
+					DoNothing: true,
+				}).
+				Create(&model)
+			if result.Error != nil {
+				return fmt.Errorf("ensure active bank connection schedule: %w", result.Error)
+			}
+			created += int(result.RowsAffected)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("ensure active daily bank connection schedules: %w", err)
+	}
+	return created, nil
+}
+
 // ListDue returns enabled schedules whose persisted occurrence is due.
 func (s *BankConnectionScheduleStore) ListDue(
 	ctx context.Context,
@@ -174,6 +214,24 @@ func saveBankConnectionSchedule(
 		}).
 		Create(&model).Error; err != nil {
 		return fmt.Errorf("save bank connection schedule: %w", err)
+	}
+	return nil
+}
+
+func saveMissingBankConnectionSchedule(
+	ctx context.Context,
+	db *gorm.DB,
+	schedule domain.BankConnectionSchedule,
+) error {
+	model := newBankConnectionScheduleModel(schedule)
+	if err := db.WithContext(ctx).
+		Table(model.TableName()).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: columnConnectionID}},
+			DoNothing: true,
+		}).
+		Create(&model).Error; err != nil {
+		return fmt.Errorf("save missing bank connection schedule: %w", err)
 	}
 	return nil
 }

@@ -24,7 +24,7 @@ func TestValues(t *testing.T) {
 			require.Equal(t, "sumweave_runtime_", values.AgentRuntime.Database.TablePrefix)
 			require.Equal(t, "local-secret-key", values.Auth.JWTSigningKey)
 			require.Equal(t, time.Minute, values.HTTPServer.IdleTimeout)
-			require.Equal(t, 5*time.Minute, values.Jobs.Worker.StaleRunningAge)
+			require.Equal(t, 30*time.Minute, values.Jobs.Worker.StaleRunningAge)
 			require.Equal(t, []string{"../../.platform-agents/skills"}, values.Skills.Paths)
 		})
 
@@ -58,6 +58,8 @@ func TestValues(t *testing.T) {
 	t.Run("uses APP automatic environment values for declared base keys", func(t *testing.T) {
 		t.Setenv("APP_APPLICATION_DATABASE_DSN", "postgres://app:secret@db.example/sumweave")
 		t.Setenv("APP_JOBS_WORKER_MAXATTEMPTS", "7")
+		t.Setenv("APP_JOBS_WORKER_STALERUNNINGAGE", "45m")
+		t.Setenv("APP_JOBS_SCHEDULER_LOOPINTERVAL", "45s")
 		t.Setenv("APP_HTTPSERVER_WRITETIMEOUT", "45s")
 		t.Setenv("APP_HTTPSERVER_TLS_CERTFILE", "certs/app.pem")
 		t.Setenv("APP_HTTPSERVER_TLS_KEYFILE", "certs/app-key.pem")
@@ -67,10 +69,15 @@ func TestValues(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "postgres://app:secret@db.example/sumweave", values.Application.Database.DSN)
 		require.Equal(t, 7, values.Jobs.Worker.MaxAttempts)
+		require.Equal(t, 45*time.Minute, values.Jobs.Worker.StaleRunningAge)
+		require.Equal(t, 45*time.Second, values.Jobs.Scheduler.LoopInterval)
 		require.Equal(t, 45*time.Second, values.HTTPServer.WriteTimeout)
 		require.Equal(t, "certs/app.pem", values.HTTPServer.TLS.CertFile)
 		require.Equal(t, "certs/app-key.pem", values.HTTPServer.TLS.KeyFile)
 		require.Equal(t, []string{"skills/one", "skills/two"}, values.Skills.Paths)
+		schedulerRoot, err := values.SchedulerRoot("test")
+		require.NoError(t, err)
+		require.Equal(t, 45*time.Second, schedulerRoot.Scheduler.LoopInterval)
 	})
 
 	t.Run("applies typed CLI overrides after exact decoding", func(t *testing.T) {
@@ -183,6 +190,7 @@ func TestValues(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, values.Finance, root.Finance)
 		require.Equal(t, values.Auth, root.Auth)
+		require.Equal(t, 30*time.Second, root.Scheduler.LoopInterval)
 
 		for _, mutate := range []func(*Values){
 			func(value *Values) { value.Auth.JWTSigningKey = "" },
@@ -190,6 +198,8 @@ func TestValues(t *testing.T) {
 			func(value *Values) { value.Finance.Providers.Monobank.RetryAfterFallbackDelay = 0 },
 			func(value *Values) { value.Finance.Providers.EnableBanking.ASPSPName = "" },
 			func(value *Values) { value.Finance.Providers.EnableBanking.ValidDays = 0 },
+			func(value *Values) { value.Jobs.Scheduler.LoopInterval = 0 },
+			func(value *Values) { value.Jobs.Scheduler.LoopInterval = -time.Second },
 		} {
 			candidate, loadErr := LoadValues(ValuesLoadInput{Environment: "test"})
 			require.NoError(t, loadErr)

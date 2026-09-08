@@ -94,7 +94,7 @@ describe('Finance account detail page', () => {
 
     expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
     expect(mocks.listTransactions).toHaveBeenLastCalledWith({ tenantId: 'tenant-1', accountId: 'account-1', limit: 10, offset: 0 })
-    await user.click(screen.getByRole('button', { name: 'Recent transaction pages: next page' }))
+    await user.click(screen.getByRole('button', { name: 'Recent transaction pages: older page' }))
     expect(await screen.findByText('Transaction 11')).toBeInTheDocument()
     expect(mocks.listTransactions).toHaveBeenLastCalledWith({ tenantId: 'tenant-1', accountId: 'account-1', limit: 10, offset: 10 })
   })
@@ -112,7 +112,7 @@ describe('Finance account detail page', () => {
     render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
 
     expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
-    const next = screen.getByRole('button', { name: 'Recent transaction pages: next page' })
+    const next = screen.getByRole('button', { name: 'Recent transaction pages: older page' })
     await user.click(next)
 
     await waitFor(() => expect(next).toBeDisabled())
@@ -142,7 +142,7 @@ describe('Finance account detail page', () => {
     const view = render(FinanceAccountDetail, { params: { accountId: 'account-1' } })
 
     await screen.findByText('Checking 0')
-    await user.click(screen.getByRole('button', { name: 'Recent transaction pages: next page' }))
+    await user.click(screen.getByRole('button', { name: 'Recent transaction pages: older page' }))
     await screen.findByText('No transactions yet.')
     await view.rerender({ params: { accountId: 'account-2' } })
 

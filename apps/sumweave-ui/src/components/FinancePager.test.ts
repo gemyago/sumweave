@@ -15,12 +15,12 @@ describe('FinancePager', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Page 2')
     expect(screen.getByRole('navigation', { name: 'Ledger pages' })).toHaveAttribute('tabindex', '-1')
-    expect(screen.getByRole('button', { name: 'Ledger pages: previous page' })).toHaveAttribute('type', 'button')
-    expect(screen.getByRole('button', { name: 'Ledger pages: next page' })).toHaveAttribute('aria-controls', 'ledger-results')
-    await user.click(screen.getByRole('button', { name: 'Ledger pages: previous page' }))
-    await user.click(screen.getByRole('button', { name: 'Ledger pages: next page' }))
-    expect(onPrevious).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Ledger pages: older page' })).toHaveAttribute('type', 'button')
+    expect(screen.getByRole('button', { name: 'Ledger pages: newer page' })).toHaveAttribute('aria-controls', 'ledger-results')
+    await user.click(screen.getByRole('button', { name: 'Ledger pages: older page' }))
+    await user.click(screen.getByRole('button', { name: 'Ledger pages: newer page' }))
     expect(onNext).toHaveBeenCalledOnce()
+    expect(onPrevious).toHaveBeenCalledOnce()
   })
 
   it('focuses the successful pager region without scrolling', async () => {
@@ -31,7 +31,7 @@ describe('FinancePager', () => {
       onPrevious: () => false, onNext: async () => true,
     })
 
-    await user.click(screen.getByRole('button', { name: 'Ledger pages: next page' }))
+    await user.click(screen.getByRole('button', { name: 'Ledger pages: older page' }))
 
     expect(focus).toHaveBeenCalledWith({ preventScroll: true })
     expect(screen.getByRole('navigation', { name: 'Ledger pages' })).toHaveFocus()
@@ -44,8 +44,8 @@ describe('FinancePager', () => {
     })
 
     expect(screen.getByRole('navigation', { name: 'Ledger pages' })).toHaveAttribute('aria-busy', 'true')
-    expect(screen.getByRole('button', { name: 'Ledger pages: previous page' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Ledger pages: next page' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Ledger pages: older page' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Ledger pages: newer page' })).toBeDisabled()
   })
 
   it('keeps its viewport anchor and focuses its stable region when a full page becomes final', async () => {
@@ -53,7 +53,7 @@ describe('FinancePager', () => {
     const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => undefined)
     render(FinancePagerHarness)
     const pager = screen.getByRole('navigation', { name: 'Ledger pages' })
-    const previousNext = screen.getByRole('button', { name: 'Ledger pages: next page' })
+    const previousNext = screen.getByRole('button', { name: 'Ledger pages: older page' })
     const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       return { top: this === pager && screen.getByRole('status').textContent === 'Page 1' ? 700 : 200 } as DOMRect
     })
@@ -63,7 +63,7 @@ describe('FinancePager', () => {
     await waitFor(() => expect(scrollBy).toHaveBeenCalledWith(0, -500))
     expect(screen.getByRole('navigation', { name: 'Ledger pages' })).toBe(pager)
     expect(pager).toHaveFocus()
-    expect(screen.getByRole('button', { name: 'Ledger pages: next page' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Ledger pages: older page' })).toBeDisabled()
     rect.mockRestore()
     scrollBy.mockRestore()
   })
@@ -74,7 +74,7 @@ describe('FinancePager', () => {
     const focus = vi.spyOn(HTMLElement.prototype, 'focus')
     render(FinancePagerHarness, { succeed: false })
 
-    await user.click(screen.getByRole('button', { name: 'Ledger pages: next page' }))
+    await user.click(screen.getByRole('button', { name: 'Ledger pages: older page' }))
 
     expect(scrollBy).not.toHaveBeenCalled()
     expect(focus).not.toHaveBeenCalledWith({ preventScroll: true })

@@ -1872,47 +1872,48 @@ func (_m *MockConnectionStore) EXPECT() *MockConnectionStore_Expecter {
 	return &MockConnectionStore_Expecter{mock: &_m.Mock}
 }
 
-// SaveLinkedConnectionWithSnapshot provides a mock function for the type MockConnectionStore
-func (_mock *MockConnectionStore) SaveLinkedConnectionWithSnapshot(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot) (domain.BankConnection, error) {
-	ret := _mock.Called(ctx, connection, secret, snapshot)
+// SaveLinkedConnectionWithSnapshotAndSchedule provides a mock function for the type MockConnectionStore
+func (_mock *MockConnectionStore) SaveLinkedConnectionWithSnapshotAndSchedule(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot, schedule *domain.BankConnectionSchedule) (domain.BankConnection, error) {
+	ret := _mock.Called(ctx, connection, secret, snapshot, schedule)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SaveLinkedConnectionWithSnapshot")
+		panic("no return value specified for SaveLinkedConnectionWithSnapshotAndSchedule")
 	}
 
 	var r0 domain.BankConnection
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot) (domain.BankConnection, error)); ok {
-		return returnFunc(ctx, connection, secret, snapshot)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot, *domain.BankConnectionSchedule) (domain.BankConnection, error)); ok {
+		return returnFunc(ctx, connection, secret, snapshot, schedule)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot) domain.BankConnection); ok {
-		r0 = returnFunc(ctx, connection, secret, snapshot)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot, *domain.BankConnectionSchedule) domain.BankConnection); ok {
+		r0 = returnFunc(ctx, connection, secret, snapshot, schedule)
 	} else {
 		r0 = ret.Get(0).(domain.BankConnection)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot) error); ok {
-		r1 = returnFunc(ctx, connection, secret, snapshot)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, domain.BankConnection, domain.ConnectionSecret, *domain.ProviderSnapshot, *domain.BankConnectionSchedule) error); ok {
+		r1 = returnFunc(ctx, connection, secret, snapshot, schedule)
 	} else {
 		r1 = ret.Error(1)
 	}
 	return r0, r1
 }
 
-// MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveLinkedConnectionWithSnapshot'
-type MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call struct {
+// MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveLinkedConnectionWithSnapshotAndSchedule'
+type MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call struct {
 	*mock.Call
 }
 
-// SaveLinkedConnectionWithSnapshot is a helper method to define mock.On call
+// SaveLinkedConnectionWithSnapshotAndSchedule is a helper method to define mock.On call
 //   - ctx context.Context
 //   - connection domain.BankConnection
 //   - secret domain.ConnectionSecret
 //   - snapshot *domain.ProviderSnapshot
-func (_e *MockConnectionStore_Expecter) SaveLinkedConnectionWithSnapshot(ctx interface{}, connection interface{}, secret interface{}, snapshot interface{}) *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call {
-	return &MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call{Call: _e.mock.On("SaveLinkedConnectionWithSnapshot", ctx, connection, secret, snapshot)}
+//   - schedule *domain.BankConnectionSchedule
+func (_e *MockConnectionStore_Expecter) SaveLinkedConnectionWithSnapshotAndSchedule(ctx interface{}, connection interface{}, secret interface{}, snapshot interface{}, schedule interface{}) *MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call {
+	return &MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call{Call: _e.mock.On("SaveLinkedConnectionWithSnapshotAndSchedule", ctx, connection, secret, snapshot, schedule)}
 }
 
-func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call) Run(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot)) *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call {
+func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call) Run(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot, schedule *domain.BankConnectionSchedule)) *MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1930,22 +1931,27 @@ func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call) Run(run fun
 		if args[3] != nil {
 			arg3 = args[3].(*domain.ProviderSnapshot)
 		}
+		var arg4 *domain.BankConnectionSchedule
+		if args[4] != nil {
+			arg4 = args[4].(*domain.BankConnectionSchedule)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
 }
 
-func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call) Return(bankConnection domain.BankConnection, err error) *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call {
+func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call) Return(bankConnection domain.BankConnection, err error) *MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call {
 	_c.Call.Return(bankConnection, err)
 	return _c
 }
 
-func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call) RunAndReturn(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot) (domain.BankConnection, error)) *MockConnectionStore_SaveLinkedConnectionWithSnapshot_Call {
+func (_c *MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call) RunAndReturn(run func(ctx context.Context, connection domain.BankConnection, secret domain.ConnectionSecret, snapshot *domain.ProviderSnapshot, schedule *domain.BankConnectionSchedule) (domain.BankConnection, error)) *MockConnectionStore_SaveLinkedConnectionWithSnapshotAndSchedule_Call {
 	_c.Call.Return(run)
 	return _c
 }

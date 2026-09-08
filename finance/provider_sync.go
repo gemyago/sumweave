@@ -13,13 +13,14 @@ import (
 )
 
 const (
-	BankConnectionSyncJobType         = "finance.bank_connection_sync"
-	BankConnectionSyncReasonManual    = "manual"
-	BankConnectionSyncReasonScheduled = "scheduled"
-	bankProviderMonobank              = "monobank"
-	bankProviderPKO                   = "pko"
-	bankConnectorEnableBanking        = "enable-banking"
-	pendingBankConnectionLinkStartTTL = 15 * time.Minute
+	BankConnectionSyncJobType             = "finance.bank_connection_sync"
+	BankConnectionSyncReasonManual        = "manual"
+	BankConnectionSyncReasonScheduled     = "scheduled"
+	defaultBankConnectionScheduleInterval = 24 * time.Hour
+	bankProviderMonobank                  = "monobank"
+	bankProviderPKO                       = "pko"
+	bankConnectorEnableBanking            = "enable-banking"
+	pendingBankConnectionLinkStartTTL     = 15 * time.Minute
 )
 
 var (

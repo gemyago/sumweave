@@ -67,11 +67,12 @@ type ConnectionSecretWriter interface {
 }
 
 type ConnectionStore interface {
-	SaveLinkedConnectionWithSnapshot(
+	SaveLinkedConnectionWithSnapshotAndSchedule(
 		ctx context.Context,
 		connection domain.BankConnection,
 		secret domain.ConnectionSecret,
 		snapshot *domain.ProviderSnapshot,
+		schedule *domain.BankConnectionSchedule,
 	) (domain.BankConnection, error)
 }
 
@@ -85,6 +86,7 @@ type LinkCoordinatorArgs struct {
 	Now                     func() time.Time
 	NewID                   func() string
 	PendingStartTTL         time.Duration
+	DefaultScheduleInterval time.Duration
 }
 
 type LinkCoordinator struct {
@@ -97,6 +99,7 @@ type LinkCoordinator struct {
 	now                     func() time.Time
 	newID                   func() string
 	pendingStartTTL         time.Duration
+	defaultScheduleInterval time.Duration
 }
 
 type RedirectLinkStartRequest struct {
@@ -160,6 +163,7 @@ func NewLinkCoordinator(args LinkCoordinatorArgs) (*LinkCoordinator, error) {
 		now:                     args.Now,
 		newID:                   args.NewID,
 		pendingStartTTL:         args.PendingStartTTL,
+		defaultScheduleInterval: args.DefaultScheduleInterval,
 	}, nil
 }
 
@@ -626,8 +630,8 @@ func (c *LinkCoordinator) saveLinkedConnection(
 			snapshot.CapturedAt = now
 		}
 	}
-	savedConnection, err := c.connectionStore.SaveLinkedConnectionWithSnapshot(
-		ctx, connection, secret, snapshot,
+	savedConnection, err := c.connectionStore.SaveLinkedConnectionWithSnapshotAndSchedule(
+		ctx, connection, secret, snapshot, c.newInitialSchedule(connection, now),
 	)
 	if err != nil {
 		c.logger.WarnContext(
@@ -662,4 +666,22 @@ func (c *LinkCoordinator) saveLinkedConnection(
 		slog.Bool("hasConnectionSnapshot", snapshot != nil),
 	)
 	return savedConnection, nil
+}
+
+func (c *LinkCoordinator) newInitialSchedule(
+	connection domain.BankConnection,
+	now time.Time,
+) *domain.BankConnectionSchedule {
+	if connection.State != domain.BankConnectionStateActive || c.defaultScheduleInterval <= 0 {
+		return nil
+	}
+	nextRunAt := now.Add(c.defaultScheduleInterval)
+	return &domain.BankConnectionSchedule{
+		ConnectionID: connection.ID,
+		Interval:     c.defaultScheduleInterval,
+		NextRunAt:    &nextRunAt,
+		Enabled:      true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
 }

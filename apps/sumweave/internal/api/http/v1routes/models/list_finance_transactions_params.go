@@ -12,6 +12,61 @@ import (
 var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
+type ListFinanceTransactionsParamsSort string
+
+// List of ListFinanceTransactionsParamsSort values.
+const (
+	ListFinanceTransactionsParamsSortAsc ListFinanceTransactionsParamsSort = "asc"
+	ListFinanceTransactionsParamsSortDesc ListFinanceTransactionsParamsSort = "desc"
+)
+
+func(v ListFinanceTransactionsParamsSort) IsAsc() bool {
+  return v == ListFinanceTransactionsParamsSortAsc
+}
+
+func(v ListFinanceTransactionsParamsSort) IsDesc() bool {
+  return v == ListFinanceTransactionsParamsSortDesc
+}
+
+func(v ListFinanceTransactionsParamsSort) String() string {
+	return string(v)
+}
+
+type assignableListFinanceTransactionsParamsSort interface {
+	IsAsc() bool
+	IsDesc() bool
+	String() string
+}
+
+func AsListFinanceTransactionsParamsSort(v assignableListFinanceTransactionsParamsSort) (ListFinanceTransactionsParamsSort) {
+	return ListFinanceTransactionsParamsSort(v.String())
+}
+
+func ParseListFinanceTransactionsParamsSort(str string, target *ListFinanceTransactionsParamsSort) error {
+	switch str {
+	case "asc":
+		*target = ListFinanceTransactionsParamsSortAsc
+	case "desc":
+		*target = ListFinanceTransactionsParamsSortDesc
+	default:
+		return fmt.Errorf("unexpected ListFinanceTransactionsParamsSort value: %s", str)
+	}
+	return nil
+}
+
+func (v *ListFinanceTransactionsParamsSort) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	return ParseListFinanceTransactionsParamsSort(str, v)
+}
+
+// All allowed values of ListFinanceTransactionsParamsSort enum.
+var AllowableListFinanceTransactionsParamsSortValues = []ListFinanceTransactionsParamsSort{
+	ListFinanceTransactionsParamsSortAsc,
+	ListFinanceTransactionsParamsSortDesc,
+}
 
 // ListFinanceTransactionsParams - Parameters for the listFinanceTransactions operation.
 type ListFinanceTransactionsParams struct { 
@@ -19,6 +74,10 @@ type ListFinanceTransactionsParams struct {
 	AccountID string `json:"accountId,omitempty"`
 	Source string `json:"source,omitempty"`
 	Status string `json:"status,omitempty"`
+	Kind string `json:"kind,omitempty"`
+	StartDate time.Time `json:"startDate,omitempty"`
+	EndDate time.Time `json:"endDate,omitempty"`
+	Sort ListFinanceTransactionsParamsSort `json:"sort,omitempty"`
 	IncludeHidden bool `json:"includeHidden,omitempty"`
 	Limit int64 `json:"limit"`
 	Offset int64 `json:"offset,omitempty"`

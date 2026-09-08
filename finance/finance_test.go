@@ -120,6 +120,12 @@ func TestFinance(t *testing.T) {
 		assert.Equal(t, string(domain.ProviderIDMonobank), connection.Provider)
 		assert.Equal(t, domain.ProviderConnectorIDMonobank, connection.ConnectorID)
 		assert.Empty(t, connection.ProviderReference)
+		schedule, err := store.GetBankConnectionSchedule(t.Context(), connection.ID)
+		require.NoError(t, err)
+		require.NotNil(t, schedule)
+		assert.Equal(t, defaultBankConnectionScheduleInterval, schedule.Interval)
+		require.NotNil(t, schedule.NextRunAt)
+		assert.True(t, schedule.NextRunAt.Equal(now.Add(defaultBankConnectionScheduleInterval)))
 
 		windowStart := now.Add(-24 * time.Hour)
 		result, err := financeModule.BankSyncService.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{

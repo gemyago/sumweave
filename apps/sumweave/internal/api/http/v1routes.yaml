@@ -801,6 +801,21 @@ paths:
           name: status
           schema: { type: string }
         - in: query
+          name: kind
+          schema: { type: string }
+        - in: query
+          name: startDate
+          description: Inclusive transaction effective timestamp.
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          description: Exclusive transaction effective timestamp, later than startDate when both are supplied.
+          schema: { type: string, format: date-time }
+        - in: query
+          name: sort
+          description: Transaction effective-time order applied before the offset page.
+          schema: { type: string, enum: [asc, desc] }
+        - in: query
           name: includeHidden
           schema: { type: boolean }
         - in: query

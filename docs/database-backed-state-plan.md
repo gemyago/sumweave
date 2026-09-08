@@ -117,7 +117,7 @@ process modes for deployment:
 - `start` serves the API without executing durable jobs inline
 - `jobs worker` consumes finance jobs
 - `jobs enqueue-due` enqueues due finance schedules
-- local PM2 runs `start` and `jobs worker` separately; `jobs enqueue-due` stays an explicit scheduler tick
+- local PM2 runs `start`, `jobs worker`, and `jobs scheduler` separately; `enqueue-due` remains the explicit one-shot scheduler tick
 - `start-all` combines the API, worker, and scheduler for diagnostics
 
 Worker shutdown must propagate `SIGINT` and `SIGTERM` through the root context

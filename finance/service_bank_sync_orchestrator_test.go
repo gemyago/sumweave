@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,10 +15,12 @@ import (
 	"github.com/gemyago/sumweave/finance/domain"
 	internalproviders "github.com/gemyago/sumweave/finance/internal/providers"
 	"github.com/gemyago/sumweave/finance/persistence"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestBankSyncServiceOrchestration(t *testing.T) {
@@ -343,6 +347,211 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		deleted, err := store.GetBankConnection(t.Context(), connection.ID)
 		require.ErrorIs(t, err, persistence.ErrBankConnectionNotFound)
 		assert.Nil(t, deleted)
+	})
+
+	t.Run("serializes an idempotent link with deletion before removing owned state", func(t *testing.T) {
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
+		linkPersistence := persistence.NewProviderLinkPersistence(store)
+		now := time.Date(2026, time.August, 21, 12, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
+		actorUserID := "actor-" + fake.UUID().V4()
+		tenant, err := NewTenantService(store).CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     actorUserID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "PLN",
+		})
+		require.NoError(t, err)
+		connection := domain.BankConnection{
+			ID:                "connection-" + fake.UUID().V4(),
+			TenantID:          tenant.ID,
+			Provider:          string(domain.ProviderIDPKO),
+			ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+			ProviderReference: "reference-" + fake.UUID().V4(),
+			SecretID:          "secret-" + fake.UUID().V4(),
+			State:             domain.BankConnectionStateActive,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
+		secret := domain.ConnectionSecret{
+			ID:        connection.SecretID,
+			Provider:  connection.Provider,
+			Reference: connection.ProviderReference,
+			Envelope: credentials.Envelope{
+				KeyVersion: "v1", Algorithm: "test", Nonce: "nonce", Ciphertext: "ciphertext",
+			},
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		_, err = linkPersistence.SaveLinkedConnection(t.Context(), connection, secret)
+		require.NoError(t, err)
+		originalSnapshot := domain.ProviderSnapshot{
+			ID:               "snapshot-" + fake.UUID().V4(),
+			TenantID:         connection.TenantID,
+			ConnectionID:     connection.ID,
+			Subject:          domain.ProviderSnapshotSubjectConnection,
+			Kind:             domain.ProviderSnapshotKindConnection,
+			ProviderObjectID: connection.ProviderReference,
+			DocumentJSON:     []byte(`{"session":"original"}`),
+			CapturedAt:       now,
+		}
+		_, err = persistence.NewProviderSnapshotStoreFromStore(store).SaveProviderSnapshot(
+			t.Context(), originalSnapshot,
+		)
+		require.NoError(t, err)
+		nextRunAt := now.Add(24 * time.Hour)
+		_, err = store.SaveBankConnectionSchedule(t.Context(), domain.BankConnectionSchedule{
+			ConnectionID: connection.ID,
+			Interval:     24 * time.Hour,
+			NextRunAt:    &nextRunAt,
+			Enabled:      true,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		})
+		require.NoError(t, err)
+
+		linkLookupHeld := make(chan struct{})
+		releaseLink := make(chan struct{})
+		var releaseLinkOnce sync.Once
+		var linkLookupBlocked atomic.Bool
+		deleteAttempted := make(chan struct{})
+		var deleteLockTimeout atomic.Bool
+		lookupCallbackName := "hold-link-lookup-" + fake.UUID().V4()
+		require.NoError(t, store.DB().Callback().Query().After("gorm:query").Register(
+			lookupCallbackName,
+			func(tx *gorm.DB) {
+				if tx.Statement.Table != "finance_bank_connections" {
+					return
+				}
+				if !linkLookupBlocked.CompareAndSwap(false, true) {
+					return
+				}
+				close(linkLookupHeld)
+				<-releaseLink
+			},
+		))
+		t.Cleanup(func() {
+			require.NoError(t, store.DB().Callback().Query().Remove(lookupCallbackName))
+		})
+		deleteCallbackName := "observe-connection-delete-" + fake.UUID().V4()
+		require.NoError(t, store.DB().Callback().Delete().Before("gorm:delete").Register(
+			deleteCallbackName,
+			func(tx *gorm.DB) {
+				if tx.Statement.Table != "finance_bank_connections" ||
+					!deleteLockTimeout.CompareAndSwap(false, true) {
+					return
+				}
+				if lockErr := tx.Exec("SET LOCAL lock_timeout = '100ms'").Error; lockErr != nil {
+					tx.AddError(lockErr)
+					return
+				}
+				close(deleteAttempted)
+			},
+		))
+		t.Cleanup(func() {
+			require.NoError(t, store.DB().Callback().Delete().Remove(deleteCallbackName))
+		})
+
+		retry := connection
+		retry.ID = "connection-retry-" + fake.UUID().V4()
+		retry.SecretID = "secret-retry-" + fake.UUID().V4()
+		retrySecret := secret
+		retrySecret.ID = retry.SecretID
+		retrySnapshot := originalSnapshot
+		retrySnapshot.ID = "snapshot-retry-" + fake.UUID().V4()
+		retrySnapshot.DocumentJSON = []byte(`{"session":"retry"}`)
+		retrySchedule := domain.BankConnectionSchedule{
+			Interval: 24 * time.Hour, NextRunAt: &nextRunAt, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		}
+		linkDone := make(chan error, 1)
+		deleteDone := make(chan error, 1)
+		var linkStarted, linkFinished atomic.Bool
+		var deleteStarted, deleteFinished atomic.Bool
+		testContext, cancelTestContext := context.WithCancel(t.Context())
+		releaseLinkAndWait := func() {
+			releaseLinkOnce.Do(func() { close(releaseLink) })
+		}
+		waitForCompletion := func(name string, started, finished *atomic.Bool, done <-chan error) {
+			if !started.Load() || finished.Load() {
+				return
+			}
+			select {
+			case <-done:
+				finished.Store(true)
+			case <-time.After(5 * time.Second):
+				t.Errorf("%s goroutine did not finish during cleanup", name)
+			}
+		}
+		t.Cleanup(func() {
+			cancelTestContext()
+			releaseLinkAndWait()
+			waitForCompletion("link", &linkStarted, &linkFinished, linkDone)
+			waitForCompletion("delete", &deleteStarted, &deleteFinished, deleteDone)
+		})
+		linkStarted.Store(true)
+		go func() {
+			_, linkErr := linkPersistence.SaveLinkedConnectionWithSnapshotAndSchedule(
+				testContext, retry, retrySecret, &retrySnapshot, &retrySchedule,
+			)
+			linkFinished.Store(true)
+			linkDone <- linkErr
+		}()
+		select {
+		case <-linkLookupHeld:
+		case <-time.After(5 * time.Second):
+			t.Fatal("idempotent link did not reach its locked lookup")
+		}
+
+		orchestrator := newMockbankSyncOrchestrator(t)
+		service := NewBankSyncService(
+			store,
+			orchestrator,
+			WithBankSyncServiceSnapshotDeleter(persistence.NewProviderSnapshotStoreFromStore(store)),
+		)
+		deleteStarted.Store(true)
+		go func() {
+			deleteErr := service.DeleteBankConnection(testContext, DeleteBankConnectionParams{
+				ActorUserID:  actorUserID,
+				TenantID:     connection.TenantID,
+				ConnectionID: connection.ID,
+			})
+			deleteFinished.Store(true)
+			deleteDone <- deleteErr
+		}()
+		select {
+		case <-deleteAttempted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("delete did not reach the parent-row DELETE")
+		}
+		select {
+		case deleteErr := <-deleteDone:
+			var pgErr *pgconn.PgError
+			require.ErrorAs(t, deleteErr, &pgErr)
+			assert.Equal(t, "55P03", pgErr.Code, "DELETE must time out on the link's parent-row lock")
+		case <-time.After(5 * time.Second):
+			t.Fatal("DELETE did not time out while the link held the parent-row lock")
+		}
+		releaseLinkAndWait()
+		select {
+		case linkErr := <-linkDone:
+			require.NoError(t, linkErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("idempotent link did not finish after its lock was released")
+		}
+		require.NoError(t, service.DeleteBankConnection(t.Context(), DeleteBankConnectionParams{
+			ActorUserID:  actorUserID,
+			TenantID:     connection.TenantID,
+			ConnectionID: connection.ID,
+		}))
+
+		_, err = store.GetBankConnection(t.Context(), connection.ID)
+		require.ErrorIs(t, err, persistence.ErrBankConnectionNotFound)
+		_, err = store.GetBankConnectionSchedule(t.Context(), connection.ID)
+		require.ErrorIs(t, err, persistence.ErrBankConnectionScheduleNotFound)
+		snapshots, err := persistence.NewProviderSnapshotStoreFromStore(store).ListProviderSnapshotsByConnection(
+			t.Context(), connection.ID,
+		)
+		require.NoError(t, err)
+		assert.Empty(t, snapshots)
 	})
 
 	t.Run("validates schedule metadata and retains prior schedule projections", func(t *testing.T) {

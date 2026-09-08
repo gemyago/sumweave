@@ -468,6 +468,12 @@ func (s *BankSyncService) deleteBankConnectionOwnedMetadata(
 	ctx context.Context,
 	connection domain.BankConnection,
 ) error {
+	// Delete the connection first to take the parent-row lock before owned
+	// state. Link persistence takes this same lock before saving a snapshot or
+	// schedule, preventing an orphaned write after deletion.
+	if err := s.store.DeleteBankConnection(ctx, connection.ID); err != nil {
+		return fmt.Errorf("delete bank connection: %w", err)
+	}
 	if s.syncStateJournalDeleter != nil {
 		deleteSyncStatesErr := s.syncStateJournalDeleter.DeleteSyncStatesByConnection(ctx, connection.ID)
 		if deleteSyncStatesErr != nil { // coverage-ignore // Journal-store errors are covered by persistence tests.
@@ -484,7 +490,6 @@ func (s *BankSyncService) deleteBankConnectionOwnedMetadata(
 		func(ctx context.Context) error { return s.store.DeleteBalanceSnapshots(ctx, connection.ID) },
 		func(ctx context.Context) error { return s.store.DeleteConnectionProviderAccounts(ctx, connection.ID) },
 		func(ctx context.Context) error { return s.store.DeleteBankConnectionSchedule(ctx, connection.ID) },
-		func(ctx context.Context) error { return s.store.DeleteBankConnection(ctx, connection.ID) },
 		func(ctx context.Context) error { return s.store.DeleteConnectionSecret(ctx, connection.SecretID) },
 	} {
 		if stepErr := step(ctx); stepErr != nil { // coverage-ignore // Store errors are covered by persistence tests.

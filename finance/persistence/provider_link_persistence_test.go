@@ -17,6 +17,140 @@ import (
 )
 
 func TestProviderLinkPersistence(t *testing.T) {
+	t.Run(
+		"rolls back a linked connection when its initial schedule cannot be saved and repairs without changing existing state",
+		func(t *testing.T) {
+			fake := faker.New()
+			store := NewStore(openTestDatabase(t))
+			linkPersistence := NewProviderLinkPersistence(store)
+			now := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.FixedZone("test", 2*60*60))
+			connection := domain.BankConnection{
+				ID:                "connection-" + fake.UUID().V4(),
+				TenantID:          "tenant-" + fake.UUID().V4(),
+				Provider:          string(domain.ProviderIDPKO),
+				ConnectorID:       domain.ProviderConnectorIDEnableBanking,
+				ProviderReference: "reference-" + fake.UUID().V4(),
+				SecretID:          "secret-" + fake.UUID().V4(),
+				State:             domain.BankConnectionStateActive,
+				CreatedAt:         now,
+				UpdatedAt:         now,
+			}
+			secret := domain.ConnectionSecret{
+				ID:        connection.SecretID,
+				Provider:  connection.Provider,
+				Reference: connection.ProviderReference,
+				Envelope: credentials.Envelope{
+					KeyVersion: "v1", Algorithm: "test", Nonce: "nonce", Ciphertext: "ciphertext",
+				},
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			snapshot := &domain.ProviderSnapshot{
+				ID:               "snapshot-" + fake.UUID().V4(),
+				TenantID:         connection.TenantID,
+				ConnectionID:     connection.ID,
+				Subject:          domain.ProviderSnapshotSubjectConnection,
+				Kind:             domain.ProviderSnapshotKindConnection,
+				ProviderObjectID: connection.ProviderReference,
+				DocumentJSON:     []byte(`{"session":"typed"}`),
+				CapturedAt:       now,
+			}
+			nextRunAt := now.Add(24 * time.Hour)
+			schedule := &domain.BankConnectionSchedule{
+				ConnectionID: connection.ID,
+				Interval:     24 * time.Hour,
+				NextRunAt:    &nextRunAt,
+				Enabled:      true,
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			}
+			callbackName := "fail-link-schedule-" + fake.UUID().V4()
+			scheduleErr := errors.New(fake.Lorem().Sentence(3))
+			require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register(
+				callbackName,
+				func(tx *gorm.DB) {
+					if tx.Statement.Table == (bankConnectionScheduleModel{}).TableName() {
+						tx.AddError(scheduleErr)
+					}
+				},
+			))
+
+			_, err := linkPersistence.SaveLinkedConnectionWithSnapshotAndSchedule(
+				t.Context(), connection, secret, snapshot, schedule,
+			)
+			require.ErrorIs(t, err, scheduleErr)
+			var secretCount int64
+			require.NoError(t, store.DB().Table((connectionSecretModel{}).TableName()).
+				Where("id = ?", secret.ID).Count(&secretCount).Error)
+			assert.Zero(t, secretCount)
+			var connectionCount int64
+			require.NoError(t, store.DB().Table((bankConnectionModel{}).TableName()).
+				Where("id = ?", connection.ID).Count(&connectionCount).Error)
+			assert.Zero(t, connectionCount)
+			var snapshotCount int64
+			require.NoError(t, store.DB().Table((providerSnapshotModel{}).TableName()).
+				Where("id = ?", snapshot.ID).Count(&snapshotCount).Error)
+			assert.Zero(t, snapshotCount)
+			var scheduleCount int64
+			require.NoError(t, store.DB().Table((bankConnectionScheduleModel{}).TableName()).
+				Where("connection_id = ?", connection.ID).Count(&scheduleCount).Error)
+			assert.Zero(t, scheduleCount)
+
+			require.NoError(t, store.DB().Callback().Create().Remove(callbackName))
+			saved, err := linkPersistence.SaveLinkedConnectionWithSnapshotAndSchedule(
+				t.Context(), connection, secret, snapshot, schedule,
+			)
+			require.NoError(t, err)
+			persistedSchedule, err := store.GetBankConnectionSchedule(t.Context(), saved.ID)
+			require.NoError(t, err)
+			assert.Equal(t, schedule.ConnectionID, persistedSchedule.ConnectionID)
+			assert.Equal(t, schedule.Interval, persistedSchedule.Interval)
+			assert.True(t, schedule.NextRunAt.Equal(*persistedSchedule.NextRunAt))
+			assert.Equal(t, schedule.Enabled, persistedSchedule.Enabled)
+
+			lastScheduledAt := now.Add(-4 * time.Hour)
+			lastStartedAt := now.Add(-3 * time.Hour)
+			lastCompletedAt := now.Add(-2 * time.Hour)
+			existingSchedule := *persistedSchedule
+			existingSchedule.Interval = 47 * time.Hour
+			existingSchedule.NextRunAt = &lastCompletedAt
+			existingSchedule.LastScheduledAt = &lastScheduledAt
+			existingSchedule.LastStartedAt = &lastStartedAt
+			existingSchedule.LastCompletedAt = &lastCompletedAt
+			existingSchedule.LastJobID = "job-" + fake.UUID().V4()
+			existingSchedule.Enabled = false
+			existingSchedule.UpdatedAt = now.Add(time.Hour)
+			_, err = store.SaveBankConnectionSchedule(t.Context(), existingSchedule)
+			require.NoError(t, err)
+			beforeDuplicate, err := store.GetBankConnectionSchedule(t.Context(), saved.ID)
+			require.NoError(t, err)
+			require.False(t, beforeDuplicate.Enabled)
+
+			duplicateSchedule := *schedule
+			duplicateNextRunAt := now.Add(48 * time.Hour)
+			duplicateSchedule.Interval = 12 * time.Hour
+			duplicateSchedule.NextRunAt = &duplicateNextRunAt
+			repeated, err := linkPersistence.SaveLinkedConnectionWithSnapshotAndSchedule(
+				t.Context(), connection, secret, snapshot, &duplicateSchedule,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, saved.ID, repeated.ID)
+			afterDuplicate, err := store.GetBankConnectionSchedule(t.Context(), saved.ID)
+			require.NoError(t, err)
+			assert.Equal(t, *beforeDuplicate, *afterDuplicate)
+
+			require.NoError(t, store.DeleteBankConnectionSchedule(t.Context(), saved.ID))
+			repaired, err := linkPersistence.SaveLinkedConnectionWithSnapshotAndSchedule(
+				t.Context(), connection, secret, snapshot, schedule,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, saved.ID, repaired.ID)
+			persistedSchedule, err = store.GetBankConnectionSchedule(t.Context(), repaired.ID)
+			require.NoError(t, err)
+			assert.True(t, schedule.NextRunAt.Equal(*persistedSchedule.NextRunAt))
+		},
+	)
+
 	t.Run("atomically saves final connection snapshots and rolls back an invalid one", func(t *testing.T) {
 		assertSnapshotEqual := func(expected, actual domain.ProviderSnapshot) {
 			t.Helper()

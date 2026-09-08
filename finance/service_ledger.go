@@ -478,7 +478,14 @@ func (s *LedgerService) ListTransactions(
 		params.Source,
 		params.Status,
 		params.IncludeHidden,
-		persistence.ListTransactionsPage{Limit: params.Limit, Offset: params.Offset},
+		persistence.ListTransactionsPage{
+			Limit:         params.Limit,
+			Offset:        params.Offset,
+			Kind:          params.Kind,
+			StartDate:     params.StartDate,
+			EndDate:       params.EndDate,
+			SortAscending: params.SortAscending,
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list transactions: %w", err)

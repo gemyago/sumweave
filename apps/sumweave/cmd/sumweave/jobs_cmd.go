@@ -10,14 +10,15 @@ import (
 )
 
 const (
-	jobsCommandName       = "jobs"
-	jobsWorkerCommandName = "worker"
-	enqueueDueCommandName = "enqueue-due"
+	jobsCommandName          = "jobs"
+	jobsWorkerCommandName    = "worker"
+	jobsSchedulerCommandName = "scheduler"
+	enqueueDueCommandName    = "enqueue-due"
 )
 
 func newJobsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: jobsCommandName, Short: "Run durable jobs worker and scheduler commands"}
-	cmd.AddCommand(newJobsWorkerCmd(), newJobsEnqueueDueCmd())
+	cmd.AddCommand(newJobsWorkerCmd(), newJobsSchedulerCmd(), newJobsEnqueueDueCmd())
 	return cmd
 }
 
@@ -42,7 +43,14 @@ type jobsSchedulerCommandRunner interface {
 	Close(context.Context) error
 }
 
+type jobsSchedulerLoopCommandRunner interface {
+	jobsSchedulerCommandRunner
+	Run(context.Context) error
+}
+
 type jobsSchedulerResolver func(*cobra.Command) (jobsSchedulerCommandRunner, error)
+
+type jobsSchedulerLoopResolver func(*cobra.Command) (jobsSchedulerLoopCommandRunner, error)
 
 func newJobsWorkerCmd() *cobra.Command {
 	return newJobsWorkerCmdWithResolver(resolveJobsWorker)
@@ -78,6 +86,31 @@ func newJobsWorkerCmdWithResolver(resolver jobsWorkerResolver) *cobra.Command {
 
 func newJobsEnqueueDueCmd() *cobra.Command {
 	return newJobsEnqueueDueCmdWithResolver(resolveJobsScheduler)
+}
+
+func newJobsSchedulerCmd() *cobra.Command {
+	return newJobsSchedulerCmdWithResolver(resolveJobsSchedulerLoop)
+}
+
+func newJobsSchedulerCmdWithResolver(resolver jobsSchedulerLoopResolver) *cobra.Command {
+	return &cobra.Command{
+		Use:   jobsSchedulerCommandName,
+		Short: "Run the finance schedule publisher loop",
+		RunE: func(cmd *cobra.Command, _ []string) (err error) {
+			scheduler, err := resolver(cmd)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				err = errors.Join(err, scheduler.Close(cmd.Context()))
+			}()
+			err = scheduler.Run(cmd.Context())
+			if errors.Is(err, context.Canceled) && cmd.Context().Err() != nil {
+				return nil
+			}
+			return err
+		},
+	}
 }
 
 func newJobsEnqueueDueCmdWithResolver(resolver jobsSchedulerResolver) *cobra.Command {
@@ -117,6 +150,15 @@ func resolveJobsWorker(cmd *cobra.Command) (jobsWorkerCommandRunner, error) { //
 
 //nolint:ireturn
 func resolveJobsScheduler(cmd *cobra.Command) (jobsSchedulerCommandRunner, error) { // coverage-ignore
+	return resolveJobsSchedulerRuntime(cmd)
+}
+
+//nolint:ireturn
+func resolveJobsSchedulerLoop(cmd *cobra.Command) (jobsSchedulerLoopCommandRunner, error) { // coverage-ignore
+	return resolveJobsSchedulerRuntime(cmd)
+}
+
+func resolveJobsSchedulerRuntime(cmd *cobra.Command) (*jobsSchedulerRuntime, error) { // coverage-ignore
 	options, err := jobsOptionsFromRoot(cmd.Root())
 	if err != nil {
 		return nil, err
@@ -170,12 +212,15 @@ func (runtime *jobsWorkerRuntime) Close(ctx context.Context) error { // coverage
 }
 
 type jobsSchedulerRuntime struct {
-	scheduler jobsSchedulerRunner
+	scheduler jobsSchedulerLoopCommandRunner
 	close     func(context.Context) error
 }
 
 func (runtime *jobsSchedulerRuntime) EnqueueDue(ctx context.Context) (int, error) { // coverage-ignore
 	return runtime.scheduler.EnqueueDue(ctx)
+}
+func (runtime *jobsSchedulerRuntime) Run(ctx context.Context) error { // coverage-ignore
+	return runtime.scheduler.Run(ctx)
 }
 func (runtime *jobsSchedulerRuntime) Close(ctx context.Context) error { // coverage-ignore
 	return runtime.close(ctx)
