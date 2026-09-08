@@ -284,12 +284,12 @@ describe('Finance dashboard page', () => {
   it('pages dashboard transactions inside the selected range and carries that range to the ledger', async () => {
     const user = userEvent.setup()
     window.location.hash = '#/finance?startDate=2026-06-01&endDate=2026-06-30'
-    const transactions = (offset: number) => Array.from({ length: 5 }, (_, index) => ({
+    const transactions = (offset: number, count = 6) => Array.from({ length: count }, (_, index) => ({
       id: `tx-${offset + index}`,
       tenantId: 'tenant-1', accountId: 'acc-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: -100,
       currency: 'USD', description: `Transaction ${offset + index}`, effectiveAt: new Date(2026, 5, 30 - offset - index), categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: new Date(), updatedAt: new Date(),
     }))
-    mocks.listTransactions.mockResolvedValueOnce(transactions(0)).mockResolvedValueOnce(transactions(5)).mockResolvedValueOnce(transactions(0))
+    mocks.listTransactions.mockResolvedValueOnce(transactions(0)).mockResolvedValueOnce(transactions(5, 5)).mockResolvedValueOnce(transactions(0))
     mocks.getDashboard.mockResolvedValueOnce({
       period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
       settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
@@ -304,12 +304,31 @@ describe('Finance dashboard page', () => {
     await user.click(screen.getByRole('button', { name: 'Dashboard transaction pages: older page' }))
     expect(await screen.findByText('Transaction 5')).toBeInTheDocument()
     expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({
-      startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1), limit: 5, offset: 5,
+      startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1), limit: 6, offset: 5,
     }))
 
     await user.click(screen.getByRole('button', { name: 'Dashboard transaction pages: newer page' }))
     expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
     expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }))
+  })
+
+  it('keeps newer navigation available on a full final dashboard page', async () => {
+    const user = userEvent.setup()
+    const transactions = (offset: number, count: number) => Array.from({ length: count }, (_, index) => ({
+      id: `tx-${offset + index}`,
+      tenantId: 'tenant-1', accountId: 'acc-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: -100,
+      currency: 'USD', description: `Transaction ${offset + index}`, effectiveAt: new Date(2026, 5, 30 - offset - index), categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: new Date(), updatedAt: new Date(),
+    }))
+    mocks.listTransactions.mockResolvedValueOnce(transactions(0, 6)).mockResolvedValueOnce(transactions(5, 5))
+
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Dashboard transaction pages: older page' }))
+
+    expect(await screen.findByText('Transaction 5')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Dashboard transaction pages: older page' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Dashboard transaction pages: newer page' })).toBeEnabled()
+    expect(mocks.listTransactions).toHaveBeenCalledTimes(2)
   })
 
   it('navigates forward one local calendar month per click', async () => {

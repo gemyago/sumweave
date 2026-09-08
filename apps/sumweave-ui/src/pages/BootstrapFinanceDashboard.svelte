@@ -267,7 +267,7 @@
 
   const visibleRecentTransactions = $derived.by(() => recentTransactions.slice(0, TRANSACTION_SECTION_LIMIT))
   const dashboardTransactionPage = $derived(Math.floor(transactionOffset / TRANSACTION_SECTION_LIMIT) + 1)
-  const hasOlderDashboardTransactions = $derived(recentTransactions.length === TRANSACTION_SECTION_LIMIT)
+  const hasOlderDashboardTransactions = $derived(recentTransactions.length > TRANSACTION_SECTION_LIMIT)
   const hasNewerDashboardTransactions = $derived(transactionOffset > 0)
   const accountNameById = $derived(new Map(historyAccounts.map((account) => [account.id, account.name])))
   const hiddenAccountIds = $derived(new Set(historyAccounts.filter((account) => account.hiddenAt).map((account) => account.id)))
@@ -464,7 +464,7 @@
           includeHidden: true,
           startDate: range.startDate,
           endDate: range.endDate,
-          limit: TRANSACTION_SECTION_LIMIT,
+          limit: TRANSACTION_SECTION_LIMIT + 1,
           offset: 0,
         }),
         financeApi.listConnections({ tenantId }),
@@ -597,7 +597,7 @@
         includeHidden: true,
         startDate: range.startDate,
         endDate: range.endDate,
-        limit: TRANSACTION_SECTION_LIMIT,
+        limit: TRANSACTION_SECTION_LIMIT + 1,
         offset,
       })
       if (financeShell.selectedTenantId !== tenantId || activeDashboardRange !== range) return false
@@ -662,11 +662,10 @@
 <section
   class="container-fluid px-0"
   aria-labelledby="finance-dashboard-heading"
-  data-bootstrap-finance-dashboard="true"
 >
-  <div class="d-grid gap-4">
+  <div class="d-grid gap-2 gap-sm-4">
     <header class="card border-0 shadow-sm">
-      <div class="card-body p-3 p-xl-5">
+      <div class="card-body p-2 p-sm-3 p-xl-5">
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
           <div>
             <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Finance overview</p>
@@ -689,16 +688,16 @@
           </div>
         </div>
 
-        <hr class="my-3 my-xl-4" />
+        <hr class="d-none d-sm-block my-3 my-xl-4" />
 
-        <div class="row g-4 align-items-start finance-dashboard-period">
+        <div class="row g-2 g-sm-4 align-items-start">
           <div class="col-12 col-xl-5">
             <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Reporting period</p>
             {#if dashboard}
               <h2 class="h5 mb-1">
                 {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(inclusiveDashboardEndDate(dashboard.period.endDate)!)}
               </h2>
-              <p class="text-body-secondary mb-2">Period: {dashboardPeriodModeLabel()}</p>
+              <p class="text-body-secondary mb-1 mb-sm-2">Period: {dashboardPeriodModeLabel()}</p>
               {#if isHistoricalPeriod}
                 <p class="text-body-secondary small mb-0">Past activity is valued using today’s latest FX rates, not an end-of-period rate.</p>
               {/if}
@@ -709,7 +708,7 @@
           </div>
 
           <div class="col-12 col-xl-7">
-            <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="d-flex flex-wrap gap-2 mb-2 mb-sm-3">
               <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openPreviousPeriod()} disabled={!dashboard || loadingDashboard}>
                 Previous month
               </button>
