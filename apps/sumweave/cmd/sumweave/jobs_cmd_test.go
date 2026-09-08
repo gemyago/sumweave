@@ -71,22 +71,6 @@ func TestJobsCommandErrorHandling(t *testing.T) {
 		require.ErrorIs(t, err, cleanupErr)
 	})
 
-	t.Run("scheduler joins operation and cleanup errors", func(t *testing.T) {
-		scheduler := newMockjobsSchedulerLoopCommandRunner(t)
-		operationErr := errors.New(fake.Lorem().Sentence(3))
-		cleanupErr := errors.New(fake.Lorem().Sentence(3))
-		scheduler.EXPECT().Run(mock.Anything).Return(operationErr)
-		scheduler.EXPECT().Close(mock.Anything).Return(cleanupErr)
-
-		cmd := newJobsSchedulerCmdWithResolver(func(*cobra.Command) (jobsSchedulerLoopCommandRunner, error) {
-			return scheduler, nil
-		})
-
-		err := cmd.ExecuteContext(t.Context())
-		require.ErrorIs(t, err, operationErr)
-		require.ErrorIs(t, err, cleanupErr)
-	})
-
 	t.Run("resolver errors do not close worker", func(t *testing.T) {
 		worker := newMockjobsWorkerCommandRunner(t)
 		resolverErr := errors.New(fake.Lorem().Sentence(3))
@@ -125,4 +109,17 @@ func TestJobsOptionsFromRoot(t *testing.T) {
 	options, err := jobsOptionsFromRoot(newRootCmd())
 	require.NoError(t, err)
 	require.True(t, options.DisablePProf)
+}
+
+func TestJobsCommandModes(t *testing.T) {
+	cmd := newJobsCmd()
+
+	for _, name := range []string{jobsWorkerCommandName, enqueueDueCommandName} {
+		child, _, err := cmd.Find([]string{name})
+		require.NoError(t, err)
+		require.Equal(t, name, child.Name())
+	}
+
+	_, _, err := cmd.Find([]string{"scheduler"})
+	require.Error(t, err)
 }

@@ -17,13 +17,6 @@ module.exports = {
       interpreter: 'none',
     },
     {
-      name: 'scheduler',
-      namespace: 'backend',
-      cwd: './apps/sumweave',
-      script: 'go run ./cmd/sumweave jobs scheduler --env local --json-logs | pino-pretty',
-      interpreter: 'none',
-    },
-    {
       name: 'ui',
       script: 'npm run dev -- --host 127.0.0.1 --port 5173',
       interpreter: 'none',

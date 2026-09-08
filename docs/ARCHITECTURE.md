@@ -48,18 +48,16 @@ uses that same database with the `sumweave_runtime_` prefix. Run
 `sumweave_owner`, `sumweave_migrator`, and `sumweave_runtime` roles; prepares
 `sumweave_local` and `sumweave_test`; runs `sumweave db-migrate` once for each;
 and grants the runtime role access to the migrated tables and sequences. After
-that setup, local PM2 runs the API-only `start`, `jobs worker`, and `jobs
-scheduler` commands as separate processes. The scheduler repeatedly runs the
-same tick exposed by `jobs enqueue-due`. The
+that setup, local PM2 runs the API-only `start` and `jobs worker` commands as
+separate processes; `jobs enqueue-due` remains a separate scheduler tick. The
 combined `sumweave start-all` command is available for diagnostics. API-only
 `start` can publish dispatch messages but does not start a message router or
 execute background work.
 
 The retained process modes are `start` for API-only serving, `jobs worker` for
-the durable appdispatch consumer, `jobs scheduler` for the scheduler loop, and
-`jobs enqueue-due` for one scheduler tick. `start-all` explicitly combines the
-same three capabilities for diagnostics; the worker and scheduler remain
-separate deployment processes.
+the durable appdispatch consumer, and `jobs enqueue-due` for one scheduler tick.
+`start-all` explicitly combines those three capabilities for diagnostics; the
+worker and scheduler remain separate deployment processes.
 
 The scheduler first repairs any active bank connection missing a schedule by
 inserting an enabled daily schedule without changing existing schedule state. It

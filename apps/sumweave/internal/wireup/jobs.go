@@ -54,7 +54,6 @@ type WorkerRoot struct {
 type SchedulerRoot struct {
 	bankSchedules         *financepkg.BankConnectionScheduleService
 	fxSchedules           *financepkg.FXRefreshScheduleService
-	logger                *slog.Logger
 	SchedulerLoopInterval time.Duration
 
 	shutdownHooks *lifecycle.ShutdownHooks
@@ -423,32 +422,9 @@ func buildScheduler(
 	return &SchedulerRoot{
 		bankSchedules:         financeModule.BankConnectionScheduleService,
 		fxSchedules:           financeModule.FXRefreshScheduleService,
-		logger:                infrastructure.rootLogger,
 		SchedulerLoopInterval: rootConfig.Scheduler.LoopInterval,
 		shutdownHooks:         infrastructure.shutdownHooks,
 	}, nil
-}
-
-// Run periodically publishes due finance schedule occurrences until shutdown.
-// It never executes the resulting finance work.
-func (root *SchedulerRoot) Run(ctx context.Context) error { // coverage-ignore
-	root.enqueueDueAndLog(ctx)
-	ticker := time.NewTicker(root.SchedulerLoopInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			root.enqueueDueAndLog(ctx)
-		}
-	}
-}
-
-func (root *SchedulerRoot) enqueueDueAndLog(ctx context.Context) { // coverage-ignore
-	if _, err := root.EnqueueDue(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		root.logger.ErrorContext(ctx, "scheduler tick failed", "error", err)
-	}
 }
 
 // EnqueueDue invokes each finance-owned due service. It only publishes semantic

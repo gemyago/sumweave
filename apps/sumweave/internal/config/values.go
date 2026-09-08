@@ -412,9 +412,6 @@ func (values *Values) SchedulerRoot(environment string) (SchedulerRootConfig, er
 	if enableBanking.ValidDays <= 0 {
 		return SchedulerRootConfig{}, errors.New("scheduler enable banking valid days must be positive")
 	}
-	if root.Scheduler.LoopInterval <= 0 {
-		return SchedulerRootConfig{}, errors.New("scheduler loop interval must be positive")
-	}
 	return root, nil
 }
 

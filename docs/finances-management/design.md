@@ -153,8 +153,8 @@ Scheduling decisions:
   admin/diagnostics UI.
 - In Kubernetes, use standard CronJobs for the scheduler tick, for example a
   periodic `sumweave jobs enqueue-due` command.
-- In local development, PM2 runs `sumweave jobs scheduler`, which repeatedly
-  invokes the same tick as `enqueue-due` for recurring local sync.
+- In local development, run `sumweave jobs enqueue-due` manually when scheduled
+  behavior needs to be exercised.
 - A newly linked active bank connection receives an enabled daily schedule; its
   first run is 24 hours after linking.
 - Each scheduler tick idempotently repairs active connections that predate that

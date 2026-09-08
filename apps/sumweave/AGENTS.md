@@ -51,7 +51,7 @@ Key rules:
 
 Invoke repo-scoped PM2 commands from the repo root:
 
-`pm2 start ecosystem.config.js` creates the API, worker, scheduler, and UI development processes.
+`pm2 start ecosystem.config.js` creates the API, worker, and UI development processes.
 
 Before starting or restarting backend processes that rely on persisted tables, run `make postgres-bootstrap` from the repository root.
 
@@ -61,8 +61,8 @@ For the optional HTTPS backend and Vite development workflow, follow [../../docs
 
 Release build workflow is `make -C build dist` from the repository root. It builds the SPA once, embeds it before CGO-disabled Linux amd64/arm64 Go cross-compilation, and stages platform-agent skills. Runtime UI serving is embedded-only: if embedded `dist/index.html` is absent, the backend stays API-only.
 
-PM2 starts the API-only `start` command on port 4501 plus separate `jobs worker` and `jobs scheduler` commands. The backend processes use the `backend` namespace as `api`, `worker`, and `scheduler`; `ui` remains in PM2's default namespace.
-PM2 remains repo-scoped, but `ecosystem.config.js` sets all backend process working directories to `apps/sumweave`.
+PM2 starts the API-only `start` command on port 4501 and the separate `jobs worker` command. Both processes use the `backend` namespace as `api` and `worker`; `ui` remains in PM2's default namespace.
+PM2 remains repo-scoped, but `ecosystem.config.js` sets both backend process working directories to `apps/sumweave`.
 
 PM2 accepts a namespace as the positional lifecycle/log target: use `pm2 start|stop|restart|delete backend` or `pm2 logs backend` for the existing backend group. If the PM2 command shape changed or you need to guarantee the current ecosystem config is applied, recreate it with `pm2 delete backend && pm2 start ecosystem.config.js` from the repo root; PM2 can otherwise keep an older command definition.
 
@@ -70,7 +70,7 @@ Durable jobs workflow:
 - `make postgres-bootstrap` is the standard schema setup path for local/dev and PM2-backed environments.
 - `sumweave user add --if-not-exists` supports retry-safe bootstrap hooks
   without resetting an existing password.
-- PM2 runs `sumweave start`, `sumweave jobs worker`, and `sumweave jobs scheduler` as the standard local backend mode. The scheduler repeatedly runs the same finance-owned tick as `sumweave jobs enqueue-due`.
+- PM2 runs `sumweave start` and `sumweave jobs worker` as the standard local backend mode; run `sumweave jobs enqueue-due` separately when a scheduler tick is required.
 - `sumweave start-all` combines the HTTP server, durable consumer, and scheduler loop for startup diagnostics only.
 - `sumweave start` starts only the API/server path; it must not execute durable jobs inline.
 - `sumweave jobs worker` runs the observed-job consumer plus independent `finance.classification.v1` and `finance.transfer-matching.v1` ordinary event routers. Each committed bank-sync window can trigger both enrichments for its exact range independently; automatic handling creates no job projection and does not alter the bank-sync job outcome.

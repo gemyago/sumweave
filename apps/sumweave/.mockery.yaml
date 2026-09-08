@@ -75,6 +75,5 @@ packages:
       jobsWorkerCommandRunner:
       jobsSchedulerRunner:
       jobsSchedulerCommandRunner:
-      jobsSchedulerLoopCommandRunner:
       startAllHTTPServer:
       startAllRunner:
