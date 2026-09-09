@@ -13,7 +13,7 @@
 
 ## 4. Tenant-Scoped Provenance Aggregation Correction
 
-- [ ] 4.1 Scope the provenance aggregate to the requested tenant's bank connections so transfer-matching attempts do not group the database-wide provider-match table. Follow TDD flow: first extend the focused PostgreSQL persistence case with saved tenant-owned connections and foreign-tenant match data, proving foreign provenance is ignored while one, repeated-same, conflicting, no-mapping, eligibility, and one-row-per-transaction behavior remain correct; then join and filter through the existing indexed bank-connection ownership before grouping, without adding a schema or index change, and verify the finance module.
+- [x] 4.1 Scope the provenance aggregate to the requested tenant's bank connections so transfer-matching attempts do not group the database-wide provider-match table. Follow TDD flow: first extend the focused PostgreSQL persistence case with saved tenant-owned connections and foreign-tenant match data, proving foreign provenance is ignored while one, repeated-same, conflicting, no-mapping, eligibility, and one-row-per-transaction behavior remain correct; then join and filter through the existing indexed bank-connection ownership before grouping, without adding a schema or index change, and verify the finance module.
 
 ## 5. Bounded Worker CI Failure Investigation
 

@@ -508,6 +508,7 @@ func TestTransferPairStore(t *testing.T) {
 		now := time.Date(2026, time.September, 8, 12, 0, 0, 0, time.FixedZone("matching", -3*60*60))
 		_, coreStore, transactions, store := makeStores(t)
 		tenantID := "tenant-" + fake.UUID().V4()
+		otherTenantID := "tenant-other-" + fake.UUID().V4()
 		accounts := []domain.Account{
 			{
 				ID: "account-first-" + fake.UUID().V4(), TenantID: tenantID,
@@ -544,15 +545,35 @@ func TestTransferPairStore(t *testing.T) {
 		conflictingMapping := makeTransaction(
 			"transaction-conflicting-"+fake.UUID().V4(), accounts[1].ID, domain.TransactionStatusBooked,
 		)
+		foreignMapping := makeTransaction(
+			"transaction-foreign-"+fake.UUID().V4(), accounts[0].ID, domain.TransactionStatusBooked,
+		)
 		ineligible := makeTransaction(
 			"transaction-pending-"+fake.UUID().V4(), accounts[0].ID, domain.TransactionStatusPending,
 		)
-		for _, transaction := range []domain.Transaction{oneMapping, noMapping, repeatedMapping, conflictingMapping, ineligible} {
+		for _, transaction := range []domain.Transaction{oneMapping, noMapping, repeatedMapping, conflictingMapping, foreignMapping, ineligible} {
 			_, err := transactions.SaveTransaction(t.Context(), transaction)
 			require.NoError(t, err)
 		}
 		connectionOneID := "connection-one-" + fake.UUID().V4()
 		connectionTwoID := "connection-two-" + fake.UUID().V4()
+		foreignConnectionID := "connection-foreign-" + fake.UUID().V4()
+		makeConnection := func(id string, connectionTenantID string) domain.BankConnection {
+			return domain.BankConnection{
+				ID: id, TenantID: connectionTenantID, Provider: "provider-" + fake.Lorem().Word(),
+				DisplayName: fake.Company().Name(), ProviderReference: "reference-" + fake.UUID().V4(),
+				SecretID: "secret-" + fake.UUID().V4(), State: domain.BankConnectionStateActive,
+				CreatedAt: now, UpdatedAt: now,
+			}
+		}
+		for _, connection := range []domain.BankConnection{
+			makeConnection(connectionOneID, tenantID),
+			makeConnection(connectionTwoID, tenantID),
+			makeConnection(foreignConnectionID, otherTenantID),
+		} {
+			_, err := coreStore.SaveBankConnection(t.Context(), connection)
+			require.NoError(t, err)
+		}
 		makeMatch := func(transactionID string, connectionID string) domain.ProviderTransactionMatch {
 			return domain.ProviderTransactionMatch{
 				ID: "match-" + fake.UUID().V4(), ConnectionID: connectionID,
@@ -564,10 +585,12 @@ func TestTransferPairStore(t *testing.T) {
 		}
 		for _, match := range []domain.ProviderTransactionMatch{
 			makeMatch(oneMapping.ID, connectionOneID),
+			makeMatch(oneMapping.ID, foreignConnectionID),
 			makeMatch(repeatedMapping.ID, connectionOneID),
 			makeMatch(repeatedMapping.ID, connectionOneID),
 			makeMatch(conflictingMapping.ID, connectionOneID),
 			makeMatch(conflictingMapping.ID, connectionTwoID),
+			makeMatch(foreignMapping.ID, foreignConnectionID),
 		} {
 			_, err := coreStore.SaveProviderTransactionMatch(t.Context(), match)
 			require.NoError(t, err)
@@ -598,6 +621,14 @@ func TestTransferPairStore(t *testing.T) {
 				AmountMinor: noMapping.AmountMinor,
 				EffectiveAt: noMapping.EffectiveAt,
 				Description: noMapping.Description,
+			},
+			foreignMapping.ID: {
+				ID:          foreignMapping.ID,
+				AccountID:   foreignMapping.AccountID,
+				Currency:    foreignMapping.Currency,
+				AmountMinor: foreignMapping.AmountMinor,
+				EffectiveAt: foreignMapping.EffectiveAt,
+				Description: foreignMapping.Description,
 			},
 			repeatedMapping.ID: {
 				ID:           repeatedMapping.ID,

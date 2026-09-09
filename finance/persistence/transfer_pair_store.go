@@ -94,9 +94,12 @@ func (s *TransferPairStore) ListEligibleTransferMatchingTransactions(
 		).
 		Joins(
 			"LEFT JOIN ("+
-				"SELECT transaction_id, CASE WHEN COUNT(DISTINCT connection_id) = 1 THEN MIN(connection_id) ELSE NULL END AS connection_id "+
-				"FROM "+(providerTransactionMatchModel{}).TableName()+" GROUP BY transaction_id"+
+				"SELECT matches.transaction_id, CASE WHEN COUNT(DISTINCT matches.connection_id) = 1 THEN MIN(matches.connection_id) ELSE NULL END AS connection_id "+
+				"FROM "+(providerTransactionMatchModel{}).TableName()+" AS matches "+
+				"JOIN "+(bankConnectionModel{}).TableName()+" AS connections ON connections.id = matches.connection_id "+
+				"WHERE connections.tenant_id = ? GROUP BY matches.transaction_id"+
 				") AS provenance ON provenance.transaction_id = transactions.id",
+			params.TenantID,
 		).
 		Where("transactions.tenant_id = ?", params.TenantID).
 		Where("transactions.effective_at >= ? AND transactions.effective_at < ?", loadStart, loadEndExclusive).
