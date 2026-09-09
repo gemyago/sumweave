@@ -28,7 +28,7 @@
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const financeApi = $derived.by(() => createSignalFinanceApiForAuth({ baseUrl: appBaseUrl, authStore }))
-  const isCreateMode = $derived(!params.transactionId)
+  const isCreateRoute = $derived(!params.transactionId)
   const financeShell = useFinanceShellState()
 
   let loading = $state(true)
@@ -42,6 +42,7 @@
   let tags = $state<FinanceTag[]>([])
   let tagCatalogState = $state<'loading' | 'ready' | 'error'>('loading')
   let transaction = $state<FinanceTransaction | null>(null)
+  const isCreateMode = $derived(isCreateRoute && !transaction)
   let form = $state(makeBlankForm())
   let transferPartner = $state<FinanceTransaction | null>(null)
   let partnerLoading = $state(false)
@@ -152,7 +153,7 @@
     ])
     await loadTagCatalog()
 
-    if (isCreateMode) {
+    if (isCreateRoute) {
       transaction = null
       form = makeBlankForm()
         if (selectableAccounts.length > 0) {
@@ -394,7 +395,7 @@
       } else {
         transaction = await financeApi.updateTransaction({
           tenantId: financeShell.selectedTenantId,
-          transactionId: params.transactionId ?? '',
+          transactionId: transaction!.id,
           description: form.description,
           amountMinor,
           effectiveAt: fromDateTimeLocalValue(form.effectiveAt),

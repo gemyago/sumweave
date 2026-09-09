@@ -161,6 +161,42 @@ describe('Finance transaction editor page', () => {
     focus.mockRestore()
   })
 
+  it('updates the created transaction and preserves its offer with latest saved defaults', async () => {
+    const user = userEvent.setup()
+    const now = new Date('2026-06-20T12:00:00Z')
+    const created = {
+      id: 'tx-new', tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: 1200,
+      currency: 'USD', description: 'Coffee', effectiveAt: now, categoryId: 'cat-1', tagIds: ['tag-1'], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: now, updatedAt: now,
+    }
+    const updated = { ...created, description: 'Coffee beans', tagIds: ['tag-1', 'tag-2'] }
+    mocks.createTransaction.mockResolvedValueOnce(created)
+    mocks.updateTransaction.mockResolvedValueOnce(updated)
+    render(FinanceTransactionEditor, { params: {} })
+
+    await user.selectOptions(await screen.findByLabelText('Transaction category'), 'cat-1')
+    await user.click(screen.getByLabelText('Household'))
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+    expect(await screen.findByRole('button', { name: 'Create rule from this transaction' })).toBeInTheDocument()
+
+    await user.clear(screen.getByLabelText('Transaction description'))
+    await user.type(screen.getByLabelText('Transaction description'), 'Coffee beans')
+    await user.click(screen.getByLabelText('Shared'))
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }))
+
+    await waitFor(() => expect(mocks.updateTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      transactionId: 'tx-new', description: 'Coffee beans', tagIds: ['tag-1', 'tag-2'],
+    })))
+    expect(mocks.createTransaction).toHaveBeenCalledTimes(1)
+    expect(mocks.updateTransaction).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Create rule from this transaction' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Create rule from this transaction' }))
+    await user.click(screen.getByRole('button', { name: 'Save rule' }))
+    await waitFor(() => expect(mocks.createClassificationRule).toHaveBeenCalledWith({
+      tenantId: 'tenant-1', matchType: 'contains', condition: 'Coffee beans', categoryId: 'cat-1', tagIds: ['tag-1', 'tag-2'],
+    }))
+  })
+
   it('keeps details first, clears stale save feedback after an edit, and omits context copy', async () => {
     const user = userEvent.setup()
     render(FinanceTransactionEditor, { params: {} })
