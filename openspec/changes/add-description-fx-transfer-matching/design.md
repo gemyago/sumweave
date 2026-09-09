@@ -37,7 +37,7 @@ Extraction runs once per loaded transaction before indexes are built. Candidate 
 
 Extend `persistence.TransferMatchingTransaction` with the current ledger `Description` and optional unambiguous `ConnectionID`. The existing single tenant-scoped, 144-hour-extended query remains the only matching load and preserves all eligibility predicates.
 
-The query left-joins an aggregate of `finance_provider_transaction_matches` by ledger transaction ID. Exactly one distinct connection ID yields usable provenance; no mapping or multiple distinct connection IDs yields no connection. Group or aggregate before projection so every eligible ledger transaction still appears exactly once. Missing or conflicting provenance does not remove the row and therefore cannot alter same-currency matching.
+The query left-joins an aggregate of `finance_provider_transaction_matches` by ledger transaction ID. Before grouping, that aggregate joins `finance_bank_connections` by connection ID and restricts connections to the requested tenant. This makes the provenance scan use the existing tenant and connection indexes instead of grouping the database-wide match table on every attempt. Exactly one distinct tenant-owned connection ID yields usable provenance; no mapping or multiple distinct connection IDs yields no connection. Group or aggregate before projection so every eligible ledger transaction still appears exactly once. Missing, foreign-tenant, or conflicting provenance does not remove the row and therefore cannot alter same-currency matching. No schema or index change is required.
 
 ### Produce candidate sets from two rules, then decide once
 
