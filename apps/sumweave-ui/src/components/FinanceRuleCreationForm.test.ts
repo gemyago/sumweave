@@ -16,6 +16,8 @@ describe('FinanceRuleCreationForm', () => {
   const props = {
     tenantId: 'tenant-1', offerId: 1, description: 'Visible coffee memo', categoryId: 'category-1',
     categories: [{ id: 'category-1', tenantId: 'tenant-1', name: 'Groceries', kind: 'expense', seededDefault: false, createdAt: now, updatedAt: now }],
+    tags: [{ id: 'tag-1', tenantId: 'tenant-1', name: 'Household', createdAt: now, updatedAt: now }],
+    initialTagIds: ['tag-1'], tagCatalogState: 'ready' as const,
     onCancel: vi.fn(), onSaved: vi.fn(),
   }
 
@@ -27,8 +29,9 @@ describe('FinanceRuleCreationForm', () => {
     expect(screen.getByLabelText('Rule condition')).toHaveValue('Visible coffee memo')
     expect(screen.getByLabelText('Rule category')).toHaveValue('category-1')
     await user.selectOptions(screen.getByLabelText('Match type'), 'exact')
+    expect(screen.getByLabelText('Household')).toBeChecked()
     await user.click(screen.getByRole('button', { name: 'Save rule' }))
-    await waitFor(() => expect(mocks.createClassificationRule).toHaveBeenCalledWith({ tenantId: 'tenant-1', matchType: 'exact', condition: 'Visible coffee memo', categoryId: 'category-1' }))
+    await waitFor(() => expect(mocks.createClassificationRule).toHaveBeenCalledWith({ tenantId: 'tenant-1', matchType: 'exact', condition: 'Visible coffee memo', categoryId: 'category-1', tagIds: ['tag-1'] }))
     expect(props.onSaved).toHaveBeenCalledTimes(1)
   })
 
@@ -43,6 +46,21 @@ describe('FinanceRuleCreationForm', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel rule' }))
     expect(props.onCancel).toHaveBeenCalledTimes(1)
     expect(mocks.createClassificationRule).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps an unavailable selected tag recoverable until it is explicitly removed', async () => {
+    const user = userEvent.setup()
+    render(FinanceRuleCreationForm, {
+      ...props,
+      tags: [],
+      initialTagIds: ['missing-tag'],
+      tagCatalogState: 'error',
+    })
+
+    expect(screen.getAllByRole('alert')[0]).toHaveTextContent('Tag catalog is unavailable')
+    expect(screen.getByRole('button', { name: 'Save rule' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Remove unavailable tag missing-tag' }))
+    expect(screen.getByRole('button', { name: 'Save rule' })).toBeDisabled()
   })
 
   it('resets only for a replacement offer and submits that offer’s defaults', async () => {
@@ -65,6 +83,9 @@ describe('FinanceRuleCreationForm', () => {
       description: firstDescription,
       categoryId: firstCategoryId,
       categories,
+      tags: props.tags,
+      initialTagIds: ['tag-1'],
+      tagCatalogState: 'ready',
     })
 
     await user.selectOptions(screen.getByLabelText('Match type'), 'exact')
@@ -78,6 +99,9 @@ describe('FinanceRuleCreationForm', () => {
       description: firstDescription,
       categoryId: firstCategoryId,
       categories,
+      tags: props.tags,
+      initialTagIds: ['tag-1'],
+      tagCatalogState: 'ready',
     })
     expect(screen.getByLabelText('Match type')).toHaveValue('exact')
     expect(screen.getByLabelText('Rule condition')).toHaveValue(editedCondition)
@@ -89,6 +113,9 @@ describe('FinanceRuleCreationForm', () => {
       description: firstDescription,
       categoryId: firstCategoryId,
       categories,
+      tags: props.tags,
+      initialTagIds: ['tag-1'],
+      tagCatalogState: 'ready',
     })
     expect(screen.getByLabelText('Match type')).toHaveValue('contains')
     expect(screen.getByLabelText('Rule condition')).toHaveValue(firstDescription)
@@ -100,6 +127,9 @@ describe('FinanceRuleCreationForm', () => {
       description: latestDescription,
       categoryId: latestCategoryId,
       categories,
+      tags: props.tags,
+      initialTagIds: [],
+      tagCatalogState: 'ready',
     })
     await user.click(screen.getByRole('button', { name: 'Save rule' }))
 
@@ -108,6 +138,7 @@ describe('FinanceRuleCreationForm', () => {
       matchType: 'contains',
       condition: latestDescription,
       categoryId: latestCategoryId,
+      tagIds: [],
     }))
   })
 })

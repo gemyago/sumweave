@@ -89,7 +89,7 @@ Expected:
 3. Choose a short date range that includes a known uncategorized fixture transaction and select **Run classification**.
 4. Confirm the panel identifies the returned Finance job. In the normal PM2 setup, the worker can materialize it before the first UI poll, so do not expect an initial `404`.
 5. To deterministically observe the initiating-request `404`, use the API-only worker stop/start window in [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md#explicit-classification-and-category-preservation-checks). Its isolated setup stops PM2 backend processes, starts only the API, asserts the `404` after submission, then runs the bounded worker.
-6. Start or wait for the local worker, then confirm the panel shows terminal success or an actionable failure message. On success, open `#/finance/transactions` and confirm the matching ledger row shows its category without a manual reload.
+6. Start or wait for the local worker, then confirm the panel shows terminal success or an actionable failure message. On success, open `#/finance/transactions` and confirm the matching ledger row shows its category without a manual reload. Manually change that category if needed: the row should show a compact **Create rule from this transaction** action, not an expanded rule form. Open it only after any desired tag/description save and verify its default tags and description match the latest saved row.
 
 Expected:
 

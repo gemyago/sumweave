@@ -48,7 +48,7 @@
   let error = $state<string | null>(null)
   let descriptionInput = $state<HTMLInputElement | null>(null)
   let nextRuleOfferId = 0
-  let ruleOffer = $state<{ offerId: number; transactionId: string; description: string; categoryId: string } | null>(null)
+  let ruleOffer = $state<{ offerId: number; transactionId: string; tenantId: string; phase: 'collapsed' | 'editing' } | null>(null)
 
   const categoryNameById = $derived(new Map(categories.map((category) => [category.id, category.name])))
   const tagNameById = $derived(new Map(tags.map((tag) => [tag.id, tag.name])))
@@ -56,6 +56,13 @@
   $effect(() => {
     void tenantId
     loadCatalog()
+  })
+
+  $effect(() => {
+    if (!ruleOffer) return
+    if (ruleOffer.tenantId !== tenantId || !transactions.some((transaction) => transaction.id === ruleOffer?.transactionId)) {
+      ruleOffer = null
+    }
   })
 
   function loadCatalog() {
@@ -162,7 +169,7 @@
       })
       onTransactionUpdated(updated)
       if (editing.field === 'category' && updated.categoryId) {
-        ruleOffer = { offerId: ++nextRuleOfferId, transactionId: updated.id, description: updated.description, categoryId: updated.categoryId }
+        ruleOffer = { offerId: ++nextRuleOfferId, transactionId: updated.id, tenantId, phase: 'collapsed' }
       } else if (editing.field === 'category') {
         ruleOffer = null
       }
@@ -172,6 +179,11 @@
     } finally {
       saving = false
     }
+  }
+
+  function openRuleOffer(item: FinanceTransaction) {
+    if (!ruleOffer || ruleOffer.transactionId !== item.id || saving || !item.categoryId) return
+    ruleOffer = { ...ruleOffer, phase: 'editing' }
   }
 </script>
 
@@ -282,15 +294,26 @@
       {#if error && editing?.transactionId === item.id}<div class="alert alert-danger py-2 px-3 mt-3 mb-0" role="alert">{error}</div>{/if}
       {#if ruleOffer?.transactionId === item.id}
         <div class="mt-3">
-          <FinanceRuleCreationForm
-            {tenantId}
-            offerId={ruleOffer.offerId}
-            description={ruleOffer.description}
-            categoryId={ruleOffer.categoryId}
-            {categories}
-            onCancel={() => ruleOffer = null}
-            onSaved={() => ruleOffer = null}
-          />
+          {#if ruleOffer.phase === 'collapsed'}
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <button class="btn btn-link p-0" type="button" onclick={() => openRuleOffer(item)} disabled={saving}>Create rule from this transaction</button>
+              <button class="btn btn-link btn-sm p-0 text-body-secondary" type="button" onclick={() => ruleOffer = null} disabled={saving}>Dismiss</button>
+            </div>
+          {:else if item.categoryId}
+            <FinanceRuleCreationForm
+              {tenantId}
+              offerId={ruleOffer.offerId}
+              description={item.description}
+              categoryId={item.categoryId}
+              {categories}
+              {tags}
+              initialTagIds={item.tagIds}
+              tagCatalogState={tagCatalogState}
+              onRetryTags={() => void loadTags()}
+              onCancel={() => ruleOffer = null}
+              onSaved={() => ruleOffer = null}
+            />
+          {/if}
         </div>
       {/if}
     </article>

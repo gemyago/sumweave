@@ -399,7 +399,7 @@ describe('Finance transaction editor page', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Transaction updated.')
   })
 
-  it('offers an independent rule after a saved detail-category change and never after a clear', async () => {
+  it('offers a compact independent rule after a saved detail-category change and never after a clear', async () => {
     const user = userEvent.setup()
     mocks.updateTransaction.mockResolvedValueOnce({
       ...(await mocks.getTransaction()), categoryId: 'cat-2', description: 'Refund', tagIds: [],
@@ -408,7 +408,9 @@ describe('Finance transaction editor page', () => {
     await screen.findByLabelText('Transaction category')
     await user.selectOptions(screen.getByLabelText('Transaction category'), 'cat-2')
     await user.click(screen.getByRole('button', { name: 'Save transaction' }))
-    expect(await screen.findByRole('form', { name: 'Create classification rule' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Create rule from this transaction' })).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Create classification rule' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Create rule from this transaction' }))
     expect(screen.getByLabelText('Rule condition')).toHaveValue('Refund')
     await user.click(screen.getByRole('button', { name: 'Cancel rule' }))
     expect(screen.getByText('Transaction updated.')).toBeInTheDocument()
@@ -442,15 +444,14 @@ describe('Finance transaction editor page', () => {
     await user.selectOptions(screen.getByLabelText('Transaction category'), 'cat-2')
     await user.click(screen.getByRole('button', { name: 'Save transaction' }))
 
-    expect(await screen.findByRole('form', { name: 'Create classification rule' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Rule condition')).toHaveValue('First detail assignment')
-    expect(screen.getByLabelText('Rule category')).toHaveValue('cat-2')
+    expect(await screen.findByRole('button', { name: 'Create rule from this transaction' })).toBeInTheDocument()
 
     await user.clear(screen.getByLabelText('Transaction description'))
     await user.type(screen.getByLabelText('Transaction description'), 'Second detail assignment')
     await user.selectOptions(screen.getByLabelText('Transaction category'), 'cat-1')
     await user.click(screen.getByRole('button', { name: 'Save transaction' }))
 
+    await user.click(screen.getByRole('button', { name: 'Create rule from this transaction' }))
     await waitFor(() => expect(screen.getByLabelText('Rule condition')).toHaveValue('Second detail assignment'))
     expect(screen.getByLabelText('Rule category')).toHaveValue('cat-1')
     await user.click(screen.getByRole('button', { name: 'Save rule' }))
@@ -459,6 +460,7 @@ describe('Finance transaction editor page', () => {
       matchType: 'contains',
       condition: 'Second detail assignment',
       categoryId: 'cat-1',
+      tagIds: ['tag-1', 'tag-2'],
     }))
   })
 

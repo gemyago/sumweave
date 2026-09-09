@@ -40,6 +40,7 @@
   let accounts = $state<FinanceAccount[]>([])
   let categories = $state<FinanceCategory[]>([])
   let tags = $state<FinanceTag[]>([])
+  let tagCatalogState = $state<'loading' | 'ready' | 'error'>('loading')
   let transaction = $state<FinanceTransaction | null>(null)
   let form = $state(makeBlankForm())
   let transferPartner = $state<FinanceTransaction | null>(null)
@@ -60,7 +61,7 @@
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
   let nextRuleOfferId = 0
-  let ruleOffer = $state<{ offerId: number; description: string; categoryId: string } | null>(null)
+  let ruleOffer = $state<{ offerId: number; transactionId: string; tenantId: string; phase: 'collapsed' | 'editing' } | null>(null)
 
   const candidatePageSize = 20
   const hasMatchedTransfer = $derived(transaction ? isMatchedTransfer(transaction) : false)
@@ -120,6 +121,7 @@
         accounts = []
         categories = []
         tags = []
+        tagCatalogState = 'ready'
         transaction = null
         form = makeBlankForm()
         return
@@ -144,11 +146,11 @@
     partnerError = null
     closeCandidateWorkflow()
     unlinkConfirmationOpen = false
-    ;[accounts, categories, tags] = await Promise.all([
+    ;[accounts, categories] = await Promise.all([
       financeApi.listAccounts({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
       financeApi.listCategories({ tenantId: financeShell.selectedTenantId }),
-      financeApi.listTags({ tenantId: financeShell.selectedTenantId, includeHidden: true }),
     ])
+    await loadTagCatalog()
 
     if (isCreateMode) {
       transaction = null
@@ -167,6 +169,18 @@
     fillFormFromTransaction(transaction)
     if (isMatchedTransfer(transaction)) {
       void loadTransferPartner(transaction)
+    }
+  }
+
+  async function loadTagCatalog() {
+    if (!financeShell.selectedTenantId) return
+    tagCatalogState = 'loading'
+    try {
+      tags = await financeApi.listTags({ tenantId: financeShell.selectedTenantId, includeHidden: true })
+      tagCatalogState = 'ready'
+    } catch {
+      tags = []
+      tagCatalogState = 'error'
     }
   }
 
@@ -375,7 +389,7 @@
         saveMessage = 'Transaction recorded.'
         fillFormFromTransaction(created)
         if (created.categoryId) {
-          ruleOffer = { offerId: ++nextRuleOfferId, description: created.description, categoryId: created.categoryId }
+          ruleOffer = { offerId: ++nextRuleOfferId, transactionId: created.id, tenantId: financeShell.selectedTenantId, phase: 'collapsed' }
         }
       } else {
         transaction = await financeApi.updateTransaction({
@@ -391,7 +405,9 @@
         if (transaction) {
           fillFormFromTransaction(transaction)
           if (categoryChanged && transaction.categoryId) {
-            ruleOffer = { offerId: ++nextRuleOfferId, description: transaction.description, categoryId: transaction.categoryId }
+            ruleOffer = { offerId: ++nextRuleOfferId, transactionId: transaction.id, tenantId: financeShell.selectedTenantId, phase: 'collapsed' }
+          } else if (categoryChanged) {
+            ruleOffer = null
           }
         }
       }
@@ -409,6 +425,11 @@
     saveMessage = null
   }
 
+  function openRuleOffer() {
+    if (!ruleOffer || !transaction || ruleOffer.transactionId !== transaction.id || saving || !transaction.categoryId) return
+    ruleOffer = { ...ruleOffer, phase: 'editing' }
+  }
+
   $effect(() => {
     if (financeShell.loading || !reactiveReady) return
     void financeShell.selectedTenantId
@@ -418,6 +439,13 @@
       return
     }
     void loadEditorData()
+  })
+
+  $effect(() => {
+    if (!ruleOffer) return
+    if (ruleOffer.tenantId !== financeShell.selectedTenantId || ruleOffer.transactionId !== transaction?.id) {
+      ruleOffer = null
+    }
   })
 </script>
 
@@ -504,19 +532,33 @@
           <div class="d-flex flex-wrap gap-2"><button class="btn btn-primary" type="submit" disabled={saving || !financeShell.selectedTenantId}>{#if saving}Saving…{:else}Save transaction{/if}</button><a class="btn btn-outline-secondary" href="/finance/transactions" use:link>Cancel</a></div>
           {#if saveError}<div class="alert alert-danger mb-0" role="alert">{saveError}</div>{/if}
           {#if saveMessage}<div class="alert alert-success mb-0" role="status" tabindex="-1" bind:this={saveStatus}>{saveMessage}</div>{/if}
-          {#if ruleOffer}
+        </div>
+      </form>
+
+      {#if ruleOffer && transaction?.categoryId}
+        <div>
+          {#if ruleOffer.phase === 'collapsed'}
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <button class="btn btn-link p-0" type="button" onclick={openRuleOffer} disabled={saving}>Create rule from this transaction</button>
+              <button class="btn btn-link btn-sm p-0 text-body-secondary" type="button" onclick={() => ruleOffer = null} disabled={saving}>Dismiss</button>
+            </div>
+          {:else}
             <FinanceRuleCreationForm
               tenantId={financeShell.selectedTenantId}
               offerId={ruleOffer.offerId}
-              description={ruleOffer.description}
-              categoryId={ruleOffer.categoryId}
+              description={transaction.description}
+              categoryId={transaction.categoryId}
               {categories}
+              {tags}
+              initialTagIds={transaction.tagIds}
+              {tagCatalogState}
+              onRetryTags={() => void loadTagCatalog()}
               onCancel={() => ruleOffer = null}
               onSaved={() => ruleOffer = null}
             />
           {/if}
         </div>
-      </form>
+      {/if}
 
       {#if transaction?.providerOriginal}
         <section class="card shadow-sm">

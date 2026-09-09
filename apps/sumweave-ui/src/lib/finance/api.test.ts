@@ -786,6 +786,7 @@ describe('finance api', () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
     const rule = {
       id: 'rule-1', matchType: 'contains', condition: 'Coffee', categoryId: 'category-1', position: 1,
+      tagIds: ['tag-1'],
       createdAt: '2026-06-20T12:00:00Z', updatedAt: '2026-06-20T12:00:00Z',
     }
     const responses = [
@@ -809,15 +810,15 @@ describe('finance api', () => {
     const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
 
     const rules = await api.listClassificationRules({ tenantId: 'tenant / 1', categoryId: 'category / 1' })
-    const created = await api.createClassificationRule({ tenantId: 'tenant / 1', matchType: 'exact', condition: 'Coffee', categoryId: 'category / 1' })
-    await api.updateClassificationRule({ tenantId: 'tenant / 1', ruleId: 'rule / 1', matchType: 'contains', condition: 'Cafe', categoryId: 'category / 1' })
+    const created = await api.createClassificationRule({ tenantId: 'tenant / 1', matchType: 'exact', condition: 'Coffee', categoryId: 'category / 1', tagIds: ['tag-1'] })
+    await api.updateClassificationRule({ tenantId: 'tenant / 1', ruleId: 'rule / 1', matchType: 'contains', condition: 'Cafe', categoryId: 'category / 1', tagIds: [] })
     await api.moveClassificationRule({ tenantId: 'tenant / 1', ruleId: 'rule / 1', direction: 'up' })
     await api.deleteClassificationRule({ tenantId: 'tenant / 1', ruleId: 'rule / 1' })
 
     await expect(api.deleteCategory({ tenantId: 'tenant / 1', categoryId: 'category / 1' })).rejects.toEqual(
       new CategoryReferencedByClassificationRulesError({ ruleIds: ['rule-1', 'rule-2'] }),
     )
-    expect(rules[0]).toMatchObject({ id: 'rule-1', position: 1, createdAt: new Date('2026-06-20T12:00:00Z') })
+    expect(rules[0]).toMatchObject({ id: 'rule-1', position: 1, tagIds: ['tag-1'], createdAt: new Date('2026-06-20T12:00:00Z') })
     expect(created.id).toBe('rule-2')
     expect(calls.map((call) => [call.init?.method, new URL(String(call.input)).pathname])).toEqual([
       ['GET', '/api/v1/finance/tenants/tenant%20%2F%201/classification-rules'],
@@ -828,7 +829,8 @@ describe('finance api', () => {
       ['DELETE', '/api/v1/finance/tenants/tenant%20%2F%201/categories/category%20%2F%201'],
     ])
     expect(new URL(String(calls[0].input)).searchParams.get('categoryId')).toBe('category / 1')
-    expect(JSON.parse(String(calls[1].init?.body))).toEqual({ matchType: 'exact', condition: 'Coffee', categoryId: 'category / 1' })
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({ matchType: 'exact', condition: 'Coffee', categoryId: 'category / 1', tagIds: ['tag-1'] })
+    expect(JSON.parse(String(calls[2].init?.body))).toEqual({ matchType: 'contains', condition: 'Cafe', categoryId: 'category / 1', tagIds: [] })
     expect(JSON.parse(String(calls[3].init?.body))).toEqual({ direction: 'up' })
   })
 
