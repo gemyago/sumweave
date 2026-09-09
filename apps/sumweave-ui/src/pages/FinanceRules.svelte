@@ -10,6 +10,7 @@
     type FinanceCategory,
     type FinanceClassificationMatchType,
     type FinanceClassificationRule,
+    type FinanceTag,
   } from '../lib/finance/api'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
   import { classificationRangeFromDateInputs, defaultClassificationDateRange } from '../lib/finance/classification-range'
@@ -23,12 +24,15 @@
   let error = $state<string | null>(null)
   let rules = $state<FinanceClassificationRule[]>([])
   let categories = $state<FinanceCategory[]>([])
+  let tags = $state<FinanceTag[]>([])
+  let tagCatalogState = $state<'loading' | 'ready' | 'error'>('loading')
   let creating = $state(false)
   let editingId = $state<string | null>(null)
   let mutationBusy = $state(false)
   let matchType = $state<FinanceClassificationMatchType>('contains')
   let condition = $state('')
   let categoryId = $state('')
+  let tagIds = $state<string[]>([])
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
   const defaultClassificationRange = defaultClassificationDateRange()
@@ -45,6 +49,9 @@
     return new URLSearchParams(query).get('categoryId') ?? ''
   })
   const categoryNameById = $derived(new Map(categories.map((category) => [category.id, category.name])))
+  const tagNameById = $derived(new Map(tags.map((tag) => [tag.id, tag.name])))
+  const unavailableTagIds = $derived(tagIds.filter((tagId) => !tagNameById.has(tagId)))
+  const canSaveRule = $derived(tagCatalogState === 'ready' && unavailableTagIds.length === 0)
 
   onMount(() => { void loadPage() })
 
@@ -54,7 +61,7 @@
     error = null
     try {
       await financeShell.initialize()
-      await loadRulesAndCategories()
+      await Promise.all([loadRulesAndCategories(), loadTags()])
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load classification rules.'
     } finally {
@@ -76,12 +83,29 @@
     ])
   }
 
+  async function loadTags() {
+    if (!financeShell.selectedTenantId) {
+      tags = []
+      tagCatalogState = 'ready'
+      return
+    }
+    tagCatalogState = 'loading'
+    try {
+      tags = await financeApi.listTags({ tenantId: financeShell.selectedTenantId })
+      tagCatalogState = 'ready'
+    } catch {
+      tags = []
+      tagCatalogState = 'error'
+    }
+  }
+
   function resetForm() {
     creating = false
     editingId = null
     matchType = 'contains'
     condition = ''
     categoryId = ''
+    tagIds = []
   }
 
   function startCreate() {
@@ -91,6 +115,7 @@
     matchType = 'contains'
     condition = ''
     categoryId = categories[0]?.id ?? ''
+    tagIds = []
   }
 
   function startEdit(rule: FinanceClassificationRule) {
@@ -100,21 +125,22 @@
     matchType = rule.matchType
     condition = rule.condition
     categoryId = rule.categoryId
+    tagIds = [...rule.tagIds]
   }
 
   async function saveRule(event: SubmitEvent) {
     event.preventDefault()
-    if (!financeShell.selectedTenantId || mutationBusy) return
+    if (!financeShell.selectedTenantId || mutationBusy || !canSaveRule) return
     mutationBusy = true
     error = null
     try {
       if (editingId) {
-        await financeApi.updateClassificationRule({ tenantId: financeShell.selectedTenantId, ruleId: editingId, matchType, condition, categoryId })
+        await financeApi.updateClassificationRule({ tenantId: financeShell.selectedTenantId, ruleId: editingId, matchType, condition, categoryId, tagIds })
       } else {
-        await financeApi.createClassificationRule({ tenantId: financeShell.selectedTenantId, matchType, condition, categoryId })
+        await financeApi.createClassificationRule({ tenantId: financeShell.selectedTenantId, matchType, condition, categoryId, tagIds })
       }
       resetForm()
-      await loadRulesAndCategories()
+      await Promise.all([loadRulesAndCategories(), loadTags()])
     } catch (saveError) {
       error = saveError instanceof Error ? saveError.message : 'Could not save the classification rule.'
     } finally {
@@ -192,7 +218,7 @@
       skipNextReactiveLoad = false
       return
     }
-    void loadRulesAndCategories()
+    void Promise.all([loadRulesAndCategories(), loadTags()])
   })
 </script>
 
@@ -252,8 +278,11 @@
               <div class="col-12 col-md-4"><label class="form-label" for="finance-rules-match-type">Match type</label><select id="finance-rules-match-type" class="form-select" bind:value={matchType} disabled={mutationBusy}><option value="contains">contains</option><option value="exact">exact</option></select></div>
               <div class="col-12 col-md-8"><label class="form-label" for="finance-rules-condition">Condition</label><input id="finance-rules-condition" class="form-control" bind:value={condition} disabled={mutationBusy} required /></div>
               <div class="col-12"><label class="form-label" for="finance-rules-category">Target category</label><select id="finance-rules-category" class="form-select" bind:value={categoryId} disabled={mutationBusy} required>{#each categories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}</select></div>
+              <fieldset class="col-12" disabled={mutationBusy || tagCatalogState !== 'ready'}><legend class="form-label mb-2">Rule tags</legend>{#if tagCatalogState === 'loading'}<p class="form-text mb-0">Loading tag catalog…</p>{:else if tags.length === 0}<p class="form-text mb-0">No tenant tags are available. This rule will assign only its category.</p>{:else}<div class="d-flex flex-wrap gap-3" aria-label="Rule tags">{#each tags as tag (tag.id)}<div class="form-check"><input id={`finance-rules-tag-${tag.id}`} class="form-check-input" type="checkbox" value={tag.id} bind:group={tagIds} /><label class="form-check-label" for={`finance-rules-tag-${tag.id}`}>{tag.name}</label></div>{/each}</div>{/if}</fieldset>
             </div>
-            <div class="d-flex flex-wrap gap-2"><button class="btn btn-primary" type="submit" disabled={mutationBusy}>{mutationBusy ? 'Saving…' : 'Save rule'}</button><button class="btn btn-outline-secondary" type="button" onclick={resetForm} disabled={mutationBusy}>Cancel</button></div>
+            {#if tagCatalogState === 'error'}<div class="alert alert-warning mb-0" role="alert">Tag catalog is unavailable. Refresh it before saving this rule. <button class="btn btn-link btn-sm p-0 align-baseline" type="button" onclick={() => void loadTags()}>Retry tag catalog</button></div>{/if}
+            {#if unavailableTagIds.length}<div class="alert alert-warning mb-0" role="alert">Selected tag IDs are unavailable. Refresh the catalog or remove them before saving.<div class="d-flex flex-wrap gap-2 mt-2">{#each unavailableTagIds as tagId (tagId)}<button class="btn btn-outline-warning btn-sm" type="button" onclick={() => tagIds = tagIds.filter((id) => id !== tagId)}>Remove unavailable tag {tagId}</button>{/each}</div></div>{/if}
+            <div class="d-flex flex-wrap gap-2"><button class="btn btn-primary" type="submit" disabled={mutationBusy || !canSaveRule}>{mutationBusy ? 'Saving…' : 'Save rule'}</button><button class="btn btn-outline-secondary" type="button" onclick={resetForm} disabled={mutationBusy}>Cancel</button></div>
           </div>
         </form>
       {/if}
@@ -267,7 +296,7 @@
             <ol class="list-group list-group-numbered">
               {#each rules as rule, index (rule.id)}
                 <li class="list-group-item d-flex flex-column flex-md-row justify-content-between gap-3">
-                  <div class="me-md-auto"><div class="fw-semibold">{rule.matchType} “{rule.condition}”</div><div class="small text-body-secondary">Target: {categoryNameById.get(rule.categoryId) ?? 'Unknown category'} · Position {rule.position}</div></div>
+                  <div class="me-md-auto"><div class="fw-semibold">{rule.matchType} “{rule.condition}”</div><div class="small text-body-secondary">Target: {categoryNameById.get(rule.categoryId) ?? 'Unknown category'} · Position {rule.position}</div>{#if rule.tagIds.length}<div class="d-flex flex-wrap gap-1 mt-2" aria-label={`Rule tags for ${rule.condition}`}>{#each rule.tagIds as tagId (tagId)}<span class="badge text-bg-secondary">{tagNameById.get(tagId) ?? 'Unknown tag'}</span>{/each}</div>{/if}</div>
                   <div class="d-flex flex-wrap gap-2 align-self-md-center"><button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => void moveRule(rule, 'up')} disabled={mutationBusy || index === 0} aria-label={`Move ${rule.condition} up`}>Move up</button><button class="btn btn-outline-secondary btn-sm" type="button" onclick={() => void moveRule(rule, 'down')} disabled={mutationBusy || index === rules.length - 1} aria-label={`Move ${rule.condition} down`}>Move down</button><button class="btn btn-outline-primary btn-sm" type="button" onclick={() => startEdit(rule)} disabled={mutationBusy}>Edit</button><button class="btn btn-outline-danger btn-sm" type="button" onclick={() => void deleteRule(rule.id)} disabled={mutationBusy}>Delete</button></div>
                 </li>
               {/each}

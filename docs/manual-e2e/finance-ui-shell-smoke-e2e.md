@@ -67,7 +67,8 @@ Expected:
 1. Use the Finance shell navigation to visit the supported route groups:
    - `#/finance/transactions`
    - `#/finance/accounts`
-   - `#/finance/categories`
+    - `#/finance/categories`
+    - `#/finance/rules`
    - `#/finance/connections`
    - `#/finance/imports`
    - `#/finance/tenants`
@@ -76,6 +77,8 @@ Expected:
 4. From Transactions, open the dedicated create route and, if seeded data exists, one existing edit route. Confirm the browse page remains table-first and detail/editor flows stay on dedicated routes.
 5. From Connections, open **Synced accounts** on one card. Confirm it lazily loads account name/currency/last sync and account links; retry a failed card-local load, then use **Sync now** and reopen the disclosure to confirm its cached details are refreshed. Start the synthetic flow if safe for the environment and confirm the app reaches `#/finance/connections/synthetic`; if no pending `state` exists, confirm the route shows guidance instead of crashing.
 6. If Imports or Connections exposes a Finance job deep link, open it and confirm `#/finance/jobs/:jobId` stays inside Finance context after tenant resolution.
+7. In **Rules**, confirm an existing tagged rule names its target tags as compact badges. Add or edit a rule, select an optional existing tag, save, and confirm the list refreshes with that tag. If the tag catalog is unavailable, confirm the draft stays visible with a retry action and cannot silently drop a selected tag.
+8. In **Transactions**, assign or change a category on one record. Confirm only the compact **Create rule from this transaction** / **Dismiss** action appears without moving focus or scrolling. Save a description or tag change first, then open the action and confirm the editable rule defaults use those latest saved values. Dismiss/cancel or fail a rule save and confirm the transaction edit remains saved and the rule interaction stays recoverable.
 
 Expected:
 

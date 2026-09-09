@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
@@ -305,12 +307,18 @@ func TestFinanceController(t *testing.T) {
 		tenantID := "tenant-" + fake.UUID().V4()
 		ruleID := "rule-" + fake.UUID().V4()
 		categoryID := "category-" + fake.UUID().V4()
+		tagID := "tag-" + fake.UUID().V4()
 		rules := newMockclassificationRuleService(t)
 		now := time.Now()
 		rule := domain.ClassificationRule{
 			ID: ruleID, TenantID: tenantID, Position: 1, MatchType: domain.ClassificationMatchTypeContains,
-			Condition: "merchant-" + fake.Letter(), CategoryID: categoryID, CreatedAt: now, UpdatedAt: now,
+			Condition: "merchant-" + fake.Letter(), CategoryID: categoryID, TagIDs: []string{tagID},
+			CreatedAt: now, UpdatedAt: now,
 		}
+		categoryOnlyRule := rule
+		categoryOnlyRule.ID = "rule-" + fake.UUID().V4()
+		categoryOnlyRule.Position = 2
+		categoryOnlyRule.TagIDs = nil
 		handler := newHandler(
 			newMockfinanceService(t),
 			newMockbankConnectionService(t),
@@ -319,7 +327,7 @@ func TestFinanceController(t *testing.T) {
 		)
 		rules.EXPECT().List(mock.Anything, financepkg.ListClassificationRulesParams{
 			ActorUserID: userID, TenantID: tenantID, CategoryID: categoryID,
-		}).Return([]domain.ClassificationRule{rule}, nil).Once()
+		}).Return([]domain.ClassificationRule{rule, categoryOnlyRule}, nil).Once()
 		listResponse := httptest.NewRecorder()
 		handler.ServeHTTP(listResponse, newRequest(
 			http.MethodGet,
@@ -328,29 +336,48 @@ func TestFinanceController(t *testing.T) {
 			true,
 		))
 		require.Equal(t, http.StatusOK, listResponse.Code)
-		assert.Equal(t, ruleID, decode(t, listResponse)["items"].([]any)[0].(map[string]any)["id"])
+		listedRule := decode(t, listResponse)["items"].([]any)[0].(map[string]any)
+		assert.Equal(t, ruleID, listedRule["id"])
+		assert.Equal(t, []any{tagID}, listedRule["tagIds"])
+		categoryOnlyListedRule := decode(t, listResponse)["items"].([]any)[1].(map[string]any)
+		assert.Equal(t, []any{}, categoryOnlyListedRule["tagIds"])
 
-		body := `{"matchType":"contains","condition":"` + rule.Condition + `","categoryId":"` + categoryID + `"}`
+		body := `{"matchType":"contains","condition":"` + rule.Condition + `","categoryId":"` + categoryID + `","tagIds":["` + tagID + `"]}`
 		rules.EXPECT().Create(mock.Anything, financepkg.CreateClassificationRuleParams{
 			ActorUserID: userID,
 			TenantID:    tenantID,
 			MatchType:   rule.MatchType,
 			Condition:   rule.Condition,
 			CategoryID:  categoryID,
+			TagIDs:      []string{tagID},
 		}).Return(rule, nil).Once()
 		createResponse := httptest.NewRecorder()
 		handler.ServeHTTP(createResponse, newRequest(
 			http.MethodPost, "/api/v1/finance/tenants/"+tenantID+"/classification-rules", body, true,
 		))
 		require.Equal(t, http.StatusCreated, createResponse.Code)
-		assert.Equal(t, ruleID, decode(t, createResponse)["id"])
+		assert.Equal(t, map[string]any{"id": ruleID}, decode(t, createResponse))
 
-		rules.EXPECT().Update(mock.Anything, mock.Anything).Return(nil).Once()
-		updateResponse := httptest.NewRecorder()
-		handler.ServeHTTP(updateResponse, newRequest(
-			http.MethodPut, "/api/v1/finance/tenants/"+tenantID+"/classification-rules/"+ruleID, body, true,
-		))
-		require.Equal(t, http.StatusNoContent, updateResponse.Code)
+		for _, body := range []string{
+			`{"matchType":"contains","condition":"` + rule.Condition + `","categoryId":"` + categoryID + `"}`,
+			`{"matchType":"contains","condition":"` + rule.Condition + `","categoryId":"` + categoryID + `","tagIds":[]}`,
+		} {
+			rules.EXPECT().Update(mock.Anything, financepkg.UpdateClassificationRuleParams{
+				ActorUserID: userID,
+				TenantID:    tenantID,
+				RuleID:      ruleID,
+				MatchType:   rule.MatchType,
+				Condition:   rule.Condition,
+				CategoryID:  categoryID,
+				TagIDs:      []string{},
+			}).Return(nil).Once()
+			updateResponse := httptest.NewRecorder()
+			handler.ServeHTTP(updateResponse, newRequest(
+				http.MethodPut, "/api/v1/finance/tenants/"+tenantID+"/classification-rules/"+ruleID, body, true,
+			))
+			require.Equal(t, http.StatusNoContent, updateResponse.Code)
+			assert.Empty(t, updateResponse.Body.String())
+		}
 		rules.EXPECT().Move(mock.Anything, mock.Anything).Return(nil).Once()
 		moveResponse := httptest.NewRecorder()
 		handler.ServeHTTP(moveResponse, newRequest(
@@ -366,6 +393,132 @@ func TestFinanceController(t *testing.T) {
 			http.MethodDelete, "/api/v1/finance/tenants/"+tenantID+"/classification-rules/"+ruleID, "", true,
 		))
 		require.Equal(t, http.StatusNoContent, deleteResponse.Code)
+		assert.Empty(t, deleteResponse.Body.String())
+	})
+
+	t.Run("rejects invalid classification rule tags through registered routes", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		ruleID := "rule-" + fake.UUID().V4()
+		categoryID := "category-" + fake.UUID().V4()
+		rules := newMockclassificationRuleService(t)
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withClassificationRuleService(rules),
+		)
+		requestBody := `{"matchType":"contains","condition":"` + fake.Letter() + `","categoryId":"` + categoryID +
+			`","tagIds":["tag-` + fake.UUID().V4() + `"]}`
+
+		for _, tc := range []struct {
+			name string
+			err  error
+			want int
+		}{
+			{name: "duplicate", err: financepkg.ErrInvalidClassificationRule, want: http.StatusBadRequest},
+			{name: "missing or cross-tenant", err: financepkg.ErrTagNotFound, want: http.StatusNotFound},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				rules.EXPECT().Create(mock.Anything, mock.Anything).Return(domain.ClassificationRule{}, tc.err).Once()
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, newRequest(
+					http.MethodPost, "/api/v1/finance/tenants/"+tenantID+"/classification-rules", requestBody, true,
+				))
+				require.Equal(t, tc.want, response.Code)
+				assert.Empty(t, response.Body.String())
+			})
+		}
+
+		for _, tc := range []struct {
+			name   string
+			method string
+			target string
+		}{
+			{
+				name:   "create",
+				method: http.MethodPost,
+				target: "/api/v1/finance/tenants/" + tenantID + "/classification-rules",
+			},
+			{
+				name:   "replacement",
+				method: http.MethodPut,
+				target: "/api/v1/finance/tenants/" + tenantID + "/classification-rules/" + ruleID,
+			},
+		} {
+			t.Run("explicit null is rejected for "+tc.name, func(t *testing.T) {
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, newRequest(
+					tc.method,
+					tc.target,
+					`{"matchType":"contains","condition":"`+fake.Letter()+`","categoryId":"`+categoryID+`","tagIds":null}`,
+					true,
+				))
+				require.Equal(t, http.StatusBadRequest, response.Code)
+				assert.Empty(t, response.Body.String())
+			})
+		}
+
+		t.Run("rejects partial bodies from failed reads before generated binding", func(t *testing.T) {
+			partialBody := `{"matchType":"contains","condition":"` + fake.Letter() + `","categoryId":"` + categoryID + `"}`
+			limitedHandler := middleware.NewRequestBodyLimitMiddleware(int64(len(partialBody)))(handler)
+			request := newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants/"+tenantID+"/classification-rules",
+				partialBody+" ",
+				true,
+			)
+			request.ContentLength = int64(len(partialBody))
+			response := httptest.NewRecorder()
+
+			limitedHandler.ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusRequestEntityTooLarge, response.Code)
+			assert.Empty(t, response.Body.String())
+		})
+
+		t.Run("rejects ordinary body read failures before generated binding", func(t *testing.T) {
+			partialBody := `{"matchType":"contains","condition":"` + fake.Letter() + `","categoryId":"` + categoryID + `"}`
+			request := newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants/"+tenantID+"/classification-rules",
+				partialBody,
+				true,
+			)
+			bodyReader := iotest.DataErrReader(iotest.TimeoutReader(strings.NewReader(partialBody)))
+			request.Body = io.NopCloser(bodyReader)
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusBadRequest, response.Code)
+			assert.Empty(t, response.Body.String())
+		})
+	})
+
+	t.Run("classification rule routes preserve tenant isolation", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		rules := newMockclassificationRuleService(t)
+		rules.EXPECT().Create(mock.Anything, mock.Anything).
+			Return(domain.ClassificationRule{}, financepkg.ErrTenantAccessDenied).Once()
+		handler := newHandler(
+			newMockfinanceService(t),
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+			withClassificationRuleService(rules),
+		)
+		body := `{"matchType":"contains","condition":"` + fake.Letter() + `","categoryId":"category-` +
+			fake.UUID().V4() + `","tagIds":[]}`
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/classification-rules",
+			body,
+			true,
+		))
+		assert.Equal(t, http.StatusUnauthorized, response.Code)
+		assert.Empty(t, response.Body.String())
 	})
 
 	t.Run("returns the documented category rule conflict body", func(t *testing.T) {

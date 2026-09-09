@@ -1,8 +1,5 @@
-# transaction-classification Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change add-phase0-transaction-classification. Update Purpose after archive.
-## Requirements
 ### Requirement: Tenant-Owned Ordered Classification Rules
 The finance module SHALL provide one active ordered classification-rule list per finance tenant and SHALL expose authenticated tenant-member operations to list, create, replace, delete, and move those rules.
 
@@ -154,53 +151,3 @@ Each classification delivery attempt SHALL load rules once, process eligible row
 - **THEN** the new attempt MUST reload the current ordered rules and recheck current transaction state
 - **AND** previously categorized transactions MUST be excluded from selection so committed categories and tags are not reapplied or overwritten
 - **AND** an assignment that rolled back MUST remain eligible for a later attempt when it still satisfies selection.
-
-### Requirement: Explicit Classification Uses Observed Durable Work
-The backend application SHALL let a tenant member submit a valid classification range as a semantic command and observe it through the existing durable-jobs lifecycle.
-
-#### Scenario: Explicit range is submitted
-- **WHEN** an authenticated tenant member posts full RFC 3339 `rangeStart` and `rangeEndExclusive` timestamps with offsets to `/transactions/classify` and `rangeStart` is before `rangeEndExclusive`
-- **THEN** the API MUST publish `finance.classification.explicit.v1` with tenant, range, and authenticated requester metadata
-- **AND** it MUST return `202` with the immutable dispatch message ID as `jobId` without executing classification inline or creating a job row.
-
-#### Scenario: Explicit range is invalid
-- **WHEN** either range value is not a full RFC 3339 timestamp with an offset or the start is not before the exclusive end
-- **THEN** the API MUST reject the request without publishing a command.
-
-#### Scenario: Explicit tenant access is denied
-- **WHEN** an authenticated caller submits classification for a tenant they have not joined
-- **THEN** the API MUST return the standard empty `401 Unauthorized` finance response
-- **AND** it MUST NOT publish a classification command.
-
-#### Scenario: Explicit command is delivered
-- **WHEN** the worker receives the explicit command through its one job-observed consumer
-- **THEN** it MUST materialize job type `finance.classification` using the message ID
-- **AND** it MUST pass the command's tenant and range unchanged to the shared classifier.
-
-#### Scenario: Explicit classification fails
-- **WHEN** classification returns a finance-owned terminal failure
-- **THEN** the observed job MUST use the existing sanitized failed lifecycle
-- **AND** infrastructure, decoding, persistence, and unclassified failures MUST retain the existing appdispatch retry and dead-letter behavior.
-
-### Requirement: Committed Bank Windows Trigger Automatic Classification
-Every successfully committed provider-sync requested window SHALL durably trigger automatic classification for that exact tenant and ledger range independently of the overall bank-sync job.
-
-#### Scenario: Window completion event is consumed
-- **WHEN** `finance.bank-sync-window-completed.v1` is delivered to consumer group `finance.classification.v1`
-- **THEN** its ordinary subscriber MUST pass the event tenant, `rangeStart`, and `rangeEndExclusive` unchanged to the shared classifier
-- **AND** the automatic reaction MUST create no job projection.
-
-#### Scenario: Later bank window fails
-- **WHEN** an earlier requested window committed successfully and a later window fails
-- **THEN** the earlier window's completion event and finance writes MUST remain durable
-- **AND** classification of that earlier range MUST remain independently deliverable even if retry resumes beyond it.
-
-#### Scenario: Process stops after window commit
-- **WHEN** the process stops after a successful window transaction commits but before overall sync completion state is saved
-- **THEN** the committed completion event MUST remain available to the classification consumer after restart.
-
-#### Scenario: Automatic classification fails
-- **WHEN** the ordinary classification subscriber fails
-- **THEN** appdispatch MUST apply its normal retry and dead-letter behavior
-- **AND** the committed bank imports MUST remain intact and the bank-sync job outcome MUST remain independent.
-

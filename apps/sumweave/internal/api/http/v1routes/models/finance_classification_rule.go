@@ -19,6 +19,7 @@ type FinanceClassificationRule struct {
 	MatchType string `json:"matchType"`
 	Condition string `json:"condition"`
 	CategoryID string `json:"categoryId"`
+	TagIDs []string `json:"tagIds"`
 	Position int64 `json:"position"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`

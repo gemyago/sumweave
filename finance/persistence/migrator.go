@@ -26,6 +26,7 @@ func financeSchemaModels() []any {
 		&accountModel{},
 		&categoryModel{},
 		&classificationRuleModel{},
+		&classificationRuleTagModel{},
 		&tagModel{},
 		&transactionModel{},
 		&transactionTagModel{},

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import FinanceRules from './FinanceRules.svelte'
 
 const mocks = vi.hoisted(() => ({
-  listTenants: vi.fn(), listCategories: vi.fn(), listClassificationRules: vi.fn(),
+    listTenants: vi.fn(), listCategories: vi.fn(), listTags: vi.fn(), listClassificationRules: vi.fn(),
   createClassificationRule: vi.fn(), updateClassificationRule: vi.fn(),
   deleteClassificationRule: vi.fn(), moveClassificationRule: vi.fn(),
   submitTransactionClassification: vi.fn(),
@@ -33,9 +33,13 @@ describe('Finance rules page', () => {
       { id: 'category-1', tenantId: 'tenant-1', name: 'Groceries', kind: 'expense', seededDefault: true, createdAt: now, updatedAt: now },
       { id: 'category-2', tenantId: 'tenant-1', name: 'Dining', kind: 'expense', seededDefault: false, createdAt: now, updatedAt: now },
     ])
+    mocks.listTags.mockResolvedValue([
+      { id: 'tag-1', tenantId: 'tenant-1', name: 'Household', hiddenAt: null, createdAt: now, updatedAt: now },
+      { id: 'tag-2', tenantId: 'tenant-1', name: 'Shared', hiddenAt: null, createdAt: now, updatedAt: now },
+    ])
     mocks.listClassificationRules.mockResolvedValue([
-      { id: 'rule-1', matchType: 'contains', condition: 'SHOP', categoryId: 'category-1', position: 1, createdAt: now, updatedAt: now },
-      { id: 'rule-2', matchType: 'exact', condition: 'CAFE', categoryId: 'category-2', position: 2, createdAt: now, updatedAt: now },
+      { id: 'rule-1', matchType: 'contains', condition: 'SHOP', categoryId: 'category-1', tagIds: ['tag-1'], position: 1, createdAt: now, updatedAt: now },
+      { id: 'rule-2', matchType: 'exact', condition: 'CAFE', categoryId: 'category-2', tagIds: [], position: 2, createdAt: now, updatedAt: now },
     ])
     mocks.createClassificationRule.mockResolvedValue({ id: 'rule-3' })
     mocks.updateClassificationRule.mockResolvedValue(undefined)
@@ -49,6 +53,7 @@ describe('Finance rules page', () => {
     render(FinanceRules)
     expect(await screen.findByText('contains “SHOP”')).toBeInTheDocument()
     expect(screen.getByText('Target: Groceries · Position 1')).toBeInTheDocument()
+    expect(screen.getByText('Household')).toBeInTheDocument()
     expect(screen.getByText('Target: Dining · Position 2')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Move SHOP up' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Move CAFE down' })).toBeDisabled()
@@ -63,8 +68,9 @@ describe('Finance rules page', () => {
     await user.click(screen.getByRole('button', { name: 'Add rule' }))
     await user.type(screen.getByLabelText('Condition'), 'NETFLIX')
     await user.selectOptions(screen.getByLabelText('Target category'), 'category-2')
+    await user.click(screen.getByLabelText('Shared'))
     await user.click(screen.getByRole('button', { name: 'Save rule' }))
-    await waitFor(() => expect(mocks.createClassificationRule).toHaveBeenCalledWith({ tenantId: 'tenant-1', matchType: 'contains', condition: 'NETFLIX', categoryId: 'category-2' }))
+    await waitFor(() => expect(mocks.createClassificationRule).toHaveBeenCalledWith({ tenantId: 'tenant-1', matchType: 'contains', condition: 'NETFLIX', categoryId: 'category-2', tagIds: ['tag-2'] }))
 
     await user.click(screen.getAllByRole('button', { name: 'Edit' })[0])
     await user.clear(screen.getByLabelText('Condition'))

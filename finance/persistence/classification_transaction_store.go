@@ -8,6 +8,7 @@ import (
 
 	"github.com/gemyago/sumweave/finance/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const classificationBatchSize = 200
@@ -23,10 +24,11 @@ type ListEligibleClassificationTransactionsParams struct {
 	AfterID           string
 }
 
-type AssignClassificationCategoryParams struct {
+type AssignClassificationParams struct {
 	TenantID      string
 	TransactionID string
 	CategoryID    string
+	TagIDs        []string
 	UpdatedAt     time.Time
 }
 
@@ -62,17 +64,40 @@ func (s *ClassificationTransactionStore) ListEligibleClassificationTransactions(
 	return transactions, nil
 }
 
-func (s *ClassificationTransactionStore) AssignClassificationCategory(
+func (s *ClassificationTransactionStore) AssignClassification(
 	ctx context.Context,
-	params AssignClassificationCategoryParams,
+	params AssignClassificationParams,
 ) (bool, error) {
-	query := eligibleClassificationTransactionQuery(s.db.WithContext(ctx), params.TenantID, time.Time{}, time.Time{}).
-		Where("id = ?", strings.TrimSpace(params.TransactionID))
-	result := query.Updates(map[string]any{columnCategoryID: params.CategoryID, columnUpdatedAt: params.UpdatedAt})
-	if result.Error != nil {
-		return false, fmt.Errorf("assign classification category: %w", result.Error)
+	assigned := false
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := eligibleClassificationTransactionQuery(tx, params.TenantID, time.Time{}, time.Time{}).
+			Where("id = ?", strings.TrimSpace(params.TransactionID))
+		result := query.Updates(map[string]any{columnCategoryID: params.CategoryID, columnUpdatedAt: params.UpdatedAt})
+		if result.Error != nil {
+			return fmt.Errorf("update classification category: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		assigned = true
+		if len(params.TagIDs) == 0 {
+			return nil
+		}
+		assignments := make([]transactionTagModel, 0, len(params.TagIDs))
+		for _, tagID := range params.TagIDs {
+			assignments = append(assignments, transactionTagModel{
+				TransactionID: params.TransactionID,
+				TagID:         tagID,
+			})
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&assignments).Error; err != nil {
+			return fmt.Errorf("assign classification tags: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return false, fmt.Errorf("assign classification: %w", err)
 	}
-	return result.RowsAffected == 1, nil
+	return assigned, nil
 }
 
 func eligibleClassificationTransactionQuery(

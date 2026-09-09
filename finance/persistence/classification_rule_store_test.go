@@ -27,7 +27,9 @@ func TestClassificationRuleStore(t *testing.T) {
 		store := NewClassificationRuleStore(openTestDatabase(t))
 		tenantID := "tenant-" + fake.UUID().V4()
 		categoryID := "category-" + fake.UUID().V4()
-		first, err := store.AppendClassificationRule(t.Context(), makeRule(fake, tenantID, categoryID, now))
+		firstRule := makeRule(fake, tenantID, categoryID, now)
+		firstRule.TagIDs = []string{"tag-b-" + fake.UUID().V4(), "tag-a-" + fake.UUID().V4()}
+		first, err := store.AppendClassificationRule(t.Context(), firstRule)
 		require.NoError(t, err)
 		secondRule := makeRule(fake, tenantID, categoryID, now)
 		secondRule.Condition = first.Condition
@@ -43,15 +45,57 @@ func TestClassificationRuleStore(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{first.ID, second.ID}, []string{items[0].ID, items[1].ID})
 		assert.Equal(t, []int{first.Position, second.Position}, []int{items[0].Position, items[1].Position})
+		assert.Equal(t, []string{firstRule.TagIDs[1], firstRule.TagIDs[0]}, items[0].TagIDs)
+		assert.Empty(t, items[1].TagIDs)
+		referenceIDs, err := store.ListClassificationRuleIDsReferencingTag(t.Context(), tenantID, firstRule.TagIDs[0])
+		require.NoError(t, err)
+		assert.Equal(t, []string{first.ID}, referenceIDs)
 		require.NoError(t, store.MoveClassificationRule(t.Context(), tenantID, second.ID, -1, now.Add(time.Minute)))
 		items, err = store.ListClassificationRules(t.Context(), tenantID, "")
 		require.NoError(t, err)
 		assert.Equal(t, []string{second.ID, first.ID}, []string{items[0].ID, items[1].ID})
+		assert.Equal(t, []string{firstRule.TagIDs[1], firstRule.TagIDs[0]}, items[1].TagIDs)
 		require.NoError(t, store.DeleteClassificationRule(t.Context(), tenantID, second.ID))
 		items, err = store.ListClassificationRules(t.Context(), tenantID, "")
 		require.NoError(t, err)
 		require.Len(t, items, 1)
 		assert.Equal(t, 1, items[0].Position)
+		assert.Equal(t, []string{firstRule.TagIDs[1], firstRule.TagIDs[0]}, items[0].TagIDs)
+	})
+
+	t.Run("replaces complete rule tag sets and clears them with an empty set", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		store := NewClassificationRuleStore(openTestDatabase(t))
+		rule := makeRule(fake, "tenant-"+fake.UUID().V4(), "category-"+fake.UUID().V4(), now)
+		rule.TagIDs = []string{"tag-old-" + fake.UUID().V4()}
+		saved, err := store.AppendClassificationRule(t.Context(), rule)
+		require.NoError(t, err)
+
+		saved.TagIDs = []string{"tag-new-" + fake.UUID().V4(), "tag-another-" + fake.UUID().V4()}
+		saved.UpdatedAt = now.Add(time.Minute)
+		require.NoError(t, store.ReplaceClassificationRule(t.Context(), saved))
+		items, err := store.ListClassificationRules(t.Context(), rule.TenantID, "")
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, []string{saved.TagIDs[1], saved.TagIDs[0]}, items[0].TagIDs)
+
+		saved.TagIDs = []string{}
+		require.NoError(t, store.ReplaceClassificationRule(t.Context(), saved))
+		items, err = store.ListClassificationRules(t.Context(), rule.TenantID, "")
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, []string{}, items[0].TagIDs)
+	})
+
+	t.Run("returns an empty rule list with no tag hydration query", func(t *testing.T) {
+		fake := faker.New()
+		store := NewClassificationRuleStore(openTestDatabase(t))
+
+		items, err := store.ListClassificationRules(t.Context(), "tenant-"+fake.UUID().V4(), "")
+
+		require.NoError(t, err)
+		assert.Empty(t, items)
 	})
 
 	t.Run("treats edge moves as no-ops and rolls back failed replacement", func(t *testing.T) {
@@ -100,6 +144,12 @@ func TestClassificationRuleStore(t *testing.T) {
 			rule.CategoryID,
 		)
 		require.Error(t, err)
+		_, err = makeClosedStore(t).ListClassificationRuleIDsReferencingTag(
+			t.Context(),
+			rule.TenantID,
+			"tag-"+fake.UUID().V4(),
+		)
+		require.Error(t, err)
 	})
 
 	t.Run("returns not found errors and rolls back duplicate appends", func(t *testing.T) {
@@ -110,6 +160,11 @@ func TestClassificationRuleStore(t *testing.T) {
 		saved, err := store.AppendClassificationRule(t.Context(), rule)
 		require.NoError(t, err)
 		_, err = store.AppendClassificationRule(t.Context(), rule)
+		require.Error(t, err)
+		ruleWithDuplicateTags := makeRule(fake, rule.TenantID, rule.CategoryID, now)
+		duplicateTagID := "tag-" + fake.UUID().V4()
+		ruleWithDuplicateTags.TagIDs = []string{duplicateTagID, duplicateTagID}
+		_, err = store.AppendClassificationRule(t.Context(), ruleWithDuplicateTags)
 		require.Error(t, err)
 		items, err := store.ListClassificationRules(t.Context(), rule.TenantID, "")
 		require.NoError(t, err)

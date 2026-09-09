@@ -122,4 +122,84 @@ func TestCatalogServiceClassificationRuleReferences(t *testing.T) {
 		require.NoError(t, getErr)
 		assert.Nil(t, stored.HiddenAt)
 	})
+
+	t.Run(
+		"blocks tag hiding until referenced rules are retargeted while retaining transaction tags",
+		func(t *testing.T) {
+			fake := faker.New()
+			database := openTestDatabase(t)
+			store := persistence.NewStore(database)
+			ruleStore := persistence.NewClassificationRuleStoreFromStore(store)
+			transactionStore := persistence.NewTransactionTagStore(database)
+			actorUserID := "user-" + fake.UUID().V4()
+			tenant, err := NewTenantService(store).CreateTenant(t.Context(), CreateTenantParams{
+				ActorUserID: actorUserID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "USD",
+				SeedDefaults: false,
+			})
+			require.NoError(t, err)
+			service := NewCatalogService(store, ruleStore)
+			tag, err := service.CreateTag(t.Context(), CreateTagParams{
+				ActorUserID: actorUserID, TenantID: tenant.ID, Name: "tag-" + fake.Lorem().Word(),
+			})
+			require.NoError(t, err)
+			now := time.Date(2026, time.September, 6, 16, 0, 0, 0, time.FixedZone("test", 2*60*60))
+			transaction, err := transactionStore.SaveTransaction(t.Context(), domain.Transaction{
+				ID: "transaction-" + fake.UUID().V4(), TenantID: tenant.ID, AccountID: "account-" + fake.UUID().V4(),
+				Source: domain.TransactionSourceManual, Status: domain.TransactionStatusBooked,
+				Kind: domain.TransactionKindExpense, Currency: "USD", Description: "transaction-" + fake.Lorem().Word(),
+				EffectiveAt: now, TagIDs: []string{tag.ID}, CreatedAt: now, UpdatedAt: now,
+			})
+			require.NoError(t, err)
+			rule, err := ruleStore.AppendClassificationRule(t.Context(), domain.ClassificationRule{
+				ID: "rule-" + fake.UUID().V4(), TenantID: tenant.ID, CategoryID: "category-" + fake.UUID().V4(),
+				MatchType: domain.ClassificationMatchTypeContains, Condition: "condition-" + fake.Lorem().Word(),
+				TagIDs: []string{tag.ID}, CreatedAt: now, UpdatedAt: now,
+			})
+			require.NoError(t, err)
+
+			err = service.HideTag(t.Context(), HideTagParams{
+				ActorUserID: actorUserID, TenantID: tenant.ID, TagID: tag.ID,
+			})
+			var blocked *TagReferencedByClassificationRulesError
+			require.ErrorAs(t, err, &blocked)
+			require.ErrorIs(t, err, ErrTagReferencedByClassificationRules)
+			assert.Equal(t, []string{rule.ID}, blocked.RuleIDs)
+			storedTag, err := store.GetTag(t.Context(), tag.ID)
+			require.NoError(t, err)
+			assert.Nil(t, storedTag.HiddenAt)
+
+			hiddenAt := now.Add(time.Minute)
+			tag.HiddenAt = &hiddenAt
+			tag.UpdatedAt = hiddenAt
+			_, err = store.SaveTag(t.Context(), tag)
+			require.ErrorIs(t, err, persistence.ErrTagReferencedByClassificationRules)
+			storedTag, err = store.GetTag(t.Context(), tag.ID)
+			require.NoError(t, err)
+			assert.Nil(t, storedTag.HiddenAt)
+
+			rule.TagIDs = []string{}
+			require.NoError(t, ruleStore.ReplaceClassificationRule(t.Context(), rule))
+			require.NoError(t, service.HideTag(t.Context(), HideTagParams{
+				ActorUserID: actorUserID, TenantID: tenant.ID, TagID: tag.ID,
+			}))
+			storedTransaction, err := transactionStore.GetTransaction(t.Context(), transaction.ID)
+			require.NoError(t, err)
+			assert.Equal(t, []string{tag.ID}, storedTransaction.TagIDs)
+
+			secondTag, err := service.CreateTag(t.Context(), CreateTagParams{
+				ActorUserID: actorUserID, TenantID: tenant.ID, Name: "tag-" + fake.Lorem().Word(),
+			})
+			require.NoError(t, err)
+			rule.TagIDs = []string{secondTag.ID}
+			require.NoError(t, ruleStore.ReplaceClassificationRule(t.Context(), rule))
+			err = service.HideTag(t.Context(), HideTagParams{
+				ActorUserID: actorUserID, TenantID: tenant.ID, TagID: secondTag.ID,
+			})
+			require.ErrorIs(t, err, ErrTagReferencedByClassificationRules)
+			require.NoError(t, ruleStore.DeleteClassificationRule(t.Context(), tenant.ID, rule.ID))
+			require.NoError(t, service.HideTag(t.Context(), HideTagParams{
+				ActorUserID: actorUserID, TenantID: tenant.ID, TagID: secondTag.ID,
+			}))
+		},
+	)
 }

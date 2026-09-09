@@ -96,6 +96,7 @@ func TestClassificationService(t *testing.T) {
 			Rules:        rules,
 			Transactions: transactions,
 			Categories:   categories,
+			Tags:         newMockclassificationTagStore(t),
 			Logger:       slog.New(slog.DiscardHandler),
 			Now:          time.Now,
 		}, WithClassificationServiceCommandPublisher(publisher))
@@ -121,6 +122,7 @@ func TestClassificationService(t *testing.T) {
 			Rules:        newMockclassificationRuleStore(t),
 			Transactions: newMockclassificationTransactionStore(t),
 			Categories:   newMockclassificationCategoryStore(t),
+			Tags:         newMockclassificationTagStore(t),
 			Logger:       slog.New(slog.DiscardHandler),
 			Now:          time.Now,
 		}, WithClassificationServiceCommandPublisher(NewMockSemanticCommandPublisher(t)))
@@ -153,6 +155,7 @@ func TestClassificationService(t *testing.T) {
 			Rules:        newMockclassificationRuleStore(t),
 			Transactions: newMockclassificationTransactionStore(t),
 			Categories:   newMockclassificationCategoryStore(t),
+			Tags:         newMockclassificationTagStore(t),
 			Logger:       slog.New(slog.DiscardHandler),
 			Now:          time.Now,
 		}, WithClassificationServiceCommandPublisher(publisher))
@@ -196,7 +199,7 @@ func TestClassificationService(t *testing.T) {
 			GetCategory(t.Context(), "category-a").
 			Return(&domain.Category{ID: "category-a", TenantID: params.TenantID}, nil).
 			Once()
-		transactions.EXPECT().AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+		transactions.EXPECT().AssignClassification(t.Context(), persistence.AssignClassificationParams{
 			TenantID: params.TenantID, TransactionID: first.ID, CategoryID: "category-a", UpdatedAt: now,
 		}).Return(true, nil).Once()
 		transactions.EXPECT().
@@ -209,13 +212,174 @@ func TestClassificationService(t *testing.T) {
 			Return(nil, nil).
 			Once()
 		service, err := NewClassificationService(ClassificationServiceArgs{
-			Access: access, Rules: rules, Transactions: transactions, Categories: categories,
-			Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
+			Access:       access,
+			Rules:        rules,
+			Transactions: transactions,
+			Categories:   categories,
+			Tags:         newMockclassificationTagStore(t),
+			Logger:       slog.New(slog.DiscardHandler),
+			Now:          func() time.Time { return now },
 		})
 		if assert.NoError(t, err) {
 			counts, classifyErr := service.Classify(t.Context(), params)
 			assert.NoError(t, classifyErr)
 			assert.Equal(t, ClassificationAttemptCounts{Classified: 1, Unmatched: 1}, counts)
+		}
+	})
+
+	t.Run("uses only the winning rule tags for one committed assignment", func(t *testing.T) {
+		fake := faker.New()
+		rules := newMockclassificationRuleStore(t)
+		transactions := newMockclassificationTransactionStore(t)
+		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
+		access := newMockaccessGuardStore(t)
+		now := time.Date(2026, time.September, 9, 15, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		params := ClassificationParams{
+			TenantID: "tenant-" + fake.UUID().V4(), RangeStart: now.Add(-time.Hour), RangeEndExclusive: now,
+		}
+		firstTagID := "tag-first-" + fake.UUID().V4()
+		secondTagID := "tag-second-" + fake.UUID().V4()
+		firstCategoryID := "category-first-" + fake.UUID().V4()
+		secondCategoryID := "category-second-" + fake.UUID().V4()
+		transaction := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "matching description"}
+		rules.EXPECT().ListClassificationRules(t.Context(), params.TenantID, "").Return([]domain.ClassificationRule{
+			{
+				ID:         "rule-first-" + fake.UUID().V4(),
+				MatchType:  domain.ClassificationMatchTypeContains,
+				Condition:  "matching",
+				CategoryID: firstCategoryID,
+				TagIDs:     []string{firstTagID},
+			},
+			{
+				ID:         "rule-second-" + fake.UUID().V4(),
+				MatchType:  domain.ClassificationMatchTypeContains,
+				Condition:  "matching",
+				CategoryID: secondCategoryID,
+				TagIDs:     []string{secondTagID},
+			},
+		}, nil).Once()
+		transactions.EXPECT().ListEligibleClassificationTransactions(
+			t.Context(),
+			persistence.ListEligibleClassificationTransactionsParams{
+				TenantID:          params.TenantID,
+				RangeStart:        params.RangeStart,
+				RangeEndExclusive: params.RangeEndExclusive,
+			},
+		).Return([]domain.Transaction{transaction}, nil).Once()
+		categories.EXPECT().GetCategory(t.Context(), firstCategoryID).Return(
+			&domain.Category{ID: firstCategoryID, TenantID: params.TenantID},
+			nil,
+		).Once()
+		tags.EXPECT().GetTag(t.Context(), firstTagID).Return(
+			&domain.Tag{ID: firstTagID, TenantID: params.TenantID},
+			nil,
+		).Once()
+		transactions.EXPECT().AssignClassification(t.Context(), persistence.AssignClassificationParams{
+			TenantID:      params.TenantID,
+			TransactionID: transaction.ID,
+			CategoryID:    firstCategoryID,
+			TagIDs:        []string{firstTagID},
+			UpdatedAt:     now,
+		}).Return(true, nil).Once()
+		transactions.EXPECT().ListEligibleClassificationTransactions(
+			t.Context(),
+			persistence.ListEligibleClassificationTransactionsParams{
+				TenantID:          params.TenantID,
+				RangeStart:        params.RangeStart,
+				RangeEndExclusive: params.RangeEndExclusive,
+				AfterID:           transaction.ID,
+			},
+		).Return(nil, nil).Once()
+		service, err := NewClassificationService(ClassificationServiceArgs{
+			Access: access, Rules: rules, Transactions: transactions, Categories: categories, Tags: tags,
+			Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
+		})
+		require.NoError(t, err)
+		counts, err := service.Classify(t.Context(), params)
+		require.NoError(t, err)
+		assert.Equal(t, ClassificationAttemptCounts{Classified: 1}, counts)
+	})
+
+	t.Run("makes unavailable rule tags terminal and tag lookup failures retryable", func(t *testing.T) {
+		fake := faker.New()
+		makeService := func(t *testing.T) (*ClassificationService, *mockclassificationRuleStore, *mockclassificationTransactionStore, *mockclassificationCategoryStore, *mockclassificationTagStore, ClassificationParams, domain.Transaction, string, string) {
+			t.Helper()
+			now := time.Date(2026, time.September, 9, 16, 0, 0, 0, time.FixedZone("test", 2*60*60))
+			params := ClassificationParams{
+				TenantID:          "tenant-" + fake.UUID().V4(),
+				RangeStart:        now.Add(-time.Hour),
+				RangeEndExclusive: now,
+			}
+			rules := newMockclassificationRuleStore(t)
+			transactions := newMockclassificationTransactionStore(t)
+			categories := newMockclassificationCategoryStore(t)
+			tags := newMockclassificationTagStore(t)
+			categoryID := "category-" + fake.UUID().V4()
+			tagID := "tag-" + fake.UUID().V4()
+			transaction := domain.Transaction{ID: "transaction-" + fake.UUID().V4(), Description: "match"}
+			rules.EXPECT().ListClassificationRules(t.Context(), params.TenantID, "").Return(
+				[]domain.ClassificationRule{{
+					ID:         "rule-" + fake.UUID().V4(),
+					MatchType:  domain.ClassificationMatchTypeExact,
+					Condition:  transaction.Description,
+					CategoryID: categoryID,
+					TagIDs:     []string{tagID},
+				}},
+				nil,
+			).Once()
+			transactions.EXPECT().ListEligibleClassificationTransactions(
+				t.Context(),
+				persistence.ListEligibleClassificationTransactionsParams{
+					TenantID:          params.TenantID,
+					RangeStart:        params.RangeStart,
+					RangeEndExclusive: params.RangeEndExclusive,
+				},
+			).Return([]domain.Transaction{transaction}, nil).Once()
+			categories.EXPECT().GetCategory(t.Context(), categoryID).Return(
+				&domain.Category{ID: categoryID, TenantID: params.TenantID},
+				nil,
+			).Once()
+			service, err := NewClassificationService(ClassificationServiceArgs{
+				Access:       newMockaccessGuardStore(t),
+				Rules:        rules,
+				Transactions: transactions,
+				Categories:   categories,
+				Tags:         tags,
+				Logger:       slog.New(slog.DiscardHandler),
+				Now:          func() time.Time { return now },
+			})
+			require.NoError(t, err)
+			return service, rules, transactions, categories, tags, params, transaction, categoryID, tagID
+		}
+		for _, tc := range []struct {
+			name     string
+			tag      *domain.Tag
+			err      error
+			terminal bool
+		}{
+			{name: "missing", err: persistence.ErrTagNotFound, terminal: true},
+			{name: "hidden", tag: &domain.Tag{HiddenAt: &time.Time{}}, terminal: true},
+			{name: "other tenant", tag: &domain.Tag{TenantID: "tenant-other-" + fake.UUID().V4()}, terminal: true},
+			{name: "operational", err: fmt.Errorf("get tag: %w", errors.New("database unavailable"))},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				service, _, _, _, tags, params, _, _, tagID := makeService(t)
+				if tc.tag != nil {
+					tc.tag.ID = tagID
+					if tc.tag.TenantID == "" {
+						tc.tag.TenantID = params.TenantID
+					}
+				}
+				tags.EXPECT().GetTag(t.Context(), tagID).Return(tc.tag, tc.err).Once()
+				_, err := service.Classify(t.Context(), params)
+				require.Error(t, err)
+				failure, terminal := TerminalFailureFrom(err)
+				assert.Equal(t, tc.terminal, terminal)
+				if terminal {
+					assert.Equal(t, "classification_tag_unavailable", failure.Code)
+				}
+			})
 		}
 	})
 
@@ -242,12 +406,13 @@ func TestClassificationService(t *testing.T) {
 			Transactions: transactions,
 			Categories:   categories,
 		})
-		require.ErrorContains(t, err, "logger is required")
+		require.ErrorContains(t, err, "tag store is required")
 		_, err = NewClassificationService(ClassificationServiceArgs{
 			Access:       access,
 			Rules:        rules,
 			Transactions: transactions,
 			Categories:   categories,
+			Tags:         newMockclassificationTagStore(t),
 			Logger:       slog.New(slog.DiscardHandler),
 		})
 		require.ErrorContains(t, err, "clock is required")
@@ -270,6 +435,7 @@ func TestClassificationService(t *testing.T) {
 				Rules:        rules,
 				Transactions: transactions,
 				Categories:   categories,
+				Tags:         newMockclassificationTagStore(t),
 				Logger:       slog.New(slog.DiscardHandler),
 				Now:          func() time.Time { return now },
 			})
@@ -370,7 +536,7 @@ func TestClassificationService(t *testing.T) {
 						Return(&domain.Category{ID: firstCategoryID, TenantID: params.TenantID}, nil).
 						Once()
 					transactions.EXPECT().
-						AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+						AssignClassification(t.Context(), persistence.AssignClassificationParams{
 							TenantID:      params.TenantID,
 							TransactionID: first.ID,
 							CategoryID:    firstCategoryID,
@@ -422,7 +588,7 @@ func TestClassificationService(t *testing.T) {
 				Return(&domain.Category{ID: firstCategoryID, TenantID: params.TenantID}, nil).
 				Once()
 			transactions.EXPECT().
-				AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+				AssignClassification(t.Context(), persistence.AssignClassificationParams{
 					TenantID: params.TenantID, TransactionID: first.ID, CategoryID: firstCategoryID, UpdatedAt: now,
 				}).
 				Return(true, nil).
@@ -470,7 +636,7 @@ func TestClassificationService(t *testing.T) {
 				Return(&domain.Category{ID: categoryID, TenantID: params.TenantID}, nil).
 				Once()
 			transactions.EXPECT().
-				AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+				AssignClassification(t.Context(), persistence.AssignClassificationParams{
 					TenantID: params.TenantID, TransactionID: transaction.ID, CategoryID: categoryID, UpdatedAt: now,
 				}).
 				Return(false, nil).
@@ -523,7 +689,7 @@ func TestClassificationService(t *testing.T) {
 		_, err = store.SaveTransaction(t.Context(), firstTransaction)
 		require.NoError(t, err)
 		service, err := NewClassificationService(ClassificationServiceArgs{
-			Access: store, Rules: ruleStore, Transactions: transactionStore, Categories: store,
+			Access: store, Rules: ruleStore, Transactions: transactionStore, Categories: store, Tags: store,
 			Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return now },
 		})
 		require.NoError(t, err)
@@ -573,6 +739,7 @@ func TestClassificationService(t *testing.T) {
 			Rules:        rules,
 			Transactions: transactions,
 			Categories:   categories,
+			Tags:         newMockclassificationTagStore(t),
 			Logger:       slog.New(slog.DiscardHandler),
 			Now:          func() time.Time { return now },
 		})
@@ -602,7 +769,7 @@ func TestClassificationService(t *testing.T) {
 			GetCategory(t.Context(), categoryID).
 			Return(&domain.Category{ID: categoryID, TenantID: params.TenantID}, nil).
 			Once()
-		transactions.EXPECT().AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+		transactions.EXPECT().AssignClassification(t.Context(), persistence.AssignClassificationParams{
 			TenantID: params.TenantID, TransactionID: transaction.ID, CategoryID: categoryID, UpdatedAt: now,
 		}).Return(true, nil).Once()
 		transactions.EXPECT().
@@ -636,7 +803,7 @@ func TestClassificationService(t *testing.T) {
 			GetCategory(t.Context(), categoryID).
 			Return(&domain.Category{ID: categoryID, TenantID: secondParams.TenantID}, nil).
 			Once()
-		transactions.EXPECT().AssignClassificationCategory(t.Context(), persistence.AssignClassificationCategoryParams{
+		transactions.EXPECT().AssignClassification(t.Context(), persistence.AssignClassificationParams{
 			TenantID: secondParams.TenantID, TransactionID: newTransaction.ID, CategoryID: categoryID, UpdatedAt: now,
 		}).Return(true, nil).Once()
 		transactions.EXPECT().
