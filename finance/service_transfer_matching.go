@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"time"
 
@@ -398,6 +399,30 @@ type transferMatchingAmountKey struct {
 	amount   int64
 }
 
+type transferMatchingFXKey struct {
+	connectionID    string
+	namespace       string
+	reference       string
+	baseCurrency    string
+	quoteCurrency   string
+	rateCoefficient string
+	rateScale       int
+}
+
+type transferMatchingIndexedTransaction struct {
+	transaction persistence.TransferMatchingTransaction
+	evidence    fxEvidence
+	hasEvidence bool
+}
+
+type transferMatchingIndexes struct {
+	byAmount map[transferMatchingAmountKey][]transferMatchingIndexedTransaction
+	byFX     map[transferMatchingFXKey][]transferMatchingIndexedTransaction
+	starting []transferMatchingIndexedTransaction
+}
+
+type transferMatchingEvidenceExtractor func(string) (fxEvidence, bool)
+
 type transferMatchingPair struct {
 	first  persistence.TransferMatchingTransaction
 	second persistence.TransferMatchingTransaction
@@ -414,14 +439,14 @@ func decideTransferMatchingPairs(
 	rangeStart time.Time,
 	rangeEndExclusive time.Time,
 ) ([]transferMatchingPair, TransferMatchingAttemptCounts, error) {
-	byAmount, starting := transferMatchingIndex(transactions, rangeStart, rangeEndExclusive)
+	indexes := transferMatchingIndex(transactions, rangeStart, rangeEndExclusive, extractFXEvidence)
 	accepted := make(map[transferMatchingPairKey]transferMatchingPair)
 	counts := TransferMatchingAttemptCounts{}
-	for _, transaction := range starting {
+	for _, transaction := range indexes.starting {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return nil, counts, contextErr
 		}
-		pair, delta := evaluateTransferMatchingStart(transaction, byAmount)
+		pair, delta := evaluateTransferMatchingStart(transaction, indexes)
 		counts = addTransferMatchingAttemptCounts(counts, delta)
 		if pair != nil {
 			accepted[transferMatchingPairKey{firstID: pair.first.ID, secondID: pair.second.ID}] = *pair
@@ -444,38 +469,68 @@ func transferMatchingIndex(
 	transactions []persistence.TransferMatchingTransaction,
 	rangeStart time.Time,
 	rangeEndExclusive time.Time,
-) (map[transferMatchingAmountKey][]persistence.TransferMatchingTransaction, []persistence.TransferMatchingTransaction) {
-	byAmount := make(map[transferMatchingAmountKey][]persistence.TransferMatchingTransaction)
-	starting := make([]persistence.TransferMatchingTransaction, 0, len(transactions))
+	extractEvidence transferMatchingEvidenceExtractor,
+) transferMatchingIndexes {
+	indexes := transferMatchingIndexes{
+		byAmount: make(map[transferMatchingAmountKey][]transferMatchingIndexedTransaction),
+		byFX:     make(map[transferMatchingFXKey][]transferMatchingIndexedTransaction),
+		starting: make([]transferMatchingIndexedTransaction, 0, len(transactions)),
+	}
 	for _, transaction := range transactions {
+		evidence, hasEvidence := extractEvidence(transaction.Description)
+		indexed := transferMatchingIndexedTransaction{
+			transaction: transaction,
+			evidence:    evidence,
+			hasEvidence: hasEvidence,
+		}
 		key := transferMatchingAmountKey{currency: transaction.Currency, amount: transaction.AmountMinor}
-		byAmount[key] = append(byAmount[key], transaction)
+		indexes.byAmount[key] = append(indexes.byAmount[key], indexed)
+		if fxKey, ok := transferMatchingFXKeyFor(indexed); ok {
+			indexes.byFX[fxKey] = append(indexes.byFX[fxKey], indexed)
+		}
 		if !transaction.EffectiveAt.Before(rangeStart) && transaction.EffectiveAt.Before(rangeEndExclusive) {
-			starting = append(starting, transaction)
+			indexes.starting = append(indexes.starting, indexed)
 		}
 	}
-	for key := range byAmount {
-		sort.Slice(byAmount[key], func(i int, j int) bool {
-			if byAmount[key][i].EffectiveAt.Equal(byAmount[key][j].EffectiveAt) {
-				return byAmount[key][i].ID < byAmount[key][j].ID
-			}
-			return byAmount[key][i].EffectiveAt.Before(byAmount[key][j].EffectiveAt)
-		})
+	for key := range indexes.byAmount {
+		sortTransferMatchingTransactions(indexes.byAmount[key])
 	}
-	sort.Slice(starting, func(i int, j int) bool {
-		if starting[i].EffectiveAt.Equal(starting[j].EffectiveAt) {
-			return starting[i].ID < starting[j].ID
+	for key := range indexes.byFX {
+		sortTransferMatchingTransactions(indexes.byFX[key])
+	}
+	sortTransferMatchingTransactions(indexes.starting)
+	return indexes
+}
+
+func sortTransferMatchingTransactions(transactions []transferMatchingIndexedTransaction) {
+	sort.Slice(transactions, func(i int, j int) bool {
+		if transactions[i].transaction.EffectiveAt.Equal(transactions[j].transaction.EffectiveAt) {
+			return transactions[i].transaction.ID < transactions[j].transaction.ID
 		}
-		return starting[i].EffectiveAt.Before(starting[j].EffectiveAt)
+		return transactions[i].transaction.EffectiveAt.Before(transactions[j].transaction.EffectiveAt)
 	})
-	return byAmount, starting
+}
+
+func transferMatchingFXKeyFor(
+	transaction transferMatchingIndexedTransaction,
+) (transferMatchingFXKey, bool) {
+	if !transaction.hasEvidence || transaction.transaction.ConnectionID == nil {
+		return transferMatchingFXKey{}, false
+	}
+	evidence := transaction.evidence
+	return transferMatchingFXKey{
+		connectionID: *transaction.transaction.ConnectionID,
+		namespace:    evidence.namespace, reference: evidence.reference,
+		baseCurrency: evidence.baseCurrency, quoteCurrency: evidence.quoteCurrency,
+		rateCoefficient: evidence.rateCoefficient, rateScale: evidence.rateScale,
+	}, true
 }
 
 func evaluateTransferMatchingStart(
-	transaction persistence.TransferMatchingTransaction,
-	byAmount map[transferMatchingAmountKey][]persistence.TransferMatchingTransaction,
+	transaction transferMatchingIndexedTransaction,
+	indexes transferMatchingIndexes,
 ) (*transferMatchingPair, TransferMatchingAttemptCounts) {
-	counterparts := transferMatchingCandidates(transaction, byAmount)
+	counterparts := transferMatchingCandidates(transaction, indexes)
 	if len(counterparts) == 0 {
 		return nil, TransferMatchingAttemptCounts{Unmatched: 1}
 	}
@@ -483,11 +538,11 @@ func evaluateTransferMatchingStart(
 		return nil, TransferMatchingAttemptCounts{Ambiguous: 1}
 	}
 	counterpart := counterparts[0]
-	reverseCandidates := transferMatchingCandidates(counterpart, byAmount)
-	if len(reverseCandidates) != 1 || reverseCandidates[0].ID != transaction.ID {
+	reverseCandidates := transferMatchingCandidates(counterpart, indexes)
+	if len(reverseCandidates) != 1 || reverseCandidates[0].transaction.ID != transaction.transaction.ID {
 		return nil, TransferMatchingAttemptCounts{Ambiguous: 1}
 	}
-	first, second := transaction, counterpart
+	first, second := transaction.transaction, counterpart.transaction
 	if second.ID < first.ID {
 		first, second = second, first
 	}
@@ -507,28 +562,94 @@ func addTransferMatchingAttemptCounts(
 }
 
 func transferMatchingCandidates(
-	transaction persistence.TransferMatchingTransaction,
-	byAmount map[transferMatchingAmountKey][]persistence.TransferMatchingTransaction,
-) []persistence.TransferMatchingTransaction {
-	if transaction.AmountMinor == math.MinInt64 {
+	transaction transferMatchingIndexedTransaction,
+	indexes transferMatchingIndexes,
+) []transferMatchingIndexedTransaction {
+	candidates := make([]transferMatchingIndexedTransaction, 0, transferMatchingMaxCandidates)
+	candidateIDs := make(map[string]struct{}, transferMatchingMaxCandidates)
+	addCandidate := func(candidate transferMatchingIndexedTransaction) bool {
+		if candidate.transaction.ID == transaction.transaction.ID {
+			return len(candidates) == transferMatchingMaxCandidates
+		}
+		if _, found := candidateIDs[candidate.transaction.ID]; found {
+			return len(candidates) == transferMatchingMaxCandidates
+		}
+		candidateIDs[candidate.transaction.ID] = struct{}{}
+		candidates = append(candidates, candidate)
+		return len(candidates) == transferMatchingMaxCandidates
+	}
+	if slices.ContainsFunc(transferMatchingSameCurrencyCandidates(transaction, indexes.byAmount), addCandidate) {
+		return candidates
+	}
+	if slices.ContainsFunc(transferMatchingFXCandidates(transaction, indexes.byFX), addCandidate) {
+		return candidates
+	}
+	return candidates
+}
+
+func transferMatchingSameCurrencyCandidates(
+	transaction transferMatchingIndexedTransaction,
+	byAmount map[transferMatchingAmountKey][]transferMatchingIndexedTransaction,
+) []transferMatchingIndexedTransaction {
+	if transaction.transaction.AmountMinor == math.MinInt64 {
 		return nil
 	}
-	bucket := byAmount[transferMatchingAmountKey{currency: transaction.Currency, amount: -transaction.AmountMinor}]
+	bucket := byAmount[transferMatchingAmountKey{
+		currency: transaction.transaction.Currency,
+		amount:   -transaction.transaction.AmountMinor,
+	}]
 	if len(bucket) == 0 {
 		return nil
 	}
-	windowStart := transaction.EffectiveAt.Add(-transferMatchingWindow)
-	windowEnd := transaction.EffectiveAt.Add(transferMatchingWindow)
+	windowStart := transaction.transaction.EffectiveAt.Add(-transferMatchingWindow)
+	windowEnd := transaction.transaction.EffectiveAt.Add(transferMatchingWindow)
 	start := sort.Search(len(bucket), func(index int) bool {
-		return !bucket[index].EffectiveAt.Before(windowStart)
+		return !bucket[index].transaction.EffectiveAt.Before(windowStart)
 	})
-	candidates := make([]persistence.TransferMatchingTransaction, 0, transferMatchingMaxCandidates)
+	candidates := make([]transferMatchingIndexedTransaction, 0, transferMatchingMaxCandidates)
 	for index := start; index < len(bucket); index++ {
 		candidate := bucket[index]
-		if candidate.EffectiveAt.After(windowEnd) {
+		if candidate.transaction.EffectiveAt.After(windowEnd) {
 			break
 		}
-		if candidate.AccountID == transaction.AccountID {
+		if candidate.transaction.AccountID == transaction.transaction.AccountID {
+			continue
+		}
+		candidates = append(candidates, candidate)
+		if len(candidates) == transferMatchingMaxCandidates {
+			break
+		}
+	}
+	return candidates
+}
+
+func transferMatchingFXCandidates(
+	transaction transferMatchingIndexedTransaction,
+	byFX map[transferMatchingFXKey][]transferMatchingIndexedTransaction,
+) []transferMatchingIndexedTransaction {
+	key, ok := transferMatchingFXKeyFor(transaction)
+	if !ok {
+		return nil
+	}
+	windowStart := transaction.transaction.EffectiveAt.Add(-transferMatchingWindow)
+	windowEnd := transaction.transaction.EffectiveAt.Add(transferMatchingWindow)
+	candidates := make([]transferMatchingIndexedTransaction, 0, transferMatchingMaxCandidates)
+	for _, candidate := range byFX[key] {
+		if candidate.transaction.EffectiveAt.Before(windowStart) {
+			continue
+		}
+		if candidate.transaction.EffectiveAt.After(windowEnd) {
+			break
+		}
+		if candidate.transaction.AccountID == transaction.transaction.AccountID ||
+			candidate.transaction.ID == transaction.transaction.ID ||
+			!fxConversionMatches(
+				transaction.evidence,
+				transaction.transaction.Currency,
+				transaction.transaction.AmountMinor,
+				candidate.transaction.Currency,
+				candidate.transaction.AmountMinor,
+			) {
 			continue
 		}
 		candidates = append(candidates, candidate)

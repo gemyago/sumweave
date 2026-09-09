@@ -23,6 +23,20 @@ func TestTransferMatchingService(t *testing.T) {
 			ID: id, AccountID: accountID, Currency: "USD", AmountMinor: amount, EffectiveAt: effectiveAt,
 		}
 	}
+	makeFXRow := func(
+		id string,
+		accountID string,
+		currency string,
+		amount int64,
+		description string,
+		effectiveAt time.Time,
+		connectionID *string,
+	) persistence.TransferMatchingTransaction {
+		return persistence.TransferMatchingTransaction{
+			ID: id, AccountID: accountID, Currency: currency, AmountMinor: amount, Description: description,
+			EffectiveAt: effectiveAt, ConnectionID: connectionID,
+		}
+	}
 	makeService := func(t *testing.T, pairs transferMatchingPairStore) *TransferMatchingService {
 		t.Helper()
 		service, err := NewTransferMatchingService(TransferMatchingServiceArgs{
@@ -81,6 +95,193 @@ func TestTransferMatchingService(t *testing.T) {
 		assert.Equal(t, "group-test", saved.TransferGroupID)
 		assert.True(t, now.Equal(saved.TransferMatchedAt))
 		assert.True(t, now.Equal(saved.UpdatedAt))
+	})
+
+	t.Run("combines same-currency and FX candidates before mutual uniqueness", func(t *testing.T) {
+		fake := faker.New()
+		stringPointer := func(value string) *string { return &value }
+		now := time.Date(2026, time.September, 8, 12, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		connectionID := "connection-" + fake.UUID().V4()
+		params := TransferMatchingParams{
+			TenantID: "tenant-" + fake.UUID().V4(), RangeStart: now, RangeEndExclusive: now.Add(time.Hour),
+		}
+		baseDescription := "FX123 USD/PLN 4.125"
+		quoteDescription := "FX123 USD/PLN 4,12500"
+		base := makeFXRow(
+			"base-"+fake.UUID().V4(), "account-base-"+fake.UUID().V4(), "USD", -10_000,
+			baseDescription, now, &connectionID,
+		)
+		quote := makeFXRow(
+			"quote-"+fake.UUID().V4(), "account-quote-"+fake.UUID().V4(), "PLN", 41_250,
+			quoteDescription, now.Add(time.Hour), &connectionID,
+		)
+
+		t.Run("matches the illustrated USD PLN exchange", func(t *testing.T) {
+			pairs := newMocktransferMatchingPairStore(t)
+			pairs.EXPECT().
+				ListEligibleTransferMatchingTransactions(t.Context(), mock.Anything).
+				Return([]persistence.TransferMatchingTransaction{base, quote}, nil).
+				Once()
+			pairs.EXPECT().
+				LinkTransferPair(t.Context(), mock.MatchedBy(func(value persistence.TransferPairLinkParams) bool {
+					return value.FirstTransactionID == base.ID && value.SecondTransactionID == quote.ID
+				})).
+				Return(nil).
+				Once()
+
+			counts, err := makeService(t, pairs).Match(t.Context(), params)
+
+			require.NoError(t, err)
+			assert.Equal(t, TransferMatchingAttemptCounts{MatchedPairs: 1}, counts)
+		})
+
+		t.Run("rejects mismatched FX evidence and unavailable provenance", func(t *testing.T) {
+			cases := []struct {
+				name   string
+				second persistence.TransferMatchingTransaction
+			}{
+				{
+					name: "connection scope",
+					second: makeFXRow(
+						"quote-connection-"+fake.UUID().V4(),
+						"account-quote-connection-"+fake.UUID().V4(), "PLN", 41_250,
+						quoteDescription, now.Add(time.Hour), stringPointer("connection-"+fake.UUID().V4()),
+					),
+				},
+				{
+					name: "reference",
+					second: makeFXRow(
+						"quote-reference-"+fake.UUID().V4(),
+						"account-quote-reference-"+fake.UUID().V4(), "PLN", 41_250,
+						"FX456 USD/PLN 4.125", now.Add(time.Hour), &connectionID,
+					),
+				},
+				{
+					name: "rate",
+					second: makeFXRow(
+						"quote-rate-"+fake.UUID().V4(),
+						"account-quote-rate-"+fake.UUID().V4(), "PLN", 41_250,
+						"FX123 USD/PLN 4.126", now.Add(time.Hour), &connectionID,
+					),
+				},
+				{
+					name: "ordered currency pair",
+					second: makeFXRow(
+						"quote-pair-"+fake.UUID().V4(),
+						"account-quote-pair-"+fake.UUID().V4(), "PLN", 41_250,
+						"FX123 PLN/USD 4.125", now.Add(time.Hour), &connectionID,
+					),
+				},
+				{
+					name: "converted value",
+					second: makeFXRow(
+						"quote-value-"+fake.UUID().V4(),
+						"account-quote-value-"+fake.UUID().V4(), "PLN", 41_249,
+						quoteDescription, now.Add(time.Hour), &connectionID,
+					),
+				},
+				{
+					name: "missing provenance",
+					second: makeFXRow(
+						"quote-missing-"+fake.UUID().V4(),
+						"account-quote-missing-"+fake.UUID().V4(), "PLN", 41_250,
+						quoteDescription, now.Add(time.Hour), nil,
+					),
+				},
+				{
+					name: "conflicting provenance",
+					second: makeFXRow(
+						"quote-conflicting-"+fake.UUID().V4(),
+						"account-quote-conflicting-"+fake.UUID().V4(), "PLN", 41_250,
+						quoteDescription, now.Add(time.Hour), nil,
+					),
+				},
+			}
+			for _, testCase := range cases {
+				t.Run(testCase.name, func(t *testing.T) {
+					pairs := newMocktransferMatchingPairStore(t)
+					pairs.EXPECT().
+						ListEligibleTransferMatchingTransactions(t.Context(), mock.Anything).
+						Return([]persistence.TransferMatchingTransaction{base, testCase.second}, nil).
+						Once()
+
+					counts, err := makeService(t, pairs).Match(t.Context(), params)
+
+					require.NoError(t, err)
+					assert.Equal(t, TransferMatchingAttemptCounts{Unmatched: 1}, counts)
+				})
+			}
+		})
+
+		t.Run("keeps candidates ambiguous across both rules and outside the requested range", func(t *testing.T) {
+			sameCurrency := makeFXRow(
+				"same-currency-"+fake.UUID().V4(), "account-same-currency-"+fake.UUID().V4(), "USD", 10_000,
+				"unrelated", now.Add(time.Minute), &connectionID,
+			)
+			pairs := newMocktransferMatchingPairStore(t)
+			pairs.EXPECT().
+				ListEligibleTransferMatchingTransactions(t.Context(), mock.Anything).
+				Return([]persistence.TransferMatchingTransaction{base, quote, sameCurrency}, nil).
+				Once()
+
+			counts, err := makeService(t, pairs).Match(t.Context(), params)
+
+			require.NoError(t, err)
+			assert.Equal(t, TransferMatchingAttemptCounts{Ambiguous: 2}, counts)
+
+			outside := makeFXRow(
+				"outside-"+fake.UUID().V4(), "account-outside-"+fake.UUID().V4(), "USD", -10_000,
+				baseDescription, now.Add(73*time.Hour), &connectionID,
+			)
+			pairs = newMocktransferMatchingPairStore(t)
+			pairs.EXPECT().
+				ListEligibleTransferMatchingTransactions(t.Context(), mock.Anything).
+				Return([]persistence.TransferMatchingTransaction{base, quote, outside}, nil).
+				Once()
+
+			counts, err = makeService(t, pairs).Match(t.Context(), params)
+
+			require.NoError(t, err)
+			assert.Equal(t, TransferMatchingAttemptCounts{Ambiguous: 1}, counts)
+		})
+
+		t.Run("keeps FX decisions stable, range-scoped, and extracts evidence once per row", func(t *testing.T) {
+			rows := []persistence.TransferMatchingTransaction{base, quote}
+			forward, forwardCounts, err := decideTransferMatchingPairs(
+				t.Context(), rows, params.RangeStart, params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			require.Equal(t, TransferMatchingAttemptCounts{}, forwardCounts)
+			slices.Reverse(rows)
+			shuffled, shuffledCounts, err := decideTransferMatchingPairs(
+				t.Context(), rows, params.RangeStart, params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, forward, shuffled)
+			assert.Equal(t, forwardCounts, shuffledCounts)
+
+			outsideRange, outsideCounts, err := decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{base, quote},
+				now.Add(2*time.Hour),
+				now.Add(3*time.Hour),
+			)
+			require.NoError(t, err)
+			assert.Empty(t, outsideRange)
+			assert.Equal(t, TransferMatchingAttemptCounts{}, outsideCounts)
+
+			extractions := 0
+			transferMatchingIndex(
+				rows,
+				params.RangeStart,
+				params.RangeEndExclusive,
+				func(description string) (fxEvidence, bool) {
+					extractions++
+					return extractFXEvidence(description)
+				},
+			)
+			assert.Equal(t, len(rows), extractions)
+		})
 	})
 
 	t.Run("rejects invalid ranges before loading and requires constructor dependencies", func(t *testing.T) {
