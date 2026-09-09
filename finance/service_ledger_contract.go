@@ -78,6 +78,10 @@ type ListTransactionsParams struct {
 	AccountID     string
 	Source        domain.TransactionSource
 	Status        domain.TransactionStatus
+	Kind          domain.TransactionKind
+	StartDate     time.Time
+	EndDate       time.Time
+	SortAscending bool
 	IncludeHidden bool
 	Limit         int64
 	Offset        int64

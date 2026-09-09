@@ -22,6 +22,8 @@
   } from '../lib/finance/dashboard-period'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
   import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
+  import FinancePager from '../components/FinancePager.svelte'
+  import { dateQueryValue, financeRouteQuery, readDateQuery, replaceFinanceRouteQuery } from '../lib/finance/url-filters'
 
   type BootstrapTone = 'primary' | 'success' | 'warning' | 'danger' | 'secondary'
   type DashboardPeriodMode = 'current_month' | 'previous_month' | 'next_month' | 'custom'
@@ -57,6 +59,8 @@
   let dashboard = $state<FinanceDashboard | null>(null)
   let historyAccounts = $state<FinanceAccount[]>([])
   let recentTransactions = $state<FinanceTransaction[]>([])
+  let transactionOffset = $state(0)
+  let loadingTransactions = $state(false)
   let recentConnections = $state<FinanceBankConnection[]>([])
   let dashboardPeriodMode = $state<DashboardPeriodMode>('current_month')
   let activeDashboardRange = $state<DashboardPeriodRange | undefined>(undefined)
@@ -262,6 +266,9 @@
   })
 
   const visibleRecentTransactions = $derived.by(() => recentTransactions.slice(0, TRANSACTION_SECTION_LIMIT))
+  const dashboardTransactionPage = $derived(Math.floor(transactionOffset / TRANSACTION_SECTION_LIMIT) + 1)
+  const hasOlderDashboardTransactions = $derived(recentTransactions.length > TRANSACTION_SECTION_LIMIT)
+  const hasNewerDashboardTransactions = $derived(transactionOffset > 0)
   const accountNameById = $derived(new Map(historyAccounts.map((account) => [account.id, account.name])))
   const hiddenAccountIds = $derived(new Set(historyAccounts.filter((account) => account.hiddenAt).map((account) => account.id)))
 
@@ -378,8 +385,30 @@
   })
 
   onMount(() => {
+    restoreRangeFromUrl()
     void loadPage()
   })
+
+  function restoreRangeFromUrl() {
+    const query = financeRouteQuery()
+    const startDate = readDateQuery(query, 'startDate')
+    const inclusiveEndDate = readDateQuery(query, 'endDate')
+    if (!startDate || !inclusiveEndDate) return
+    const endDate = customRangeEndDate(dateInputValue(inclusiveEndDate))
+    if (!endDate) return
+    if (startDate >= endDate) return
+    customStartDate = startDate
+    customEndDate = endDate
+    activeDashboardRange = { startDate, endDate }
+    dashboardPeriodMode = 'custom'
+  }
+
+  function persistRange(range: DashboardPeriodRange) {
+    replaceFinanceRouteQuery({
+      startDate: dateQueryValue(range.startDate),
+      endDate: dateQueryValue(inclusiveDashboardEndDate(range.endDate)),
+    })
+  }
 
   async function loadPage() {
     loading = true
@@ -430,7 +459,14 @@
           endDate: range.endDate,
         }),
         financeApi.listAccounts({ tenantId, includeHidden: true }),
-        financeApi.listTransactions({ tenantId, includeHidden: true, limit: TRANSACTION_SECTION_LIMIT }),
+        financeApi.listTransactions({
+          tenantId,
+          includeHidden: true,
+          startDate: range.startDate,
+          endDate: range.endDate,
+          limit: TRANSACTION_SECTION_LIMIT + 1,
+          offset: 0,
+        }),
         financeApi.listConnections({ tenantId }),
       ])
 
@@ -439,7 +475,7 @@
       historyAccounts = loadedAccounts
       recentTransactions = [...loadedTransactions]
         .sort((left, right) => right.effectiveAt.getTime() - left.effectiveAt.getTime())
-        .slice(0, TRANSACTION_SECTION_LIMIT)
+      transactionOffset = 0
       recentConnections = [...loadedConnections].sort((left, right) => {
         const leftTime = left.lastSyncStartedAt?.getTime() ?? left.updatedAt.getTime()
         const rightTime = right.lastSyncStartedAt?.getTime() ?? right.updatedAt.getTime()
@@ -451,6 +487,7 @@
       }
       customStartDate = loadedDashboard.period.startDate
       customEndDate = loadedDashboard.period.endDate
+      persistRange(activeDashboardRange)
       return true
     } catch (loadError) {
       if (financeShell.selectedTenantId !== tenantId || dashboardLoadRevision !== requestRevision) return false
@@ -549,6 +586,50 @@
     recentTransactions = recentTransactions.map((item) => item.id === updated.id ? updated : item)
   }
 
+  async function loadDashboardTransactionPage(offset: number): Promise<boolean> {
+    const tenantId = financeShell.selectedTenantId!
+    const range = activeDashboardRange!
+
+    loadingTransactions = true
+    try {
+      const loadedTransactions = await financeApi.listTransactions({
+        tenantId,
+        includeHidden: true,
+        startDate: range.startDate,
+        endDate: range.endDate,
+        limit: TRANSACTION_SECTION_LIMIT + 1,
+        offset,
+      })
+      if (financeShell.selectedTenantId !== tenantId || activeDashboardRange !== range) return false
+      recentTransactions = [...loadedTransactions]
+        .sort((left, right) => right.effectiveAt.getTime() - left.effectiveAt.getTime())
+      transactionOffset = offset
+      return true
+    } catch (loadError) {
+      error = loadError instanceof Error ? loadError.message : 'Failed to load dashboard transactions'
+      return false
+    } finally {
+      loadingTransactions = false
+    }
+  }
+
+  function loadOlderDashboardTransactions(): Promise<boolean> {
+    return loadDashboardTransactionPage(transactionOffset + TRANSACTION_SECTION_LIMIT)
+  }
+
+  function loadNewerDashboardTransactions(): Promise<boolean> {
+    return loadDashboardTransactionPage(Math.max(0, transactionOffset - TRANSACTION_SECTION_LIMIT))
+  }
+
+  function dashboardTransactionsHref(): string {
+    const range = activeDashboardRange!
+    const query = new URLSearchParams({
+      startDate: dateQueryValue(range.startDate)!,
+      endDate: dateQueryValue(inclusiveDashboardEndDate(range.endDate))!,
+    })
+    return `/finance/transactions?${query.toString()}`
+  }
+
   function customRangeStartDate(value: string): Date | undefined {
     const date = withDateInput(undefined, value)
     if (!date) return undefined
@@ -581,11 +662,10 @@
 <section
   class="container-fluid px-0"
   aria-labelledby="finance-dashboard-heading"
-  data-bootstrap-finance-dashboard="true"
 >
-  <div class="d-grid gap-4">
+  <div class="d-grid gap-2 gap-sm-4">
     <header class="card border-0 shadow-sm">
-      <div class="card-body p-3 p-xl-5">
+      <div class="card-body p-2 p-sm-3 p-xl-5">
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
           <div>
             <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Finance overview</p>
@@ -608,16 +688,16 @@
           </div>
         </div>
 
-        <hr class="my-3 my-xl-4" />
+        <hr class="d-none d-sm-block my-3 my-xl-4" />
 
-        <div class="row g-4 align-items-start">
+        <div class="row g-2 g-sm-4 align-items-start">
           <div class="col-12 col-xl-5">
             <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Reporting period</p>
             {#if dashboard}
               <h2 class="h5 mb-1">
                 {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(inclusiveDashboardEndDate(dashboard.period.endDate)!)}
               </h2>
-              <p class="text-body-secondary mb-2">Period: {dashboardPeriodModeLabel()}</p>
+              <p class="text-body-secondary mb-1 mb-sm-2">Period: {dashboardPeriodModeLabel()}</p>
               {#if isHistoricalPeriod}
                 <p class="text-body-secondary small mb-0">Past activity is valued using today’s latest FX rates, not an end-of-period rate.</p>
               {/if}
@@ -628,7 +708,7 @@
           </div>
 
           <div class="col-12 col-xl-7">
-            <div class="d-flex flex-wrap gap-2 mb-3">
+            <div class="d-flex flex-wrap gap-2 mb-2 mb-sm-3">
               <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openPreviousPeriod()} disabled={!dashboard || loadingDashboard}>
                 Previous month
               </button>
@@ -999,22 +1079,34 @@
               <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
                 <div>
                   <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Recent activity</p>
-                  <h2 class="h5 mb-1">Recent transactions</h2>
-                  <p class="text-body-secondary mb-0">Latest booked and pending activity for the selected tenant.</p>
+                  <h2 class="h5 mb-1">Transactions</h2>
+                  <p class="text-body-secondary mb-0">Booked and pending activity in the reporting period.</p>
                 </div>
-                <a class="btn btn-outline-secondary btn-sm" href="/finance/transactions" use:link>View all transactions</a>
+                <a class="btn btn-outline-secondary btn-sm" href={dashboardTransactionsHref()} use:link>View all transactions</a>
               </div>
 
               {#if visibleRecentTransactions.length === 0}
-                <div class="alert alert-light border mb-0" role="status">No recent transactions for this tenant yet.</div>
+                <div class="alert alert-light border mb-0" role="status">No transactions in this reporting period.</div>
               {:else}
-                <FinanceTransactionList
-                  tenantId={financeShell.selectedTenantId}
-                  transactions={visibleRecentTransactions}
-                  accountNameById={accountNameById}
-                  {hiddenAccountIds}
-                  ariaLabel="Recent transactions"
-                  onTransactionUpdated={applyTransactionUpdate}
+                <div id="finance-dashboard-transactions">
+                  <FinanceTransactionList
+                    tenantId={financeShell.selectedTenantId}
+                    transactions={visibleRecentTransactions}
+                    accountNameById={accountNameById}
+                    {hiddenAccountIds}
+                    ariaLabel="Dashboard transactions"
+                    onTransactionUpdated={applyTransactionUpdate}
+                  />
+                </div>
+                <FinancePager
+                  label="Dashboard transaction pages"
+                  status={loadingTransactions ? 'Loading transaction page…' : `Page ${dashboardTransactionPage}`}
+                  controls="finance-dashboard-transactions"
+                  busy={loadingTransactions}
+                  hasPrevious={hasNewerDashboardTransactions}
+                  hasNext={hasOlderDashboardTransactions}
+                  onPrevious={loadNewerDashboardTransactions}
+                  onNext={loadOlderDashboardTransactions}
                 />
               {/if}
             </div>

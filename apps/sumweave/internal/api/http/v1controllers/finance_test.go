@@ -1298,6 +1298,9 @@ func TestFinanceController(t *testing.T) {
 				require.Equal(t, accountID, params.AccountID)
 				require.Equal(t, domain.TransactionSourceManual, params.Source)
 				require.Equal(t, domain.TransactionStatusBooked, params.Status)
+				require.Equal(t, domain.TransactionKindExpense, params.Kind)
+				require.Equal(t, time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC), params.StartDate)
+				require.Equal(t, time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC), params.EndDate)
 				require.True(t, params.IncludeHidden)
 				require.Equal(t, int64(20), params.Limit)
 				require.Equal(t, int64(5), params.Offset)
@@ -1420,7 +1423,7 @@ func TestFinanceController(t *testing.T) {
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/categories", body: `{"name":"Groceries","kind":"expense"}`, field: "id", want: categoryID},
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/tags?includeHidden=true", field: "items", want: 1},
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/tags", body: `{"name":"Household"}`, field: "id", want: tagID},
-			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions?accountId=" + accountID + "&source=manual&status=booked&includeHidden=true&limit=20&offset=5", field: "items", want: 1},
+			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions?accountId=" + accountID + "&source=manual&status=booked&kind=expense&startDate=2026-06-01T00:00:00Z&endDate=2026-07-01T00:00:00Z&includeHidden=true&limit=20&offset=5", field: "items", want: 1},
 			{method: http.MethodGet, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, field: "id", want: transactionID},
 			{method: http.MethodPost, target: "/api/v1/finance/tenants/" + tenantID + "/transactions", body: `{"accountId":"` + accountID + `","source":"manual","status":"booked","kind":"regular","amountMinor":-2500,"currency":"USD","description":"Coffee","effectiveAt":"2026-06-20T14:00:00Z","categoryId":"` + categoryID + `","transferGroupId":"group-1"}`, field: "id", want: transactionID},
 			{method: http.MethodPatch, target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID, body: `{"description":"Coffee update","amountMinor":-3100,"effectiveAt":"2026-06-21T10:00:00Z","categoryId":"` + updatedCategoryID + `","tagIds":[]}`, field: "id", want: transactionID},
@@ -2796,6 +2799,14 @@ func TestFinanceController(t *testing.T) {
 				name: "dashboard missing range", method: http.MethodGet,
 				target: "/api/v1/finance/tenants/" + tenantID + "/dashboard",
 			},
+			{
+				name: "transactions equal", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/transactions?startDate=2026-06-01T00:00:00Z&endDate=2026-06-01T00:00:00Z&limit=20",
+			},
+			{
+				name: "transactions reversed", method: http.MethodGet,
+				target: "/api/v1/finance/tenants/" + tenantID + "/transactions?startDate=2026-06-02T00:00:00Z&endDate=2026-06-01T00:00:00Z&limit=20",
+			},
 		} {
 			t.Run(testCase.name, func(t *testing.T) {
 				response := httptest.NewRecorder()
@@ -2804,6 +2815,53 @@ func TestFinanceController(t *testing.T) {
 				require.NotContains(t, response.Body.String(), "response validation")
 			})
 		}
+	})
+
+	t.Run("registered transaction route preserves valid offset-bearing ranges", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		timeZone := time.FixedZone("test", 2*60*60)
+		expectedStart := time.Date(2026, time.June, 1, 12, 0, 0, 0, timeZone)
+		expectedEnd := time.Date(2026, time.June, 1, 12, 0, 1, 0, timeZone)
+		service := newMockfinanceService(t)
+		service.EXPECT().
+			ListTransactions(mock.Anything, mock.MatchedBy(func(params financepkg.ListTransactionsParams) bool {
+				return params.StartDate.Equal(expectedStart) && params.EndDate.Equal(expectedEnd)
+			})).
+			Return([]domain.Transaction{}, nil)
+		response := httptest.NewRecorder()
+		newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+			response,
+			newRequest(
+				http.MethodGet,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions?startDate=2026-06-01T12:00:00%2B02:00&endDate=2026-06-01T12:00:01%2B02:00&limit=20",
+				"",
+				true,
+			),
+		)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	})
+
+	t.Run("registered transaction route applies ascending order before its offset page", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		service := newMockfinanceService(t)
+		service.EXPECT().
+			ListTransactions(mock.Anything, mock.MatchedBy(func(params financepkg.ListTransactionsParams) bool {
+				return params.TenantID == tenantID && params.SortAscending && params.Limit == 20 && params.Offset == 20
+			})).
+			Return([]domain.Transaction{}, nil)
+		response := httptest.NewRecorder()
+		newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+			response,
+			newRequest(
+				http.MethodGet,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions?sort=asc&limit=20&offset=20",
+				"",
+				true,
+			),
+		)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	})
 
 	t.Run("controller maps finance domain and decode errors safely", func(t *testing.T) {

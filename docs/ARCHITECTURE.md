@@ -59,11 +59,13 @@ the durable appdispatch consumer, and `jobs enqueue-due` for one scheduler tick.
 `start-all` explicitly combines those three capabilities for diagnostics; the
 worker and scheduler remain separate deployment processes.
 
-The scheduler reads finance-owned bank-connection schedules and the finance-owned
-daily FX refresh schedule. It publishes one semantic command per due occurrence,
-advances the schedule, and stores the returned message ID as the future reference
-in one application-database transaction. It does not use a generic schedule
-registry, execute provider work, or create a job row.
+The scheduler first repairs any active bank connection missing a schedule by
+inserting an enabled daily schedule without changing existing schedule state. It
+then reads finance-owned bank-connection schedules and the finance-owned daily FX
+refresh schedule. It publishes one semantic command per due occurrence, advances
+the schedule, and stores the returned message ID as the future reference in one
+application-database transaction. It does not use a generic schedule registry,
+execute provider work, or create a job row.
 
 Message delivery is at least once. Consumer handlers must tolerate duplicate
 delivery. Routers recover panics, retry failures with the configured bounded
@@ -106,10 +108,13 @@ create no job state.
 
 Only running projections whose durable claim timestamp is at least the
 worker-level `staleRunningAge` old are requeued or terminally failed (the
-default age is five minutes). Recovery conditionally matches the claim owner
+default age is 30 minutes). Recovery conditionally matches the claim owner
 and timestamp, so it cannot overwrite a newer claim or terminal transition.
-The uniform attempt policy defaults to three attempts; handlers and individual
-rows do not define competing retry limits.
+Active handlers renew their claims before recovery. A canceled handler
+conditionally releases its own claim while leaving the source message
+unacknowledged, so a replacement worker can retry promptly. The uniform attempt
+policy defaults to three attempts; handlers and individual rows do not define
+competing retry limits.
 
 The topic-aware dispatch schema intentionally replaces the earlier alpha
 single-topic schema. Recreate the local Compose PostgreSQL volume if a clean

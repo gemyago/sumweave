@@ -284,7 +284,13 @@ func (w *Worker) executeClaimedObserved(
 			))
 		}
 		queuedAt := w.clock()
-		if requeueErr := w.store.RequeueRunning(ctx, *claimed, queuedAt); requeueErr != nil {
+		requeueCtx := ctx
+		if ctx.Err() != nil {
+			// The source message remains unacknowledged, so safely release only this
+			// worker's claim for a prompt at-least-once retry after shutdown.
+			requeueCtx = context.WithoutCancel(ctx)
+		}
+		if requeueErr := w.store.RequeueRunning(requeueCtx, *claimed, queuedAt); requeueErr != nil {
 			return fmt.Errorf("requeue transient observed job: %w", requeueErr)
 		}
 		return exhaustedRetryError{

@@ -111,6 +111,10 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 - **Layers:** embedded **`default.yaml`**, then **`internal/config/<env>.yaml`** (from **`--env` / `-e`**, default **`local`**), then optional **`<env>-user.yaml`** for local secrets.
 - **Env:** keys map to **`APP_…`** (Viper `AutomaticEnv()`); nested keys use underscores (e.g. **`APP_OPENAI_APIKEY`** for OpenAI). The loader exact-decodes the layered values before roots validate and translate them to native component inputs.
 - **Database setup:** PostgreSQL is the only supported database. Startup commands never migrate app-owned schemas; run **`make postgres-bootstrap`** from the repository root before **`start-all`**, **`start`**, **`jobs worker`**, or **`jobs enqueue-due`**. It provisions local/test databases and roles, runs the two explicit `db-migrate` commands through the migrator role, then grants the runtime role access to the prepared schemas.
+- **Worker claims:** **`jobs.worker.staleRunningAge`** defaults to 30 minutes,
+  above the expected finance execution window. Active handlers renew their
+  claims before recovery; a canceled handler conditionally requeues its own
+  claim while leaving its dispatch message unacknowledged for retry.
 - **HTTP defaults:** e.g. **`httpServer.port`** **4501**, **`writeTimeout`** aligned with long SSE/agent runs (see comments in **`default.yaml`**). Set both `httpServer.tls.certFile` and `keyFile` (or their `APP_` equivalents) for local HTTPS; see [../../../docs/local-https.md](../../../docs/local-https.md). No secrets in repo.
 
 ## Repository integration

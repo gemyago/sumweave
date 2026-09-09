@@ -315,4 +315,44 @@ func TestWorker(t *testing.T) {
 
 		require.ErrorIs(t, worker.processObserved(t.Context(), registry.Handlers()[0], message), retryErr)
 	})
+
+	t.Run("requeues a canceled delivery with a live persistence context", func(t *testing.T) {
+		store := newMockworkerStore(t)
+		registry := NewRegistry()
+		topic := "worker." + fake.UUID().V4()
+		jobType := JobType("finance." + fake.Letter())
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+		require.NoError(t, RegisterTypedHandler(registry, TypedHandlerSpec[struct{}]{
+			JobType: jobType,
+			Topic:   topic,
+			Metadata: func(struct{}) (JobMetadata, error) {
+				return JobMetadata{JobType: jobType}, nil
+			},
+			Run: func(runCtx context.Context, _ Job, _ struct{}) error {
+				cancel()
+				return runCtx.Err()
+			},
+		}))
+		now := time.Now()
+		workerID := fake.UUID().V4()
+		message := appdispatch.Message{ID: fake.UUID().V4(), Payload: []byte(`{}`)}
+		queued := Job{ID: message.ID, JobType: jobType, Status: JobStatusQueued}
+		claimed := queued
+		claimed.Status = JobStatusRunning
+		worker := &Worker{
+			store: store, registry: registry, logger: slog.New(slog.DiscardHandler),
+			clock: func() time.Time { return now }, workerID: workerID,
+		}
+		store.EXPECT().MaterializeQueued(mock.Anything, mock.Anything).Return(&queued, nil).Once()
+		store.EXPECT().ClaimQueued(mock.Anything, message.ID, workerID, now).Return(&claimed, nil).Once()
+		store.EXPECT().
+			RequeueRunning(mock.MatchedBy(func(requeueCtx context.Context) bool {
+				return requeueCtx.Err() == nil
+			}), claimed, now).
+			Return(nil).
+			Once()
+
+		require.ErrorIs(t, worker.processObserved(ctx, registry.Handlers()[0], message), context.Canceled)
+	})
 }

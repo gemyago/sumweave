@@ -119,7 +119,7 @@ jobs:
     pollInterval: 2s
     maxAttempts: 3
     # Recover only claims older than this age; set above the longest expected job execution.
-    staleRunningAge: 5m
+    staleRunningAge: 30m
 
 finance:
   providers:

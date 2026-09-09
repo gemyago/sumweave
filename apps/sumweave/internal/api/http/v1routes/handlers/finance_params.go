@@ -1361,6 +1361,10 @@ type paramsParserFinanceListFinanceTransactions struct {
 	bindAccountID requestParamBinder[[]string, string]
 	bindSource requestParamBinder[[]string, string]
 	bindStatus requestParamBinder[[]string, string]
+	bindKind requestParamBinder[[]string, string]
+	bindStartDate requestParamBinder[[]string, time.Time]
+	bindEndDate requestParamBinder[[]string, time.Time]
+	bindSort requestParamBinder[[]string, ListFinanceTransactionsParamsSort]
 	bindIncludeHidden requestParamBinder[[]string, bool]
 	bindOffset requestParamBinder[[]string, int64]
 }
@@ -1377,6 +1381,10 @@ func (p *paramsParserFinanceListFinanceTransactions) parse(router httpRouter, re
 	p.bindAccountID(queryParamsCtx.Fork("accountId"), readQueryValue("accountId", query), &reqParams.AccountID)
 	p.bindSource(queryParamsCtx.Fork("source"), readQueryValue("source", query), &reqParams.Source)
 	p.bindStatus(queryParamsCtx.Fork("status"), readQueryValue("status", query), &reqParams.Status)
+	p.bindKind(queryParamsCtx.Fork("kind"), readQueryValue("kind", query), &reqParams.Kind)
+	p.bindStartDate(queryParamsCtx.Fork("startDate"), readQueryValue("startDate", query), &reqParams.StartDate)
+	p.bindEndDate(queryParamsCtx.Fork("endDate"), readQueryValue("endDate", query), &reqParams.EndDate)
+	p.bindSort(queryParamsCtx.Fork("sort"), readQueryValue("sort", query), &reqParams.Sort)
 	p.bindIncludeHidden(queryParamsCtx.Fork("includeHidden"), readQueryValue("includeHidden", query), &reqParams.IncludeHidden)
 	p.bindLimit(queryParamsCtx.Fork("limit"), readQueryValue("limit", query), &reqParams.Limit)
 	p.bindOffset(queryParamsCtx.Fork("offset"), readQueryValue("offset", query), &reqParams.Offset)
@@ -1424,6 +1432,38 @@ func newParamsParserFinanceListFinanceTransactions(rootHandler *RootHandler) par
 				rootHandler.knownParsers.stringParser,
 			),
 			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindKind: newRequestParamBinder(binderParams[[]string, string]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindStartDate: newRequestParamBinder(binderParams[[]string, time.Time]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.timeParser,
+			),
+			validateValue: NewSimpleFieldValidator[time.Time](
+			),
+		}),
+		bindEndDate: newRequestParamBinder(binderParams[[]string, time.Time]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.timeParser,
+			),
+			validateValue: NewSimpleFieldValidator[time.Time](
+			),
+		}),
+		bindSort: newRequestParamBinder(binderParams[[]string, ListFinanceTransactionsParamsSort]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				ParseListFinanceTransactionsParamsSort,
+			),
+			validateValue: NewSimpleFieldValidator[ListFinanceTransactionsParamsSort](
 			),
 		}),
 		bindIncludeHidden: newRequestParamBinder(binderParams[[]string, bool]{

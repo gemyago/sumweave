@@ -420,9 +420,10 @@ func buildScheduler(
 		return nil, fmt.Errorf("ensure scheduler fx refresh schedule: %w", err)
 	}
 	return &SchedulerRoot{
-		bankSchedules: financeModule.BankConnectionScheduleService,
-		fxSchedules:   financeModule.FXRefreshScheduleService, SchedulerLoopInterval: rootConfig.Scheduler.LoopInterval,
-		shutdownHooks: infrastructure.shutdownHooks,
+		bankSchedules:         financeModule.BankConnectionScheduleService,
+		fxSchedules:           financeModule.FXRefreshScheduleService,
+		SchedulerLoopInterval: rootConfig.Scheduler.LoopInterval,
+		shutdownHooks:         infrastructure.shutdownHooks,
 	}, nil
 }
 

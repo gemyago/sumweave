@@ -233,7 +233,7 @@ describe('Finance transaction editor page', () => {
     expect(screen.getByText('Candidates are from other visible accounts. The effective-before boundary is exclusive.')).toBeInTheDocument()
     expect(screen.getByLabelText('Select Candidate 0')).toBeDisabled()
     expect(screen.queryByText(/Eligibility:/)).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Transfer candidate pages: next page' }))
+    await user.click(screen.getByRole('button', { name: 'Transfer candidate pages: older page' }))
     await waitFor(() => expect(mocks.listTransferCandidates).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 20 })))
     await user.click(screen.getByRole('button', { name: 'Apply' }))
     await waitFor(() => expect(mocks.listTransferCandidates).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 })))
@@ -256,7 +256,7 @@ describe('Finance transaction editor page', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Link transfer' }))
     expect(await screen.findByText('Candidate 0')).toBeInTheDocument()
-    const next = screen.getByRole('button', { name: 'Transfer candidate pages: next page' })
+    const next = screen.getByRole('button', { name: 'Transfer candidate pages: older page' })
     await user.click(next)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Candidates changed')

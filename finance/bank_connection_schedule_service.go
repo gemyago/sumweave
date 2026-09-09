@@ -60,6 +60,13 @@ func (s *BankConnectionScheduleService) EnqueueDue(ctx context.Context) (int, er
 		return 0, errors.New("scheduled bank sync command publisher is required")
 	}
 	now := s.now()
+	nextRunAt := now.Add(defaultBankConnectionScheduleInterval)
+	if _, err := s.store.EnsureActiveDailySchedules(ctx, domain.BankConnectionSchedule{
+		Interval: defaultBankConnectionScheduleInterval, NextRunAt: &nextRunAt, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		return 0, fmt.Errorf("ensure active bank connection schedules: %w", err)
+	}
 	schedules, err := s.store.ListDue(ctx, now)
 	if err != nil { // coverage-ignore // Persistence failures are covered by the focused store tests.
 		return 0, fmt.Errorf("list due bank connection schedules: %w", err)

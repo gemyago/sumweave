@@ -21,6 +21,8 @@
   import { defaultMatchingDateRange, matchingRangeFromDateInputs } from '../lib/finance/matching-range'
   import { requestFinanceLedgerRefresh } from '../lib/finance/ledger-refresh'
   import type { JobDetail } from '../lib/jobs/api'
+  import { dateQueryValue, financeRouteQuery, readDateQuery, replaceFinanceRouteQuery } from '../lib/finance/url-filters'
+  import { dateInputValue } from '../lib/date-range'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const transactionPageSize = 20
@@ -32,8 +34,9 @@
   let accounts = $state<FinanceAccount[]>([])
   let transactions = $state<FinanceTransaction[]>([])
   let accountFilter = $state('')
-  let statusFilter = $state('')
-  let sourceFilter = $state('')
+  let kindFilter = $state('')
+  let startDate = $state<Date | undefined>(undefined)
+  let endDate = $state<Date | undefined>(undefined)
   let sortOrder = $state('desc')
   let transactionOffset = $state(0)
   let loadingList = $state(false)
@@ -49,23 +52,18 @@
   let matchingTenantId = $state('')
   let matchingTerminal = $state(false)
 
-  const visibleTransactions = $derived(
-    [...transactions].sort((a, b) =>
-      sortOrder === 'asc'
-        ? a.effectiveAt.getTime() - b.effectiveAt.getTime()
-        : b.effectiveAt.getTime() - a.effectiveAt.getTime(),
-    ),
-  )
+  const visibleTransactions = $derived(transactions)
   const accountNameById = $derived.by(() => new Map(accounts.map((account) => [account.id, account.name])))
   const hiddenAccountIds = $derived.by(() => new Set(accounts.filter((account) => account.hiddenAt).map((account) => account.id)))
   const visiblePendingCount = $derived(visibleTransactions.filter((item) => item.status === 'pending').length)
   const visibleHiddenCount = $derived(visibleTransactions.filter((item) => item.hiddenAt !== null).length)
-  const activeFilterCount = $derived([accountFilter, statusFilter, sourceFilter].filter(Boolean).length)
+  const activeFilterCount = $derived([accountFilter, kindFilter, startDate, endDate].filter(Boolean).length)
   const pageNumber = $derived(Math.floor(transactionOffset / transactionPageSize) + 1)
   const hasPreviousPage = $derived(transactionOffset > 0)
   const hasNextPage = $derived(transactions.length === transactionPageSize)
 
   onMount(() => {
+    restoreFiltersFromUrl()
     void loadPage()
     return subscribeToFinanceLedgerRefresh((tenantId) => {
       if (financeShell.selectedTenantId !== tenantId) return
@@ -73,6 +71,34 @@
       void loadTenantData(0)
     })
   })
+
+  function restoreFiltersFromUrl() {
+    const query = financeRouteQuery()
+    accountFilter = query.get('accountId') ?? ''
+    kindFilter = query.get('type') ?? ''
+    sortOrder = query.get('sort') === 'asc' ? 'asc' : 'desc'
+    startDate = readDateQuery(query, 'startDate')
+    endDate = readDateQuery(query, 'endDate')
+  }
+
+  function persistFilters() {
+    replaceFinanceRouteQuery({
+      accountId: accountFilter || undefined,
+      type: kindFilter || undefined,
+      sort: sortOrder === 'asc' ? 'asc' : undefined,
+      startDate: dateQueryValue(startDate),
+      endDate: dateQueryValue(endDate),
+    })
+  }
+
+  function exclusiveDateRangeEnd(value: Date | undefined): Date | undefined {
+    if (!value) return undefined
+    const valueAsDateInput = dateInputValue(value)
+    const date = readDateQuery(new URLSearchParams(`date=${valueAsDateInput}`), 'date')
+    if (!date) return undefined
+    date.setDate(date.getDate() + 1)
+    return date
+  }
 
   async function loadPage() {
     loading = true
@@ -114,8 +140,10 @@
         financeApi.listTransactions({
           tenantId,
           accountId: accountFilter,
-          status: statusFilter,
-          source: sourceFilter,
+          kind: kindFilter,
+          startDate,
+          endDate: exclusiveDateRangeEnd(endDate),
+          sort: sortOrder === 'asc' ? 'asc' : undefined,
           limit: transactionPageSize,
           offset,
         }),
@@ -140,6 +168,7 @@
 
   function reloadFirstPage() {
     transactionOffset = 0
+    persistFilters()
     void loadTenantData()
   }
 
@@ -281,7 +310,7 @@
           <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
             <div>
               <h2 class="h5 mb-1">Browse filters</h2>
-              <p class="text-body-secondary mb-0">Adjust the tenant-local ledger scope without leaving the transactions route.</p>
+              <p class="text-body-secondary mb-0">Adjust the tenant-local ledger scope. Filters are saved in this page URL.</p>
             </div>
 
             {#if loadingList}
@@ -289,61 +318,71 @@
             {/if}
           </div>
 
-          <div class="row g-3 align-items-end">
+          <div class="d-grid gap-3">
             {#if !financeShell.embedded}
-              <div class="col-12 col-md-6 col-xl-3">
-                <label class="form-label" for="finance-transactions-tenant-filter">Tenant</label>
-                <select
-                  id="finance-transactions-tenant-filter"
-                  class="form-select"
-                  value={financeShell.selectedTenantId}
-                  onchange={(event) => selectTenant((event.currentTarget as HTMLSelectElement).value)}
-                  aria-label="Tenant"
-                >
-                  <option value="">Select tenant</option>
-                  {#each financeShell.tenants as tenant (tenant.id)}
-                    <option value={tenant.id}>{tenant.name}</option>
-                  {/each}
-                </select>
+              <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-6 col-xl-3">
+                  <label class="form-label" for="finance-transactions-tenant-filter">Tenant</label>
+                  <select
+                    id="finance-transactions-tenant-filter"
+                    class="form-select"
+                    value={financeShell.selectedTenantId}
+                    onchange={(event) => selectTenant((event.currentTarget as HTMLSelectElement).value)}
+                    aria-label="Tenant"
+                  >
+                    <option value="">Select tenant</option>
+                    {#each financeShell.tenants as tenant (tenant.id)}
+                      <option value={tenant.id}>{tenant.name}</option>
+                    {/each}
+                  </select>
+                </div>
               </div>
             {/if}
 
-            <div class="col-12 col-md-6 col-xl-3">
-              <label class="form-label" for="finance-transactions-account-filter">Account</label>
-              <select id="finance-transactions-account-filter" class="form-select" bind:value={accountFilter} onchange={reloadFirstPage} aria-label="Account filter">
-                <option value="">Any account</option>
-                {#each accounts as account (account.id)}
-                  <option value={account.id}>{account.name}{account.hiddenAt ? ' (Hidden)' : ''}</option>
-                {/each}
-              </select>
+            <div class="row g-3">
+              <div class="col-12 col-md-6 col-xl-5">
+                <label class="form-label" for="finance-transactions-account-filter">Account</label>
+                <select id="finance-transactions-account-filter" class="form-select" bind:value={accountFilter} onchange={reloadFirstPage} aria-label="Account filter">
+                  <option value="">Any account</option>
+                  {#each accounts as account (account.id)}
+                    <option value={account.id}>{account.name}{account.hiddenAt ? ' (Hidden)' : ''}</option>
+                  {/each}
+                </select>
+              </div>
+
+              <div class="col-12 col-md-6 col-xl-3">
+                <label class="form-label" for="finance-transactions-kind-filter">Type</label>
+                <select id="finance-transactions-kind-filter" class="form-select" bind:value={kindFilter} onchange={reloadFirstPage} aria-label="Transaction type filter">
+                  <option value="">Any type</option>
+                  <option value="income">income</option>
+                  <option value="expense">expense</option>
+                  <option value="refund">refund</option>
+                  <option value="transfer">transfer</option>
+                  <option value="regular">regular</option>
+                  <option value="reconciliation">reconciliation</option>
+                  <option value="opening_balance">opening balance</option>
+                </select>
+              </div>
+
+              <div class="col-12 col-md-6 col-xl-4">
+                <label class="form-label" for="finance-transactions-sort-order">Sort</label>
+                <select id="finance-transactions-sort-order" class="form-select" bind:value={sortOrder} onchange={reloadFirstPage} aria-label="Sort order">
+                  <option value="desc">Newest first</option>
+                  <option value="asc">Oldest first</option>
+                </select>
+              </div>
             </div>
 
-            <div class="col-12 col-md-6 col-xl-2">
-              <label class="form-label" for="finance-transactions-status-filter">Status</label>
-              <select id="finance-transactions-status-filter" class="form-select" bind:value={statusFilter} onchange={reloadFirstPage} aria-label="Transaction status filter">
-                <option value="">Any status</option>
-                <option value="pending">pending</option>
-                <option value="booked">booked</option>
-              </select>
-            </div>
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="finance-transactions-start-date">From date</label>
+                <input id="finance-transactions-start-date" class="form-control" type="date" value={dateInputValue(startDate)} onchange={(event) => { startDate = readDateQuery(new URLSearchParams(`date=${event.currentTarget.value}`), 'date'); reloadFirstPage() }} aria-label="Transaction start date" />
+              </div>
 
-            <div class="col-12 col-md-6 col-xl-2">
-              <label class="form-label" for="finance-transactions-source-filter">Source</label>
-              <select id="finance-transactions-source-filter" class="form-select" bind:value={sourceFilter} onchange={reloadFirstPage} aria-label="Transaction source filter">
-                <option value="">Any source</option>
-                <option value="manual">manual</option>
-                <option value="provider">provider</option>
-                <option value="csv">csv</option>
-                <option value="system">system</option>
-              </select>
-            </div>
-
-            <div class="col-12 col-md-6 col-xl-2">
-              <label class="form-label" for="finance-transactions-sort-order">Sort</label>
-              <select id="finance-transactions-sort-order" class="form-select" bind:value={sortOrder} aria-label="Sort order">
-                <option value="desc">Newest first</option>
-                <option value="asc">Oldest first</option>
-              </select>
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="finance-transactions-end-date">To date</label>
+                <input id="finance-transactions-end-date" class="form-control" type="date" value={dateInputValue(endDate)} onchange={(event) => { endDate = readDateQuery(new URLSearchParams(`date=${event.currentTarget.value}`), 'date'); reloadFirstPage() }} aria-label="Transaction end date" />
+              </div>
             </div>
           </div>
         </div>
@@ -390,10 +429,10 @@
                 status={loadingList ? 'Loading transaction page…' : `Page ${pageNumber}`}
                controls="finance-transactions-ledger"
                busy={loadingList}
-               hasPrevious={hasPreviousPage}
-               hasNext={hasNextPage}
-               onPrevious={loadPreviousPage}
-               onNext={loadNextPage}
+                hasPrevious={sortOrder === 'desc' ? hasPreviousPage : hasNextPage}
+                hasNext={sortOrder === 'desc' ? hasNextPage : hasPreviousPage}
+                onPrevious={sortOrder === 'desc' ? loadPreviousPage : loadNextPage}
+                onNext={sortOrder === 'desc' ? loadNextPage : loadPreviousPage}
              />
           {/if}
         </div>

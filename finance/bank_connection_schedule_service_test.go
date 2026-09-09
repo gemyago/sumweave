@@ -36,6 +36,17 @@ func TestBankConnectionScheduleService(t *testing.T) {
 			Enabled: true, CreatedAt: now, UpdatedAt: now,
 		}
 	}
+	makeConnection := func(now time.Time, state domain.BankConnectionState) domain.BankConnection {
+		return domain.BankConnection{
+			ID:        fake.UUID().V4(),
+			TenantID:  fake.UUID().V4(),
+			Provider:  fake.Lorem().Word(),
+			SecretID:  fake.UUID().V4(),
+			State:     state,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	}
 
 	t.Run("publishes and advances one due occurrence only once", func(t *testing.T) {
 		database := openTestDatabase(t)
@@ -105,6 +116,81 @@ func TestBankConnectionScheduleService(t *testing.T) {
 		require.ErrorContains(t, err, "interval must be positive")
 		invalid.Enabled = false
 		require.NoError(t, store.Save(t.Context(), invalid))
+	})
+
+	t.Run("repairs active connections missing schedules without changing existing state", func(t *testing.T) {
+		assertSchedule := func(expected, actual domain.BankConnectionSchedule) {
+			t.Helper()
+			assert.Equal(t, expected.ConnectionID, actual.ConnectionID)
+			assert.Equal(t, expected.Interval, actual.Interval)
+			assert.Equal(t, expected.LastJobID, actual.LastJobID)
+			assert.Equal(t, expected.Enabled, actual.Enabled)
+			for _, timestamp := range []struct {
+				expected *time.Time
+				actual   *time.Time
+			}{
+				{expected: expected.NextRunAt, actual: actual.NextRunAt},
+				{expected: expected.LastScheduledAt, actual: actual.LastScheduledAt},
+				{expected: expected.LastStartedAt, actual: actual.LastStartedAt},
+				{expected: expected.LastCompletedAt, actual: actual.LastCompletedAt},
+			} {
+				if timestamp.expected == nil {
+					assert.Nil(t, timestamp.actual)
+					continue
+				}
+				require.NotNil(t, timestamp.actual)
+				assert.True(t, timestamp.actual.Equal(*timestamp.expected))
+			}
+			assert.True(t, actual.CreatedAt.Equal(expected.CreatedAt))
+			assert.True(t, actual.UpdatedAt.Equal(expected.UpdatedAt))
+		}
+
+		database := openTestDatabase(t)
+		scheduleStore := persistence.NewBankConnectionScheduleStore(database)
+		connectionStore := persistence.NewStore(database)
+		now := time.Date(2000, time.January, 2, 0, 0, 0, 0, time.UTC)
+		activeMissing := makeConnection(now, domain.BankConnectionStateActive)
+		inactiveMissing := makeConnection(now, domain.BankConnectionStateDisconnected)
+		activeExisting := makeConnection(now, domain.BankConnectionStateActive)
+		for _, connection := range []domain.BankConnection{activeMissing, inactiveMissing, activeExisting} {
+			_, err := connectionStore.SaveBankConnection(t.Context(), connection)
+			require.NoError(t, err)
+		}
+		existingNextRunAt := now.Add(-time.Hour)
+		existingLastScheduledAt := now.Add(-2 * time.Hour)
+		existingLastStartedAt := now.Add(-90 * time.Minute)
+		existingLastCompletedAt := now.Add(-30 * time.Minute)
+		existing := domain.BankConnectionSchedule{
+			ConnectionID: activeExisting.ID, Interval: time.Hour, NextRunAt: &existingNextRunAt,
+			LastScheduledAt: &existingLastScheduledAt, LastStartedAt: &existingLastStartedAt,
+			LastCompletedAt: &existingLastCompletedAt, LastJobID: fake.UUID().V4(), Enabled: false,
+			CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
+		}
+		require.NoError(t, scheduleStore.Save(t.Context(), existing))
+		publisher := NewMockScheduledSemanticCommandPublisher(t)
+		publisher.EXPECT().PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.Anything).
+			Return(DispatchReference{MessageID: fake.UUID().V4()}, nil).Maybe()
+		service := NewBankConnectionScheduleService(
+			scheduleStore,
+			WithBankConnectionScheduleServiceNow(func() time.Time { return now }),
+			WithBankConnectionScheduleServicePublisher(publisher),
+		)
+
+		_, err := service.EnqueueDue(t.Context())
+
+		require.NoError(t, err)
+		repaired, err := scheduleStore.Get(t.Context(), activeMissing.ID)
+		require.NoError(t, err)
+		expectedNextRunAt := now.Add(defaultBankConnectionScheduleInterval)
+		assertSchedule(domain.BankConnectionSchedule{
+			ConnectionID: activeMissing.ID, Interval: defaultBankConnectionScheduleInterval,
+			NextRunAt: &expectedNextRunAt, Enabled: true, CreatedAt: now, UpdatedAt: now,
+		}, *repaired)
+		_, err = scheduleStore.Get(t.Context(), inactiveMissing.ID)
+		require.ErrorIs(t, err, persistence.ErrBankConnectionScheduleNotFound)
+		actualExisting, err := scheduleStore.Get(t.Context(), activeExisting.ID)
+		require.NoError(t, err)
+		assertSchedule(existing, *actualExisting)
 	})
 
 	t.Run("rolls back on publication errors and empty references", func(t *testing.T) {

@@ -18,7 +18,7 @@ const (
 	maxListLimit                                 = 100
 	defaultWorkerPollInterval                    = 2 * time.Second
 	defaultWorkerMaxAttempts                     = 3
-	defaultWorkerStaleRunningAge                 = 5 * time.Minute
+	defaultWorkerStaleRunningAge                 = 30 * time.Minute
 	maxErrorSummaryLength                        = 240
 	maxErrorDetailsLength                        = 1024
 	jobConsumerGroup                             = "jobs.workers.v1"

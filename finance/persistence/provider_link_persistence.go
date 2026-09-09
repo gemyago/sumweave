@@ -10,6 +10,7 @@ import (
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/internal/providers"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const columnConsumedAt = "consumed_at"
@@ -173,10 +174,23 @@ func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
 	secret domain.ConnectionSecret,
 	snapshot *domain.ProviderSnapshot,
 ) (domain.BankConnection, error) {
+	return p.SaveLinkedConnectionWithSnapshotAndSchedule(ctx, connection, secret, snapshot, nil)
+}
+
+// SaveLinkedConnectionWithSnapshotAndSchedule persists the encrypted secret,
+// durable connection, source snapshot, and initial schedule in one transaction.
+// A retry creates a missing legacy schedule without changing an existing schedule.
+func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshotAndSchedule(
+	ctx context.Context,
+	connection domain.BankConnection,
+	secret domain.ConnectionSecret,
+	snapshot *domain.ProviderSnapshot,
+	schedule *domain.BankConnectionSchedule,
+) (domain.BankConnection, error) {
 	var saved domain.BankConnection
 	connectionInsertFailed := false
 	err := p.Store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		existing, found, lookupErr := findProviderLinkConnection(tx, connection)
+		existing, found, lookupErr := findProviderLinkConnectionForUpdate(tx, connection)
 		if lookupErr != nil {
 			return lookupErr
 		}
@@ -201,7 +215,10 @@ func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
 			}
 			saved = bankConnectionFromModel(connectionModel)
 		}
-		return saveLinkedConnectionSnapshot(ctx, tx, saved.ID, snapshot)
+		if snapshotErr := saveLinkedConnectionSnapshot(ctx, tx, saved.ID, snapshot); snapshotErr != nil {
+			return snapshotErr
+		}
+		return saveLinkedConnectionSchedule(ctx, tx, saved.ID, schedule, found)
 	})
 	if err == nil {
 		return saved, nil
@@ -218,6 +235,30 @@ func (p *ProviderLinkPersistence) SaveLinkedConnectionWithSnapshot(
 		return existing, nil
 	}
 	return domain.BankConnection{}, fmt.Errorf("save linked connection with snapshot: %w", err)
+}
+
+func saveLinkedConnectionSchedule(
+	ctx context.Context,
+	tx *gorm.DB,
+	connectionID string,
+	schedule *domain.BankConnectionSchedule,
+	insertOnly bool,
+) error {
+	if schedule == nil {
+		return nil
+	}
+	attached := *schedule
+	attached.ConnectionID = connectionID
+	var err error
+	if insertOnly {
+		err = saveMissingBankConnectionSchedule(ctx, tx, attached)
+	} else {
+		err = saveBankConnectionSchedule(ctx, tx, attached)
+	}
+	if err != nil {
+		return fmt.Errorf("save linked connection schedule: %w", err)
+	}
+	return nil
 }
 
 func saveLinkedConnectionSnapshot(
@@ -250,11 +291,33 @@ func findProviderLinkConnection(
 	db *gorm.DB,
 	candidate domain.BankConnection,
 ) (domain.BankConnection, bool, error) {
+	return findProviderLinkConnectionWithLock(db, candidate, false)
+}
+
+// findProviderLinkConnectionForUpdate holds an existing connection row until
+// its linked snapshot and schedule writes commit. Deletion takes the same row
+// before deleting owned state, so it cannot leave writes for a deleted ID.
+func findProviderLinkConnectionForUpdate(
+	db *gorm.DB,
+	candidate domain.BankConnection,
+) (domain.BankConnection, bool, error) {
+	return findProviderLinkConnectionWithLock(db, candidate, true)
+}
+
+func findProviderLinkConnectionWithLock(
+	db *gorm.DB,
+	candidate domain.BankConnection,
+	forUpdate bool,
+) (domain.BankConnection, bool, error) {
 	if candidate.ProviderReference == "" {
 		return domain.BankConnection{}, false, nil
 	}
 	var model bankConnectionModel
-	if err := db.Table((bankConnectionModel{}).TableName()).
+	query := db.Table((bankConnectionModel{}).TableName())
+	if forUpdate {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.
 		Where(
 			"tenant_id = ? AND provider = ? AND connector_id = ? AND provider_reference = ?",
 			strings.TrimSpace(candidate.TenantID),

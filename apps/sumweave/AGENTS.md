@@ -86,7 +86,7 @@ Durable jobs workflow:
 - Finance bank and FX schedule state is authoritative in `finance/`; publication, schedule advance, and stored future reference commit together.
 - Explicit finance terminal failures become sanitized failed observed jobs and are acknowledged; unclassified service, payload, materialization, claim, panic, and terminal-write failures remain dispatch failures.
 - Message routers use at-least-once delivery and durable dead letters.
-- Worker recovery runs at startup and between polls for claims older than `jobs.worker.staleRunningAge` (five minutes by default); active handlers renew their claims before recovery.
+- Worker recovery runs at startup and between polls for claims older than `jobs.worker.staleRunningAge` (30 minutes by default); active handlers renew their claims before recovery.
 - Recreate the repo-scoped Compose PostgreSQL volume only when a clean local
   environment is required; no SQLite data migration or compatibility path exists.
 

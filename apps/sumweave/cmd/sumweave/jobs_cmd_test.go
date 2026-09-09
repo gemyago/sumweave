@@ -110,3 +110,16 @@ func TestJobsOptionsFromRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, options.DisablePProf)
 }
+
+func TestJobsCommandModes(t *testing.T) {
+	cmd := newJobsCmd()
+
+	for _, name := range []string{jobsWorkerCommandName, enqueueDueCommandName} {
+		child, _, err := cmd.Find([]string{name})
+		require.NoError(t, err)
+		require.Equal(t, name, child.Name())
+	}
+
+	_, _, err := cmd.Find([]string{"scheduler"})
+	require.Error(t, err)
+}

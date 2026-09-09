@@ -39,6 +39,7 @@ vi.mock('../lib/finance/shell-state.svelte', async (importOriginal) => ({
 describe('Finance dashboard page', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    window.location.hash = '#/finance'
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTenants.mockReset()
     mocks.getDashboard.mockReset()
@@ -116,7 +117,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByLabelText('Category breakdown chart')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Largest balances' })).toBeInTheDocument()
     expect(screen.getByLabelText('Account balances chart')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Recent transactions' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Transactions' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Needs attention' })).toBeInTheDocument()
     expect(screen.getByText('Missing FX coverage')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open accounts' })).toHaveAttribute('href', '#/finance/accounts')
@@ -265,6 +266,69 @@ describe('Finance dashboard page', () => {
     await user.click(screen.getByText('Custom range'))
     expect(screen.getByLabelText('Custom start date')).toHaveValue('2026-04-01')
     expect(screen.getByLabelText('Custom end date')).toHaveValue('2026-04-30')
+  })
+
+  it('restores a direct dashboard date-range URL and requests its exclusive end boundary', async () => {
+    window.location.hash = '#/finance?startDate=2026-05-10&endDate=2026-05-12'
+
+    render(Finance)
+
+    await screen.findByRole('heading', { name: 'Finance dashboard' })
+    await waitFor(() => expect(mocks.getDashboard).toHaveBeenCalledOnce())
+    const request = mocks.getDashboard.mock.calls[0][0]
+    expect(request.tenantId).toBe('tenant-1')
+    expect(dateInputValue(request.startDate)).toBe('2026-05-10')
+    expect(dateInputValue(request.endDate)).toBe('2026-05-13')
+  })
+
+  it('pages dashboard transactions inside the selected range and carries that range to the ledger', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/finance?startDate=2026-06-01&endDate=2026-06-30'
+    const transactions = (offset: number, count = 6) => Array.from({ length: count }, (_, index) => ({
+      id: `tx-${offset + index}`,
+      tenantId: 'tenant-1', accountId: 'acc-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: -100,
+      currency: 'USD', description: `Transaction ${offset + index}`, effectiveAt: new Date(2026, 5, 30 - offset - index), categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: new Date(), updatedAt: new Date(),
+    }))
+    mocks.listTransactions.mockResolvedValueOnce(transactions(0)).mockResolvedValueOnce(transactions(5, 5)).mockResolvedValueOnce(transactions(0))
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      settled: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+
+    render(Finance)
+    expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'View all transactions' })).toHaveAttribute('href', '#/finance/transactions?startDate=2026-06-01&endDate=2026-06-30')
+
+    await user.click(screen.getByRole('button', { name: 'Dashboard transaction pages: older page' }))
+    expect(await screen.findByText('Transaction 5')).toBeInTheDocument()
+    expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({
+      startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1), limit: 6, offset: 5,
+    }))
+
+    await user.click(screen.getByRole('button', { name: 'Dashboard transaction pages: newer page' }))
+    expect(await screen.findByText('Transaction 0')).toBeInTheDocument()
+    expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }))
+  })
+
+  it('keeps newer navigation available on a full final dashboard page', async () => {
+    const user = userEvent.setup()
+    const transactions = (offset: number, count: number) => Array.from({ length: count }, (_, index) => ({
+      id: `tx-${offset + index}`,
+      tenantId: 'tenant-1', accountId: 'acc-1', source: 'manual', status: 'booked', kind: 'expense', amountMinor: -100,
+      currency: 'USD', description: `Transaction ${offset + index}`, effectiveAt: new Date(2026, 5, 30 - offset - index), categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, providerOriginal: null, createdAt: new Date(), updatedAt: new Date(),
+    }))
+    mocks.listTransactions.mockResolvedValueOnce(transactions(0, 6)).mockResolvedValueOnce(transactions(5, 5))
+
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Dashboard transaction pages: older page' }))
+
+    expect(await screen.findByText('Transaction 5')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Dashboard transaction pages: older page' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Dashboard transaction pages: newer page' })).toBeEnabled()
+    expect(mocks.listTransactions).toHaveBeenCalledTimes(2)
   })
 
   it('navigates forward one local calendar month per click', async () => {
@@ -522,7 +586,7 @@ describe('Finance dashboard page', () => {
     expect(await screen.findByText('No settled or pending cash flow to chart for this period.')).toBeInTheDocument()
     expect(screen.getByText('No category activity to chart for this period.')).toBeInTheDocument()
     expect(screen.getByText('No account balances to chart yet.')).toBeInTheDocument()
-    expect(screen.getByText('No recent transactions for this tenant yet.')).toBeInTheDocument()
+    expect(screen.getByText('No transactions in this reporting period.')).toBeInTheDocument()
     expect(screen.getByText('No active attention signals right now.')).toBeInTheDocument()
     expect(screen.getByText('No booked balances yet')).toBeInTheDocument()
   })
@@ -750,7 +814,7 @@ describe('Finance dashboard page', () => {
     expect(screen.queryByText('Transaction 6')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'View all accounts' })).toHaveAttribute('href', '#/finance/accounts')
     expect(screen.getByRole('link', { name: 'View all categories' })).toHaveAttribute('href', '#/finance/categories')
-    expect(screen.getByRole('link', { name: 'View all transactions' })).toHaveAttribute('href', '#/finance/transactions')
+    expect(screen.getByRole('link', { name: 'View all transactions' })).toHaveAttribute('href', '#/finance/transactions?startDate=2026-06-20&endDate=2026-06-19')
   })
 
   it('renders a dashboard error after tenant selection', async () => {

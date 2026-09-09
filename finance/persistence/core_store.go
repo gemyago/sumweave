@@ -476,6 +476,15 @@ func (s *Store) ListTransactions(
 	if status != "" {
 		query = query.Where("status = ?", string(status))
 	}
+	if len(page) > 0 && page[0].Kind != "" {
+		query = query.Where("kind = ?", string(page[0].Kind))
+	}
+	if len(page) > 0 && !page[0].StartDate.IsZero() {
+		query = query.Where("effective_at >= ?", page[0].StartDate)
+	}
+	if len(page) > 0 && !page[0].EndDate.IsZero() {
+		query = query.Where("effective_at < ?", page[0].EndDate)
+	}
 	if !includeHidden {
 		query = query.Where("hidden_at IS NULL")
 	}
@@ -487,7 +496,11 @@ func (s *Store) ListTransactions(
 			query = query.Offset(dbPageInt(page[0].Offset))
 		}
 	}
-	if err := query.Order("effective_at DESC, created_at DESC, id DESC").Find(&models).Error; err != nil {
+	order := "effective_at DESC, created_at DESC, id DESC"
+	if len(page) > 0 && page[0].SortAscending {
+		order = "effective_at ASC, created_at ASC, id ASC"
+	}
+	if err := query.Order(order).Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list transactions: %w", err)
 	}
 	items := make([]domain.Transaction, 0, len(models))
@@ -498,8 +511,12 @@ func (s *Store) ListTransactions(
 }
 
 type ListTransactionsPage struct {
-	Limit  int64
-	Offset int64
+	Limit         int64
+	Offset        int64
+	Kind          domain.TransactionKind
+	StartDate     time.Time
+	EndDate       time.Time
+	SortAscending bool
 }
 
 func dbPageInt(value int64) int {

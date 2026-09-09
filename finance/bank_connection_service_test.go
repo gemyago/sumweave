@@ -52,6 +52,7 @@ func TestBankConnectionService(t *testing.T) {
 			connectionStore:    args.connectionStore,
 			linkCoordinator:    args.linkCoordinator,
 			logger:             logger.With("component", "bankConnectionService"),
+			now:                time.Now,
 		}
 	}
 
@@ -326,6 +327,7 @@ func TestBankConnectionService(t *testing.T) {
 				pendingStartLookup:    recordingPendingStartLookup{},
 				linkCoordinator:       coordinator,
 			})
+			service.now = func() time.Time { return now }
 
 			tokenParams := LinkTokenBankConnectionParams{
 				ActorUserID: "actor-" + fake.UUID().V4(),

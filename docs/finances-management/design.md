@@ -153,8 +153,13 @@ Scheduling decisions:
   admin/diagnostics UI.
 - In Kubernetes, use standard CronJobs for the scheduler tick, for example a
   periodic `sumweave jobs enqueue-due` command.
-- In local development, the same enqueue-due command can be run manually or by
-  PM2 if recurring local sync is needed.
+- In local development, run `sumweave jobs enqueue-due` manually when scheduled
+  behavior needs to be exercised.
+- A newly linked active bank connection receives an enabled daily schedule; its
+  first run is 24 hours after linking.
+- Each scheduler tick idempotently repairs active connections that predate that
+  rule by inserting the same enabled daily schedule when no schedule exists.
+  Existing schedule state is never changed by this repair.
 - CSV imports are explicit user-triggered jobs after preview/confirmation.
 - Account imports are explicit user-triggered jobs after preview/confirmation.
 

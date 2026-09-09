@@ -255,6 +255,7 @@ type connectionStoreFixture struct {
 	mock       *MockConnectionStore
 	saved      []domain.BankConnection
 	snapshots  []*domain.ProviderSnapshot
+	schedules  []*domain.BankConnectionSchedule
 	listResult []domain.BankConnection
 	saveErr    error
 }
@@ -263,7 +264,8 @@ func newConnectionStoreFixture(t *testing.T, fixture connectionStoreFixture) *co
 	t.Helper()
 
 	fixture.mock = NewMockConnectionStore(t)
-	saveBankConnectionCall := fixture.mock.EXPECT().SaveLinkedConnectionWithSnapshot(
+	saveBankConnectionCall := fixture.mock.EXPECT().SaveLinkedConnectionWithSnapshotAndSchedule(
+		testifymock.Anything,
 		testifymock.Anything,
 		testifymock.Anything,
 		testifymock.Anything,
@@ -275,6 +277,7 @@ func newConnectionStoreFixture(t *testing.T, fixture connectionStoreFixture) *co
 			connection domain.BankConnection,
 			_ domain.ConnectionSecret,
 			snapshot *domain.ProviderSnapshot,
+			schedule *domain.BankConnectionSchedule,
 		) (domain.BankConnection, error) {
 			if fixture.saveErr != nil {
 				return domain.BankConnection{}, fixture.saveErr
@@ -286,6 +289,7 @@ func newConnectionStoreFixture(t *testing.T, fixture connectionStoreFixture) *co
 			}
 			fixture.saved = append(fixture.saved, connection)
 			fixture.snapshots = append(fixture.snapshots, snapshot)
+			fixture.schedules = append(fixture.schedules, schedule)
 			return connection, nil
 		},
 	)

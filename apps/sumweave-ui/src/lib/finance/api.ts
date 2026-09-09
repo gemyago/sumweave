@@ -364,13 +364,17 @@ export interface SignalFinanceApi {
   listTags(params: { tenantId: string; includeHidden?: boolean }): Promise<FinanceTag[]>
   createTag(params: { tenantId: string; name: string }): Promise<FinanceTag>
   renameTag(params: { tenantId: string; tagId: string; name: string }): Promise<void>
-  listTransactions(params: {
-    tenantId: string
-    limit: number
-    accountId?: string
-    source?: string
-    status?: string
-    includeHidden?: boolean
+   listTransactions(params: {
+     tenantId: string
+     limit: number
+     accountId?: string
+     kind?: string
+     source?: string
+     status?: string
+     startDate?: Date
+     endDate?: Date
+     sort?: 'asc'
+     includeHidden?: boolean
     offset?: number
   }): Promise<FinanceTransaction[]>
   getTransaction(params: { tenantId: string; transactionId: string }): Promise<FinanceTransaction>
@@ -713,11 +717,22 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         body: { name },
       })
     },
-    async listTransactions({ tenantId, accountId, source, status, includeHidden, limit, offset }) {
+    async listTransactions({ tenantId, accountId, kind, source, status, startDate, endDate, sort, includeHidden, limit, offset }) {
       const json = await request<{ items?: RawTransaction[] }>({
         method: 'GET',
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions`,
-        query: buildSearchParams({ accountId, source, status, includeHidden, limit, offset }),
+          query: buildSearchParams({
+            accountId,
+            kind,
+            source,
+            status,
+            startDate: startDate && serializeRequestTimestamp(startDate),
+            endDate: endDate && serializeRequestTimestamp(endDate),
+            sort,
+            includeHidden,
+            limit,
+            offset,
+          }),
       })
       return requireItems<RawTransaction>(json, 'finance.transactions.items').map(mapTransaction)
     },

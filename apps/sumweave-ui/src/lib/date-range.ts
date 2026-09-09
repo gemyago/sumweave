@@ -6,7 +6,9 @@ export function dateInputValue(value?: Date | null): string {
 export function withDateInput(existing: Date | undefined, value: string): Date | undefined {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) return undefined
-  const next = existing instanceof Date && !Number.isNaN(existing.getTime()) ? new Date(existing) : new Date(0)
+  const hasExistingTime = existing instanceof Date && !Number.isNaN(existing.getTime())
+  const next = hasExistingTime ? new Date(existing) : new Date(0)
   next.setFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  if (!hasExistingTime) next.setHours(0, 0, 0, 0)
   return next.getMonth() === Number(match[2]) - 1 && next.getDate() === Number(match[3]) ? next : undefined
 }

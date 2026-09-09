@@ -417,5 +417,9 @@ func TestFocusedPublicServices(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, persistedState)
 		assert.Equal(t, state.JobID, persistedState.JobID)
+		persistedConnection, err := store.GetBankConnection(t.Context(), connection.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persistedConnection)
+		assert.Equal(t, connection.ID, persistedConnection.ID)
 	})
 }

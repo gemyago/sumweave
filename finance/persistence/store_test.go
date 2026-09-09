@@ -481,6 +481,23 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, pendingTransactions, 1)
 
+		filteredTransactions, err := store.ListTransactions(
+			t.Context(),
+			tenant.ID,
+			"",
+			"",
+			"",
+			true,
+			ListTransactionsPage{
+				Kind:      domain.TransactionKindRefund,
+				StartDate: now.Add(-2 * time.Minute),
+				EndDate:   now,
+			},
+		)
+		require.NoError(t, err)
+		require.Len(t, filteredTransactions, 1)
+		require.Equal(t, []string{transactionTwo.ID}, []string{filteredTransactions[0].ID})
+
 		pagedTransactions, err := store.ListTransactions(
 			t.Context(),
 			tenant.ID,
@@ -493,6 +510,19 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, pagedTransactions, 1)
 		assert.Equal(t, transactionTwo.ID, pagedTransactions[0].ID)
+
+		ascendingPagedTransactions, err := store.ListTransactions(
+			t.Context(),
+			tenant.ID,
+			"",
+			"",
+			"",
+			true,
+			ListTransactionsPage{Limit: 1, Offset: 1, SortAscending: true},
+		)
+		require.NoError(t, err)
+		require.Len(t, ascendingPagedTransactions, 1)
+		assert.Equal(t, transactionOne.ID, ascendingPagedTransactions[0].ID)
 
 		transactionOne.HiddenAt = &hiddenAt
 		_, err = store.SaveTransaction(t.Context(), transactionOne)

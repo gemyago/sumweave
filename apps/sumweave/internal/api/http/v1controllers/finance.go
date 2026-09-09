@@ -1951,6 +1951,12 @@ func (c *FinanceController) ListFinanceTransactions(
 		if err != nil {
 			return nil, err
 		}
+		if !params.StartDate.IsZero() && !params.EndDate.IsZero() && !params.EndDate.After(params.StartDate) {
+			return nil, app.NewErrInvalidInput("endDate", "must be later than startDate")
+		}
+		if params.Sort != "" && params.Sort != "asc" && params.Sort != "desc" {
+			return nil, app.NewErrInvalidInput("sort", "must be asc or desc")
+		}
 
 		items, err := c.deps.LedgerService.ListTransactions(
 			ctx,
@@ -1960,6 +1966,10 @@ func (c *FinanceController) ListFinanceTransactions(
 				AccountID:     params.AccountID,
 				Source:        domain.TransactionSource(params.Source),
 				Status:        domain.TransactionStatus(params.Status),
+				Kind:          domain.TransactionKind(params.Kind),
+				StartDate:     params.StartDate,
+				EndDate:       params.EndDate,
+				SortAscending: params.Sort == "asc",
 				IncludeHidden: params.IncludeHidden,
 				Limit:         params.Limit,
 				Offset:        params.Offset,
