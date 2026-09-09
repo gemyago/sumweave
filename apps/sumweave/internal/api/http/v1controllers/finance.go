@@ -2476,8 +2476,12 @@ func rejectNullClassificationRuleTagIDs(next http.Handler) http.Handler {
 		// OpenAPI contract's distinct null rejection before generated binding.
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
-			req.Body = io.NopCloser(bytes.NewReader(body))
-			next.ServeHTTP(w, req)
+			var maxBytesError *http.MaxBytesError
+			if errors.As(err, &maxBytesError) {
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		req.Body = io.NopCloser(bytes.NewReader(body))

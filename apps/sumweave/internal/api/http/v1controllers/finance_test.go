@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
@@ -406,7 +408,7 @@ func TestFinanceController(t *testing.T) {
 			makeAuthMiddleware(userID),
 			withClassificationRuleService(rules),
 		)
-		body := `{"matchType":"contains","condition":"` + fake.Letter() + `","categoryId":"` + categoryID +
+		requestBody := `{"matchType":"contains","condition":"` + fake.Letter() + `","categoryId":"` + categoryID +
 			`","tagIds":["tag-` + fake.UUID().V4() + `"]}`
 
 		for _, tc := range []struct {
@@ -421,7 +423,7 @@ func TestFinanceController(t *testing.T) {
 				rules.EXPECT().Create(mock.Anything, mock.Anything).Return(domain.ClassificationRule{}, tc.err).Once()
 				response := httptest.NewRecorder()
 				handler.ServeHTTP(response, newRequest(
-					http.MethodPost, "/api/v1/finance/tenants/"+tenantID+"/classification-rules", body, true,
+					http.MethodPost, "/api/v1/finance/tenants/"+tenantID+"/classification-rules", requestBody, true,
 				))
 				require.Equal(t, tc.want, response.Code)
 				assert.Empty(t, response.Body.String())
@@ -456,6 +458,42 @@ func TestFinanceController(t *testing.T) {
 				assert.Empty(t, response.Body.String())
 			})
 		}
+
+		t.Run("rejects partial bodies from failed reads before generated binding", func(t *testing.T) {
+			partialBody := `{"matchType":"contains","condition":"` + fake.Letter() + `","categoryId":"` + categoryID + `"}`
+			limitedHandler := middleware.NewRequestBodyLimitMiddleware(int64(len(partialBody)))(handler)
+			request := newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants/"+tenantID+"/classification-rules",
+				partialBody+" ",
+				true,
+			)
+			request.ContentLength = int64(len(partialBody))
+			response := httptest.NewRecorder()
+
+			limitedHandler.ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusRequestEntityTooLarge, response.Code)
+			assert.Empty(t, response.Body.String())
+		})
+
+		t.Run("rejects ordinary body read failures before generated binding", func(t *testing.T) {
+			partialBody := `{"matchType":"contains","condition":"` + fake.Letter() + `","categoryId":"` + categoryID + `"}`
+			request := newRequest(
+				http.MethodPost,
+				"/api/v1/finance/tenants/"+tenantID+"/classification-rules",
+				partialBody,
+				true,
+			)
+			bodyReader := iotest.DataErrReader(iotest.TimeoutReader(strings.NewReader(partialBody)))
+			request.Body = io.NopCloser(bodyReader)
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusBadRequest, response.Code)
+			assert.Empty(t, response.Body.String())
+		})
 	})
 
 	t.Run("classification rule routes preserve tenant isolation", func(t *testing.T) {
