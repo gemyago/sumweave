@@ -1,10 +1,12 @@
 package v1controllers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -560,13 +562,14 @@ func (c *FinanceController) CreateFinanceClassificationRule(
 			MatchType:   domain.ClassificationMatchType(params.Payload.MatchType),
 			Condition:   params.Payload.Condition,
 			CategoryID:  params.Payload.CategoryID,
+			TagIDs:      nonNilTagIDs(params.Payload.TagIDs),
 		})
 		if err != nil {
 			return nil, mapClassificationRuleError(err)
 		}
 		return &models.FinanceIDentifierResponse{ID: item.ID}, nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.AuthMiddleware(rejectNullClassificationRuleTagIDs(inner))
 }
 
 func (c *FinanceController) UpdateFinanceClassificationRule(
@@ -589,10 +592,11 @@ func (c *FinanceController) UpdateFinanceClassificationRule(
 				MatchType:   domain.ClassificationMatchType(params.Payload.MatchType),
 				Condition:   params.Payload.Condition,
 				CategoryID:  params.Payload.CategoryID,
+				TagIDs:      nonNilTagIDs(params.Payload.TagIDs),
 			},
 		))
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.AuthMiddleware(rejectNullClassificationRuleTagIDs(inner))
 }
 
 func (c *FinanceController) DeleteFinanceClassificationRule(
@@ -2272,6 +2276,8 @@ func mapClassificationRuleError(err error) error {
 		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("classificationRule", err.Error()), err)
 	case errors.Is(err, financepkg.ErrCategoryNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("category", "requested resource"), err)
+	case errors.Is(err, financepkg.ErrTagNotFound):
+		return fmt.Errorf("%w: %w", app.NewErrNotFound("tag", "requested resource"), err)
 	default:
 		return err
 	}
@@ -2457,10 +2463,32 @@ func mapClassificationRule(item domain.ClassificationRule) models.FinanceClassif
 		MatchType:  string(item.MatchType),
 		Condition:  item.Condition,
 		CategoryID: item.CategoryID,
+		TagIDs:     append([]string{}, item.TagIDs...),
 		Position:   int64(item.Position),
 		CreatedAt:  item.CreatedAt,
 		UpdatedAt:  item.UpdatedAt,
 	}
+}
+
+func rejectNullClassificationRuleTagIDs(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// apigen represents optional arrays as nullable slices, so preserve the
+		// OpenAPI contract's distinct null rejection before generated binding.
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			req.Body = io.NopCloser(bytes.NewReader(body))
+			next.ServeHTTP(w, req)
+			return
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+
+		var payload map[string]json.RawMessage
+		if json.Unmarshal(body, &payload) == nil && bytes.Equal(bytes.TrimSpace(payload["tagIds"]), []byte("null")) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 func mapTag(item domain.Tag) models.FinanceTag {

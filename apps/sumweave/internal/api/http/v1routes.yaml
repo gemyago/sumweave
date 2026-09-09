@@ -2123,6 +2123,11 @@ components:
         matchType: { type: string, enum: [exact, contains] }
         condition: { type: string }
         categoryId: { type: string }
+        tagIds:
+          type: array
+          nullable: false
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
     FinanceClassificationRuleMoveRequest:
       type: object
       required: [direction]
@@ -2130,13 +2135,16 @@ components:
         direction: { type: string, enum: [up, down] }
     FinanceClassificationRule:
       type: object
-      required: [id, tenantId, matchType, condition, categoryId, position, createdAt, updatedAt]
+      required: [id, tenantId, matchType, condition, categoryId, tagIds, position, createdAt, updatedAt]
       properties:
         id: { type: string }
         tenantId: { type: string }
         matchType: { type: string }
         condition: { type: string }
         categoryId: { type: string }
+        tagIds:
+          type: array
+          items: { type: string }
         position: { type: integer, format: int64 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

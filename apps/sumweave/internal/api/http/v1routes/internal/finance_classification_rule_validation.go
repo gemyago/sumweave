@@ -26,6 +26,13 @@ func NewFinanceClassificationRuleValidator() FieldValidator[*FinanceClassificati
 	validateCategoryID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
+	validateTagIDs := NewArrayValidator[string](
+		NewSimpleFieldValidator[[]string](
+			EnsureArrayFieldRequired,
+		),
+		NewSimpleFieldValidator[string](
+			),
+	)
 	validatePosition := NewSimpleFieldValidator[int64](
 		EnsureNonDefault[int64],
 	)
@@ -42,6 +49,7 @@ func NewFinanceClassificationRuleValidator() FieldValidator[*FinanceClassificati
 		validateMatchType(bindingCtx.Fork("matchType"), value.MatchType)
 		validateCondition(bindingCtx.Fork("condition"), value.Condition)
 		validateCategoryID(bindingCtx.Fork("categoryId"), value.CategoryID)
+		validateTagIDs(bindingCtx.Fork("tagIds"), value.TagIDs)
 		validatePosition(bindingCtx.Fork("position"), value.Position)
 		validateCreatedAt(bindingCtx.Fork("createdAt"), value.CreatedAt)
 		validateUpdatedAt(bindingCtx.Fork("updatedAt"), value.UpdatedAt)

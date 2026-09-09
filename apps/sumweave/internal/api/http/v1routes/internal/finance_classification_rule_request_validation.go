@@ -20,10 +20,18 @@ func NewFinanceClassificationRuleRequestValidator() FieldValidator[*FinanceClass
 	validateCategoryID := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
+	validateTagIDs := NewArrayValidator[string](
+		NewSimpleFieldValidator[[]string](
+		),
+		NewSimpleFieldValidator[string](
+				NewMinMaxLengthValidator[string, string](1, true),
+			),
+	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceClassificationRuleRequest) {
 		validateMatchType(bindingCtx.Fork("matchType"), value.MatchType)
 		validateCondition(bindingCtx.Fork("condition"), value.Condition)
 		validateCategoryID(bindingCtx.Fork("categoryId"), value.CategoryID)
+		validateTagIDs(bindingCtx.Fork("tagIds"), value.TagIDs)
 	}
 }

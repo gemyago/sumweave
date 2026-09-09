@@ -72,4 +72,5 @@ type FinanceClassificationRuleRequest struct {
 	MatchType FinanceClassificationRuleRequestMatchType `json:"matchType"`
 	Condition string `json:"condition"`
 	CategoryID string `json:"categoryId"`
+	TagIDs []string `json:"tagIds,omitempty"`
 }

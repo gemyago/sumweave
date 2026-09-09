@@ -10,7 +10,7 @@
 
 ## 3. Application API
 
-- [ ] 3.1 Expose rule tags through the existing classification endpoints. Follow TDD (write failing registered-route tests -> implement -> verify) for optional request `tagIds`, required read arrays, omitted/empty replacement semantics, invalid-tag response mapping, tenant isolation, and unchanged minimal mutation responses; update OpenAPI, regenerate backend models/validation, and update controller mappings.
+- [x] 3.1 Expose rule tags through the existing classification endpoints. Follow TDD (write failing registered-route tests -> implement -> verify) for optional request `tagIds`, required read arrays, omitted/empty replacement semantics, invalid-tag response mapping, tenant isolation, and unchanged minimal mutation responses; update OpenAPI, regenerate backend models/validation, and update controller mappings.
 
 ## 4. Rule editing and transaction prompts
 
