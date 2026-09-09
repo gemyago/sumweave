@@ -827,6 +827,80 @@ func (_c *mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingCa
 	return _c
 }
 
+// ListClassificationRuleIDsReferencingTag provides a mock function for the type mockcategoryRuleReferenceFinder
+func (_mock *mockcategoryRuleReferenceFinder) ListClassificationRuleIDsReferencingTag(ctx context.Context, tenantID string, tagID string) ([]string, error) {
+	ret := _mock.Called(ctx, tenantID, tagID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListClassificationRuleIDsReferencingTag")
+	}
+
+	var r0 []string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) ([]string, error)); ok {
+		return returnFunc(ctx, tenantID, tagID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) []string); ok {
+		r0 = returnFunc(ctx, tenantID, tagID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, tenantID, tagID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListClassificationRuleIDsReferencingTag'
+type mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call struct {
+	*mock.Call
+}
+
+// ListClassificationRuleIDsReferencingTag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenantID string
+//   - tagID string
+func (_e *mockcategoryRuleReferenceFinder_Expecter) ListClassificationRuleIDsReferencingTag(ctx interface{}, tenantID interface{}, tagID interface{}) *mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call {
+	return &mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call{Call: _e.mock.On("ListClassificationRuleIDsReferencingTag", ctx, tenantID, tagID)}
+}
+
+func (_c *mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call) Run(run func(ctx context.Context, tenantID string, tagID string)) *mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call) Return(strings []string, err error) *mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call {
+	_c.Call.Return(strings, err)
+	return _c
+}
+
+func (_c *mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call) RunAndReturn(run func(ctx context.Context, tenantID string, tagID string) ([]string, error)) *mockcategoryRuleReferenceFinder_ListClassificationRuleIDsReferencingTag_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // newMockclassificationTransactionStore creates a new instance of mockclassificationTransactionStore. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func newMockclassificationTransactionStore(t interface {
@@ -1218,6 +1292,80 @@ func (_c *mockclassificationRuleStore_ListClassificationRuleIDsReferencingCatego
 	return _c
 }
 
+// ListClassificationRuleIDsReferencingTag provides a mock function for the type mockclassificationRuleStore
+func (_mock *mockclassificationRuleStore) ListClassificationRuleIDsReferencingTag(ctx context.Context, tenantID string, tagID string) ([]string, error) {
+	ret := _mock.Called(ctx, tenantID, tagID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListClassificationRuleIDsReferencingTag")
+	}
+
+	var r0 []string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) ([]string, error)); ok {
+		return returnFunc(ctx, tenantID, tagID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) []string); ok {
+		r0 = returnFunc(ctx, tenantID, tagID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, tenantID, tagID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListClassificationRuleIDsReferencingTag'
+type mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call struct {
+	*mock.Call
+}
+
+// ListClassificationRuleIDsReferencingTag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tenantID string
+//   - tagID string
+func (_e *mockclassificationRuleStore_Expecter) ListClassificationRuleIDsReferencingTag(ctx interface{}, tenantID interface{}, tagID interface{}) *mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call {
+	return &mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call{Call: _e.mock.On("ListClassificationRuleIDsReferencingTag", ctx, tenantID, tagID)}
+}
+
+func (_c *mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call) Run(run func(ctx context.Context, tenantID string, tagID string)) *mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call) Return(strings []string, err error) *mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call {
+	_c.Call.Return(strings, err)
+	return _c
+}
+
+func (_c *mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call) RunAndReturn(run func(ctx context.Context, tenantID string, tagID string) ([]string, error)) *mockclassificationRuleStore_ListClassificationRuleIDsReferencingTag_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListClassificationRules provides a mock function for the type mockclassificationRuleStore
 func (_mock *mockclassificationRuleStore) ListClassificationRules(ctx context.Context, tenantID string, categoryID string) ([]domain.ClassificationRule, error) {
 	ret := _mock.Called(ctx, tenantID, categoryID)
@@ -1515,6 +1663,101 @@ func (_c *mockclassificationCategoryStore_GetCategory_Call) Return(category *dom
 }
 
 func (_c *mockclassificationCategoryStore_GetCategory_Call) RunAndReturn(run func(ctx context.Context, categoryID string) (*domain.Category, error)) *mockclassificationCategoryStore_GetCategory_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// newMockclassificationTagStore creates a new instance of mockclassificationTagStore. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
+// The first argument is typically a *testing.T value.
+func newMockclassificationTagStore(t interface {
+	mock.TestingT
+	Cleanup(func())
+}) *mockclassificationTagStore {
+	mock := &mockclassificationTagStore{}
+	mock.Mock.Test(t)
+
+	t.Cleanup(func() { mock.AssertExpectations(t) })
+
+	return mock
+}
+
+// mockclassificationTagStore is an autogenerated mock type for the classificationTagStore type
+type mockclassificationTagStore struct {
+	mock.Mock
+}
+
+type mockclassificationTagStore_Expecter struct {
+	mock *mock.Mock
+}
+
+func (_m *mockclassificationTagStore) EXPECT() *mockclassificationTagStore_Expecter {
+	return &mockclassificationTagStore_Expecter{mock: &_m.Mock}
+}
+
+// GetTag provides a mock function for the type mockclassificationTagStore
+func (_mock *mockclassificationTagStore) GetTag(ctx context.Context, tagID string) (*domain.Tag, error) {
+	ret := _mock.Called(ctx, tagID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTag")
+	}
+
+	var r0 *domain.Tag
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*domain.Tag, error)); ok {
+		return returnFunc(ctx, tagID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *domain.Tag); ok {
+		r0 = returnFunc(ctx, tagID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*domain.Tag)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, tagID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockclassificationTagStore_GetTag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTag'
+type mockclassificationTagStore_GetTag_Call struct {
+	*mock.Call
+}
+
+// GetTag is a helper method to define mock.On call
+//   - ctx context.Context
+//   - tagID string
+func (_e *mockclassificationTagStore_Expecter) GetTag(ctx interface{}, tagID interface{}) *mockclassificationTagStore_GetTag_Call {
+	return &mockclassificationTagStore_GetTag_Call{Call: _e.mock.On("GetTag", ctx, tagID)}
+}
+
+func (_c *mockclassificationTagStore_GetTag_Call) Run(run func(ctx context.Context, tagID string)) *mockclassificationTagStore_GetTag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockclassificationTagStore_GetTag_Call) Return(tag *domain.Tag, err error) *mockclassificationTagStore_GetTag_Call {
+	_c.Call.Return(tag, err)
+	return _c
+}
+
+func (_c *mockclassificationTagStore_GetTag_Call) RunAndReturn(run func(ctx context.Context, tagID string) (*domain.Tag, error)) *mockclassificationTagStore_GetTag_Call {
 	_c.Call.Return(run)
 	return _c
 }

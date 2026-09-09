@@ -1,8 +1,8 @@
 ## 1. Rule tag persistence and lifecycle
 
-- [ ] 1.1 Persist optional classification rule tags. Follow TDD (write failing behavior tests -> implement -> verify) for the `TagIDs` domain field, GORM association model/migrator registration, batched rule-tag hydration, atomic create/replace/delete, empty-set clearing, and preserved ordering/filtering. Use PostgreSQL persistence tests and keep migration coverage to one shallow smoke scenario.
-- [ ] 1.2 Validate tenant-owned rule tag selections. Follow TDD (write failing tests -> implement -> verify) for create/update service parameters, required tag lookup dependency and wiring, duplicate/blank IDs, missing/hidden/cross-tenant tags, and rejected writes leaving stored rules intact; regenerate affected Mockery mocks.
-- [ ] 1.3 Protect tags referenced by classification rules. Follow TDD (write failing tests -> implement -> verify) for dedicated rule-tag reference lookup, catalog hide errors with rule IDs, persistence-level hide protection, release after retarget/delete, and preservation of historical transaction tags.
+- [x] 1.1 Persist optional classification rule tags. Follow TDD (write failing behavior tests -> implement -> verify) for the `TagIDs` domain field, GORM association model/migrator registration, batched rule-tag hydration, atomic create/replace/delete, empty-set clearing, and preserved ordering/filtering. Use PostgreSQL persistence tests and keep migration coverage to one shallow smoke scenario.
+- [x] 1.2 Validate tenant-owned rule tag selections. Follow TDD (write failing tests -> implement -> verify) for create/update service parameters, required tag lookup dependency and wiring, duplicate/blank IDs, missing/hidden/cross-tenant tags, and rejected writes leaving stored rules intact; regenerate affected Mockery mocks.
+- [x] 1.3 Protect tags referenced by classification rules. Follow TDD (write failing tests -> implement -> verify) for dedicated rule-tag reference lookup, catalog hide errors with rule IDs, persistence-level hide protection, release after retarget/delete, and preservation of historical transaction tags.
 
 ## 2. Atomic classification assignment
 

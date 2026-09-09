@@ -40,11 +40,12 @@ const (
 )
 
 var (
-	ErrTenantInviteNotFound = errors.New("tenant invite not found")
-	ErrAccountNotFound      = errors.New("account not found")
-	ErrCategoryNotFound     = errors.New("category not found")
-	ErrTagNotFound          = errors.New("tag not found")
-	ErrTransactionNotFound  = errors.New("transaction not found")
+	ErrTenantInviteNotFound               = errors.New("tenant invite not found")
+	ErrAccountNotFound                    = errors.New("account not found")
+	ErrCategoryNotFound                   = errors.New("category not found")
+	ErrTagNotFound                        = errors.New("tag not found")
+	ErrTransactionNotFound                = errors.New("transaction not found")
+	ErrTagReferencedByClassificationRules = errors.New("tag referenced by classification rules")
 )
 
 func (s *Store) SaveTenant(ctx context.Context, tenant domain.Tenant) (domain.Tenant, error) {
@@ -373,6 +374,19 @@ func (s *Store) ListCategories(
 
 func (s *Store) SaveTag(ctx context.Context, tag domain.Tag) (domain.Tag, error) {
 	model := newTagModel(tag)
+	if model.HiddenAt != nil {
+		var count int64
+		if err := s.db.WithContext(ctx).
+			Table((classificationRuleTagModel{}).TableName()+" AS rule_tags").
+			Joins("JOIN finance_classification_rules AS rules ON rules.id = rule_tags.rule_id").
+			Where("rule_tags.tag_id = ?", model.ID).
+			Count(&count).Error; err != nil {
+			return domain.Tag{}, fmt.Errorf("check classification rule tag references: %w", err)
+		}
+		if count > 0 {
+			return domain.Tag{}, ErrTagReferencedByClassificationRules
+		}
+	}
 	if err := s.db.WithContext(ctx).
 		Table(model.TableName()).
 		Clauses(clause.OnConflict{

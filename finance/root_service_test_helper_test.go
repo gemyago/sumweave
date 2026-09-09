@@ -133,6 +133,12 @@ func (s *Service) bindServices() {
 		mock.Anything,
 		mock.Anything,
 	).Return([]string(nil), nil).Maybe()
+	ruleReferences.On(
+		"ListClassificationRuleIDsReferencingTag",
+		mock.Anything,
+		mock.Anything,
+		mock.Anything,
+	).Return([]string(nil), nil).Maybe()
 	s.catalog = NewCatalogService(
 		s.store,
 		ruleReferences,

@@ -100,6 +100,7 @@ type ClassificationRule struct {
 	MatchType  ClassificationMatchType
 	Condition  string
 	CategoryID string
+	TagIDs     []string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }

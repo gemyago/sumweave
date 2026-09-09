@@ -117,6 +117,13 @@ type classificationRuleModel struct {
 
 func (classificationRuleModel) TableName() string { return "finance_classification_rules" }
 
+type classificationRuleTagModel struct {
+	RuleID string `gorm:"column:rule_id;size:255;not null;primaryKey;index:idx_finance_classification_rule_tags_tag_id,priority:2"`
+	TagID  string `gorm:"column:tag_id;size:255;not null;primaryKey;index:idx_finance_classification_rule_tags_tag_id,priority:1"`
+}
+
+func (classificationRuleTagModel) TableName() string { return "finance_classification_rule_tags" }
+
 type tagModel struct {
 	ID        string     `gorm:"column:id;size:255;not null;primaryKey"`
 	TenantID  string     `gorm:"column:tenant_id;size:255;not null;index:idx_finance_tags_created_order,priority:1"`

@@ -17,6 +17,7 @@ packages:
       requiredFXPairLister:
       classificationRuleStore:
       classificationCategoryStore:
+      classificationTagStore:
       classificationTransactionStore:
       categoryRuleReferenceFinder:
       BankSyncWindowCompletionPublisher:

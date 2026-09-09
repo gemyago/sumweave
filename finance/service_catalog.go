@@ -35,6 +35,7 @@ type categoryRuleReferenceFinder interface {
 		tenantID string,
 		categoryID string,
 	) ([]string, error)
+	ListClassificationRuleIDsReferencingTag(ctx context.Context, tenantID string, tagID string) ([]string, error)
 }
 
 type CatalogService struct {
@@ -426,6 +427,13 @@ func (s *CatalogService) HideTag(ctx context.Context, params HideTagParams) erro
 	tag, err := s.requireTenantTag(ctx, params.TenantID, params.ActorUserID, params.TagID)
 	if err != nil {
 		return err
+	}
+	ruleIDs, err := s.ruleReferences.ListClassificationRuleIDsReferencingTag(ctx, tag.TenantID, tag.ID)
+	if err != nil {
+		return fmt.Errorf("check tag classification rule references: %w", err)
+	}
+	if len(ruleIDs) > 0 {
+		return &TagReferencedByClassificationRulesError{RuleIDs: ruleIDs}
 	}
 	now := s.now()
 	tag.HiddenAt = &now

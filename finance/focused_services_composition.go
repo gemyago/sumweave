@@ -153,7 +153,7 @@ func newClassificationServices(
 	cfg focusedServicesConfig,
 ) (*ClassificationRuleService, *ClassificationService) {
 	ruleService, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
-		Access: store, Categories: store, Rules: ruleStore, Now: cfg.now, NewID: cfg.newID,
+		Access: store, Categories: store, Tags: store, Rules: ruleStore, Now: cfg.now, NewID: cfg.newID,
 	})
 	if err != nil {
 		panic(err)

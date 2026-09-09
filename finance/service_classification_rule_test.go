@@ -17,6 +17,7 @@ func TestClassificationRuleService(t *testing.T) {
 	t.Run("checks membership and validates a visible same-tenant category before appending", func(t *testing.T) {
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		now := time.Date(2026, time.September, 6, 13, 0, 0, 0, time.FixedZone("test", 60*60))
 		params := CreateClassificationRuleParams{
@@ -30,11 +31,12 @@ func TestClassificationRuleService(t *testing.T) {
 			Once()
 		rules.EXPECT().AppendClassificationRule(t.Context(), domain.ClassificationRule{
 			ID: "rule-a", TenantID: params.TenantID, MatchType: params.MatchType, Condition: "condition",
-			CategoryID: params.CategoryID, CreatedAt: now, UpdatedAt: now,
+			CategoryID: params.CategoryID, TagIDs: []string{}, CreatedAt: now, UpdatedAt: now,
 		}).Return(domain.ClassificationRule{ID: "rule-a", Position: 1}, nil).Once()
 		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
 			Access:     access,
 			Categories: categories,
+			Tags:       tags,
 			Rules:      rules,
 			Now:        func() time.Time { return now },
 			NewID:      func() string { return "rule-a" },
@@ -45,22 +47,131 @@ func TestClassificationRuleService(t *testing.T) {
 		assert.Equal(t, "rule-a", created.ID)
 	})
 
+	t.Run("validates visible same-tenant tags before persisting a complete rule tag set", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.September, 6, 14, 0, 0, 0, time.FixedZone("test", 60*60))
+		access := newMockaccessGuardStore(t)
+		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
+		rules := newMockclassificationRuleStore(t)
+		params := CreateClassificationRuleParams{
+			ActorUserID: "user-" + fake.UUID().V4(), TenantID: "tenant-" + fake.UUID().V4(),
+			MatchType: domain.ClassificationMatchTypeContains, Condition: "condition-" + fake.Lorem().Word(),
+			CategoryID: "category-" + fake.UUID().V4(),
+			TagIDs:     []string{" tag-a-" + fake.UUID().V4() + " ", "tag-b-" + fake.UUID().V4()},
+		}
+		expectedTagIDs := []string{params.TagIDs[0][1 : len(params.TagIDs[0])-1], params.TagIDs[1]}
+		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
+		categories.EXPECT().GetCategory(t.Context(), params.CategoryID).
+			Return(&domain.Category{ID: params.CategoryID, TenantID: params.TenantID}, nil).Once()
+		for _, tagID := range expectedTagIDs {
+			tags.EXPECT().GetTag(t.Context(), tagID).
+				Return(&domain.Tag{ID: tagID, TenantID: params.TenantID}, nil).Once()
+		}
+		rules.EXPECT().AppendClassificationRule(t.Context(), domain.ClassificationRule{
+			ID: "rule-" + params.TenantID, TenantID: params.TenantID, MatchType: params.MatchType,
+			Condition: params.Condition, CategoryID: params.CategoryID, TagIDs: expectedTagIDs,
+			CreatedAt: now, UpdatedAt: now,
+		}).Return(domain.ClassificationRule{}, nil).Once()
+		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
+			Access: access, Categories: categories, Tags: tags, Rules: rules,
+			Now: func() time.Time { return now }, NewID: func() string { return "rule-" + params.TenantID },
+		})
+		require.NoError(t, err)
+		_, err = service.Create(t.Context(), params)
+		require.NoError(t, err)
+	})
+
+	t.Run("rejects invalid or unavailable tags without replacing the stored rule", func(t *testing.T) {
+		fake := faker.New()
+		makeService := func(t *testing.T) (
+			*ClassificationRuleService,
+			*mockaccessGuardStore,
+			*mockclassificationCategoryStore,
+			*mockclassificationTagStore,
+		) {
+			t.Helper()
+			access := newMockaccessGuardStore(t)
+			categories := newMockclassificationCategoryStore(t)
+			tags := newMockclassificationTagStore(t)
+			service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
+				Access: access, Categories: categories, Tags: tags, Rules: newMockclassificationRuleStore(t),
+				Now: time.Now, NewID: fake.UUID().V4,
+			})
+			require.NoError(t, err)
+			return service, access, categories, tags
+		}
+		params := UpdateClassificationRuleParams{
+			ActorUserID: "user-" + fake.UUID().V4(), TenantID: "tenant-" + fake.UUID().V4(),
+			RuleID: "rule-" + fake.UUID().V4(), MatchType: domain.ClassificationMatchTypeExact,
+			Condition: "condition-" + fake.Lorem().Word(), CategoryID: "category-" + fake.UUID().V4(),
+		}
+
+		t.Run("blank or duplicate IDs", func(t *testing.T) {
+			service, access, _, _ := makeService(t)
+			params.TagIDs = []string{"  ", "tag-" + fake.UUID().V4()}
+			access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
+			err := service.Update(t.Context(), params)
+			require.ErrorIs(t, err, ErrInvalidClassificationRule)
+
+			service, access, _, _ = makeService(t)
+			tagID := "tag-" + fake.UUID().V4()
+			params.TagIDs = []string{tagID, " " + tagID + " "}
+			access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
+			err = service.Update(t.Context(), params)
+			require.ErrorIs(t, err, ErrInvalidClassificationRule)
+		})
+
+		for _, unavailable := range []string{"missing", "hidden", "other tenant"} {
+			t.Run(unavailable, func(t *testing.T) {
+				service, access, categories, tags := makeService(t)
+				tagID := "tag-" + fake.UUID().V4()
+				params.TagIDs = []string{tagID}
+				access.EXPECT().
+					IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).
+					Return(true, nil).
+					Once()
+				categories.EXPECT().GetCategory(t.Context(), params.CategoryID).
+					Return(&domain.Category{ID: params.CategoryID, TenantID: params.TenantID}, nil).Once()
+				switch unavailable {
+				case "missing":
+					tags.EXPECT().GetTag(t.Context(), tagID).Return(nil, persistence.ErrTagNotFound).Once()
+				case "hidden":
+					hiddenAt := time.Now()
+					tags.EXPECT().GetTag(t.Context(), tagID).
+						Return(&domain.Tag{ID: tagID, TenantID: params.TenantID, HiddenAt: &hiddenAt}, nil).Once()
+				default:
+					tags.EXPECT().GetTag(t.Context(), tagID).
+						Return(&domain.Tag{ID: tagID, TenantID: "tenant-" + fake.UUID().V4()}, nil).Once()
+				}
+
+				err := service.Update(t.Context(), params)
+				require.ErrorIs(t, err, ErrTagNotFound)
+			})
+		}
+	})
+
 	t.Run("rejects missing required dependencies", func(t *testing.T) {
 		_, err := NewClassificationRuleService(ClassificationRuleServiceArgs{})
 		require.ErrorContains(t, err, "access store is required")
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		_, err = NewClassificationRuleService(ClassificationRuleServiceArgs{Access: access})
 		require.ErrorContains(t, err, "category store is required")
 		_, err = NewClassificationRuleService(ClassificationRuleServiceArgs{Access: access, Categories: categories})
+		require.ErrorContains(t, err, "tag store is required")
+		_, err = NewClassificationRuleService(
+			ClassificationRuleServiceArgs{Access: access, Categories: categories, Tags: tags},
+		)
 		require.ErrorContains(t, err, "rule store is required")
 		_, err = NewClassificationRuleService(ClassificationRuleServiceArgs{
-			Access: access, Categories: categories, Rules: rules,
+			Access: access, Categories: categories, Tags: tags, Rules: rules,
 		})
 		require.ErrorContains(t, err, "clock is required")
 		_, err = NewClassificationRuleService(ClassificationRuleServiceArgs{
-			Access: access, Categories: categories, Rules: rules, Now: time.Now,
+			Access: access, Categories: categories, Tags: tags, Rules: rules, Now: time.Now,
 		})
 		require.ErrorContains(t, err, "ID generator is required")
 	})
@@ -71,9 +182,10 @@ func TestClassificationRuleService(t *testing.T) {
 		categoryID := "category-" + fake.UUID().V4()
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
-			Access: access, Categories: categories, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
+			Access: access, Categories: categories, Tags: tags, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
 		})
 		require.NoError(t, err)
 		listed := []domain.ClassificationRule{{ID: "rule-" + fake.UUID().V4(), TenantID: tenantID, Position: 1}}
@@ -124,9 +236,10 @@ func TestClassificationRuleService(t *testing.T) {
 		tenantID, actorUserID := "tenant-"+fake.UUID().V4(), "user-"+fake.UUID().V4()
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
-			Access: access, Categories: categories, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
+			Access: access, Categories: categories, Tags: tags, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
 		})
 		require.NoError(t, err)
 		access.EXPECT().IsTenantMember(t.Context(), tenantID, actorUserID).Return(false, nil).Once()
@@ -145,9 +258,10 @@ func TestClassificationRuleService(t *testing.T) {
 		tenantID, actorUserID := "tenant-"+fake.UUID().V4(), "user-"+fake.UUID().V4()
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
-			Access: access, Categories: categories, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
+			Access: access, Categories: categories, Tags: tags, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
 		})
 		require.NoError(t, err)
 		invalid := CreateClassificationRuleParams{TenantID: tenantID, ActorUserID: actorUserID, MatchType: "invalid"}
@@ -194,9 +308,10 @@ func TestClassificationRuleService(t *testing.T) {
 		tenantID, actorUserID := "tenant-"+fake.UUID().V4(), "user-"+fake.UUID().V4()
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
-			Access: access, Categories: categories, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
+			Access: access, Categories: categories, Tags: tags, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
 		})
 		require.NoError(t, err)
 		access.EXPECT().IsTenantMember(t.Context(), tenantID, actorUserID).Return(false, nil).Once()
@@ -212,9 +327,10 @@ func TestClassificationRuleService(t *testing.T) {
 		tenantID, actorUserID := "tenant-"+fake.UUID().V4(), "user-"+fake.UUID().V4()
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
-			Access: access, Categories: categories, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
+			Access: access, Categories: categories, Tags: tags, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
 		})
 		require.NoError(t, err)
 		access.EXPECT().IsTenantMember(t.Context(), tenantID, actorUserID).Return(false, nil).Once()
@@ -229,10 +345,12 @@ func TestClassificationRuleService(t *testing.T) {
 		categoryID, ruleID := "category-"+fake.UUID().V4(), "rule-"+fake.UUID().V4()
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
 			Access:     access,
 			Categories: categories,
+			Tags:       tags,
 			Rules:      rules,
 			Now:        func() time.Time { return now },
 			NewID:      fake.UUID().V4,
@@ -258,6 +376,7 @@ func TestClassificationRuleService(t *testing.T) {
 			MatchType:  update.MatchType,
 			Condition:  update.Condition[1:],
 			CategoryID: categoryID,
+			TagIDs:     []string{},
 			UpdatedAt:  now,
 		}).Return(nil).Once()
 		require.NoError(t, service.Update(t.Context(), update))
@@ -294,9 +413,10 @@ func TestClassificationRuleService(t *testing.T) {
 		ruleID, categoryID := "rule-"+fake.UUID().V4(), "category-"+fake.UUID().V4()
 		access := newMockaccessGuardStore(t)
 		categories := newMockclassificationCategoryStore(t)
+		tags := newMockclassificationTagStore(t)
 		rules := newMockclassificationRuleStore(t)
 		service, err := NewClassificationRuleService(ClassificationRuleServiceArgs{
-			Access: access, Categories: categories, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
+			Access: access, Categories: categories, Tags: tags, Rules: rules, Now: time.Now, NewID: fake.UUID().V4,
 		})
 		require.NoError(t, err)
 		operationErr := errors.New("operation failed")
