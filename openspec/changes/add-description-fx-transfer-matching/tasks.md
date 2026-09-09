@@ -4,7 +4,7 @@
 
 ## 2. FX Evidence And Exact Conversion
 
-- [ ] 2.1 Add the typed FX evidence extractor and currency-aware exact conversion predicate. Follow TDD flow: first cover the complete `FX<digits> <BASE>/<QUOTE> <rate>` syntax, comma and dot rates, equivalent values with trailing zeros, malformed/unknown text, invalid or equal currencies, nonpositive rates, both debit directions, quote-minor rounding including halfway behavior, differing currency scales, and large values; then implement extraction plus arbitrary-precision conversion and make `golang.org/x/text/currency` a direct finance dependency.
+- [x] 2.1 Add the typed FX evidence extractor and currency-aware exact conversion predicate. Follow TDD flow: first cover the complete `FX<digits> <BASE>/<QUOTE> <rate>` syntax, comma and dot rates, equivalent values with trailing zeros, malformed/unknown text, invalid or equal currencies, nonpositive rates, both debit directions, quote-minor rounding including halfway behavior, differing currency scales, and large values; then implement extraction plus arbitrary-precision conversion and make `golang.org/x/text/currency` a direct finance dependency.
 
 ## 3. Combined Candidate Decisions And Documentation
 
