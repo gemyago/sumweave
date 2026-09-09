@@ -6,7 +6,7 @@
 
 ## 2. Atomic classification assignment
 
-- [ ] 2.1 Apply each winning rule's category and optional tags atomically. Follow TDD (write failing service and persistence tests -> implement -> verify) for conditional eligibility, additive conflict-safe tag insertion, overlap/category-only cases, rollback on failure, first-rule-only tags, unavailable-tag terminal failures versus operational errors, unchanged categorized-row exclusion, and per-transaction counts/retries. Wire required dependencies and mocks, and update the classification PRD/design with the schema and chosen behavior in the same task.
+- [x] 2.1 Apply each winning rule's category and optional tags atomically. Follow TDD (write failing service and persistence tests -> implement -> verify) for conditional eligibility, additive conflict-safe tag insertion, overlap/category-only cases, rollback on failure, first-rule-only tags, unavailable-tag terminal failures versus operational errors, unchanged categorized-row exclusion, and per-transaction counts/retries. Wire required dependencies and mocks, and update the classification PRD/design with the schema and chosen behavior in the same task.
 
 ## 3. Application API
 

@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestClassificationTransactionStore(t *testing.T) {
@@ -49,7 +51,7 @@ func TestClassificationTransactionStore(t *testing.T) {
 			)
 			require.NoError(t, err)
 			require.Len(t, selected, 3)
-			assigned, err := store.AssignClassificationCategory(t.Context(), AssignClassificationCategoryParams{
+			assigned, err := store.AssignClassification(t.Context(), AssignClassificationParams{
 				TenantID:      tenantID,
 				TransactionID: selected[0].ID,
 				CategoryID:    "category-" + fake.UUID().V4(),
@@ -57,7 +59,7 @@ func TestClassificationTransactionStore(t *testing.T) {
 			})
 			require.NoError(t, err)
 			assert.True(t, assigned)
-			assigned, err = store.AssignClassificationCategory(t.Context(), AssignClassificationCategoryParams{
+			assigned, err = store.AssignClassification(t.Context(), AssignClassificationParams{
 				TenantID:      tenantID,
 				TransactionID: selected[0].ID,
 				CategoryID:    "category-other-" + fake.UUID().V4(),
@@ -67,6 +69,96 @@ func TestClassificationTransactionStore(t *testing.T) {
 			assert.False(t, assigned)
 		},
 	)
+
+	t.Run("atomically assigns a category and missing rule tags without replacing existing tags", func(t *testing.T) {
+		fake := faker.New()
+		database := openTestDatabase(t)
+		core := NewStore(database)
+		store := NewClassificationTransactionStore(database)
+		tagStore := NewTransactionTagStore(database)
+		now := time.Date(2026, time.September, 9, 14, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		tenantID := "tenant-" + fake.UUID().V4()
+		categoryID := "category-" + fake.UUID().V4()
+		existingTagID := "tag-existing-" + fake.UUID().V4()
+		ruleTagID := "tag-rule-" + fake.UUID().V4()
+		transaction := makeTransaction(
+			fake,
+			tenantID,
+			domain.TransactionSourceManual,
+			domain.TransactionKindExpense,
+			domain.TransactionStatusBooked,
+			now,
+		)
+		_, err := core.SaveTransaction(t.Context(), transaction)
+		require.NoError(t, err)
+		require.NoError(t, database.db.Create(&transactionTagModel{
+			TransactionID: transaction.ID,
+			TagID:         existingTagID,
+		}).Error)
+
+		assigned, err := store.AssignClassification(t.Context(), AssignClassificationParams{
+			TenantID: tenantID, TransactionID: transaction.ID, CategoryID: categoryID,
+			TagIDs: []string{existingTagID, ruleTagID}, UpdatedAt: now.Add(time.Minute),
+		})
+		require.NoError(t, err)
+		assert.True(t, assigned)
+		stored, err := tagStore.GetTransaction(t.Context(), transaction.ID)
+		require.NoError(t, err)
+		assert.Equal(t, &categoryID, stored.CategoryID)
+		assert.Equal(t, []string{existingTagID, ruleTagID}, stored.TagIDs)
+
+		assigned, err = store.AssignClassification(t.Context(), AssignClassificationParams{
+			TenantID: tenantID, TransactionID: transaction.ID,
+			CategoryID: "category-other-" + fake.UUID().V4(), TagIDs: []string{"tag-other-" + fake.UUID().V4()},
+			UpdatedAt: now.Add(2 * time.Minute),
+		})
+		require.NoError(t, err)
+		assert.False(t, assigned)
+		stored, err = tagStore.GetTransaction(t.Context(), transaction.ID)
+		require.NoError(t, err)
+		assert.Equal(t, &categoryID, stored.CategoryID)
+		assert.Equal(t, []string{existingTagID, ruleTagID}, stored.TagIDs)
+	})
+
+	t.Run("rolls back the category when rule tag insertion fails", func(t *testing.T) {
+		fake := faker.New()
+		database := openTestDatabase(t)
+		core := NewStore(database)
+		store := NewClassificationTransactionStore(database)
+		now := time.Date(2026, time.September, 9, 14, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		tenantID := "tenant-" + fake.UUID().V4()
+		transaction := makeTransaction(
+			fake,
+			tenantID,
+			domain.TransactionSourceManual,
+			domain.TransactionKindExpense,
+			domain.TransactionStatusBooked,
+			now,
+		)
+		_, err := core.SaveTransaction(t.Context(), transaction)
+		require.NoError(t, err)
+		callbackName := "fail-classification-tag-insert-" + fake.UUID().V4()
+		require.NoError(t, database.db.Callback().Create().Before("gorm:create").Register(
+			callbackName,
+			func(tx *gorm.DB) {
+				if tx.Statement.Table == (transactionTagModel{}).TableName() {
+					tx.AddError(errors.New("classification tag insertion failed"))
+				}
+			},
+		))
+		t.Cleanup(func() {
+			require.NoError(t, database.db.Callback().Create().Remove(callbackName))
+		})
+
+		_, err = store.AssignClassification(t.Context(), AssignClassificationParams{
+			TenantID: tenantID, TransactionID: transaction.ID, CategoryID: "category-" + fake.UUID().V4(),
+			TagIDs: []string{"tag-" + fake.UUID().V4()}, UpdatedAt: now.Add(time.Minute),
+		})
+		require.Error(t, err)
+		stored, err := core.GetTransaction(t.Context(), transaction.ID)
+		require.NoError(t, err)
+		assert.Nil(t, stored.CategoryID)
+	})
 
 	t.Run("uses a 200-row ID keyset and excludes the complete ineligible matrix", func(t *testing.T) {
 		fake := faker.New()
@@ -203,7 +295,7 @@ func TestClassificationTransactionStore(t *testing.T) {
 		require.Len(t, secondBatch, 1)
 		assert.Equal(t, fmt.Sprintf("%s%03d", batchPrefix, classificationBatchSize), secondBatch[0].ID)
 
-		assigned, err := store.AssignClassificationCategory(t.Context(), AssignClassificationCategoryParams{
+		assigned, err := store.AssignClassification(t.Context(), AssignClassificationParams{
 			TenantID: tenantID, TransactionID: hidden.ID, CategoryID: "category-" + fake.UUID().V4(), UpdatedAt: now,
 		})
 		require.NoError(t, err)
@@ -229,7 +321,7 @@ func TestClassificationTransactionStore(t *testing.T) {
 		}
 		_, err := makeClosedStore(t).ListEligibleClassificationTransactions(t.Context(), params)
 		require.Error(t, err)
-		_, err = makeClosedStore(t).AssignClassificationCategory(t.Context(), AssignClassificationCategoryParams{
+		_, err = makeClosedStore(t).AssignClassification(t.Context(), AssignClassificationParams{
 			TenantID: params.TenantID, TransactionID: "transaction-" + fake.UUID().V4(),
 			CategoryID: "category-" + fake.UUID().V4(), UpdatedAt: now,
 		})

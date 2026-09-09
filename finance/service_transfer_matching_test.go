@@ -521,6 +521,7 @@ func TestTransferMatchingService(t *testing.T) {
 			Rules:        ruleStore,
 			Transactions: persistence.NewClassificationTransactionStore(database),
 			Categories:   store,
+			Tags:         store,
 			Logger:       slog.New(slog.DiscardHandler),
 			Now:          func() time.Time { return now },
 		})

@@ -40,19 +40,21 @@ Create and edit bodies:
 {
   "matchType": "contains",
   "condition": "BIEDRONKA",
-  "categoryId": "category-id"
+  "categoryId": "category-id",
+  "tagIds": ["tag-id"]
 }
 ```
 
-A listed rule contains `id`, `matchType`, `condition`, `categoryId`, `position`,
-`createdAt`, and `updatedAt`. Positions are read-only and one-based. Fetch
+A listed rule contains `id`, `matchType`, `condition`, `categoryId`, `tagIds`,
+`position`, `createdAt`, and `updatedAt`. Positions are read-only and one-based. Fetch
 category names through the existing category resource and refetch rules after
 mutations. All rules are active.
 
-Validate `matchType` as `exact | contains`, a nonblank condition, and an existing
-visible category belonging to the tenant. Store the condition with surrounding
-whitespace removed and preserve its case. Duplicate rules are allowed; order
-still determines the winner.
+Validate `matchType` as `exact | contains`, a nonblank condition, an existing
+visible category, and optional existing visible tags belonging to the tenant.
+Reject blank or duplicate tag IDs. Store the condition with surrounding whitespace
+removed and preserve its case. Duplicate rules are allowed; order still determines
+the winner.
 
 Use ordinary database transactions for multi-row changes.
 Concurrent management edits can race in Phase 0; ordered reads include `id` as
@@ -122,7 +124,8 @@ already categorized transactions are skipped.
 
 ## Database schema shape
 
-The only new table is `finance_classification_rules`:
+Classification uses `finance_classification_rules` and its finance-owned
+`finance_classification_rule_tags` association:
 
 - `id`: primary key, using the existing string-ID convention.
 - `tenant_id`: required tenant reference.
@@ -132,14 +135,21 @@ The only new table is `finance_classification_rules`:
 - `category_id`: required reference to an existing category.
 - `created_at`, `updated_at`: required timestamps.
 
+`finance_classification_rule_tags` has composite primary key `(rule_id, tag_id)`
+and reverse index `(tag_id, rule_id)`. It has no timestamps or tenant column;
+the referenced rule establishes tenant ownership. Rule create, replacement, and
+deletion update these associations in the rule transaction.
+
 Index `(tenant_id, position, id)` for ordered reads and
 `(tenant_id, category_id)` for reference checks. Validate same-tenant category
 ownership in the service. Use the existing GORM auto-migrate path and keep
 persistence models separate from domain types.
 
 Append at the end and maintain positions through ordinary CRUD transactions.
-Category assignment updates the existing transaction's `category_id` and
-`updated_at`.
+Classification assignment conditionally updates the existing transaction's
+`category_id` and `updated_at`, then conflict-ignores inserts of the winning
+rule's tags into `finance_transaction_tags` in the same short transaction. It
+never clears existing transaction tags or saves a stale whole transaction.
 
 Commands and events use existing appdispatch storage. Jobs retain
 their existing lifecycle metadata. Finance persists rules and ledger category
@@ -164,7 +174,9 @@ Job-observed handler               Classification subscriber
                          |
                  Read ledger in batches
                          |
-                 Assign categories
+             Validate category and tags
+                          |
+             Assign category and missing tags
                          |
                  Log counts and errors
 
@@ -238,9 +250,14 @@ existing behavior; a committed bank-sync window or explicit request starts a pas
 1. Fetch the tenant's ordered rules once into memory when execution starts.
 2. Read eligible scoped transactions in bounded batches, initially 200 rows.
 3. Recheck eligibility, match the current description, and choose the first rule.
-4. Update only the category and modification timestamp. Retain a simple
-   `category_id IS NULL` write predicate, tenant scope, and eligibility checks.
-5. Accumulate counts in memory and log batch summaries and completion/failure.
+4. Validate the winning rule's category and tags are still visible and owned by
+   the tenant. An unavailable category or tag is terminal; an operational lookup
+   error remains retryable.
+5. In one short transaction, conditionally update only the category and
+   modification timestamp, then conflict-ignore the winning rule's tag inserts.
+   Retain a `category_id IS NULL` predicate, tenant scope, and eligibility checks.
+   If the conditional update affects no row, insert no tags.
+6. Accumulate counts in memory and log batch summaries and completion/failure.
 
 Use an in-memory keyset cursor ordered by transaction ID
 within the effective-date range. This keeps pagination stable as transactions
@@ -265,9 +282,11 @@ compares the whole description; contains matching searches a literal substring.
 Preserve internal whitespace and punctuation; blank descriptions match nothing.
 Use one matcher for both entry points, without regex or database wildcard rules.
 
-Validate that a chosen category still exists and is visible before assignment.
-If it is unavailable, return a finance-owned terminal error and log the partial
-attempt counts. Concurrent category removal remains an accepted race.
+Validate that a chosen category and every winning-rule tag still exist, are visible,
+and belong to the tenant before assignment. An unavailable category returns the
+existing terminal error; an unavailable tag returns terminal code
+`classification_tag_unavailable`. Operational lookup failures remain ordinary
+errors for dispatch retry. Concurrent catalog removal remains an accepted race.
 
 ### Retries, logging, and accepted risks
 
@@ -279,7 +298,8 @@ A retry starts selection and counting again and reloads rules. Transactions
 already categorized by earlier attempts are excluded from selection. Counts
 describe only rows processed during that attempt:
 
-- `classified`: category assignments with confirmed commits.
+- `classified`: category-and-additive-tag assignments with confirmed commits,
+  counted once per transaction regardless of tag count.
 - `unmatched`: eligible rows for which no rule matches.
 - `skipped`: selected rows skipped during processing because an eligibility
   recheck fails or a conditional category update affects no row.
@@ -317,8 +337,10 @@ imported data intact, and the UI uses existing job feedback. Verify that the
 command and event handlers pass identical range parameters to the same service,
 each sync event uses its committed window's bounds, and date selection handles
 exclusive boundaries and differing offsets across DST. Test the simple
-conditional category write and the distinction between rows excluded by
-selection and rows counted as skipped during processing.
+conditional category-plus-additive-tags write, including overlap, category-only,
+and rollback behavior, and the distinction between rows excluded by selection and
+rows counted as skipped during processing. Verify unavailable tag terminal errors,
+operational tag lookup retries, and first-rule-only tags.
 
 Verify that an early committed window remains scheduled for classification when
 a later window fails and retry resumes beyond it. Cover a crash after a window

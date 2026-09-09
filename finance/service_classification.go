@@ -18,9 +18,9 @@ type classificationTransactionStore interface {
 		ctx context.Context,
 		params persistence.ListEligibleClassificationTransactionsParams,
 	) ([]domain.Transaction, error)
-	AssignClassificationCategory(
+	AssignClassification(
 		ctx context.Context,
-		params persistence.AssignClassificationCategoryParams,
+		params persistence.AssignClassificationParams,
 	) (bool, error)
 }
 
@@ -45,6 +45,7 @@ type ClassificationServiceArgs struct {
 	Rules        classificationRuleStore
 	Transactions classificationTransactionStore
 	Categories   classificationCategoryStore
+	Tags         classificationTagStore
 	Logger       *slog.Logger
 	Now          func() time.Time
 }
@@ -54,6 +55,7 @@ type ClassificationService struct {
 	rules        classificationRuleStore
 	transactions classificationTransactionStore
 	categories   classificationCategoryStore
+	tags         classificationTagStore
 	logger       *slog.Logger
 	now          func() time.Time
 	publisher    SemanticCommandPublisher
@@ -83,6 +85,9 @@ func NewClassificationService(
 	if args.Categories == nil {
 		return nil, errors.New("classification category store is required")
 	}
+	if args.Tags == nil {
+		return nil, errors.New("classification tag store is required")
+	}
 	if args.Logger == nil {
 		return nil, errors.New("classification logger is required")
 	}
@@ -94,6 +99,7 @@ func NewClassificationService(
 		rules:        args.Rules,
 		transactions: args.Transactions,
 		categories:   args.Categories,
+		tags:         args.Tags,
 		logger:       args.Logger,
 		now:          args.Now,
 	}
@@ -231,14 +237,21 @@ func (s *ClassificationService) classifyTransaction(
 			errors.New("category not found"),
 		)
 	}
-	assigned, err := s.transactions.AssignClassificationCategory(
+	if validationErr := s.validateClassificationTags(ctx, tenantID, rule.TagIDs); validationErr != nil {
+		return ClassificationAttemptCounts{}, validationErr
+	}
+	assigned, err := s.transactions.AssignClassification(
 		ctx,
-		persistence.AssignClassificationCategoryParams{
-			TenantID: tenantID, TransactionID: transaction.ID, CategoryID: category.ID, UpdatedAt: s.now(),
+		persistence.AssignClassificationParams{
+			TenantID:      tenantID,
+			TransactionID: transaction.ID,
+			CategoryID:    category.ID,
+			TagIDs:        rule.TagIDs,
+			UpdatedAt:     s.now(),
 		},
 	)
 	if err != nil {
-		return ClassificationAttemptCounts{}, fmt.Errorf("assign classification category: %w", err)
+		return ClassificationAttemptCounts{}, fmt.Errorf("assign classification: %w", err)
 	}
 	if assigned {
 		return ClassificationAttemptCounts{Classified: 1}, nil
@@ -246,11 +259,40 @@ func (s *ClassificationService) classifyTransaction(
 	return ClassificationAttemptCounts{Skipped: 1}, nil
 }
 
+func (s *ClassificationService) validateClassificationTags(
+	ctx context.Context,
+	tenantID string,
+	tagIDs []string,
+) error {
+	for _, tagID := range tagIDs {
+		tag, err := s.tags.GetTag(ctx, tagID)
+		if err != nil {
+			if errors.Is(err, persistence.ErrTagNotFound) {
+				return unavailableClassificationTagFailure(tagID, err)
+			}
+			return fmt.Errorf("get classification rule tag: %w", err)
+		}
+		if tag == nil || tag.TenantID != tenantID || tag.HiddenAt != nil {
+			return unavailableClassificationTagFailure(tagID, errors.New("tag not found"))
+		}
+	}
+	return nil
+}
+
 func unavailableClassificationCategoryFailure(categoryID string, cause error) error {
 	return NewTerminalFailure(
 		fmt.Errorf("classification rule category %q is unavailable: %w", categoryID, cause),
 		"classification_category_unavailable",
 		"A classification rule references an unavailable category.",
+		"Update or delete the classification rule before retrying.",
+	)
+}
+
+func unavailableClassificationTagFailure(tagID string, cause error) error {
+	return NewTerminalFailure(
+		fmt.Errorf("classification rule tag %q is unavailable: %w", tagID, cause),
+		"classification_tag_unavailable",
+		"A classification rule references an unavailable tag.",
 		"Update or delete the classification rule before retrying.",
 	)
 }

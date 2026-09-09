@@ -167,7 +167,7 @@ func newClassificationServices(
 	}
 	service, err := NewClassificationService(ClassificationServiceArgs{
 		Access: store, Rules: ruleStore, Transactions: persistence.NewClassificationTransactionStoreFromStore(store),
-		Categories: store, Logger: cfg.logger, Now: cfg.now,
+		Categories: store, Tags: store, Logger: cfg.logger, Now: cfg.now,
 	}, classificationOptions...)
 	if err != nil {
 		panic(err)
