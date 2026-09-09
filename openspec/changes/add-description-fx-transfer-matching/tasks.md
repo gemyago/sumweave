@@ -1,6 +1,6 @@
 ## 1. Matching Input And Provenance
 
-- [ ] 1.1 Extend the compact transfer-matching row and bulk query with the current description and one optional unambiguous connection ID. Follow TDD flow: first add focused PostgreSQL behavior cases for one mapping, no mapping, repeated same-connection mappings, and conflicting distinct connections while proving eligibility and one-row-per-transaction behavior remain unchanged; then implement the aggregate provenance projection and verify the finance module tests.
+- [x] 1.1 Extend the compact transfer-matching row and bulk query with the current description and one optional unambiguous connection ID. Follow TDD flow: first add focused PostgreSQL behavior cases for one mapping, no mapping, repeated same-connection mappings, and conflicting distinct connections while proving eligibility and one-row-per-transaction behavior remain unchanged; then implement the aggregate provenance projection and verify the finance module tests.
 
 ## 2. FX Evidence And Exact Conversion
 
