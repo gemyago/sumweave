@@ -1,11 +1,11 @@
 # Transfer Matching Phase 0
 
-Status: implemented through the four automated implementation chunks on
-2026-09-07. The isolated manual E2E and independent UI design-review gates are
-recorded separately and remain to be run. Product requirements were approved on
-2026-09-06; concurrency requirements were revised on 2026-09-07 following
-design review: match against data loaded at attempt start and accept
-concurrent-update races in Phase 0.
+Status: implemented. The same-currency Phase 0 matcher was delivered on
+2026-09-07 and its description-derived FX rule on 2026-09-09. The isolated
+manual E2E and independent UI design-review gates are recorded separately and
+remain to be run. Product requirements were approved on 2026-09-06; concurrency
+requirements were revised on 2026-09-07 following design review: match against
+data loaded at attempt start and accept concurrent-update races in Phase 0.
 System design, API contracts, and storage changes are outside this PRD.
 [Architecture](../ARCHITECTURE.md) remains the source of truth for product direction.
 
@@ -14,9 +14,10 @@ System design, API contracts, and storage changes are outside this PRD.
 Automatically recognize simple movements between accounts tracked in the same
 finance tenant, so those movements do not inflate reported income and expenses.
 
-Phase 0 links two existing ledger transactions using one fixed, deterministic
-rule. It leaves uncertain cases unchanged and retains manual linking as the
-fallback. It never initiates a bank transfer or creates a missing transaction.
+Phase 0 links two existing ledger transactions using two fixed, deterministic
+candidate rules. It leaves uncertain cases unchanged and retains manual linking
+as the fallback. It never initiates a bank transfer or creates a missing
+transaction.
 
 ## Existing foundation
 
@@ -62,24 +63,47 @@ movement.
 Eligible bank-synced, CSV-imported, and manually entered transactions participate
 under the same rules. An existing category does not prevent matching.
 
-### 2. One fixed matching rule
+### 2. Two fixed candidate rules
 
-A candidate pair must have:
+Every candidate pair must have different accounts, opposite signs, and ledger
+effective timestamps no more than 72 hours apart, inclusive. The same-currency
+rule additionally requires:
 
 - The same transaction currency.
 - Exactly equal absolute amounts in minor units, with opposite signs.
-- Ledger effective timestamps no more than 72 hours apart, inclusive.
-- Exactly one possible partner for each transaction: each other's only eligible
-  candidate under all of the above requirements.
+
+The FX rule additionally requires matching typed evidence extracted from each
+row's current ledger description. The initial complete ASCII description form is
+`FX<digits> <BASE>/<QUOTE> <rate>`, where currencies are distinct uppercase
+three-letter ISO codes and the positive decimal rate uses a comma or dot
+separator. The evidence contains namespace `FX`, the deal reference, ordered
+base/quote currencies, and an exact rate; comma/dot spellings and insignificant
+trailing decimal zeros have the same value.
+
+FX rows must have one unambiguous existing provider transaction mapping to the
+same bank connection. Missing mappings or mappings to multiple distinct
+connections disable only the FX rule; those rows remain eligible for the
+same-currency rule. Both rows must agree on connection, namespace, reference,
+ordered currency pair, and exact rate. Their ledger currencies must cover that
+pair, and the absolute quote amount must equal the absolute base amount converted
+by the rate and rounded to the quote currency's standard minor unit. Exact
+integer and decimal arithmetic is used, with an exact positive halfway result
+rounded upward; no binary floating point or amount tolerance applies.
+
+Candidates from both rules are merged and deduplicated before applying mutual
+uniqueness. A pair qualifies only when each leg has exactly one possible partner
+across the combined candidate set and they are each other.
 
 Use ledger amounts, currencies, and effective timestamps loaded at attempt
 start, including user edits already saved. Compare timestamps as instants with
 their supplied offsets. The 72-hour tolerance is a fixed elapsed duration,
 including across DST changes.
 
-Descriptions, names, provider snapshots, account identifiers from payment
-descriptions, and exchange rates are not matching inputs in Phase 0. There are
-no user-defined rules or adjustable tolerances.
+Descriptions are matching inputs only for the narrow FX evidence format above.
+Names, provider snapshots, account identifiers from payment descriptions, and
+other description text are not matching inputs. No user-defined rules,
+adjustable tolerances, structured provider exchange-rate data, market-rate
+lookup, or fee inference is included.
 
 Examples:
 
@@ -90,6 +114,10 @@ Examples:
   from both sides. Never choose the first or nearest candidate to break a tie.
 - `-500.00 PLN` and `+495.00 PLN`, or `-500.00 PLN` and `+120.00 EUR`,
   remain unmatched. Manual linking remains available.
+- Account A has `-100.00 USD` with `FX123 USD/PLN 4.125`, and account B has
+  `+412.50 PLN` with `FX123 USD/PLN 4,12500`. If both have the same unambiguous
+  bank connection and neither has another candidate under either rule, link
+  them automatically.
 
 Uniqueness is evaluated against all eligible transactions loaded for each
 leg's full matching window, including outside the requested processing range.
@@ -197,13 +225,19 @@ management screen, original-kind history, or manual/automatic pair provenance.
 - A unique equal-and-opposite same-currency pair within 72 hours becomes a
   matched internal transfer, retains its categories/tags, and no longer
   contributes to income or expenses.
-- Same-account, cross-tenant, unequal-amount, cross-currency, zero-amount,
-  hidden, pending, refund, system, and already-linked cases remain unchanged.
+- Same-account, cross-tenant, unequal-amount, zero-amount, hidden, pending,
+  refund, system, and already-linked cases remain unchanged. Cross-currency
+  rows remain unchanged unless they meet every scoped FX rule requirement.
 - A pair with either leg pending remains unmatched. Once both legs are booked,
   a subsequent applicable run can link them if all matching requirements hold.
 - A gap of exactly 72 hours qualifies; a larger gap does not.
 - One-to-many and many-to-one candidates remain unchanged, including when a
-  competing candidate lies outside the run's date range or on another page.
+  competing candidate lies outside the run's date range or on another page, or
+  when the competing candidate arises under the other automatic rule.
+- A valid USD/PLN FX pair with mismatched connection, reference, currency pair,
+  rate, or converted value remains unchanged. Missing or conflicting connection
+  provenance likewise prevents FX matching without blocking same-currency
+  matching.
 - Either leg can arrive first. When the other arrives in a later connection
   sync or adjacent window, matching finds the older leg within the tolerance.
 - An explicit range can match to a nearby partner outside its boundaries, but
@@ -245,10 +279,11 @@ it does not claim a measured precision rate from repository analysis alone.
 Not required in Phase 0:
 
 - Pending-transaction matching or pending-pair settlement revalidation.
-- Cross-currency/FX matching, amount tolerances, or fee inference.
+- Amount tolerances, fee inference, and any FX format other than the documented
+  scoped description evidence.
 - Split, many-to-one, or one-to-many transfers.
 - Matching to accounts outside the tenant or creating missing legs.
-- Description rules, transfer-rule management, LLMs, or confidence scores.
+- Transfer-rule management, LLMs, or confidence scores.
 - A suggestions inbox, bulk approval, dry-run preview, or match audit history.
 - New triggers for CSV import/manual creation, periodic full-history scans,
   or automatic rematching of existing pairs.

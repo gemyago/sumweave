@@ -1,18 +1,20 @@
 # Transfer Matching Phase 0 — system design
 
-Status: implemented through automated chunks on 2026-09-07; isolated manual E2E
-and independent UI design review remain recorded completion gates. This design
-follows the [Phase 0 PRD](transfer-matching-phase0-prd.md), including the review
-decision to match in memory and accept concurrent-update races in Phase 0.
+Status: implemented. The original automated Phase 0 work was delivered on
+2026-09-07; description-derived FX candidate matching was delivered on
+2026-09-09. Isolated manual E2E and independent UI design review remain recorded
+completion gates. This design follows the [Phase 0 PRD](transfer-matching-phase0-prd.md),
+including the review decision to match in memory and accept concurrent-update
+races in Phase 0.
 [Architecture](../ARCHITECTURE.md) remains authoritative.
 
 ## Design summary
 
 Add a finance transfer-matching service that processes a tenant and ledger
 timestamp range. Both explicit requests and committed bank-sync windows call
-the same service. Automatically pair only booked, equal-and-opposite,
-same-currency transactions within 72 hours when each leg has exactly one
-eligible partner.
+the same service. Automatically pair booked transactions within 72 hours when
+each leg has exactly one eligible partner across equal-and-opposite
+same-currency candidates and scoped description-derived FX candidates.
 
 Reuse the existing transfer group, matching timestamp, reporting behavior, and
 partner inspection UI. Add one transaction exclusion flag, a dedicated pair
@@ -162,6 +164,12 @@ constraints, or version columns are required. The bulk read uses the existing
 `idx_finance_transactions_list_order` index, whose leading columns are
 `tenant_id` and `effective_at`.
 
+The FX rule adds no schema change. It reuses existing
+`finance_provider_transaction_matches` rows only to project optional matching
+provenance; it does not persist parsed descriptions, FX evidence, rates, or
+candidate decisions. API, UI, dispatch, job, provider-call, provider-snapshot,
+and resync contracts are unchanged by this rule.
+
 ## Pair writes and exclusion state
 
 An automatic pair updates only these fields on both existing rows:
@@ -249,8 +257,15 @@ are excluded. An unmatched transfer is eligible only when both pair fields
 are absent.
 
 Load only the matching fields: transaction ID, account ID, currency, signed
-minor-unit amount, and effective timestamp. Eligibility is handled by the
-query. Do not hydrate descriptions, tags, categories, or provider snapshots.
+minor-unit amount, effective timestamp, current ledger description, and optional
+unambiguous connection ID. Eligibility is handled by the query. Do not hydrate
+tags, categories, or provider snapshots. The query left-joins a transaction-ID
+aggregate over `finance_provider_transaction_matches`: exactly one distinct
+connection ID is projected, while no mapping or multiple distinct connection IDs
+projects no usable connection. Group before projecting so every eligible ledger
+transaction remains one row. Missing or conflicting provenance does not affect
+same-currency eligibility.
+
 Finish this load before deciding or writing any pair. Do not limit it to a UI
 page or silently truncate the result. Memory use grows with the selected range;
 Phase 0 accepts that tradeoff and keeps the implementation to one bulk read.
@@ -272,25 +287,57 @@ inside the original range. The outer rows supply ambiguity evidence; they do
 not widen which pairs the run may create. No recursive expansion is needed:
 only the two proposed legs' candidate windows determine their uniqueness.
 
-### Decide pairs
+### Extract evidence and decide pairs
 
-Build an in-memory index by currency and signed minor-unit amount, sorting each
-bucket by effective timestamp and ID. For a transaction A, inspect the opposite
-amount bucket within its inclusive 72-hour window, excluding its own account.
-Use binary search to locate the time window and stop counting after two
-eligible counterparts, since two already establishes ambiguity.
+Extract optional typed FX evidence once from each loaded description before
+building indexes. The initial extractor recognizes only the complete ASCII form:
+
+```text
+FX<digits> <BASE>/<QUOTE> <positive-rate>
+```
+
+It returns namespace `FX`, reference, ordered base/quote ISO currencies, and an
+exact canonical decimal rate. The parser rejects malformed text, same or unknown
+currencies, and nonpositive rates. Candidate code consumes only this typed value,
+so a later compatible description syntax changes extraction and its tests rather
+than matching decisions.
+
+Build an in-memory index by currency and signed minor-unit amount and an FX
+evidence index keyed by connection ID, namespace, reference, ordered pair, and
+canonical rate. Sort each bucket by effective timestamp and ID. For a transaction
+A, inspect the opposite amount bucket within its inclusive 72-hour window,
+excluding its own account. Use binary search to locate the same-currency window
+and stop counting after two combined counterparts, since two already establishes
+ambiguity.
 
 Amounts must be exactly opposite integers, with no floating point or unchecked
 absolute-value arithmetic. The minimum signed 64-bit amount has no representable
 opposite and therefore no candidate. Compare timestamps as instants; 72 hours
 is an elapsed duration across DST, without explicit UTC normalization.
 
+For an FX evidence bucket, require different accounts, opposite signs, and that
+the two ledger currencies cover the evidence's ordered base/quote pair. The
+evidence pair determines conversion direction regardless of which leg is debited.
+The matcher verifies conversion with arbitrary-precision integer arithmetic:
+
+```text
+quoteMinor = round(baseMinor * rateCoefficient * 10^quoteScale
+                   / (10^rateScale * 10^baseScale))
+```
+
+`baseScale` and `quoteScale` are each ISO currency's standard minor-unit scale.
+Positive exact halfway results round upward. Invalid evidence, unavailable
+currency scales, and inconsistent conversion fail closed. No binary floating
+point or persisted extracted value is used.
+
 1. Select starting rows in memory using the original half-open range:
    `rangeStart <= effectiveAt < rangeEndExclusive`. Either sign can start a pair.
-2. Find A's candidates in the loaded index. Zero means unmatched; more than one
-   means ambiguous.
-3. If B is the only candidate, find B's candidates in the same index. Accept the
-   pair only if A is B's sole candidate. Otherwise it is ambiguous.
+2. Find A's same-currency and FX candidates in the loaded indexes, merge and
+   deduplicate them by transaction ID. Zero means unmatched; more than one means
+   ambiguous. Do not give either rule priority.
+3. If B is the only combined candidate, find B's combined candidates in the same
+   indexes. Accept the pair only if A is B's sole candidate. Otherwise it is
+   ambiguous.
 4. Deduplicate accepted pairs by their two IDs in a stable order. When both legs
    are starting rows, they still produce one pair.
 5. Finish all decisions against the unchanged loaded index, then save each
@@ -299,7 +346,8 @@ is an elapsed duration across DST, without explicit UTC normalization.
 Never remove candidates while evaluating other starting rows, choose the first
 or nearest candidate to break a tie, or query the database from inside the
 matching loop. The algorithm is deterministic for the loaded input, independent
-of input order. Check cancellation during evaluation and writes. On retry,
+of input order. The shared candidate set means ambiguity under either rule blocks
+the proposed pair. Check cancellation during evaluation and writes. On retry,
 load the slice again and recompute from current data.
 
 ## Classification and reporting
@@ -390,6 +438,12 @@ Implement backend work serially, with behavior tests integral to each step:
    range semantics to the same service.
 4. Add the ledger action and existing job-feedback integration. Update the UI
    wireframe and manual E2E guide for matching and manual correction.
+
+The delivered FX follow-on keeps those triggers, persistence, and worker paths
+unchanged. Its acceptance coverage includes USD/PLN matching, scope/reference/
+rate/pair/value rejections, unavailable provenance, shared-rule ambiguity,
+reverse ambiguity outside the requested range, shuffled input, extraction once
+per loaded row, range scope, and existing atomic pair writes.
 
 Cover these acceptance boundaries:
 

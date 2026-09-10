@@ -268,6 +268,7 @@ func TestBuildProcessRoots(t *testing.T) {
 				Currency:    classification.Currency,
 				AmountMinor: classification.AmountMinor,
 				EffectiveAt: classification.EffectiveAt,
+				Description: classification.Description,
 			},
 			{
 				ID:          firstMatching.ID,
@@ -275,6 +276,7 @@ func TestBuildProcessRoots(t *testing.T) {
 				Currency:    firstMatching.Currency,
 				AmountMinor: firstMatching.AmountMinor,
 				EffectiveAt: firstMatching.EffectiveAt,
+				Description: firstMatching.Description,
 			},
 			{
 				ID:          secondMatching.ID,
@@ -282,6 +284,7 @@ func TestBuildProcessRoots(t *testing.T) {
 				Currency:    secondMatching.Currency,
 				AmountMinor: secondMatching.AmountMinor,
 				EffectiveAt: secondMatching.EffectiveAt,
+				Description: secondMatching.Description,
 			},
 		}, eligible)
 		return enrichmentFixture{

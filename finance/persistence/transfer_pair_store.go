@@ -38,11 +38,13 @@ type TransferPairUnlinkParams struct {
 // TransferMatchingTransaction is the compact immutable row used by one
 // transfer-matching attempt.
 type TransferMatchingTransaction struct {
-	ID          string
-	AccountID   string
-	Currency    string
-	AmountMinor int64
-	EffectiveAt time.Time
+	ID           string
+	AccountID    string
+	Currency     string
+	AmountMinor  int64
+	EffectiveAt  time.Time
+	Description  string
+	ConnectionID *string
 }
 
 // ListEligibleTransferMatchingTransactionsParams bounds one complete matching
@@ -83,10 +85,21 @@ func (s *TransferPairStore) ListEligibleTransferMatchingTransactions(
 			"transactions.currency AS currency",
 			"transactions.amount_minor AS amount_minor",
 			"transactions.effective_at AS effective_at",
+			"transactions.description AS description",
+			"provenance.connection_id AS connection_id",
 		}).
 		Joins(
 			"JOIN "+(accountModel{}).TableName()+
 				" AS accounts ON accounts.id = transactions.account_id AND accounts.tenant_id = transactions.tenant_id",
+		).
+		Joins(
+			"LEFT JOIN ("+
+				"SELECT matches.transaction_id, CASE WHEN COUNT(DISTINCT matches.connection_id) = 1 THEN MIN(matches.connection_id) ELSE NULL END AS connection_id "+
+				"FROM "+(providerTransactionMatchModel{}).TableName()+" AS matches "+
+				"JOIN "+(bankConnectionModel{}).TableName()+" AS connections ON connections.id = matches.connection_id "+
+				"WHERE connections.tenant_id = ? GROUP BY matches.transaction_id"+
+				") AS provenance ON provenance.transaction_id = transactions.id",
+			params.TenantID,
 		).
 		Where("transactions.tenant_id = ?", params.TenantID).
 		Where("transactions.effective_at >= ? AND transactions.effective_at < ?", loadStart, loadEndExclusive).
