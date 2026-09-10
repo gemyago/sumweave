@@ -64,6 +64,7 @@ func newFocusedServices(
 	var csvImportStore *persistence.CSVImportStore
 	var providerSnapshotStore *persistence.ProviderSnapshotStore
 	var currentFXRateStore *persistence.CurrentFXRateStore
+	var cashFlowSeriesStore *persistence.CashFlowSeriesStore
 	var fxPairDiscoveryStore *persistence.FXPairDiscoveryStore
 	var cfg focusedServicesConfig
 	for _, value := range values {
@@ -74,11 +75,16 @@ func newFocusedServices(
 			providerSnapshotStore = typed
 		case *persistence.CurrentFXRateStore:
 			currentFXRateStore = typed
+		case *persistence.CashFlowSeriesStore:
+			cashFlowSeriesStore = typed
 		case *persistence.FXPairDiscoveryStore:
 			fxPairDiscoveryStore = typed
 		case focusedServicesConfig:
 			cfg = typed
 		}
+	}
+	if cashFlowSeriesStore == nil {
+		cashFlowSeriesStore = persistence.NewCashFlowSeriesStoreFromStore(store)
 	}
 	tenantOpts := []TenantServiceOption{
 		WithTenantServiceNow(cfg.now),
@@ -111,7 +117,7 @@ func newFocusedServices(
 	classificationRuleService, classificationService := newClassificationServices(store, ruleStore, cfg)
 	catalogService := NewCatalogService(store, ruleStore, catalogOpts...)
 	ledgerService := NewLedgerService(store, ledgerOpts...)
-	reportingService := NewReportingService(store, reportingOpts...)
+	reportingService := NewReportingService(store, cashFlowSeriesStore, reportingOpts...)
 	fxOpts = append(fxOpts, WithFXServiceRequiredPairs(fxPairDiscoveryStore))
 	fxService := NewFXService(currentFXRateStore, fxOpts...)
 	csvImportOpts := []CSVImportServiceOption{

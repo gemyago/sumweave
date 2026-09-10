@@ -97,6 +97,7 @@ func TestFinance(t *testing.T) {
 		require.NotNil(t, financeModule.CatalogService)
 		require.NotNil(t, financeModule.LedgerService)
 		require.NotNil(t, financeModule.ReportingService)
+		require.NotNil(t, financeModule.ReportingService.cashFlows)
 		require.NotNil(t, financeModule.FXService)
 		require.NotNil(t, financeModule.CSVImportService)
 		require.NotNil(t, financeModule.BankConnectionService)

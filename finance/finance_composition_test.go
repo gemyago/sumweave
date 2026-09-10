@@ -39,13 +39,20 @@ func TestFinanceComposition(t *testing.T) {
 			DefaultFXProvider:      "custom-fx",
 			CommandPublisher:       commandPublisher,
 		}, newMockbankSyncOrchestrator(t))
-		services := newFocusedServices(store, persistence.NewTransactionTagStore(database), serviceConfig)
+		cashFlows := persistence.NewCashFlowSeriesStore(database)
+		services := newFocusedServices(
+			store,
+			persistence.NewTransactionTagStore(database),
+			cashFlows,
+			serviceConfig,
+		)
 
 		require.Same(t, commandPublisher, services.FXService.commandPublisher)
 		require.Same(t, commandPublisher, services.CSVImportService.commandPublisher)
 		require.Same(t, commandPublisher, services.BankSyncService.commandPublisher)
 		assert.Equal(t, "custom-fx", services.FXService.defaultFXProvider)
 		assert.Contains(t, services.FXService.fxProviders, "custom-fx")
+		assert.Same(t, cashFlows, services.ReportingService.cashFlows)
 	})
 
 	t.Run("New composes orchestrated synthetic first sync through PostgreSQL", func(t *testing.T) {

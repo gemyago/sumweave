@@ -33,6 +33,7 @@ type reportingFXRateStore interface {
 
 type ReportingService struct {
 	store             reportingServiceStore
+	cashFlows         cashFlowSeriesStore
 	fxRates           reportingFXRateStore
 	balanceStore      accountBalanceReadStore
 	access            *accessGuard
@@ -68,9 +69,17 @@ func WithReportingServiceDefaultFXProvider(name string) ReportingServiceOption {
 	}
 }
 
-func NewReportingService(store reportingServiceStore, opts ...ReportingServiceOption) *ReportingService {
+func NewReportingService(
+	store reportingServiceStore,
+	cashFlows cashFlowSeriesStore,
+	opts ...ReportingServiceOption,
+) *ReportingService {
+	if cashFlows == nil {
+		panic("cash-flow series store is required")
+	}
 	service := &ReportingService{
 		store:             store,
+		cashFlows:         cashFlows,
 		access:            newAccessGuard(store),
 		now:               time.Now,
 		defaultFXProvider: FXProviderFrankfurter,
@@ -83,6 +92,26 @@ func NewReportingService(store reportingServiceStore, opts ...ReportingServiceOp
 	}
 	assignAccountBalanceReadStore(store, &service.balanceStore)
 	return service
+}
+
+func (s *ReportingService) GetCashFlowSeries(
+	ctx context.Context,
+	params CashFlowSeriesParams,
+) (CashFlowSeries, error) {
+	if err := ValidateCashFlowSeriesParams(params); err != nil {
+		return CashFlowSeries{}, err
+	}
+	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
+		return CashFlowSeries{}, err
+	}
+	series, err := s.cashFlows.GetCashFlowSeries(ctx, persistence.CashFlowSeriesParams{
+		TenantID: params.TenantID, StartDate: params.StartDate, EndDate: params.EndDate,
+		GroupBy: params.GroupBy, FXProvider: s.defaultFXProvider,
+	})
+	if err != nil {
+		return CashFlowSeries{}, fmt.Errorf("get cash-flow series: %w", err)
+	}
+	return series, nil
 }
 
 func (s *ReportingService) GetDashboard(ctx context.Context, params DashboardParams) (Dashboard, error) {

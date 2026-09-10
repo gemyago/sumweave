@@ -58,6 +58,104 @@ describe('finance api', () => {
     expect(job.jobId).toBe('job-1')
   })
 
+  it('serializes and maps a complete cash-flow series response', async () => {
+    const tenantId = `tenant ${faker.string.uuid()}`
+    const startDate = new Date('2026-03-01T00:00:00-07:00')
+    const endDate = new Date('2026-04-01T00:00:00-07:00')
+    let requestInput: RequestInfo | URL | undefined
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requestInput = input
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          period: { startDate: '2026-03-01T00:00:00-07:00', endDate: '2026-04-01T00:00:00-07:00' },
+          groupBy: 'month',
+          displayCurrency: 'EUR',
+          complete: false,
+          missingFx: [{ provider: 'frankfurter', baseCurrency: 'USD', quoteCurrency: 'EUR', affectedTransactionCount: 2 }],
+          buckets: [{ startDate: '2026-03-01T00:00:00-07:00', endDate: '2026-04-01T00:00:00-07:00', incomeMinor: 420000, expenseMinor: 175000 }],
+        }),
+      } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    const series = await api.getCashFlowSeries({ tenantId, startDate, endDate, groupBy: 'month' })
+
+    const requestUrl = new URL(String(requestInput))
+    expect(requestUrl.pathname).toBe(`/api/v1/finance/tenants/${encodeURIComponent(tenantId)}/cash-flow-series`)
+    expect(requestUrl.searchParams).toMatchObject(new URLSearchParams({
+      startDate: '2026-03-01T07:00:00.000Z', endDate: '2026-04-01T07:00:00.000Z', groupBy: 'month',
+    }))
+    expect(series).toMatchObject({ groupBy: 'month', displayCurrency: 'EUR', complete: false })
+    expect(series.period).toEqual({ startDate, endDate })
+    expect(series.buckets[0]).toEqual({ startDate, endDate, incomeMinor: 420000, expenseMinor: 175000 })
+    expect(series.missingFx).toEqual([{ provider: 'frankfurter', baseCurrency: 'USD', quoteCurrency: 'EUR', affectedTransactionCount: 2 }])
+  })
+
+  it('rejects a cash-flow series response missing required fields', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ period: {}, groupBy: 'day', displayCurrency: 'EUR', complete: true, missingFx: [], buckets: [] }),
+    }) as Response)
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await expect(api.getCashFlowSeries({
+      tenantId: faker.string.uuid(), startDate: new Date('2026-03-01T00:00:00Z'), endDate: new Date('2026-03-02T00:00:00Z'), groupBy: 'day',
+    })).rejects.toMatchObject({ name: 'FinanceResponseError', message: expect.stringContaining('finance.cashFlowSeries.period.startDate') })
+  })
+
+  it('rejects a cash-flow series response with malformed bucket timestamps', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({
+        period: { startDate: '2026-03-01T00:00:00Z', endDate: '2026-03-02T00:00:00Z' }, groupBy: 'day', displayCurrency: 'EUR', complete: true, missingFx: [],
+        buckets: [{ startDate: 'not-a-timestamp', endDate: '2026-03-02T00:00:00Z', incomeMinor: 0, expenseMinor: 0 }],
+      }),
+    }) as Response)
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await expect(api.getCashFlowSeries({
+      tenantId: faker.string.uuid(), startDate: new Date('2026-03-01T00:00:00Z'), endDate: new Date('2026-03-02T00:00:00Z'), groupBy: 'day',
+    })).rejects.toMatchObject({ name: 'FinanceResponseError', message: expect.stringContaining('finance.cashFlowSeries.buckets[0].startDate') })
+  })
+
+  it('rejects a cash-flow series response with an unsupported grouping', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({ period: { startDate: '2026-03-01T00:00:00Z', endDate: '2026-03-02T00:00:00Z' }, groupBy: 'year', displayCurrency: 'EUR', complete: true, missingFx: [], buckets: [] }),
+    }) as Response)
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await expect(api.getCashFlowSeries({
+      tenantId: faker.string.uuid(), startDate: new Date('2026-03-01T00:00:00Z'), endDate: new Date('2026-03-02T00:00:00Z'), groupBy: 'day',
+    })).rejects.toMatchObject({ name: 'FinanceResponseError', message: expect.stringContaining('finance.cashFlowSeries.groupBy') })
+  })
+
+  it('rejects a cash-flow series response with malformed missing-FX diagnostics', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => ({
+        period: { startDate: '2026-03-01T00:00:00Z', endDate: '2026-03-02T00:00:00Z' }, groupBy: 'day', displayCurrency: 'EUR', complete: false,
+        missingFx: [{ provider: 'frankfurter', baseCurrency: 'USD', quoteCurrency: 'EUR' }], buckets: [],
+      }),
+    }) as Response)
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+
+    await expect(api.getCashFlowSeries({
+      tenantId: faker.string.uuid(), startDate: new Date('2026-03-01T00:00:00Z'), endDate: new Date('2026-03-02T00:00:00Z'), groupBy: 'day',
+    })).rejects.toMatchObject({ name: 'FinanceResponseError', message: expect.stringContaining('finance.cashFlowSeries.missingFx[0].affectedTransactionCount') })
+  })
+
   it('preserves an explicit empty transaction-import account selection', async () => {
     let requestInit: RequestInit | undefined
     const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

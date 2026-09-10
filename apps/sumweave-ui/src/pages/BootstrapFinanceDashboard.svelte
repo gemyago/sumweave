@@ -7,6 +7,8 @@
     type FinanceAccount,
     type FinanceBankConnection,
     type FinanceDashboard,
+    type FinanceCashFlowSeries,
+    type FinanceCashFlowGroupBy,
     type FinanceTransaction,
   } from '../lib/finance/api'
   import {
@@ -17,17 +19,20 @@
   import { dateInputValue, withDateInput } from '../lib/date-range'
   import {
     currentDashboardMonth,
+    cashFlowGroupByForDashboardPeriod,
+    lastDashboardMonths,
     shiftDashboardMonth,
+    type DashboardPeriodMode,
     type DashboardPeriodRange,
   } from '../lib/finance/dashboard-period'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
   import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
   import FinancePager from '../components/FinancePager.svelte'
+  import EChartsSvgChart from '../components/EChartsSvgChart.svelte'
   import { dateQueryValue, financeRouteQuery, readDateQuery, replaceFinanceRouteQuery } from '../lib/finance/url-filters'
+  import type { EChartsCoreOption } from 'echarts/core'
 
   type BootstrapTone = 'primary' | 'success' | 'warning' | 'danger' | 'secondary'
-  type DashboardPeriodMode = 'current_month' | 'previous_month' | 'next_month' | 'custom'
-
   interface VisualMetric {
     key: string
     label: string
@@ -69,8 +74,19 @@
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
   let dashboardLoadRevision = 0
+  let cashFlowSeries = $state<FinanceCashFlowSeries | null>(null)
+  let loadingCashFlowSeries = $state(false)
+  let cashFlowSeriesError = $state<string | null>(null)
+  let cashFlowSeriesRequest = $state<CashFlowSeriesRequest | undefined>(undefined)
+  let cashFlowSeriesLoadRevision = 0
 
   const financeShell = useFinanceShellState()
+
+  interface CashFlowSeriesRequest {
+    tenantId: string
+    range: DashboardPeriodRange
+    groupBy: FinanceCashFlowGroupBy
+  }
 
   function maxMagnitude(values: number[]): number {
     return values.reduce((maximum, value) => Math.max(maximum, Math.abs(value)), 0)
@@ -116,55 +132,76 @@
     return `${label.slice(0, 1).toUpperCase()}${label.slice(1)}`
   }
 
-  const cashFlowMetrics = $derived.by<VisualMetric[]>(() => {
-    if (!dashboard) return []
+  function cashFlowBucketRange(startDate: Date, endDate: Date): string {
+    return `${formatFinanceDate(startDate)} → ${formatFinanceDate(inclusiveDashboardEndDate(endDate)!)}`
+  }
 
-    const currency = dashboard.settled.displayCurrency
-    const items = [
-      {
-        key: 'settled-income',
-        label: 'Settled income',
-        detail: `${dashboard.settled.transactionCount} booked transactions`,
-        value: dashboard.settled.incomeMinor,
-        formattedValue: formatFinanceMoney(dashboard.settled.incomeMinor, currency),
-        tone: 'success' as const,
-      },
-      {
-        key: 'settled-expense',
-        label: 'Settled expense',
-        detail: 'Booked outflow in the active window',
-        value: dashboard.settled.expenseMinor,
-        formattedValue: formatFinanceMoney(dashboard.settled.expenseMinor, currency),
-        tone: 'danger' as const,
-      },
-      {
-        key: 'pending-income',
-        label: 'Pending income',
-        detail: `${dashboard.pending.transactionCount} pending transactions`,
-        value: dashboard.pending.incomeMinor,
-        formattedValue: formatFinanceMoney(dashboard.pending.incomeMinor, currency),
-        tone: 'primary' as const,
-      },
-      {
-        key: 'pending-expense',
-        label: 'Pending expense',
-        detail: 'Unsettled outflow still in motion',
-        value: dashboard.pending.expenseMinor,
-        formattedValue: formatFinanceMoney(dashboard.pending.expenseMinor, currency),
-        tone: 'warning' as const,
-      },
-    ]
+  function cashFlowBucketLabel(series: FinanceCashFlowSeries, bucketIndex: number): string {
+    if (series.groupBy !== 'month') return formatFinanceDate(series.buckets[bucketIndex].startDate)
 
-    const maximum = maxMagnitude(items.map((item) => item.value))
+    const firstIncludedMonth = series.period.startDate
+    return new Intl.DateTimeFormat(undefined, { month: 'short', year: 'numeric' }).format(
+      new Date(firstIncludedMonth.getFullYear(), firstIncludedMonth.getMonth() + bucketIndex, 1),
+    )
+  }
 
-    return items.map((item) => ({
-      key: item.key,
-      label: item.label,
-      detail: item.detail,
-      formattedValue: item.formattedValue,
-      tone: item.tone,
-      widthClass: widthClass(item.value, maximum),
-    }))
+  const cashFlowHasActivity = $derived.by(() =>
+    cashFlowSeries?.buckets.some((bucket) => bucket.incomeMinor !== 0 || bucket.expenseMinor !== 0) ?? false,
+  )
+
+  const cashFlowChartOption = $derived.by<EChartsCoreOption | undefined>(() => {
+    if (!cashFlowSeries || !cashFlowHasActivity) return undefined
+
+    const series = cashFlowSeries
+    const labelInterval = series.buckets.length > 12 ? Math.ceil(series.buckets.length / 6) - 1 : 0
+
+    return {
+      grid: { left: 12, right: 12, top: 44, bottom: 56, containLabel: true },
+      legend: { top: 8, textStyle: { color: 'var(--bs-body-color)' } },
+      tooltip: {
+        trigger: 'axis',
+        confine: true,
+        formatter: (params: unknown) => {
+          const values = Array.isArray(params) ? params : [params]
+          const dataIndex = (values[0] as { dataIndex?: number } | undefined)?.dataIndex
+          const bucket = dataIndex === undefined ? undefined : series.buckets[dataIndex]
+          if (!bucket) return ''
+          return `${cashFlowBucketRange(bucket.startDate, bucket.endDate)}<br/>Income: ${formatFinanceMoney(bucket.incomeMinor, series.displayCurrency)}<br/>Expense: ${formatFinanceMoney(bucket.expenseMinor, series.displayCurrency)}`
+        },
+      },
+      xAxis: {
+        type: 'category',
+        data: series.buckets.map((_, index) => cashFlowBucketLabel(series, index)),
+        axisLabel: { color: 'var(--bs-secondary-color)', hideOverlap: true, interval: labelInterval },
+        axisLine: { lineStyle: { color: 'var(--bs-border-color)' } },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: {
+          color: 'var(--bs-secondary-color)',
+          formatter: (value: number) => formatFinanceMoney(value, series.displayCurrency),
+        },
+        splitLine: { lineStyle: { color: 'var(--bs-border-color)' } },
+      },
+      series: [
+        {
+          name: 'Income',
+          type: 'bar',
+          data: series.buckets.map((bucket) => bucket.incomeMinor),
+          itemStyle: { color: 'var(--color-success)' },
+          emphasis: { focus: 'none', itemStyle: { color: 'var(--color-success)', opacity: 1 } },
+          blur: { itemStyle: { color: 'var(--color-success)', opacity: 1 } },
+        },
+        {
+          name: 'Expense',
+          type: 'bar',
+          data: series.buckets.map((bucket) => bucket.expenseMinor),
+          itemStyle: { color: 'var(--color-danger)' },
+          emphasis: { focus: 'none', itemStyle: { color: 'var(--color-danger)', opacity: 1 } },
+          blur: { itemStyle: { color: 'var(--color-danger)', opacity: 1 } },
+        },
+      ],
+    }
   })
 
   const balanceSummary = $derived.by(() => {
@@ -271,17 +308,6 @@
   const hasNewerDashboardTransactions = $derived(transactionOffset > 0)
   const accountNameById = $derived(new Map(historyAccounts.map((account) => [account.id, account.name])))
   const hiddenAccountIds = $derived(new Set(historyAccounts.filter((account) => account.hiddenAt).map((account) => account.id)))
-
-  const cashFlowHasActivity = $derived.by(() =>
-    dashboard
-      ? [
-          dashboard.settled.incomeMinor,
-          dashboard.settled.expenseMinor,
-          dashboard.pending.incomeMinor,
-          dashboard.pending.expenseMinor,
-        ].some((value) => value !== 0)
-      : false,
-  )
 
   const failedSyncConnections = $derived.by(() =>
     recentConnections.filter((connection) => (connection.lastSyncError?.trim().length ?? 0) > 0),
@@ -423,6 +449,7 @@
         dashboard = null
         recentTransactions = []
         recentConnections = []
+        clearCashFlowSeries()
       }
     } catch (loadError) {
       error = loadError instanceof Error ? loadError.message : 'Failed to load finance workspace'
@@ -440,6 +467,7 @@
       historyAccounts = []
       recentTransactions = []
       recentConnections = []
+      clearCashFlowSeries()
       return false
     }
     if (!range) {
@@ -450,6 +478,11 @@
 
     loadingDashboard = true
     error = null
+    void loadCashFlowSeries({
+      tenantId,
+      range,
+      groupBy: cashFlowGroupByForDashboardPeriod(dashboardPeriodMode, range),
+    })
 
     try {
       const [loadedDashboard, loadedAccounts, loadedTransactions, loadedConnections] = await Promise.all([
@@ -503,6 +536,59 @@
     }
   }
 
+  function clearCashFlowSeries() {
+    cashFlowSeriesLoadRevision += 1
+    cashFlowSeries = null
+    cashFlowSeriesError = null
+    cashFlowSeriesRequest = undefined
+    loadingCashFlowSeries = false
+  }
+
+  async function loadCashFlowSeries(request: CashFlowSeriesRequest) {
+    const requestRevision = ++cashFlowSeriesLoadRevision
+    cashFlowSeriesRequest = request
+    cashFlowSeries = null
+    cashFlowSeriesError = null
+    loadingCashFlowSeries = true
+
+    try {
+      const loadedSeries = await financeApi.getCashFlowSeries({
+        tenantId: request.tenantId,
+        startDate: request.range.startDate,
+        endDate: request.range.endDate,
+        groupBy: request.groupBy,
+      })
+      if (
+        financeShell.selectedTenantId !== request.tenantId ||
+        cashFlowSeriesLoadRevision !== requestRevision ||
+        !isCurrentCashFlowSeriesRequest(request)
+      ) return
+      cashFlowSeries = loadedSeries
+    } catch (loadError) {
+      if (
+        financeShell.selectedTenantId !== request.tenantId ||
+        cashFlowSeriesLoadRevision !== requestRevision ||
+        !isCurrentCashFlowSeriesRequest(request)
+      ) return
+      cashFlowSeriesError = loadError instanceof Error ? loadError.message : 'Failed to load cash-flow chart'
+    } finally {
+      if (cashFlowSeriesLoadRevision === requestRevision) loadingCashFlowSeries = false
+    }
+  }
+
+  function isCurrentCashFlowSeriesRequest(request: CashFlowSeriesRequest): boolean {
+    const currentRequest = cashFlowSeriesRequest
+    return currentRequest?.tenantId === request.tenantId &&
+      currentRequest.groupBy === request.groupBy &&
+      currentRequest.range.startDate.getTime() === request.range.startDate.getTime() &&
+      currentRequest.range.endDate.getTime() === request.range.endDate.getTime()
+  }
+
+  function retryCashFlowSeries() {
+    if (!cashFlowSeriesRequest || loadingCashFlowSeries) return
+    void loadCashFlowSeries(cashFlowSeriesRequest)
+  }
+
   function rangeForDashboardMode(): DashboardPeriodRange | undefined {
     if (activeDashboardRange) return activeDashboardRange
 
@@ -517,6 +603,8 @@
     const currentMonth = currentDashboardMonth()
     if (dashboardPeriodMode === 'previous_month') return shiftDashboardMonth(currentMonth, -1)
     if (dashboardPeriodMode === 'next_month') return shiftDashboardMonth(currentMonth, 1)
+    if (dashboardPeriodMode === 'last_6_months') return lastDashboardMonths(new Date(), 6)
+    if (dashboardPeriodMode === 'last_12_months') return lastDashboardMonths(new Date(), 12)
     return currentMonth
   }
 
@@ -529,6 +617,8 @@
     switch (dashboardPeriodMode) {
       case 'previous_month': return 'Previous month'
       case 'next_month': return 'Next month'
+      case 'last_6_months': return 'Last 6 months'
+      case 'last_12_months': return 'Last 12 months'
       case 'custom': return 'Custom range'
       default: return 'Current month'
     }
@@ -564,6 +654,12 @@
     const range = rangeForMonthAction(1)
     dashboardPeriodMode = 'next_month'
     await loadDashboard(range)
+  }
+
+  async function openLastMonths(monthCount: 6 | 12) {
+    if (loadingDashboard) return
+    dashboardPeriodMode = monthCount === 6 ? 'last_6_months' : 'last_12_months'
+    await loadDashboard(lastDashboardMonths(new Date(), monthCount))
   }
 
   async function applyCustomRange(event: SubmitEvent) {
@@ -718,6 +814,12 @@
               <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openNextPeriod()} disabled={!dashboard || loadingDashboard}>
                 Next month
               </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openLastMonths(6)} disabled={!financeShell.selectedTenantId || loadingDashboard}>
+                Last 6 months
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick={() => void openLastMonths(12)} disabled={!financeShell.selectedTenantId || loadingDashboard}>
+                Last 12 months
+              </button>
             </div>
 
             <details class="border rounded-3 p-2">
@@ -788,7 +890,7 @@
         </div>
       {/if}
       <div class="row g-4">
-        <div class="col-12 col-xxl-7">
+        <div class="col-12">
           <div class="card shadow-sm h-100">
             <div class="card-body p-4 d-grid gap-4">
               <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-start">
@@ -895,36 +997,47 @@
           </div>
         </div>
 
-        <div class="col-12 col-xxl-5">
+        <div class="col-12">
           <div class="card shadow-sm h-100">
             <div class="card-body p-4 d-grid gap-4">
               <div>
                 <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Cash-flow visual</p>
-                <h2 class="h5 mb-1">Period flow</h2>
-                <p class="text-body-secondary mb-0">Booked and pending movement for the reporting window, valued with current FX.</p>
+                <h2 class="h5 mb-1">Cash flow over time</h2>
+                <p class="text-body-secondary mb-0">Settled income and expense by reporting bucket, valued with current FX.</p>
               </div>
 
-              {#if !cashFlowHasActivity}
-                <div class="alert alert-light border mb-0" role="status">
-                  No settled or pending cash flow to chart for this period.
+              {#if loadingCashFlowSeries}
+                <div class="alert alert-secondary mb-0" role="status">Loading cash-flow chart…</div>
+              {:else if cashFlowSeriesError}
+                <div class="alert alert-danger mb-0" role="alert">
+                  <p class="mb-2">{cashFlowSeriesError}</p>
+                  <button type="button" class="btn btn-outline-danger btn-sm" onclick={retryCashFlowSeries}>Retry cash-flow chart</button>
                 </div>
-              {:else}
-                <div class="d-grid gap-3" aria-label="Cash flow chart">
-                  {#each cashFlowMetrics as item (item.key)}
-                    <div>
-                      <div class="d-flex justify-content-between gap-3 mb-1">
-                        <div>
-                          <strong>{item.label}</strong>
-                          <p class="small text-body-secondary mb-0">{item.detail}</p>
-                        </div>
-                        <strong class="text-nowrap">{item.formattedValue}</strong>
-                      </div>
-                      <div class="progress" aria-hidden="true">
-                        <div class={`progress-bar ${progressClass(item.tone)} ${item.widthClass}`}></div>
-                      </div>
-                    </div>
-                  {/each}
-                </div>
+              {:else if cashFlowSeries}
+                {#if !cashFlowSeries.complete}
+                  <div class="alert alert-warning mb-0" role="alert">
+                    <strong>Cash-flow chart data is incomplete.</strong>
+                    {#each cashFlowSeries.missingFx as diagnostic (`${diagnostic.provider}-${diagnostic.baseCurrency}-${diagnostic.quoteCurrency}`)}
+                      {diagnostic.baseCurrency} → {diagnostic.quoteCurrency} ({diagnostic.provider}, {diagnostic.affectedTransactionCount} transaction value{diagnostic.affectedTransactionCount === 1 ? '' : 's'})
+                    {/each}
+                    <a class="alert-link" href="/admin/finance/fx" use:link>Open FX diagnostics</a>.
+                  </div>
+                {/if}
+                {#if !cashFlowHasActivity}
+                  <div class="alert alert-light border mb-0" role="status">
+                    No settled cash flow to chart for this period.
+                  </div>
+                {:else if cashFlowChartOption}
+                  <EChartsSvgChart ariaLabel="Cash flow chart" option={cashFlowChartOption} />
+                {/if}
+                <details class="border rounded p-3">
+                  <summary class="fw-semibold">Cash-flow values</summary>
+                  <ul class="small text-body-secondary mb-0 mt-3 ps-3">
+                    {#each cashFlowSeries.buckets as bucket (bucket.startDate.getTime())}
+                      <li>{cashFlowBucketRange(bucket.startDate, bucket.endDate)}: Income {formatFinanceMoney(bucket.incomeMinor, cashFlowSeries.displayCurrency)} · Expense {formatFinanceMoney(bucket.expenseMinor, cashFlowSeries.displayCurrency)}</li>
+                    {/each}
+                  </ul>
+                </details>
               {/if}
 
             </div>

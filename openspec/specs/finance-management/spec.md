@@ -681,3 +681,45 @@ The finance catalog SHALL prevent internal tag hiding while any live classificat
 - **THEN** the tag MUST cease to be blocked by classification references
 - **AND** existing transaction tag assignments MUST remain unchanged.
 
+### Requirement: Tenant Cash-Flow Series Reporting
+The finance module SHALL expose a focused tenant cash-flow series read that aggregates settled income and expense over a caller-selected timestamp range.
+
+#### Scenario: Protected API accepts explicit range and grouping
+- **WHEN** an authenticated tenant member requests `GET /api/v1/finance/tenants/{tenantId}/cash-flow-series` with full RFC 3339 `startDate` and `endDate` timestamps and `groupBy=day` or `groupBy=month`
+- **THEN** the system MUST authorize membership in the selected tenant and treat the range as inclusive start and exclusive end
+- **AND** the cash-flow series MUST remain separate from the finance dashboard response
+- **AND** response JSON MUST use camelCase fields
+
+#### Scenario: Invalid or excessive series requests are rejected as client input
+- **WHEN** a cash-flow series request omits a bound or grouping, supplies an invalid or reversed range, supplies an unsupported grouping, or would generate more than 366 buckets
+- **THEN** the system MUST reject the request before executing the aggregation with a 4xx invalid-input response
+- **AND** untrusted grouping text MUST NOT be interpolated into a SQL expression
+
+#### Scenario: PostgreSQL returns ordered zero-filled buckets
+- **WHEN** a valid cash-flow series is requested
+- **THEN** a dedicated finance persistence store MUST generate consecutive `day` or `month` buckets anchored to the supplied `startDate` and ending no later than the supplied `endDate`
+- **AND** PostgreSQL MUST aggregate qualifying transactions into those buckets and return them in ascending order
+- **AND** buckets without qualifying transactions MUST still be returned with zero income and expense
+- **AND** a generated start equal to the exclusive range end MUST NOT create a zero-width bucket
+- **AND** no database schema addition or persisted aggregate MUST be required
+
+#### Scenario: Buckets use submitted instants without a timezone parameter
+- **WHEN** the client submits full timestamps whose instants represent its selected reporting boundaries
+- **THEN** filtering MUST compare transaction `effective_at` values against those exact instants
+- **AND** monthly bucket generation and monthly bucket-limit validation MUST derive each indexed boundary from the submitted original start day, time, and RFC 3339 offset, apply the PostgreSQL month interval in that fixed offset calendar, and then compare the resulting `timestamptz` instant rather than using a previously clipped boundary or the PostgreSQL session calendar
+- **AND** the API MUST NOT require or infer a separate timezone
+
+#### Scenario: Series preserves settled reporting semantics
+- **WHEN** PostgreSQL calculates cash-flow contributions for a bucket
+- **THEN** only booked transactions visible through visible accounts MUST contribute
+- **AND** reconciliations, opening balances, hidden transactions, and matched internal transfers MUST be excluded
+- **AND** unmatched transfers and ordinary income or expense MUST follow their amount signs while refunds reduce expense
+- **AND** pending transactions MUST NOT contribute
+
+#### Scenario: Series uses tenant display currency and current FX
+- **WHEN** qualifying transactions use currencies other than the tenant display currency
+- **THEN** the aggregation MUST use the configured persisted current FX provider rate, the same `float64` multiplication and half-away-from-zero `math.Round` behavior as dashboard reporting, and round each converted transaction before summing the bucket
+- **AND** unavailable conversions MUST be omitted without substituting native minor units
+- **AND** the response MUST mark the series incomplete and group omitted transactions by configured provider and currency pair with a distinct affected-transaction count
+- **AND** the focused response MUST contain only the requested period, selected grouping, display currency, response-wide completeness, grouped missing-FX diagnostics, and bucket timestamps and amounts
+

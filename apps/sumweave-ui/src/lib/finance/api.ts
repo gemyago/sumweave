@@ -235,6 +235,36 @@ export interface FinanceDashboard {
   nativeSettledTotals: FinanceDashboardCurrencyTotal[]
 }
 
+export type FinanceCashFlowGroupBy = 'day' | 'month'
+
+export interface FinanceCashFlowSeriesPeriod {
+  startDate: Date
+  endDate: Date
+}
+
+export interface FinanceCashFlowMissingFXDiagnostic {
+  provider: string
+  baseCurrency: string
+  quoteCurrency: string
+  affectedTransactionCount: number
+}
+
+export interface FinanceCashFlowSeriesBucket {
+  startDate: Date
+  endDate: Date
+  incomeMinor: number
+  expenseMinor: number
+}
+
+export interface FinanceCashFlowSeries {
+  period: FinanceCashFlowSeriesPeriod
+  groupBy: FinanceCashFlowGroupBy
+  displayCurrency: string
+  complete: boolean
+  missingFx: FinanceCashFlowMissingFXDiagnostic[]
+  buckets: FinanceCashFlowSeriesBucket[]
+}
+
 export interface FinanceFXProviderDiagnostic {
   name: string
   default: boolean
@@ -439,6 +469,12 @@ export interface SignalFinanceApi {
     windowEnd?: Date
   }): Promise<FinanceJobRef>
   getDashboard(params: { tenantId: string; startDate: Date; endDate: Date }): Promise<FinanceDashboard>
+  getCashFlowSeries(params: {
+    tenantId: string
+    startDate: Date
+    endDate: Date
+    groupBy: FinanceCashFlowGroupBy
+  }): Promise<FinanceCashFlowSeries>
   getFXDiagnostics(): Promise<FinanceFXDiagnostics>
   triggerFXSync(params: {
     provider?: string
@@ -929,6 +965,19 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         }),
       )
     },
+    async getCashFlowSeries({ tenantId, startDate, endDate, groupBy }) {
+      return mapCashFlowSeries(
+        await request<RawCashFlowSeries>({
+          method: 'GET',
+          path: `/finance/tenants/${encodeURIComponent(tenantId)}/cash-flow-series`,
+          query: buildSearchParams({
+            startDate: serializeRequestTimestamp(startDate),
+            endDate: serializeRequestTimestamp(endDate),
+            groupBy,
+          }),
+        }),
+      )
+    },
     async getFXDiagnostics() {
       return mapFXDiagnostics(await request<RawFXDiagnostics>({ method: 'GET', path: '/finance/fx/diagnostics' }))
     },
@@ -1016,6 +1065,10 @@ interface RawDashboardFXCoverage { provider: string; baseCurrency: string; quote
 interface RawCurrentFxRate { provider: string; baseCurrency: string; quoteCurrency: string; effectiveAt: string; lastSuccessfulRefreshAt: string; stale: boolean }
 interface RawCurrencyTotal { currency: string; incomeMinor: number; expenseMinor: number; netMinor: number }
 interface RawDashboard { period: RawDashboardPeriod; settled: RawMoneySummary; pending: RawMoneySummary; categoryBreakdowns: RawCategoryBreakdown[]; accountBalances: RawAccountBalance[]; alerts: RawDashboardAlert[]; fxCoverage: RawDashboardFXCoverage[]; currentFxRates: RawCurrentFxRate[]; nativeSettledTotals: RawCurrencyTotal[] }
+interface RawCashFlowSeriesPeriod { startDate: string; endDate: string }
+interface RawCashFlowMissingFXDiagnostic { provider: string; baseCurrency: string; quoteCurrency: string; affectedTransactionCount: number }
+interface RawCashFlowSeriesBucket { startDate: string; endDate: string; incomeMinor: number; expenseMinor: number }
+interface RawCashFlowSeries { period: RawCashFlowSeriesPeriod; groupBy: string; displayCurrency: string; complete: boolean; missingFx: RawCashFlowMissingFXDiagnostic[]; buckets: RawCashFlowSeriesBucket[] }
 interface RawFXDiagnostics { defaultProvider: string; storedRatesCount: number; providers: RawFXProvider[] }
 interface RawFXProvider { name: string; default: boolean; ready: boolean }
 interface RawCSVRejectedRow { rowNumber: number; field?: string; reason: string }
@@ -1179,6 +1232,36 @@ function mapDashboard(item: RawDashboard): FinanceDashboard {
       lastSuccessfulRefreshAt: parseRequiredDate(rate.lastSuccessfulRefreshAt, `finance.dashboard.currentFxRates[${index}].lastSuccessfulRefreshAt`),
     })),
     nativeSettledTotals: item.nativeSettledTotals,
+  }
+}
+function mapCashFlowSeries(item: RawCashFlowSeries): FinanceCashFlowSeries {
+  requireFields(item, 'finance.cashFlowSeries', ['period', 'groupBy', 'displayCurrency', 'complete', 'missingFx', 'buckets'])
+  requireFields(item.period, 'finance.cashFlowSeries.period', ['startDate', 'endDate'])
+  requireArray(item.missingFx, 'finance.cashFlowSeries.missingFx')
+  requireArray(item.buckets, 'finance.cashFlowSeries.buckets')
+  if (item.groupBy !== 'day' && item.groupBy !== 'month') {
+    throw new FinanceResponseError({ field: 'finance.cashFlowSeries.groupBy', issue: 'must be day or month' })
+  }
+  item.missingFx.forEach((diagnostic, index) => {
+    requireFields(diagnostic, `finance.cashFlowSeries.missingFx[${index}]`, ['provider', 'baseCurrency', 'quoteCurrency', 'affectedTransactionCount'])
+  })
+  item.buckets.forEach((bucket, index) => {
+    requireFields(bucket, `finance.cashFlowSeries.buckets[${index}]`, ['startDate', 'endDate', 'incomeMinor', 'expenseMinor'])
+  })
+  return {
+    period: {
+      startDate: parseRequiredDate(item.period.startDate, 'finance.cashFlowSeries.period.startDate'),
+      endDate: parseRequiredDate(item.period.endDate, 'finance.cashFlowSeries.period.endDate'),
+    },
+    groupBy: item.groupBy,
+    displayCurrency: item.displayCurrency,
+    complete: item.complete,
+    missingFx: item.missingFx,
+    buckets: item.buckets.map((bucket, index) => ({
+      ...bucket,
+      startDate: parseRequiredDate(bucket.startDate, `finance.cashFlowSeries.buckets[${index}].startDate`),
+      endDate: parseRequiredDate(bucket.endDate, `finance.cashFlowSeries.buckets[${index}].endDate`),
+    })),
   }
 }
 function mapFXDiagnostics(item: RawFXDiagnostics): FinanceFXDiagnostics {
