@@ -103,14 +103,16 @@ describe('Finance dashboard page', () => {
     ])
   })
 
-  it('renders the canonical bootstrap dashboard with balance-first summaries and canonical finance links', async () => {
+  it('renders the canonical bootstrap dashboard with period-net summaries and canonical finance links', async () => {
     render(Finance)
 
     expect(await screen.findByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
-    expect(await screen.findByText('Booked balance story')).toBeInTheDocument()
+    expect(await screen.findByText('Period net')).toBeInTheDocument()
+    expect(screen.getByText('Income minus expenses for Jun 20, 2026 → Jun 20, 2026.')).toBeInTheDocument()
+    expect(screen.getByText('Booked balance total')).toBeInTheDocument()
     expect(screen.getByText('Income')).toBeInTheDocument()
     expect(screen.getByText('Expense')).toBeInTheDocument()
-    expect(screen.getByText('Pending delta')).toBeInTheDocument()
+    expect(screen.getByText('Pending net')).toBeInTheDocument()
     expect(screen.getByText('Cash-flow visual')).toBeInTheDocument()
     expect(screen.getByLabelText('Cash flow chart')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Top categories' })).toBeInTheDocument()
@@ -588,7 +590,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByText('No account balances to chart yet.')).toBeInTheDocument()
     expect(screen.getByText('No transactions in this reporting period.')).toBeInTheDocument()
     expect(screen.getByText('No active attention signals right now.')).toBeInTheDocument()
-    expect(screen.getByText('No booked balances yet')).toBeInTheDocument()
+    expect(screen.getByText('No booked account balances yet. Connect or create accounts to start tracking balances here.')).toBeInTheDocument()
   })
 
   it('routes native totals, sync issues, and import follow-up through the dashboard attention area', async () => {
@@ -627,7 +629,7 @@ describe('Finance dashboard page', () => {
     render(Finance)
 
     expect(await screen.findByText('Native totals')).toBeInTheDocument()
-    expect(screen.getByText('No booked balances yet')).toBeInTheDocument()
+    expect(screen.getByText('No booked account balances yet. Connect or create accounts to start tracking balances here.')).toBeInTheDocument()
     expect(screen.getByText('Salary')).toBeInTheDocument()
     expect(screen.getByText('Failed sync')).toBeInTheDocument()
     expect(screen.getByText('Failed import')).toBeInTheDocument()
@@ -734,7 +736,7 @@ describe('Finance dashboard page', () => {
 
     render(Finance)
 
-    expect(await screen.findByText('Booked total unavailable')).toBeInTheDocument()
+    expect(await screen.findByText('Booked balance total')).toBeInTheDocument()
     expect(screen.getAllByText('Unavailable')).not.toHaveLength(0)
     expect(screen.getByText('Native 200.00 EUR')).toBeInTheDocument()
     expect(screen.queryByText('300.00 PLN')).not.toBeInTheDocument()
