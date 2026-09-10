@@ -1013,10 +1013,6 @@
                   <p class="mb-2">{cashFlowSeriesError}</p>
                   <button type="button" class="btn btn-outline-danger btn-sm" onclick={retryCashFlowSeries}>Retry cash-flow chart</button>
                 </div>
-              {:else if !cashFlowHasActivity}
-                <div class="alert alert-light border mb-0" role="status">
-                  No settled cash flow to chart for this period.
-                </div>
               {:else if cashFlowSeries}
                 {#if !cashFlowSeries.complete}
                   <div class="alert alert-warning mb-0" role="alert">
@@ -1027,7 +1023,11 @@
                     <a class="alert-link" href="/admin/finance/fx" use:link>Open FX diagnostics</a>.
                   </div>
                 {/if}
-                {#if cashFlowChartOption}
+                {#if !cashFlowHasActivity}
+                  <div class="alert alert-light border mb-0" role="status">
+                    No settled cash flow to chart for this period.
+                  </div>
+                {:else if cashFlowChartOption}
                   <EChartsSvgChart ariaLabel="Cash flow chart" option={cashFlowChartOption} />
                 {/if}
                 <details class="border rounded p-3">

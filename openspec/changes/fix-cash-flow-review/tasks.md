@@ -9,4 +9,4 @@
 
 ## 3. Incomplete-Series Dashboard State
 
-- [ ] 3.1 Render an incomplete cash-flow warning and its missing-FX diagnostics before the all-zero activity state while retaining the loaded-series textual alternative, update the Finance wireframe's chart-state wording, and follow the UI TDD and visual-verification flows with an all-zero incomplete response test, the required Finance shell smoke, and independent desktop/narrow visual review.
+- [x] 3.1 Render an incomplete cash-flow warning and its missing-FX diagnostics before the all-zero activity state while retaining the loaded-series textual alternative, update the Finance wireframe's chart-state wording, and follow the UI TDD and visual-verification flows with an all-zero incomplete response test, the required Finance shell smoke, and independent desktop/narrow visual review.

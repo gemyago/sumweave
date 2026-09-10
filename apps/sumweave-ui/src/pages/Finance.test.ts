@@ -299,6 +299,23 @@ describe('Finance dashboard page', () => {
     expect(warning).toHaveTextContent('EUR → USD (frankfurter, 2 transaction values)')
   })
 
+  it('shows incomplete all-zero cash-flow diagnostics before zero activity and retains the textual alternative', async () => {
+    mocks.getCashFlowSeries.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21) },
+      groupBy: 'day', displayCurrency: 'USD', complete: false,
+      missingFx: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 2 }],
+      buckets: [{ startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21), incomeMinor: 0, expenseMinor: 0 }],
+    })
+
+    render(Finance)
+
+    const warning = await screen.findByText('Cash-flow chart data is incomplete.')
+    const zeroActivity = screen.getByText('No settled cash flow to chart for this period.')
+    expect(warning.compareDocumentPosition(zeroActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(warning.parentElement).toHaveTextContent('EUR → USD (frankfurter, 2 transaction values)')
+    expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 0.00 USD · Expense 0.00 USD')).toBeInTheDocument()
+  })
+
   it('does not let a stale series response replace a newer reporting period', async () => {
     const user = userEvent.setup()
     let resolveInitialSeries: (value: unknown) => void
