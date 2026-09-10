@@ -366,6 +366,91 @@ func TestConnector(t *testing.T) {
 		), statementPaths[secondAccountID])
 	})
 
+	t.Run("fetch pairs a cross-currency amount with its account currency", func(t *testing.T) {
+		capturedAt := time.Date(2026, time.July, 2, 12, 0, 0, 0, time.UTC)
+		connection := makeConnection()
+		token := "token-" + fake.UUID().V4()
+		accountID := "account-" + fake.UUID().V4()
+		transactionID := "transaction-" + fake.UUID().V4()
+		description := "purchase-" + fake.Lorem().Word()
+		clientInfoBody := fmt.Sprintf(
+			`{"accounts":[{"id":"%s","currencyCode":980}]}`,
+			accountID,
+		)
+		statementBody := fmt.Sprintf(
+			`[{"id":"%s","time":%d,"description":"%s","amount":508300,"operationAmount":10000,"currencyCode":978}]`,
+			transactionID,
+			capturedAt.Unix(),
+			description,
+		)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, token, r.Header.Get("X-Token"))
+			switch r.URL.Path {
+			case "/personal/client-info":
+				_, _ = w.Write([]byte(clientInfoBody))
+			case fmt.Sprintf(
+				"/personal/statement/%s/%d/%d",
+				accountID,
+				capturedAt.Add(-time.Hour).Unix(),
+				capturedAt.Unix(),
+			):
+				_, _ = w.Write([]byte(statementBody))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+		connector := NewConnector(
+			Args{BaseURL: server.URL, HTTPClient: server.Client()},
+			WithNow(func() time.Time { return capturedAt }),
+			WithSecretTokenResolver(func(context.Context, domain.ConnectionSecret) (string, error) {
+				return token, nil
+			}),
+		)
+
+		batch, err := connector.Fetch(t.Context(), providers.FetchRequest{
+			Connection: connection,
+			Secret:     makeSecret("reference-" + fake.UUID().V4()),
+			RequestedWindow: domain.ProviderSyncWindow{
+				Start: capturedAt.Add(-time.Hour), End: capturedAt,
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, batch.Transactions, 1)
+		require.Len(t, batch.Snapshots, 3)
+
+		effectiveAt := time.Unix(capturedAt.Unix(), 0)
+		assert.Equal(t, domain.ProviderTransactionObservation{
+			Connection:            connection,
+			ProviderAccountID:     accountID,
+			ProviderTransactionID: transactionID,
+			Status:                domain.TransactionStatusBooked,
+			AmountMinor:           508300,
+			Currency:              currencyUAH,
+			Description:           description,
+			EffectiveAt:           effectiveAt,
+			Fingerprint: providerFingerprint(
+				accountID,
+				description,
+				int64(508300),
+				currencyUAH,
+				effectiveAt,
+			),
+			ProviderOriginal: &domain.ProviderTransactionOriginal{
+				AmountMinor: 508300,
+				Currency:    currencyUAH,
+				Description: description,
+				EffectiveAt: &effectiveAt,
+			},
+		}, batch.Transactions[0])
+		assert.JSONEq(t, fmt.Sprintf(
+			`{"id":"%s","time":%d,"description":"%s","amount":508300,"operationAmount":10000,"currencyCode":978}`,
+			transactionID,
+			capturedAt.Unix(),
+			description,
+		), string(batch.Snapshots[2].DocumentJSON))
+	})
+
 	t.Run("fetch returns bounded secret resolver errors", func(t *testing.T) {
 		resolverErr := fmt.Errorf("resolver-%s", fake.UUID().V4())
 		connector := NewConnector(

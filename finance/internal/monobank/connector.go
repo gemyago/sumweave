@@ -251,7 +251,7 @@ func (c *Connector) Fetch(
 			for _, item := range statementResponse.Items {
 				transaction := normalizeTransaction(
 					request.Connection,
-					chunk.accountID,
+					account,
 					item,
 				)
 				batch.Transactions = append(
@@ -334,12 +334,13 @@ func normalizeBalance(
 
 func normalizeTransaction(
 	connection domain.ProviderConnectionRef,
-	providerAccountID string,
+	account monobankclient.InfoAccount,
 	item monobankclient.PersonalStatementItem,
 ) domain.ProviderTransactionObservation {
 	effectiveAt := time.Unix(item.Time, 0)
 	description := strings.TrimSpace(item.Description)
-	currency := currencyCodeToISO(item.CurrencyCode)
+	providerAccountID := firstNonEmpty(account.ID, "0")
+	currency := currencyCodeToISO(account.CurrencyCode)
 	return domain.ProviderTransactionObservation{
 		Connection:            connection,
 		ProviderAccountID:     strings.TrimSpace(providerAccountID),
