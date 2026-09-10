@@ -2483,6 +2483,27 @@ func TestFinanceController(t *testing.T) {
 		}
 	})
 
+	t.Run("registered cash-flow series route rejects over-limit buckets before its service", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		start := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+		service := newMockfinanceService(t)
+		target := "/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?" + url.Values{
+			"startDate": []string{start.Format(time.RFC3339)},
+			"endDate":   []string{start.AddDate(0, 0, 367).Format(time.RFC3339)},
+			"groupBy":   []string{"day"},
+		}.Encode()
+		response := httptest.NewRecorder()
+
+		newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+			response,
+			newRequest(http.MethodGet, target, "", true),
+		)
+
+		assert.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+		service.AssertNotCalled(t, "GetCashFlowSeries", mock.Anything, mock.Anything)
+	})
+
 	t.Run("registered cash-flow series route propagates access errors", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()

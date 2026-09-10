@@ -1295,7 +1295,7 @@ func (c *FinanceController) GetFinanceCashFlowSeries(
 			GroupBy:     financepkg.CashFlowGroupBy(params.GroupBy),
 		}
 		if validationErr := financepkg.ValidateCashFlowSeriesParams(seriesParams); validationErr != nil {
-			return nil, mapFinanceRangeError(validationErr)
+			return nil, app.NewErrInvalidInput("dateRange", validationErr.Error())
 		}
 
 		item, err := c.deps.ReportingService.GetCashFlowSeries(ctx, seriesParams)

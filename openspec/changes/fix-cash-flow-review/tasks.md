@@ -5,7 +5,7 @@
 
 ## 2. Cash-Flow API Validation
 
-- [ ] 2.1 Map every controller-side cash-flow parameter-validation failure to a 4xx invalid-input response before service delegation, and follow the TDD flow with a registered-route test for a valid grouping/range that exceeds 366 buckets and proves no service call occurs.
+- [x] 2.1 Map every controller-side cash-flow parameter-validation failure to a 4xx invalid-input response before service delegation, and follow the TDD flow with a registered-route test for a valid grouping/range that exceeds 366 buckets and proves no service call occurs.
 
 ## 3. Incomplete-Series Dashboard State
 
