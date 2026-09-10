@@ -23,6 +23,9 @@ packages:
       BankSyncWindowCompletionPublisher:
       ledgerTransferPairStore:
       transferMatchingPairStore:
+      cashFlowSeriesStore:
+      reportingServiceStore:
+      accountBalanceReadStore:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:
       ConnectionSecretWriter:

@@ -33,6 +33,7 @@ func TestHiddenAccountLifecycle(t *testing.T) {
 		ledger := NewLedgerService(store)
 		reporting := NewReportingService(
 			store,
+			persistence.NewCashFlowSeriesStore(database),
 			WithReportingServiceNow(func() time.Time {
 				return time.Date(2026, time.July, 17, 10, 0, 0, 0, time.Local)
 			}),

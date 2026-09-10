@@ -142,6 +142,7 @@ func TestFocusedPublicServices(t *testing.T) {
 		provider := "provider-" + fake.UUID().V4()
 		service := NewReportingService(
 			store,
+			persistence.NewCashFlowSeriesStoreFromStore(store),
 			WithReportingServiceNow(func() time.Time { return now }),
 			WithReportingServiceDefaultFXProvider(provider),
 		)

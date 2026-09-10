@@ -994,6 +994,7 @@ func TestRealisticScenario(t *testing.T) {
 	)
 	reportingService := financepkg.NewReportingService(
 		store,
+		persistence.NewCashFlowSeriesStoreFromStore(store),
 		financepkg.WithReportingServiceNow(func() time.Time { return now }),
 	)
 	financeService := &realisticScenarioFinanceAdapter{

@@ -1,8 +1,8 @@
 ## 1. Finance Cash-Flow Series
 
-- [ ] 1.1 Define the cash-flow grouping, request, response, bucket, completeness, and grouped missing-FX domain contracts plus bounded validation, and follow the TDD flow by adding focused randomized service tests before implementing request validation and tenant authorization.
-- [ ] 1.2 Implement the dedicated PostgreSQL cash-flow series store with anchored zero-filled non-zero-width buckets, settled reporting rules, per-transaction current-FX conversion, grouped missing-FX diagnostics, and no schema changes; follow the TDD flow with PostgreSQL integration cases for day/month grouping, clipped ends, exclusions, refunds, rounding, missing FX, ordering, and empty buckets.
-- [ ] 1.3 Inject the dedicated store as a required reporting dependency and wire it through finance composition without extending the legacy general store; follow the TDD flow by extending composition and service tests before production wiring.
+- [x] 1.1 Define the cash-flow grouping, request, response, bucket, completeness, and grouped missing-FX domain contracts plus bounded validation, and follow the TDD flow by adding focused randomized service tests before implementing request validation and tenant authorization.
+- [x] 1.2 Implement the dedicated PostgreSQL cash-flow series store with anchored zero-filled non-zero-width buckets, settled reporting rules, per-transaction current-FX conversion, grouped missing-FX diagnostics, and no schema changes; follow the TDD flow with PostgreSQL integration cases for day/month grouping, clipped ends, exclusions, refunds, rounding, missing FX, ordering, and empty buckets.
+- [x] 1.3 Inject the dedicated store as a required reporting dependency and wire it through finance composition without extending the legacy general store; follow the TDD flow by extending composition and service tests before production wiring.
 
 ## 2. Protected API Contract
 

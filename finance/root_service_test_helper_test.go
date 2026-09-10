@@ -146,8 +146,15 @@ func (s *Service) bindServices() {
 		WithCatalogServiceIDGenerator(s.newID),
 	)
 	s.ledger = NewLedgerService(s.store, WithLedgerServiceNow(s.now), WithLedgerServiceIDGenerator(s.newID))
+	var cashFlows cashFlowSeriesStore
+	if store, ok := s.store.(*persistence.Store); ok {
+		cashFlows = persistence.NewCashFlowSeriesStoreFromStore(store)
+	} else {
+		cashFlows = &mockcashFlowSeriesStore{}
+	}
 	s.reporting = NewReportingService(
 		s.store,
+		cashFlows,
 		WithReportingServiceNow(s.now),
 		WithReportingServiceDefaultFXProvider(s.defaultFXProvider),
 		WithReportingServiceFXRateStore(s.currentFXRates),

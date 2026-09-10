@@ -171,7 +171,10 @@ func TestFinanceCommand(t *testing.T) {
 		ownerTenants, err := tenantService.ListTenantsForUser(t.Context(), ownerID)
 		require.NoError(t, err)
 		require.Len(t, ownerTenants, 1)
-		reportingService := financepkg.NewReportingService(store)
+		reportingService := financepkg.NewReportingService(
+			store,
+			persistence.NewCashFlowSeriesStore(runtimeConfig.Database),
+		)
 		dashboard, err := reportingService.GetDashboard(t.Context(), financepkg.DashboardParams{
 			ActorUserID: ownerID, TenantID: ownerTenants[0].Tenant.ID,
 			StartDate: time.Now().AddDate(-5, 0, 0), EndDate: time.Now().AddDate(1, 0, 0),
@@ -236,7 +239,10 @@ func TestFinanceCommand(t *testing.T) {
 		ownerTenants, err := tenantService.ListTenantsForUser(t.Context(), ownerID)
 		require.NoError(t, err)
 		require.Len(t, ownerTenants, 1)
-		reportingService := financepkg.NewReportingService(store)
+		reportingService := financepkg.NewReportingService(
+			store,
+			persistence.NewCashFlowSeriesStore(runtimeConfig.Database),
+		)
 		dashboard, err := reportingService.GetDashboard(t.Context(), financepkg.DashboardParams{
 			ActorUserID: ownerID,
 			TenantID:    ownerTenants[0].Tenant.ID,
