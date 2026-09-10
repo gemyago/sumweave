@@ -25,7 +25,7 @@ The finance module SHALL expose a focused tenant cash-flow series read that aggr
 #### Scenario: Buckets use submitted instants without a timezone parameter
 - **WHEN** the client submits full timestamps whose instants represent its selected reporting boundaries
 - **THEN** filtering MUST compare transaction `effective_at` values against those exact instants
-- **AND** bucket generation and monthly bucket-limit validation MUST derive each indexed boundary from the submitted original start instant using PostgreSQL interval semantics rather than a previously clipped boundary
+- **AND** monthly bucket generation and monthly bucket-limit validation MUST derive each indexed boundary from the submitted original start day, time, and RFC 3339 offset, apply the PostgreSQL month interval in that fixed offset calendar, and then compare the resulting `timestamptz` instant rather than using a previously clipped boundary or the PostgreSQL session calendar
 - **AND** the API MUST NOT require or infer a separate timezone
 
 #### Scenario: Series preserves settled reporting semantics

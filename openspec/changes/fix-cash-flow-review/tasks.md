@@ -10,3 +10,7 @@
 ## 3. Incomplete-Series Dashboard State
 
 - [x] 3.1 Render an incomplete cash-flow warning and its missing-FX diagnostics before the all-zero activity state while retaining the loaded-series textual alternative, update the Finance wireframe's chart-state wording, and follow the UI TDD and visual-verification flows with an all-zero incomplete response test, the required Finance shell smoke, and independent desktop/narrow visual review.
+
+## 4. Monthly Calendar Parity Follow-up
+
+- [ ] 4.1 Align the monthly validator and PostgreSQL `timestamptz` bucket generation on the submitted RFC 3339 start-offset calendar semantics, and follow the TDD flow with an actual PostgreSQL comparison of validator bucket acceptance/counting and generated monthly buckets for offset-bearing inputs, including accepted 366-bucket and rejected over-366 cap boundaries; make no schema or migration changes.

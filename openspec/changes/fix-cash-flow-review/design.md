@@ -34,9 +34,9 @@ The controller will map an error returned by its own `ValidateCashFlowSeriesPara
 
 The series query will make the converted minor-unit product use double-precision arithmetic and replace PostgreSQL `ROUND` with a sign-and-absolute-value expression that rounds half values away from zero, matching `int64(math.Round(float64(amountMinor) * rate))`. Each converted contribution remains rounded before aggregation. A PostgreSQL integration regression will seed the reviewed half-unit and floating-boundary examples and compare the sum of series buckets to the existing dashboard settled totals for the identical tenant, period, rate, and transactions.
 
-### Derive every monthly validation boundary from the original start
+### Derive every monthly boundary from the original start in its submitted offset calendar
 
-Monthly bucket counting will keep the input start immutable and calculate each candidate boundary from the original calendar day and time at its month index, clipping only that indexed target month to its last day. It will not use a previously clipped boundary as the next anchor. This matches SQL's `start_date + bucket_index * interval '1 month'`; focused month-end cases will cover the cap boundary and the accepted limit.
+Monthly validation and PostgreSQL bucket generation will keep the input start immutable and calculate each candidate boundary from the original calendar day and time at its month index, clipping only that indexed target month to its last day. They will use the fixed calendar offset submitted with `startDate`: PostgreSQL will apply the interval in that offset calendar before returning a `timestamptz`, rather than letting its session calendar change the submitted boundary. This is not a separate timezone parameter; range filtering and the exclusive end remain exact submitted instants. Neither path will use a previously clipped boundary as the next anchor. PostgreSQL comparison coverage will prove parity for offset-bearing RFC 3339 inputs at both sides of the 366-bucket cap.
 
 ## Risks / Trade-offs
 
