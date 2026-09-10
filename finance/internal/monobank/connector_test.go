@@ -369,31 +369,42 @@ func TestConnector(t *testing.T) {
 	t.Run("fetch pairs a cross-currency amount with its account currency", func(t *testing.T) {
 		capturedAt := time.Date(2026, time.July, 2, 12, 0, 0, 0, time.UTC)
 		connection := makeConnection()
+		token := "token-" + fake.UUID().V4()
 		accountID := "account-" + fake.UUID().V4()
 		transactionID := "transaction-" + fake.UUID().V4()
 		description := "purchase-" + fake.Lorem().Word()
-		statementItem := client.PersonalStatementItem{
-			ID:              transactionID,
-			Time:            capturedAt.Unix(),
-			Description:     description,
-			Amount:          508300,
-			OperationAmount: 10000,
-			CurrencyCode:    monobankCurrencyEUR,
-		}
-		account := client.InfoAccount{ID: accountID, CurrencyCode: monobankCurrencyUAH}
+		clientInfoBody := fmt.Sprintf(
+			`{"accounts":[{"id":"%s","currencyCode":980}]}`,
+			accountID,
+		)
+		statementBody := fmt.Sprintf(
+			`[{"id":"%s","time":%d,"description":"%s","amount":508300,"operationAmount":10000,"currencyCode":978}]`,
+			transactionID,
+			capturedAt.Unix(),
+			description,
+		)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, token, r.Header.Get("X-Token"))
+			switch r.URL.Path {
+			case "/personal/client-info":
+				_, _ = w.Write([]byte(clientInfoBody))
+			case fmt.Sprintf(
+				"/personal/statement/%s/%d/%d",
+				accountID,
+				capturedAt.Add(-time.Hour).Unix(),
+				capturedAt.Unix(),
+			):
+				_, _ = w.Write([]byte(statementBody))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
 		connector := NewConnector(
-			Args{BaseURL: "https://example.test"},
-			WithAPI(&stubAPI{
-				clientInfoResponse: &client.GetPersonalClientInfoResponse{
-					ClientInfo: &client.Info{Accounts: []client.InfoAccount{account}},
-				},
-				statementResponse: &client.GetPersonalStatementResponse{
-					Items: []client.PersonalStatementItem{statementItem},
-				},
-			}),
+			Args{BaseURL: server.URL, HTTPClient: server.Client()},
 			WithNow(func() time.Time { return capturedAt }),
 			WithSecretTokenResolver(func(context.Context, domain.ConnectionSecret) (string, error) {
-				return "token-" + fake.UUID().V4(), nil
+				return token, nil
 			}),
 		)
 
@@ -408,7 +419,7 @@ func TestConnector(t *testing.T) {
 		require.Len(t, batch.Transactions, 1)
 		require.Len(t, batch.Snapshots, 3)
 
-		effectiveAt := time.Unix(statementItem.Time, 0)
+		effectiveAt := time.Unix(capturedAt.Unix(), 0)
 		assert.Equal(t, domain.ProviderTransactionObservation{
 			Connection:            connection,
 			ProviderAccountID:     accountID,
@@ -435,7 +446,7 @@ func TestConnector(t *testing.T) {
 		assert.JSONEq(t, fmt.Sprintf(
 			`{"id":"%s","time":%d,"description":"%s","amount":508300,"operationAmount":10000,"currencyCode":978}`,
 			transactionID,
-			statementItem.Time,
+			capturedAt.Unix(),
 			description,
 		), string(batch.Snapshots[2].DocumentJSON))
 	})
