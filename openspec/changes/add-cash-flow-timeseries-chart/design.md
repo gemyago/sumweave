@@ -120,12 +120,13 @@ The Finance dashboard builds the grouped chart options:
 
 - income and expense render as adjacent exact-value bars; ordinary expenses are positive, while a refund-dominant bucket may place net expense below zero;
 - income uses the success tone and expense uses the danger tone;
+- hovering a bar keeps both bar series visible at their normal opaque success and danger tones while the exact-value tooltip is active; hover emphasis MUST NOT hide, fade, or make either series transparent;
 - the horizontal axis uses localized bucket labels and reduces visible tick labels when space is constrained;
 - tooltips show the complete localized bucket range and exact formatted currency values;
 - the renderer uses a transparent background and theme-compatible axis, grid, and tooltip colors;
 - a non-canvas text alternative identifies every bucket range and its exact income and expense values.
 
-The chart becomes a full-width primary card below the period-net summary so a daily month remains legible. Any chart-height or containment exception is added to the shared stylesheet with the required widget-sizing comment; the Finance route does not add local styles.
+The period-performance card and the chart each span the full available dashboard content width at every breakpoint, with the chart remaining a separate primary card below the period-performance summary so a daily month remains legible. Any chart-height or containment exception is added to the shared stylesheet with the required widget-sizing comment; the Finance route does not add local styles.
 
 ## Risks / Trade-offs
 

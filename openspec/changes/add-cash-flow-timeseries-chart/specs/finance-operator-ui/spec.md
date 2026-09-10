@@ -33,6 +33,8 @@ The Finance dashboard SHALL present selected-period settled income and expense a
 
 #### Scenario: Cash-flow chart remains usable and accessible
 - **WHEN** the chart renders on desktop or a narrow viewport
-- **THEN** it MUST use a full-width dashboard card, responsive tick-label reduction, theme-compatible presentation, and an accessible chart name and textual alternative containing every bucket's range and exact values
+- **THEN** the period-performance card and cash-flow chart card MUST each span the full available dashboard content width at every breakpoint
+- **AND** the chart MUST use responsive tick-label reduction, theme-compatible presentation, and an accessible chart name and textual alternative containing every bucket's range and exact values
+- **AND** hovering any income or expense bar MUST keep both bar series visibly rendered in their normal opaque semantic tones while the exact-value tooltip is displayed
 - **AND** canonical Finance markup MUST remain Bootstrap-first without route-local style blocks or inline layout styles
 - **AND** the changed desktop and narrow-screen flows MUST pass the repository's required independent visual-review and manual smoke loops after concrete findings are resolved
