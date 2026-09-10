@@ -366,6 +366,80 @@ func TestConnector(t *testing.T) {
 		), statementPaths[secondAccountID])
 	})
 
+	t.Run("fetch pairs a cross-currency amount with its account currency", func(t *testing.T) {
+		capturedAt := time.Date(2026, time.July, 2, 12, 0, 0, 0, time.UTC)
+		connection := makeConnection()
+		accountID := "account-" + fake.UUID().V4()
+		transactionID := "transaction-" + fake.UUID().V4()
+		description := "purchase-" + fake.Lorem().Word()
+		statementItem := client.PersonalStatementItem{
+			ID:              transactionID,
+			Time:            capturedAt.Unix(),
+			Description:     description,
+			Amount:          508300,
+			OperationAmount: 10000,
+			CurrencyCode:    monobankCurrencyEUR,
+		}
+		account := client.InfoAccount{ID: accountID, CurrencyCode: monobankCurrencyUAH}
+		connector := NewConnector(
+			Args{BaseURL: "https://example.test"},
+			WithAPI(&stubAPI{
+				clientInfoResponse: &client.GetPersonalClientInfoResponse{
+					ClientInfo: &client.Info{Accounts: []client.InfoAccount{account}},
+				},
+				statementResponse: &client.GetPersonalStatementResponse{
+					Items: []client.PersonalStatementItem{statementItem},
+				},
+			}),
+			WithNow(func() time.Time { return capturedAt }),
+			WithSecretTokenResolver(func(context.Context, domain.ConnectionSecret) (string, error) {
+				return "token-" + fake.UUID().V4(), nil
+			}),
+		)
+
+		batch, err := connector.Fetch(t.Context(), providers.FetchRequest{
+			Connection: connection,
+			Secret:     makeSecret("reference-" + fake.UUID().V4()),
+			RequestedWindow: domain.ProviderSyncWindow{
+				Start: capturedAt.Add(-time.Hour), End: capturedAt,
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, batch.Transactions, 1)
+		require.Len(t, batch.Snapshots, 3)
+
+		effectiveAt := time.Unix(statementItem.Time, 0)
+		assert.Equal(t, domain.ProviderTransactionObservation{
+			Connection:            connection,
+			ProviderAccountID:     accountID,
+			ProviderTransactionID: transactionID,
+			Status:                domain.TransactionStatusBooked,
+			AmountMinor:           508300,
+			Currency:              currencyUAH,
+			Description:           description,
+			EffectiveAt:           effectiveAt,
+			Fingerprint: providerFingerprint(
+				accountID,
+				description,
+				int64(508300),
+				currencyUAH,
+				effectiveAt,
+			),
+			ProviderOriginal: &domain.ProviderTransactionOriginal{
+				AmountMinor: 508300,
+				Currency:    currencyUAH,
+				Description: description,
+				EffectiveAt: &effectiveAt,
+			},
+		}, batch.Transactions[0])
+		assert.JSONEq(t, fmt.Sprintf(
+			`{"id":"%s","time":%d,"description":"%s","amount":508300,"operationAmount":10000,"currencyCode":978}`,
+			transactionID,
+			statementItem.Time,
+			description,
+		), string(batch.Snapshots[2].DocumentJSON))
+	})
+
 	t.Run("fetch returns bounded secret resolver errors", func(t *testing.T) {
 		resolverErr := fmt.Errorf("resolver-%s", fake.UUID().V4())
 		connector := NewConnector(
