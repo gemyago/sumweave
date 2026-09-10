@@ -160,6 +160,7 @@
       legend: { top: 8, textStyle: { color: 'var(--bs-body-color)' } },
       tooltip: {
         trigger: 'axis',
+        confine: true,
         formatter: (params: unknown) => {
           const values = Array.isArray(params) ? params : [params]
           const dataIndex = (values[0] as { dataIndex?: number } | undefined)?.dataIndex
@@ -188,12 +189,16 @@
           type: 'bar',
           data: series.buckets.map((bucket) => bucket.incomeMinor),
           itemStyle: { color: 'var(--color-success)' },
+          emphasis: { focus: 'none', itemStyle: { color: 'var(--color-success)', opacity: 1 } },
+          blur: { itemStyle: { color: 'var(--color-success)', opacity: 1 } },
         },
         {
           name: 'Expense',
           type: 'bar',
           data: series.buckets.map((bucket) => bucket.expenseMinor),
           itemStyle: { color: 'var(--color-danger)' },
+          emphasis: { focus: 'none', itemStyle: { color: 'var(--color-danger)', opacity: 1 } },
+          blur: { itemStyle: { color: 'var(--color-danger)', opacity: 1 } },
         },
       ],
     }
@@ -885,7 +890,7 @@
         </div>
       {/if}
       <div class="row g-4">
-        <div class="col-12 col-xxl-7">
+        <div class="col-12">
           <div class="card shadow-sm h-100">
             <div class="card-body p-4 d-grid gap-4">
               <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-start">

@@ -17,4 +17,4 @@
 
 ## 4. User-Review UI Corrections
 
-- [ ] 4.1 Make the period-performance card span the full available dashboard content width at every breakpoint and keep both income and expense bar series visibly opaque in their normal semantic tones while any bar is hovered and its tooltip is active; follow the TDD flow with focused dashboard option/layout coverage, then run the required Finance smoke and independent desktop/narrow visual verification for both corrections as one coupled UI chunk.
+- [x] 4.1 Make the period-performance card span the full available dashboard content width at every breakpoint and keep both income and expense bar series visibly opaque in their normal semantic tones while any bar is hovered and its tooltip is active; follow the TDD flow with focused dashboard option/layout coverage, then run the required Finance smoke and independent desktop/narrow visual verification for both corrections as one coupled UI chunk.

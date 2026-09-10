@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listAccounts: vi.fn(),
   listTransactions: vi.fn(),
   listConnections: vi.fn(),
+  chartSetOption: vi.fn(),
   shellState: null as FinanceShellState | null,
 }))
 
@@ -59,6 +60,31 @@ vi.mock('../lib/finance/shell-state.svelte', async (importOriginal) => ({
   useFinanceShellState: vi.fn(() => mocks.shellState!),
 }))
 
+vi.mock('echarts/core', () => ({
+  init: vi.fn((element: HTMLElement) => ({
+    dispose: vi.fn(),
+    resize: vi.fn(),
+    setOption: (option: { xAxis?: { data?: string[] } }) => {
+      mocks.chartSetOption(option)
+      element.replaceChildren(...(option.xAxis?.data ?? []).map((label) => {
+        const tick = document.createElement('span')
+        tick.textContent = label
+        return tick
+      }))
+    },
+  })),
+  use: vi.fn(),
+}))
+
+vi.mock('echarts/charts', () => ({ BarChart: class BarChart {} }))
+vi.mock('echarts/components', () => ({
+  AriaComponent: class AriaComponent {},
+  GridComponent: class GridComponent {},
+  LegendComponent: class LegendComponent {},
+  TooltipComponent: class TooltipComponent {},
+}))
+vi.mock('echarts/renderers', () => ({ SVGRenderer: class SVGRenderer {} }))
+
 describe('Finance dashboard page', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -70,6 +96,7 @@ describe('Finance dashboard page', () => {
     mocks.listAccounts.mockReset()
     mocks.listTransactions.mockReset()
     mocks.listConnections.mockReset()
+    mocks.chartSetOption.mockReset()
     mocks.shellState = new FinanceShellState()
     mocks.listTenants.mockResolvedValue([
       { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
@@ -179,6 +206,34 @@ describe('Finance dashboard page', () => {
     })
     expect(screen.getByRole('img', { name: 'Cash flow chart' })).toBeInTheDocument()
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 1200.00 USD · Expense 450.00 USD')).toBeInTheDocument()
+  })
+
+  it('uses the full dashboard row for period performance and prevents ECharts emphasis blur from fading either cash-flow series', async () => {
+    render(Finance)
+
+    const periodPerformance = await screen.findByText('Period performance')
+    expect(periodPerformance.closest('.col-12')).toHaveClass('col-12')
+    expect(periodPerformance.closest('.col-12')).not.toHaveClass('col-xxl-7')
+
+    await waitFor(() => expect(mocks.chartSetOption).toHaveBeenCalled())
+    const option = mocks.chartSetOption.mock.calls.at(-1)?.[0] as {
+      tooltip: { confine?: boolean }
+      series: Array<{
+        emphasis?: { focus?: string; itemStyle?: { color?: string; opacity?: number } }
+        blur?: { itemStyle?: { color?: string; opacity?: number } }
+      }>
+    }
+    expect(option.tooltip.confine).toBe(true)
+    expect(option.series).toEqual([
+      expect.objectContaining({
+        emphasis: { focus: 'none', itemStyle: { color: 'var(--color-success)', opacity: 1 } },
+        blur: { itemStyle: { color: 'var(--color-success)', opacity: 1 } },
+      }),
+      expect.objectContaining({
+        emphasis: { focus: 'none', itemStyle: { color: 'var(--color-danger)', opacity: 1 } },
+        blur: { itemStyle: { color: 'var(--color-danger)', opacity: 1 } },
+      }),
+    ])
   })
 
   it('requests monthly series for aligned longer reporting periods and keeps their bounds in the URL', async () => {
