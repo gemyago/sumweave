@@ -292,8 +292,9 @@ The Finance dashboard SHALL present selected-period settled income and expense a
 - **AND** the selected range MUST remain visible and persist through the existing dashboard URL range behavior
 
 #### Scenario: Series request lifecycle is independent and current
-- **WHEN** the cash-flow series is loading, empty, fails, or a newer tenant or range selection supersedes it
+- **WHEN** the cash-flow series is loading, empty, incomplete, fails, or a newer tenant or range selection supersedes it
 - **THEN** the chart card MUST show its own honest loading, zero-activity, partial-data warning, or recoverable error with retry without making the remaining dashboard unavailable
+- **AND** an incomplete series with zero values in every bucket MUST render its partial-data warning and missing-FX diagnostics before the zero-activity state so omitted valuations cannot appear as genuine inactivity
 - **AND** a response for an obsolete tenant, range, or grouping MUST NOT replace the current series
 
 #### Scenario: ECharts integration is reusable and bounded
