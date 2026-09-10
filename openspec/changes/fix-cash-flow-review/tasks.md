@@ -13,4 +13,4 @@
 
 ## 4. Monthly Calendar Parity Follow-up
 
-- [ ] 4.1 Align the monthly validator and PostgreSQL `timestamptz` bucket generation on the submitted RFC 3339 start-offset calendar semantics, and follow the TDD flow with an actual PostgreSQL comparison of validator bucket acceptance/counting and generated monthly buckets for offset-bearing inputs, including accepted 366-bucket and rejected over-366 cap boundaries; make no schema or migration changes.
+- [x] 4.1 Align the monthly validator and PostgreSQL `timestamptz` bucket generation on the submitted RFC 3339 start-offset calendar semantics, and follow the TDD flow with an actual PostgreSQL comparison of validator bucket acceptance/counting and generated monthly buckets for offset-bearing inputs, including accepted 366-bucket and rejected over-366 cap boundaries; make no schema or migration changes.

@@ -83,6 +83,8 @@ func cashFlowBucketCount(startDate time.Time, endDate time.Time, groupBy CashFlo
 }
 
 func cashFlowMonthBoundary(startDate time.Time, monthIndex int) time.Time {
+	_, offsetSeconds := startDate.Zone()
+	startDate = startDate.In(time.FixedZone("", offsetSeconds))
 	firstOfTargetMonth := time.Date(
 		startDate.Year(),
 		startDate.Month()+time.Month(monthIndex),

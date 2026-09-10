@@ -144,6 +144,55 @@ func TestCashFlowSeriesContracts(t *testing.T) {
 		assert.Equal(t, dashboard.Settled.ExpenseMinor, series.Buckets[0].ExpenseMinor)
 	})
 
+	t.Run("matches PostgreSQL monthly buckets and cap validation in the submitted offset calendar", func(t *testing.T) {
+		fake := faker.New()
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
+		seriesStore := persistence.NewCashFlowSeriesStore(database)
+		start := time.Date(2024, time.January, 31, 0, 30, 0, 0, time.FixedZone("submitted", 2*60*60))
+		acceptedEnd := cashFlowMonthBoundary(start, maxCashFlowBuckets)
+		tenant := domain.Tenant{
+			ID:              "tenant-" + fake.UUID().V4(),
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "EUR",
+			CreatedAt:       start,
+			UpdatedAt:       start,
+		}
+		_, err := store.SaveTenant(t.Context(), tenant)
+		require.NoError(t, err)
+
+		acceptedParams := CashFlowSeriesParams{
+			ActorUserID: "actor-" + fake.UUID().V4(),
+			TenantID:    tenant.ID,
+			StartDate:   start,
+			EndDate:     acceptedEnd,
+			GroupBy:     CashFlowGroupByMonth,
+		}
+		require.Equal(t, maxCashFlowBuckets, cashFlowBucketCount(start, acceptedEnd, CashFlowGroupByMonth))
+		require.NoError(t, ValidateCashFlowSeriesParams(acceptedParams))
+		acceptedSeries, err := seriesStore.GetCashFlowSeries(t.Context(), persistence.CashFlowSeriesParams{
+			TenantID: tenant.ID, StartDate: start, EndDate: acceptedEnd,
+			GroupBy: CashFlowGroupByMonth, FXProvider: "provider-" + fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		require.Len(t, acceptedSeries.Buckets, maxCashFlowBuckets)
+		for index, bucket := range acceptedSeries.Buckets {
+			require.True(t, cashFlowMonthBoundary(start, index).Equal(bucket.StartDate), "bucket %d", index)
+		}
+
+		overCapEnd := acceptedEnd.Add(time.Microsecond)
+		overCapParams := acceptedParams
+		overCapParams.EndDate = overCapEnd
+		require.Equal(t, maxCashFlowBuckets+1, cashFlowBucketCount(start, overCapEnd, CashFlowGroupByMonth))
+		require.Error(t, ValidateCashFlowSeriesParams(overCapParams))
+		overCapSeries, err := seriesStore.GetCashFlowSeries(t.Context(), persistence.CashFlowSeriesParams{
+			TenantID: tenant.ID, StartDate: start, EndDate: overCapEnd,
+			GroupBy: CashFlowGroupByMonth, FXProvider: "provider-" + fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		require.Len(t, overCapSeries.Buckets, maxCashFlowBuckets+1)
+	})
+
 	t.Run("authorizes the tenant before delegating a valid request", func(t *testing.T) {
 		fake := faker.New()
 		params := makeParams(fake)

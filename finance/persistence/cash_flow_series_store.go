@@ -63,6 +63,7 @@ func (s *CashFlowSeriesStore) GetCashFlowSeries(
 		params.EndDate,
 		params.TenantID,
 		params.FXProvider,
+		cashFlowPostgreSQLStartOffset(params.StartDate),
 	).Scan(&rows).Error; queryErr != nil {
 		return domain.CashFlowSeries{}, fmt.Errorf("get cash-flow series: %w", queryErr)
 	}
@@ -92,22 +93,36 @@ func (s *CashFlowSeriesStore) GetCashFlowSeries(
 }
 
 func cashFlowSeriesQuery(groupBy CashFlowGroupBy) (string, error) {
-	var interval string
+	var bucketStart, nextBucketStart string
 	switch groupBy {
 	case CashFlowGroupByDay:
-		interval = "1 day"
+		bucketStart = "request.start_date + bucket_indices.bucket_index * interval '1 day'"
+		nextBucketStart = "request.start_date + (bucket_indices.bucket_index + 1) * interval '1 day'"
 	case CashFlowGroupByMonth:
-		interval = "1 month"
+		bucketStart = "timezone(request.start_offset, timezone(request.start_offset, request.start_date) + bucket_indices.bucket_index * interval '1 month')"
+		nextBucketStart = "timezone(request.start_offset, timezone(request.start_offset, request.start_date) + (bucket_indices.bucket_index + 1) * interval '1 month')"
 	default:
 		return "", fmt.Errorf("unsupported cash-flow grouping %q", groupBy)
 	}
-	return fmt.Sprintf(cashFlowSeriesQueryTemplate, interval, interval, interval), nil
+	return fmt.Sprintf(cashFlowSeriesQueryTemplate, nextBucketStart, bucketStart, nextBucketStart), nil
+}
+
+func cashFlowPostgreSQLStartOffset(startDate time.Time) string {
+	_, offsetSeconds := startDate.Zone()
+	sign := "-"
+	if offsetSeconds < 0 {
+		offsetSeconds = -offsetSeconds
+		sign = "+"
+	}
+	hour := offsetSeconds / int(time.Hour/time.Second)
+	minute := offsetSeconds % int(time.Hour/time.Second) / int(time.Minute/time.Second)
+	return fmt.Sprintf("%s%02d:%02d", sign, hour, minute)
 }
 
 const cashFlowSeriesQueryTemplate = `
 WITH RECURSIVE request AS (
     SELECT ?::timestamptz AS start_date, ?::timestamptz AS end_date,
-           ?::text AS tenant_id, ?::text AS fx_provider
+           ?::text AS tenant_id, ?::text AS fx_provider, ?::text AS start_offset
 ), tenant AS (
     SELECT item.id AS tenant_id, item.display_currency, request.fx_provider
     FROM finance_tenants item
@@ -118,11 +133,11 @@ WITH RECURSIVE request AS (
     SELECT bucket_indices.bucket_index + 1
     FROM bucket_indices
     CROSS JOIN request
-    WHERE request.start_date + (bucket_indices.bucket_index + 1) * interval '%s' < request.end_date
+    WHERE %s < request.end_date
 ), buckets AS (
     SELECT tenant.tenant_id, tenant.display_currency, tenant.fx_provider,
-           request.start_date + bucket_indices.bucket_index * interval '%s' AS bucket_start,
-           LEAST(request.start_date + (bucket_indices.bucket_index + 1) * interval '%s', request.end_date) AS bucket_end
+           %s AS bucket_start,
+           LEAST(%s, request.end_date) AS bucket_end
     FROM tenant
     CROSS JOIN request
     CROSS JOIN bucket_indices
