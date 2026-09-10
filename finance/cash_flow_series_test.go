@@ -46,6 +46,102 @@ func TestCashFlowSeriesContracts(t *testing.T) {
 
 		monthStart := time.Date(2026, time.January, 31, 9, 30, 0, 0, time.FixedZone("monthly", 2*60*60))
 		assert.Equal(t, 3, cashFlowBucketCount(monthStart, monthStart.AddDate(0, 2, 1), CashFlowGroupByMonth))
+
+		originalAnchorStart := time.Date(2024, time.January, 31, 9, 30, 0, 0, time.FixedZone("monthly-anchor", 2*60*60))
+		assert.Equal(t, 2, cashFlowBucketCount(
+			originalAnchorStart,
+			time.Date(2024, time.March, 30, 9, 30, 0, 0, originalAnchorStart.Location()),
+			CashFlowGroupByMonth,
+		))
+		params = makeParams(fake)
+		params.StartDate = originalAnchorStart
+		params.EndDate = time.Date(2054, time.July, 31, 9, 30, 0, 0, originalAnchorStart.Location())
+		params.GroupBy = CashFlowGroupByMonth
+		require.NoError(t, ValidateCashFlowSeriesParams(params))
+		params.EndDate = params.EndDate.Add(time.Nanosecond)
+		require.Error(t, ValidateCashFlowSeriesParams(params))
+	})
+
+	cashFlowRegressionName := "matches PostgreSQL converted buckets with dashboard settled totals at reviewed FX boundaries"
+	t.Run(cashFlowRegressionName, func(t *testing.T) {
+		fake := faker.New()
+		database := openTestDatabase(t)
+		store := persistence.NewStore(database)
+		provider := "provider-" + fake.UUID().V4()
+		service := NewService(store, WithDefaultFXProvider(provider))
+		reporting := NewReportingService(
+			store,
+			persistence.NewCashFlowSeriesStore(database),
+			WithReportingServiceDefaultFXProvider(provider),
+		)
+		ownerID := "owner-" + fake.UUID().V4()
+		start := time.Date(2026, time.July, 14, 9, 30, 0, 0, time.FixedZone("series", 2*60*60))
+		end := start.AddDate(0, 0, 1)
+
+		tenant, err := service.CreateTenant(t.Context(), CreateTenantParams{
+			ActorUserID:     ownerID,
+			Name:            "tenant-" + fake.Company().Name(),
+			DisplayCurrency: "EUR",
+			SeedDefaults:    true,
+		})
+		require.NoError(t, err)
+		usdAccount, err := service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: ownerID,
+			TenantID:    tenant.ID,
+			Name:        "usd-" + fake.Lorem().Word(),
+			Currency:    "USD",
+			Kind:        domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+		gbpAccount, err := service.CreateAccount(t.Context(), CreateAccountParams{
+			ActorUserID: ownerID,
+			TenantID:    tenant.ID,
+			Name:        "gbp-" + fake.Lorem().Word(),
+			Currency:    "GBP",
+			Kind:        domain.AccountKindManual,
+		})
+		require.NoError(t, err)
+		require.NoError(t, store.SaveCurrentFXRates(t.Context(), []domain.FXRate{
+			{
+				Provider: provider, BaseCurrency: "USD", QuoteCurrency: "EUR", Rate: 1.5,
+				EffectiveAt: start, LastSuccessfulRefreshAt: start,
+			},
+			{
+				Provider: provider, BaseCurrency: "GBP", QuoteCurrency: "EUR", Rate: 0.29,
+				EffectiveAt: start, LastSuccessfulRefreshAt: start,
+			},
+		}))
+		for _, transaction := range []RecordTransactionParams{
+			{
+				ActorUserID: ownerID, TenantID: tenant.ID, AccountID: usdAccount.ID,
+				Source: domain.TransactionSourceManual, Status: domain.TransactionStatusBooked,
+				Kind: domain.TransactionKindIncome, AmountMinor: 99, Currency: "USD",
+				Description: "income-" + fake.Lorem().Word(), EffectiveAt: start.Add(time.Minute),
+			},
+			{
+				ActorUserID: ownerID, TenantID: tenant.ID, AccountID: gbpAccount.ID,
+				Source: domain.TransactionSourceManual, Status: domain.TransactionStatusBooked,
+				Kind: domain.TransactionKindExpense, AmountMinor: -50, Currency: "GBP",
+				Description: "expense-" + fake.Lorem().Word(), EffectiveAt: start.Add(2 * time.Minute),
+			},
+		} {
+			_, recordErr := service.RecordTransaction(t.Context(), transaction)
+			require.NoError(t, recordErr)
+		}
+
+		series, err := reporting.GetCashFlowSeries(t.Context(), CashFlowSeriesParams{
+			ActorUserID: ownerID, TenantID: tenant.ID, StartDate: start, EndDate: end, GroupBy: CashFlowGroupByDay,
+		})
+		require.NoError(t, err)
+		dashboard, err := reporting.GetDashboard(t.Context(), DashboardParams{
+			ActorUserID: ownerID, TenantID: tenant.ID, StartDate: start, EndDate: end,
+		})
+		require.NoError(t, err)
+		require.Len(t, series.Buckets, 1)
+		assert.Equal(t, int64(149), series.Buckets[0].IncomeMinor)
+		assert.Equal(t, int64(14), series.Buckets[0].ExpenseMinor)
+		assert.Equal(t, dashboard.Settled.IncomeMinor, series.Buckets[0].IncomeMinor)
+		assert.Equal(t, dashboard.Settled.ExpenseMinor, series.Buckets[0].ExpenseMinor)
 	})
 
 	t.Run("authorizes the tenant before delegating a valid request", func(t *testing.T) {

@@ -175,12 +175,18 @@ WITH RECURSIVE request AS (
            buckets.bucket_start, buckets.bucket_end,
            COALESCE(SUM(CASE
              WHEN contributions.currency = contributions.display_currency THEN contributions.income_native_minor
-             WHEN contributions.matched_provider IS NOT NULL THEN ROUND(contributions.income_native_minor * contributions.rate_value)::bigint
+              WHEN contributions.matched_provider IS NOT NULL THEN (
+                SIGN(contributions.income_native_minor::double precision * contributions.rate_value) *
+                FLOOR(ABS(contributions.income_native_minor::double precision * contributions.rate_value) + 0.5)
+              )::bigint
              ELSE 0
            END), 0)::bigint AS income_minor,
            COALESCE(SUM(CASE
              WHEN contributions.currency = contributions.display_currency THEN contributions.expense_native_minor
-             WHEN contributions.matched_provider IS NOT NULL THEN ROUND(contributions.expense_native_minor * contributions.rate_value)::bigint
+              WHEN contributions.matched_provider IS NOT NULL THEN (
+                SIGN(contributions.expense_native_minor::double precision * contributions.rate_value) *
+                FLOOR(ABS(contributions.expense_native_minor::double precision * contributions.rate_value) + 0.5)
+              )::bigint
              ELSE 0
            END), 0)::bigint AS expense_minor,
            ''::text AS provider, ''::text AS base_currency, ''::text AS quote_currency,

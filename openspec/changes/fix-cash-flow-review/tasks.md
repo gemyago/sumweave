@@ -1,7 +1,7 @@
 ## 1. Finance Series Semantics
 
-- [ ] 1.1 Align PostgreSQL converted cash-flow contributions with existing Go `float64` multiplication and `math.Round` half-away-from-zero behavior, and follow the TDD flow with a PostgreSQL regression that compares the series bucket sum and dashboard settled totals for the reviewed half-unit and floating-boundary FX cases.
-- [ ] 1.2 Anchor monthly cash-flow bucket-limit validation to the original start timestamp rather than a prior clipped month boundary, and follow the TDD flow with month-end tests covering original-anchor boundaries plus accepted and rejected 366-bucket caps.
+- [x] 1.1 Align PostgreSQL converted cash-flow contributions with existing Go `float64` multiplication and `math.Round` half-away-from-zero behavior, and follow the TDD flow with a PostgreSQL regression that compares the series bucket sum and dashboard settled totals for the reviewed half-unit and floating-boundary FX cases.
+- [x] 1.2 Anchor monthly cash-flow bucket-limit validation to the original start timestamp rather than a prior clipped month boundary, and follow the TDD flow with month-end tests covering original-anchor boundaries plus accepted and rejected 366-bucket caps.
 
 ## 2. Cash-Flow API Validation
 

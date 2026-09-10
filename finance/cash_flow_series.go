@@ -64,39 +64,45 @@ func validateCashFlowGroupBy(groupBy CashFlowGroupBy) error {
 }
 
 func cashFlowBucketCount(startDate time.Time, endDate time.Time, groupBy CashFlowGroupBy) int {
-	count := 0
-	for boundary := startDate; boundary.Before(endDate); count++ {
-		switch groupBy {
-		case CashFlowGroupByDay:
+	switch groupBy {
+	case CashFlowGroupByDay:
+		count := 0
+		for boundary := startDate; boundary.Before(endDate); count++ {
 			boundary = boundary.AddDate(0, 0, 1)
-		case CashFlowGroupByMonth:
-			boundary = addCashFlowMonth(boundary)
 		}
+		return count
+	case CashFlowGroupByMonth:
+		count := 0
+		for boundary := startDate; boundary.Before(endDate); count++ {
+			boundary = cashFlowMonthBoundary(startDate, count+1)
+		}
+		return count
+	default:
+		return 0
 	}
-	return count
 }
 
-func addCashFlowMonth(boundary time.Time) time.Time {
-	firstOfNextMonth := time.Date(
-		boundary.Year(),
-		boundary.Month()+1,
+func cashFlowMonthBoundary(startDate time.Time, monthIndex int) time.Time {
+	firstOfTargetMonth := time.Date(
+		startDate.Year(),
+		startDate.Month()+time.Month(monthIndex),
 		1,
-		boundary.Hour(),
-		boundary.Minute(),
-		boundary.Second(),
-		boundary.Nanosecond(),
-		boundary.Location(),
+		startDate.Hour(),
+		startDate.Minute(),
+		startDate.Second(),
+		startDate.Nanosecond(),
+		startDate.Location(),
 	)
-	lastOfNextMonth := firstOfNextMonth.AddDate(0, 1, -1).Day()
-	day := min(boundary.Day(), lastOfNextMonth)
+	lastOfTargetMonth := firstOfTargetMonth.AddDate(0, 1, -1).Day()
+	day := min(startDate.Day(), lastOfTargetMonth)
 	return time.Date(
-		firstOfNextMonth.Year(),
-		firstOfNextMonth.Month(),
+		firstOfTargetMonth.Year(),
+		firstOfTargetMonth.Month(),
 		day,
-		boundary.Hour(),
-		boundary.Minute(),
-		boundary.Second(),
-		boundary.Nanosecond(),
-		boundary.Location(),
+		startDate.Hour(),
+		startDate.Minute(),
+		startDate.Second(),
+		startDate.Nanosecond(),
+		startDate.Location(),
 	)
 }
