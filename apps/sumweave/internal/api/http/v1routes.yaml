@@ -1584,6 +1584,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/finance/tenants/{tenantId}/cash-flow-series:
+    get:
+      summary: Read tenant cash-flow series
+      operationId: getFinanceCashFlowSeries
+      tags: [finance]
+      parameters:
+        - in: path
+          name: tenantId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: startDate
+          required: true
+          description: Inclusive cash-flow series range start. The range is [startDate, endDate).
+          schema: { type: string, format: date-time }
+        - in: query
+          name: endDate
+          required: true
+          description: Exclusive cash-flow series range end. It must be later than startDate.
+          schema: { type: string, format: date-time }
+        - in: query
+          name: groupBy
+          required: true
+          schema: { type: string, enum: [day, month] }
+      responses:
+        '200':
+          description: Tenant cash-flow series
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCashFlowSeriesResponse"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /api/v1/finance/fx/diagnostics:
     get:
       summary: Read finance FX diagnostics
@@ -2528,6 +2565,46 @@ components:
         incomeMinor: { type: integer, format: int64 }
         expenseMinor: { type: integer, format: int64 }
         netMinor: { type: integer, format: int64 }
+    FinanceCashFlowSeriesResponse:
+      type: object
+      additionalProperties: false
+      required: [period, groupBy, displayCurrency, complete, missingFx, buckets]
+      properties:
+        period: { $ref: "#/components/schemas/FinanceCashFlowSeriesPeriod" }
+        groupBy: { type: string, enum: [day, month] }
+        displayCurrency: { type: string }
+        complete: { type: boolean }
+        missingFx:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceCashFlowMissingFxDiagnostic" }
+        buckets:
+          type: array
+          items: { $ref: "#/components/schemas/FinanceCashFlowSeriesBucket" }
+    FinanceCashFlowSeriesPeriod:
+      type: object
+      additionalProperties: false
+      required: [startDate, endDate]
+      properties:
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+    FinanceCashFlowMissingFxDiagnostic:
+      type: object
+      additionalProperties: false
+      required: [provider, baseCurrency, quoteCurrency, affectedTransactionCount]
+      properties:
+        provider: { type: string }
+        baseCurrency: { type: string }
+        quoteCurrency: { type: string }
+        affectedTransactionCount: { type: integer, format: int64, minimum: 0 }
+    FinanceCashFlowSeriesBucket:
+      type: object
+      additionalProperties: false
+      required: [startDate, endDate, incomeMinor, expenseMinor]
+      properties:
+        startDate: { type: string, format: date-time }
+        endDate: { type: string, format: date-time }
+        incomeMinor: { type: integer, format: int64 }
+        expenseMinor: { type: integer, format: int64 }
     FinanceFxProviderDiagnostic:
       type: object
       required: [name, default, ready]

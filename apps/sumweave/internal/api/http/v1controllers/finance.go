@@ -126,6 +126,10 @@ type bankSyncService interface {
 }
 
 type reportingService interface {
+	GetCashFlowSeries(
+		context.Context,
+		financepkg.CashFlowSeriesParams,
+	) (financepkg.CashFlowSeries, error)
 	GetDashboard(context.Context, financepkg.DashboardParams) (financepkg.Dashboard, error)
 }
 
@@ -1262,6 +1266,44 @@ func (c *FinanceController) GetFinanceDashboard(
 		}
 
 		response := mapDashboard(item)
+		return &response, nil
+	})
+
+	return c.deps.AuthMiddleware(inner)
+}
+
+func (c *FinanceController) GetFinanceCashFlowSeries(
+	builder handlers.HandlerBuilder[
+		*models.GetFinanceCashFlowSeriesParams,
+		*models.FinanceCashFlowSeriesResponse,
+	],
+) http.Handler {
+	inner := builder.HandleWith(func(
+		ctx context.Context,
+		params *models.GetFinanceCashFlowSeriesParams,
+	) (*models.FinanceCashFlowSeriesResponse, error) {
+		userID, err := operatorUserIDFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		seriesParams := financepkg.CashFlowSeriesParams{
+			ActorUserID: userID,
+			TenantID:    params.TenantID,
+			StartDate:   params.StartDate,
+			EndDate:     params.EndDate,
+			GroupBy:     financepkg.CashFlowGroupBy(params.GroupBy),
+		}
+		if validationErr := financepkg.ValidateCashFlowSeriesParams(seriesParams); validationErr != nil {
+			return nil, mapFinanceRangeError(validationErr)
+		}
+
+		item, err := c.deps.ReportingService.GetCashFlowSeries(ctx, seriesParams)
+		if err != nil {
+			return nil, mapFinanceRangeError(err)
+		}
+
+		response := mapCashFlowSeries(item)
 		return &response, nil
 	})
 
@@ -2782,6 +2824,37 @@ func mapDashboard(item financepkg.Dashboard) models.FinanceDashboardResponse { /
 			NetMinor:     total.NetMinor,
 		}
 		response.NativeSettledTotals = append(response.NativeSettledTotals, &mapped)
+	}
+	return response
+}
+
+func mapCashFlowSeries(item financepkg.CashFlowSeries) models.FinanceCashFlowSeriesResponse {
+	response := models.FinanceCashFlowSeriesResponse{
+		Period: &models.FinanceCashFlowSeriesPeriod{
+			StartDate: item.Period.StartDate,
+			EndDate:   item.Period.EndDate,
+		},
+		GroupBy:         models.FinanceCashFlowSeriesResponseGroupBy(item.GroupBy),
+		DisplayCurrency: item.DisplayCurrency,
+		Complete:        item.Complete,
+		MissingFx:       make([]*models.FinanceCashFlowMissingFxDiagnostic, 0, len(item.MissingFX)),
+		Buckets:         make([]*models.FinanceCashFlowSeriesBucket, 0, len(item.Buckets)),
+	}
+	for _, diagnostic := range item.MissingFX {
+		response.MissingFx = append(response.MissingFx, &models.FinanceCashFlowMissingFxDiagnostic{
+			Provider:                 diagnostic.Provider,
+			BaseCurrency:             diagnostic.BaseCurrency,
+			QuoteCurrency:            diagnostic.QuoteCurrency,
+			AffectedTransactionCount: int64(diagnostic.AffectedTransactionCount),
+		})
+	}
+	for _, bucket := range item.Buckets {
+		response.Buckets = append(response.Buckets, &models.FinanceCashFlowSeriesBucket{
+			StartDate:    bucket.StartDate,
+			EndDate:      bucket.EndDate,
+			IncomeMinor:  bucket.IncomeMinor,
+			ExpenseMinor: bucket.ExpenseMinor,
+		})
 	}
 	return response
 }

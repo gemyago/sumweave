@@ -2070,6 +2070,72 @@ func (_c *mockfinanceService_GetCSVImportAudit_Call) RunAndReturn(run func(conte
 	return _c
 }
 
+// GetCashFlowSeries provides a mock function for the type mockfinanceService
+func (_mock *mockfinanceService) GetCashFlowSeries(context1 context.Context, cashFlowSeriesParams finance.CashFlowSeriesParams) (finance.CashFlowSeries, error) {
+	ret := _mock.Called(context1, cashFlowSeriesParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCashFlowSeries")
+	}
+
+	var r0 finance.CashFlowSeries
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.CashFlowSeriesParams) (finance.CashFlowSeries, error)); ok {
+		return returnFunc(context1, cashFlowSeriesParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, finance.CashFlowSeriesParams) finance.CashFlowSeries); ok {
+		r0 = returnFunc(context1, cashFlowSeriesParams)
+	} else {
+		r0 = ret.Get(0).(finance.CashFlowSeries)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, finance.CashFlowSeriesParams) error); ok {
+		r1 = returnFunc(context1, cashFlowSeriesParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// mockfinanceService_GetCashFlowSeries_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCashFlowSeries'
+type mockfinanceService_GetCashFlowSeries_Call struct {
+	*mock.Call
+}
+
+// GetCashFlowSeries is a helper method to define mock.On call
+//   - context1 context.Context
+//   - cashFlowSeriesParams finance.CashFlowSeriesParams
+func (_e *mockfinanceService_Expecter) GetCashFlowSeries(context1 interface{}, cashFlowSeriesParams interface{}) *mockfinanceService_GetCashFlowSeries_Call {
+	return &mockfinanceService_GetCashFlowSeries_Call{Call: _e.mock.On("GetCashFlowSeries", context1, cashFlowSeriesParams)}
+}
+
+func (_c *mockfinanceService_GetCashFlowSeries_Call) Run(run func(context1 context.Context, cashFlowSeriesParams finance.CashFlowSeriesParams)) *mockfinanceService_GetCashFlowSeries_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 finance.CashFlowSeriesParams
+		if args[1] != nil {
+			arg1 = args[1].(finance.CashFlowSeriesParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *mockfinanceService_GetCashFlowSeries_Call) Return(v finance.CashFlowSeries, err error) *mockfinanceService_GetCashFlowSeries_Call {
+	_c.Call.Return(v, err)
+	return _c
+}
+
+func (_c *mockfinanceService_GetCashFlowSeries_Call) RunAndReturn(run func(context1 context.Context, cashFlowSeriesParams finance.CashFlowSeriesParams) (finance.CashFlowSeries, error)) *mockfinanceService_GetCashFlowSeries_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetDashboard provides a mock function for the type mockfinanceService
 func (_mock *mockfinanceService) GetDashboard(context1 context.Context, dashboardParams finance.DashboardParams) (finance.Dashboard, error) {
 	ret := _mock.Called(context1, dashboardParams)

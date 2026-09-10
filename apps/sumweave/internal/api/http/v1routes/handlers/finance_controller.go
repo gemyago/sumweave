@@ -188,6 +188,16 @@ type FinanceController interface {
 		*FinanceProviderSnapshot,
 	]) http.Handler
 
+	// GET /api/v1/finance/tenants/{tenantId}/cash-flow-series
+	//
+	// Request type: GetFinanceCashFlowSeriesParams,
+	//
+	// Response type: FinanceCashFlowSeriesResponse
+	GetFinanceCashFlowSeries(HandlerBuilder[
+		*GetFinanceCashFlowSeriesParams,
+		*FinanceCashFlowSeriesResponse,
+	]) http.Handler
+
 	// GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 	//
 	// Request type: GetFinanceCsvImportAuditParams,
@@ -644,6 +654,8 @@ type FinanceController interface {
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}
 // 
+// - GET /api/v1/finance/tenants/{tenantId}/cash-flow-series
+// 
 // - GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 // 
 // - GET /api/v1/finance/tenants/{tenantId}/dashboard
@@ -751,6 +763,7 @@ func(rootHandler *RootHandler) RegisterFinanceRoutes(controller FinanceControlle
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}", controller.GetFinanceAccount(builder.GetFinanceAccount))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/account-imports/{importId}", controller.GetFinanceAccountCsvImportAudit(builder.GetFinanceAccountCsvImportAudit))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}", controller.GetFinanceAccountProviderSnapshot(builder.GetFinanceAccountProviderSnapshot))
+	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/cash-flow-series", controller.GetFinanceCashFlowSeries(builder.GetFinanceCashFlowSeries))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/imports/{importId}", controller.GetFinanceCsvImportAudit(builder.GetFinanceCsvImportAudit))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/tenants/{tenantId}/dashboard", controller.GetFinanceDashboard(builder.GetFinanceDashboard))
 	rootHandler.router.HandleRoute("GET", "/api/v1/finance/fx/diagnostics", controller.GetFinanceFxDiagnostics(builder.GetFinanceFxDiagnostics))

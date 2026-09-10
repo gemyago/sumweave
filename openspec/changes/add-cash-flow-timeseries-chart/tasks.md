@@ -6,8 +6,8 @@
 
 ## 2. Protected API Contract
 
-- [ ] 2.1 Add the protected `/api/v1/finance/tenants/{tenantId}/cash-flow-series` OpenAPI operation and exact response schemas, regenerate Go route code and controller mocks, and follow the TDD flow with registered-route controller tests for authentication, parameter validation, domain mapping, and errors.
-- [ ] 2.2 Extend the hand-written typed Finance UI API with cash-flow request serialization and strict response mapping, and follow the TDD flow with client contract tests for required fields, timestamps, grouping, completeness, missing-FX diagnostics, and malformed responses.
+- [x] 2.1 Add the protected `/api/v1/finance/tenants/{tenantId}/cash-flow-series` OpenAPI operation and exact response schemas, regenerate Go route code and controller mocks, and follow the TDD flow with registered-route controller tests for authentication, parameter validation, domain mapping, and errors.
+- [x] 2.2 Extend the hand-written typed Finance UI API with cash-flow request serialization and strict response mapping, and follow the TDD flow with client contract tests for required fields, timestamps, grouping, completeness, missing-FX diagnostics, and malformed responses.
 
 ## 3. ECharts Dashboard Visualization
 

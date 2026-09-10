@@ -640,6 +640,65 @@ func newParamsParserFinanceGetFinanceAccountProviderSnapshot(rootHandler *RootHa
 	}
 }
 
+type paramsParserFinanceGetFinanceCashFlowSeries struct {
+	bindTenantID requestParamBinder[string, string]
+	bindStartDate requestParamBinder[[]string, time.Time]
+	bindEndDate requestParamBinder[[]string, time.Time]
+	bindGroupBy requestParamBinder[[]string, GetFinanceCashFlowSeriesParamsGroupBy]
+}
+
+func (p *paramsParserFinanceGetFinanceCashFlowSeries) parse(router httpRouter, req *http.Request) (*GetFinanceCashFlowSeriesParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &GetFinanceCashFlowSeriesParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTenantID(pathParamsCtx.Fork("tenantId"), readPathValue("tenantId", router, req), &reqParams.TenantID)
+	// query params
+	query := req.URL.Query()
+	queryParamsCtx := bindingCtx.Fork("query")
+	p.bindStartDate(queryParamsCtx.Fork("startDate"), readQueryValue("startDate", query), &reqParams.StartDate)
+	p.bindEndDate(queryParamsCtx.Fork("endDate"), readQueryValue("endDate", query), &reqParams.EndDate)
+	p.bindGroupBy(queryParamsCtx.Fork("groupBy"), readQueryValue("groupBy", query), &reqParams.GroupBy)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserFinanceGetFinanceCashFlowSeries(rootHandler *RootHandler) paramsParser[*GetFinanceCashFlowSeriesParams] {
+	return &paramsParserFinanceGetFinanceCashFlowSeries{
+		bindTenantID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindStartDate: newRequestParamBinder(binderParams[[]string, time.Time]{
+			required: true,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.timeParser,
+			),
+			validateValue: NewSimpleFieldValidator[time.Time](
+			),
+		}),
+		bindEndDate: newRequestParamBinder(binderParams[[]string, time.Time]{
+			required: true,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.timeParser,
+			),
+			validateValue: NewSimpleFieldValidator[time.Time](
+			),
+		}),
+		bindGroupBy: newRequestParamBinder(binderParams[[]string, GetFinanceCashFlowSeriesParamsGroupBy]{
+			required: true,
+			parseValue: parseMultiValueParamAsSoloValue(
+				ParseGetFinanceCashFlowSeriesParamsGroupBy,
+			),
+			validateValue: NewSimpleFieldValidator[GetFinanceCashFlowSeriesParamsGroupBy](
+			),
+		}),
+	}
+}
+
 type paramsParserFinanceGetFinanceCsvImportAudit struct {
 	bindTenantID requestParamBinder[string, string]
 	bindImportID requestParamBinder[string, string]
@@ -2537,6 +2596,18 @@ type financeControllerBuilder struct {
 		httpHandlerActionFunc[*GetFinanceAccountProviderSnapshotParams, *FinanceProviderSnapshot],
 	]
 
+	// GET /api/v1/finance/tenants/{tenantId}/cash-flow-series
+	//
+	// Request type: GetFinanceCashFlowSeriesParams,
+	//
+	// Response type: FinanceCashFlowSeriesResponse
+	GetFinanceCashFlowSeries genericHandlerBuilder[
+		*GetFinanceCashFlowSeriesParams,
+		*FinanceCashFlowSeriesResponse,
+		handlerActionFunc[*GetFinanceCashFlowSeriesParams, *FinanceCashFlowSeriesResponse],
+		httpHandlerActionFunc[*GetFinanceCashFlowSeriesParams, *FinanceCashFlowSeriesResponse],
+	]
+
 	// GET /api/v1/finance/tenants/{tenantId}/imports/{importId}
 	//
 	// Request type: GetFinanceCsvImportAuditParams,
@@ -3417,6 +3488,26 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserFinanceGetFinanceAccountProviderSnapshot(app),
+			},
+		),
+
+		// GET /api/v1/finance/tenants/{tenantId}/cash-flow-series
+		GetFinanceCashFlowSeries: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*GetFinanceCashFlowSeriesParams,
+				*FinanceCashFlowSeriesResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*GetFinanceCashFlowSeriesParams,
+				*FinanceCashFlowSeriesResponse,
+			](),
+			makeActionBuilderParams[
+				*GetFinanceCashFlowSeriesParams,
+				*FinanceCashFlowSeriesResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserFinanceGetFinanceCashFlowSeries(app),
 			},
 		),
 

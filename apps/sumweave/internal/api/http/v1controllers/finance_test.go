@@ -611,6 +611,7 @@ func TestFinanceController(t *testing.T) {
 			{name: "finish redirect connection", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/link-redirect/finish", body: `{"provider":"pko","state":"state-1","code":"code-1"}`},
 			{name: "trigger connection sync", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/connections/connection-a/sync", body: `{"reason":"manual"}`},
 			{name: "dashboard", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/dashboard?startDate=2026-06-01T00:00:00Z&endDate=2026-06-30T00:00:00Z"},
+			{name: "cash flow series", method: http.MethodGet, target: "/api/v1/finance/tenants/tenant-a/cash-flow-series?startDate=2026-06-01T00:00:00Z&endDate=2026-06-30T00:00:00Z&groupBy=day"},
 			{name: "fx diagnostics", method: http.MethodGet, target: "/api/v1/finance/fx/diagnostics"},
 			{name: "fx sync", method: http.MethodPost, target: "/api/v1/finance/fx/sync", body: `{"provider":"nbp","baseCurrencies":["EUR"],"quoteCurrency":"USD","startDate":"2026-06-01T00:00:00Z","endDate":"2026-06-21T00:00:00Z"}`},
 			{name: "preview import", method: http.MethodPost, target: "/api/v1/finance/tenants/tenant-a/imports/preview", body: `{"importType":"transactions","fileName":"demo.csv","csv":"account,amount\nChecking,100"}`},
@@ -2409,6 +2410,96 @@ func TestFinanceController(t *testing.T) {
 			),
 		)
 		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+	})
+
+	t.Run("registered cash-flow series route maps its focused response", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		start := time.Date(2026, time.March, 1, 9, 30, 0, 123, time.FixedZone("reporting", 3*60*60))
+		end := start.AddDate(0, 0, 1)
+		service := newMockfinanceService(t)
+		service.EXPECT().
+			GetCashFlowSeries(mock.Anything, mock.MatchedBy(func(params financepkg.CashFlowSeriesParams) bool {
+				return params.ActorUserID == userID &&
+					params.TenantID == tenantID &&
+					params.StartDate.Equal(start) &&
+					params.EndDate.Equal(end) &&
+					params.GroupBy == financepkg.CashFlowGroupByDay
+			})).
+			Return(financepkg.CashFlowSeries{
+				Period:          financepkg.CashFlowPeriod{StartDate: start, EndDate: end},
+				GroupBy:         financepkg.CashFlowGroupByDay,
+				DisplayCurrency: "EUR",
+				Complete:        false,
+				MissingFX: []financepkg.CashFlowMissingFXDiagnostic{
+					{
+						Provider:                 "provider-" + fake.UUID().V4(),
+						BaseCurrency:             "USD",
+						QuoteCurrency:            "EUR",
+						AffectedTransactionCount: 2,
+					},
+				},
+				Buckets: []financepkg.CashFlowSeriesBucket{{
+					StartDate: start, EndDate: end, IncomeMinor: 420000, ExpenseMinor: 175000,
+				}},
+			}, nil).Once()
+		target := "/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?" + url.Values{
+			"startDate": []string{start.Format(time.RFC3339Nano)},
+			"endDate":   []string{end.Format(time.RFC3339Nano)},
+			"groupBy":   []string{"day"},
+		}.Encode()
+		response := httptest.NewRecorder()
+		newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+			response,
+			newRequest(
+				http.MethodGet,
+				target,
+				"",
+				true,
+			),
+		)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		payload := decode(t, response)
+		assert.Equal(t, "day", payload["groupBy"])
+		assert.Equal(t, "EUR", payload["displayCurrency"])
+		assert.Equal(t, false, payload["complete"])
+		assert.Equal(t, start.Format(time.RFC3339Nano), payload["period"].(map[string]any)["startDate"])
+		assert.InDelta(t, 420000, payload["buckets"].([]any)[0].(map[string]any)["incomeMinor"], 0)
+		assert.InDelta(t, 2, payload["missingFx"].([]any)[0].(map[string]any)["affectedTransactionCount"], 0)
+	})
+
+	t.Run("registered cash-flow series route rejects invalid parameters before its service", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		handler := newHandler(newMockfinanceService(t), newMockbankConnectionService(t), makeAuthMiddleware(userID))
+		for _, target := range []string{
+			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-06-02T00:00:00Z&endDate=2026-06-01T00:00:00Z&groupBy=day",
+			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-06-01T00:00:00Z&endDate=2026-06-02T00:00:00Z&groupBy=year",
+			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-06-01T00:00:00Z&endDate=2026-06-02T00:00:00Z",
+		} {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, newRequest(http.MethodGet, target, "", true))
+			require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("registered cash-flow series route propagates access errors", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		service := newMockfinanceService(t)
+		service.EXPECT().GetCashFlowSeries(mock.Anything, mock.Anything).
+			Return(financepkg.CashFlowSeries{}, financepkg.ErrTenantAccessDenied).Once()
+		target := "/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?" + url.Values{
+			"startDate": []string{"2026-06-01T00:00:00Z"},
+			"endDate":   []string{"2026-06-02T00:00:00Z"},
+			"groupBy":   []string{"day"},
+		}.Encode()
+		response := httptest.NewRecorder()
+		newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+			response,
+			newRequest(http.MethodGet, target, "", true),
+		)
+		require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
 	})
 
 	t.Run("nullable finance responses omit absent state and preserve present state", func(t *testing.T) {
