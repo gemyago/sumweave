@@ -9,11 +9,33 @@ import { formatFinanceDate } from '../lib/finance/format'
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
   getDashboard: vi.fn(),
+  getCashFlowSeries: vi.fn(),
   listAccounts: vi.fn(),
   listTransactions: vi.fn(),
   listConnections: vi.fn(),
   shellState: null as FinanceShellState | null,
 }))
+
+function monthlyCashFlowSeries(year: number, month: number, monthCount: number) {
+  return {
+    period: { startDate: new Date(year, month, 1), endDate: new Date(year, month + monthCount, 1) },
+    groupBy: 'month' as const,
+    displayCurrency: 'USD',
+    complete: true,
+    missingFx: [],
+    buckets: Array.from({ length: monthCount }, (_, index) => {
+      const startDate = index === 2
+        ? new Date(year, month + index - 1, 31)
+        : new Date(year, month + index, 1)
+      return {
+        startDate,
+        endDate: new Date(year, month + index + 1, 1),
+        incomeMinor: 100,
+        expenseMinor: 50,
+      }
+    }),
+  }
+}
 
 vi.mock('../lib/finance/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/finance/api')>()
@@ -22,6 +44,7 @@ vi.mock('../lib/finance/api', async (importOriginal) => {
     createSignalFinanceApiForAuth: vi.fn(() => ({
       listTenants: mocks.listTenants,
       getDashboard: mocks.getDashboard,
+      getCashFlowSeries: mocks.getCashFlowSeries,
       listAccounts: mocks.listAccounts,
       listTransactions: mocks.listTransactions,
       listConnections: mocks.listConnections,
@@ -43,6 +66,7 @@ describe('Finance dashboard page', () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.listTenants.mockReset()
     mocks.getDashboard.mockReset()
+    mocks.getCashFlowSeries.mockReset()
     mocks.listAccounts.mockReset()
     mocks.listTransactions.mockReset()
     mocks.listConnections.mockReset()
@@ -101,6 +125,14 @@ describe('Finance dashboard page', () => {
         schedule: null,
       },
     ])
+    mocks.getCashFlowSeries.mockResolvedValue({
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21) },
+      groupBy: 'day',
+      displayCurrency: 'USD',
+      complete: true,
+      missingFx: [],
+      buckets: [{ startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21), incomeMinor: 120000, expenseMinor: 45000 }],
+    })
   })
 
   it('renders the canonical bootstrap dashboard with period-net summaries and canonical finance links', async () => {
@@ -110,8 +142,8 @@ describe('Finance dashboard page', () => {
     expect(await screen.findByText('Period net')).toBeInTheDocument()
     expect(screen.getByText('Income minus expenses for Jun 20, 2026 → Jun 20, 2026.')).toBeInTheDocument()
     expect(screen.getByText('Booked balance total')).toBeInTheDocument()
-    expect(screen.getByText('Income')).toBeInTheDocument()
-    expect(screen.getByText('Expense')).toBeInTheDocument()
+    expect(screen.getAllByText('Income').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Expense').length).toBeGreaterThan(0)
     expect(screen.getByText('Pending net')).toBeInTheDocument()
     expect(screen.getByText('Cash-flow visual')).toBeInTheDocument()
     expect(screen.getByLabelText('Cash flow chart')).toBeInTheDocument()
@@ -131,6 +163,111 @@ describe('Finance dashboard page', () => {
     expect(screen.getByLabelText('Custom end date')).not.toBeVisible()
     expect(screen.queryByText('2026-06-20T12:00:00.000Z')).not.toBeInTheDocument()
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026')).toBeInTheDocument()
+  })
+
+  it('renders the independently loaded cash-flow series with its complete textual alternative', async () => {
+    window.location.hash = '#/finance?startDate=2026-06-20&endDate=2026-06-20'
+    render(Finance)
+
+    expect(await screen.findByRole('heading', { name: 'Cash flow over time' })).toBeInTheDocument()
+    await waitFor(() => expect(mocks.getCashFlowSeries).toHaveBeenCalledOnce())
+    expect(mocks.getCashFlowSeries).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      startDate: new Date(2026, 5, 20),
+      endDate: new Date(2026, 5, 21),
+      groupBy: 'day',
+    })
+    expect(screen.getByRole('img', { name: 'Cash flow chart' })).toBeInTheDocument()
+    expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 1200.00 USD · Expense 450.00 USD')).toBeInTheDocument()
+  })
+
+  it('requests monthly series for aligned longer reporting periods and keeps their bounds in the URL', async () => {
+    const user = userEvent.setup()
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Last 6 months' }))
+    await waitFor(() => expect(mocks.getCashFlowSeries).toHaveBeenCalledTimes(2))
+    expect(mocks.getCashFlowSeries.mock.calls[1][0]).toMatchObject({ groupBy: 'month' })
+    expect(window.location.hash).toContain('startDate=')
+    expect(window.location.hash).toContain('endDate=')
+
+    await user.click(screen.getByRole('button', { name: 'Last 12 months' }))
+    await waitFor(() => expect(mocks.getCashFlowSeries).toHaveBeenCalledTimes(3))
+    expect(mocks.getCashFlowSeries.mock.calls[2][0]).toMatchObject({ groupBy: 'month' })
+  })
+
+  it('labels six- and twelve-month charts with their included months rather than bucket dates', async () => {
+    const user = userEvent.setup()
+    mocks.getCashFlowSeries
+      .mockResolvedValueOnce({
+        period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21) },
+        groupBy: 'day', displayCurrency: 'USD', complete: true, missingFx: [],
+        buckets: [{ startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21), incomeMinor: 120000, expenseMinor: 45000 }],
+      })
+      .mockResolvedValueOnce(monthlyCashFlowSeries(2026, 3, 6))
+      .mockResolvedValueOnce(monthlyCashFlowSeries(2025, 9, 12))
+
+    render(Finance)
+
+    await user.click(await screen.findByRole('button', { name: 'Last 6 months' }))
+    expect(await screen.findByText('Apr 2026')).toBeInTheDocument()
+    expect(screen.getByText('May 31, 2026 → Jun 30, 2026: Income 1.00 USD · Expense 0.50 USD')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Last 12 months' }))
+    expect(await screen.findByText('Oct 2025')).toBeInTheDocument()
+  })
+
+  it('keeps a series failure local to the chart and retries it without reloading the dashboard', async () => {
+    const user = userEvent.setup()
+    mocks.getCashFlowSeries.mockRejectedValueOnce(new Error('series exploded'))
+
+    render(Finance)
+
+    expect(await screen.findByText('series exploded')).toBeInTheDocument()
+    expect(screen.getByText('Period net')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Retry cash-flow chart' }))
+    await waitFor(() => expect(mocks.getCashFlowSeries).toHaveBeenCalledTimes(2))
+    expect(mocks.getDashboard).toHaveBeenCalledOnce()
+  })
+
+  it('shows grouped missing-FX diagnostics in the chart-local partial-data warning', async () => {
+    mocks.getCashFlowSeries.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21) },
+      groupBy: 'day', displayCurrency: 'USD', complete: false,
+      missingFx: [{ provider: 'frankfurter', baseCurrency: 'EUR', quoteCurrency: 'USD', affectedTransactionCount: 2 }],
+      buckets: [{ startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21), incomeMinor: 120000, expenseMinor: 45000 }],
+    })
+
+    render(Finance)
+
+    const warning = (await screen.findByText('Cash-flow chart data is incomplete.')).parentElement!
+    expect(warning).toHaveTextContent('EUR → USD (frankfurter, 2 transaction values)')
+  })
+
+  it('does not let a stale series response replace a newer reporting period', async () => {
+    const user = userEvent.setup()
+    let resolveInitialSeries: (value: unknown) => void
+    const initialSeries = new Promise((resolve) => {
+      resolveInitialSeries = resolve
+    })
+    mocks.getCashFlowSeries.mockReturnValueOnce(initialSeries).mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 0, 1), endDate: new Date(2026, 6, 1) },
+      groupBy: 'month', displayCurrency: 'USD', complete: true, missingFx: [],
+      buckets: [{ startDate: new Date(2026, 0, 1), endDate: new Date(2026, 1, 1), incomeMinor: 60000, expenseMinor: 20000 }],
+    })
+
+    render(Finance)
+    await user.click(await screen.findByRole('button', { name: 'Last 6 months' }))
+    await waitFor(() => expect(mocks.getCashFlowSeries).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('Jan 1, 2026 → Jan 31, 2026: Income 600.00 USD · Expense 200.00 USD')).toBeInTheDocument()
+
+    resolveInitialSeries!({
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21) },
+      groupBy: 'day', displayCurrency: 'USD', complete: true, missingFx: [],
+      buckets: [{ startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21), incomeMinor: 99900, expenseMinor: 0 }],
+    })
+
+    await waitFor(() => expect(screen.queryByText('Jun 20, 2026 → Jun 20, 2026: Income 999.00 USD · Expense 0.00 USD')).not.toBeInTheDocument())
   })
 
   it('keeps hidden-account history named and labeled without restoring it to current balances', async () => {
@@ -215,7 +352,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByText('EUR → PLN · frankfurter · 2 transaction values · 1 account value')).toBeInTheDocument()
     expect(screen.getByText('USD → PLN · frankfurter · 1 transaction value · 0 account values')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open FX diagnostics' })).toHaveAttribute('href', '#/admin/finance/fx')
-    expect(screen.getByText('Income').compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getAllByText('Income')[0].compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('shows the tenant-create prompt when no tenants exist', async () => {
@@ -582,10 +719,15 @@ describe('Finance dashboard page', () => {
     })
     mocks.listTransactions.mockResolvedValueOnce([])
     mocks.listConnections.mockResolvedValueOnce([])
+    mocks.getCashFlowSeries.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21) },
+      groupBy: 'day', displayCurrency: 'USD', complete: true, missingFx: [],
+      buckets: [{ startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21), incomeMinor: 0, expenseMinor: 0 }],
+    })
 
     render(Finance)
 
-    expect(await screen.findByText('No settled or pending cash flow to chart for this period.')).toBeInTheDocument()
+    expect(await screen.findByText('No settled cash flow to chart for this period.')).toBeInTheDocument()
     expect(screen.getByText('No category activity to chart for this period.')).toBeInTheDocument()
     expect(screen.getByText('No account balances to chart yet.')).toBeInTheDocument()
     expect(screen.getByText('No transactions in this reporting period.')).toBeInTheDocument()

@@ -158,6 +158,30 @@ func TestCashFlowSeriesStore(t *testing.T) {
 		}}, actual.MissingFX)
 	})
 
+	t.Run("anchors twelve monthly buckets across February and daylight saving time", func(t *testing.T) {
+		fake := faker.New()
+		_, _, seriesStore, tenant, _, _ := makeFixture(t)
+		location, err := time.LoadLocation("America/Los_Angeles")
+		require.NoError(t, err)
+		start := time.Date(2025, time.October, 31, 1, 30, 0, 0, location)
+		end := time.Date(2026, time.October, 31, 1, 30, 0, 0, location)
+
+		actual, err := seriesStore.GetCashFlowSeries(t.Context(), CashFlowSeriesParams{
+			TenantID: tenant.ID, StartDate: start, EndDate: end,
+			GroupBy: CashFlowGroupByMonth, FXProvider: "provider-" + fake.UUID().V4(),
+		})
+		require.NoError(t, err)
+		require.Len(t, actual.Buckets, 12)
+		assert.Equal(t, []int{31, 30, 31, 31, 28, 31, 30, 31, 30, 31, 31, 30}, func() []int {
+			days := make([]int, len(actual.Buckets))
+			for index, bucket := range actual.Buckets {
+				days[index] = bucket.StartDate.UTC().Day()
+			}
+			return days
+		}())
+		assert.True(t, end.Equal(actual.Buckets[len(actual.Buckets)-1].EndDate))
+	})
+
 	t.Run("rejects unsupported grouping and returns database failures", func(t *testing.T) {
 		fake := faker.New()
 		_, _, seriesStore, tenant, _, now := makeFixture(t)

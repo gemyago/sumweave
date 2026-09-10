@@ -101,26 +101,31 @@ func cashFlowSeriesQuery(groupBy CashFlowGroupBy) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported cash-flow grouping %q", groupBy)
 	}
-	return fmt.Sprintf(cashFlowSeriesQueryTemplate, interval, interval), nil
+	return fmt.Sprintf(cashFlowSeriesQueryTemplate, interval, interval, interval), nil
 }
 
 const cashFlowSeriesQueryTemplate = `
-WITH request AS (
+WITH RECURSIVE request AS (
     SELECT ?::timestamptz AS start_date, ?::timestamptz AS end_date,
            ?::text AS tenant_id, ?::text AS fx_provider
 ), tenant AS (
     SELECT item.id AS tenant_id, item.display_currency, request.fx_provider
     FROM finance_tenants item
     JOIN request ON request.tenant_id = item.id
+), bucket_indices AS (
+    SELECT 0 AS bucket_index
+    UNION ALL
+    SELECT bucket_indices.bucket_index + 1
+    FROM bucket_indices
+    CROSS JOIN request
+    WHERE request.start_date + (bucket_indices.bucket_index + 1) * interval '%s' < request.end_date
 ), buckets AS (
     SELECT tenant.tenant_id, tenant.display_currency, tenant.fx_provider,
-           generated.bucket_start,
-           LEAST(generated.bucket_start + interval '%s', request.end_date) AS bucket_end
+           request.start_date + bucket_indices.bucket_index * interval '%s' AS bucket_start,
+           LEAST(request.start_date + (bucket_indices.bucket_index + 1) * interval '%s', request.end_date) AS bucket_end
     FROM tenant
     CROSS JOIN request
-    CROSS JOIN LATERAL generate_series(request.start_date, request.end_date, interval '%s')
-        AS generated(bucket_start)
-    WHERE generated.bucket_start < request.end_date
+    CROSS JOIN bucket_indices
 ), qualifying AS (
     SELECT buckets.tenant_id, buckets.display_currency, buckets.fx_provider,
            buckets.bucket_start, buckets.bucket_end,

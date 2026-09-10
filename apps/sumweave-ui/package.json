@@ -41,6 +41,7 @@
   "dependencies": {
     "@lucide/svelte": "^1.8.0",
     "bootstrap": "^5.3.8",
+    "echarts": "^6.1.0",
     "openapi-fetch": "^0.17.0",
     "svelte-spa-router": "^5.0.0"
   }
