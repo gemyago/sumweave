@@ -793,30 +793,19 @@
             <div class="card-body p-4 d-grid gap-4">
               <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-start">
                 <div>
-                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Balance-first summary</p>
-                  <h2 class="h5 mb-2">Booked balance story</h2>
-                  {#if balanceSummary && balanceSummary.accountCount > 0}
-                    {#if balanceSummary.bookedMinor === null}
-                      <p class="display-6 mb-1">Booked total unavailable</p>
-                    {:else}
-                      <p class="display-6 mb-1">{formatFinanceMoney(balanceSummary.bookedMinor, balanceSummary.currency)}</p>
-                    {/if}
-                    <p class="text-body-secondary mb-0">
-                      {balanceSummary.accountCount} accounts · pending movement {balanceSummary.pendingMinor === null ? 'unavailable' : formatFinanceMoney(balanceSummary.pendingMinor, balanceSummary.currency)}
-                    </p>
-                  {:else}
-                    <p class="h4 mb-1">No booked balances yet</p>
-                    <p class="text-body-secondary mb-0">
-                      Connect or create accounts to start tracking balances here.
-                    </p>
-                  {/if}
+                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Period performance</p>
+                  <h2 class="h5 mb-2">Period net</h2>
+                  <p class="display-6 mb-1">
+                    {formatFinanceMoney(dashboard.settled.netMinor, dashboard.settled.displayCurrency)}
+                  </p>
+                  <p class="text-body-secondary mb-0">
+                    Income minus expenses for {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(inclusiveDashboardEndDate(dashboard.period.endDate)!)}.
+                  </p>
                 </div>
 
-                {#if balanceSummary && balanceSummary.bookedMinor !== null}
-                  <span class={`badge ${badgeClass(toneFromMoney(balanceSummary.bookedMinor))}`}>
-                    {balanceSummary.bookedMinor < 0 ? 'Net outflow' : balanceSummary.bookedMinor > 0 ? 'Net inflow' : 'Even period'}
-                  </span>
-                {/if}
+                <span class={`badge ${badgeClass(toneFromMoney(dashboard.settled.netMinor))}`}>
+                  {dashboard.settled.netMinor < 0 ? 'Net outflow' : dashboard.settled.netMinor > 0 ? 'Net inflow' : 'Even period'}
+                </span>
               </div>
 
               <div class="row g-3" aria-label="Balance summary">
@@ -840,7 +829,7 @@
                 </div>
                 <div class="col-12 col-md-4">
                   <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
-                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Pending delta</p>
+                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Pending net</p>
                     <p class="fs-5 fw-semibold mb-1">
                       {formatFinanceMoney(dashboard.pending.netMinor, dashboard.pending.displayCurrency)}
                     </p>
@@ -938,26 +927,6 @@
                 </div>
               {/if}
 
-              <div class="row g-3">
-                <div class="col-12 col-sm-6">
-                  <div class="border rounded-3 p-3 h-100">
-                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Settled net</p>
-                    <p class="fs-5 fw-semibold mb-1">
-                      {formatFinanceMoney(dashboard.settled.netMinor, dashboard.settled.displayCurrency)}
-                    </p>
-                    <p class="small text-body-secondary mb-0">{dashboard.settled.transactionCount} booked transactions</p>
-                  </div>
-                </div>
-                <div class="col-12 col-sm-6">
-                  <div class="border rounded-3 p-3 h-100">
-                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Pending net</p>
-                    <p class="fs-5 fw-semibold mb-1">
-                      {formatFinanceMoney(dashboard.pending.netMinor, dashboard.pending.displayCurrency)}
-                    </p>
-                    <p class="small text-body-secondary mb-0">{dashboard.pending.transactionCount} pending transactions</p>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -1009,6 +978,24 @@
                 </div>
                 <a class="btn btn-outline-secondary btn-sm" href="/finance/accounts" use:link>View all accounts</a>
               </div>
+
+              {#if balanceSummary && balanceSummary.accountCount > 0}
+                <div class="border rounded-3 p-3 bg-body-tertiary">
+                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Booked balance total</p>
+                  {#if balanceSummary.bookedMinor === null}
+                    <p class="fs-5 fw-semibold mb-1">Unavailable</p>
+                  {:else}
+                    <p class="fs-5 fw-semibold mb-1">{formatFinanceMoney(balanceSummary.bookedMinor, balanceSummary.currency)}</p>
+                  {/if}
+                  <p class="small text-body-secondary mb-0">
+                    {balanceSummary.accountCount} accounts · pending movement {balanceSummary.pendingMinor === null ? 'unavailable' : formatFinanceMoney(balanceSummary.pendingMinor, balanceSummary.currency)}
+                  </p>
+                </div>
+              {:else}
+                <div class="alert alert-light border mb-0" role="status">
+                  No booked account balances yet. Connect or create accounts to start tracking balances here.
+                </div>
+              {/if}
 
               {#if visibleAccountBalances.length === 0}
                 <div class="alert alert-light border mb-0" role="status">No account balances to chart yet.</div>

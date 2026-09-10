@@ -63,7 +63,7 @@
 | `/login` | Canonical Bootstrap login page; username + password form inside a compact Bootstrap card. On success, sets auth tokens and `push()`es the remembered protected destination or `/finance`. On failure, shows inline error alert. |
 | `/chat/:sessionId?` | Chat; optional id in URL after `sessionBound` (`replace`). One route entry so binding the id does not remount the page or abort the stream. |
 | `/providers` | Provider configuration management page. Protected (auth required). |
-| `/finance` | Canonical Bootstrap finance dashboard. Protected. Uses the shared Finance shell, keeps current-FX-valuation balance-first summaries in the first viewport, exposes previous/current/next/custom reporting-period controls, caps account/category/recent-transaction sections, and keeps missing/stale FX plus sync/import follow-up visible. |
+| `/finance` | Canonical Bootstrap finance dashboard. Protected. Uses the shared Finance shell, keeps current-FX-valuation period-net summaries in the first viewport, exposes previous/current/next/custom reporting-period controls, caps account/category/recent-transaction sections, and keeps missing/stale FX plus sync/import follow-up visible. |
  | `/finance/tenants` | Finance tenant selection with demand-driven create/update/invite/join/member actions. Protected. |
 | `/finance/accounts` | Finance account browse workspace. Protected. |
 | `/finance/accounts/new` | Dedicated Finance account create screen. Protected. |
@@ -199,17 +199,17 @@
 - In `current_month` mode, the visible start/end date controls stay populated with the active month bounds on first load and after **Current month** is clicked.
 - Direct month controls and the custom-range action keep the visible date inputs synchronized with the reporting window returned by the dashboard API.
 - Body order:
-  - first row: booked-balance story plus compact income/expense/pending delta summaries beside the primary cash-flow visual
-  - second row: capped top-category section and capped account snapshot section with links into the dedicated browse/detail routes
+  - first row: period-net story plus compact income/expense/pending-net summaries beside the primary cash-flow visual
+  - second row: capped top-category section and capped account snapshot section with the booked account-balance total, plus links into the dedicated browse/detail routes
 - third row: full-width paged **Transactions** list scoped to the selected reporting range, followed by visually secondary compact needs-attention cards for pending activity, missing FX, sync failures, and import follow-up. **View all transactions** carries that same inclusive range into the ledger.
-- When dashboard data is available, the first useful viewport should read in this order: compact header and period context, primary booked-balance story, compact income/expense/pending summaries, one primary visual summary, then capped activity and attention states.
+- When dashboard data is available, the first useful viewport should read in this order: compact header and period context, primary period-net story, compact income/expense/pending-net summaries, one primary visual summary, then capped activity and attention states. The period net is settled income minus expenses for the selected period; account balances remain secondary snapshot information.
 - When settled income/expense reporting is incomplete, an unmistakable warning appears directly with those totals. It names missing distinct FX pairs, their affected value count, and links to FX diagnostics; the later needs-attention area remains secondary.
 - Display-currency balances, settled/pending income and expense, categories, and prior/custom periods are **current FX valuations**. They use the latest successful rate and may change after a refresh; ledger membership and native values do not change.
 - A compact collapsed **FX coverage** disclosure appears only when current, stale, or missing rates need context. It lists each provider/pair with market effective and last-successful-refresh times, stale markers, and each missing pair’s affected transaction/account-value counts. A stale rate (the backend threshold) produces a prominent warning and refresh link. Missing coverage names distinct pairs and affected values, never occurrence counts as “rates” or “gaps”; display totals stay partial/unavailable rather than substituting native minor units.
 - Account and flow native totals remain corroboration only: they are shown separately by currency and never summed into a display-currency total.
 - Current reporting and account snapshots exclude hidden accounts. Recent history retains a hidden account's name and **Hidden account** badge through a separate include-hidden lookup; that history context does not restore it to reporting.
-- Responsive behavior preserves the same balance-first order on narrow screens; shell chrome, tenant chrome, and route actions should not push the money summary below the first viewport.
-- On narrow mobile widths, the dashboard condenses the introductory padding and period divider, hides the repeated overview/FX-valuation explainers, and shortens route-action labels; the reporting controls and route actions remain available before the balance-first summary.
+- Responsive behavior preserves the same period-net-first order on narrow screens; shell chrome, tenant chrome, and route actions should not push the money summary below the first viewport.
+- On narrow mobile widths, the dashboard condenses the introductory padding and period divider, hides the repeated overview/FX-valuation explainers, and shortens route-action labels; the reporting controls and route actions remain available before the period-net summary.
 
 **Tenants (`/finance/tenants`)**
 
