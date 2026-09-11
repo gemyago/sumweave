@@ -8,7 +8,7 @@ Automatic and explicit transfer matching SHALL use one finance-owned range servi
 
 #### Scenario: Eligible transaction is loaded
 - **WHEN** a visible booked transaction belongs to a visible account in the selected tenant, has kind `regular`, `expense`, `income`, or `transfer`, has a nonzero amount, has neither transfer group nor matching timestamp, and is not excluded from automatic matching
-- **THEN** the matching load MUST include its ID, account ID, currency, signed minor amount, effective timestamp, current ledger description, and optional unambiguous bank-connection provenance regardless of manual, CSV, or provider source and regardless of category.
+- **THEN** the matching load MUST include its ID, account ID, currency, signed minor amount, effective timestamp, current ledger description, optional unambiguous bank-connection and connector provenance, provider-original amount/currency, and optional scoped transaction snapshot JSON regardless of manual, CSV, or provider source and regardless of category.
 
 #### Scenario: Ineligible transaction is excluded
 - **WHEN** a transaction or account is missing, hidden, deleted, or outside the tenant, or the transaction is pending, zero amount, excluded, already paired, a refund, reconciliation, opening balance, or system kind
@@ -25,7 +25,7 @@ Automatic and explicit transfer matching SHALL use one finance-owned range servi
 - **AND** the row MUST remain eligible for the same-currency rule but MUST NOT form an FX candidate.
 
 ### Requirement: Fixed Mutual-Uniqueness Matching Rule
-The transfer matcher SHALL combine candidates from the equal-and-opposite same-currency rule and the scoped description-derived FX rule, and SHALL accept a pair only when different-account rows lie no more than 72 elapsed hours apart and are each other's only eligible counterpart across the combined candidate set.
+The transfer matcher SHALL combine candidates from the equal-and-opposite same-currency rule, the scoped description-derived FX rule, and the scoped Monobank snapshot FX rule, and SHALL accept a pair only when different-account rows lie no more than 72 elapsed hours apart and are each other's only eligible counterpart across the combined candidate set.
 
 #### Scenario: Unique equal-and-opposite pair qualifies
 - **WHEN** two eligible same-tenant transactions are on different visible accounts, use the same currency, have exact opposite nonzero minor amounts, are no more than 72 elapsed hours apart inclusive, and neither has another eligible counterpart under either rule
@@ -223,3 +223,38 @@ The transfer matcher SHALL recognize a cross-currency candidate only from matchi
 - **WHEN** otherwise identical FX references occur in different bank connections or reference namespaces
 - **THEN** the matcher MUST keep their candidates separate and MUST NOT create a cross-scope pair.
 
+### Requirement: Scoped Monobank Snapshot FX Candidate Rule
+The transfer matcher SHALL use stored Monobank transaction snapshots only as a
+third fixed candidate rule and SHALL merge its candidates with same-currency and
+description-derived FX candidates before mutual uniqueness. It SHALL use no rate,
+tolerance, description, name, receipt, provider transaction ID, or external
+lookup for this rule.
+
+#### Scenario: Reciprocal snapshots qualify
+- **WHEN** two eligible rows on different accounts and within 72 elapsed hours
+  share one unambiguous Monobank connection; each has exactly one applicable
+  transaction snapshot; and `A.operationCurrency == B.ledgerCurrency`,
+  `A.operationAmount == -B.ledgerAmount`,
+  `B.operationCurrency == A.ledgerCurrency`, and
+  `B.operationAmount == -A.ledgerAmount`
+- **THEN** the matcher MUST add them as snapshot FX candidates regardless of
+  descriptions or provider transaction IDs.
+
+#### Scenario: Evidence fails closed
+- **WHEN** connector provenance, snapshot count, snapshot JSON, MCC,
+  currency-code, amount/sign, provider-original, current-ledger, or negation
+  requirements are not met; specifically, usable evidence requires connector
+  `monobank`, nonzero `amount` and `operationAmount`, recognized `currencyCode`,
+  `mcc = 4829`, optional nonzero `originalMcc = 4829`, same-sign amounts, an
+  operation currency distinct from ledger currency, snapshot amount equal to the
+  provider-original amount, and current ledger amount/currency equal to the
+  provider-original values
+- **THEN** the snapshot rule MUST produce no evidence and MUST NOT disable the
+  other two candidate rules.
+
+#### Scenario: Existing storage is reused
+- **WHEN** this rule loads matching evidence
+- **THEN** it MUST use grouped existing provider-match and snapshot projections
+  with one row per transaction
+- **AND** it MUST add no schema, migration, backfill, resync, API, UI, job,
+  scheduling, reporting, provider-call, or separate evidence-persistence change.

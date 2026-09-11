@@ -1,7 +1,8 @@
 # Transfer Matching Phase 0
 
 Status: implemented. The same-currency Phase 0 matcher was delivered on
-2026-09-07 and its description-derived FX rule on 2026-09-09. The isolated
+2026-09-07, its description-derived FX rule on 2026-09-09, and its Monobank
+snapshot FX rule on 2026-09-11. The isolated
 manual E2E and independent UI design-review gates are recorded separately and
 remain to be run. Product requirements were approved on 2026-09-06; concurrency
 requirements were revised on 2026-09-07 following design review: match against
@@ -14,7 +15,7 @@ System design, API contracts, and storage changes are outside this PRD.
 Automatically recognize simple movements between accounts tracked in the same
 finance tenant, so those movements do not inflate reported income and expenses.
 
-Phase 0 links two existing ledger transactions using two fixed, deterministic
+Phase 0 links two existing ledger transactions using three fixed, deterministic
 candidate rules. It leaves uncertain cases unchanged and retains manual linking
 as the fallback. It never initiates a bank transfer or creates a missing
 transaction.
@@ -63,7 +64,7 @@ movement.
 Eligible bank-synced, CSV-imported, and manually entered transactions participate
 under the same rules. An existing category does not prevent matching.
 
-### 2. Two fixed candidate rules
+### 2. Three fixed candidate rules
 
 Every candidate pair must have different accounts, opposite signs, and ledger
 effective timestamps no more than 72 hours apart, inclusive. The same-currency
@@ -72,7 +73,7 @@ rule additionally requires:
 - The same transaction currency.
 - Exactly equal absolute amounts in minor units, with opposite signs.
 
-The FX rule additionally requires matching typed evidence extracted from each
+The description-derived FX rule additionally requires matching typed evidence extracted from each
 row's current ledger description. The initial complete ASCII description form is
 `FX<digits> <BASE>/<QUOTE> <rate>`, where currencies are distinct uppercase
 three-letter ISO codes and the positive decimal rate uses a comma or dot
@@ -90,18 +91,42 @@ by the rate and rounded to the quote currency's standard minor unit. Exact
 integer and decimal arithmetic is used, with an exact positive halfway result
 rounded upward; no binary floating point or amount tolerance applies.
 
-Candidates from both rules are merged and deduplicated before applying mutual
+Candidates from all three rules are merged and deduplicated before applying mutual
 uniqueness. A pair qualifies only when each leg has exactly one possible partner
 across the combined candidate set and they are each other.
+
+The Monobank snapshot FX rule additionally requires both rows to have the same
+unambiguous Monobank bank connection and exactly one stored transaction snapshot
+for that row and connection. It decodes only the snapshot's `amount`,
+`operationAmount`, `currencyCode`, `mcc`, and optional `originalMcc`. Both MCC
+values must be 4829 (`originalMcc` may be absent); amounts must be nonzero and
+have the same sign; the operation currency must be recognized and differ from
+the ledger currency. Snapshot amount, provider-original amount/currency, and
+the current ledger amount/currency must agree exactly, so edited or malformed
+evidence fails closed. The two snapshots are reciprocal only when:
+
+```text
+A.operationCurrency == B.ledgerCurrency
+A.operationAmount   == -B.ledgerAmount
+B.operationCurrency == A.ledgerCurrency
+B.operationAmount   == -A.ledgerAmount
+```
+
+No rate, tolerance, description, name, receipt, transaction ID, or external
+lookup is used. Missing, ambiguous, foreign-tenant, malformed, unsupported, or
+edited snapshot evidence disables only this rule. It does not alter eligibility
+for the same-currency or description-derived FX rules.
 
 Use ledger amounts, currencies, and effective timestamps loaded at attempt
 start, including user edits already saved. Compare timestamps as instants with
 their supplied offsets. The 72-hour tolerance is a fixed elapsed duration,
 including across DST changes.
 
-Descriptions are matching inputs only for the narrow FX evidence format above.
-Names, provider snapshots, account identifiers from payment descriptions, and
-other description text are not matching inputs. No user-defined rules,
+Descriptions are matching inputs only for the narrow description-derived FX
+evidence format above. Monobank transaction snapshots are matching inputs only
+for the narrow reciprocal rule above. Names, account identifiers from payment
+descriptions, unrelated provider data, and other description text are not
+matching inputs. No user-defined rules,
 adjustable tolerances, structured provider exchange-rate data, market-rate
 lookup, or fee inference is included.
 
@@ -118,6 +143,12 @@ Examples:
   `+412.50 PLN` with `FX123 USD/PLN 4,12500`. If both have the same unambiguous
   bank connection and neither has another candidate under either rule, link
   them automatically.
+- A UAH Monobank ledger row has `+508300 UAH` and a snapshot with
+  `amount=508300`, `operationAmount=10000`, and `currencyCode=978`; an EUR row
+  on the same connection has `-10000 EUR` with the reciprocal UAH operation.
+  If both snapshot MCC values satisfy the rule and neither leg has another
+  candidate under any rule, link them automatically even when descriptions and
+  provider transaction IDs differ.
 
 Uniqueness is evaluated against all eligible transactions loaded for each
 leg's full matching window, including outside the requested processing range.
@@ -234,10 +265,12 @@ management screen, original-kind history, or manual/automatic pair provenance.
 - One-to-many and many-to-one candidates remain unchanged, including when a
   competing candidate lies outside the run's date range or on another page, or
   when the competing candidate arises under the other automatic rule.
-- A valid USD/PLN FX pair with mismatched connection, reference, currency pair,
-  rate, or converted value remains unchanged. Missing or conflicting connection
-  provenance likewise prevents FX matching without blocking same-currency
-  matching.
+- A valid description-derived USD/PLN FX pair with mismatched connection,
+  reference, currency pair, rate, or converted value remains unchanged. A
+  Monobank pair with one-sided, nonreciprocal, same-sign, different-connection,
+  same-account, outside-window, malformed, or edited snapshot evidence also
+  remains unchanged. Missing or conflicting connection provenance prevents both
+  scoped FX rules without blocking same-currency matching.
 - Either leg can arrive first. When the other arrives in a later connection
   sync or adjacent window, matching finds the older leg within the tolerance.
 - An explicit range can match to a nearby partner outside its boundaries, but
@@ -280,7 +313,7 @@ Not required in Phase 0:
 
 - Pending-transaction matching or pending-pair settlement revalidation.
 - Amount tolerances, fee inference, and any FX format other than the documented
-  scoped description evidence.
+  scoped description or Monobank snapshot evidence.
 - Split, many-to-one, or one-to-many transfers.
 - Matching to accounts outside the tenant or creating missing legs.
 - Transfer-rule management, LLMs, or confidence scores.

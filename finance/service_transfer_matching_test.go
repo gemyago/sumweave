@@ -3,6 +3,7 @@ package finance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"slices"
@@ -35,6 +36,29 @@ func TestTransferMatchingService(t *testing.T) {
 		return persistence.TransferMatchingTransaction{
 			ID: id, AccountID: accountID, Currency: currency, AmountMinor: amount, Description: description,
 			EffectiveAt: effectiveAt, ConnectionID: connectionID,
+		}
+	}
+	makeMonobankRow := func(
+		id string,
+		accountID string,
+		currency string,
+		amount int64,
+		operationAmount int64,
+		operationCurrencyCode int,
+		effectiveAt time.Time,
+		connectionID *string,
+	) persistence.TransferMatchingTransaction {
+		connectorID := "monobank"
+		snapshot := fmt.Sprintf(
+			`{"amount":%d,"operationAmount":%d,"currencyCode":%d,"mcc":4829}`,
+			amount,
+			operationAmount,
+			operationCurrencyCode,
+		)
+		return persistence.TransferMatchingTransaction{
+			ID: id, AccountID: accountID, Currency: currency, AmountMinor: amount, EffectiveAt: effectiveAt,
+			ConnectionID: connectionID, ConnectorID: &connectorID, ProviderOriginalAmountMinor: &amount,
+			ProviderOriginalCurrency: &currency, SnapshotJSON: &snapshot,
 		}
 	}
 	makeService := func(t *testing.T, pairs transferMatchingPairStore) *TransferMatchingService {
@@ -281,6 +305,153 @@ func TestTransferMatchingService(t *testing.T) {
 				},
 			)
 			assert.Equal(t, len(rows), extractions)
+		})
+	})
+
+	t.Run("matches only reciprocal Monobank snapshots", func(t *testing.T) {
+		fake := faker.New()
+		stringPointer := func(value string) *string { return &value }
+		now := time.Date(2026, time.September, 11, 12, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		connectionID := "connection-" + fake.UUID().V4()
+		params := TransferMatchingParams{
+			TenantID: "tenant-" + fake.UUID().V4(), RangeStart: now, RangeEndExclusive: now.Add(time.Hour),
+		}
+		first := makeMonobankRow(
+			"transaction-uah-"+fake.UUID().V4(), "account-uah-"+fake.UUID().V4(), "UAH", 508_300, 10_000, 978,
+			now, &connectionID,
+		)
+		second := makeMonobankRow(
+			"transaction-eur-"+fake.UUID().V4(), "account-eur-"+fake.UUID().V4(), "EUR", -10_000, -508_300, 980,
+			now, &connectionID,
+		)
+
+		t.Run("accepts either input order and persists the illustrated pair atomically", func(t *testing.T) {
+			forward, forwardCounts, err := decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{first, second},
+				params.RangeStart,
+				params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			require.Equal(t, TransferMatchingAttemptCounts{}, forwardCounts)
+			require.Len(t, forward, 1)
+			reversed, reversedCounts, err := decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{second, first},
+				params.RangeStart,
+				params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, forward, reversed)
+			assert.Equal(t, forwardCounts, reversedCounts)
+
+			pairs := newMocktransferMatchingPairStore(t)
+			pairs.EXPECT().
+				ListEligibleTransferMatchingTransactions(t.Context(), mock.Anything).
+				Return([]persistence.TransferMatchingTransaction{second, first}, nil).
+				Once()
+			pairs.EXPECT().
+				LinkTransferPair(t.Context(), mock.MatchedBy(func(value persistence.TransferPairLinkParams) bool {
+					return value.TenantID == params.TenantID &&
+						((value.FirstTransactionID == first.ID && value.SecondTransactionID == second.ID) ||
+							(value.FirstTransactionID == second.ID && value.SecondTransactionID == first.ID))
+				})).
+				Return(nil).
+				Once()
+			counts, err := makeService(t, pairs).Match(t.Context(), params)
+			require.NoError(t, err)
+			assert.Equal(t, TransferMatchingAttemptCounts{MatchedPairs: 1}, counts)
+		})
+
+		t.Run("finds the reciprocal pair when either leg starts the requested range", func(t *testing.T) {
+			secondOutsideRange := second
+			secondOutsideRange.EffectiveAt = now.Add(time.Hour)
+			pairs, counts, err := decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{first, secondOutsideRange},
+				now,
+				now.Add(time.Minute),
+			)
+			require.NoError(t, err)
+			assert.Len(t, pairs, 1)
+			assert.Equal(t, TransferMatchingAttemptCounts{}, counts)
+			firstOutsideRange := first
+			firstOutsideRange.EffectiveAt = now.Add(-time.Hour)
+			pairs, counts, err = decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{firstOutsideRange, second},
+				now,
+				now.Add(time.Minute),
+			)
+			require.NoError(t, err)
+			assert.Len(t, pairs, 1)
+			assert.Equal(t, TransferMatchingAttemptCounts{}, counts)
+		})
+
+		t.Run("rejects incomplete or incompatible Monobank candidates", func(t *testing.T) {
+			outside := second
+			outside.EffectiveAt = now.Add(transferMatchingWindow + time.Nanosecond)
+			sameAccount := second
+			sameAccount.AccountID = first.AccountID
+			differentConnection := second
+			differentConnection.ConnectionID = stringPointer("connection-" + fake.UUID().V4())
+			nonreciprocal := second
+			snapshot := `{"amount":-10000,"operationAmount":-508299,"currencyCode":980,"mcc":4829}`
+			nonreciprocal.SnapshotJSON = &snapshot
+			oneSided := second
+			oneSided.SnapshotJSON = nil
+			sameSign := second
+			sameSignSnapshot := `{"amount":-10000,"operationAmount":508300,"currencyCode":980,"mcc":4829}`
+			sameSign.SnapshotJSON = &sameSignSnapshot
+			for _, testCase := range []struct {
+				name   string
+				second persistence.TransferMatchingTransaction
+			}{
+				{name: "one sided", second: oneSided},
+				{name: "nonreciprocal", second: nonreciprocal},
+				{name: "same sign", second: sameSign},
+				{name: "different connection", second: differentConnection},
+				{name: "same account", second: sameAccount},
+				{name: "outside window", second: outside},
+			} {
+				t.Run(testCase.name, func(t *testing.T) {
+					pairs, _, err := decideTransferMatchingPairs(
+						t.Context(),
+						[]persistence.TransferMatchingTransaction{first, testCase.second},
+						params.RangeStart,
+						params.RangeEndExclusive,
+					)
+					require.NoError(t, err)
+					assert.Empty(t, pairs)
+				})
+			}
+		})
+
+		t.Run("keeps two reciprocal snapshots and cross-rule candidates ambiguous", func(t *testing.T) {
+			secondCopy := second
+			secondCopy.ID = "transaction-eur-copy-" + fake.UUID().V4()
+			secondCopy.AccountID = "account-eur-copy-" + fake.UUID().V4()
+			pairs, _, err := decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{first, second, secondCopy},
+				params.RangeStart,
+				params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			assert.Empty(t, pairs)
+
+			sameCurrency := persistence.TransferMatchingTransaction{
+				ID: "transaction-uah-same-" + fake.UUID().V4(), AccountID: "account-uah-same-" + fake.UUID().V4(),
+				Currency: "UAH", AmountMinor: -508_300, EffectiveAt: now,
+			}
+			pairs, _, err = decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{first, second, sameCurrency},
+				params.RangeStart,
+				params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			assert.Empty(t, pairs)
 		})
 	})
 
