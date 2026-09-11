@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	internalmonobank "github.com/gemyago/sumweave/finance/internal/monobank"
 	"github.com/gemyago/sumweave/finance/persistence"
 )
 
@@ -409,16 +410,25 @@ type transferMatchingFXKey struct {
 	rateScale       int
 }
 
+type transferMatchingMonobankKey struct {
+	connectionID string
+	currency     string
+	amount       int64
+}
+
 type transferMatchingIndexedTransaction struct {
-	transaction persistence.TransferMatchingTransaction
-	evidence    fxEvidence
-	hasEvidence bool
+	transaction                 persistence.TransferMatchingTransaction
+	evidence                    fxEvidence
+	hasEvidence                 bool
+	monobankEvidence            internalmonobank.TransferMatchingEvidence
+	hasMonobankTransferEvidence bool
 }
 
 type transferMatchingIndexes struct {
-	byAmount map[transferMatchingAmountKey][]transferMatchingIndexedTransaction
-	byFX     map[transferMatchingFXKey][]transferMatchingIndexedTransaction
-	starting []transferMatchingIndexedTransaction
+	byAmount   map[transferMatchingAmountKey][]transferMatchingIndexedTransaction
+	byFX       map[transferMatchingFXKey][]transferMatchingIndexedTransaction
+	byMonobank map[transferMatchingMonobankKey][]transferMatchingIndexedTransaction
+	starting   []transferMatchingIndexedTransaction
 }
 
 type transferMatchingEvidenceExtractor func(string) (fxEvidence, bool)
@@ -472,21 +482,28 @@ func transferMatchingIndex(
 	extractEvidence transferMatchingEvidenceExtractor,
 ) transferMatchingIndexes {
 	indexes := transferMatchingIndexes{
-		byAmount: make(map[transferMatchingAmountKey][]transferMatchingIndexedTransaction),
-		byFX:     make(map[transferMatchingFXKey][]transferMatchingIndexedTransaction),
-		starting: make([]transferMatchingIndexedTransaction, 0, len(transactions)),
+		byAmount:   make(map[transferMatchingAmountKey][]transferMatchingIndexedTransaction),
+		byFX:       make(map[transferMatchingFXKey][]transferMatchingIndexedTransaction),
+		byMonobank: make(map[transferMatchingMonobankKey][]transferMatchingIndexedTransaction),
+		starting:   make([]transferMatchingIndexedTransaction, 0, len(transactions)),
 	}
 	for _, transaction := range transactions {
 		evidence, hasEvidence := extractEvidence(transaction.Description)
+		monobankEvidence, hasMonobankEvidence := transferMatchingMonobankEvidenceFor(transaction)
 		indexed := transferMatchingIndexedTransaction{
-			transaction: transaction,
-			evidence:    evidence,
-			hasEvidence: hasEvidence,
+			transaction:                 transaction,
+			evidence:                    evidence,
+			hasEvidence:                 hasEvidence,
+			monobankEvidence:            monobankEvidence,
+			hasMonobankTransferEvidence: hasMonobankEvidence,
 		}
 		key := transferMatchingAmountKey{currency: transaction.Currency, amount: transaction.AmountMinor}
 		indexes.byAmount[key] = append(indexes.byAmount[key], indexed)
 		if fxKey, ok := transferMatchingFXKeyFor(indexed); ok {
 			indexes.byFX[fxKey] = append(indexes.byFX[fxKey], indexed)
+		}
+		if monobankKey, ok := transferMatchingMonobankKeyFor(indexed); ok {
+			indexes.byMonobank[monobankKey] = append(indexes.byMonobank[monobankKey], indexed)
 		}
 		if !transaction.EffectiveAt.Before(rangeStart) && transaction.EffectiveAt.Before(rangeEndExclusive) {
 			indexes.starting = append(indexes.starting, indexed)
@@ -498,8 +515,40 @@ func transferMatchingIndex(
 	for key := range indexes.byFX {
 		sortTransferMatchingTransactions(indexes.byFX[key])
 	}
+	for key := range indexes.byMonobank {
+		sortTransferMatchingTransactions(indexes.byMonobank[key])
+	}
 	sortTransferMatchingTransactions(indexes.starting)
 	return indexes
+}
+
+func transferMatchingMonobankEvidenceFor(
+	transaction persistence.TransferMatchingTransaction,
+) (internalmonobank.TransferMatchingEvidence, bool) {
+	if transaction.ConnectionID == nil || transaction.ConnectorID == nil || transaction.SnapshotJSON == nil {
+		return internalmonobank.TransferMatchingEvidence{}, false
+	}
+	return internalmonobank.ExtractTransferMatchingEvidence(internalmonobank.TransferMatchingEvidenceInput{
+		ConnectorID:                 *transaction.ConnectorID,
+		CurrentAmountMinor:          transaction.AmountMinor,
+		CurrentCurrency:             transaction.Currency,
+		ProviderOriginalAmountMinor: transaction.ProviderOriginalAmountMinor,
+		ProviderOriginalCurrency:    transaction.ProviderOriginalCurrency,
+		SnapshotJSON:                *transaction.SnapshotJSON,
+	})
+}
+
+func transferMatchingMonobankKeyFor(
+	transaction transferMatchingIndexedTransaction,
+) (transferMatchingMonobankKey, bool) {
+	if !transaction.hasMonobankTransferEvidence || transaction.transaction.ConnectionID == nil {
+		return transferMatchingMonobankKey{}, false
+	}
+	return transferMatchingMonobankKey{
+		connectionID: *transaction.transaction.ConnectionID,
+		currency:     transaction.transaction.Currency,
+		amount:       transaction.transaction.AmountMinor,
+	}, true
 }
 
 func sortTransferMatchingTransactions(transactions []transferMatchingIndexedTransaction) {
@@ -583,6 +632,50 @@ func transferMatchingCandidates(
 	}
 	if slices.ContainsFunc(transferMatchingFXCandidates(transaction, indexes.byFX), addCandidate) {
 		return candidates
+	}
+	if slices.ContainsFunc(transferMatchingMonobankCandidates(transaction, indexes.byMonobank), addCandidate) {
+		return candidates
+	}
+	return candidates
+}
+
+func transferMatchingMonobankCandidates(
+	transaction transferMatchingIndexedTransaction,
+	byMonobank map[transferMatchingMonobankKey][]transferMatchingIndexedTransaction,
+) []transferMatchingIndexedTransaction {
+	if !transaction.hasMonobankTransferEvidence ||
+		transaction.monobankEvidence.OperationAmountMinor == math.MinInt64 ||
+		transaction.transaction.AmountMinor == math.MinInt64 ||
+		transaction.transaction.ConnectionID == nil {
+		return nil
+	}
+	bucket := byMonobank[transferMatchingMonobankKey{
+		connectionID: *transaction.transaction.ConnectionID,
+		currency:     transaction.monobankEvidence.OperationCurrency,
+		amount:       -transaction.monobankEvidence.OperationAmountMinor,
+	}]
+	windowStart := transaction.transaction.EffectiveAt.Add(-transferMatchingWindow)
+	windowEnd := transaction.transaction.EffectiveAt.Add(transferMatchingWindow)
+	start := sort.Search(len(bucket), func(index int) bool {
+		return !bucket[index].transaction.EffectiveAt.Before(windowStart)
+	})
+	candidates := make([]transferMatchingIndexedTransaction, 0, transferMatchingMaxCandidates)
+	for index := start; index < len(bucket); index++ {
+		candidate := bucket[index]
+		if candidate.transaction.EffectiveAt.After(windowEnd) {
+			break
+		}
+		if candidate.transaction.ID == transaction.transaction.ID ||
+			candidate.transaction.AccountID == transaction.transaction.AccountID ||
+			!candidate.hasMonobankTransferEvidence ||
+			candidate.monobankEvidence.OperationCurrency != transaction.transaction.Currency ||
+			candidate.monobankEvidence.OperationAmountMinor != -transaction.transaction.AmountMinor {
+			continue
+		}
+		candidates = append(candidates, candidate)
+		if len(candidates) == transferMatchingMaxCandidates {
+			break
+		}
 	}
 	return candidates
 }

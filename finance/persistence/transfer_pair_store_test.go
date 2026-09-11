@@ -666,4 +666,157 @@ func TestTransferPairStore(t *testing.T) {
 			assert.Equal(t, expectedTransaction.EffectiveAt.UnixNano(), actualTransaction.EffectiveAt.UnixNano())
 		}
 	})
+
+	t.Run("projects only usable Monobank snapshot evidence without duplicating rows", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.September, 11, 11, 0, 0, 0, time.FixedZone("matching", 2*60*60))
+		_, coreStore, transactions, store := makeStores(t)
+		tenantID := "tenant-" + fake.UUID().V4()
+		otherTenantID := "tenant-other-" + fake.UUID().V4()
+		account := domain.Account{
+			ID: "account-" + fake.UUID().V4(), TenantID: tenantID,
+			Name: "account-" + fake.Lorem().Word(), Currency: "UAH", Kind: domain.AccountKindLinked,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		records := []domain.Transaction{}
+		makeTransaction := func(name string) domain.Transaction {
+			originalAmount := int64(508_300)
+			return domain.Transaction{
+				ID: "transaction-" + name + "-" + fake.UUID().V4(), TenantID: tenantID, AccountID: account.ID,
+				Source: domain.TransactionSourceProvider, Status: domain.TransactionStatusBooked,
+				Kind: domain.TransactionKindRegular, AmountMinor: originalAmount, Currency: "UAH",
+				Description: "transaction-" + fake.Lorem().Word(), EffectiveAt: now, CreatedAt: now, UpdatedAt: now,
+				ProviderOriginal: &domain.ProviderTransactionOriginal{AmountMinor: originalAmount, Currency: "UAH"},
+			}
+		}
+		withSnapshot := makeTransaction("snapshot")
+		missingSnapshot := makeTransaction("missing")
+		multipleSnapshots := makeTransaction("multiple")
+		conflictingProvenance := makeTransaction("conflict")
+		foreignEvidence := makeTransaction("foreign")
+		records = append(
+			records,
+			withSnapshot,
+			missingSnapshot,
+			multipleSnapshots,
+			conflictingProvenance,
+			foreignEvidence,
+		)
+		require.NoError(t, func() error { _, err := coreStore.SaveAccount(t.Context(), account); return err }())
+		for _, transaction := range records {
+			_, err := transactions.SaveTransaction(t.Context(), transaction)
+			require.NoError(t, err)
+		}
+		connection := domain.BankConnection{
+			ID: "connection-" + fake.UUID().V4(), TenantID: tenantID, Provider: string(domain.ProviderIDMonobank),
+			ConnectorID: domain.ProviderConnectorIDMonobank, DisplayName: "connection-" + fake.Lorem().Word(),
+			ProviderReference: "reference-" + fake.UUID().V4(), SecretID: "secret-" + fake.UUID().V4(),
+			State: domain.BankConnectionStateActive, CreatedAt: now, UpdatedAt: now,
+		}
+		secondConnection := connection
+		secondConnection.ID = "connection-second-" + fake.UUID().V4()
+		secondConnection.ProviderReference = "reference-second-" + fake.UUID().V4()
+		foreignConnection := connection
+		foreignConnection.ID = "connection-foreign-" + fake.UUID().V4()
+		foreignConnection.TenantID = otherTenantID
+		foreignConnection.ProviderReference = "reference-foreign-" + fake.UUID().V4()
+		for _, item := range []domain.BankConnection{connection, secondConnection, foreignConnection} {
+			_, err := coreStore.SaveBankConnection(t.Context(), item)
+			require.NoError(t, err)
+		}
+		makeMatch := func(transactionID string, connectionID string) domain.ProviderTransactionMatch {
+			return domain.ProviderTransactionMatch{
+				ID:           "match-" + fake.UUID().V4(),
+				ConnectionID: connectionID,
+				ProviderAccountID: "provider-account-" + fake.UUID().
+					V4(),
+				ProviderTransactionID: "provider-transaction-" + fake.UUID().V4(),
+				Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+				TransactionID:         transactionID,
+				Status:                domain.TransactionStatusBooked,
+				CreatedAt:             now,
+				UpdatedAt:             now,
+			}
+		}
+		for _, match := range []domain.ProviderTransactionMatch{
+			makeMatch(withSnapshot.ID, connection.ID), makeMatch(missingSnapshot.ID, connection.ID),
+			makeMatch(multipleSnapshots.ID, connection.ID), makeMatch(conflictingProvenance.ID, connection.ID),
+			makeMatch(conflictingProvenance.ID, secondConnection.ID), makeMatch(foreignEvidence.ID, foreignConnection.ID),
+		} {
+			_, err := coreStore.SaveProviderTransactionMatch(t.Context(), match)
+			require.NoError(t, err)
+		}
+		makeSnapshot := func(transaction domain.Transaction, objectID string) domain.ProviderSnapshot {
+			return domain.ProviderSnapshot{
+				ID:                   "snapshot-" + fake.UUID().V4(),
+				TenantID:             tenantID,
+				ConnectionID:         connection.ID,
+				FinanceAccountID:     account.ID,
+				FinanceTransactionID: transaction.ID,
+				Subject:              domain.ProviderSnapshotSubjectTransaction,
+				Kind:                 domain.ProviderSnapshotKindTransaction,
+				ProviderObjectID:     objectID,
+				DocumentJSON:         []byte(`{"amount":508300,"operationAmount":10000,"currencyCode":978,"mcc":4829}`),
+				CapturedAt:           now,
+			}
+		}
+		snapshots := NewProviderSnapshotStoreFromStore(coreStore)
+		for _, snapshot := range []domain.ProviderSnapshot{
+			makeSnapshot(withSnapshot, "object-"+fake.UUID().V4()),
+			makeSnapshot(multipleSnapshots, "object-first-"+fake.UUID().V4()),
+			makeSnapshot(multipleSnapshots, "object-second-"+fake.UUID().V4()),
+			makeSnapshot(conflictingProvenance, "object-conflict-"+fake.UUID().V4()),
+		} {
+			_, err := snapshots.SaveProviderSnapshot(t.Context(), snapshot)
+			require.NoError(t, err)
+		}
+		foreignSnapshot := providerSnapshotModel{
+			ID:                   "snapshot-foreign-" + fake.UUID().V4(),
+			TenantID:             otherTenantID,
+			ConnectionID:         foreignConnection.ID,
+			FinanceAccountID:     account.ID,
+			FinanceTransactionID: foreignEvidence.ID,
+			Subject: string(
+				domain.ProviderSnapshotSubjectTransaction,
+			),
+			Kind:             string(domain.ProviderSnapshotKindTransaction),
+			ProviderObjectID: "object-foreign-" + fake.UUID().V4(),
+			DocumentJSON:     `{"amount":508300}`,
+			CapturedAt:       now,
+		}
+		require.NoError(t, coreStore.db.Create(&foreignSnapshot).Error)
+
+		actual, err := store.ListEligibleTransferMatchingTransactions(
+			t.Context(),
+			ListEligibleTransferMatchingTransactionsParams{
+				TenantID: tenantID, RangeStart: now, RangeEndExclusive: now.Add(time.Hour),
+			},
+		)
+
+		require.NoError(t, err)
+		actualByID := make(map[string]TransferMatchingTransaction, len(actual))
+		for _, transaction := range actual {
+			actualByID[transaction.ID] = transaction
+		}
+		require.Len(t, actual, len(records))
+		require.Len(t, actualByID, len(records))
+		assert.Equal(t, connection.ID, *actualByID[withSnapshot.ID].ConnectionID)
+		assert.Equal(t, string(domain.ProviderConnectorIDMonobank), *actualByID[withSnapshot.ID].ConnectorID)
+		assert.Equal(t, int64(508_300), *actualByID[withSnapshot.ID].ProviderOriginalAmountMinor)
+		assert.Equal(t, "UAH", *actualByID[withSnapshot.ID].ProviderOriginalCurrency)
+		assert.JSONEq(
+			t,
+			`{"amount":508300,"operationAmount":10000,"currencyCode":978,"mcc":4829}`,
+			*actualByID[withSnapshot.ID].SnapshotJSON,
+		)
+		for _, transactionID := range []string{missingSnapshot.ID, multipleSnapshots.ID, conflictingProvenance.ID, foreignEvidence.ID} {
+			assert.Nil(t, actualByID[transactionID].SnapshotJSON)
+		}
+		for _, transactionID := range []string{conflictingProvenance.ID, foreignEvidence.ID} {
+			assert.Nil(t, actualByID[transactionID].ConnectionID)
+			assert.Nil(t, actualByID[transactionID].ConnectorID)
+			assert.Nil(t, actualByID[transactionID].ProviderOriginalAmountMinor)
+			assert.Nil(t, actualByID[transactionID].ProviderOriginalCurrency)
+		}
+	})
 }

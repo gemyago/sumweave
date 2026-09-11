@@ -38,13 +38,17 @@ type TransferPairUnlinkParams struct {
 // TransferMatchingTransaction is the compact immutable row used by one
 // transfer-matching attempt.
 type TransferMatchingTransaction struct {
-	ID           string
-	AccountID    string
-	Currency     string
-	AmountMinor  int64
-	EffectiveAt  time.Time
-	Description  string
-	ConnectionID *string
+	ID                          string
+	AccountID                   string
+	Currency                    string
+	AmountMinor                 int64
+	EffectiveAt                 time.Time
+	Description                 string
+	ConnectionID                *string
+	ConnectorID                 *string
+	ProviderOriginalAmountMinor *int64
+	ProviderOriginalCurrency    *string
+	SnapshotJSON                *string
 }
 
 // ListEligibleTransferMatchingTransactionsParams bounds one complete matching
@@ -87,6 +91,10 @@ func (s *TransferPairStore) ListEligibleTransferMatchingTransactions(
 			"transactions.effective_at AS effective_at",
 			"transactions.description AS description",
 			"provenance.connection_id AS connection_id",
+			"provenance.connector_id AS connector_id",
+			"CASE WHEN provenance.connection_id IS NOT NULL THEN transactions.original_amount_minor ELSE NULL END AS provider_original_amount_minor",
+			"CASE WHEN provenance.connection_id IS NOT NULL THEN transactions.original_currency ELSE NULL END AS provider_original_currency",
+			"snapshot.document_json AS snapshot_json",
 		}).
 		Joins(
 			"JOIN "+(accountModel{}).TableName()+
@@ -94,12 +102,28 @@ func (s *TransferPairStore) ListEligibleTransferMatchingTransactions(
 		).
 		Joins(
 			"LEFT JOIN ("+
-				"SELECT matches.transaction_id, CASE WHEN COUNT(DISTINCT matches.connection_id) = 1 THEN MIN(matches.connection_id) ELSE NULL END AS connection_id "+
+				"SELECT matches.transaction_id, "+
+				"CASE WHEN COUNT(DISTINCT matches.connection_id) = 1 THEN MIN(matches.connection_id) ELSE NULL END AS connection_id, "+
+				"CASE WHEN COUNT(DISTINCT matches.connection_id) = 1 THEN MIN(connections.connector_id) ELSE NULL END AS connector_id "+
 				"FROM "+(providerTransactionMatchModel{}).TableName()+" AS matches "+
 				"JOIN "+(bankConnectionModel{}).TableName()+" AS connections ON connections.id = matches.connection_id "+
 				"WHERE connections.tenant_id = ? GROUP BY matches.transaction_id"+
 				") AS provenance ON provenance.transaction_id = transactions.id",
 			params.TenantID,
+		).
+		Joins(
+			"LEFT JOIN ("+
+				"SELECT snapshots.finance_transaction_id, snapshots.connection_id, "+
+				"CASE WHEN COUNT(*) = 1 THEN MIN(snapshots.document_json) ELSE NULL END AS document_json "+
+				"FROM "+(providerSnapshotModel{}).TableName()+" AS snapshots "+
+				"JOIN "+(bankConnectionModel{}).TableName()+" AS connections ON connections.id = snapshots.connection_id "+
+				"WHERE snapshots.tenant_id = ? AND connections.tenant_id = ? AND snapshots.subject = ? AND snapshots.kind = "+
+				"? GROUP BY snapshots.finance_transaction_id, snapshots.connection_id"+
+				") AS snapshot ON snapshot.finance_transaction_id = transactions.id AND snapshot.connection_id = provenance.connection_id",
+			params.TenantID,
+			params.TenantID,
+			string(domain.ProviderSnapshotSubjectTransaction),
+			string(domain.ProviderSnapshotKindTransaction),
 		).
 		Where("transactions.tenant_id = ?", params.TenantID).
 		Where("transactions.effective_at >= ? AND transactions.effective_at < ?", loadStart, loadEndExclusive).

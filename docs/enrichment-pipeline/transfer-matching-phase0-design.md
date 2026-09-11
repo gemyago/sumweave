@@ -2,7 +2,8 @@
 
 Status: implemented. The original automated Phase 0 work was delivered on
 2026-09-07; description-derived FX candidate matching was delivered on
-2026-09-09. Isolated manual E2E and independent UI design review remain recorded
+2026-09-09, and the Monobank snapshot FX rule was delivered on 2026-09-11.
+Isolated manual E2E and independent UI design review remain recorded
 completion gates. This design follows the [Phase 0 PRD](transfer-matching-phase0-prd.md),
 including the review decision to match in memory and accept concurrent-update
 races in Phase 0.
@@ -14,7 +15,8 @@ Add a finance transfer-matching service that processes a tenant and ledger
 timestamp range. Both explicit requests and committed bank-sync windows call
 the same service. Automatically pair booked transactions within 72 hours when
 each leg has exactly one eligible partner across equal-and-opposite
-same-currency candidates and scoped description-derived FX candidates.
+same-currency candidates, scoped description-derived FX candidates, and scoped
+Monobank snapshot FX candidates.
 
 Reuse the existing transfer group, matching timestamp, reporting behavior, and
 partner inspection UI. Add one transaction exclusion flag, a dedicated pair
@@ -164,11 +166,12 @@ constraints, or version columns are required. The bulk read uses the existing
 `idx_finance_transactions_list_order` index, whose leading columns are
 `tenant_id` and `effective_at`.
 
-The FX rule adds no schema change. It reuses existing
-`finance_provider_transaction_matches` rows only to project optional matching
-provenance; it does not persist parsed descriptions, FX evidence, rates, or
-candidate decisions. API, UI, dispatch, job, provider-call, provider-snapshot,
-and resync contracts are unchanged by this rule.
+The FX rules add no schema change. They reuse existing
+`finance_provider_transaction_matches`, `finance_bank_connections`, transaction
+provider-original columns, and `finance_provider_snapshots` rows only for the
+compact matching projection. They do not persist parsed descriptions, snapshot
+evidence, rates, or candidate decisions. API, UI, dispatch, job, provider-call,
+provider-snapshot, and resync contracts are unchanged by these rules.
 
 ## Pair writes and exclusion state
 
@@ -257,14 +260,18 @@ are excluded. An unmatched transfer is eligible only when both pair fields
 are absent.
 
 Load only the matching fields: transaction ID, account ID, currency, signed
-minor-unit amount, effective timestamp, current ledger description, and optional
-unambiguous connection ID. Eligibility is handled by the query. Do not hydrate
-tags, categories, or provider snapshots. The query left-joins a transaction-ID
-aggregate over `finance_provider_transaction_matches`: exactly one distinct
-connection ID is projected, while no mapping or multiple distinct connection IDs
-projects no usable connection. Group before projecting so every eligible ledger
-transaction remains one row. Missing or conflicting provenance does not affect
-same-currency eligibility.
+minor-unit amount, effective timestamp, current ledger description, optional
+unambiguous connection and connector IDs, provider-original amount/currency,
+and optional transaction snapshot JSON. Eligibility is handled by the query.
+The query left-joins a transaction-ID aggregate over
+`finance_provider_transaction_matches`: exactly one distinct tenant-owned
+connection ID projects that ID and connector; no mapping or multiple distinct
+connection IDs projects no provider evidence. A second grouped snapshot
+projection returns JSON only when exactly one tenant-owned transaction snapshot
+exists for that transaction and connection. Group before projecting so every
+eligible ledger transaction remains one row; do not directly join snapshots.
+Missing, foreign, or conflicting provenance does not affect same-currency
+eligibility.
 
 Finish this load before deciding or writing any pair. Do not limit it to a UI
 page or silently truncate the result. Memory use grows with the selected range;
@@ -289,8 +296,8 @@ only the two proposed legs' candidate windows determine their uniqueness.
 
 ### Extract evidence and decide pairs
 
-Extract optional typed FX evidence once from each loaded description before
-building indexes. The initial extractor recognizes only the complete ASCII form:
+Extract optional typed description FX evidence once from each loaded description
+before building indexes. The initial extractor recognizes only the complete ASCII form:
 
 ```text
 FX<digits> <BASE>/<QUOTE> <positive-rate>
@@ -315,7 +322,7 @@ absolute-value arithmetic. The minimum signed 64-bit amount has no representable
 opposite and therefore no candidate. Compare timestamps as instants; 72 hours
 is an elapsed duration across DST, without explicit UTC normalization.
 
-For an FX evidence bucket, require different accounts, opposite signs, and that
+For a description FX evidence bucket, require different accounts, opposite signs, and that
 the two ledger currencies cover the evidence's ordered base/quote pair. The
 evidence pair determines conversion direction regardless of which leg is debited.
 The matcher verifies conversion with arbitrary-precision integer arithmetic:
@@ -330,9 +337,22 @@ Positive exact halfway results round upward. Invalid evidence, unavailable
 currency scales, and inconsistent conversion fail closed. No binary floating
 point or persisted extracted value is used.
 
+Build a third index keyed by bank connection ID, ledger currency, and signed
+ledger amount for usable Monobank evidence. Its extractor owns all JSON,
+currency-code, and MCC knowledge. It accepts only connector `monobank`, exactly
+one snapshot, `mcc = 4829`, optional nonzero `originalMcc = 4829`, nonzero
+same-sign `amount` and `operationAmount`, a recognized operation currency
+different from the ledger currency, provider-original equality, and current
+ledger equality. It rejects either `int64` negation boundary. For a candidate A,
+look up connection A, operation currency A, and negated operation amount A;
+then require the candidate's operation currency and negated operation amount to
+reciprocate A's ledger currency and amount. The normal account and inclusive
+72-hour checks apply. No descriptions, provider IDs, rates, tolerances, names,
+receipts, external lookup, or separate evidence persistence participate.
+
 1. Select starting rows in memory using the original half-open range:
    `rangeStart <= effectiveAt < rangeEndExclusive`. Either sign can start a pair.
-2. Find A's same-currency and FX candidates in the loaded indexes, merge and
+2. Find A's same-currency, description FX, and Monobank snapshot FX candidates in the loaded indexes, merge and
    deduplicate them by transaction ID. Zero means unmatched; more than one means
    ambiguous. Do not give either rule priority.
 3. If B is the only combined candidate, find B's combined candidates in the same
@@ -439,9 +459,10 @@ Implement backend work serially, with behavior tests integral to each step:
 4. Add the ledger action and existing job-feedback integration. Update the UI
    wireframe and manual E2E guide for matching and manual correction.
 
-The delivered FX follow-on keeps those triggers, persistence, and worker paths
-unchanged. Its acceptance coverage includes USD/PLN matching, scope/reference/
-rate/pair/value rejections, unavailable provenance, shared-rule ambiguity,
+The delivered FX follow-ons keep triggers, persistence writes, and worker paths
+unchanged. Their acceptance coverage includes description USD/PLN matching and
+Monobank UAH/EUR snapshot matching, scope/reference/rate/pair/value and
+snapshot-evidence rejections, unavailable provenance, shared-rule ambiguity,
 reverse ambiguity outside the requested range, shuffled input, extraction once
 per loaded row, range scope, and existing atomic pair writes.
 
