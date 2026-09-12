@@ -761,25 +761,18 @@
 >
   <div class="d-grid gap-2 gap-sm-4">
     <header class="card border-0 shadow-sm">
-      <div class="card-body p-2 p-sm-3 p-xl-5">
+      <div class="card-body p-2 p-sm-3">
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
           <div>
-            <p class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2">Finance overview</p>
-            <h1 id="finance-dashboard-heading" class="h3 mb-2">Finance dashboard</h1>
+            <h1 id="finance-dashboard-heading" class="h3 mb-1">Finance dashboard</h1>
             <p class="d-none d-sm-block text-body-secondary mb-0">
-              Display-currency balances, flows, categories, and pending values use current FX valuation and can change after a rate refresh.
+              Values use current FX valuation.
             </p>
           </div>
 
           <div class="d-flex flex-wrap gap-2 align-content-start">
             <a class="btn btn-primary btn-sm" href="/finance/transactions/new" use:link aria-label="Add transaction">
               <span class="d-sm-none">Add</span><span class="d-none d-sm-inline">Add transaction</span>
-            </a>
-            <a class="btn btn-outline-secondary btn-sm" href="/finance/accounts" use:link aria-label="Open accounts">
-              <span class="d-sm-none">Accounts</span><span class="d-none d-sm-inline">Open accounts</span>
-            </a>
-            <a class="btn btn-outline-secondary btn-sm" href="/finance/transactions" use:link aria-label="Open transactions">
-              <span class="d-sm-none">Transactions</span><span class="d-none d-sm-inline">Open transactions</span>
             </a>
           </div>
         </div>
@@ -891,48 +884,47 @@
       {/if}
       <div class="row g-4">
         <div class="col-12">
-          <div class="card shadow-sm h-100">
+          <div class="card shadow-sm">
             <div class="card-body p-4 d-grid gap-4">
-              <div class="d-flex flex-column flex-md-row justify-content-between gap-3 align-items-md-start">
-                <div>
-                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Period performance</p>
-                  <h2 class="h5 mb-2">Period net</h2>
-                  <p class="display-6 mb-1">
-                    {formatFinanceMoney(dashboard.settled.netMinor, dashboard.settled.displayCurrency)}
-                  </p>
-                  <p class="text-body-secondary mb-0">
-                    Income minus expenses for {formatFinanceDate(dashboard.period.startDate)} → {formatFinanceDate(inclusiveDashboardEndDate(dashboard.period.endDate)!)}.
-                  </p>
-                </div>
-
-                <span class={`badge ${badgeClass(toneFromMoney(dashboard.settled.netMinor))}`}>
-                  {dashboard.settled.netMinor < 0 ? 'Net outflow' : dashboard.settled.netMinor > 0 ? 'Net inflow' : 'Even period'}
-                </span>
+              <div>
+                <h2 class="h5 mb-1">Cash flow over time</h2>
+                <p class="text-body-secondary mb-0">Settled income and expense by reporting bucket, valued with current FX.</p>
               </div>
 
-              <div class="row g-3" aria-label="Balance summary">
-                <div class="col-12 col-md-4">
+              <div class="row g-3" aria-label="Period summary">
+                <div class="col-6 col-lg-3">
+                  <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
+                    <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Net</p>
+                    <p class="fs-5 fw-semibold text-nowrap mb-1">
+                      {formatFinanceMoney(dashboard.settled.netMinor, dashboard.settled.displayCurrency)}
+                    </p>
+                    <span class={`badge ${badgeClass(toneFromMoney(dashboard.settled.netMinor))}`}>
+                      {dashboard.settled.netMinor < 0 ? 'Net outflow' : dashboard.settled.netMinor > 0 ? 'Net inflow' : 'Even period'}
+                    </span>
+                  </div>
+                </div>
+                <div class="col-6 col-lg-3">
                   <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
                     <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Income</p>
-                    <p class="fs-5 fw-semibold mb-1">
+                    <p class="fs-5 fw-semibold text-nowrap mb-1">
                       {formatFinanceMoney(dashboard.settled.incomeMinor, dashboard.settled.displayCurrency)}
                     </p>
                     <p class="small text-body-secondary mb-0">{dashboard.settled.transactionCount} settled transactions</p>
                   </div>
                 </div>
-                <div class="col-12 col-md-4">
+                <div class="col-6 col-lg-3">
                   <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
                     <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Expense</p>
-                    <p class="fs-5 fw-semibold mb-1">
+                    <p class="fs-5 fw-semibold text-nowrap mb-1">
                       {formatFinanceMoney(dashboard.settled.expenseMinor, dashboard.settled.displayCurrency)}
                     </p>
                     <p class="small text-body-secondary mb-0">Booked outflow this period</p>
                   </div>
                 </div>
-                <div class="col-12 col-md-4">
+                <div class="col-6 col-lg-3">
                   <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
                     <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Pending net</p>
-                    <p class="fs-5 fw-semibold mb-1">
+                    <p class="fs-5 fw-semibold text-nowrap mb-1">
                       {formatFinanceMoney(dashboard.pending.netMinor, dashboard.pending.displayCurrency)}
                     </p>
                     <p class="small text-body-secondary mb-0">{dashboard.pending.transactionCount} unsettled transactions</p>
@@ -947,64 +939,6 @@
                   <a class="alert-link" href="/admin/finance/fx" use:link>Open FX diagnostics</a>.
                 </div>
               {/if}
-
-              {#if dashboard.nativeSettledTotals.length > 0}
-                <div>
-                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Native totals</p>
-                  <div class="list-group">
-                    {#each dashboard.nativeSettledTotals as total (total.currency)}
-                      <div class="list-group-item d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
-                        <div>
-                          <strong>{total.currency}</strong>
-                          <p class="small text-body-secondary mb-0">
-                            Income {formatFinanceMoney(total.incomeMinor, total.currency)} · Expense {formatFinanceMoney(total.expenseMinor, total.currency)}
-                          </p>
-                        </div>
-                        <strong>{formatFinanceMoney(total.netMinor, total.currency)}</strong>
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-
-              {#if hasFxCoverageDetails}
-                <details class="border rounded p-3">
-                  <summary class="fw-semibold">FX coverage</summary>
-                  <div class="small text-body-secondary mt-3 d-grid gap-2">
-                    {#if fxCoverage.length > 0}
-                      <div class="d-grid gap-1">
-                        <strong class="text-body">Missing pairs</strong>
-                        {#each fxCoverage as coverage (`${coverage.provider}-${coverage.baseCurrency}-${coverage.quoteCurrency}`)}
-                          <div>
-                            {coverage.baseCurrency} → {coverage.quoteCurrency} · {coverage.provider} · {coverage.affectedTransactionCount} transaction value{coverage.affectedTransactionCount === 1 ? '' : 's'} · {coverage.affectedAccountCount} account value{coverage.affectedAccountCount === 1 ? '' : 's'}
-                          </div>
-                        {/each}
-                      </div>
-                    {/if}
-                    {#if currentFxRates.length > 0}
-                      <div class="d-grid gap-1">
-                        <strong class="text-body">Current rates</strong>
-                        {#each currentFxRates as rate (`${rate.provider}-${rate.baseCurrency}-${rate.quoteCurrency}`)}
-                          <div>{rate.baseCurrency} → {rate.quoteCurrency} · {rate.provider} · effective {formatFinanceDateTime(rate.effectiveAt)} · refreshed {formatFinanceDateTime(rate.lastSuccessfulRefreshAt)}{rate.stale ? ' · stale' : ''}</div>
-                        {/each}
-                      </div>
-                    {/if}
-                    <a href="/admin/finance/fx" use:link>Refresh required rates</a>
-                  </div>
-                </details>
-              {/if}
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12">
-          <div class="card shadow-sm h-100">
-            <div class="card-body p-4 d-grid gap-4">
-              <div>
-                <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Cash-flow visual</p>
-                <h2 class="h5 mb-1">Cash flow over time</h2>
-                <p class="text-body-secondary mb-0">Settled income and expense by reporting bucket, valued with current FX.</p>
-              </div>
 
               {#if loadingCashFlowSeries}
                 <div class="alert alert-secondary mb-0" role="status">Loading cash-flow chart…</div>
@@ -1024,9 +958,7 @@
                   </div>
                 {/if}
                 {#if !cashFlowHasActivity}
-                  <div class="alert alert-light border mb-0" role="status">
-                    No settled cash flow to chart for this period.
-                  </div>
+                  <div class="alert alert-light border mb-0" role="status">No settled cash flow to chart for this period.</div>
                 {:else if cashFlowChartOption}
                   <EChartsSvgChart ariaLabel="Cash flow chart" option={cashFlowChartOption} />
                 {/if}
@@ -1040,12 +972,61 @@
                 </details>
               {/if}
 
+              {#if dashboard.nativeSettledTotals.length > 0 || hasFxCoverageDetails}
+                <details class="border rounded p-3">
+                  <summary class="fw-semibold">Valuation details</summary>
+                  <div class="small text-body-secondary mt-3 d-grid gap-3">
+                  {#if dashboard.nativeSettledTotals.length > 0}
+                    <div>
+                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Native totals</p>
+                  <div class="list-group">
+                    {#each dashboard.nativeSettledTotals as total (total.currency)}
+                      <div class="list-group-item d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+                        <div>
+                          <strong>{total.currency}</strong>
+                          <p class="small text-body-secondary mb-0">
+                            Income {formatFinanceMoney(total.incomeMinor, total.currency)} · Expense {formatFinanceMoney(total.expenseMinor, total.currency)}
+                          </p>
+                        </div>
+                        <strong>{formatFinanceMoney(total.netMinor, total.currency)}</strong>
+                      </div>
+                    {/each}
+                  </div>
+                    </div>
+                  {/if}
+
+                  {#if hasFxCoverageDetails}
+                    <div class="d-grid gap-2">
+                    {#if fxCoverage.length > 0}
+                      <div class="d-grid gap-1">
+                        <strong class="text-body">Missing pairs</strong>
+                        {#each fxCoverage as coverage (`${coverage.provider}-${coverage.baseCurrency}-${coverage.quoteCurrency}`)}
+                          <div>
+                            {coverage.baseCurrency} → {coverage.quoteCurrency} · {coverage.provider} · {coverage.affectedTransactionCount} transaction value{coverage.affectedTransactionCount === 1 ? '' : 's'} · {coverage.affectedAccountCount} account value{coverage.affectedAccountCount === 1 ? '' : 's'}
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if currentFxRates.length > 0}
+                      <div class="d-grid gap-1">
+                        <strong class="text-body">Current rates</strong>
+                        {#each currentFxRates as rate (`${rate.provider}-${rate.baseCurrency}-${rate.quoteCurrency}`)}
+                          <div>{rate.baseCurrency} → {rate.quoteCurrency} · {rate.provider} · effective {formatFinanceDateTime(rate.effectiveAt)} · refreshed {formatFinanceDateTime(rate.lastSuccessfulRefreshAt)}{rate.stale ? ' · stale' : ''}</div>
+                        {/each}
+                      </div>
+                    {/if}
+                    <a href="/admin/finance/fx" use:link>Refresh required rates</a>
+                    </div>
+                  {/if}
+                  </div>
+                </details>
+              {/if}
             </div>
           </div>
         </div>
 
         <div class="col-12 col-xl-6">
-          <div class="card shadow-sm h-100">
+          <div class="card shadow-sm">
             <div class="card-body p-4 d-grid gap-4">
               <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
                 <div>
@@ -1081,7 +1062,7 @@
         </div>
 
         <div class="col-12 col-xl-6">
-          <div class="card shadow-sm h-100">
+          <div class="card shadow-sm">
             <div class="card-body p-4 d-grid gap-4">
               <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
                 <div>
