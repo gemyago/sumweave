@@ -47,9 +47,9 @@ Expected:
 2. Confirm the dashboard hierarchy is visible for the selected tenant:
    - compact page header
     - visible reporting-period summary with **Previous month**, **Current month**, and **Next month** controls
-   - balance-first summary with booked balance before secondary sections
-   - compact income, expense, and pending summaries
-   - one primary cash-flow or equivalent summary visual in the first viewport
+    - full-width cash-flow card first, with Net, Income, Expense, and Pending net KPI tiles
+    - one primary cash-flow visual in the first viewport
+    - collapsed Cash-flow values and Valuation details disclosures below the visual
    - account snapshot section
    - category or spending summary section
    - recent transactions section
@@ -90,7 +90,8 @@ Expected:
 
 1. Check the Finance shell at a desktop viewport such as `1280x900`.
 2. Check the same routes at a narrow viewport such as `390x844`.
-3. On both `#/finance` and `#/finance/transactions`, look for:
+3. Without reloading, shrink the open dashboard from `1280x900` through approximately `1200px`, `992px`, `768px`, and `576px` to `390x844`, then expand back to `1280x900`. Repeat on `#/finance/transactions`.
+4. On both `#/finance` and `#/finance/transactions`, look for:
     - the desktop rail uses the wider workspace well
     - on narrow viewports, the full Finance nav stacks above the utility header and page content as a full-width section with compact wrapping link rows
     - the utility header wraps compactly below the stacked nav, omits duplicate route labels when space is tight, and does not introduce a menu-toggle-only state
@@ -99,6 +100,8 @@ Expected:
     - headings, actions, and filter rows remain readable
     - no overlapping shell, toolbar, table, or inspector regions
     - no clipped content, horizontal overflow, or unusable action rows
+    - cash-flow KPI tiles form a `2 x 2` grid on narrow screens and four columns on desktop
+    - the Finance rail, dashboard controls, and chart reflow immediately in both resize directions; chart SVG width matches its host
 
 Expected:
 

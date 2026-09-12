@@ -177,6 +177,7 @@ html:not([data-theme]) {
 /* Finance ECharts SVG widgets need one shared, responsive containment height. */
 .finance-chart-widget {
   width: 100%;
+  min-width: 0;
   height: 22rem;
 }
 

@@ -264,10 +264,10 @@ describe('FinanceShell', () => {
   it('does not define route-local styles or style attributes', () => {
     expect(FinanceShellSource).not.toMatch(/<style[\s>]/)
     expect(FinanceShellSource).not.toMatch(/\sstyle=/)
-    expect(BootstrapFinanceDashboardSource).toContain('class="card-body p-2 p-sm-3 p-xl-5"')
+    expect(BootstrapFinanceDashboardSource).toContain('class="card-body p-2 p-sm-3"')
     expect(BootstrapFinanceDashboardSource).toContain('class="d-none d-sm-block text-body-secondary mb-0"')
-    expect(BootstrapFinanceDashboardSource).toContain('class="d-none d-sm-block text-uppercase text-body-secondary fw-semibold small mb-2"')
-    expect(BootstrapFinanceDashboardSource).toContain('<span class="d-sm-none">Transactions</span>')
+    expect(BootstrapFinanceDashboardSource).not.toContain('Finance overview')
+    expect(BootstrapFinanceDashboardSource).not.toContain('Open accounts')
     expect(BootstrapFinanceDashboardSource).toContain('class="d-none d-sm-block my-3 my-xl-4"')
   })
 })

@@ -162,17 +162,17 @@ describe('Finance dashboard page', () => {
     })
   })
 
-  it('renders the canonical bootstrap dashboard with period-net summaries and canonical finance links', async () => {
+  it('renders the cash-flow-first bootstrap dashboard hierarchy', async () => {
     render(Finance)
 
     expect(await screen.findByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
-    expect(await screen.findByText('Period net')).toBeInTheDocument()
-    expect(screen.getByText('Income minus expenses for Jun 20, 2026 → Jun 20, 2026.')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Cash flow over time' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Period summary')).toBeInTheDocument()
+    expect(screen.getByText('Net')).toBeInTheDocument()
     expect(screen.getByText('Booked balance total')).toBeInTheDocument()
     expect(screen.getAllByText('Income').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Expense').length).toBeGreaterThan(0)
     expect(screen.getByText('Pending net')).toBeInTheDocument()
-    expect(screen.getByText('Cash-flow visual')).toBeInTheDocument()
     expect(screen.getByLabelText('Cash flow chart')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Top categories' })).toBeInTheDocument()
     expect(screen.getByLabelText('Category breakdown chart')).toBeInTheDocument()
@@ -181,8 +181,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByRole('heading', { name: 'Transactions' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Needs attention' })).toBeInTheDocument()
     expect(screen.getByText('Missing FX coverage')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open accounts' })).toHaveAttribute('href', '#/finance/accounts')
-    expect(screen.getByRole('link', { name: 'Open transactions' })).toHaveAttribute('href', '#/finance/transactions')
+    expect(screen.getByRole('link', { name: 'Add transaction' })).toHaveAttribute('href', '#/finance/transactions/new')
     expect(screen.getByRole('link', { name: 'Review in admin FX diagnostics' })).toHaveAttribute('href', '#/admin/finance/fx')
     expect(screen.queryByText('Bootstrap pilot')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument()
@@ -190,6 +189,16 @@ describe('Finance dashboard page', () => {
     expect(screen.getByLabelText('Custom end date')).not.toBeVisible()
     expect(screen.queryByText('2026-06-20T12:00:00.000Z')).not.toBeInTheDocument()
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026')).toBeInTheDocument()
+  })
+
+  it('keeps period KPI money values on one line', async () => {
+    render(Finance)
+
+    await screen.findByRole('heading', { name: 'Cash flow over time' })
+
+    for (const value of ['750.00 USD', '1200.00 USD', '450.00 USD', '-50.00 USD']) {
+      expect(screen.getByText(value).closest('p')).toHaveClass('text-nowrap')
+    }
   })
 
   it('renders the independently loaded cash-flow series with its complete textual alternative', async () => {
@@ -208,12 +217,15 @@ describe('Finance dashboard page', () => {
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 1200.00 USD · Expense 450.00 USD')).toBeInTheDocument()
   })
 
-  it('uses the full dashboard row for period performance and prevents ECharts emphasis blur from fading either cash-flow series', async () => {
+  it('keeps the period KPIs and chart in one full-width cash-flow card and prevents ECharts emphasis blur', async () => {
     render(Finance)
 
-    const periodPerformance = await screen.findByText('Period performance')
-    expect(periodPerformance.closest('.col-12')).toHaveClass('col-12')
-    expect(periodPerformance.closest('.col-12')).not.toHaveClass('col-xxl-7')
+    const cashFlowHeading = await screen.findByRole('heading', { name: 'Cash flow over time' })
+    const cashFlowCard = cashFlowHeading.closest('.card')
+    expect(cashFlowCard?.parentElement).toHaveClass('col-12')
+    expect(screen.getByLabelText('Cash flow chart').closest('.card')).toBe(cashFlowCard)
+    expect(screen.getByLabelText('Period summary').closest('.card')).toBe(cashFlowCard)
+    expect(screen.queryByText('Period performance')).not.toBeInTheDocument()
 
     await waitFor(() => expect(mocks.chartSetOption).toHaveBeenCalled())
     const option = mocks.chartSetOption.mock.calls.at(-1)?.[0] as {
@@ -279,7 +291,7 @@ describe('Finance dashboard page', () => {
     render(Finance)
 
     expect(await screen.findByText('series exploded')).toBeInTheDocument()
-    expect(screen.getByText('Period net')).toBeInTheDocument()
+    expect(screen.getByLabelText('Period summary')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Retry cash-flow chart' }))
     await waitFor(() => expect(mocks.getCashFlowSeries).toHaveBeenCalledTimes(2))
     expect(mocks.getDashboard).toHaveBeenCalledOnce()
@@ -963,7 +975,7 @@ describe('Finance dashboard page', () => {
       categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], currentFxRates: [], nativeSettledTotals: [],
     })
     render(Finance)
-    expect(await screen.findByText('Display-currency balances, flows, categories, and pending values use current FX valuation and can change after a rate refresh.')).toBeInTheDocument()
+    expect(await screen.findByText('Values use current FX valuation.')).toBeInTheDocument()
   })
 
   it('shows fresh rate metadata and a prominent stale-rate warning', async () => {
@@ -979,8 +991,8 @@ describe('Finance dashboard page', () => {
     })
     render(Finance)
     expect(await screen.findByText('Current FX valuation may be stale.')).toBeInTheDocument()
-    expect(screen.getByText('FX coverage')).toBeInTheDocument()
-    await user.click(screen.getByText('FX coverage'))
+    expect(screen.getByText('Valuation details')).toBeInTheDocument()
+    await user.click(screen.getByText('Valuation details'))
     expect(screen.getByText(/EUR → PLN · frankfurter · effective/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Refresh current rates' })).toHaveAttribute('href', '#/admin/finance/fx')
     expect(screen.queryByText('Current FX valuation')).not.toBeInTheDocument()
