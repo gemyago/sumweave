@@ -165,6 +165,14 @@ html:not([data-theme]) {
   }
 }
 
+@media (min-width: 992px) {
+  /* Shell containment: the narrow xl rail must wrap its longest Bootstrap nav label. */
+  .finance-shell-nav-link {
+    width: 100%;
+    white-space: normal !important;
+  }
+}
+
 /* Finance list containment and inline editors need shrinkable fields beside fixed action groups. */
 .finance-transaction-list,
 .finance-transaction-list .min-w-0,
@@ -177,6 +185,7 @@ html:not([data-theme]) {
 /* Finance ECharts SVG widgets need one shared, responsive containment height. */
 .finance-chart-widget {
   width: 100%;
+  min-width: 0;
   height: 22rem;
 }
 

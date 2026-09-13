@@ -140,7 +140,7 @@
   data-bs-theme={themeStore.effective}
 >
   <div class="row g-0 min-vh-100">
-    <aside class="col-12 col-lg-4 col-xl-3 col-xxl-2 border-end bg-body-tertiary">
+    <aside class="col-12 col-lg-3 col-xl-2 border-end bg-body-tertiary">
       <div class="d-flex h-100 flex-column gap-2 p-2 p-lg-3">
         <div>
           <a class="navbar-brand fw-semibold" href="/finance" use:link>Sumweave</a>
@@ -150,7 +150,7 @@
         <nav class="nav nav-pills flex-row flex-lg-column gap-2" aria-label="Finance navigation">
           {#each navLinks as item (item.href)}
             <a
-              class="nav-link flex-grow-1 flex-lg-grow-0 px-2 px-lg-3 py-2 text-nowrap"
+              class="finance-shell-nav-link nav-link flex-grow-1 flex-lg-grow-0 px-2 px-lg-3 py-2 text-nowrap"
               class:active={activeNavHref === item.href}
               href={item.href}
               use:link
@@ -163,7 +163,7 @@
       </div>
     </aside>
 
-    <section class="col-12 col-lg-8 col-xl-9 col-xxl-10">
+    <section class="col-12 col-lg-9 col-xl-10">
       <header class="border-bottom bg-body" aria-label="Finance utilities">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 p-2 p-lg-4">
           <nav class="finance-shell-breadcrumb-nav d-none d-sm-block" aria-label="Breadcrumb">

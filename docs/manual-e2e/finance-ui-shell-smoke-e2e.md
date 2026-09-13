@@ -47,13 +47,11 @@ Expected:
 2. Confirm the dashboard hierarchy is visible for the selected tenant:
    - compact page header
     - visible reporting-period summary with **Previous month**, **Current month**, and **Next month** controls
-   - balance-first summary with booked balance before secondary sections
-   - compact income, expense, and pending summaries
-   - one primary cash-flow or equivalent summary visual in the first viewport
-   - account snapshot section
-   - category or spending summary section
-   - recent transactions section
-   - compact needs-attention or follow-up states
+    - full-width cash-flow card first, with title, Net-state, and settled-transaction-count badges in its header plus Net, Income, Expense, and Pending net KPI tiles
+    - one primary cash-flow visual in the first viewport
+    - Transactions immediately after the cash-flow card
+    - Top categories, then Largest balances, in their shared row
+    - compact needs-attention or follow-up states
 3. Click **Previous month** twice and **Next month** twice, waiting for each dashboard load to complete because all period actions disable during loading. Confirm every completed click advances exactly one browser-local calendar month. In browser network tools, confirm each request contains only explicit `startDate` and `endDate` timestamps and that the response period returns those same half-open `[startDate, endDate)` bounds: a month request ends at the next local month start. Inclusive end labels show the previous local calendar day for an exclusive end at local midnight; otherwise they show the exclusive end instant's local calendar date. If the shell offers another tenant, switch it and confirm the active client range reloads for that tenant with the same displayed bounds; then confirm the first following previous/next click advances one additional month without a stale cross-tenant response. Click **Current month** and confirm its request and response period use that browser-local month's explicit bounds. Use **Custom range** separately; for custom date-only values, confirm the selected start is reported from local start-of-day and the selected end at the following local day's start, including any imported row recorded at local midnight on the first day.
 
 Expected:
@@ -90,7 +88,8 @@ Expected:
 
 1. Check the Finance shell at a desktop viewport such as `1280x900`.
 2. Check the same routes at a narrow viewport such as `390x844`.
-3. On both `#/finance` and `#/finance/transactions`, look for:
+3. Without reloading, shrink the open dashboard from `1280x900` through approximately `1200px`, `992px`, `768px`, and `576px` to `390x844`, then expand back to `1280x900`. Repeat on `#/finance/transactions`.
+4. On both `#/finance` and `#/finance/transactions`, look for:
     - the desktop rail uses the wider workspace well
     - on narrow viewports, the full Finance nav stacks above the utility header and page content as a full-width section with compact wrapping link rows
     - the utility header wraps compactly below the stacked nav, omits duplicate route labels when space is tight, and does not introduce a menu-toggle-only state
@@ -99,6 +98,8 @@ Expected:
     - headings, actions, and filter rows remain readable
     - no overlapping shell, toolbar, table, or inspector regions
     - no clipped content, horizontal overflow, or unusable action rows
+    - cash-flow KPI tiles form a compact `2 x 2` grid at `390px` through large widths and use four columns at extra-large desktop widths; `100000.00 USD` (or an equivalent long value) remains fully visible without clipping or horizontal overflow
+    - the Finance rail, dashboard controls, and chart reflow immediately in both resize directions; chart SVG width matches its host
 
 Expected:
 
