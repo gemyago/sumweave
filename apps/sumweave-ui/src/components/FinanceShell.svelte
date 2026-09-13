@@ -150,7 +150,7 @@
         <nav class="nav nav-pills flex-row flex-lg-column gap-2" aria-label="Finance navigation">
           {#each navLinks as item (item.href)}
             <a
-              class="nav-link flex-grow-1 flex-lg-grow-0 px-2 px-lg-3 py-2 text-nowrap"
+              class="finance-shell-nav-link nav-link flex-grow-1 flex-lg-grow-0 px-2 px-lg-3 py-2 text-nowrap"
               class:active={activeNavHref === item.href}
               href={item.href}
               use:link

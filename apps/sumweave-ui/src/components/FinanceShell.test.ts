@@ -122,6 +122,7 @@ describe('FinanceShell', () => {
       'Tenants',
     ]) {
       expect(screen.getByRole('link', { name: label })).toHaveClass(
+        'finance-shell-nav-link',
         'flex-grow-1',
         'flex-lg-grow-0',
         'px-2',
