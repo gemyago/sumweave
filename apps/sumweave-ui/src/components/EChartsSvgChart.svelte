@@ -13,10 +13,11 @@
 
   interface Props {
     ariaLabel: string
+    ariaDescription?: string
     option: EChartsCoreOption
   }
 
-  let { ariaLabel, option }: Props = $props()
+  let { ariaLabel, ariaDescription, option }: Props = $props()
   let chartElement: HTMLDivElement
   let chart: ECharts | undefined
 
@@ -54,4 +55,10 @@
   })
 </script>
 
-<div class="finance-chart-widget" role="img" aria-label={ariaLabel} bind:this={chartElement}></div>
+<div
+  class="finance-chart-widget"
+  role="img"
+  aria-label={ariaLabel}
+  aria-describedby={ariaDescription}
+  bind:this={chartElement}
+></div>

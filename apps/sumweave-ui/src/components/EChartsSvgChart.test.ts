@@ -55,17 +55,28 @@ describe('EChartsSvgChart', () => {
     vi.stubGlobal('ResizeObserver', ResizeObserverMock)
   })
 
-  it('initializes an SVG chart with an accessible name and updates options', async () => {
+  it('initializes an SVG chart with an accessible name, description, and updated options', async () => {
     const firstOption = { series: [] }
     const secondOption = { series: [{ type: 'bar', data: [42] }] }
-    const view = render(EChartsSvgChart, { ariaLabel: 'Cash flow chart', option: firstOption })
+    const view = render(EChartsSvgChart, {
+      ariaLabel: 'Cash flow chart',
+      ariaDescription: 'cash-flow-chart-description',
+      option: firstOption,
+    })
 
-    expect(await screen.findByRole('img', { name: 'Cash flow chart' })).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Cash flow chart' })).toHaveAttribute(
+      'aria-describedby',
+      'cash-flow-chart-description',
+    )
     expect(mocks.use).toHaveBeenCalledOnce()
     expect(mocks.init).toHaveBeenCalledWith(expect.any(HTMLDivElement), undefined, { renderer: 'svg' })
     expect(mocks.setOption).toHaveBeenLastCalledWith(firstOption, { notMerge: true })
 
-    await view.rerender({ ariaLabel: 'Cash flow chart', option: secondOption })
+    await view.rerender({
+      ariaLabel: 'Cash flow chart',
+      ariaDescription: 'cash-flow-chart-description',
+      option: secondOption,
+    })
 
     expect(mocks.setOption).toHaveBeenLastCalledWith(secondOption, { notMerge: true })
   })

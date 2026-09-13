@@ -169,6 +169,8 @@ describe('Finance dashboard page', () => {
     expect(await screen.findByRole('heading', { name: 'Cash flow over time' })).toBeInTheDocument()
     expect(screen.getByLabelText('Period summary')).toBeInTheDocument()
     expect(screen.getByText('Net')).toBeInTheDocument()
+    expect(screen.getByText('Net inflow')).toBeInTheDocument()
+    expect(screen.getByText('12 settled transactions')).toBeInTheDocument()
     expect(screen.getByText('Booked balance total')).toBeInTheDocument()
     expect(screen.getAllByText('Income').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Expense').length).toBeGreaterThan(0)
@@ -191,17 +193,25 @@ describe('Finance dashboard page', () => {
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026')).toBeInTheDocument()
   })
 
-  it('keeps period KPI money values on one line', async () => {
+  it('keeps a compact 2x2 KPI grid at 390px and preserves long money values', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 21) },
+      settled: { displayCurrency: 'USD', incomeMinor: 10000000, expenseMinor: 45000, netMinor: 9955000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
     render(Finance)
 
     await screen.findByRole('heading', { name: 'Cash flow over time' })
 
-    for (const value of ['750.00 USD', '1200.00 USD', '450.00 USD', '-50.00 USD']) {
-      expect(screen.getByText(value).closest('p')).toHaveClass('text-nowrap')
+    for (const value of ['99550.00 USD', '100000.00 USD', '450.00 USD', '-50.00 USD']) {
+      const moneyValue = screen.getByText(value).closest('p')
+      expect(moneyValue).toHaveClass('fs-6', 'text-nowrap')
+      expect(moneyValue?.closest('.col-6')).toHaveClass('col-xl-3')
     }
   })
 
-  it('renders the independently loaded cash-flow series with its complete textual alternative', async () => {
+  it('provides the independently loaded cash-flow series as a chart description', async () => {
     window.location.hash = '#/finance?startDate=2026-06-20&endDate=2026-06-20'
     render(Finance)
 
@@ -213,8 +223,11 @@ describe('Finance dashboard page', () => {
       endDate: new Date(2026, 5, 21),
       groupBy: 'day',
     })
-    expect(screen.getByRole('img', { name: 'Cash flow chart' })).toBeInTheDocument()
-    expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 1200.00 USD · Expense 450.00 USD')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Cash flow chart' })).toHaveAttribute(
+      'aria-describedby',
+      'cash-flow-chart-description',
+    )
+    expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 1200.00 USD · Expense 450.00 USD').closest('div')).toHaveClass('visually-hidden')
   })
 
   it('keeps the period KPIs and chart in one full-width cash-flow card and prevents ECharts emphasis blur', async () => {
@@ -226,6 +239,8 @@ describe('Finance dashboard page', () => {
     expect(screen.getByLabelText('Cash flow chart').closest('.card')).toBe(cashFlowCard)
     expect(screen.getByLabelText('Period summary').closest('.card')).toBe(cashFlowCard)
     expect(screen.queryByText('Period performance')).not.toBeInTheDocument()
+    expect(cashFlowHeading.compareDocumentPosition(screen.getByRole('heading', { name: 'Transactions' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Transactions' }).compareDocumentPosition(screen.getByRole('heading', { name: 'Top categories' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     await waitFor(() => expect(mocks.chartSetOption).toHaveBeenCalled())
     const option = mocks.chartSetOption.mock.calls.at(-1)?.[0] as {
@@ -415,7 +430,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByRole('link', { name: 'Review imports' })).toHaveAttribute('href', '#/finance/imports')
   })
 
-  it('places an incomplete income and expense warning beside the totals with excluded count and FX diagnostics link', async () => {
+  it('places an incomplete income and expense warning beside the totals without the removed valuation details', async () => {
     mocks.getDashboard.mockResolvedValueOnce({
       period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
       settled: { displayCurrency: 'PLN', incomeMinor: 100, expenseMinor: 200, netMinor: -100, transactionCount: 2, complete: false },
@@ -433,9 +448,9 @@ describe('Finance dashboard page', () => {
     const warning = (await screen.findByText('Income and expense totals are incomplete.')).parentElement!
     expect(warning).toHaveTextContent('Income and expense totals are incomplete.')
     expect(warning).toHaveTextContent('FX coverage missing for 2 pairs (EUR → PLN, USD → PLN), affecting 4 values.')
-    expect(screen.getByText('EUR → PLN · frankfurter · 2 transaction values · 1 account value')).toBeInTheDocument()
-    expect(screen.getByText('USD → PLN · frankfurter · 1 transaction value · 0 account values')).toBeInTheDocument()
+    expect(screen.getByText('2 valued settled transactions')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open FX diagnostics' })).toHaveAttribute('href', '#/admin/finance/fx')
+    expect(screen.queryByText('Valuation details')).not.toBeInTheDocument()
     expect(screen.getAllByText('Income')[0].compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
@@ -787,7 +802,6 @@ describe('Finance dashboard page', () => {
     expect(request.endDate).toEqual(new Date(2026, 5, 4, 0, 0, 0, 0))
     expect(importedAtMidnight.getTime()).toBeGreaterThanOrEqual(request.startDate.getTime())
     expect(importedAtMidnight.getTime()).toBeLessThan(request.endDate.getTime())
-    expect(await screen.findByText('PLN')).toBeInTheDocument()
   })
 
   it('renders honest empty states when the dashboard has no activity', async () => {
@@ -819,7 +833,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByText('No booked account balances yet. Connect or create accounts to start tracking balances here.')).toBeInTheDocument()
   })
 
-  it('routes native totals, sync issues, and import follow-up through the dashboard attention area', async () => {
+  it('keeps sync issues and import follow-up visible after removing native totals', async () => {
     const now = new Date('2026-06-20T12:00:00Z')
     mocks.getDashboard.mockResolvedValueOnce({
       period: { startDate: new Date(2026, 5, 20), endDate: new Date(2026, 5, 20) },
@@ -854,8 +868,8 @@ describe('Finance dashboard page', () => {
 
     render(Finance)
 
-    expect(await screen.findByText('Native totals')).toBeInTheDocument()
-    expect(screen.getByText('No booked account balances yet. Connect or create accounts to start tracking balances here.')).toBeInTheDocument()
+    expect(await screen.findByText('No booked account balances yet. Connect or create accounts to start tracking balances here.')).toBeInTheDocument()
+    expect(screen.queryByText('Native totals')).not.toBeInTheDocument()
     expect(screen.getByText('Salary')).toBeInTheDocument()
     expect(screen.getByText('Failed sync')).toBeInTheDocument()
     expect(screen.getByText('Failed import')).toBeInTheDocument()
@@ -978,8 +992,7 @@ describe('Finance dashboard page', () => {
     expect(await screen.findByText('Values use current FX valuation.')).toBeInTheDocument()
   })
 
-  it('shows fresh rate metadata and a prominent stale-rate warning', async () => {
-    const user = userEvent.setup()
+  it('shows a prominent stale-rate warning without the removed valuation disclosure', async () => {
     mocks.getDashboard.mockResolvedValue({
       period: { startDate: new Date(), endDate: new Date() },
       settled: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true }, pending: { displayCurrency: 'PLN', incomeMinor: 0, expenseMinor: 0, netMinor: 0, transactionCount: 0, complete: true },
@@ -991,11 +1004,8 @@ describe('Finance dashboard page', () => {
     })
     render(Finance)
     expect(await screen.findByText('Current FX valuation may be stale.')).toBeInTheDocument()
-    expect(screen.getByText('Valuation details')).toBeInTheDocument()
-    await user.click(screen.getByText('Valuation details'))
-    expect(screen.getByText(/EUR → PLN · frankfurter · effective/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Refresh current rates' })).toHaveAttribute('href', '#/admin/finance/fx')
-    expect(screen.queryByText('Current FX valuation')).not.toBeInTheDocument()
+    expect(screen.queryByText('Valuation details')).not.toBeInTheDocument()
   })
 
   it('caps account, category, and recent transaction sections to keep the dashboard scannable', async () => {

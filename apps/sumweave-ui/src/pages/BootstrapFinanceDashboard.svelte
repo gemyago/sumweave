@@ -13,7 +13,6 @@
   } from '../lib/finance/api'
   import {
     formatFinanceDate,
-    formatFinanceDateTime,
     formatFinanceMoney,
   } from '../lib/finance/format'
   import { dateInputValue, withDateInput } from '../lib/date-range'
@@ -319,7 +318,6 @@
   const missingFxAffectedValueCount = $derived.by(() =>
     fxCoverage.reduce((total, coverage) => total + coverage.affectedTransactionCount + coverage.affectedAccountCount, 0),
   )
-  const hasFxCoverageDetails = $derived(currentFxRates.length > 0 || fxCoverage.length > 0)
   const isHistoricalPeriod = $derived.by(() => dashboardPeriodMode !== 'current_month')
 
   function fxCoveragePairList() {
@@ -886,48 +884,49 @@
         <div class="col-12">
           <div class="card shadow-sm">
             <div class="card-body p-4 d-grid gap-4">
-              <div>
-                <h2 class="h5 mb-1">Cash flow over time</h2>
-                <p class="text-body-secondary mb-0">Settled income and expense by reporting bucket, valued with current FX.</p>
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <h2 class="h5 mb-0">Cash flow over time</h2>
+                <div class="d-flex flex-wrap justify-content-end gap-2 ms-auto">
+                  <span class={`badge ${badgeClass(toneFromMoney(dashboard.settled.netMinor))}`}>
+                    {dashboard.settled.netMinor < 0 ? 'Net outflow' : dashboard.settled.netMinor > 0 ? 'Net inflow' : 'Even period'}
+                  </span>
+                  <span class="badge text-bg-secondary">
+                    {dashboard.settled.transactionCount} {dashboard.settled.complete ? 'settled' : 'valued settled'} transactions
+                  </span>
+                </div>
               </div>
 
               <div class="row g-3" aria-label="Period summary">
-                <div class="col-6 col-lg-3">
-                  <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
+                <div class="col-6 col-xl-3">
+                  <div class="border rounded-3 p-2 p-sm-3 h-100 bg-body-tertiary">
                     <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Net</p>
-                    <p class="fs-5 fw-semibold text-nowrap mb-1">
+                    <p class="fs-6 fw-semibold text-nowrap mb-0">
                       {formatFinanceMoney(dashboard.settled.netMinor, dashboard.settled.displayCurrency)}
                     </p>
-                    <span class={`badge ${badgeClass(toneFromMoney(dashboard.settled.netMinor))}`}>
-                      {dashboard.settled.netMinor < 0 ? 'Net outflow' : dashboard.settled.netMinor > 0 ? 'Net inflow' : 'Even period'}
-                    </span>
                   </div>
                 </div>
-                <div class="col-6 col-lg-3">
-                  <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
+                <div class="col-6 col-xl-3">
+                  <div class="border rounded-3 p-2 p-sm-3 h-100 bg-body-tertiary">
                     <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Income</p>
-                    <p class="fs-5 fw-semibold text-nowrap mb-1">
+                    <p class="fs-6 fw-semibold text-nowrap mb-0">
                       {formatFinanceMoney(dashboard.settled.incomeMinor, dashboard.settled.displayCurrency)}
                     </p>
-                    <p class="small text-body-secondary mb-0">{dashboard.settled.transactionCount} settled transactions</p>
                   </div>
                 </div>
-                <div class="col-6 col-lg-3">
-                  <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
+                <div class="col-6 col-xl-3">
+                  <div class="border rounded-3 p-2 p-sm-3 h-100 bg-body-tertiary">
                     <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Expense</p>
-                    <p class="fs-5 fw-semibold text-nowrap mb-1">
+                    <p class="fs-6 fw-semibold text-nowrap mb-0">
                       {formatFinanceMoney(dashboard.settled.expenseMinor, dashboard.settled.displayCurrency)}
                     </p>
-                    <p class="small text-body-secondary mb-0">Booked outflow this period</p>
                   </div>
                 </div>
-                <div class="col-6 col-lg-3">
-                  <div class="border rounded-3 p-3 h-100 bg-body-tertiary">
+                <div class="col-6 col-xl-3">
+                  <div class="border rounded-3 p-2 p-sm-3 h-100 bg-body-tertiary">
                     <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Pending net</p>
-                    <p class="fs-5 fw-semibold text-nowrap mb-1">
+                    <p class="fs-6 fw-semibold text-nowrap mb-0">
                       {formatFinanceMoney(dashboard.pending.netMinor, dashboard.pending.displayCurrency)}
                     </p>
-                    <p class="small text-body-secondary mb-0">{dashboard.pending.transactionCount} unsettled transactions</p>
                   </div>
                 </div>
               </div>
@@ -935,7 +934,7 @@
               {#if !dashboard.settled.complete}
                 <div class="alert alert-warning mb-0" role="alert">
                   <strong>Income and expense totals are incomplete.</strong>
-                  {fxCoverageSummary()} Display totals are partial; native totals remain separate below.
+                  {fxCoverageSummary()} Display totals are partial.
                   <a class="alert-link" href="/admin/finance/fx" use:link>Open FX diagnostics</a>.
                 </div>
               {/if}
@@ -959,67 +958,61 @@
                 {/if}
                 {#if !cashFlowHasActivity}
                   <div class="alert alert-light border mb-0" role="status">No settled cash flow to chart for this period.</div>
-                {:else if cashFlowChartOption}
-                  <EChartsSvgChart ariaLabel="Cash flow chart" option={cashFlowChartOption} />
+                  {:else if cashFlowChartOption}
+                    <EChartsSvgChart
+                      ariaLabel="Cash flow chart"
+                      ariaDescription="cash-flow-chart-description"
+                      option={cashFlowChartOption}
+                    />
+                  {/if}
+                  <div id="cash-flow-chart-description" class="visually-hidden">
+                    <p>Cash-flow values:</p>
+                    <ul>
+                      {#each cashFlowSeries.buckets as bucket (bucket.startDate.getTime())}
+                        <li>{cashFlowBucketRange(bucket.startDate, bucket.endDate)}: Income {formatFinanceMoney(bucket.incomeMinor, cashFlowSeries.displayCurrency)} · Expense {formatFinanceMoney(bucket.expenseMinor, cashFlowSeries.displayCurrency)}</li>
+                      {/each}
+                    </ul>
+                  </div>
                 {/if}
-                <details class="border rounded p-3">
-                  <summary class="fw-semibold">Cash-flow values</summary>
-                  <ul class="small text-body-secondary mb-0 mt-3 ps-3">
-                    {#each cashFlowSeries.buckets as bucket (bucket.startDate.getTime())}
-                      <li>{cashFlowBucketRange(bucket.startDate, bucket.endDate)}: Income {formatFinanceMoney(bucket.incomeMinor, cashFlowSeries.displayCurrency)} · Expense {formatFinanceMoney(bucket.expenseMinor, cashFlowSeries.displayCurrency)}</li>
-                    {/each}
-                  </ul>
-                </details>
-              {/if}
+            </div>
+          </div>
+        </div>
 
-              {#if dashboard.nativeSettledTotals.length > 0 || hasFxCoverageDetails}
-                <details class="border rounded p-3">
-                  <summary class="fw-semibold">Valuation details</summary>
-                  <div class="small text-body-secondary mt-3 d-grid gap-3">
-                  {#if dashboard.nativeSettledTotals.length > 0}
-                    <div>
-                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Native totals</p>
-                  <div class="list-group">
-                    {#each dashboard.nativeSettledTotals as total (total.currency)}
-                      <div class="list-group-item d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
-                        <div>
-                          <strong>{total.currency}</strong>
-                          <p class="small text-body-secondary mb-0">
-                            Income {formatFinanceMoney(total.incomeMinor, total.currency)} · Expense {formatFinanceMoney(total.expenseMinor, total.currency)}
-                          </p>
-                        </div>
-                        <strong>{formatFinanceMoney(total.netMinor, total.currency)}</strong>
-                      </div>
-                    {/each}
-                  </div>
-                    </div>
-                  {/if}
+        <div class="col-12">
+          <div class="card shadow-sm h-100">
+            <div class="card-body p-4 d-grid gap-4">
+              <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
+                <div>
+                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Recent activity</p>
+                  <h2 class="h5 mb-1">Transactions</h2>
+                  <p class="text-body-secondary mb-0">Booked and pending activity in the reporting period.</p>
+                </div>
+                <a class="btn btn-outline-secondary btn-sm" href={dashboardTransactionsHref()} use:link>View all transactions</a>
+              </div>
 
-                  {#if hasFxCoverageDetails}
-                    <div class="d-grid gap-2">
-                    {#if fxCoverage.length > 0}
-                      <div class="d-grid gap-1">
-                        <strong class="text-body">Missing pairs</strong>
-                        {#each fxCoverage as coverage (`${coverage.provider}-${coverage.baseCurrency}-${coverage.quoteCurrency}`)}
-                          <div>
-                            {coverage.baseCurrency} → {coverage.quoteCurrency} · {coverage.provider} · {coverage.affectedTransactionCount} transaction value{coverage.affectedTransactionCount === 1 ? '' : 's'} · {coverage.affectedAccountCount} account value{coverage.affectedAccountCount === 1 ? '' : 's'}
-                          </div>
-                        {/each}
-                      </div>
-                    {/if}
-                    {#if currentFxRates.length > 0}
-                      <div class="d-grid gap-1">
-                        <strong class="text-body">Current rates</strong>
-                        {#each currentFxRates as rate (`${rate.provider}-${rate.baseCurrency}-${rate.quoteCurrency}`)}
-                          <div>{rate.baseCurrency} → {rate.quoteCurrency} · {rate.provider} · effective {formatFinanceDateTime(rate.effectiveAt)} · refreshed {formatFinanceDateTime(rate.lastSuccessfulRefreshAt)}{rate.stale ? ' · stale' : ''}</div>
-                        {/each}
-                      </div>
-                    {/if}
-                    <a href="/admin/finance/fx" use:link>Refresh required rates</a>
-                    </div>
-                  {/if}
-                  </div>
-                </details>
+              {#if visibleRecentTransactions.length === 0}
+                <div class="alert alert-light border mb-0" role="status">No transactions in this reporting period.</div>
+              {:else}
+                <div id="finance-dashboard-transactions">
+                  <FinanceTransactionList
+                    tenantId={financeShell.selectedTenantId}
+                    transactions={visibleRecentTransactions}
+                    accountNameById={accountNameById}
+                    {hiddenAccountIds}
+                    ariaLabel="Dashboard transactions"
+                    onTransactionUpdated={applyTransactionUpdate}
+                  />
+                </div>
+                <FinancePager
+                  label="Dashboard transaction pages"
+                  status={loadingTransactions ? 'Loading transaction page…' : `Page ${dashboardTransactionPage}`}
+                  controls="finance-dashboard-transactions"
+                  busy={loadingTransactions}
+                  hasPrevious={hasNewerDashboardTransactions}
+                  hasNext={hasOlderDashboardTransactions}
+                  onPrevious={loadNewerDashboardTransactions}
+                  onNext={loadOlderDashboardTransactions}
+                />
               {/if}
             </div>
           </div>
@@ -1149,46 +1142,6 @@
                     </table>
                   </div>
                 </div>
-              {/if}
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12">
-          <div class="card shadow-sm h-100">
-            <div class="card-body p-4 d-grid gap-4">
-              <div class="d-flex flex-column flex-md-row justify-content-between gap-2 align-items-md-center">
-                <div>
-                  <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Recent activity</p>
-                  <h2 class="h5 mb-1">Transactions</h2>
-                  <p class="text-body-secondary mb-0">Booked and pending activity in the reporting period.</p>
-                </div>
-                <a class="btn btn-outline-secondary btn-sm" href={dashboardTransactionsHref()} use:link>View all transactions</a>
-              </div>
-
-              {#if visibleRecentTransactions.length === 0}
-                <div class="alert alert-light border mb-0" role="status">No transactions in this reporting period.</div>
-              {:else}
-                <div id="finance-dashboard-transactions">
-                  <FinanceTransactionList
-                    tenantId={financeShell.selectedTenantId}
-                    transactions={visibleRecentTransactions}
-                    accountNameById={accountNameById}
-                    {hiddenAccountIds}
-                    ariaLabel="Dashboard transactions"
-                    onTransactionUpdated={applyTransactionUpdate}
-                  />
-                </div>
-                <FinancePager
-                  label="Dashboard transaction pages"
-                  status={loadingTransactions ? 'Loading transaction page…' : `Page ${dashboardTransactionPage}`}
-                  controls="finance-dashboard-transactions"
-                  busy={loadingTransactions}
-                  hasPrevious={hasNewerDashboardTransactions}
-                  hasNext={hasOlderDashboardTransactions}
-                  onPrevious={loadNewerDashboardTransactions}
-                  onNext={loadOlderDashboardTransactions}
-                />
               {/if}
             </div>
           </div>
