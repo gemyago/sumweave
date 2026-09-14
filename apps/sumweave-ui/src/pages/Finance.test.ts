@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   listTransactions: vi.fn(),
   listConnections: vi.fn(),
   chartSetOption: vi.fn(),
+  chartClickHandler: undefined as ((params: { dataIndex?: number }) => void) | undefined,
   shellState: null as FinanceShellState | null,
 }))
 
@@ -64,6 +65,10 @@ vi.mock('echarts/core', () => ({
   init: vi.fn((element: HTMLElement) => ({
     dispose: vi.fn(),
     resize: vi.fn(),
+    on: (eventName: string, handler: (params: { dataIndex?: number }) => void) => {
+      if (eventName === 'click') mocks.chartClickHandler = handler
+    },
+    off: vi.fn(),
     setOption: (option: { xAxis?: { data?: string[] } }) => {
       mocks.chartSetOption(option)
       element.replaceChildren(...(option.xAxis?.data ?? []).map((label) => {
@@ -97,6 +102,7 @@ describe('Finance dashboard page', () => {
     mocks.listTransactions.mockReset()
     mocks.listConnections.mockReset()
     mocks.chartSetOption.mockReset()
+    mocks.chartClickHandler = undefined
     mocks.shellState = new FinanceShellState()
     mocks.listTenants.mockResolvedValue([
       { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
@@ -181,6 +187,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByRole('heading', { name: 'Largest balances' })).toBeInTheDocument()
     expect(screen.getByLabelText('Account balances chart')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Transactions' })).toBeInTheDocument()
+    expect(screen.queryByText('Select a bar to filter the transactions below to its time window. Select it again to clear the filter.')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Needs attention' })).toBeInTheDocument()
     expect(screen.getByText('Missing FX coverage')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Add transaction' })).toHaveAttribute('href', '#/finance/transactions/new')
@@ -190,7 +197,7 @@ describe('Finance dashboard page', () => {
     expect(screen.getByLabelText('Custom start date')).not.toBeVisible()
     expect(screen.getByLabelText('Custom end date')).not.toBeVisible()
     expect(screen.queryByText('2026-06-20T12:00:00.000Z')).not.toBeInTheDocument()
-    expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Jun 20, 2026 → Jun 20, 2026' })).toBeInTheDocument()
   })
 
   it('keeps a compact 2x2 KPI grid at 390px and preserves long money values', async () => {
@@ -228,6 +235,172 @@ describe('Finance dashboard page', () => {
       'cash-flow-chart-description',
     )
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 1200.00 USD · Expense 450.00 USD').closest('div')).toHaveClass('visually-hidden')
+  })
+
+  it('removes the transaction time-window filter when the selected cash-flow bucket is clicked again', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    mocks.getCashFlowSeries.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      groupBy: 'day', displayCurrency: 'USD', complete: true, missingFx: [],
+      buckets: [
+        { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 2), incomeMinor: 100, expenseMinor: 50 },
+        { startDate: new Date(2026, 5, 2), endDate: new Date(2026, 5, 3), incomeMinor: 200, expenseMinor: 75 },
+      ],
+    })
+
+    render(Finance)
+    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await waitFor(() => expect(mocks.chartClickHandler).toBeTypeOf('function'))
+
+    mocks.chartClickHandler?.({ dataIndex: 1 })
+
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(2))
+    expect(mocks.listTransactions.mock.calls[1][0]).toMatchObject({
+      tenantId: 'tenant-1',
+      startDate: new Date(2026, 5, 2),
+      endDate: new Date(2026, 5, 3),
+      offset: 0,
+    })
+    await waitFor(() => expect(screen.getByText('Filtered to Jun 2, 2026 → Jun 2, 2026.')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Clear chart filter' })).toBeVisible()
+    const bucketTransactionsHref = screen.getByRole('link', { name: 'View all transactions' }).getAttribute('href')!
+    const bucketTransactionsQuery = new URLSearchParams(bucketTransactionsHref.split('?')[1])
+    expect(new Date(bucketTransactionsQuery.get('startAt')!).getTime()).toBe(new Date(2026, 5, 2).getTime())
+    expect(new Date(bucketTransactionsQuery.get('endAt')!).getTime()).toBe(new Date(2026, 5, 3).getTime())
+
+    mocks.chartClickHandler?.({ dataIndex: 1 })
+
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(3))
+    expect(mocks.listTransactions.mock.calls[2][0]).toMatchObject({
+      startDate: new Date(2026, 5, 1),
+      endDate: new Date(2026, 6, 1),
+      offset: 0,
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Clear chart filter' })).not.toBeInTheDocument()
+      expect(screen.getByText('Booked and pending activity in the reporting period.')).toBeInTheDocument()
+    })
+  })
+
+  it('clears the transaction time-window filter with the visible chart-filter action', async () => {
+    const user = userEvent.setup()
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    mocks.getCashFlowSeries.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      groupBy: 'day', displayCurrency: 'USD', complete: true, missingFx: [],
+      buckets: [
+        { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 2), incomeMinor: 100, expenseMinor: 50 },
+        { startDate: new Date(2026, 5, 2), endDate: new Date(2026, 5, 3), incomeMinor: 200, expenseMinor: 75 },
+      ],
+    })
+
+    render(Finance)
+    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await waitFor(() => expect(mocks.chartClickHandler).toBeTypeOf('function'))
+
+    mocks.chartClickHandler?.({ dataIndex: 0 })
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(2))
+    await screen.findByRole('button', { name: 'Clear chart filter' })
+
+    await user.click(screen.getByRole('button', { name: 'Clear chart filter' }))
+
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(3))
+    expect(mocks.listTransactions.mock.calls[2][0]).toMatchObject({
+      startDate: new Date(2026, 5, 1),
+      endDate: new Date(2026, 6, 1),
+      offset: 0,
+    })
+    expect(screen.queryByRole('button', { name: 'Clear chart filter' })).not.toBeInTheDocument()
+    expect(screen.getByText('Booked and pending activity in the reporting period.')).toBeInTheDocument()
+  })
+
+  it('provides a mobile-friendly cash-flow time-window selector', async () => {
+    const user = userEvent.setup()
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    mocks.getCashFlowSeries.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      groupBy: 'day', displayCurrency: 'USD', complete: true, missingFx: [],
+      buckets: [
+        { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 2), incomeMinor: 100, expenseMinor: 50 },
+        { startDate: new Date(2026, 5, 2), endDate: new Date(2026, 5, 3), incomeMinor: 200, expenseMinor: 75 },
+      ],
+    })
+
+    render(Finance)
+    const selector = await screen.findByRole('combobox', { name: 'Filter transactions by cash-flow time window' }) as HTMLSelectElement
+    expect(selector.parentElement).toHaveClass('mt-2')
+    expect(selector).toHaveClass('form-select-sm')
+
+    await user.selectOptions(selector, '1')
+
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(2))
+    expect(mocks.listTransactions.mock.calls[1][0]).toMatchObject({
+      tenantId: 'tenant-1',
+      startDate: new Date(2026, 5, 2),
+      endDate: new Date(2026, 5, 3),
+      offset: 0,
+    })
+    await waitFor(() => {
+      expect(selector).toHaveValue('1')
+      expect(selector.selectedIndex).toBe(2)
+      expect(selector.selectedOptions[0]).toHaveTextContent('Jun 2, 2026 → Jun 2, 2026')
+    })
+    expect(screen.getByText('Filtered to Jun 2, 2026 → Jun 2, 2026.')).toBeInTheDocument()
+
+    await user.selectOptions(selector, '')
+
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(3))
+    expect(mocks.listTransactions.mock.calls[2][0]).toMatchObject({
+      startDate: new Date(2026, 5, 1),
+      endDate: new Date(2026, 6, 1),
+      offset: 0,
+    })
+    expect(selector).toHaveValue('')
+    expect(selector.selectedIndex).toBe(0)
+    expect(selector.selectedOptions[0]).toHaveTextContent('All reporting-period transactions')
+  })
+
+  it('keeps the current filter and rows visible when a bucket request fails', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    mocks.getCashFlowSeries.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      groupBy: 'day', displayCurrency: 'USD', complete: true, missingFx: [],
+      buckets: [{ startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 2), incomeMinor: 100, expenseMinor: 50 }],
+    })
+
+    render(Finance)
+    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(1))
+    mocks.listTransactions.mockRejectedValueOnce(new Error('bucket transactions failed'))
+
+    mocks.chartClickHandler?.({ dataIndex: 0 })
+
+    expect(await screen.findByText('bucket transactions failed')).toHaveAttribute('role', 'alert')
+    expect(screen.getByText('Booked and pending activity in the reporting period.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear chart filter' })).not.toBeInTheDocument()
+    const transactionsQuery = new URLSearchParams(screen.getByRole('link', { name: 'View all transactions' }).getAttribute('href')!.split('?')[1])
+    expect(transactionsQuery.get('startDate')).toBe('2026-06-01')
+    expect(transactionsQuery.get('endDate')).toBe('2026-06-30')
   })
 
   it('keeps the period KPIs and chart in one full-width cash-flow card and prevents ECharts emphasis blur', async () => {

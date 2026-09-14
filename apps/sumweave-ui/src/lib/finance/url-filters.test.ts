@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { dateQueryValue, financeRouteQuery, readDateQuery, replaceFinanceRouteQuery } from './url-filters'
+import { dateQueryValue, financeRouteQuery, readDateQuery, readTimestampQuery, replaceFinanceRouteQuery, timestampQueryValue } from './url-filters'
 
 describe('finance URL filters', () => {
   beforeEach(() => {
@@ -20,5 +20,15 @@ describe('finance URL filters', () => {
     replaceFinanceRouteQuery({ startDate: dateQueryValue(new Date(2026, 5, 1)), type: 'income', endDate: undefined })
 
     expect(window.location.hash).toBe('#/finance/transactions?startDate=2026-06-01&type=income')
+  })
+
+  it('round-trips exact timestamp filters with their local offset', () => {
+    const timestamp = new Date(2026, 9, 31, 23, 15, 30, 125)
+    const value = timestampQueryValue(timestamp)!
+
+    const restored = readTimestampQuery(new URLSearchParams(`startAt=${encodeURIComponent(value)}`), 'startAt')
+
+    expect(restored?.getTime()).toBe(timestamp.getTime())
+    expect(readTimestampQuery(new URLSearchParams('startAt=2026-10-31'), 'startAt')).toBeUndefined()
   })
 })

@@ -15,9 +15,10 @@
     ariaLabel: string
     ariaDescription?: string
     option: EChartsCoreOption
+    onDataClick?: (dataIndex: number) => void
   }
 
-  let { ariaLabel, ariaDescription, option }: Props = $props()
+  let { ariaLabel, ariaDescription, option, onDataClick }: Props = $props()
   let chartElement: HTMLDivElement
   let chart: ECharts | undefined
 
@@ -34,12 +35,20 @@
     chart?.setOption(nextOption, { notMerge: true })
   }
 
+  function handleChartClick(params: unknown) {
+    const dataIndex = (params as { dataIndex?: unknown }).dataIndex
+    if (typeof dataIndex === 'number' && Number.isInteger(dataIndex) && dataIndex >= 0) {
+      onDataClick?.(dataIndex)
+    }
+  }
+
   $effect(() => {
     updateChart(option)
   })
 
   onMount(() => {
     chart = echarts.init(chartElement, undefined, { renderer: 'svg' })
+    chart.on('click', handleChartClick)
     updateChart(option)
 
     const resizeObserver = typeof ResizeObserver === 'undefined'
@@ -49,6 +58,7 @@
 
     return () => {
       resizeObserver?.disconnect()
+      chart?.off('click', handleChartClick)
       chart?.dispose()
       chart = undefined
     }

@@ -81,6 +81,7 @@ The rules are:
 - Finance detail breadcrumbs link to section parents and use active non-links.
 - Do not add header-only cards when Finance breadcrumbs already locate a detail route.
 - Follow [DESIGN.md](./DESIGN.md) for all UI styling changes.
+- Prefer interaction affordances and accessible descriptions over persistent instructional copy that consumes dashboard space.
 - For canonical `#/login` and tenant-facing `#/finance*`, prefer vanilla Bootstrap classes and native HTML/Svelte markup over custom CSS.
 - Treat Bootstrap Finance/login as canonical; do not restore `restructure-finance-ui-shell` custom-shell styling as the default direction.
 - Canonical Bootstrap login and Finance pages must not add route-local `<style>` blocks or `style=` layout/styling attributes.

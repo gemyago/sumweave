@@ -21,7 +21,7 @@
   import { defaultMatchingDateRange, matchingRangeFromDateInputs } from '../lib/finance/matching-range'
   import { requestFinanceLedgerRefresh } from '../lib/finance/ledger-refresh'
   import type { JobDetail } from '../lib/jobs/api'
-  import { dateQueryValue, financeRouteQuery, readDateQuery, replaceFinanceRouteQuery } from '../lib/finance/url-filters'
+  import { dateQueryValue, financeRouteQuery, readDateQuery, readTimestampQuery, replaceFinanceRouteQuery, timestampQueryValue } from '../lib/finance/url-filters'
   import { dateInputValue } from '../lib/date-range'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
@@ -37,6 +37,8 @@
   let kindFilter = $state('')
   let startDate = $state<Date | undefined>(undefined)
   let endDate = $state<Date | undefined>(undefined)
+  let exactStartDate = $state<Date | undefined>(undefined)
+  let exactEndDate = $state<Date | undefined>(undefined)
   let sortOrder = $state('desc')
   let transactionOffset = $state(0)
   let loadingList = $state(false)
@@ -77,8 +79,10 @@
     accountFilter = query.get('accountId') ?? ''
     kindFilter = query.get('type') ?? ''
     sortOrder = query.get('sort') === 'asc' ? 'asc' : 'desc'
-    startDate = readDateQuery(query, 'startDate')
-    endDate = readDateQuery(query, 'endDate')
+    exactStartDate = readTimestampQuery(query, 'startAt')
+    exactEndDate = readTimestampQuery(query, 'endAt')
+    startDate = exactStartDate ?? readDateQuery(query, 'startDate')
+    endDate = exactEndDate ?? readDateQuery(query, 'endDate')
   }
 
   function persistFilters() {
@@ -86,8 +90,10 @@
       accountId: accountFilter || undefined,
       type: kindFilter || undefined,
       sort: sortOrder === 'asc' ? 'asc' : undefined,
-      startDate: dateQueryValue(startDate),
-      endDate: dateQueryValue(endDate),
+      startDate: exactStartDate ? undefined : dateQueryValue(startDate),
+      endDate: exactEndDate ? undefined : dateQueryValue(endDate),
+      startAt: timestampQueryValue(exactStartDate),
+      endAt: timestampQueryValue(exactEndDate),
     })
   }
 
@@ -141,8 +147,8 @@
           tenantId,
           accountId: accountFilter,
           kind: kindFilter,
-          startDate,
-          endDate: exclusiveDateRangeEnd(endDate),
+          startDate: exactStartDate ?? startDate,
+          endDate: exactEndDate ?? exclusiveDateRangeEnd(endDate),
           sort: sortOrder === 'asc' ? 'asc' : undefined,
           limit: transactionPageSize,
           offset,
@@ -376,12 +382,12 @@
             <div class="row g-3">
               <div class="col-12 col-md-6">
                 <label class="form-label" for="finance-transactions-start-date">From date</label>
-                <input id="finance-transactions-start-date" class="form-control" type="date" value={dateInputValue(startDate)} onchange={(event) => { startDate = readDateQuery(new URLSearchParams(`date=${event.currentTarget.value}`), 'date'); reloadFirstPage() }} aria-label="Transaction start date" />
+                <input id="finance-transactions-start-date" class="form-control" type="date" value={dateInputValue(startDate)} onchange={(event) => { exactStartDate = undefined; startDate = readDateQuery(new URLSearchParams(`date=${event.currentTarget.value}`), 'date'); reloadFirstPage() }} aria-label="Transaction start date" />
               </div>
 
               <div class="col-12 col-md-6">
                 <label class="form-label" for="finance-transactions-end-date">To date</label>
-                <input id="finance-transactions-end-date" class="form-control" type="date" value={dateInputValue(endDate)} onchange={(event) => { endDate = readDateQuery(new URLSearchParams(`date=${event.currentTarget.value}`), 'date'); reloadFirstPage() }} aria-label="Transaction end date" />
+                <input id="finance-transactions-end-date" class="form-control" type="date" value={dateInputValue(endDate)} onchange={(event) => { exactEndDate = undefined; endDate = readDateQuery(new URLSearchParams(`date=${event.currentTarget.value}`), 'date'); reloadFirstPage() }} aria-label="Transaction end date" />
               </div>
             </div>
           </div>

@@ -653,6 +653,23 @@ describe('Finance transactions page', () => {
     expect(dateInputValue(request.endDate)).toBe('2026-07-01')
   })
 
+  it('preserves exact dashboard bucket boundaries from a direct link', async () => {
+    const user = userEvent.setup()
+    const startAt = '2026-10-31T23:00:00+01:00'
+    const endAt = '2026-11-30T23:00:00+01:00'
+    window.location.hash = `#/finance/transactions?startAt=${encodeURIComponent(startAt)}&endAt=${encodeURIComponent(endAt)}`
+
+    render(FinanceTransactions)
+
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Transaction type filter' }), 'expense')
+    const request = mocks.listTransactions.mock.calls.at(-1)![0]
+    expect(request.startDate.getTime()).toBe(new Date(startAt).getTime())
+    expect(request.endDate.getTime()).toBe(new Date(endAt).getTime())
+    const query = new URLSearchParams(window.location.hash.split('?')[1])
+    expect(new Date(query.get('startAt')!).getTime()).toBe(new Date(startAt).getTime())
+    expect(new Date(query.get('endAt')!).getTime()).toBe(new Date(endAt).getTime())
+  })
+
   it('keeps the visible inclusive end date in the URL while using its next local day only for the API', async () => {
     render(FinanceTransactions)
     const endDate = await screen.findByLabelText('Transaction end date')
