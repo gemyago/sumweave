@@ -149,10 +149,10 @@ func consumeFXLocalizedAmount(description string, cursor *int, signed bool) bool
 	if !hasInteger {
 		return false
 	}
+	if *cursor-start > fxLocalizedAmountGroupSize {
+		return false
+	}
 	if strings.HasPrefix(description[*cursor:], "\u00a0") {
-		if *cursor-start > fxLocalizedAmountGroupSize {
-			return false
-		}
 		for strings.HasPrefix(description[*cursor:], "\u00a0") {
 			*cursor += len("\u00a0")
 			groupStart := *cursor

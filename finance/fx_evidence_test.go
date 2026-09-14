@@ -80,6 +80,8 @@ func TestFXEvidence(t *testing.T) {
 			"FX96600719 EUR/PLN 4.36682\u00a0500,00 USD -10\u00a0917,00 PLN",
 			"FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10\u00a0917,00 USD",
 			"FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10\u00a0917,00 PLN extra",
+			"FX96600719 EUR/PLN 4.36682500,00 EUR -10\u00a0917,00 PLN",
+			"FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10917,00 PLN",
 		}
 		for _, description := range descriptions {
 			_, ok := extractFXEvidence(description)
