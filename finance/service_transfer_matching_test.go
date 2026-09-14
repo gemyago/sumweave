@@ -159,6 +159,102 @@ func TestTransferMatchingService(t *testing.T) {
 			assert.Equal(t, TransferMatchingAttemptCounts{MatchedPairs: 1}, counts)
 		})
 
+		t.Run("matches amount-bearing FX evidence in either debit direction", func(t *testing.T) {
+			description := "FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10\u00a0917,00 PLN"
+			for _, testCase := range []struct {
+				name        string
+				baseAmount  int64
+				quoteAmount int64
+			}{
+				{name: "EUR debited", baseAmount: -250_000, quoteAmount: 1_091_700},
+				{name: "PLN debited", baseAmount: 250_000, quoteAmount: -1_091_700},
+			} {
+				t.Run(testCase.name, func(t *testing.T) {
+					baseRow := makeFXRow(
+						"transaction-eur-"+fake.UUID().V4(),
+						"account-eur-"+fake.UUID().V4(),
+						"EUR",
+						testCase.baseAmount,
+						description, now, &connectionID,
+					)
+					quoteRow := makeFXRow(
+						"transaction-pln-"+fake.UUID().V4(),
+						"account-pln-"+fake.UUID().V4(),
+						"PLN",
+						testCase.quoteAmount,
+						description, now.Add(time.Hour), &connectionID,
+					)
+					pairs := newMocktransferMatchingPairStore(t)
+					pairs.EXPECT().
+						ListEligibleTransferMatchingTransactions(t.Context(), mock.Anything).
+						Return([]persistence.TransferMatchingTransaction{baseRow, quoteRow}, nil).
+						Once()
+					pairs.EXPECT().
+						LinkTransferPair(t.Context(), mock.Anything).
+						Return(nil).
+						Once()
+
+					counts, err := makeService(t, pairs).Match(t.Context(), params)
+
+					require.NoError(t, err)
+					assert.Equal(t, TransferMatchingAttemptCounts{MatchedPairs: 1}, counts)
+				})
+			}
+		})
+
+		t.Run("leaves invalid evidence and inconsistent conversions unmatched", func(t *testing.T) {
+			description := "FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10\u00a0917,00 PLN"
+			baseRow := makeFXRow(
+				"transaction-eur-"+fake.UUID().V4(),
+				"account-eur-"+fake.UUID().V4(),
+				"EUR",
+				-250_000,
+				description, now, &connectionID,
+			)
+			for _, testCase := range []struct {
+				name        string
+				description string
+				quoteAmount int64
+			}{
+				{
+					name:        "malformed amount",
+					description: "FX96600719 EUR/PLN 4.36682\u00a0500,0 EUR -10\u00a0917,00 PLN",
+					quoteAmount: 1_091_700,
+				},
+				{
+					name:        "mismatched suffix currency",
+					description: "FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10\u00a0917,00 USD",
+					quoteAmount: 1_091_700,
+				},
+				{
+					name:        "extra text",
+					description: description + " extra",
+					quoteAmount: 1_091_700,
+				},
+				{name: "inconsistent conversion", description: description, quoteAmount: 1_091_699},
+			} {
+				t.Run(testCase.name, func(t *testing.T) {
+					quoteRow := makeFXRow(
+						"transaction-pln-"+fake.UUID().V4(),
+						"account-pln-"+fake.UUID().V4(),
+						"PLN",
+						testCase.quoteAmount,
+						testCase.description, now.Add(time.Hour), &connectionID,
+					)
+					pairs := newMocktransferMatchingPairStore(t)
+					pairs.EXPECT().
+						ListEligibleTransferMatchingTransactions(t.Context(), mock.Anything).
+						Return([]persistence.TransferMatchingTransaction{baseRow, quoteRow}, nil).
+						Once()
+
+					counts, err := makeService(t, pairs).Match(t.Context(), params)
+
+					require.NoError(t, err)
+					assert.Equal(t, TransferMatchingAttemptCounts{Unmatched: 1}, counts)
+				})
+			}
+		})
+
 		t.Run("rejects mismatched FX evidence and unavailable provenance", func(t *testing.T) {
 			cases := []struct {
 				name   string

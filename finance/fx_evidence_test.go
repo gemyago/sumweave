@@ -42,9 +42,29 @@ func TestFXEvidence(t *testing.T) {
 		assert.Equal(t, expected.rateScale, comma.rateScale)
 	})
 
+	t.Run("extracts concatenated rates and localized amounts", func(t *testing.T) {
+		description := "FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10\u00a0917,00 PLN"
+
+		actual, ok := extractFXEvidence(description)
+
+		require.True(t, ok)
+		expected := fxEvidence{
+			namespace: "FX", reference: "96600719", baseCurrency: "EUR", quoteCurrency: "PLN",
+			rateCoefficient: "43668", rateScale: 4,
+		}
+		assert.Equal(t, expected, actual)
+		compact, compactOK := extractFXEvidence("FX96600719 EUR/PLN 4.3668")
+		require.True(t, compactOK)
+		assert.Equal(t, expected, compact)
+		commaCompact, commaCompactOK := extractFXEvidence("FX96600719 EUR/PLN 4,3668")
+		require.True(t, commaCompactOK)
+		assert.Equal(t, expected, commaCompact)
+	})
+
 	t.Run("rejects unknown malformed invalid and nonpositive descriptions", func(t *testing.T) {
 		descriptions := []string{
 			"not an FX description",
+			"FX EUR/PLN 4.3668",
 			"FX123 USD/PLN",
 			"FX123 USD/PLN .125",
 			"FX123 USD/PLN 4.",
@@ -55,6 +75,13 @@ func TestFXEvidence(t *testing.T) {
 			"FX123 USD/USD 1.0",
 			"FX123 ZZZ/PLN 1.0",
 			"FX123 usd/PLN 1.0",
+			"FX96600719 EUR/PLN 4.36682 500,00 EUR -10\u00a0917,00 PLN",
+			"FX96600719 EUR/PLN 4.36682\u00a0500,0 EUR -10\u00a0917,00 PLN",
+			"FX96600719 EUR/PLN 4.36682\u00a0500,00 USD -10\u00a0917,00 PLN",
+			"FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10\u00a0917,00 USD",
+			"FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10\u00a0917,00 PLN extra",
+			"FX96600719 EUR/PLN 4.36682500,00 EUR -10\u00a0917,00 PLN",
+			"FX96600719 EUR/PLN 4.36682\u00a0500,00 EUR -10917,00 PLN",
 		}
 		for _, description := range descriptions {
 			_, ok := extractFXEvidence(description)

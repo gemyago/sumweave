@@ -3,15 +3,16 @@ package finance
 import (
 	"math"
 	"math/big"
-	"regexp"
 	"strings"
 
 	"golang.org/x/text/currency"
 )
 
-const fxDecimalRadix = 10
-
-var fxDescriptionPattern = regexp.MustCompile(`^FX([0-9]+) ([A-Z]{3})/([A-Z]{3}) ([0-9]+(?:[,.][0-9]+)?)$`)
+const (
+	fxDecimalRadix                   = 10
+	fxConcatenatedRateFractionDigits = 4
+	fxLocalizedAmountGroupSize       = 3
+)
 
 // fxEvidence is the syntax-independent FX data used by transfer matching.
 type fxEvidence struct {
@@ -24,25 +25,149 @@ type fxEvidence struct {
 }
 
 func extractFXEvidence(description string) (fxEvidence, bool) {
-	match := fxDescriptionPattern.FindStringSubmatch(description)
-	if match == nil || match[2] == match[3] {
+	cursor := 0
+	if !consumeFXLiteral(description, &cursor, "FX") {
 		return fxEvidence{}, false
 	}
-	if !isRecognizedCurrency(match[2]) || !isRecognizedCurrency(match[3]) {
+	reference, ok := consumeFXDigits(description, &cursor)
+	if !ok || !consumeFXLiteral(description, &cursor, " ") {
 		return fxEvidence{}, false
 	}
-	coefficient, scale, ok := normalizeFXRate(match[4])
+	baseCurrency, ok := consumeFXCurrency(description, &cursor)
+	if !ok || !consumeFXLiteral(description, &cursor, "/") {
+		return fxEvidence{}, false
+	}
+	quoteCurrency, ok := consumeFXCurrency(description, &cursor)
+	if !ok || !consumeFXLiteral(description, &cursor, " ") || baseCurrency == quoteCurrency {
+		return fxEvidence{}, false
+	}
+	if !isRecognizedCurrency(baseCurrency) || !isRecognizedCurrency(quoteCurrency) {
+		return fxEvidence{}, false
+	}
+	rate, hasAmounts, ok := consumeFXRate(description, &cursor)
+	if !ok {
+		return fxEvidence{}, false
+	}
+	if hasAmounts && (!consumeFXLocalizedAmount(description, &cursor, false) ||
+		!consumeFXLiteral(description, &cursor, " ") ||
+		!consumeFXCurrencyLiteral(description, &cursor, baseCurrency) ||
+		!consumeFXLiteral(description, &cursor, " ") ||
+		!consumeFXLocalizedAmount(description, &cursor, true) ||
+		!consumeFXLiteral(description, &cursor, " ") ||
+		!consumeFXCurrencyLiteral(description, &cursor, quoteCurrency)) {
+		return fxEvidence{}, false
+	}
+	if cursor != len(description) {
+		return fxEvidence{}, false
+	}
+	coefficient, scale, ok := normalizeFXRate(rate)
 	if !ok {
 		return fxEvidence{}, false
 	}
 	return fxEvidence{
 		namespace:       "FX",
-		reference:       match[1],
-		baseCurrency:    match[2],
-		quoteCurrency:   match[3],
+		reference:       reference,
+		baseCurrency:    baseCurrency,
+		quoteCurrency:   quoteCurrency,
 		rateCoefficient: coefficient,
 		rateScale:       scale,
 	}, true
+}
+
+func consumeFXLiteral(description string, cursor *int, literal string) bool {
+	if !strings.HasPrefix(description[*cursor:], literal) {
+		return false
+	}
+	*cursor += len(literal)
+	return true
+}
+
+func consumeFXDigits(description string, cursor *int) (string, bool) {
+	start := *cursor
+	for *cursor < len(description) && description[*cursor] >= '0' && description[*cursor] <= '9' {
+		*cursor++
+	}
+	return description[start:*cursor], *cursor > start
+}
+
+func consumeFXCurrency(description string, cursor *int) (string, bool) {
+	if *cursor+3 > len(description) {
+		return "", false
+	}
+	code := description[*cursor : *cursor+3]
+	for index := range len(code) {
+		if code[index] < 'A' || code[index] > 'Z' {
+			return "", false
+		}
+	}
+	*cursor += len(code)
+	return code, true
+}
+
+func consumeFXCurrencyLiteral(description string, cursor *int, currency string) bool {
+	return consumeFXLiteral(description, cursor, currency)
+}
+
+func consumeFXRate(description string, cursor *int) (string, bool, bool) {
+	start := *cursor
+	_, hasInteger := consumeFXDigits(description, cursor)
+	if !hasInteger {
+		return "", false, false
+	}
+	if *cursor == len(description) {
+		return description[start:*cursor], false, true
+	}
+	if description[*cursor] != '.' && description[*cursor] != ',' {
+		return "", false, false
+	}
+	*cursor++
+	fractionStart := *cursor
+	_, hasFraction := consumeFXDigits(description, cursor)
+	if !hasFraction {
+		return "", false, false
+	}
+	if *cursor == len(description) {
+		return description[start:*cursor], false, true
+	}
+	if fractionStart+fxConcatenatedRateFractionDigits >= len(description) ||
+		description[fractionStart+fxConcatenatedRateFractionDigits] < '0' ||
+		description[fractionStart+fxConcatenatedRateFractionDigits] > '9' {
+		return "", false, false
+	}
+	*cursor = fractionStart + fxConcatenatedRateFractionDigits
+	return description[start:*cursor], true, true
+}
+
+func consumeFXLocalizedAmount(description string, cursor *int, signed bool) bool {
+	if signed {
+		if !consumeFXLiteral(description, cursor, "-") {
+			return false
+		}
+	}
+	start := *cursor
+	_, hasInteger := consumeFXDigits(description, cursor)
+	if !hasInteger {
+		return false
+	}
+	if *cursor-start > fxLocalizedAmountGroupSize {
+		return false
+	}
+	if strings.HasPrefix(description[*cursor:], "\u00a0") {
+		for strings.HasPrefix(description[*cursor:], "\u00a0") {
+			*cursor += len("\u00a0")
+			groupStart := *cursor
+			_, hasGroup := consumeFXDigits(description, cursor)
+			if !hasGroup || *cursor-groupStart != fxLocalizedAmountGroupSize {
+				return false
+			}
+		}
+	}
+	if !consumeFXLiteral(description, cursor, ",") {
+		return false
+	}
+	fractionStart := *cursor
+	_, hasFraction := consumeFXDigits(description, cursor)
+	return hasFraction && *cursor-fractionStart == 2
 }
 
 func fxConversionMatches(
