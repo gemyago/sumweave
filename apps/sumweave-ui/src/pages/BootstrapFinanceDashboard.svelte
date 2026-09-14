@@ -8,6 +8,7 @@
     type FinanceBankConnection,
     type FinanceDashboard,
     type FinanceCashFlowSeries,
+    type FinanceCashFlowSeriesBucket,
     type FinanceCashFlowGroupBy,
     type FinanceTransaction,
   } from '../lib/finance/api'
@@ -78,6 +79,9 @@
   let cashFlowSeriesError = $state<string | null>(null)
   let cashFlowSeriesRequest = $state<CashFlowSeriesRequest | undefined>(undefined)
   let cashFlowSeriesLoadRevision = 0
+  let selectedCashFlowBucket = $state<FinanceCashFlowSeriesBucket | undefined>(undefined)
+  let cashFlowBucketFilterValue = $state('')
+  let transactionLoadRevision = 0
 
   const financeShell = useFinanceShellState()
 
@@ -144,6 +148,11 @@
     )
   }
 
+  function isSelectedCashFlowBucket(bucket: FinanceCashFlowSeriesBucket): boolean {
+    return selectedCashFlowBucket?.startDate.getTime() === bucket.startDate.getTime() &&
+      selectedCashFlowBucket.endDate.getTime() === bucket.endDate.getTime()
+  }
+
   const cashFlowHasActivity = $derived.by(() =>
     cashFlowSeries?.buckets.some((bucket) => bucket.incomeMinor !== 0 || bucket.expenseMinor !== 0) ?? false,
   )
@@ -186,7 +195,13 @@
         {
           name: 'Income',
           type: 'bar',
-          data: series.buckets.map((bucket) => bucket.incomeMinor),
+          cursor: 'pointer',
+          data: series.buckets.map((bucket) => ({
+            value: bucket.incomeMinor,
+            itemStyle: {
+              opacity: selectedCashFlowBucket && !isSelectedCashFlowBucket(bucket) ? 0.35 : 1,
+            },
+          })),
           itemStyle: { color: 'var(--color-success)' },
           emphasis: { focus: 'none', itemStyle: { color: 'var(--color-success)', opacity: 1 } },
           blur: { itemStyle: { color: 'var(--color-success)', opacity: 1 } },
@@ -194,7 +209,13 @@
         {
           name: 'Expense',
           type: 'bar',
-          data: series.buckets.map((bucket) => bucket.expenseMinor),
+          cursor: 'pointer',
+          data: series.buckets.map((bucket) => ({
+            value: bucket.expenseMinor,
+            itemStyle: {
+              opacity: selectedCashFlowBucket && !isSelectedCashFlowBucket(bucket) ? 0.35 : 1,
+            },
+          })),
           itemStyle: { color: 'var(--color-danger)' },
           emphasis: { focus: 'none', itemStyle: { color: 'var(--color-danger)', opacity: 1 } },
           blur: { itemStyle: { color: 'var(--color-danger)', opacity: 1 } },
@@ -461,6 +482,10 @@
   async function loadDashboard(range: DashboardPeriodRange | undefined): Promise<boolean> {
     const tenantId = financeShell.selectedTenantId
     if (!tenantId) {
+      transactionLoadRevision += 1
+      selectedCashFlowBucket = undefined
+      cashFlowBucketFilterValue = ''
+      loadingTransactions = false
       dashboard = null
       historyAccounts = []
       recentTransactions = []
@@ -473,6 +498,10 @@
       return false
     }
     const requestRevision = ++dashboardLoadRevision
+    transactionLoadRevision += 1
+    selectedCashFlowBucket = undefined
+    cashFlowBucketFilterValue = ''
+    loadingTransactions = false
 
     loadingDashboard = true
     error = null
@@ -682,7 +711,8 @@
 
   async function loadDashboardTransactionPage(offset: number): Promise<boolean> {
     const tenantId = financeShell.selectedTenantId!
-    const range = activeDashboardRange!
+    const range = selectedCashFlowBucket ?? activeDashboardRange!
+    const requestRevision = ++transactionLoadRevision
 
     loadingTransactions = true
     try {
@@ -694,17 +724,59 @@
         limit: TRANSACTION_SECTION_LIMIT + 1,
         offset,
       })
-      if (financeShell.selectedTenantId !== tenantId || activeDashboardRange !== range) return false
+      if (financeShell.selectedTenantId !== tenantId || transactionLoadRevision !== requestRevision) return false
       recentTransactions = [...loadedTransactions]
         .sort((left, right) => right.effectiveAt.getTime() - left.effectiveAt.getTime())
       transactionOffset = offset
       return true
     } catch (loadError) {
+      if (financeShell.selectedTenantId !== tenantId || transactionLoadRevision !== requestRevision) return false
       error = loadError instanceof Error ? loadError.message : 'Failed to load dashboard transactions'
       return false
     } finally {
-      loadingTransactions = false
+      if (transactionLoadRevision === requestRevision) loadingTransactions = false
     }
+  }
+
+  function toggleCashFlowBucket(bucketIndex: number) {
+    const bucket = cashFlowSeries?.buckets[bucketIndex]
+    if (!bucket || !activeDashboardRange) return
+
+    if (isSelectedCashFlowBucket(bucket)) {
+      selectedCashFlowBucket = undefined
+      cashFlowBucketFilterValue = ''
+    } else {
+      selectedCashFlowBucket = bucket
+      cashFlowBucketFilterValue = String(bucketIndex)
+    }
+    void loadDashboardTransactionPage(0)
+  }
+
+  function clearCashFlowBucketFilter() {
+    if (!selectedCashFlowBucket) return
+    selectedCashFlowBucket = undefined
+    cashFlowBucketFilterValue = ''
+    void loadDashboardTransactionPage(0)
+  }
+
+  function selectCashFlowBucketFilter(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value
+    if (value === '') {
+      clearCashFlowBucketFilter()
+      return
+    }
+
+    const bucketIndex = Number(value)
+    if (!Number.isInteger(bucketIndex) || bucketIndex < 0) {
+      return
+    }
+
+    const bucket = cashFlowSeries?.buckets[bucketIndex]
+    if (!bucket || isSelectedCashFlowBucket(bucket)) return
+
+    selectedCashFlowBucket = bucket
+    cashFlowBucketFilterValue = value
+    void loadDashboardTransactionPage(0)
   }
 
   function loadOlderDashboardTransactions(): Promise<boolean> {
@@ -716,7 +788,7 @@
   }
 
   function dashboardTransactionsHref(): string {
-    const range = activeDashboardRange!
+    const range = selectedCashFlowBucket ?? activeDashboardRange!
     const query = new URLSearchParams({
       startDate: dateQueryValue(range.startDate)!,
       endDate: dateQueryValue(inclusiveDashboardEndDate(range.endDate))!,
@@ -963,7 +1035,22 @@
                       ariaLabel="Cash flow chart"
                       ariaDescription="cash-flow-chart-description"
                       option={cashFlowChartOption}
+                      onDataClick={toggleCashFlowBucket}
                     />
+                    <div class="d-md-none">
+                      <label class="form-label small mb-1" for="cash-flow-bucket-filter">Filter transactions by cash-flow time window</label>
+                      <select
+                        id="cash-flow-bucket-filter"
+                        class="form-select"
+                        bind:value={cashFlowBucketFilterValue}
+                        onchange={selectCashFlowBucketFilter}
+                      >
+                        <option value="">All reporting-period transactions</option>
+                        {#each cashFlowSeries.buckets as bucket, index (bucket.startDate.getTime())}
+                          <option value={String(index)}>{cashFlowBucketRange(bucket.startDate, bucket.endDate)}</option>
+                        {/each}
+                      </select>
+                    </div>
                   {/if}
                   <div id="cash-flow-chart-description" class="visually-hidden">
                     <p>Cash-flow values:</p>
@@ -985,9 +1072,18 @@
                 <div>
                   <p class="text-uppercase text-body-secondary fw-semibold small mb-2">Recent activity</p>
                   <h2 class="h5 mb-1">Transactions</h2>
-                  <p class="text-body-secondary mb-0">Booked and pending activity in the reporting period.</p>
+                  {#if selectedCashFlowBucket}
+                    <p class="text-body-secondary mb-0">Filtered to {cashFlowBucketRange(selectedCashFlowBucket.startDate, selectedCashFlowBucket.endDate)}.</p>
+                  {:else}
+                    <p class="text-body-secondary mb-0">Booked and pending activity in the reporting period.</p>
+                  {/if}
                 </div>
-                <a class="btn btn-outline-secondary btn-sm" href={dashboardTransactionsHref()} use:link>View all transactions</a>
+                <div class="d-flex flex-wrap gap-2">
+                  {#if selectedCashFlowBucket}
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick={clearCashFlowBucketFilter}>Clear chart filter</button>
+                  {/if}
+                  <a class="btn btn-outline-secondary btn-sm" href={dashboardTransactionsHref()} use:link>View all transactions</a>
+                </div>
               </div>
 
               {#if visibleRecentTransactions.length === 0}
