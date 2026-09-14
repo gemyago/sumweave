@@ -61,6 +61,43 @@ func TestTransferMatchingService(t *testing.T) {
 			ProviderOriginalCurrency: &currency, SnapshotJSON: &snapshot,
 		}
 	}
+	makePKORow := func(
+		id string,
+		accountID string,
+		currency string,
+		amount int64,
+		trackedIBAN string,
+		direction string,
+		remittance string,
+		snapshotAmount string,
+		debtorIBAN string,
+		creditorIBAN string,
+		effectiveAt time.Time,
+		connectionID *string,
+	) persistence.TransferMatchingTransaction {
+		providerID := "pko"
+		connectorID := "enable-banking"
+		snapshot := fmt.Sprintf(
+			`{"transaction_amount":{"amount":"%s","currency":"%s"},"credit_debit_indicator":"%s","remittance_information":%s,"debtor_account":{"iban":"%s"}%s}`,
+			snapshotAmount,
+			currency,
+			direction,
+			remittance,
+			debtorIBAN,
+			func() string {
+				if creditorIBAN == "" {
+					return ""
+				}
+				return fmt.Sprintf(`,"creditor_account":{"iban":"%s"}`, creditorIBAN)
+			}(),
+		)
+		return persistence.TransferMatchingTransaction{
+			ID: id, AccountID: accountID, Currency: currency, AmountMinor: amount, EffectiveAt: effectiveAt,
+			ConnectionID: connectionID, ProviderID: &providerID, ConnectorID: &connectorID,
+			TrackedAccountIBAN: &trackedIBAN, ProviderOriginalAmountMinor: &amount,
+			ProviderOriginalCurrency: &currency, SnapshotJSON: &snapshot,
+		}
+	}
 	makeService := func(t *testing.T, pairs transferMatchingPairStore) *TransferMatchingService {
 		t.Helper()
 		service, err := NewTransferMatchingService(TransferMatchingServiceArgs{
@@ -543,6 +580,154 @@ func TestTransferMatchingService(t *testing.T) {
 			pairs, _, err = decideTransferMatchingPairs(
 				t.Context(),
 				[]persistence.TransferMatchingTransaction{first, second, sameCurrency},
+				params.RangeStart,
+				params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			assert.Empty(t, pairs)
+		})
+	})
+
+	t.Run("matches only uniquely routed PKO Enable Banking exchanges", func(t *testing.T) {
+		fake := faker.New()
+		stringPointer := func(value string) *string { return &value }
+		now := time.Date(2026, time.September, 14, 12, 0, 0, 0, time.FixedZone("test", 2*60*60))
+		connectionID := "connection-" + fake.UUID().V4()
+		params := TransferMatchingParams{
+			TenantID: "tenant-" + fake.UUID().V4(), RangeStart: now, RangeEndExclusive: now.Add(time.Hour),
+		}
+		debit := makePKORow(
+			"transaction-debit-"+fake.UUID().V4(), "account-usd-"+fake.UUID().V4(), "USD", -60_000,
+			"PL46", "DBIT", `["EXCHANGE","TRANSFER"]`, "600.00", "PL46", "PL04", now, &connectionID,
+		)
+		credit := makePKORow(
+			"transaction-credit-"+fake.UUID().V4(), "account-pln-"+fake.UUID().V4(), "PLN", 205_488,
+			"PL04", "CRDT", `["EXCHANGE","TRANSFER-IN"]`, "2054.88", "PL46", "", now.Add(time.Hour), &connectionID,
+		)
+
+		t.Run("accepts the USD PLN exchange in either input order and when either leg starts", func(t *testing.T) {
+			forward, forwardCounts, err := decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{debit, credit},
+				params.RangeStart,
+				params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			require.Len(t, forward, 1)
+			require.Equal(t, TransferMatchingAttemptCounts{}, forwardCounts)
+			reversed, reversedCounts, err := decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{credit, debit},
+				params.RangeStart,
+				params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			assert.Equal(t, forward, reversed)
+			assert.Equal(t, forwardCounts, reversedCounts)
+			for _, rangeCase := range []struct{ start, end time.Time }{
+				{start: now, end: now.Add(time.Minute)},
+				{start: credit.EffectiveAt, end: credit.EffectiveAt.Add(time.Minute)},
+			} {
+				pairs, _, decisionErr := decideTransferMatchingPairs(
+					t.Context(),
+					[]persistence.TransferMatchingTransaction{debit, credit},
+					rangeCase.start,
+					rangeCase.end,
+				)
+				require.NoError(t, decisionErr)
+				assert.Len(t, pairs, 1)
+			}
+		})
+
+		t.Run("rejects incomplete, incompatible, and edited routes", func(t *testing.T) {
+			differentConnection := credit
+			differentConnection.ConnectionID = stringPointer("connection-" + fake.UUID().V4())
+			badMarkers := makePKORow(
+				credit.ID, credit.AccountID, credit.Currency, credit.AmountMinor, "PL04", "CRDT", `["EXCHANGE"]`,
+				"2054.88", "PL46", "", credit.EffectiveAt, &connectionID,
+			)
+			missingIBAN := credit
+			missingIBAN.TrackedAccountIBAN = nil
+			wrongRoute := makePKORow(
+				credit.ID,
+				credit.AccountID,
+				credit.Currency,
+				credit.AmountMinor,
+				"PL99",
+				"CRDT",
+				`["EXCHANGE","TRANSFER-IN"]`,
+				"2054.88", "PL46", "", credit.EffectiveAt, &connectionID,
+			)
+			sameAccount := credit
+			sameAccount.AccountID = debit.AccountID
+			sameCurrency := credit
+			sameCurrency.Currency = debit.Currency
+			providerCurrency := debit.Currency
+			sameCurrency.ProviderOriginalCurrency = &providerCurrency
+			sameSign := credit
+			sameSign.AmountMinor = -credit.AmountMinor
+			sameSignOriginal := sameSign.AmountMinor
+			sameSign.ProviderOriginalAmountMinor = &sameSignOriginal
+			overWindow := credit
+			overWindow.EffectiveAt = debit.EffectiveAt.Add(transferMatchingWindow + time.Nanosecond)
+			editedAmount := credit
+			editedAmount.AmountMinor++
+			editedCurrency := credit
+			editedCurrency.Currency = "EUR"
+			missingSnapshot := credit
+			missingSnapshot.SnapshotJSON = nil
+			for _, testCase := range []struct {
+				name   string
+				second persistence.TransferMatchingTransaction
+			}{
+				{name: "different connections", second: differentConnection},
+				{name: "bad remittance", second: badMarkers},
+				{name: "missing tracked iban", second: missingIBAN},
+				{name: "inconsistent ibans", second: wrongRoute},
+				{name: "same account", second: sameAccount},
+				{name: "same sign", second: sameSign},
+				{name: "same currency", second: sameCurrency},
+				{name: "over 72 hours", second: overWindow},
+				{name: "edited amount", second: editedAmount},
+				{name: "edited currency", second: editedCurrency},
+				{name: "missing snapshot", second: missingSnapshot},
+			} {
+				t.Run(testCase.name, func(t *testing.T) {
+					pairs, _, err := decideTransferMatchingPairs(
+						t.Context(),
+						[]persistence.TransferMatchingTransaction{debit, testCase.second},
+						params.RangeStart,
+						params.RangeEndExclusive,
+					)
+					require.NoError(t, err)
+					assert.Empty(t, pairs)
+				})
+			}
+		})
+
+		t.Run("keeps multiple exchanges and candidates from other rules ambiguous", func(t *testing.T) {
+			secondCredit := credit
+			secondCredit.ID = "transaction-credit-copy-" + fake.UUID().V4()
+			secondCredit.AccountID = "account-pln-copy-" + fake.UUID().V4()
+			pairs, _, err := decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{debit, credit, secondCredit},
+				params.RangeStart,
+				params.RangeEndExclusive,
+			)
+			require.NoError(t, err)
+			assert.Empty(t, pairs)
+
+			sameCurrency := persistence.TransferMatchingTransaction{
+				ID:          "transaction-usd-candidate-" + fake.UUID().V4(),
+				AccountID:   "account-usd-candidate-" + fake.UUID().V4(),
+				Currency:    "USD",
+				AmountMinor: 60_000,
+				EffectiveAt: now,
+			}
+			pairs, _, err = decideTransferMatchingPairs(
+				t.Context(),
+				[]persistence.TransferMatchingTransaction{debit, credit, sameCurrency},
 				params.RangeStart,
 				params.RangeEndExclusive,
 			)

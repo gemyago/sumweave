@@ -2,7 +2,8 @@
 
 Status: implemented. The original automated Phase 0 work was delivered on
 2026-09-07; description-derived FX candidate matching was delivered on
-2026-09-09, and the Monobank snapshot FX rule was delivered on 2026-09-11.
+2026-09-09, the Monobank snapshot FX rule was delivered on 2026-09-11, and
+the PKO Enable Banking snapshot exchange rule was delivered on 2026-09-14.
 Isolated manual E2E and independent UI design review remain recorded
 completion gates. This design follows the [Phase 0 PRD](transfer-matching-phase0-prd.md),
 including the review decision to match in memory and accept concurrent-update
@@ -15,8 +16,9 @@ Add a finance transfer-matching service that processes a tenant and ledger
 timestamp range. Both explicit requests and committed bank-sync windows call
 the same service. Automatically pair booked transactions within 72 hours when
 each leg has exactly one eligible partner across equal-and-opposite
-same-currency candidates, scoped description-derived FX candidates, and scoped
-Monobank snapshot FX candidates.
+same-currency candidates, scoped description-derived FX candidates, scoped
+Monobank snapshot FX candidates, and PKO Enable Banking snapshot exchange
+candidates.
 
 Reuse the existing transfer group, matching timestamp, reporting behavior, and
 partner inspection UI. Add one transaction exclusion flag, a dedicated pair
@@ -262,7 +264,9 @@ are absent.
 Load only the matching fields: transaction ID, account ID, currency, signed
 minor-unit amount, effective timestamp, current ledger description, optional
 unambiguous connection and connector IDs, provider-original amount/currency,
-and optional transaction snapshot JSON. Eligibility is handled by the query.
+provider ID, connector ID, tracked-account IBAN from the selected
+connection-provider-account mapping, and optional transaction snapshot JSON.
+Eligibility is handled by the query.
 The query left-joins a transaction-ID aggregate over
 `finance_provider_transaction_matches`: exactly one distinct tenant-owned
 connection ID projects that ID and connector; no mapping or multiple distinct
@@ -350,9 +354,22 @@ reciprocate A's ledger currency and amount. The normal account and inclusive
 72-hour checks apply. No descriptions, provider IDs, rates, tolerances, names,
 receipts, external lookup, or separate evidence persistence participate.
 
+Build a fourth index keyed by connection ID, source IBAN, and destination IBAN
+for usable PKO Enable Banking evidence. Its extractor accepts only provider
+`pko`, connector `enable-banking`, exactly one stored transaction snapshot,
+unmodified provider-original/current amount and currency, exact exchange
+markers, and the complete internal route. A DBIT debit provides
+`debtor_account.iban -> creditor_account.iban` and must have its tracked IBAN
+as debtor. A CRDT credit provides `debtor_account.iban -> tracked IBAN`. Pair
+only opposite directions, different accounts and currencies, and timestamps
+within the normal inclusive 72-hour window. It deliberately does not compare
+amounts, infer rates, use names/balances/provider transaction IDs, or look up
+external data.
+
 1. Select starting rows in memory using the original half-open range:
    `rangeStart <= effectiveAt < rangeEndExclusive`. Either sign can start a pair.
-2. Find A's same-currency, description FX, and Monobank snapshot FX candidates in the loaded indexes, merge and
+2. Find A's same-currency, description FX, Monobank snapshot FX, and PKO
+   snapshot exchange candidates in the loaded indexes, merge and
    deduplicate them by transaction ID. Zero means unmatched; more than one means
    ambiguous. Do not give either rule priority.
 3. If B is the only combined candidate, find B's combined candidates in the same
@@ -461,8 +478,9 @@ Implement backend work serially, with behavior tests integral to each step:
 
 The delivered FX follow-ons keep triggers, persistence writes, and worker paths
 unchanged. Their acceptance coverage includes description USD/PLN matching and
-Monobank UAH/EUR snapshot matching, scope/reference/rate/pair/value and
-snapshot-evidence rejections, unavailable provenance, shared-rule ambiguity,
+Monobank UAH/EUR snapshot matching, PKO USD/PLN route matching,
+scope/reference/rate/pair/value and snapshot-evidence rejections, unavailable
+provenance, shared-rule ambiguity,
 reverse ambiguity outside the requested range, shuffled input, extraction once
 per loaded row, range scope, and existing atomic pair writes.
 

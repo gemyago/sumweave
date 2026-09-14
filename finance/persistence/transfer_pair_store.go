@@ -45,7 +45,9 @@ type TransferMatchingTransaction struct {
 	EffectiveAt                 time.Time
 	Description                 string
 	ConnectionID                *string
+	ProviderID                  *string
 	ConnectorID                 *string
+	TrackedAccountIBAN          *string
 	ProviderOriginalAmountMinor *int64
 	ProviderOriginalCurrency    *string
 	SnapshotJSON                *string
@@ -91,7 +93,9 @@ func (s *TransferPairStore) ListEligibleTransferMatchingTransactions(
 			"transactions.effective_at AS effective_at",
 			"transactions.description AS description",
 			"provenance.connection_id AS connection_id",
+			"provenance.provider_id AS provider_id",
 			"provenance.connector_id AS connector_id",
+			"tracked_account.iban AS tracked_account_iban",
 			"CASE WHEN provenance.connection_id IS NOT NULL THEN transactions.original_amount_minor ELSE NULL END AS provider_original_amount_minor",
 			"CASE WHEN provenance.connection_id IS NOT NULL THEN transactions.original_currency ELSE NULL END AS provider_original_currency",
 			"snapshot.document_json AS snapshot_json",
@@ -104,11 +108,22 @@ func (s *TransferPairStore) ListEligibleTransferMatchingTransactions(
 			"LEFT JOIN ("+
 				"SELECT matches.transaction_id, "+
 				"CASE WHEN COUNT(DISTINCT matches.connection_id) = 1 THEN MIN(matches.connection_id) ELSE NULL END AS connection_id, "+
+				"CASE WHEN COUNT(DISTINCT matches.connection_id) = 1 THEN MIN(connections.provider) ELSE NULL END AS provider_id, "+
 				"CASE WHEN COUNT(DISTINCT matches.connection_id) = 1 THEN MIN(connections.connector_id) ELSE NULL END AS connector_id "+
 				"FROM "+(providerTransactionMatchModel{}).TableName()+" AS matches "+
 				"JOIN "+(bankConnectionModel{}).TableName()+" AS connections ON connections.id = matches.connection_id "+
 				"WHERE connections.tenant_id = ? GROUP BY matches.transaction_id"+
 				") AS provenance ON provenance.transaction_id = transactions.id",
+			params.TenantID,
+		).
+		Joins(
+			"LEFT JOIN ("+
+				"SELECT provider_accounts.connection_id, provider_accounts.finance_account_id, "+
+				"CASE WHEN COUNT(*) = 1 THEN MIN(provider_accounts.iban) ELSE NULL END AS iban "+
+				"FROM "+(connectionProviderAccountModel{}).TableName()+" AS provider_accounts "+
+				"JOIN "+(bankConnectionModel{}).TableName()+" AS connections ON connections.id = provider_accounts.connection_id "+
+				"WHERE connections.tenant_id = ? GROUP BY provider_accounts.connection_id, provider_accounts.finance_account_id"+
+				") AS tracked_account ON tracked_account.connection_id = provenance.connection_id AND tracked_account.finance_account_id = transactions.account_id",
 			params.TenantID,
 		).
 		Joins(

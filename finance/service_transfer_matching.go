@@ -11,6 +11,7 @@ import (
 	"time"
 
 	internalmonobank "github.com/gemyago/sumweave/finance/internal/monobank"
+	internalpko "github.com/gemyago/sumweave/finance/internal/pko"
 	"github.com/gemyago/sumweave/finance/persistence"
 )
 
@@ -416,18 +417,27 @@ type transferMatchingMonobankKey struct {
 	amount       int64
 }
 
+type transferMatchingPKOKey struct {
+	connectionID    string
+	sourceIBAN      string
+	destinationIBAN string
+}
+
 type transferMatchingIndexedTransaction struct {
 	transaction                 persistence.TransferMatchingTransaction
 	evidence                    fxEvidence
 	hasEvidence                 bool
 	monobankEvidence            internalmonobank.TransferMatchingEvidence
 	hasMonobankTransferEvidence bool
+	pkoEvidence                 internalpko.TransferMatchingEvidence
+	hasPKOTransferEvidence      bool
 }
 
 type transferMatchingIndexes struct {
 	byAmount   map[transferMatchingAmountKey][]transferMatchingIndexedTransaction
 	byFX       map[transferMatchingFXKey][]transferMatchingIndexedTransaction
 	byMonobank map[transferMatchingMonobankKey][]transferMatchingIndexedTransaction
+	byPKO      map[transferMatchingPKOKey][]transferMatchingIndexedTransaction
 	starting   []transferMatchingIndexedTransaction
 }
 
@@ -485,17 +495,21 @@ func transferMatchingIndex(
 		byAmount:   make(map[transferMatchingAmountKey][]transferMatchingIndexedTransaction),
 		byFX:       make(map[transferMatchingFXKey][]transferMatchingIndexedTransaction),
 		byMonobank: make(map[transferMatchingMonobankKey][]transferMatchingIndexedTransaction),
+		byPKO:      make(map[transferMatchingPKOKey][]transferMatchingIndexedTransaction),
 		starting:   make([]transferMatchingIndexedTransaction, 0, len(transactions)),
 	}
 	for _, transaction := range transactions {
 		evidence, hasEvidence := extractEvidence(transaction.Description)
 		monobankEvidence, hasMonobankEvidence := transferMatchingMonobankEvidenceFor(transaction)
+		pkoEvidence, hasPKOEvidence := transferMatchingPKOEvidenceFor(transaction)
 		indexed := transferMatchingIndexedTransaction{
 			transaction:                 transaction,
 			evidence:                    evidence,
 			hasEvidence:                 hasEvidence,
 			monobankEvidence:            monobankEvidence,
 			hasMonobankTransferEvidence: hasMonobankEvidence,
+			pkoEvidence:                 pkoEvidence,
+			hasPKOTransferEvidence:      hasPKOEvidence,
 		}
 		key := transferMatchingAmountKey{currency: transaction.Currency, amount: transaction.AmountMinor}
 		indexes.byAmount[key] = append(indexes.byAmount[key], indexed)
@@ -504,6 +518,9 @@ func transferMatchingIndex(
 		}
 		if monobankKey, ok := transferMatchingMonobankKeyFor(indexed); ok {
 			indexes.byMonobank[monobankKey] = append(indexes.byMonobank[monobankKey], indexed)
+		}
+		if pkoKey, ok := transferMatchingPKOKeyFor(indexed); ok {
+			indexes.byPKO[pkoKey] = append(indexes.byPKO[pkoKey], indexed)
 		}
 		if !transaction.EffectiveAt.Before(rangeStart) && transaction.EffectiveAt.Before(rangeEndExclusive) {
 			indexes.starting = append(indexes.starting, indexed)
@@ -518,8 +535,40 @@ func transferMatchingIndex(
 	for key := range indexes.byMonobank {
 		sortTransferMatchingTransactions(indexes.byMonobank[key])
 	}
+	for key := range indexes.byPKO {
+		sortTransferMatchingTransactions(indexes.byPKO[key])
+	}
 	sortTransferMatchingTransactions(indexes.starting)
 	return indexes
+}
+
+func transferMatchingPKOEvidenceFor(
+	transaction persistence.TransferMatchingTransaction,
+) (internalpko.TransferMatchingEvidence, bool) {
+	if transaction.ConnectionID == nil || transaction.ProviderID == nil ||
+		transaction.ConnectorID == nil || transaction.TrackedAccountIBAN == nil ||
+		transaction.SnapshotJSON == nil {
+		return internalpko.TransferMatchingEvidence{}, false
+	}
+	return internalpko.ExtractTransferMatchingEvidence(internalpko.TransferMatchingEvidenceInput{
+		ProviderID: *transaction.ProviderID, ConnectorID: *transaction.ConnectorID,
+		TrackedAccountIBAN: *transaction.TrackedAccountIBAN,
+		CurrentAmountMinor: transaction.AmountMinor, CurrentCurrency: transaction.Currency,
+		ProviderOriginalAmountMinor: transaction.ProviderOriginalAmountMinor,
+		ProviderOriginalCurrency:    transaction.ProviderOriginalCurrency, SnapshotJSON: *transaction.SnapshotJSON,
+	})
+}
+
+func transferMatchingPKOKeyFor(
+	transaction transferMatchingIndexedTransaction,
+) (transferMatchingPKOKey, bool) {
+	if !transaction.hasPKOTransferEvidence || transaction.transaction.ConnectionID == nil {
+		return transferMatchingPKOKey{}, false
+	}
+	return transferMatchingPKOKey{
+		connectionID: *transaction.transaction.ConnectionID,
+		sourceIBAN:   transaction.pkoEvidence.SourceIBAN, destinationIBAN: transaction.pkoEvidence.DestinationIBAN,
+	}, true
 }
 
 func transferMatchingMonobankEvidenceFor(
@@ -635,6 +684,44 @@ func transferMatchingCandidates(
 	}
 	if slices.ContainsFunc(transferMatchingMonobankCandidates(transaction, indexes.byMonobank), addCandidate) {
 		return candidates
+	}
+	if slices.ContainsFunc(transferMatchingPKOCandidates(transaction, indexes.byPKO), addCandidate) {
+		return candidates
+	}
+	return candidates
+}
+
+func transferMatchingPKOCandidates(
+	transaction transferMatchingIndexedTransaction,
+	byPKO map[transferMatchingPKOKey][]transferMatchingIndexedTransaction,
+) []transferMatchingIndexedTransaction {
+	key, ok := transferMatchingPKOKeyFor(transaction)
+	if !ok {
+		return nil
+	}
+	bucket := byPKO[key]
+	windowStart := transaction.transaction.EffectiveAt.Add(-transferMatchingWindow)
+	windowEnd := transaction.transaction.EffectiveAt.Add(transferMatchingWindow)
+	start := sort.Search(len(bucket), func(index int) bool {
+		return !bucket[index].transaction.EffectiveAt.Before(windowStart)
+	})
+	candidates := make([]transferMatchingIndexedTransaction, 0, transferMatchingMaxCandidates)
+	for index := start; index < len(bucket); index++ {
+		candidate := bucket[index]
+		if candidate.transaction.EffectiveAt.After(windowEnd) {
+			break
+		}
+		if candidate.transaction.ID == transaction.transaction.ID ||
+			candidate.transaction.AccountID == transaction.transaction.AccountID ||
+			!candidate.hasPKOTransferEvidence ||
+			candidate.pkoEvidence.Direction == transaction.pkoEvidence.Direction ||
+			candidate.transaction.Currency == transaction.transaction.Currency {
+			continue
+		}
+		candidates = append(candidates, candidate)
+		if len(candidates) == transferMatchingMaxCandidates {
+			break
+		}
 	}
 	return candidates
 }
