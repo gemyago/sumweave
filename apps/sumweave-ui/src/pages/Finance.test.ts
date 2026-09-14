@@ -266,12 +266,12 @@ describe('Finance dashboard page', () => {
       endDate: new Date(2026, 5, 3),
       offset: 0,
     })
-    expect(screen.getByText('Filtered to Jun 2, 2026 → Jun 2, 2026.')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Filtered to Jun 2, 2026 → Jun 2, 2026.')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Clear chart filter' })).toBeVisible()
-    expect(screen.getByRole('link', { name: 'View all transactions' })).toHaveAttribute(
-      'href',
-      '/finance/transactions?startDate=2026-06-02&endDate=2026-06-02',
-    )
+    const bucketTransactionsHref = screen.getByRole('link', { name: 'View all transactions' }).getAttribute('href')!
+    const bucketTransactionsQuery = new URLSearchParams(bucketTransactionsHref.split('?')[1])
+    expect(new Date(bucketTransactionsQuery.get('startAt')!).getTime()).toBe(new Date(2026, 5, 2).getTime())
+    expect(new Date(bucketTransactionsQuery.get('endAt')!).getTime()).toBe(new Date(2026, 5, 3).getTime())
 
     mocks.chartClickHandler?.({ dataIndex: 1 })
 
@@ -281,8 +281,10 @@ describe('Finance dashboard page', () => {
       endDate: new Date(2026, 6, 1),
       offset: 0,
     })
-    expect(screen.queryByRole('button', { name: 'Clear chart filter' })).not.toBeInTheDocument()
-    expect(screen.getByText('Booked and pending activity in the reporting period.')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Clear chart filter' })).not.toBeInTheDocument()
+      expect(screen.getByText('Booked and pending activity in the reporting period.')).toBeInTheDocument()
+    })
   })
 
   it('clears the transaction time-window filter with the visible chart-filter action', async () => {
@@ -308,6 +310,7 @@ describe('Finance dashboard page', () => {
 
     mocks.chartClickHandler?.({ dataIndex: 0 })
     await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(2))
+    await screen.findByRole('button', { name: 'Clear chart filter' })
 
     await user.click(screen.getByRole('button', { name: 'Clear chart filter' }))
 
@@ -340,7 +343,8 @@ describe('Finance dashboard page', () => {
 
     render(Finance)
     const selector = await screen.findByRole('combobox', { name: 'Filter transactions by cash-flow time window' }) as HTMLSelectElement
-    expect(selector.parentElement).toHaveClass('d-md-none')
+    expect(selector.parentElement).toHaveClass('mt-2')
+    expect(selector).toHaveClass('form-select-sm')
 
     await user.selectOptions(selector, '1')
 
@@ -369,6 +373,34 @@ describe('Finance dashboard page', () => {
     expect(selector).toHaveValue('')
     expect(selector.selectedIndex).toBe(0)
     expect(selector.selectedOptions[0]).toHaveTextContent('All reporting-period transactions')
+  })
+
+  it('keeps the current filter and rows visible when a bucket request fails', async () => {
+    mocks.getDashboard.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      settled: { displayCurrency: 'USD', incomeMinor: 120000, expenseMinor: 45000, netMinor: 75000, transactionCount: 12, complete: true },
+      pending: { displayCurrency: 'USD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000, transactionCount: 1, complete: true },
+      categoryBreakdowns: [], accountBalances: [], alerts: [], fxCoverage: [], nativeSettledTotals: [],
+    })
+    mocks.getCashFlowSeries.mockResolvedValueOnce({
+      period: { startDate: new Date(2026, 5, 1), endDate: new Date(2026, 6, 1) },
+      groupBy: 'day', displayCurrency: 'USD', complete: true, missingFx: [],
+      buckets: [{ startDate: new Date(2026, 5, 1), endDate: new Date(2026, 5, 2), incomeMinor: 100, expenseMinor: 50 }],
+    })
+
+    render(Finance)
+    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(1))
+    mocks.listTransactions.mockRejectedValueOnce(new Error('bucket transactions failed'))
+
+    mocks.chartClickHandler?.({ dataIndex: 0 })
+
+    expect(await screen.findByText('bucket transactions failed')).toHaveAttribute('role', 'alert')
+    expect(screen.getByText('Booked and pending activity in the reporting period.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear chart filter' })).not.toBeInTheDocument()
+    const transactionsQuery = new URLSearchParams(screen.getByRole('link', { name: 'View all transactions' }).getAttribute('href')!.split('?')[1])
+    expect(transactionsQuery.get('startDate')).toBe('2026-06-01')
+    expect(transactionsQuery.get('endDate')).toBe('2026-06-30')
   })
 
   it('keeps the period KPIs and chart in one full-width cash-flow card and prevents ECharts emphasis blur', async () => {

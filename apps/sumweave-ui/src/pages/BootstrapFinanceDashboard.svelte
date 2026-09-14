@@ -29,7 +29,7 @@
   import FinanceTransactionList from '../components/FinanceTransactionList.svelte'
   import FinancePager from '../components/FinancePager.svelte'
   import EChartsSvgChart from '../components/EChartsSvgChart.svelte'
-  import { dateQueryValue, financeRouteQuery, readDateQuery, replaceFinanceRouteQuery } from '../lib/finance/url-filters'
+  import { dateQueryValue, financeRouteQuery, readDateQuery, replaceFinanceRouteQuery, timestampQueryValue } from '../lib/finance/url-filters'
   import type { EChartsCoreOption } from 'echarts/core'
 
   type BootstrapTone = 'primary' | 'success' | 'warning' | 'danger' | 'secondary'
@@ -709,9 +709,8 @@
     recentTransactions = recentTransactions.map((item) => item.id === updated.id ? updated : item)
   }
 
-  async function loadDashboardTransactionPage(offset: number): Promise<boolean> {
+  async function loadDashboardTransactionPage(offset: number, range = selectedCashFlowBucket ?? activeDashboardRange!): Promise<boolean> {
     const tenantId = financeShell.selectedTenantId!
-    const range = selectedCashFlowBucket ?? activeDashboardRange!
     const requestRevision = ++transactionLoadRevision
 
     loadingTransactions = true
@@ -738,25 +737,27 @@
     }
   }
 
+  async function applyCashFlowBucketFilter(bucket: FinanceCashFlowSeriesBucket | undefined, value: string) {
+    if (!activeDashboardRange || !await loadDashboardTransactionPage(0, bucket ?? activeDashboardRange)) return
+
+    selectedCashFlowBucket = bucket
+    cashFlowBucketFilterValue = value
+  }
+
   function toggleCashFlowBucket(bucketIndex: number) {
     const bucket = cashFlowSeries?.buckets[bucketIndex]
     if (!bucket || !activeDashboardRange) return
 
     if (isSelectedCashFlowBucket(bucket)) {
-      selectedCashFlowBucket = undefined
-      cashFlowBucketFilterValue = ''
+      void applyCashFlowBucketFilter(undefined, '')
     } else {
-      selectedCashFlowBucket = bucket
-      cashFlowBucketFilterValue = String(bucketIndex)
+      void applyCashFlowBucketFilter(bucket, String(bucketIndex))
     }
-    void loadDashboardTransactionPage(0)
   }
 
   function clearCashFlowBucketFilter() {
     if (!selectedCashFlowBucket) return
-    selectedCashFlowBucket = undefined
-    cashFlowBucketFilterValue = ''
-    void loadDashboardTransactionPage(0)
+    void applyCashFlowBucketFilter(undefined, '')
   }
 
   function selectCashFlowBucketFilter(event: Event) {
@@ -774,9 +775,7 @@
     const bucket = cashFlowSeries?.buckets[bucketIndex]
     if (!bucket || isSelectedCashFlowBucket(bucket)) return
 
-    selectedCashFlowBucket = bucket
-    cashFlowBucketFilterValue = value
-    void loadDashboardTransactionPage(0)
+    void applyCashFlowBucketFilter(bucket, value)
   }
 
   function loadOlderDashboardTransactions(): Promise<boolean> {
@@ -789,10 +788,15 @@
 
   function dashboardTransactionsHref(): string {
     const range = selectedCashFlowBucket ?? activeDashboardRange!
-    const query = new URLSearchParams({
-      startDate: dateQueryValue(range.startDate)!,
-      endDate: dateQueryValue(inclusiveDashboardEndDate(range.endDate))!,
-    })
+    const query = selectedCashFlowBucket
+      ? new URLSearchParams({
+          startAt: timestampQueryValue(range.startDate)!,
+          endAt: timestampQueryValue(range.endDate)!,
+        })
+      : new URLSearchParams({
+          startDate: dateQueryValue(range.startDate)!,
+          endDate: dateQueryValue(inclusiveDashboardEndDate(range.endDate))!,
+        })
     return `/finance/transactions?${query.toString()}`
   }
 
@@ -1037,12 +1041,12 @@
                       option={cashFlowChartOption}
                       onDataClick={toggleCashFlowBucket}
                     />
-                    <div class="d-md-none">
+                    <div class="mt-2">
                       <label class="form-label small mb-1" for="cash-flow-bucket-filter">Filter transactions by cash-flow time window</label>
                       <select
                         id="cash-flow-bucket-filter"
-                        class="form-select"
-                        bind:value={cashFlowBucketFilterValue}
+                        class="form-select form-select-sm"
+                        value={cashFlowBucketFilterValue}
                         onchange={selectCashFlowBucketFilter}
                       >
                         <option value="">All reporting-period transactions</option>
