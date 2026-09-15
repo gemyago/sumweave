@@ -22,8 +22,9 @@ import (
 func TestObservedSubscriptions(t *testing.T) {
 	fake := faker.New()
 	type command struct {
-		Value     string `json:"value"`
-		Requester string `json:"requester"`
+		Value     string          `json:"value"`
+		Requester string          `json:"requester"`
+		Source    RequesterSource `json:"source"`
 	}
 	makeTransport := func(t *testing.T) (*Store, *appdispatch.RouterFactory, *appdispatch.Publisher, *sql.DB) {
 		t.Helper()
@@ -56,9 +57,13 @@ func TestObservedSubscriptions(t *testing.T) {
 		require.NoError(t, RegisterTypedHandler(registry, TypedHandlerSpec[command]{
 			JobType: "finance.test", Topic: topic,
 			Metadata: func(value command) (JobMetadata, error) {
+				source := value.Source
+				if source == "" {
+					source = RequesterSourceOperator
+				}
 				return JobMetadata{
 					JobType:   "finance.test",
-					Requester: Requester{UserID: value.Requester, Source: RequesterSourceOperator},
+					Requester: Requester{UserID: value.Requester, Source: source},
 				}, nil
 			},
 			Run: run,
@@ -104,7 +109,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			topic := "observed." + fake.UUID().V4()
 			message := appdispatch.NewMessage(
 				topic,
-				[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`"}`),
+				[]byte(`{"value":"`+fake.UUID().V4()+`","requester":"`+fake.UUID().V4()+`","source":"integration"}`),
 			)
 			var calls atomic.Int32
 			register(t, registry, topic, func(ctx context.Context, job Job, value command) error {
@@ -113,6 +118,7 @@ func TestObservedSubscriptions(t *testing.T) {
 				assert.Equal(t, JobStatusRunning, persisted.Status)
 				assert.Equal(t, message.ID, job.ID)
 				assert.Equal(t, value.Requester, job.Requester.UserID)
+				assert.Equal(t, RequesterSourceIntegration, job.Requester.Source)
 				calls.Add(1)
 				return nil
 			})
@@ -132,6 +138,7 @@ func TestObservedSubscriptions(t *testing.T) {
 			assert.Equal(t, JobStatusSucceeded, persisted.Status)
 			assert.Equal(t, int32(1), calls.Load())
 			assert.Equal(t, message.ID, persisted.ID)
+			assert.Equal(t, RequesterSourceIntegration, persisted.Requester.Source)
 			require.NoError(t, worker.Stop(t.Context()))
 			duplicateWorker := &Worker{
 				store:    store,
@@ -145,6 +152,9 @@ func TestObservedSubscriptions(t *testing.T) {
 				duplicateWorker.processObserved(t.Context(), registry.Handlers()[0], message),
 			)
 			assert.Equal(t, int32(1), calls.Load())
+			persisted, err = store.Get(t.Context(), message.ID)
+			require.NoError(t, err)
+			assert.Equal(t, RequesterSourceIntegration, persisted.Requester.Source)
 
 			stale := Job{
 				ID:           fake.UUID().V4(),
@@ -837,22 +847,31 @@ func TestObservedSubscriptions(t *testing.T) {
 			)
 			service, err := NewService(ServiceDeps{Store: store})
 			require.NoError(t, err)
-			got, err := service.Get(t.Context(), job.ID)
+			readScope := []RequesterSource{RequesterSourceOperator}
+			got, err := service.Get(t.Context(), GetParams{
+				JobID: job.ID, RequesterUserID: job.Requester.UserID, AllowedSources: readScope,
+			})
 			require.NoError(t, err)
 			assert.Equal(t, JobStatusSucceeded, got.Status)
 			listed, err := service.List(
 				t.Context(),
 				ListParams{
-					JobTypes: []JobType{"type-a"},
-					Statuses: []JobStatus{JobStatusSucceeded},
-					Limit:    1,
+					RequesterUserID: job.Requester.UserID,
+					AllowedSources:  readScope,
+					JobTypes:        []JobType{"type-a"},
+					Statuses:        []JobStatus{JobStatusSucceeded},
+					Limit:           1,
 				},
 			)
 			require.NoError(t, err)
 			require.Len(t, listed.Items, 1)
-			_, err = service.Get(t.Context(), fake.UUID().V4())
+			_, err = service.Get(t.Context(), GetParams{
+				JobID: fake.UUID().V4(), RequesterUserID: job.Requester.UserID, AllowedSources: readScope,
+			})
 			require.Error(t, err)
-			_, err = store.List(t.Context(), ListParams{Cursor: "%"})
+			_, err = store.List(t.Context(), ListParams{
+				RequesterUserID: job.Requester.UserID, AllowedSources: readScope, Cursor: "%",
+			})
 			require.Error(t, err)
 			require.Error(t, store.RequeueRunning(t.Context(), *claimed, time.Time{}))
 
@@ -946,6 +965,12 @@ func TestObservedSubscriptions(t *testing.T) {
 			Requester{UserID: "user", Source: RequesterSourceOperator},
 			canonicalizeRequester(Requester{UserID: " user ", Source: " operator "}),
 		)
+		assert.Equal(t, []RequesterSource{RequesterSourceIntegration}, intersectRequesterSources(
+			[]RequesterSource{
+				RequesterSourceIntegration,
+			},
+			[]RequesterSource{RequesterSourceOperator, RequesterSourceIntegration},
+		))
 		assert.Nil(t, jobErrorFromExecution(nil))
 		assert.Equal(
 			t,

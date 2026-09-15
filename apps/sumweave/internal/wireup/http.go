@@ -326,8 +326,10 @@ func buildHTTP(
 			AccessTokens: accessTokenService,
 		}),
 		JobsController: v1controllers.NewJobsController(v1controllers.JobsControllerDeps{
-			JobsService:    jobsService,
-			AuthMiddleware: authMiddleware,
+			JobsService: jobsService,
+			TokenReadMiddleware: func(next stdhttp.Handler) stdhttp.Handler {
+				return credentialAuth.Require(middleware.TokenRead, next)
+			},
 		}),
 		FinanceController: v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
 			TenantService:             financeModule.TenantService,

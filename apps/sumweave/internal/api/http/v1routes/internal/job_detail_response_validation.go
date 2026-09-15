@@ -41,9 +41,6 @@ func NewJobDetailResponseValidator() FieldValidator[*JobDetailResponse] {
 		ObjectFieldValidatorParams{Required: false, Nullable: false},
 		NewJobErrorValidator(),
 	)
-	validateWorkerID := NewSimpleFieldValidator[string](
-		EnsureNonDefault[string],
-	)
 	validateLastAttemptAt := NewSimpleFieldValidator[*time.Time](
 	)
 	
@@ -58,7 +55,6 @@ func NewJobDetailResponseValidator() FieldValidator[*JobDetailResponse] {
 		validateCompletedAt(bindingCtx.Fork("completedAt"), value.CompletedAt)
 		validateAttemptCount(bindingCtx.Fork("attemptCount"), value.AttemptCount)
 		validateError(bindingCtx.Fork("error"), value.Error)
-		validateWorkerID(bindingCtx.Fork("workerId"), value.WorkerID)
 		validateLastAttemptAt(bindingCtx.Fork("lastAttemptAt"), value.LastAttemptAt)
 	}
 }

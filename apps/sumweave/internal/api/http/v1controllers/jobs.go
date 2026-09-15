@@ -15,11 +15,11 @@ import (
 
 type jobsService interface {
 	List(context.Context, jobspkg.ListParams) (jobspkg.ListResult, error)
-	Get(context.Context, string) (*jobspkg.Job, error)
+	Get(context.Context, jobspkg.GetParams) (*jobspkg.Job, error)
 }
 type JobsControllerDeps struct {
-	JobsService    jobsService
-	AuthMiddleware middleware.AuthMiddleware
+	JobsService         jobsService
+	TokenReadMiddleware middleware.AuthMiddleware
 }
 type JobsController struct{ deps JobsControllerDeps }
 
@@ -30,37 +30,44 @@ var _ handlers.JobsController = (*JobsController)(nil)
 func (c *JobsController) GetJob(
 	builder handlers.HandlerBuilder[*models.GetJobParams, *models.JobDetailResponse],
 ) http.Handler {
-	return c.deps.AuthMiddleware(
-		builder.HandleWith(func(ctx context.Context, params *models.GetJobParams) (*models.JobDetailResponse, error) {
-			if err := requireOperatorRequester(ctx); err != nil {
+	inner := builder.HandleWith(
+		func(ctx context.Context, params *models.GetJobParams) (*models.JobDetailResponse, error) {
+			scope, err := jobReadScope(ctx)
+			if err != nil {
 				return nil, err
 			}
-			job, err := c.deps.JobsService.Get(ctx, params.JobID)
+			job, err := c.deps.JobsService.Get(ctx, jobspkg.GetParams{
+				JobID: params.JobID, RequesterUserID: scope.userID, AllowedSources: scope.allowedSources,
+			})
 			if err != nil {
 				return nil, err
 			}
 			response := mapJobDetail(*job)
 			return &response, nil
-		}),
+		},
 	)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *JobsController) ListJobs(
 	builder handlers.HandlerBuilder[*models.ListJobsParams, *models.JobListResponse],
 ) http.Handler {
-	return c.deps.AuthMiddleware(
-		builder.HandleWith(func(ctx context.Context, params *models.ListJobsParams) (*models.JobListResponse, error) {
-			if err := requireOperatorRequester(ctx); err != nil {
+	inner := builder.HandleWith(
+		func(ctx context.Context, params *models.ListJobsParams) (*models.JobListResponse, error) {
+			scope, err := jobReadScope(ctx)
+			if err != nil {
 				return nil, err
 			}
 			result, err := c.deps.JobsService.List(
 				ctx,
 				jobspkg.ListParams{
-					Statuses: mapJobStatuses(params.Status),
-					JobTypes: mapJobTypes(params.JobType),
-					Sources:  mapRequesterSources(params.Source),
-					Limit:    int(params.Limit),
-					Cursor:   params.Cursor,
+					RequesterUserID: scope.userID,
+					AllowedSources:  scope.allowedSources,
+					Statuses:        mapJobStatuses(params.Status),
+					JobTypes:        mapJobTypes(params.JobType),
+					Sources:         mapRequesterSources(params.Source),
+					Limit:           int(params.Limit),
+					Cursor:          params.Cursor,
 				},
 			)
 			if err != nil {
@@ -68,15 +75,34 @@ func (c *JobsController) ListJobs(
 			}
 			response := mapJobListResponse(result)
 			return &response, nil
-		}),
+		},
 	)
+	return c.deps.TokenReadMiddleware(inner)
 }
-func requireOperatorRequester(ctx context.Context) error {
+
+type jobReadScopeParams struct {
+	userID         string
+	allowedSources []jobspkg.RequesterSource
+}
+
+func jobReadScope(ctx context.Context) (jobReadScopeParams, error) {
 	caller, ok := auth.CallerFromContext(ctx)
 	if !ok || strings.TrimSpace(caller.UserID) == "" {
-		return app.NewErrUnauthorized("unauthorized")
+		return jobReadScopeParams{}, app.NewErrUnauthorized("unauthorized")
 	}
-	return nil
+	scope := jobReadScopeParams{userID: caller.UserID}
+	switch caller.Credential {
+	case auth.CredentialKindSession:
+		scope.allowedSources = []jobspkg.RequesterSource{
+			jobspkg.RequesterSourceOperator,
+			jobspkg.RequesterSourceIntegration,
+		}
+	case auth.CredentialKindAccessToken:
+		scope.allowedSources = []jobspkg.RequesterSource{jobspkg.RequesterSourceIntegration}
+	default:
+		return jobReadScopeParams{}, app.NewErrUnauthorized("unauthorized")
+	}
+	return scope, nil
 }
 func mapJobListResponse(result jobspkg.ListResult) models.JobListResponse {
 	items := make([]*models.JobSummary, 0, len(result.Items))
@@ -118,7 +144,6 @@ func mapJobDetail(job jobspkg.Job) models.JobDetailResponse {
 		Status:       string(job.Status),
 		CreatedAt:    job.CreatedAt,
 		UpdatedAt:    job.UpdatedAt,
-		WorkerID:     job.WorkerID,
 		AttemptCount: int64(job.AttemptCount),
 	}
 	requester := mapJobRequester(job.Requester)

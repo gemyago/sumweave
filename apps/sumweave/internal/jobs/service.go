@@ -21,10 +21,10 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	return &Service{store: deps.Store}, nil
 }
 
-func (s *Service) Get(ctx context.Context, jobID string) (*Job, error) {
-	job, err := s.store.Get(ctx, jobID)
+func (s *Service) Get(ctx context.Context, params GetParams) (*Job, error) {
+	job, err := s.store.GetForRequester(ctx, params)
 	if errors.Is(err, ErrJobNotFound) {
-		return nil, app.NewErrNotFound("job", strings.TrimSpace(jobID))
+		return nil, app.NewErrNotFound("job", strings.TrimSpace(params.JobID))
 	}
 	return job, err
 }

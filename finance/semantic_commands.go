@@ -18,6 +18,8 @@ const (
 
 	CommandRequesterSourceOperator = "operator"
 
+	CommandRequesterSourceIntegration = "integration"
+
 	CommandRequesterSourceSystem = "system"
 )
 

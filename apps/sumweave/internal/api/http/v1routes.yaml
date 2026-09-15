@@ -180,6 +180,7 @@ paths:
   /api/v1/jobs:
     get:
       summary: List durable registered jobs
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listJobs
       tags:
         - jobs
@@ -230,6 +231,7 @@ paths:
   /api/v1/jobs/{jobId}:
     get:
       summary: Get one durable registered job
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getJob
       tags:
         - jobs
@@ -2100,11 +2102,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/JobSummary"
         - type: object
-          required:
-            - workerId
           properties:
-            workerId:
-              type: string
             lastAttemptAt:
               type: string
               format: date-time

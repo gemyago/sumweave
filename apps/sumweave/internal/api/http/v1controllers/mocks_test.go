@@ -4656,8 +4656,8 @@ func (_m *mockjobsService) EXPECT() *mockjobsService_Expecter {
 }
 
 // Get provides a mock function for the type mockjobsService
-func (_mock *mockjobsService) Get(context1 context.Context, s string) (*jobs.Job, error) {
-	ret := _mock.Called(context1, s)
+func (_mock *mockjobsService) Get(context1 context.Context, getParams jobs.GetParams) (*jobs.Job, error) {
+	ret := _mock.Called(context1, getParams)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Get")
@@ -4665,18 +4665,18 @@ func (_mock *mockjobsService) Get(context1 context.Context, s string) (*jobs.Job
 
 	var r0 *jobs.Job
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*jobs.Job, error)); ok {
-		return returnFunc(context1, s)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, jobs.GetParams) (*jobs.Job, error)); ok {
+		return returnFunc(context1, getParams)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *jobs.Job); ok {
-		r0 = returnFunc(context1, s)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, jobs.GetParams) *jobs.Job); ok {
+		r0 = returnFunc(context1, getParams)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*jobs.Job)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(context1, s)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, jobs.GetParams) error); ok {
+		r1 = returnFunc(context1, getParams)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4690,20 +4690,20 @@ type mockjobsService_Get_Call struct {
 
 // Get is a helper method to define mock.On call
 //   - context1 context.Context
-//   - s string
-func (_e *mockjobsService_Expecter) Get(context1 interface{}, s interface{}) *mockjobsService_Get_Call {
-	return &mockjobsService_Get_Call{Call: _e.mock.On("Get", context1, s)}
+//   - getParams jobs.GetParams
+func (_e *mockjobsService_Expecter) Get(context1 interface{}, getParams interface{}) *mockjobsService_Get_Call {
+	return &mockjobsService_Get_Call{Call: _e.mock.On("Get", context1, getParams)}
 }
 
-func (_c *mockjobsService_Get_Call) Run(run func(context1 context.Context, s string)) *mockjobsService_Get_Call {
+func (_c *mockjobsService_Get_Call) Run(run func(context1 context.Context, getParams jobs.GetParams)) *mockjobsService_Get_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 jobs.GetParams
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(jobs.GetParams)
 		}
 		run(
 			arg0,
@@ -4718,7 +4718,7 @@ func (_c *mockjobsService_Get_Call) Return(job *jobs.Job, err error) *mockjobsSe
 	return _c
 }
 
-func (_c *mockjobsService_Get_Call) RunAndReturn(run func(context1 context.Context, s string) (*jobs.Job, error)) *mockjobsService_Get_Call {
+func (_c *mockjobsService_Get_Call) RunAndReturn(run func(context1 context.Context, getParams jobs.GetParams) (*jobs.Job, error)) *mockjobsService_Get_Call {
 	_c.Call.Return(run)
 	return _c
 }

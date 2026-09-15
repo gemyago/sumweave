@@ -339,7 +339,7 @@
 - Direct entry preserves the requested finance job route after tenant resolution.
 - If multiple tenants are joined and no active tenant is stored yet, the route shows a tenant selector and explicit active-tenant prompt before rendering job detail content.
 - Once the active tenant is resolved, the page renders Bootstrap summary,
-  lifecycle/timeline, requester/worker/attempt, schedule-occurrence where
+  lifecycle/timeline, requester/attempt, schedule-occurrence where
   present, and safe-error cards with finance-local back links and local
   date-time formatting. Job detail never exposes command input, generic
   progress, or generic result payloads.

@@ -170,7 +170,17 @@ func TestFinanceJobRegistrationAdapters(t *testing.T) {
 			)
 			require.NoError(t, err)
 			assert.Equal(t, jobspkg.JobType(financepkg.FXRefreshJobType), metadata.JobType)
+			integrationRequester := financepkg.CommandRequester{
+				UserID: fake.UUID().V4(), Source: financepkg.CommandRequesterSourceIntegration,
+			}
+			metadata, err = jobMetadata("type", integrationRequester)
+			require.NoError(t, err)
+			assert.Equal(t, jobspkg.Requester{
+				UserID: integrationRequester.UserID, Source: jobspkg.RequesterSourceIntegration,
+			}, metadata.Requester)
 			_, err = jobMetadata("type", financepkg.CommandRequester{})
+			require.Error(t, err)
+			_, err = jobMetadata("type", financepkg.CommandRequester{Source: fake.Lorem().Word()})
 			require.Error(t, err)
 			failure := handledFinanceFailure(assert.AnError)
 			require.ErrorIs(t, failure, assert.AnError)

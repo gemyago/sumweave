@@ -50,7 +50,7 @@ describe('jobs api', () => {
     expect(result.nextCursor).toBe('cursor-2')
   })
 
-  it('gets a job with optional worker and attempt metadata omitted', async () => {
+  it('gets a job with optional attempt metadata omitted', async () => {
     let requestedURL = ''
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
       requestedURL = String(input)
@@ -60,7 +60,7 @@ describe('jobs api', () => {
     const job = await createSignalJobsApi({ baseUrl: '/api/v1', fetch }).getJob({ jobId: 'job / 1' })
 
     expect(requestedURL).toContain('/jobs/job%20%2F%201')
-    expect(job).toMatchObject({ workerId: '', lastAttemptAt: undefined })
+    expect(job).toMatchObject({ lastAttemptAt: undefined })
   })
 
   it('accepts an empty list response without a next cursor', async () => {
@@ -71,13 +71,13 @@ describe('jobs api', () => {
   it('maps a safe job error and optional timestamps when present', async () => {
     const fetch = vi.fn(async () => ({
       ok: true, status: 200, statusText: 'OK',
-      json: async () => ({ ...jobFixture(), startedAt: '2026-07-27T12:00:30Z', error: { code: 'failed', summary: 'Import failed', details: 'safe details' }, workerId: 'worker-1', lastAttemptAt: '2026-07-27T12:03:00Z' }),
+      json: async () => ({ ...jobFixture(), startedAt: '2026-07-27T12:00:30Z', error: { code: 'failed', summary: 'Import failed', details: 'safe details' }, lastAttemptAt: '2026-07-27T12:03:00Z' }),
     }) as Response)
 
     const job = await createSignalJobsApi({ baseUrl: '/api/v1', fetch }).getJob({ jobId: 'job-1' })
 
     expect(job.error?.summary).toBe('Import failed')
-    expect(job.workerId).toBe('worker-1')
+    expect(job).not.toHaveProperty('workerId')
     expect(job.lastAttemptAt).toEqual(new Date('2026-07-27T12:03:00Z'))
   })
 

@@ -14,7 +14,7 @@ vi.mock('../lib/auth/auth-store.svelte', () => ({ authStore: { accessToken: 'tok
 vi.mock('svelte-spa-router', async (importOriginal) => ({ ...(await importOriginal<typeof import('svelte-spa-router')>()), replace: mocks.replace }))
 
 function detailFixture() {
-  return { id: 'job-1', jobType: 'finance.bank_connection_sync', status: 'failed', requester: { userId: 'user-1', source: 'operator' }, createdAt: new Date(), updatedAt: new Date(), attemptCount: 3, workerId: '', error: { code: 'sync_failed', summary: 'Bank declined', details: 'safe detail' } }
+  return { id: 'job-1', jobType: 'finance.bank_connection_sync', status: 'failed', requester: { userId: 'user-1', source: 'operator' }, createdAt: new Date(), updatedAt: new Date(), attemptCount: 3, error: { code: 'sync_failed', summary: 'Bank declined', details: 'safe detail' } }
 }
 
 describe('Finance job detail page', () => {
@@ -28,7 +28,7 @@ describe('Finance job detail page', () => {
 
     expect(await screen.findByText('finance.bank_connection_sync')).toBeInTheDocument()
     expect(screen.getByText('Bank declined')).toBeInTheDocument()
-    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.queryByText('Worker')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Finance' })).toHaveAttribute('href', '#/finance')
     await user.click(screen.getByRole('button', { name: 'Back to jobs' }))
     expect(mocks.replace).toHaveBeenCalledWith('/admin/jobs')
@@ -46,11 +46,11 @@ describe('Finance job detail page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load job.')
   })
 
-  it('renders a running job without an error or worker fallback', async () => {
-    mocks.getJob.mockResolvedValue({ ...detailFixture(), status: 'running', workerId: 'worker-1', error: undefined })
+  it('renders a running job without an error or worker metadata', async () => {
+    mocks.getJob.mockResolvedValue({ ...detailFixture(), status: 'running', error: undefined })
     render(FinanceJobDetail, { jobId: 'job-1' })
     expect(await screen.findByText('running')).toBeInTheDocument()
-    expect(screen.getByText('worker-1')).toBeInTheDocument()
+    expect(screen.queryByText('Worker')).not.toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
