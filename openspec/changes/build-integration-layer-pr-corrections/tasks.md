@@ -22,4 +22,4 @@ historical and unchanged.
 
 ## 5. Required CI Dashboard-Test Stabilization
 
-- [ ] 5.1 Stabilize the failing Finance dashboard hierarchy test under the normal UI suite without changing dashboard behavior or global test thresholds; must follow test-first investigation by reproducing the suite-level readiness failure, preserving the existing hierarchy assertions, and using a deterministic rendered readiness condition or a narrowly justified test-local timeout only if necessary, then run the focused file, the complete UI test target without Nx cache, and `make affected-lint-test`.
+- [x] 5.1 Stabilize the failing Finance dashboard hierarchy test under the normal UI suite without changing dashboard behavior or global test thresholds; must follow test-first investigation by reproducing the suite-level readiness failure, preserving the existing hierarchy assertions, and using a deterministic rendered readiness condition or a narrowly justified test-local timeout only if necessary, then run the focused file, the complete UI test target without Nx cache, and `make affected-lint-test`.

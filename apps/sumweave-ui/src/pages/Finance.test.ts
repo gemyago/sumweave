@@ -171,8 +171,9 @@ describe('Finance dashboard page', () => {
   it('renders the cash-flow-first bootstrap dashboard hierarchy', async () => {
     render(Finance)
 
-    expect(await screen.findByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Cash flow over time' })).toBeInTheDocument()
+    expect(await screen.findByLabelText('Cash flow chart')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Finance dashboard' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Cash flow over time' })).toBeInTheDocument()
     expect(screen.getByLabelText('Period summary')).toBeInTheDocument()
     expect(screen.getByText('Net')).toBeInTheDocument()
     expect(screen.getByText('Net inflow')).toBeInTheDocument()
