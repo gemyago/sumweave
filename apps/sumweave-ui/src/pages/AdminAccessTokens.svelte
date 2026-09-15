@@ -66,7 +66,7 @@
         await accessTokensApi.revoke(token.id)
         await load()
       } else {
-        issued = await accessTokensApi.rotate(token.id, { expiresAt: token.expiresAt })
+        issued = await accessTokensApi.rotate(token.id, { expiresAt: token.expiresAt ?? null })
         items = [issued.token, ...items.filter((item) => item.id !== token.id)]
       }
       confirming = null

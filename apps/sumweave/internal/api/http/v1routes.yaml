@@ -2,7 +2,10 @@ openapi: 3.0.3
 info:
   title: Sumweave API
   description: |
-    HTTP API for Sumweave application.
+    HTTP API for Sumweave application. Browser sessions access the existing
+    protected application surface. Personal access tokens use the same Bearer
+    header but are available only to operations whose descriptions say so; all
+    other protected operations remain browser-session only.
   version: 1.0.0
 
 servers:
@@ -101,6 +104,7 @@ paths:
   /api/v1/auth/access-tokens:
     get:
       summary: List the current user's personal access token metadata
+      description: Browser-session only. Returns metadata only; neither token values nor stored digests are returned.
       operationId: listAuthAccessTokens
       tags: [auth]
       responses:
@@ -116,6 +120,7 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
     post:
       summary: Create a personal access token for the current user
+      description: Browser-session only. The complete apiToken is returned only by this response.
       operationId: createAuthAccessToken
       tags: [auth]
       requestBody:
@@ -137,6 +142,7 @@ paths:
   /api/v1/auth/access-tokens/{tokenId}/rotate:
     post:
       summary: Rotate an active personal access token for the current user
+      description: Browser-session only. Rotation immediately invalidates the old value and returns one replacement apiToken.
       operationId: rotateAuthAccessToken
       tags: [auth]
       parameters:
@@ -163,6 +169,7 @@ paths:
   /api/v1/auth/access-tokens/{tokenId}:
     delete:
       summary: Revoke a personal access token for the current user
+      description: Browser-session only. The token is rejected on its next authenticated request.
       operationId: revokeAuthAccessToken
       tags: [auth]
       parameters:
@@ -180,7 +187,7 @@ paths:
   /api/v1/jobs:
     get:
       summary: List durable registered jobs
-      description: Available to personal access tokens with read-only or read-write permission.
+      description: Available to personal access tokens with read-only or read-write permission. Session callers see only their own operator or integration jobs; token callers see only their owner's integration jobs. Source filters can only narrow that scope.
       operationId: listJobs
       tags:
         - jobs
@@ -231,7 +238,7 @@ paths:
   /api/v1/jobs/{jobId}:
     get:
       summary: Get one durable registered job
-      description: Available to personal access tokens with read-only or read-write permission.
+      description: Available to personal access tokens with read-only or read-write permission. Missing, inaccessible, and requester-source-disallowed jobs all return the same not-found response. A just-published known job can be 404 before first delivery materializes it.
       operationId: getJob
       tags:
         - jobs
@@ -1179,7 +1186,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions/classify:
     post:
       summary: Submit explicit transaction classification
-      description: Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation.
+      description: Available to read-write personal access tokens and browser sessions. Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation. An identical retry returns the original job ID; changed semantics under that key return `409 idempotency_conflict`.
       operationId: submitFinanceTransactionClassification
       tags: [finance]
       parameters:
@@ -1206,7 +1213,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions/match-transfers:
     post:
       summary: Submit explicit transfer matching
-      description: Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation.
+      description: Available to read-write personal access tokens and browser sessions. Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation. An identical retry returns the original job ID; changed semantics under that key return `409 idempotency_conflict`.
       operationId: submitFinanceTransferMatching
       tags: [finance]
       parameters:
@@ -1617,7 +1624,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync:
     post:
       summary: Trigger finance bank connection sync job
-      description: Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation.
+      description: Available to read-write personal access tokens and browser sessions. Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation. An identical retry returns the original job ID; changed semantics under that key return `409 idempotency_conflict`.
       operationId: triggerFinanceConnectionSync
       tags: [finance]
       parameters:

@@ -42,6 +42,12 @@ Browser SPA for Sumweave under `apps/sumweave-ui`: static **`dist/`** from Vite,
 
 The Svelte UI consumes various backend APIs (including long running SSE streams). The runtime provides OpenAPI spec, see stream events are typed separately in the spec. API types are generated with `openapi-typescript`
 
+The non-finance Admin area also calls the app-owned auth routes for the
+self-service `#/admin/access-tokens` page. It displays a personal access-token
+secret only from a create or rotate response, keeps that value in page memory,
+and removes it on dismiss, navigation, or reload. The page is not an
+administrator or cross-user credential surface.
+
 ## Decisions (why not X)
 
 - **Plain Vite + Svelte, not SvelteKit:** smaller surface; deliberate third-party router; static export only.

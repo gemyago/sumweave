@@ -80,4 +80,18 @@ describe('Admin access tokens page', () => {
     expect(mocks.revoke).toHaveBeenCalledWith(replacement.id)
     expect(mocks.list).toHaveBeenCalledTimes(2)
   })
+
+  it('sends an explicit null expiry when rotating metadata that omits it', async () => {
+    const user = userEvent.setup()
+    const { expiresAt, ...token } = tokenFixture()
+    void expiresAt
+    mocks.list.mockResolvedValue([token])
+    mocks.rotate.mockResolvedValue({ token: tokenFixture(), apiToken: faker.string.alphanumeric(48) })
+    render(AdminAccessTokens)
+
+    await user.click(await screen.findByRole('button', { name: 'Rotate' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm rotate' }))
+
+    expect(mocks.rotate).toHaveBeenCalledWith(token.id, { expiresAt: null })
+  })
 })

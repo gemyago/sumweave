@@ -7,7 +7,7 @@ export interface AccessTokenMetadata {
   hint: string
   permission: AccessTokenPermission
   status: AccessTokenStatus
-  expiresAt: string | null
+  expiresAt?: string | null
   revokedAt: string | null
   createdAt: string
   updatedAt: string
