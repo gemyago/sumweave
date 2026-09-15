@@ -103,6 +103,14 @@ The API has no fixture endpoint for a transfer-matching run. Use normal manual
 ledger records. All times below include explicit offsets so the submitted range
 and the 72-hour elapsed boundary are inspectable without assuming UTC.
 
+PKO cross-currency evidence is intentionally not created by this guide: it
+requires stored Enable Banking transaction snapshots and connection-provider-
+account IBAN mappings, neither of which has a public fixture API. Focused
+PostgreSQL and service tests cover the `-600.00 USD` / `+2054.88 PLN` PKO case.
+That rule uses only exact `EXCHANGE` route markers and IBAN route evidence, not
+the implied exchange rate, names, balances, unshared provider transaction IDs,
+or external lookups.
+
 Create one category and tag, then these booked manual records:
 
 - `unique-out` and `unique-in`: equal and opposite `500` USD on different

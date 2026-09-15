@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
+//nolint:gocyclo,cyclop // PostgreSQL persistence scenarios intentionally share one fixture.
 func TestTransferPairStore(t *testing.T) {
 	makeTransaction := func(fake faker.Faker, tenantID string, accountID string, now time.Time) domain.Transaction {
 		categoryID := "category-" + fake.UUID().V4()
@@ -818,5 +819,89 @@ func TestTransferPairStore(t *testing.T) {
 			assert.Nil(t, actualByID[transactionID].ProviderOriginalAmountMinor)
 			assert.Nil(t, actualByID[transactionID].ProviderOriginalCurrency)
 		}
+	})
+
+	t.Run("projects provider and tracked account IBAN only from selected provenance", func(t *testing.T) {
+		fake := faker.New()
+		now := time.Date(2026, time.September, 14, 12, 0, 0, 0, time.FixedZone("matching", 2*60*60))
+		_, coreStore, transactions, store := makeStores(t)
+		tenantID := "tenant-" + fake.UUID().V4()
+		account := domain.Account{
+			ID: "account-" + fake.UUID().V4(), TenantID: tenantID, Name: "account-" + fake.Lorem().Word(),
+			Currency: "USD", Kind: domain.AccountKindLinked, CreatedAt: now, UpdatedAt: now,
+		}
+		unmappedAccount := account
+		unmappedAccount.ID = "account-unmapped-" + fake.UUID().V4()
+		records := []domain.Transaction{}
+		makeTransaction := func(name string, accountID string) domain.Transaction {
+			amount := -int64(fake.IntBetween(1, 10_000))
+			return domain.Transaction{
+				ID: "transaction-" + name + "-" + fake.UUID().V4(), TenantID: tenantID, AccountID: accountID,
+				Source: domain.TransactionSourceProvider, Status: domain.TransactionStatusBooked,
+				Kind: domain.TransactionKindRegular, AmountMinor: amount, Currency: "USD", EffectiveAt: now,
+				ProviderOriginal: &domain.ProviderTransactionOriginal{AmountMinor: amount, Currency: "USD"},
+				CreatedAt:        now, UpdatedAt: now,
+			}
+		}
+		usable := makeTransaction("usable", account.ID)
+		missingMapping := makeTransaction("missing-mapping", unmappedAccount.ID)
+		records = append(records, usable, missingMapping)
+		for _, item := range []domain.Account{account, unmappedAccount} {
+			_, saveErr := coreStore.SaveAccount(t.Context(), item)
+			require.NoError(t, saveErr)
+		}
+		for _, transaction := range records {
+			_, err := transactions.SaveTransaction(t.Context(), transaction)
+			require.NoError(t, err)
+		}
+		connection := domain.BankConnection{
+			ID: "connection-" + fake.UUID().V4(), TenantID: tenantID, Provider: string(domain.ProviderIDPKO),
+			ConnectorID: domain.ProviderConnectorIDEnableBanking, DisplayName: "connection-" + fake.Lorem().Word(),
+			ProviderReference: "reference-" + fake.UUID().V4(), SecretID: "secret-" + fake.UUID().V4(),
+			State: domain.BankConnectionStateActive, CreatedAt: now, UpdatedAt: now,
+		}
+		_, err := coreStore.SaveBankConnection(t.Context(), connection)
+		require.NoError(t, err)
+		providerAccountID := "provider-account-" + fake.UUID().V4()
+		_, err = coreStore.SaveConnectionProviderAccount(t.Context(), domain.ConnectionProviderAccount{
+			ID: "provider-account-row-" + fake.UUID().V4(), ConnectionID: connection.ID,
+			ProviderAccountID: providerAccountID, FinanceAccountID: account.ID, Name: "account-" + fake.Lorem().Word(),
+			Currency: "USD", IBAN: "PL46", CreatedAt: now, UpdatedAt: now,
+		})
+		require.NoError(t, err)
+		for _, transaction := range records {
+			_, saveErr := coreStore.SaveProviderTransactionMatch(t.Context(), domain.ProviderTransactionMatch{
+				ID:                    "match-" + fake.UUID().V4(),
+				ConnectionID:          connection.ID,
+				ProviderAccountID:     providerAccountID,
+				ProviderTransactionID: "provider-transaction-" + fake.UUID().V4(),
+				Fingerprint:           "fingerprint-" + fake.UUID().V4(),
+				TransactionID:         transaction.ID,
+				Status:                domain.TransactionStatusBooked,
+				CreatedAt:             now,
+				UpdatedAt:             now,
+			})
+			require.NoError(t, saveErr)
+		}
+
+		actual, err := store.ListEligibleTransferMatchingTransactions(
+			t.Context(),
+			ListEligibleTransferMatchingTransactionsParams{
+				TenantID: tenantID, RangeStart: now, RangeEndExclusive: now.Add(time.Hour),
+			},
+		)
+
+		require.NoError(t, err)
+		actualByID := make(map[string]TransferMatchingTransaction, len(actual))
+		for _, transaction := range actual {
+			actualByID[transaction.ID] = transaction
+		}
+		require.NotNil(t, actualByID[usable.ID].ConnectionID)
+		assert.Equal(t, connection.ID, *actualByID[usable.ID].ConnectionID)
+		require.NotNil(t, actualByID[usable.ID].ProviderID)
+		assert.Equal(t, string(domain.ProviderIDPKO), *actualByID[usable.ID].ProviderID)
+		require.NotNil(t, actualByID[usable.ID].TrackedAccountIBAN)
+		assert.Equal(t, "PL46", *actualByID[usable.ID].TrackedAccountIBAN)
+		assert.Nil(t, actualByID[missingMapping.ID].TrackedAccountIBAN)
 	})
 }

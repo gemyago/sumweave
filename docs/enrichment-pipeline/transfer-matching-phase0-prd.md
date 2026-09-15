@@ -1,8 +1,9 @@
 # Transfer Matching Phase 0
 
 Status: implemented. The same-currency Phase 0 matcher was delivered on
-2026-09-07, its description-derived FX rule on 2026-09-09, and its Monobank
-snapshot FX rule on 2026-09-11. The isolated
+2026-09-07, its description-derived FX rule on 2026-09-09, its Monobank
+snapshot FX rule on 2026-09-11, and its PKO Enable Banking snapshot exchange
+rule on 2026-09-14. The isolated
 manual E2E and independent UI design-review gates are recorded separately and
 remain to be run. Product requirements were approved on 2026-09-06; concurrency
 requirements were revised on 2026-09-07 following design review: match against
@@ -15,7 +16,7 @@ System design, API contracts, and storage changes are outside this PRD.
 Automatically recognize simple movements between accounts tracked in the same
 finance tenant, so those movements do not inflate reported income and expenses.
 
-Phase 0 links two existing ledger transactions using three fixed, deterministic
+Phase 0 links two existing ledger transactions using four fixed, deterministic
 candidate rules. It leaves uncertain cases unchanged and retains manual linking
 as the fallback. It never initiates a bank transfer or creates a missing
 transaction.
@@ -64,7 +65,7 @@ movement.
 Eligible bank-synced, CSV-imported, and manually entered transactions participate
 under the same rules. An existing category does not prevent matching.
 
-### 2. Three fixed candidate rules
+### 2. Four fixed candidate rules
 
 Every candidate pair must have different accounts, opposite signs, and ledger
 effective timestamps no more than 72 hours apart, inclusive. The same-currency
@@ -91,7 +92,7 @@ by the rate and rounded to the quote currency's standard minor unit. Exact
 integer and decimal arithmetic is used, with an exact positive halfway result
 rounded upward; no binary floating point or amount tolerance applies.
 
-Candidates from all three rules are merged and deduplicated before applying mutual
+Candidates from all four rules are merged and deduplicated before applying mutual
 uniqueness. A pair qualifies only when each leg has exactly one possible partner
 across the combined candidate set and they are each other.
 
@@ -116,6 +117,20 @@ No rate, tolerance, description, name, receipt, transaction ID, or external
 lookup is used. Missing, ambiguous, foreign-tenant, malformed, unsupported, or
 edited snapshot evidence disables only this rule. It does not alter eligibility
 for the same-currency or description-derived FX rules.
+
+The PKO Enable Banking snapshot exchange rule requires both rows to have the
+same unambiguous connection with provider `pko`, connector `enable-banking`,
+one stored transaction snapshot, and a mapped tracked-account IBAN. The current
+ledger amount/currency, provider-original amount/currency, and snapshot
+`transaction_amount` must agree exactly. A debit has
+`credit_debit_indicator = DBIT`, remittance `["EXCHANGE", "TRANSFER"]`, its
+tracked IBAN as `debtor_account.iban`, and a nonempty `creditor_account.iban`.
+A credit has `CRDT`, remittance `["EXCHANGE", "TRANSFER-IN"]`, and a nonempty
+debtor IBAN. The debit's debtor/creditor route must equal the credit's
+debtor/tracked-account route. The two rows must have different currencies and
+opposite signs; amounts and rates need not correspond. No names, balances,
+provider transaction IDs, inferred rate, or external lookup is evidence.
+Missing, malformed, ambiguous, or edited evidence disables only this rule.
 
 Use ledger amounts, currencies, and effective timestamps loaded at attempt
 start, including user edits already saved. Compare timestamps as instants with
@@ -313,7 +328,7 @@ Not required in Phase 0:
 
 - Pending-transaction matching or pending-pair settlement revalidation.
 - Amount tolerances, fee inference, and any FX format other than the documented
-  scoped description or Monobank snapshot evidence.
+   scoped description, Monobank snapshot, or PKO snapshot evidence.
 - Split, many-to-one, or one-to-many transfers.
 - Matching to accounts outside the tenant or creating missing legs.
 - Transfer-rule management, LLMs, or confidence scores.
