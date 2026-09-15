@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	"github.com/gemyago/sumweave/runtime/httpapi"
 )
 
@@ -88,12 +89,23 @@ func (m *CredentialMiddleware) Require(policy CredentialPolicy, next http.Handle
 		}
 
 		tokenStr := parts[1]
+		credentialKind := credentialKindForToken(tokenStr)
 		caller, err := m.authenticate(r.Context(), tokenStr)
 		if err != nil {
+			if credentialKind == auth.CredentialKindAccessToken && !errors.Is(err, auth.ErrInvalidAccessToken) {
+				m.logger.ErrorContext(
+					r.Context(),
+					"access token validation failed",
+					telemetry.ErrAttr(err),
+					slog.String("credentialKind", string(credentialKind)),
+				)
+				WriteError(w, r, apiErrorInternal())
+				return
+			}
 			m.logger.DebugContext(
 				r.Context(),
 				"credential validation failed",
-				slog.String("credentialKind", string(credentialKindForToken(tokenStr))),
+				slog.String("credentialKind", string(credentialKind)),
 			)
 			WriteError(w, r, APIErrorUnauthorized())
 			return

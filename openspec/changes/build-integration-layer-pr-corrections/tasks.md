@@ -14,7 +14,7 @@ historical and unchanged.
 
 ## 3. Credential Validation Failure Mapping
 
-- [ ] 3.1 Map unexpected access-token validation failures in credential middleware to the existing logged safe internal-error path while preserving indistinguishable `401 unauthorized` responses for `auth.ErrInvalidAccessToken`; must follow TDD flow by first adding Mockery-backed registered-middleware cases for the invalid sentinel and a wrapped store failure, including safe status/code/correlation behavior, handler non-execution, and correlation-context logging of the wrapped operational error, then implement only the typed error distinction and mapper integration; run root `make postgres-bootstrap`, focused app tests, and `make affected-lint-test`.
+- [x] 3.1 Map unexpected access-token validation failures in credential middleware to the existing logged safe internal-error path while preserving indistinguishable `401 unauthorized` responses for `auth.ErrInvalidAccessToken`; must follow TDD flow by first adding Mockery-backed registered-middleware cases for the invalid sentinel and a wrapped store failure, including safe status/code/correlation behavior, handler non-execution, and correlation-context logging of the wrapped operational error, then implement only the typed error distinction and mapper integration; run root `make postgres-bootstrap`, focused app tests, and `make affected-lint-test`.
 
 ## 4. Rotated Token Metadata Refresh
 

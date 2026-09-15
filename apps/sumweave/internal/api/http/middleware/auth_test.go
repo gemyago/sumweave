@@ -1,13 +1,18 @@
 package middleware
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/system/ident"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/telemetry"
 	"github.com/gemyago/sumweave/runtime/httpapi"
 	"github.com/jaswdr/faker/v2"
@@ -18,12 +23,16 @@ import (
 
 func TestCredentialMiddleware(t *testing.T) {
 	fake := faker.New()
-	makeMiddleware := func(t *testing.T) (*CredentialMiddleware, *mockjwtValidator, *mockaccessTokenValidator) {
+	makeMiddleware := func(t *testing.T, loggers ...*slog.Logger) (*CredentialMiddleware, *mockjwtValidator, *mockaccessTokenValidator) {
 		t.Helper()
 		jwt := newMockjwtValidator(t)
 		access := newMockaccessTokenValidator(t)
+		logger := telemetry.RootTestLogger()
+		if len(loggers) > 0 {
+			logger = loggers[0]
+		}
 		middleware, err := NewCredentialMiddleware(AuthMiddlewareDeps{
-			JWTValidator: jwt, AccessTokenValidator: access, Logger: telemetry.RootTestLogger(),
+			JWTValidator: jwt, AccessTokenValidator: access, Logger: logger,
 		})
 		require.NoError(t, err)
 		return middleware, jwt, access
@@ -145,7 +154,7 @@ func TestCredentialMiddleware(t *testing.T) {
 						if credentialKindForToken(testCase.value) == auth.CredentialKindAccessToken {
 							access.EXPECT().Validate(mock.Anything, testCase.value).Return(
 								nil,
-								errors.New(fake.Lorem().Sentence(3)),
+								auth.ErrInvalidAccessToken,
 							)
 						} else {
 							jwt.EXPECT().ValidateAccessToken(testCase.value).Return(
@@ -172,6 +181,59 @@ func TestCredentialMiddleware(t *testing.T) {
 			}
 		},
 	)
+
+	t.Run("wrapped access-token validation failures are logged and safely return internal errors", func(t *testing.T) {
+		var logBuffer bytes.Buffer
+		logger := telemetry.NewRootLogger(
+			telemetry.NewRootLoggerOpts().
+				WithJSONLogs(true).
+				WithOutput(&logBuffer).
+				WithLogLevel(slog.LevelDebug),
+		)
+		middleware, jwt, access := makeMiddleware(t, logger)
+		value := "swat_" + fake.Lorem().Word()
+		storeErr := errors.New(fake.Lorem().Sentence(3))
+		validationErr := fmt.Errorf("get presented access token: %w", storeErr)
+		access.EXPECT().Validate(mock.Anything, value).Return(nil, validationErr).Once()
+		correlationID := fake.UUID().V4()
+		request := newRequest(value)
+		request.Header.Set(telemetry.CorrelationIDHeader, correlationID)
+		response := httptest.NewRecorder()
+		handlerCalled := false
+
+		handler := NewCorrelationMiddleware(ident.NewDefaultGenerator())(
+			middleware.Require(TokenRead, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				handlerCalled = true
+			})),
+		)
+		handler.ServeHTTP(response, request)
+
+		assert.False(t, handlerCalled)
+		assert.Equal(t, http.StatusInternalServerError, response.Code)
+		assert.JSONEq(
+			t,
+			`{"code":"internal_error","message":"An internal error occurred.","correlationId":"`+correlationID+`"}`,
+			response.Body.String(),
+		)
+		assert.NotContains(t, response.Body.String(), storeErr.Error())
+		assert.NotContains(t, response.Body.String(), validationErr.Error())
+		assert.Equal(t, correlationID, response.Header().Get(telemetry.CorrelationIDHeader))
+		jwt.AssertNotCalled(t, "ValidateAccessToken", mock.Anything)
+
+		var entry struct {
+			Level          string `json:"level"`
+			Message        string `json:"msg"`
+			Error          string `json:"err"`
+			CorrelationID  string `json:"correlationId"`
+			CredentialKind string `json:"credentialKind"`
+		}
+		require.NoError(t, json.Unmarshal(logBuffer.Bytes(), &entry))
+		assert.Equal(t, "ERROR", entry.Level)
+		assert.Equal(t, "access token validation failed", entry.Message)
+		assert.Equal(t, validationErr.Error(), entry.Error)
+		assert.Equal(t, correlationID, entry.CorrelationID)
+		assert.Equal(t, string(auth.CredentialKindAccessToken), entry.CredentialKind)
+	})
 
 	t.Run("constructor requires all dependencies", func(t *testing.T) {
 		middleware, jwt, access := makeMiddleware(t)
