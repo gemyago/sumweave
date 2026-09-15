@@ -20,6 +20,9 @@ func NewRootHandler(
 	rootHandler := handlers.NewRootHandler(
 		deps.Router,
 		handlers.WithLogger(logger),
+		handlers.WithParsingErrorHandler(
+			middleware.NewParserErrorHandler(deps.RootLogger),
+		),
 		handlers.WithActionErrorHandler(
 			middleware.NewAppErrorHandler(deps.RootLogger),
 		),

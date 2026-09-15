@@ -93,7 +93,7 @@ func TestAuthController(t *testing.T) {
 			newAuthHTTPHandler(ctrl).ServeHTTP(w, req)
 
 			assert.Equal(t, http.StatusUnauthorized, w.Code)
-			assert.Empty(t, w.Body.String())
+			assert.NotEmpty(t, w.Body.String())
 		})
 
 		t.Run("missing username - 400", func(t *testing.T) {
@@ -217,7 +217,7 @@ func TestAuthController(t *testing.T) {
 			newAuthHTTPHandler(ctrl).ServeHTTP(w, req)
 
 			assert.Equal(t, http.StatusUnauthorized, w.Code)
-			assert.Empty(t, w.Body.String())
+			assert.NotEmpty(t, w.Body.String())
 		})
 
 		t.Run("missing refreshToken - 400", func(t *testing.T) {
@@ -283,7 +283,10 @@ func TestAuthController(t *testing.T) {
 				Username: username,
 			}, nil)
 
-			ctx := httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID})
+			ctx := auth.ContextWithCaller(
+				httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID}),
+				auth.Caller{UserID: userID, Credential: auth.CredentialKindSession},
+			)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
 			req = req.WithContext(ctx)
 			w := httptest.NewRecorder()
@@ -318,7 +321,10 @@ func TestAuthController(t *testing.T) {
 
 			svc.EXPECT().CurrentUser(mock.Anything, userID).Return(nil, auth.ErrUserNotFound)
 
-			ctx := httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID})
+			ctx := auth.ContextWithCaller(
+				httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID}),
+				auth.Caller{UserID: userID, Credential: auth.CredentialKindSession},
+			)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
 			req = req.WithContext(ctx)
 			w := httptest.NewRecorder()
@@ -336,7 +342,10 @@ func TestAuthController(t *testing.T) {
 
 			svc.EXPECT().CurrentUser(mock.Anything, userID).Return(nil, errors.New("unexpected error"))
 
-			ctx := httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID})
+			ctx := auth.ContextWithCaller(
+				httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID}),
+				auth.Caller{UserID: userID, Credential: auth.CredentialKindSession},
+			)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
 			req = req.WithContext(ctx)
 			w := httptest.NewRecorder()

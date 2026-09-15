@@ -8,6 +8,7 @@ import (
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/server"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	"github.com/gemyago/sumweave/runtime/httpapi"
 	"github.com/jaswdr/faker/v2"
@@ -21,12 +22,13 @@ func TestJobsController(t *testing.T) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			next.ServeHTTP(
 				w,
-				r.WithContext(
+				r.WithContext(auth.ContextWithCaller(
 					httpapi.ContextWithCallerIdentity(
 						r.Context(),
 						&testCallerIdentity{userID: fake.UUID().V4()},
 					),
-				),
+					auth.Caller{UserID: fake.UUID().V4(), Credential: auth.CredentialKindSession},
+				)),
 			)
 		})
 	}

@@ -290,10 +290,15 @@ func buildHTTP(
 		return nil, fmt.Errorf("build HTTP finance module: %w", err)
 	}
 
-	authMiddleware := middleware.NewAuthMiddleware(middleware.AuthMiddlewareDeps{
-		JWTValidator: jwtService,
-		Logger:       rootLogger,
+	credentialAuth, err := middleware.NewCredentialMiddleware(middleware.AuthMiddlewareDeps{
+		JWTValidator:         jwtService,
+		AccessTokenValidator: accessTokenService,
+		Logger:               rootLogger,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("create credential middleware: %w", err)
+	}
+	authMiddleware := credentialAuth.SessionOnly()
 	otelMiddleware := telemetry.NewOtelHTTPMiddleware(telemetry.OtelMiddlewareFactoryDeps{
 		MeterProvider:     meterProvider,
 		TracerProvider:    tracerProvider,
@@ -341,7 +346,7 @@ func buildHTTP(
 		}),
 		RootHandler:           rootHandler,
 		HTTPRouter:            router,
-		AuthMiddleware:        authMiddleware,
+		CredentialAuth:        credentialAuth,
 		RuntimeHandler:        runtime.HTTPHandler,
 		RootLogger:            rootLogger,
 		BankConnectionService: financeModule.BankConnectionService,

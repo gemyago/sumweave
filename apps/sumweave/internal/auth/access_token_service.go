@@ -52,6 +52,13 @@ type AccessTokenMetadata struct {
 	CreatedAt  time.Time
 }
 
+// ValidatedAccessToken is the safe owner and token metadata established during validation.
+type ValidatedAccessToken struct {
+	AccessTokenMetadata
+
+	UserID string
+}
+
 type IssuedAccessToken struct {
 	AccessTokenMetadata
 
@@ -219,7 +226,7 @@ func (s *AccessTokenService) Rotate(ctx context.Context, request RotateAccessTok
 }
 
 // Validate checks a presented token against PostgreSQL without exposing why it failed.
-func (s *AccessTokenService) Validate(ctx context.Context, value string) (*AccessTokenMetadata, error) {
+func (s *AccessTokenService) Validate(ctx context.Context, value string) (*ValidatedAccessToken, error) {
 	id, secret, err := parseAccessToken(value)
 	if err != nil {
 		return nil, ErrInvalidAccessToken
@@ -238,7 +245,7 @@ func (s *AccessTokenService) Validate(ctx context.Context, value string) (*Acces
 		return nil, ErrInvalidAccessToken
 	}
 	metadata := accessTokenMetadata(*token, s.now())
-	return &metadata, nil
+	return &ValidatedAccessToken{UserID: token.UserID, AccessTokenMetadata: metadata}, nil
 }
 
 func (s *AccessTokenService) issue(

@@ -11,14 +11,19 @@ import (
 var _ = time.Time{}
 
 func NewErrorValidator() FieldValidator[*Error] {
-	validateCode := NewSimpleFieldValidator[*interface{}](
-		SkipNullValidator(EnsureNonDefault[interface{}]),
+	validateCode := NewSimpleFieldValidator[string](
+		EnsureNonDefault[string],
 	)
 	validateMessage := NewSimpleFieldValidator[string](
+		EnsureNonDefault[string],
+	)
+	validateCorrelationID := NewSimpleFieldValidator[string](
+		EnsureNonDefault[string],
 	)
 	
 	return func(bindingCtx *BindingContext, value *Error) {
 		validateCode(bindingCtx.Fork("code"), value.Code)
 		validateMessage(bindingCtx.Fork("message"), value.Message)
+		validateCorrelationID(bindingCtx.Fork("correlationId"), value.CorrelationID)
 	}
 }

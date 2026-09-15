@@ -9,8 +9,8 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1routes/handlers"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1routes/models"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
-	"github.com/gemyago/sumweave/runtime/httpapi"
 )
 
 type jobsService interface {
@@ -72,8 +72,8 @@ func (c *JobsController) ListJobs(
 	)
 }
 func requireOperatorRequester(ctx context.Context) error {
-	identity := httpapi.CallerIdentityFromContext(ctx)
-	if identity == nil || strings.TrimSpace(identity.UserID()) == "" {
+	caller, ok := auth.CallerFromContext(ctx)
+	if !ok || strings.TrimSpace(caller.UserID) == "" {
 		return app.NewErrUnauthorized("unauthorized")
 	}
 	return nil

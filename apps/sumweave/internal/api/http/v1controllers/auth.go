@@ -10,7 +10,6 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1routes/models"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
-	"github.com/gemyago/sumweave/runtime/httpapi"
 )
 
 // AuthenticatingService is the auth dependency for AuthController.
@@ -89,12 +88,12 @@ func (c *AuthController) AuthMe(
 	builder handlers.NoParamsHandlerBuilder[*models.UserInfo],
 ) http.Handler {
 	inner := builder.HandleWith(func(ctx context.Context) (*models.UserInfo, error) {
-		identity := httpapi.CallerIdentityFromContext(ctx)
-		if identity == nil {
+		caller, ok := auth.CallerFromContext(ctx)
+		if !ok {
 			return nil, app.NewErrUnauthorized("unauthorized")
 		}
 
-		userInfo, err := c.deps.AuthService.CurrentUser(ctx, identity.UserID())
+		userInfo, err := c.deps.AuthService.CurrentUser(ctx, caller.UserID)
 		if err != nil {
 			return nil, fmt.Errorf("get current user: %w", err)
 		}

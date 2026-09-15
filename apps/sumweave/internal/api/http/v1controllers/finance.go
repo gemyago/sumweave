@@ -17,9 +17,9 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1routes/handlers"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1routes/models"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/domain"
-	"github.com/gemyago/sumweave/runtime/httpapi"
 )
 
 const providerRequestFailedMessage = "provider request failed"
@@ -2264,17 +2264,17 @@ func (c *FinanceController) TriggerFinanceFxRefresh(
 }
 
 func operatorUserIDFromContext(ctx context.Context) (string, error) {
-	identity := httpapi.CallerIdentityFromContext(ctx)
-	if identity == nil || strings.TrimSpace(identity.UserID()) == "" {
+	caller, ok := auth.CallerFromContext(ctx)
+	if !ok || strings.TrimSpace(caller.UserID) == "" {
 		return "", app.NewErrUnauthorized("unauthorized")
 	}
 
-	return identity.UserID(), nil
+	return caller.UserID, nil
 }
 
 func mapFinanceRangeError(err error) error {
 	if errors.Is(err, financepkg.ErrTenantAccessDenied) {
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	}
 	if errors.Is(err, financepkg.ErrInvalidTimestampRange) {
 		return app.NewErrInvalidInput("dateRange", err.Error())
@@ -2294,7 +2294,7 @@ func mapCatalogError(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrAccountNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("account", "requested resource"), err)
 	case errors.Is(err, financepkg.ErrCategoryNotFound):
@@ -2311,7 +2311,7 @@ func mapCatalogError(err error) error {
 func mapClassificationRuleError(err error) error {
 	switch {
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrClassificationRuleNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("classification rule", "requested resource"), err)
 	case errors.Is(err, financepkg.ErrInvalidClassificationRule):
@@ -2328,7 +2328,7 @@ func mapClassificationRuleError(err error) error {
 func mapProviderSnapshotError(err error) error {
 	switch {
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrAccountNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("account", "requested resource"), err)
 	case errors.Is(err, financepkg.ErrTransactionNotFound):
@@ -2373,7 +2373,7 @@ func validateFinanceTimestamp(field string, value time.Time) error {
 func mapCSVImportError(err error) error {
 	switch {
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized(err.Error()), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrInvalidTenantDisplayCurrency):
 		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("displayCurrency", err.Error()), err)
 	case errors.Is(err, financepkg.ErrCSVImportAlreadyConfirmed),
@@ -3062,7 +3062,7 @@ func mapBankConnectionError(err error, fallback string) error {
 		errors.As(err, &unauthorizedErr):
 		return err
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrUnsupportedBankProvider):
 		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("provider", "unsupported bank provider"), err)
 	case errors.Is(err, financepkg.ErrBankProviderNotConfigured):
