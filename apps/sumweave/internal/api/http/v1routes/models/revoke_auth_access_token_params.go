@@ -13,8 +13,7 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-type UserInfo struct { 
-	ID string `json:"id"`
-	Username string `json:"username"`
-	AccessToken *AccessTokenMetadata `json:"accessToken,omitempty"`
+// RevokeAuthAccessTokenParams - Parameters for the revokeAuthAccessToken operation.
+type RevokeAuthAccessTokenParams struct { 
+	TokenID string `json:"tokenId"`
 }

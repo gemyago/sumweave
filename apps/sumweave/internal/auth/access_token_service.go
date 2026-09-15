@@ -45,11 +45,13 @@ var (
 type AccessTokenMetadata struct {
 	ID         string
 	Name       string
+	Hint       string
 	Permission AccessTokenPermission
 	Status     AccessTokenStatus
 	ExpiresAt  *time.Time
 	RevokedAt  *time.Time
 	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // ValidatedAccessToken is the safe owner and token metadata established during validation.
@@ -328,9 +330,17 @@ func accessTokenStatus(token AccessToken, now time.Time) AccessTokenStatus {
 
 func accessTokenMetadata(token AccessToken, now time.Time) AccessTokenMetadata {
 	return AccessTokenMetadata{
-		ID: token.ID, Name: token.Name, Permission: token.Permission, Status: accessTokenStatus(token, now),
-		ExpiresAt: copyTime(token.ExpiresAt), RevokedAt: copyTime(token.RevokedAt), CreatedAt: token.CreatedAt,
+		ID: token.ID, Name: token.Name, Hint: accessTokenHint(token.ID), Permission: token.Permission,
+		Status: accessTokenStatus(token, now), ExpiresAt: copyTime(token.ExpiresAt),
+		RevokedAt: copyTime(token.RevokedAt), CreatedAt: token.CreatedAt, UpdatedAt: token.UpdatedAt,
 	}
+}
+
+func accessTokenHint(id string) string {
+	if len(id) < 8 {
+		return accessTokenPrefix
+	}
+	return accessTokenPrefix + id[:8] + "..."
 }
 
 func formatAccessToken(id string, secret []byte) string {

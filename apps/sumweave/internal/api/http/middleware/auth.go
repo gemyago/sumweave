@@ -132,6 +132,9 @@ func (m *CredentialMiddleware) authenticate(ctx context.Context, value string) (
 				TokenName:  validated.Name,
 				Permission: validated.Permission,
 				ExpiresAt:  validated.ExpiresAt,
+				Status:     validated.Status,
+				CreatedAt:  validated.CreatedAt,
+				UpdatedAt:  validated.UpdatedAt,
 			},
 		}, nil
 	}

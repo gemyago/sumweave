@@ -78,6 +78,7 @@
 | `/finance/imports` | Finance CSV preview/confirm/import-audit route. Protected. |
 | `/finance/jobs/:jobId` | Finance-context durable job detail route. Protected. |
 | `/admin` | Admin diagnostics overview. Protected. |
+| `/admin/access-tokens` | Self-service personal access-token list and lifecycle page. Protected. It offers compact creation, active-token rotation/revocation confirmations, bounded list states, and an explicit-copy one-time secret result that is cleared on dismiss or unmount. |
 | `/admin/jobs` | Finance job list with incremental pagination. Protected. Utilitarian filters and stacked summaries. |
 | `/admin/jobs/:jobId` | Generic admin job detail route. Protected. |
 | `/admin/finance/fx` | Admin FX diagnostics and manual sync route. Protected. |

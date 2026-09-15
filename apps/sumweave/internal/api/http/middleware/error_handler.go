@@ -45,6 +45,11 @@ func APIErrorInsufficientPermission() APIError {
 	return newAPIError(http.StatusForbidden, apiCodeInsufficientPermission, apiMessageInsufficientPermission)
 }
 
+// APIErrorInvalidRequest returns the shared invalid-request error envelope.
+func APIErrorInvalidRequest() APIError {
+	return newAPIError(http.StatusBadRequest, apiCodeInvalidRequest, apiMessageInvalidRequest)
+}
+
 func apiErrorInternal() APIError {
 	return newAPIError(http.StatusInternalServerError, apiCodeInternalError, apiMessageInternalError)
 }
@@ -100,7 +105,7 @@ func NewParserErrorHandler(rootLogger *slog.Logger) func(w http.ResponseWriter, 
 	logger := rootLogger.WithGroup("error-handler")
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		logger.WarnContext(r.Context(), "failed to parse request", telemetry.ErrAttr(err))
-		WriteError(w, r, newAPIError(http.StatusBadRequest, apiCodeInvalidRequest, apiMessageInvalidRequest))
+		WriteError(w, r, APIErrorInvalidRequest())
 	}
 }
 

@@ -320,6 +320,10 @@ func buildHTTP(
 		AuthController: v1controllers.NewAuthController(v1controllers.AuthControllerDeps{
 			AuthService:    authService,
 			AuthMiddleware: authMiddleware,
+			TokenReadMiddleware: func(next stdhttp.Handler) stdhttp.Handler {
+				return credentialAuth.Require(middleware.TokenRead, next)
+			},
+			AccessTokens: accessTokenService,
 		}),
 		JobsController: v1controllers.NewJobsController(v1controllers.JobsControllerDeps{
 			JobsService:    jobsService,

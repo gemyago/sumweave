@@ -29,6 +29,7 @@
   import AdminJobDetail from './pages/AdminJobDetail.svelte'
   import AdminFinanceFX from './pages/AdminFinanceFX.svelte'
   import AdminFinanceProviders from './pages/AdminFinanceProviders.svelte'
+  import AdminAccessTokens from './pages/AdminAccessTokens.svelte'
   import Providers from './pages/Providers.svelte'
   import RedirectToDefaultRoute from './pages/RedirectToDefaultRoute.svelte'
   import { authStore } from './lib/auth/auth-store.svelte'
@@ -102,6 +103,10 @@
     }),
     '/admin/jobs/:jobId': wrap({
       component: AdminJobDetail,
+      conditions: [() => authStore.isAuthenticated],
+    }),
+    '/admin/access-tokens': wrap({
+      component: AdminAccessTokens,
       conditions: [() => authStore.isAuthenticated],
     }),
     '/admin/jobs': wrap({

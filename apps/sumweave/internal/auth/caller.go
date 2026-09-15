@@ -18,6 +18,9 @@ type AccessTokenCaller struct {
 	TokenName  string
 	Permission AccessTokenPermission
 	ExpiresAt  *time.Time
+	Status     AccessTokenStatus
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Caller is the authenticated application caller for one request.

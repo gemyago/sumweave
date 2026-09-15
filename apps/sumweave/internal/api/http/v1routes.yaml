@@ -97,6 +97,85 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/auth/access-tokens:
+    get:
+      summary: List the current user's personal access token metadata
+      operationId: listAuthAccessTokens
+      tags: [auth]
+      responses:
+        '200':
+          description: Personal access token metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessTokenListResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      summary: Create a personal access token for the current user
+      operationId: createAuthAccessToken
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccessTokenCreateRequest" }
+      responses:
+        '201':
+          description: Issued personal access token; apiToken is returned only once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessTokenIssuedResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/auth/access-tokens/{tokenId}/rotate:
+    post:
+      summary: Rotate an active personal access token for the current user
+      operationId: rotateAuthAccessToken
+      tags: [auth]
+      parameters:
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccessTokenRotateRequest" }
+      responses:
+        '200':
+          description: Replacement personal access token; apiToken is returned only once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessTokenIssuedResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/auth/access-tokens/{tokenId}:
+    delete:
+      summary: Revoke a personal access token for the current user
+      operationId: revokeAuthAccessToken
+      tags: [auth]
+      parameters:
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Personal access token revoked }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/v1/jobs:
     get:
       summary: List durable registered jobs
@@ -1890,6 +1969,46 @@ components:
           type: string
         username:
           type: string
+        accessToken:
+          $ref: "#/components/schemas/AccessTokenMetadata"
+    AccessTokenMetadata:
+      type: object
+      required: [id, name, hint, permission, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        hint: { type: string }
+        permission: { type: string, enum: [read-only, read-write] }
+        status: { type: string, enum: [active, expired, revoked] }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AccessTokenCreateRequest:
+      type: object
+      required: [name, permission]
+      properties:
+        name: { type: string }
+        permission: { type: string, enum: [read-only, read-write] }
+        expiresAt: { type: string, format: date-time, nullable: true }
+    AccessTokenRotateRequest:
+      type: object
+      required: [expiresAt]
+      properties:
+        expiresAt: { type: string, format: date-time, nullable: true }
+    AccessTokenIssuedResponse:
+      type: object
+      required: [token, apiToken]
+      properties:
+        token: { $ref: "#/components/schemas/AccessTokenMetadata" }
+        apiToken: { type: string }
+    AccessTokenListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AccessTokenMetadata" }
     AuthSessionResponse:
       type: object
       required:

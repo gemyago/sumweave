@@ -9,7 +9,7 @@ import (
 )
 
 // Below is to workaround unused imports if that happens.
-type _ func() AuthLoginRequest
+type _ func() AccessTokenCreateRequest
 
 type AuthController interface {
 	// POST /api/v1/auth/login
@@ -40,6 +40,44 @@ type AuthController interface {
 		*AuthRefreshParams,
 		*AuthSessionResponse,
 	]) http.Handler
+
+	// POST /api/v1/auth/access-tokens
+	//
+	// Request type: CreateAuthAccessTokenParams,
+	//
+	// Response type: AccessTokenIssuedResponse
+	CreateAuthAccessToken(HandlerBuilder[
+		*CreateAuthAccessTokenParams,
+		*AccessTokenIssuedResponse,
+	]) http.Handler
+
+	// GET /api/v1/auth/access-tokens
+	//
+	// Request type: none
+	//
+	// Response type: AccessTokenListResponse
+	ListAuthAccessTokens(NoParamsHandlerBuilder[
+		*AccessTokenListResponse,
+	]) http.Handler
+
+	// DELETE /api/v1/auth/access-tokens/{tokenId}
+	//
+	// Request type: RevokeAuthAccessTokenParams,
+	//
+	// Response type: none
+	RevokeAuthAccessToken(NoResponseHandlerBuilder[
+		*RevokeAuthAccessTokenParams,
+	]) http.Handler
+
+	// POST /api/v1/auth/access-tokens/{tokenId}/rotate
+	//
+	// Request type: RotateAuthAccessTokenParams,
+	//
+	// Response type: AccessTokenIssuedResponse
+	RotateAuthAccessToken(HandlerBuilder[
+		*RotateAuthAccessTokenParams,
+		*AccessTokenIssuedResponse,
+	]) http.Handler
 }
 
 // RegisterAuthRoutes will attach the following routes to the root handler:
@@ -50,11 +88,23 @@ type AuthController interface {
 // 
 // - POST /api/v1/auth/refresh
 // 
+// - POST /api/v1/auth/access-tokens
+// 
+// - GET /api/v1/auth/access-tokens
+// 
+// - DELETE /api/v1/auth/access-tokens/{tokenId}
+// 
+// - POST /api/v1/auth/access-tokens/{tokenId}/rotate
+// 
 // Routes will use provided controller to handle requests.
 func(rootHandler *RootHandler) RegisterAuthRoutes(controller AuthController) *RootHandler {
 	builder := newAuthControllerBuilder(rootHandler)
 	rootHandler.router.HandleRoute("POST", "/api/v1/auth/login", controller.AuthLogin(builder.AuthLogin))
 	rootHandler.router.HandleRoute("GET", "/api/v1/auth/me", controller.AuthMe(builder.AuthMe))
 	rootHandler.router.HandleRoute("POST", "/api/v1/auth/refresh", controller.AuthRefresh(builder.AuthRefresh))
+	rootHandler.router.HandleRoute("POST", "/api/v1/auth/access-tokens", controller.CreateAuthAccessToken(builder.CreateAuthAccessToken))
+	rootHandler.router.HandleRoute("GET", "/api/v1/auth/access-tokens", controller.ListAuthAccessTokens(builder.ListAuthAccessTokens))
+	rootHandler.router.HandleRoute("DELETE", "/api/v1/auth/access-tokens/{tokenId}", controller.RevokeAuthAccessToken(builder.RevokeAuthAccessToken))
+	rootHandler.router.HandleRoute("POST", "/api/v1/auth/access-tokens/{tokenId}/rotate", controller.RotateAuthAccessToken(builder.RotateAuthAccessToken))
 	return rootHandler
 }

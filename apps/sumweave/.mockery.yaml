@@ -37,6 +37,7 @@ packages:
   github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1controllers:
     interfaces:
       AuthenticatingService:
+      accessTokenLifecycleService:
       bankConnectionService:
       financeService:
       providerSnapshotService:

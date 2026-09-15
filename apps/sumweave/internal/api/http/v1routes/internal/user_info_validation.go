@@ -17,9 +17,14 @@ func NewUserInfoValidator() FieldValidator[*UserInfo] {
 	validateUsername := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
+	validateAccessToken := NewObjectFieldValidator(
+		ObjectFieldValidatorParams{Required: false, Nullable: false},
+		NewAccessTokenMetadataValidator(),
+	)
 	
 	return func(bindingCtx *BindingContext, value *UserInfo) {
 		validateID(bindingCtx.Fork("id"), value.ID)
 		validateUsername(bindingCtx.Fork("username"), value.Username)
+		validateAccessToken(bindingCtx.Fork("accessToken"), value.AccessToken)
 	}
 }

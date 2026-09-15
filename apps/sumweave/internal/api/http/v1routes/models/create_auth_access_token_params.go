@@ -13,8 +13,7 @@ var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
 
-type UserInfo struct { 
-	ID string `json:"id"`
-	Username string `json:"username"`
-	AccessToken *AccessTokenMetadata `json:"accessToken,omitempty"`
+// CreateAuthAccessTokenParams - Parameters for the createAuthAccessToken operation.
+type CreateAuthAccessTokenParams struct { 
+	Payload *AccessTokenCreateRequest `json:"payload"`
 }

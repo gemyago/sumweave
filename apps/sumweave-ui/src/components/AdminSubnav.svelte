@@ -6,6 +6,7 @@
   const links = [
     { href: '/admin', label: 'Overview' },
     { href: '/admin/jobs', label: 'Jobs' },
+    { href: '/admin/access-tokens', label: 'Access tokens' },
     { href: '/admin/finance/fx', label: 'Finance FX' },
     { href: '/admin/finance/providers', label: 'Finance providers' },
   ]
