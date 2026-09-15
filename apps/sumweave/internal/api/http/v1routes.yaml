@@ -81,6 +81,7 @@ paths:
   /api/v1/auth/me:
     get:
       summary: Current authenticated user
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: authMe
       tags:
         - auth
@@ -254,6 +255,7 @@ paths:
   /api/v1/finance/tenants:
     get:
       summary: List finance tenants
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceTenants
       tags: [finance]
       responses:
@@ -459,6 +461,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/accounts:
     get:
       summary: List finance accounts
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceAccounts
       tags: [finance]
       parameters:
@@ -513,6 +516,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/accounts/{accountId}:
     get:
       summary: Get finance account detail
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getFinanceAccount
       tags: [finance]
       parameters:
@@ -568,6 +572,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots:
     get:
       summary: List current finance account provider snapshot metadata
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceAccountProviderSnapshots
       tags: [finance]
       parameters:
@@ -641,6 +646,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}:
     get:
       summary: Get sanitized finance account provider snapshot
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getFinanceAccountProviderSnapshot
       tags: [finance]
       parameters:
@@ -863,6 +869,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions:
     get:
       summary: List finance transactions
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceTransactions
       tags: [finance]
       parameters:
@@ -899,11 +906,13 @@ paths:
           schema: { type: boolean }
         - in: query
           name: limit
-          required: true
+          description: Maximum results returned. Defaults to 100 and is bounded to 1–200.
           schema:
             type: integer
             format: int64
             minimum: 1
+            maximum: 200
+            default: 100
         - in: query
           name: offset
           schema:
@@ -963,6 +972,7 @@ paths:
         schema: { type: string }
     get:
       summary: Get finance transaction detail
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getFinanceTransaction
       tags: [finance]
       responses:
@@ -1295,6 +1305,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots:
     get:
       summary: List current finance transaction provider snapshot metadata
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceTransactionProviderSnapshots
       tags: [finance]
       parameters:
@@ -1322,6 +1333,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots/{snapshotId}:
     get:
       summary: Get sanitized finance transaction provider snapshot
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getFinanceTransactionProviderSnapshot
       tags: [finance]
       parameters:
@@ -1353,6 +1365,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/connections:
     get:
       summary: List finance bank connections
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceConnections
       tags: [finance]
       parameters:

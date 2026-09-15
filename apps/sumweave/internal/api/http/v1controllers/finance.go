@@ -233,6 +233,7 @@ type FinanceControllerDeps struct {
 	BankConnectionService        bankConnectionService
 	SyntheticLinkStateService    syntheticLinkStateService
 	AuthMiddleware               middleware.AuthMiddleware
+	TokenReadMiddleware          middleware.AuthMiddleware
 	EnableBankingCallbackBaseURL string
 }
 
@@ -953,7 +954,7 @@ func (c *FinanceController) GetFinanceTransaction(
 		return &mapped, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceTransferCandidates(
@@ -1100,7 +1101,7 @@ func (c *FinanceController) GetFinanceAccountProviderSnapshot(
 		}
 		return &mapped, nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) GetFinanceTransactionProviderSnapshot(
@@ -1135,7 +1136,7 @@ func (c *FinanceController) GetFinanceTransactionProviderSnapshot(
 		}
 		return &mapped, nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) GetFinanceCsvImportAudit(
@@ -1533,7 +1534,7 @@ func (c *FinanceController) ListFinanceAccounts(
 		return mapAccountsResponse(items)
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceAccountProviderSnapshots(
@@ -1563,7 +1564,7 @@ func (c *FinanceController) ListFinanceAccountProviderSnapshots(
 		}
 		return mapProviderSnapshotMetadataResponse(items), nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) GetFinanceAccount(
@@ -1597,7 +1598,7 @@ func (c *FinanceController) GetFinanceAccount(
 		return &mapped, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) StartFinanceConnectionRedirectLink(
@@ -1763,7 +1764,7 @@ func (c *FinanceController) ListFinanceConnections(
 		return &response, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceConnectionSyncedAccounts(
@@ -1983,7 +1984,7 @@ func (c *FinanceController) ListFinanceTenants(
 		},
 	)
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceTransactions(
@@ -2004,6 +2005,11 @@ func (c *FinanceController) ListFinanceTransactions(
 			return nil, app.NewErrInvalidInput("sort", "must be asc or desc")
 		}
 
+		limit, err := financepkg.NormalizeTransactionListLimit(params.Limit)
+		if err != nil {
+			return nil, app.NewErrInvalidInput("limit", err.Error())
+		}
+
 		items, err := c.deps.LedgerService.ListTransactions(
 			ctx,
 			financepkg.ListTransactionsParams{
@@ -2017,7 +2023,7 @@ func (c *FinanceController) ListFinanceTransactions(
 				EndDate:       params.EndDate,
 				SortAscending: params.Sort == "asc",
 				IncludeHidden: params.IncludeHidden,
-				Limit:         params.Limit,
+				Limit:         limit,
 				Offset:        params.Offset,
 			},
 		)
@@ -2036,7 +2042,7 @@ func (c *FinanceController) ListFinanceTransactions(
 		return &response, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceTransactionProviderSnapshots(
@@ -2066,7 +2072,7 @@ func (c *FinanceController) ListFinanceTransactionProviderSnapshots(
 		}
 		return mapProviderSnapshotMetadataResponse(items), nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) UpdateFinanceTransaction(

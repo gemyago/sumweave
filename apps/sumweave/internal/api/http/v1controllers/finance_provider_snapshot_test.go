@@ -40,6 +40,7 @@ func TestFinanceProviderSnapshotController(t *testing.T) {
 		controller := NewFinanceController(FinanceControllerDeps{
 			ProviderSnapshotService: snapshots,
 			AuthMiddleware:          auth,
+			TokenReadMiddleware:     auth,
 		})
 		return server.NewTestRootHandler().RegisterFinanceRoutes(controller)
 	}

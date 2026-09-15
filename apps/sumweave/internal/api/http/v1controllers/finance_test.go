@@ -85,6 +85,7 @@ func TestFinanceController(t *testing.T) {
 			CSVImportService:      service,
 			BankConnectionService: bankConnections,
 			AuthMiddleware:        auth,
+			TokenReadMiddleware:   auth,
 		}
 		for _, option := range options {
 			option(&deps)
