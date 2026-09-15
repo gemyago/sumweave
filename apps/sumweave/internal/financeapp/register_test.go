@@ -483,6 +483,75 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		clearMessages(t, db, config, financepkg.ClassificationExplicitCommandTopic)
 	})
 
+	t.Run("preserves retry identity and conflicts for every token-write command", func(t *testing.T) {
+		db, _, config := openPrepared(t)
+		publisher := newPublisher(t, config, db)
+		jobsStore, err := jobspkg.NewStore(db, config.DatabaseDSN, jobspkg.StoreOpts{TablePrefix: "sumweave_jobs_"})
+		require.NoError(t, err)
+		adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
+		for _, testCase := range []struct {
+			name    string
+			topic   string
+			payload []byte
+		}{
+			{
+				name: "bank sync", topic: financepkg.BankConnectionSyncCommandTopic,
+				payload: []byte(`{"connectionId":"connection-` + fake.UUID().V4() + `","requester":{"userId":"user-` + fake.UUID().V4() + `","source":"integration"}}`),
+			},
+			{
+				name: "classification", topic: financepkg.ClassificationExplicitCommandTopic,
+				payload: []byte(`{"tenantId":"tenant-` + fake.UUID().V4() + `","requester":{"userId":"user-` + fake.UUID().V4() + `","source":"integration"}}`),
+			},
+			{
+				name: "transfer matching", topic: financepkg.TransferMatchingExplicitCommandTopic,
+				payload: []byte(`{"tenantId":"tenant-` + fake.UUID().V4() + `","requester":{"userId":"user-` + fake.UUID().V4() + `","source":"integration"}}`),
+			},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				key := "api:access-token:token-" + fake.UUID().V4() + ":operation:" + fake.UUID().V4()
+				command := financepkg.SemanticCommand{
+					Topic: testCase.topic, Payload: testCase.payload, IdempotencyKey: key,
+				}
+				first, publishErr := adapter.PublishSemanticCommand(t.Context(), command)
+				require.NoError(t, publishErr)
+				second, publishErr := adapter.PublishSemanticCommand(t.Context(), command)
+				require.NoError(t, publishErr)
+				assert.Equal(t, first, second)
+				_, jobErr := jobsStore.Get(t.Context(), first.MessageID)
+				require.ErrorIs(t, jobErr, jobspkg.ErrJobNotFound)
+
+				changed := command
+				changed.Payload = append([]byte{}, command.Payload...)
+				changed.Payload = append(changed.Payload, 'x')
+				_, publishErr = adapter.PublishSemanticCommand(t.Context(), changed)
+				require.ErrorIs(t, publishErr, appdispatch.ErrPublicationConflict)
+				changedOperation := command
+				changedOperation.Topic = financepkg.ClassificationExplicitCommandTopic
+				if changedOperation.Topic == command.Topic {
+					changedOperation.Topic = financepkg.TransferMatchingExplicitCommandTopic
+				}
+				_, publishErr = adapter.PublishSemanticCommand(t.Context(), changedOperation)
+				require.ErrorIs(t, publishErr, appdispatch.ErrPublicationConflict)
+
+				independent := command
+				independent.IdempotencyKey = "api:session-user:user-" + fake.UUID().V4() +
+					":operation:" + fake.UUID().V4()
+				independentReference, publishErr := adapter.PublishSemanticCommand(t.Context(), independent)
+				require.NoError(t, publishErr)
+				assert.NotEqual(t, first, independentReference)
+
+				fresh := command
+				fresh.IdempotencyKey = ""
+				freshFirst, publishErr := adapter.PublishSemanticCommand(t.Context(), fresh)
+				require.NoError(t, publishErr)
+				freshSecond, publishErr := adapter.PublishSemanticCommand(t.Context(), fresh)
+				require.NoError(t, publishErr)
+				assert.NotEqual(t, freshFirst, freshSecond)
+				clearMessages(t, db, config, testCase.topic)
+			})
+		}
+	})
+
 	t.Run("delivers registered classification commands through the observed lifecycle", func(t *testing.T) {
 		db, _, config := openPrepared(t)
 		clearMessages(t, db, config, financepkg.ClassificationExplicitCommandTopic)
@@ -498,7 +567,7 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 			RangeStart:        start,
 			RangeEndExclusive: start.Add(time.Hour),
 			Requester: financepkg.CommandRequester{
-				UserID: "user-" + fake.UUID().V4(), Source: financepkg.CommandRequesterSourceOperator,
+				UserID: "user-" + fake.UUID().V4(), Source: financepkg.CommandRequesterSourceIntegration,
 			},
 		}
 		payload, err := json.Marshal(input)
@@ -529,7 +598,7 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		stop()
 		assert.Equal(t, jobspkg.JobType(financepkg.ClassificationJobType), job.JobType)
 		assert.Equal(t, input.Requester.UserID, job.Requester.UserID)
-		assert.Equal(t, jobspkg.RequesterSourceOperator, job.Requester.Source)
+		assert.Equal(t, jobspkg.RequesterSourceIntegration, job.Requester.Source)
 		assert.Equal(t, jobspkg.JobStatusSucceeded, job.Status)
 
 		_, err = db.ExecContext(

@@ -299,13 +299,16 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		assert.True(t, resumed.Enabled)
 
 		windowStart := now.Add(-time.Hour)
+		idempotencyKey := "key-" + fake.UUID().V4()
 		job, err := service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
-			ActorUserID:  connection.TenantID,
-			TenantID:     connection.TenantID,
-			ConnectionID: connection.ID,
-			Reason:       BankConnectionSyncReasonManual,
-			WindowStart:  &windowStart,
-			WindowEnd:    &now,
+			ActorUserID:     connection.TenantID,
+			TenantID:        connection.TenantID,
+			ConnectionID:    connection.ID,
+			Reason:          BankConnectionSyncReasonManual,
+			WindowStart:     &windowStart,
+			WindowEnd:       &now,
+			RequesterSource: CommandRequesterSourceIntegration,
+			IdempotencyKey:  idempotencyKey,
 		})
 		require.NoError(t, err)
 		assert.Equal(t, BankConnectionSyncJobType, job.JobType)
@@ -313,22 +316,26 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		var publishedPayload BankConnectionSyncCommand
 		require.NoError(t, json.Unmarshal(published.Payload, &publishedPayload))
 		assert.Equal(t, connection.ID, publishedPayload.ConnectionID)
+		assert.Equal(t, CommandRequesterSourceIntegration, publishedPayload.Requester.Source)
+		assert.Equal(t, idempotencyKey, published.IdempotencyKey)
 
 		publisher.EXPECT().PublishSemanticCommand(mock.Anything, mock.Anything).Return(
 			DispatchReference{}, assert.AnError,
 		)
 		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
-			ActorUserID:  connection.TenantID,
-			TenantID:     connection.TenantID,
-			ConnectionID: connection.ID,
-			Reason:       BankConnectionSyncReasonManual,
+			ActorUserID:     connection.TenantID,
+			TenantID:        connection.TenantID,
+			ConnectionID:    connection.ID,
+			Reason:          BankConnectionSyncReasonManual,
+			RequesterSource: CommandRequesterSourceOperator,
 		})
 		require.ErrorIs(t, err, assert.AnError)
 		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
-			ActorUserID:  connection.TenantID,
-			TenantID:     connection.TenantID,
-			ConnectionID: "missing-" + fake.UUID().V4(),
-			Reason:       BankConnectionSyncReasonManual,
+			ActorUserID:     connection.TenantID,
+			TenantID:        connection.TenantID,
+			ConnectionID:    "missing-" + fake.UUID().V4(),
+			Reason:          BankConnectionSyncReasonManual,
+			RequesterSource: CommandRequesterSourceOperator,
 		})
 		require.ErrorIs(t, err, ErrBankConnectionNotFound)
 
@@ -574,7 +581,9 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		assert.True(t, first.CreatedAt.Equal(second.CreatedAt))
 
 		zero := time.Time{}
-		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{WindowStart: &zero})
+		_, err = service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
+			RequesterSource: CommandRequesterSourceOperator, WindowStart: &zero,
+		})
 		require.Error(t, err)
 		for _, params := range []RunBankConnectionSyncParams{
 			{Reason: BankConnectionSyncReasonScheduled, ScheduledAt: &zero},
@@ -592,7 +601,9 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 
 	t.Run("returns explicit lifecycle errors before orchestration", func(t *testing.T) {
 		_, service, _, connection, _, _ := makeFixture(t, domain.ProviderConnectorIDEnableBanking)
-		_, err := service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{})
+		_, err := service.TriggerBankConnectionSync(t.Context(), TriggerBankConnectionSyncParams{
+			RequesterSource: CommandRequesterSourceOperator,
+		})
 		require.ErrorContains(t, err, "bank sync command publisher is required")
 		_, err = service.RunBankConnectionSync(t.Context(), RunBankConnectionSyncParams{
 			ConnectionID: "missing-" + fake.UUID().V4(),

@@ -3,9 +3,12 @@ package finance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
+
+var ErrInvalidCommandRequesterSource = errors.New("finance command requester source is invalid")
 
 const (
 	TransactionCSVImportCommandTopic = "finance.csv-import.transactions.v1"
@@ -47,6 +50,15 @@ type DispatchReference struct {
 type CommandRequester struct {
 	UserID string `json:"userId"`
 	Source string `json:"source"`
+}
+
+func validateHTTPCommandRequesterSource(source string) error {
+	switch source {
+	case CommandRequesterSourceOperator, CommandRequesterSourceIntegration:
+		return nil
+	default:
+		return ErrInvalidCommandRequesterSource
+	}
 }
 
 // CSVImportCommand is the safe handler input for either CSV import workload.

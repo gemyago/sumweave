@@ -4170,7 +4170,7 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 				*TriggerFinanceConnectionSyncParams,
 				*FinanceFxSyncResponse,
 			]{
-				defaultStatus: 200,
+				defaultStatus: 202,
 				paramsParser:  newParamsParserFinanceTriggerFinanceConnectionSync(app),
 			},
 		),

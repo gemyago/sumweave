@@ -38,9 +38,10 @@ func TestFinanceTransactionPagination(t *testing.T) {
 	}
 	makeHandler := func(service *mockfinanceService) http.Handler {
 		controller := NewFinanceController(FinanceControllerDeps{
-			LedgerService:       service,
-			AuthMiddleware:      makeAuthMiddleware(),
-			TokenReadMiddleware: makeAuthMiddleware(),
+			LedgerService:        service,
+			AuthMiddleware:       makeAuthMiddleware(),
+			TokenReadMiddleware:  makeAuthMiddleware(),
+			TokenWriteMiddleware: makeAuthMiddleware(),
 		})
 		return server.NewTestRootHandler().RegisterFinanceRoutes(controller)
 	}

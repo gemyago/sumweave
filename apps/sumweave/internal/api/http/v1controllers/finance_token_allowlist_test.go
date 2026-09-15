@@ -111,9 +111,9 @@ func TestFinanceTokenReadAllowlist(t *testing.T) {
 			false,
 		},
 		{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/connections/link-redirect/start", false},
-		{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/transactions/classify", false},
-		{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/transactions/match-transfers", false},
-		{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/connections/" + connectionID + "/sync", false},
+		{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/transactions/classify", true},
+		{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/transactions/match-transfers", true},
+		{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/connections/" + connectionID + "/sync", true},
 		{http.MethodPost, "/api/v1/finance/fx/sync", false},
 		{http.MethodPost, "/api/v1/finance/tenants/" + tenantID + "/accounts/" + accountID + "/unhide", false},
 		{http.MethodDelete, "/api/v1/finance/tenants/" + tenantID + "/transactions/transfer-links", false},
@@ -137,10 +137,11 @@ func TestFinanceTokenReadAllowlist(t *testing.T) {
 			})
 		}
 	}
-	makeHandler := func(defaultAllowed, tokenReadAllowed bool) http.Handler {
+	makeHandler := func(defaultAllowed, tokenReadAllowed, tokenWriteAllowed bool) http.Handler {
 		controller := NewFinanceController(FinanceControllerDeps{
-			AuthMiddleware:      makeMiddleware(defaultAllowed),
-			TokenReadMiddleware: makeMiddleware(tokenReadAllowed),
+			AuthMiddleware:       makeMiddleware(defaultAllowed),
+			TokenReadMiddleware:  makeMiddleware(tokenReadAllowed),
+			TokenWriteMiddleware: makeMiddleware(tokenWriteAllowed),
 		})
 		return server.NewTestRootHandler().RegisterFinanceRoutes(controller)
 	}
@@ -149,19 +150,23 @@ func TestFinanceTokenReadAllowlist(t *testing.T) {
 		name                string
 		defaultAllowed      bool
 		tokenReadAllowed    bool
+		tokenWriteAllowed   bool
 		expectsTokenAllowed bool
 	}{
-		{name: "session", defaultAllowed: true, tokenReadAllowed: true, expectsTokenAllowed: true},
+		{name: "session", defaultAllowed: true, tokenReadAllowed: true, tokenWriteAllowed: true, expectsTokenAllowed: true},
 		{name: "read-only token", tokenReadAllowed: true},
-		{name: "read-write token", tokenReadAllowed: true},
+		{name: "read-write token", tokenReadAllowed: true, tokenWriteAllowed: true},
 	} {
 		t.Run(caller.name, func(t *testing.T) {
-			handler := makeHandler(caller.defaultAllowed, caller.tokenReadAllowed)
+			handler := makeHandler(caller.defaultAllowed, caller.tokenReadAllowed, caller.tokenWriteAllowed)
 			for _, operation := range operations {
+				tokenWrite := operation.method == http.MethodPost && operation.tokenRead
 				response := httptest.NewRecorder()
 				handler.ServeHTTP(response, httptest.NewRequest(operation.method, operation.target, nil))
 				wantStatus := http.StatusForbidden
-				if caller.expectsTokenAllowed || operation.tokenRead {
+				if caller.expectsTokenAllowed ||
+					(operation.tokenRead && !tokenWrite && caller.tokenReadAllowed) ||
+					(tokenWrite && caller.tokenWriteAllowed) {
 					wantStatus = http.StatusNoContent
 				}
 				require.Equal(t, wantStatus, response.Code, "%s %s", operation.method, operation.target)

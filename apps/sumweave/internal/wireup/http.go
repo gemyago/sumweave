@@ -351,6 +351,9 @@ func buildHTTP(
 			TokenReadMiddleware: func(next stdhttp.Handler) stdhttp.Handler {
 				return credentialAuth.Require(middleware.TokenRead, next)
 			},
+			TokenWriteMiddleware: func(next stdhttp.Handler) stdhttp.Handler {
+				return credentialAuth.Require(middleware.TokenWrite, next)
+			},
 			EnableBankingCallbackBaseURL: rootConfig.Finance.Providers.EnableBanking.CallbackBaseURL,
 		}),
 		RootHandler:           rootHandler,

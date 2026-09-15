@@ -10,7 +10,6 @@ import (
 
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/finance/persistence"
-	"github.com/google/uuid"
 )
 
 type classificationTransactionStore interface {
@@ -114,6 +113,8 @@ type SubmitClassificationParams struct {
 	TenantID          string
 	RangeStart        time.Time
 	RangeEndExclusive time.Time
+	RequesterSource   string
+	IdempotencyKey    string
 }
 
 type ClassificationJobRef struct {
@@ -126,6 +127,9 @@ func (s *ClassificationService) Submit(
 	ctx context.Context,
 	params SubmitClassificationParams,
 ) (ClassificationJobRef, error) {
+	if err := validateHTTPCommandRequesterSource(params.RequesterSource); err != nil {
+		return ClassificationJobRef{}, err
+	}
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return ClassificationJobRef{}, err
 	}
@@ -146,10 +150,10 @@ func (s *ClassificationService) Submit(
 			RangeEndExclusive: params.RangeEndExclusive,
 			Requester: CommandRequester{
 				UserID: params.ActorUserID,
-				Source: CommandRequesterSourceOperator,
+				Source: params.RequesterSource,
 			},
 		},
-		"finance.classification.explicit:"+uuid.NewString(),
+		params.IdempotencyKey,
 	)
 	if err != nil {
 		return ClassificationJobRef{}, err

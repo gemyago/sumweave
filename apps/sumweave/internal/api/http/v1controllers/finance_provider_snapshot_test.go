@@ -41,6 +41,7 @@ func TestFinanceProviderSnapshotController(t *testing.T) {
 			ProviderSnapshotService: snapshots,
 			AuthMiddleware:          auth,
 			TokenReadMiddleware:     auth,
+			TokenWriteMiddleware:    auth,
 		})
 		return server.NewTestRootHandler().RegisterFinanceRoutes(controller)
 	}
