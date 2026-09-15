@@ -10,7 +10,7 @@ historical and unchanged.
 
 ## 2. Exact Stdin Configure Syntax
 
-- [ ] 2.1 Restore the presence-only `swmd auth configure --token-stdin` parser contract in `cmd/swmd`; must follow TDD flow by first extending randomized command cases for bare-flag success and `--token-stdin=true`, `--token-stdin=false`, and arbitrary assigned-value rejection, each proving stdin is not read and existing or absent selected config remains unchanged on failure, then implement the smallest flag parsing change without defining `--token` or changing config precedence; run root `make postgres-bootstrap`, focused app tests, and `make affected-lint-test`.
+- [x] 2.1 Restore the presence-only `swmd auth configure --token-stdin` parser contract in `cmd/swmd`; must follow TDD flow by first extending randomized command cases for bare-flag success and `--token-stdin=true`, `--token-stdin=false`, and arbitrary assigned-value rejection, each proving stdin is not read and existing or absent selected config remains unchanged on failure, then implement the smallest flag parsing change without defining `--token` or changing config precedence; run root `make postgres-bootstrap`, focused app tests, and `make affected-lint-test`.
 
 ## 3. Credential Validation Failure Mapping
 

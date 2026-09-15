@@ -21,6 +21,7 @@ import (
 const (
 	defaultJobWaitInterval = time.Second
 	defaultJobWaitTimeout  = time.Minute
+	tokenStdinNoOptValue   = "\x00"
 )
 
 type commandDeps struct {
@@ -30,6 +31,19 @@ type commandDeps struct {
 	resolver   *swmdclient.Resolver
 	httpClient *http.Client
 }
+
+type presenceOnlyFlag struct{}
+
+func (*presenceOnlyFlag) Set(value string) error {
+	if value != tokenStdinNoOptValue {
+		return errors.New("--token-stdin does not accept a value")
+	}
+	return nil
+}
+
+func (*presenceOnlyFlag) String() string { return "false" }
+
+func (*presenceOnlyFlag) Type() string { return "presence-only" }
 
 func setupCommands() *cobra.Command {
 	return newRootCmd(commandDeps{
@@ -95,8 +109,8 @@ func newAuthCmd(deps commandDeps, configPath, baseURL *string, loadClient client
 		},
 	}
 	configure.Flags().StringVar(baseURL, "base-url", "", "Sumweave API base URL")
-	configure.Flags().Bool("token-stdin", false, "Read API token from standard input")
-	configure.Flags().Lookup("token-stdin").NoOptDefVal = "true"
+	configure.Flags().Var(&presenceOnlyFlag{}, "token-stdin", "Read API token from standard input")
+	configure.Flags().Lookup("token-stdin").NoOptDefVal = tokenStdinNoOptValue
 
 	var offline bool
 	status := &cobra.Command{

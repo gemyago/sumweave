@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,11 +21,11 @@ import (
 
 //nolint:testifylint // Assertions in httptest handlers report request-contract failures.
 func TestAuthCommands(t *testing.T) {
-	makeDeps := func(stdin string, configDirectory string, httpClient *http.Client) (commandDeps, *bytes.Buffer) {
+	makeDeps := func(stdin io.Reader, configDirectory string, httpClient *http.Client) (commandDeps, *bytes.Buffer) {
 		stdout := &bytes.Buffer{}
 		stderr := &bytes.Buffer{}
 		return commandDeps{
-			stdin:      strings.NewReader(stdin),
+			stdin:      stdin,
 			stdout:     stdout,
 			stderr:     stderr,
 			httpClient: httpClient,
@@ -39,63 +41,134 @@ func TestAuthCommands(t *testing.T) {
 		directory := t.TempDir()
 		configPath := filepath.Join(directory, "selected.json")
 		token := "swat_" + fake.UUID().V4()
-		deps, stdout := makeDeps(token+"\n", directory, &http.Client{Timeout: time.Second})
+		baseURL := "https://" + fake.Internet().Domain()
+		deps, stdout := makeDeps(strings.NewReader(token+"\n"), directory, &http.Client{Timeout: time.Second})
 		command := newRootCmd(deps)
 		command.SetArgs([]string{
-			"--config", configPath, "auth", "configure", "--base-url", "https://example.test", "--token-stdin",
+			"--config", configPath, "auth", "configure", "--base-url", baseURL, "--token-stdin",
 		})
 
 		require.NoError(t, command.Execute())
 		contents, err := os.ReadFile(configPath)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"baseUrl":"https://example.test","apiToken":"`+token+`"}`, string(contents))
+		require.JSONEq(t, `{"baseUrl":"`+baseURL+`","apiToken":"`+token+`"}`, string(contents))
 		require.NotContains(t, stdout.String(), token)
 	})
 
 	t.Run("rejects every invalid configure invocation without touching configuration", func(t *testing.T) {
 		fake := faker.New()
 		cases := []struct {
-			name  string
-			args  []string
-			stdin string
+			name            string
+			args            []string
+			stdin           string
+			stdinUnconsumed bool
 		}{
-			{name: "missing base URL", args: []string{"auth", "configure", "--token-stdin"}, stdin: fake.UUID().V4()},
 			{
-				name:  "missing stdin flag",
-				args:  []string{"auth", "configure", "--base-url", "https://example.test"},
-				stdin: fake.UUID().V4(),
+				name:            "missing base URL",
+				args:            []string{"auth", "configure", "--token-stdin"},
+				stdin:           fake.UUID().V4(),
+				stdinUnconsumed: true,
 			},
 			{
-				name:  "stdin flag value",
-				args:  []string{"auth", "configure", "--base-url", "https://example.test", "--token-stdin=secret"},
-				stdin: fake.UUID().V4(),
+				name:            "missing stdin flag",
+				args:            []string{"auth", "configure", "--base-url", "https://" + fake.Internet().Domain()},
+				stdin:           fake.UUID().V4(),
+				stdinUnconsumed: true,
 			},
 			{
-				name:  "empty stdin",
-				args:  []string{"auth", "configure", "--base-url", "https://example.test", "--token-stdin"},
+				name: "stdin flag true assignment",
+				args: []string{
+					"auth",
+					"configure",
+					"--base-url",
+					"https://" + fake.Internet().Domain(),
+					"--token-stdin=true",
+				},
+				stdin:           fake.UUID().V4(),
+				stdinUnconsumed: true,
+			},
+			{
+				name: "stdin flag false assignment",
+				args: []string{
+					"auth",
+					"configure",
+					"--base-url",
+					"https://" + fake.Internet().Domain(),
+					"--token-stdin=false",
+				},
+				stdin:           fake.UUID().V4(),
+				stdinUnconsumed: true,
+			},
+			{
+				name: "stdin flag arbitrary assignment",
+				args: []string{
+					"auth",
+					"configure",
+					"--base-url",
+					"https://" + fake.Internet().Domain(),
+					"--token-stdin=" + fake.UUID().V4(),
+				},
+				stdin:           fake.UUID().V4(),
+				stdinUnconsumed: true,
+			},
+			{
+				name: "empty stdin",
+				args: []string{
+					"auth",
+					"configure",
+					"--base-url",
+					"https://" + fake.Internet().Domain(),
+					"--token-stdin",
+				},
 				stdin: "\n",
 			},
 			{
-				name:  "secret argument",
-				args:  []string{"auth", "configure", "--base-url", "https://example.test", "--token", "secret"},
-				stdin: fake.UUID().V4(),
+				name: "secret argument",
+				args: []string{
+					"auth",
+					"configure",
+					"--base-url",
+					"https://" + fake.Internet().Domain(),
+					"--token",
+					fake.UUID().V4(),
+				},
+				stdin:           fake.UUID().V4(),
+				stdinUnconsumed: true,
 			},
 		}
 		for _, testCase := range cases {
-			t.Run(testCase.name, func(t *testing.T) {
-				directory := t.TempDir()
-				configPath := filepath.Join(directory, "swmd.json")
-				original := []byte(`{"baseUrl":"https://original.example.test","apiToken":"original"}`)
-				require.NoError(t, os.WriteFile(configPath, original, 0o600))
-				deps, _ := makeDeps(testCase.stdin, directory, &http.Client{Timeout: time.Second})
-				command := newRootCmd(deps)
-				command.SetArgs(append([]string{"--config", configPath}, testCase.args...))
+			for _, existingConfig := range []bool{false, true} {
+				t.Run(testCase.name+"/config exists="+strconv.FormatBool(existingConfig), func(t *testing.T) {
+					directory := t.TempDir()
+					configPath := filepath.Join(directory, fake.UUID().V4()+".json")
+					original := []byte(
+						`{"baseUrl":"https://` + fake.Internet().
+							Domain() +
+							`","apiToken":"swat_` + fake.UUID().
+							V4() +
+							`"}`,
+					)
+					if existingConfig {
+						require.NoError(t, os.WriteFile(configPath, original, 0o600))
+					}
+					stdin := bytes.NewBufferString(testCase.stdin)
+					deps, _ := makeDeps(stdin, directory, &http.Client{Timeout: time.Second})
+					command := newRootCmd(deps)
+					command.SetArgs(append([]string{"--config", configPath}, testCase.args...))
 
-				require.Error(t, command.Execute())
-				contents, err := os.ReadFile(configPath)
-				require.NoError(t, err)
-				require.Equal(t, original, contents)
-			})
+					require.Error(t, command.Execute())
+					if testCase.stdinUnconsumed {
+						require.Equal(t, testCase.stdin, stdin.String())
+					}
+					if existingConfig {
+						contents, err := os.ReadFile(configPath)
+						require.NoError(t, err)
+						require.Equal(t, original, contents)
+						return
+					}
+					require.NoFileExists(t, configPath)
+				})
+			}
 		}
 	})
 
@@ -108,14 +181,14 @@ func TestAuthCommands(t *testing.T) {
 			configPath,
 			swmdclient.Config{BaseURL: "https://example.test", APIToken: token},
 		))
-		deps, stdout := makeDeps("", directory, &http.Client{Timeout: time.Second})
+		deps, stdout := makeDeps(strings.NewReader(""), directory, &http.Client{Timeout: time.Second})
 		command := newRootCmd(deps)
 		command.SetArgs([]string{"--config", configPath, "auth", "status", "--offline"})
 		require.NoError(t, command.Execute())
 		require.JSONEq(t, `{"baseUrl":"https://example.test","apiToken":"redacted"}`, stdout.String())
 		require.NotContains(t, stdout.String(), token)
 
-		deps, _ = makeDeps("", directory, &http.Client{Timeout: time.Second})
+		deps, _ = makeDeps(strings.NewReader(""), directory, &http.Client{Timeout: time.Second})
 		command = newRootCmd(deps)
 		command.SetArgs([]string{"--config", configPath, "auth", "clear"})
 		require.NoError(t, command.Execute())
@@ -132,7 +205,7 @@ func TestAuthCommands(t *testing.T) {
 		configPath := filepath.Join(directory, "swmd.json")
 		token := "token-" + faker.New().UUID().V4()
 		require.NoError(t, swmdclient.WriteConfig(configPath, swmdclient.Config{BaseURL: server.URL, APIToken: token}))
-		deps, stdout := makeDeps("", directory, &http.Client{Timeout: time.Second})
+		deps, stdout := makeDeps(strings.NewReader(""), directory, &http.Client{Timeout: time.Second})
 		command := newRootCmd(deps)
 		command.SetArgs([]string{"--config", configPath, "auth", "status"})
 		require.NoError(t, command.Execute())
@@ -144,7 +217,7 @@ func TestAuthCommands(t *testing.T) {
 	})
 }
 
-//nolint:testifylint,golines // Assertions in httptest handlers report request-contract failures.
+//nolint:testifylint // Assertions in httptest handlers report request-contract failures.
 func TestResourceCommands(t *testing.T) {
 	makeCommand := func(t *testing.T, handler http.HandlerFunc) (*cobra.Command, *bytes.Buffer, string) {
 		t.Helper()
@@ -179,20 +252,143 @@ func TestResourceCommands(t *testing.T) {
 		body   string
 	}{
 		{"tenant list", []string{"tenant", "list"}, http.MethodGet, "/api/v1/finance/tenants", `{"items":[]}`},
-		{"account list", []string{"account", "list", "--tenant", "tenant"}, http.MethodGet, "/api/v1/finance/tenants/tenant/accounts", `{"items":[]}`},
-		{"account get", []string{"account", "get", "--tenant", "tenant", "--account", "account"}, http.MethodGet, "/api/v1/finance/tenants/tenant/accounts/account", `{}`},
-		{"account provider list", []string{"account", "provider-data-list", "--tenant", "tenant", "--account", "account"}, http.MethodGet, "/api/v1/finance/tenants/tenant/accounts/account/provider-snapshots", `{"items":[]}`},
-		{"account provider get", []string{"account", "provider-data-get", "--tenant", "tenant", "--account", "account", "--snapshot", "snapshot"}, http.MethodGet, "/api/v1/finance/tenants/tenant/accounts/account/provider-snapshots/snapshot", `{}`},
-		{"transaction list", []string{"transaction", "list", "--tenant", "tenant", "--limit", "1"}, http.MethodGet, "/api/v1/finance/tenants/tenant/transactions", `{"items":[]}`},
-		{"transaction get", []string{"transaction", "get", "--tenant", "tenant", "--transaction", "transaction"}, http.MethodGet, "/api/v1/finance/tenants/tenant/transactions/transaction", `{}`},
-		{"transaction provider list", []string{"transaction", "provider-data-list", "--tenant", "tenant", "--transaction", "transaction"}, http.MethodGet, "/api/v1/finance/tenants/tenant/transactions/transaction/provider-snapshots", `{"items":[]}`},
-		{"transaction provider get", []string{"transaction", "provider-data-get", "--tenant", "tenant", "--transaction", "transaction", "--snapshot", "snapshot"}, http.MethodGet, "/api/v1/finance/tenants/tenant/transactions/transaction/provider-snapshots/snapshot", `{}`},
-		{"connection list", []string{"connection", "list", "--tenant", "tenant"}, http.MethodGet, "/api/v1/finance/tenants/tenant/connections", `{"items":[]}`},
-		{"connection sync", []string{"connection", "sync", "--tenant", "tenant", "--connection", "connection", "--idempotency-key", "key"}, http.MethodPost, "/api/v1/finance/tenants/tenant/connections/connection/sync", `{"jobId":"job"}`},
-		{"classification", []string{"classification", "run", "--tenant", "tenant", "--range-start", "2026-01-01T00:00:00+02:00", "--range-end-exclusive", "2026-01-02T00:00:00+02:00"}, http.MethodPost, "/api/v1/finance/tenants/tenant/transactions/classify", `{"jobId":"job"}`},
-		{"transfer", []string{"transfer", "match", "--tenant", "tenant", "--range-start", "2026-01-01T00:00:00+02:00", "--range-end-exclusive", "2026-01-02T00:00:00+02:00"}, http.MethodPost, "/api/v1/finance/tenants/tenant/transactions/match-transfers", `{"jobId":"job"}`},
+		{
+			"account list",
+			[]string{"account", "list", "--tenant", "tenant"},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/accounts",
+			`{"items":[]}`,
+		},
+		{
+			"account get",
+			[]string{"account", "get", "--tenant", "tenant", "--account", "account"},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/accounts/account",
+			`{}`,
+		},
+		{
+			"account provider list",
+			[]string{"account", "provider-data-list", "--tenant", "tenant", "--account", "account"},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/accounts/account/provider-snapshots",
+			`{"items":[]}`,
+		},
+		{
+			"account provider get",
+			[]string{
+				"account",
+				"provider-data-get",
+				"--tenant",
+				"tenant",
+				"--account",
+				"account",
+				"--snapshot",
+				"snapshot",
+			},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/accounts/account/provider-snapshots/snapshot",
+			`{}`,
+		},
+		{
+			"transaction list",
+			[]string{"transaction", "list", "--tenant", "tenant", "--limit", "1"},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/transactions",
+			`{"items":[]}`,
+		},
+		{
+			"transaction get",
+			[]string{"transaction", "get", "--tenant", "tenant", "--transaction", "transaction"},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/transactions/transaction",
+			`{}`,
+		},
+		{
+			"transaction provider list",
+			[]string{"transaction", "provider-data-list", "--tenant", "tenant", "--transaction", "transaction"},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/transactions/transaction/provider-snapshots",
+			`{"items":[]}`,
+		},
+		{
+			"transaction provider get",
+			[]string{
+				"transaction",
+				"provider-data-get",
+				"--tenant",
+				"tenant",
+				"--transaction",
+				"transaction",
+				"--snapshot",
+				"snapshot",
+			},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/transactions/transaction/provider-snapshots/snapshot",
+			`{}`,
+		},
+		{
+			"connection list",
+			[]string{"connection", "list", "--tenant", "tenant"},
+			http.MethodGet,
+			"/api/v1/finance/tenants/tenant/connections",
+			`{"items":[]}`,
+		},
+		{
+			"connection sync",
+			[]string{
+				"connection",
+				"sync",
+				"--tenant",
+				"tenant",
+				"--connection",
+				"connection",
+				"--idempotency-key",
+				"key",
+			},
+			http.MethodPost,
+			"/api/v1/finance/tenants/tenant/connections/connection/sync",
+			`{"jobId":"job"}`,
+		},
+		{
+			"classification",
+			[]string{
+				"classification",
+				"run",
+				"--tenant",
+				"tenant",
+				"--range-start",
+				"2026-01-01T00:00:00+02:00",
+				"--range-end-exclusive",
+				"2026-01-02T00:00:00+02:00",
+			},
+			http.MethodPost,
+			"/api/v1/finance/tenants/tenant/transactions/classify",
+			`{"jobId":"job"}`,
+		},
+		{
+			"transfer",
+			[]string{
+				"transfer",
+				"match",
+				"--tenant",
+				"tenant",
+				"--range-start",
+				"2026-01-01T00:00:00+02:00",
+				"--range-end-exclusive",
+				"2026-01-02T00:00:00+02:00",
+			},
+			http.MethodPost,
+			"/api/v1/finance/tenants/tenant/transactions/match-transfers",
+			`{"jobId":"job"}`,
+		},
 		{"job list", []string{"job", "list"}, http.MethodGet, "/api/v1/jobs", `{"items":[],"nextCursor":""}`},
-		{"job get", []string{"job", "get", "--job", "job"}, http.MethodGet, "/api/v1/jobs/job", `{"id":"job","jobType":"sync","status":"succeeded","requester":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","attemptCount":1}`},
+		{
+			"job get",
+			[]string{"job", "get", "--job", "job"},
+			http.MethodGet,
+			"/api/v1/jobs/job",
+			`{"id":"job","jobType":"sync","status":"succeeded","requester":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","attemptCount":1}`,
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -218,7 +414,9 @@ func TestResourceCommands(t *testing.T) {
 			writer.WriteHeader(http.StatusUnauthorized)
 			_, _ = writer.Write([]byte(`{"code":"unauthorized","message":"Denied","correlationId":"id"}`))
 		})
-		command.SetArgs([]string{"--config", configPath, "transaction", "list", "--tenant", "tenant", "--start-date", "not-a-time"})
+		command.SetArgs(
+			[]string{"--config", configPath, "transaction", "list", "--tenant", "tenant", "--start-date", "not-a-time"},
+		)
 		require.Error(t, command.Execute())
 		command, _, configPath = makeCommand(t, func(writer http.ResponseWriter, _ *http.Request) {
 			writer.WriteHeader(http.StatusUnauthorized)
@@ -236,16 +434,50 @@ func TestResourceCommands(t *testing.T) {
 			require.Equal(t, "true", request.URL.Query().Get("includeHidden"))
 			if requestCount == 1 {
 				require.Equal(t, "0", request.URL.Query().Get("offset"))
-				_, _ = writer.Write([]byte(`{"items":[{"id":"one","tenantId":"tenant","accountId":"account","source":"source","status":"booked","kind":"expense","amountMinor":1,"currency":"USD","description":"one","effectiveAt":"2026-01-01T00:00:00+02:00","createdAt":"2026-01-01T00:00:00+02:00","updatedAt":"2026-01-01T00:00:00+02:00","tagIds":[]}]}`))
+				_, _ = writer.Write(
+					[]byte(
+						`{"items":[{"id":"one","tenantId":"tenant","accountId":"account","source":"source","status":"booked","kind":"expense","amountMinor":1,"currency":"USD","description":"one","effectiveAt":"2026-01-01T00:00:00+02:00","createdAt":"2026-01-01T00:00:00+02:00","updatedAt":"2026-01-01T00:00:00+02:00","tagIds":[]}]}`,
+					),
+				)
 				return
 			}
 			require.Equal(t, "1", request.URL.Query().Get("offset"))
 			_, _ = writer.Write([]byte(`{"items":[]}`))
 		})
-		command.SetArgs([]string{"--config", configPath, "transaction", "list", "--tenant", "tenant", "--account", "account", "--source", "source", "--status", "booked", "--kind", "expense", "--start-date", "2026-01-01T00:00:00+02:00", "--end-date", "2026-01-02T00:00:00+02:00", "--sort", "asc", "--include-hidden", "--limit", "1"})
+		command.SetArgs(
+			[]string{
+				"--config",
+				configPath,
+				"transaction",
+				"list",
+				"--tenant",
+				"tenant",
+				"--account",
+				"account",
+				"--source",
+				"source",
+				"--status",
+				"booked",
+				"--kind",
+				"expense",
+				"--start-date",
+				"2026-01-01T00:00:00+02:00",
+				"--end-date",
+				"2026-01-02T00:00:00+02:00",
+				"--sort",
+				"asc",
+				"--include-hidden",
+				"--limit",
+				"1",
+			},
+		)
 		require.NoError(t, command.Execute())
 		require.Equal(t, 2, requestCount)
-		require.JSONEq(t, `{"items":[{"id":"one","tenantId":"tenant","accountId":"account","source":"source","status":"booked","kind":"expense","amountMinor":1,"currency":"USD","description":"one","effectiveAt":"2026-01-01T00:00:00+02:00","createdAt":"2026-01-01T00:00:00+02:00","updatedAt":"2026-01-01T00:00:00+02:00","tagIds":[]}]}`, stdout.String())
+		require.JSONEq(
+			t,
+			`{"items":[{"id":"one","tenantId":"tenant","accountId":"account","source":"source","status":"booked","kind":"expense","amountMinor":1,"currency":"USD","description":"one","effectiveAt":"2026-01-01T00:00:00+02:00","createdAt":"2026-01-01T00:00:00+02:00","updatedAt":"2026-01-01T00:00:00+02:00","tagIds":[]}]}`,
+			stdout.String(),
+		)
 
 		command, _, configPath = makeCommand(t, func(http.ResponseWriter, *http.Request) {})
 		command.SetArgs([]string{"--config", configPath, "transaction", "list", "--tenant", "tenant", "--limit", "201"})
@@ -270,21 +502,59 @@ func TestResourceCommands(t *testing.T) {
 			require.Contains(t, body.String(), "2026-01-01T00:00:00+02:00")
 			_, _ = writer.Write([]byte(`{"jobId":"job"}`))
 		})
-		command.SetArgs([]string{"--config", configPath, "connection", "sync", "--tenant", "tenant", "--connection", "connection", "--window-start", "2026-01-01T00:00:00+02:00", "--window-end", "2026-01-02T00:00:00+02:00", "--idempotency-key", "key"})
+		command.SetArgs(
+			[]string{
+				"--config",
+				configPath,
+				"connection",
+				"sync",
+				"--tenant",
+				"tenant",
+				"--connection",
+				"connection",
+				"--window-start",
+				"2026-01-01T00:00:00+02:00",
+				"--window-end",
+				"2026-01-02T00:00:00+02:00",
+				"--idempotency-key",
+				"key",
+			},
+		)
 		require.NoError(t, command.Execute())
 
 		command, _, configPath = makeCommand(t, func(writer http.ResponseWriter, _ *http.Request) {
 			_, _ = writer.Write([]byte(`{"items":[],"nextCursor":""}`))
 		})
-		command.SetArgs([]string{"--config", configPath, "job", "list", "--status", "queued,failed", "--job-type", "sync", "--source", "integration", "--cursor", "cursor"})
+		command.SetArgs(
+			[]string{
+				"--config",
+				configPath,
+				"job",
+				"list",
+				"--status",
+				"queued,failed",
+				"--job-type",
+				"sync",
+				"--source",
+				"integration",
+				"--cursor",
+				"cursor",
+			},
+		)
 		require.NoError(t, command.Execute())
 	})
 
 	t.Run("waits for a terminal job and validates helpers", func(t *testing.T) {
 		command, stdout, configPath := makeCommand(t, func(writer http.ResponseWriter, _ *http.Request) {
-			_, _ = writer.Write([]byte(`{"id":"job","jobType":"sync","status":"succeeded","requester":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","attemptCount":1}`))
+			_, _ = writer.Write(
+				[]byte(
+					`{"id":"job","jobType":"sync","status":"succeeded","requester":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","attemptCount":1}`,
+				),
+			)
 		})
-		command.SetArgs([]string{"--config", configPath, "job", "wait", "--job", "job", "--interval", "1ms", "--timeout", "1s"})
+		command.SetArgs(
+			[]string{"--config", configPath, "job", "wait", "--job", "job", "--interval", "1ms", "--timeout", "1s"},
+		)
 		require.NoError(t, command.Execute())
 		require.Contains(t, stdout.String(), `"status":"succeeded"`)
 		require.Equal(t, "/api/v1/finance/tenants/a%2Fb/accounts", financeRoute("a/b", "accounts"))
