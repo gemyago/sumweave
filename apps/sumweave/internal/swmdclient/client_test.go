@@ -2,6 +2,8 @@ package swmdclient
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -54,6 +56,91 @@ func TestClient(t *testing.T) {
 		}))
 		defer server.Close()
 		client := makeClient(t, server.URL+"/sumweave")
+		output := struct {
+			Value string `json:"value"`
+		}{}
+
+		err := client.Get(t.Context(), "/api/v1/test", nil, &output)
+
+		require.NoError(t, err)
+		require.Equal(t, "ok", output.Value)
+	})
+
+	t.Run("rejects unsafe redirects before credentials reach their destination", func(t *testing.T) {
+		fake := faker.New()
+		hostname := "api-" + fake.UUID().V4() + ".example.test"
+		unsafeRequest := make(chan *http.Request, 1)
+		unsafeServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			unsafeRequest <- request
+		}))
+		defer unsafeServer.Close()
+		unsafeURL, err := url.Parse(unsafeServer.URL)
+		require.NoError(t, err)
+		originRequest := make(chan struct{}, 1)
+		originServer := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			originRequest <- struct{}{}
+			writer.Header().Set("Location", "http://"+net.JoinHostPort(hostname, unsafeURL.Port()))
+			writer.WriteHeader(http.StatusFound)
+		}))
+		defer originServer.Close()
+		originURL, err := url.Parse(originServer.URL)
+		require.NoError(t, err)
+		transport := originServer.Client().Transport.(*http.Transport).Clone()
+		transport.Proxy = nil
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+		transport.TLSClientConfig.ServerName = "example.com"
+		dialer := &net.Dialer{}
+		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			_, port, splitErr := net.SplitHostPort(address)
+			if splitErr != nil {
+				return nil, fmt.Errorf("split redirect address: %w", splitErr)
+			}
+			switch port {
+			case originURL.Port():
+				return dialer.DialContext(ctx, network, originServer.Listener.Addr().String())
+			case unsafeURL.Port():
+				return dialer.DialContext(ctx, network, unsafeServer.Listener.Addr().String())
+			default:
+				return nil, fmt.Errorf("unexpected redirect port: %s", port)
+			}
+		}
+		baseURL := "https://" + net.JoinHostPort(hostname, originURL.Port())
+		client, err := NewClient(
+			Config{BaseURL: baseURL, APIToken: "token-" + fake.UUID().V4()},
+			&http.Client{Transport: transport, Timeout: time.Second},
+		)
+		require.NoError(t, err)
+
+		err = client.Get(t.Context(), "/api/v1/test", nil, nil)
+
+		require.Error(t, err)
+		select {
+		case <-originRequest:
+		default:
+			t.Fatal("redirect origin did not receive a request")
+		}
+		select {
+		case request := <-unsafeRequest:
+			require.Empty(t, request.Header.Get("Authorization"))
+		default:
+		}
+	})
+
+	t.Run("follows safe redirects with credentials", func(t *testing.T) {
+		fake := faker.New()
+		token := "token-" + fake.UUID().V4()
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.URL.Path == "/api/v1/test" {
+				http.Redirect(writer, request, "/api/v1/redirected", http.StatusFound)
+				return
+			}
+			require.Equal(t, "/api/v1/redirected", request.URL.Path)
+			require.Equal(t, "Bearer "+token, request.Header.Get("Authorization"))
+			_, _ = writer.Write([]byte(`{"value":"ok"}`))
+		}))
+		defer server.Close()
+		client := makeClient(t, server.URL)
+		client.token = token
 		output := struct {
 			Value string `json:"value"`
 		}{}
@@ -275,5 +362,25 @@ func TestWaitForJob(t *testing.T) {
 		job, err := client.WaitForJob(t.Context(), "job", WaitOptions{Interval: time.Millisecond, Timeout: time.Second})
 		require.NoError(t, err)
 		require.Equal(t, "succeeded", job.Status)
+	})
+
+	t.Run("cancels an in-flight poll at the overall wait deadline", func(t *testing.T) {
+		requestCancelled := make(chan struct{})
+		client := makeClient(t, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			<-request.Context().Done()
+			close(requestCancelled)
+		}))
+		startedAt := time.Now()
+		options := WaitOptions{Interval: time.Second, Timeout: 50 * time.Millisecond}
+
+		_, err := client.WaitForJob(t.Context(), "job", options)
+
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Less(t, time.Since(startedAt), 500*time.Millisecond)
+		select {
+		case <-requestCancelled:
+		case <-time.After(time.Second):
+			t.Fatal("polling handler did not observe request cancellation")
+		}
 	})
 }

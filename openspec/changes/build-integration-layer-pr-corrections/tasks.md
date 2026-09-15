@@ -6,7 +6,7 @@ historical and unchanged.
 
 ## 1. Direct-Client Transport And Wait Boundaries
 
-- [ ] 1.1 Enforce redirect destination validation and the overall `job wait` request deadline in `internal/swmdclient`; must follow TDD flow by first adding focused `httptest` cases that prove an HTTPS-to-HTTP redirect cannot receive an Authorization header, allowed safe requests still work, and a handler blocked on a polling request sees its request context cancelled at the configured wait timeout, then implement the narrow transport/deadline boundary while retaining normal TLS verification, finite request timeouts, 30-second lazy-job grace, and fake-clock polling coverage; run root `make postgres-bootstrap`, focused app tests, and `make affected-lint-test`.
+- [x] 1.1 Enforce redirect destination validation and the overall `job wait` request deadline in `internal/swmdclient`; must follow TDD flow by first adding focused `httptest` cases that prove an HTTPS-to-HTTP redirect cannot receive an Authorization header, allowed safe requests still work, and a handler blocked on a polling request sees its request context cancelled at the configured wait timeout, then implement the narrow transport/deadline boundary while retaining normal TLS verification, finite request timeouts, 30-second lazy-job grace, and fake-clock polling coverage; run root `make postgres-bootstrap`, focused app tests, and `make affected-lint-test`.
 
 ## 2. Exact Stdin Configure Syntax
 

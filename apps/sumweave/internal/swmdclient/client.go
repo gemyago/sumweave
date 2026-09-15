@@ -56,8 +56,23 @@ func NewClient(config Config, httpClient *http.Client) (*Client, error) {
 	if httpClient.Timeout <= 0 {
 		return nil, errors.New("HTTP client must have a finite timeout")
 	}
+	ownedHTTPClient := *httpClient
+	redirectPolicy := httpClient.CheckRedirect
+	ownedHTTPClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if redirectPolicy != nil {
+			if redirectErr := redirectPolicy(request, via); redirectErr != nil {
+				return redirectErr
+			}
+		} else if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if transportErr := validateTransportURL(request.URL); transportErr != nil {
+			return fmt.Errorf("validate redirect destination: %w", transportErr)
+		}
+		return nil
+	}
 
-	return &Client{baseURL: baseURL, token: config.APIToken, httpClient: httpClient}, nil
+	return &Client{baseURL: baseURL, token: config.APIToken, httpClient: &ownedHTTPClient}, nil
 }
 
 // Get performs a GET request and decodes its JSON response.
@@ -109,12 +124,14 @@ func (c *Client) WaitForJob(ctx context.Context, jobID string, options WaitOptio
 	if options.Sleep == nil {
 		options.Sleep = sleepContext
 	}
+	waitCtx, cancel := context.WithTimeout(ctx, options.Timeout)
+	defer cancel()
 
 	startedAt := options.Now()
 	deadline := startedAt.Add(options.Timeout)
 	graceDeadline := startedAt.Add(30 * time.Second)
 	for {
-		job, err := c.GetJob(ctx, jobID)
+		job, err := c.GetJob(waitCtx, jobID)
 		if err == nil {
 			switch job.Status {
 			case "succeeded":
@@ -136,7 +153,7 @@ func (c *Client) WaitForJob(ctx context.Context, jobID string, options WaitOptio
 		}
 		remaining := deadline.Sub(now)
 		waitFor := min(options.Interval, remaining)
-		if err := options.Sleep(ctx, waitFor); err != nil {
+		if err := options.Sleep(waitCtx, waitFor); err != nil {
 			return nil, fmt.Errorf("wait for job update: %w", err)
 		}
 	}
@@ -216,21 +233,31 @@ func decodeAPIError(response *http.Response) error {
 }
 
 func parseBaseURL(value string) (*url.URL, error) {
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return nil, fmt.Errorf("parse base URL: %w", err)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, errors.New("base URL must use http or https")
+	parsed, parseErr := url.Parse(value)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parse base URL: %w", parseErr)
 	}
 	if parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, errors.New("base URL must contain only an origin and optional path")
 	}
-	if parsed.Scheme == "http" && !isLoopbackHost(parsed.Hostname()) {
-		return nil, errors.New("plain HTTP is allowed only for localhost or loopback addresses")
+	if transportErr := validateTransportURL(parsed); transportErr != nil {
+		return nil, fmt.Errorf("validate base URL transport: %w", transportErr)
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/"
 	return parsed, nil
+}
+
+func validateTransportURL(value *url.URL) error {
+	if value == nil || value.Host == "" {
+		return errors.New("URL must include a host")
+	}
+	if value.Scheme != "http" && value.Scheme != "https" {
+		return errors.New("URL must use http or https")
+	}
+	if value.Scheme == "http" && !isLoopbackHost(value.Hostname()) {
+		return errors.New("plain HTTP is allowed only for localhost or loopback addresses")
+	}
+	return nil
 }
 
 func isLoopbackHost(host string) bool {
