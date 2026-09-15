@@ -4,6 +4,10 @@ This file describes the current backend foundation in this repository. For produ
 
 HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`sumweave`** binary built from `cmd/sumweave`. Local commands run with `apps/sumweave` as CWD (`go run ./cmd/sumweave db-migrate --env local`, `go run ./cmd/sumweave start-all --env local`, or `go run ./cmd/sumweave start --env local`). The app wires configuration, logging, OpenTelemetry, health, finance APIs, auth, durable jobs, and the generic **runtime** agent HTTP API. The long-term shape is a deployable backend that can serve or embed **`apps/sumweave-ui`** as one unit.
 
+`cmd/swmd` is a separate HTTP-only client binary in the same Go module. It does
+not compose server, finance persistence, runtime, appdispatch, or jobs stores;
+it calls the existing app API with a personal access token.
+
 ## Stack
 
 | Area | Choice |
@@ -128,6 +132,22 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 - **Sumweave-owned OpenAPI:** **`internal/api/http/v1routes.yaml`** — health, **`/api/v1/auth/*`** (login, refresh, me), and related schemas; **camelCase** in JSON per module conventions. Codegen updates **`internal/api/http/v1routes/`** via apigen (**`go generate`** on **`register.go`**).
 - **Runtime agent API:** authoritative OpenAPI for the agent HTTP surface lives under **`runtime/`** (e.g. **`runtime/internal/agentapi/openapi.yaml`**). This process **strips** the prefix and forwards **`/api/v1/runtime/*`** to the runtime **`httpapi`** handler (see **`internal/api/http/register.go`** **`SetupV1Routes`**). Standard run endpoints are profile-based (`profileName`), agent profiles carry mode-specific **`executionSettings`** (`regular` by default or `acp-stdio` for ACP subprocess execution), regular profile execution stays runner-owned, and the public runtime surface no longer exposes `/opencode-*` endpoints. The **`apps/sumweave-ui`** client generates TypeScript types from that runtime spec.
 - **Browser SPA delivery:** backend builds can embed **`apps/sumweave-ui`** output into the same binary via Go embed. The same-origin deployment shape serves the SPA from `/` and backend routes under `/api/*`; the root UI handler serves real files first, falls back to **`index.html`** for SPA routes, and keeps `/api/*` plus `/enable-banking/*` misses as backend 404s instead of masking them with the SPA shell.
+
+## Credential and direct-client boundary
+
+- App auth accepts browser-session JWTs and `swat_` personal access tokens as
+  distinct credential kinds with no validator fallback. Token secrets are
+  issued only on create or rotate and are stored as SHA-256 digests.
+- Each protected app route has an explicit policy. Tokens can use only the
+  documented current-user, finance read, jobs read, and three finance-trigger
+  operations; runtime and token lifecycle management are browser-session only.
+- The three token-writable triggers derive the `integration` requester source
+  and a credential-scoped internal idempotency key. They publish through
+  appdispatch, return `202`, and may return a known job ID that is still `404`
+  before the worker first delivers it.
+- `swmd auth configure --base-url <url> --token-stdin` is the persisted setup
+  command. Its file is private (`0700` parent, atomic `0600` file); resource
+  commands emit one JSON result on stdout and diagnostics on stderr.
 
 ## Decisions (why not X)
 

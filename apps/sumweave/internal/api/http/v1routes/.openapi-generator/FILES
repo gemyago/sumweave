@@ -8,6 +8,11 @@ handlers/health_params.go
 handlers/jobs_controller.go
 handlers/jobs_params.go
 internal/accept_finance_tenant_invite_params_validation.go
+internal/access_token_create_request_validation.go
+internal/access_token_issued_response_validation.go
+internal/access_token_list_response_validation.go
+internal/access_token_metadata_validation.go
+internal/access_token_rotate_request_validation.go
 internal/archive_finance_tenant_params_validation.go
 internal/auth_login_params_validation.go
 internal/auth_login_request_validation.go
@@ -16,6 +21,7 @@ internal/auth_refresh_request_validation.go
 internal/auth_session_response_validation.go
 internal/confirm_finance_account_csv_import_params_validation.go
 internal/confirm_finance_csv_import_params_validation.go
+internal/create_auth_access_token_params_validation.go
 internal/create_finance_account_params_validation.go
 internal/create_finance_category_params_validation.go
 internal/create_finance_classification_rule_params_validation.go
@@ -150,6 +156,8 @@ internal/move_finance_classification_rule_params_validation.go
 internal/preview_finance_account_csv_import_params_validation.go
 internal/preview_finance_csv_import_params_validation.go
 internal/put_finance_synthetic_link_state_params_validation.go
+internal/revoke_auth_access_token_params_validation.go
+internal/rotate_auth_access_token_params_validation.go
 internal/start_finance_connection_redirect_link_params_validation.go
 internal/submit_finance_transaction_classification_params_validation.go
 internal/submit_finance_transfer_matching_params_validation.go
@@ -167,6 +175,11 @@ internal/update_finance_transaction_params_validation.go
 internal/user_info_validation.go
 internal/validators.go
 models/accept_finance_tenant_invite_params.go
+models/access_token_create_request.go
+models/access_token_issued_response.go
+models/access_token_list_response.go
+models/access_token_metadata.go
+models/access_token_rotate_request.go
 models/archive_finance_tenant_params.go
 models/auth_login_params.go
 models/auth_login_request.go
@@ -175,6 +188,7 @@ models/auth_refresh_request.go
 models/auth_session_response.go
 models/confirm_finance_account_csv_import_params.go
 models/confirm_finance_csv_import_params.go
+models/create_auth_access_token_params.go
 models/create_finance_account_params.go
 models/create_finance_category_params.go
 models/create_finance_classification_rule_params.go
@@ -309,6 +323,8 @@ models/move_finance_classification_rule_params.go
 models/preview_finance_account_csv_import_params.go
 models/preview_finance_csv_import_params.go
 models/put_finance_synthetic_link_state_params.go
+models/revoke_auth_access_token_params.go
+models/rotate_auth_access_token_params.go
 models/start_finance_connection_redirect_link_params.go
 models/submit_finance_transaction_classification_params.go
 models/submit_finance_transfer_matching_params.go

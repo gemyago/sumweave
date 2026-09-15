@@ -32,6 +32,14 @@ provider snapshots, balances, reports, and FX.
   options, while components receive native values or constructed collaborators.
 - `apps/sumweave-ui/` is finance-first, with retained Admin, Chat, and Providers
   surfaces.
+- Personal access tokens are app-owned, digest-only credentials for the exact
+  documented finance and jobs allowlist. They authenticate as their owner but
+  do not copy tenant grants; every finance read and trigger retains current
+  membership checks. Session-only remains the default, including runtime and
+  token management.
+- `apps/sumweave/cmd/swmd` is the separate HTTP-only direct client for that
+  allowlist. It calls the existing API rather than a second integration route
+  tree and persists credentials only through its private local configuration.
 - `runtime/` is generic agent infrastructure only: sessions, profiles,
   providers, agent execution, and HTTP APIs.
 - `.platform-agents/skills/` is an intentionally empty stageable root until
@@ -94,6 +102,15 @@ and uses the message ID as its job ID. Until that delivery, a request for the
 known future job ID may return `404`; the UI treats that response as pending
 only for an ID it just received from a dispatching workflow. Unknown or deep
 linked IDs remain ordinary `404` errors.
+
+An accepted browser trigger is requested as `operator`; an accepted access-token
+trigger is requested as `integration`. Session job reads are limited to that
+user's operator and integration jobs, while an access token can read only its
+owner's integration jobs. Revoking a token blocks its next request but does not
+cancel a command already accepted by appdispatch. The three token-writable
+finance triggers accept an optional caller- and operation-scoped idempotency
+key: an identical retry returns the original dispatch/job ID, while a changed
+payload with that key returns `409`.
 
 Transport failure and job failure are separate concerns. A finance service must
 explicitly return a finance-owned terminal failure for a terminal domain or

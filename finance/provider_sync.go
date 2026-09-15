@@ -99,12 +99,14 @@ type ResumeBankConnectionScheduleParams struct {
 }
 
 type TriggerBankConnectionSyncParams struct {
-	ActorUserID  string
-	TenantID     string
-	ConnectionID string
-	Reason       string
-	WindowStart  *time.Time
-	WindowEnd    *time.Time
+	ActorUserID     string
+	TenantID        string
+	ConnectionID    string
+	RequesterSource string
+	IdempotencyKey  string
+	Reason          string
+	WindowStart     *time.Time
+	WindowEnd       *time.Time
 }
 
 type DeleteBankConnectionParams struct {

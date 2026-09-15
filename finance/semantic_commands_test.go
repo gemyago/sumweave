@@ -75,4 +75,10 @@ func TestSemanticCommands(t *testing.T) {
 
 		require.Error(t, err)
 	})
+
+	t.Run("defines integration as a distinct command requester source", func(t *testing.T) {
+		require.Equal(t, "integration", CommandRequesterSourceIntegration)
+		require.NotEqual(t, CommandRequesterSourceOperator, CommandRequesterSourceIntegration)
+		require.NotEqual(t, CommandRequesterSourceSystem, CommandRequesterSourceIntegration)
+	})
 }

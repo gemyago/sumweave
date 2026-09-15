@@ -450,14 +450,19 @@ func jobMetadata(
 	jobType jobspkg.JobType,
 	requester financepkg.CommandRequester,
 ) (jobspkg.JobMetadata, error) {
-	if strings.TrimSpace(requester.Source) == "" {
-		return jobspkg.JobMetadata{}, errors.New("finance command requester source is required")
+	source := strings.TrimSpace(requester.Source)
+	switch source {
+	case financepkg.CommandRequesterSourceOperator,
+		financepkg.CommandRequesterSourceIntegration,
+		financepkg.CommandRequesterSourceSystem:
+	default:
+		return jobspkg.JobMetadata{}, errors.New("finance command requester source is invalid")
 	}
 	return jobspkg.JobMetadata{
 		JobType: jobType,
 		Requester: jobspkg.Requester{
 			UserID: requester.UserID,
-			Source: jobspkg.RequesterSource(requester.Source),
+			Source: jobspkg.RequesterSource(source),
 		},
 	}, nil
 }

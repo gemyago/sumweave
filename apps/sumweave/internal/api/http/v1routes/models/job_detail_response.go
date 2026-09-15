@@ -24,6 +24,5 @@ type JobDetailResponse struct {
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 	AttemptCount int64 `json:"attemptCount"`
 	Error *JobError `json:"error,omitempty"`
-	WorkerID string `json:"workerId"`
 	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
 }

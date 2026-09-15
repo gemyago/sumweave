@@ -24,8 +24,7 @@ func NewRecovererMiddleware(rootLogger *slog.Logger) Middleware {
 						slog.Any("panic", rvr),
 						slog.String("stack", string(debug.Stack())),
 					)
-					// TODO: Do not write header if already written
-					w.WriteHeader(http.StatusInternalServerError)
+					WriteError(w, r, apiErrorInternal())
 				}
 			}()
 

@@ -84,3 +84,31 @@ func NewErrUnauthorized(reason string) *UnauthorizedError {
 func (e *UnauthorizedError) Error() string {
 	return e.Reason
 }
+
+// ForbiddenError indicates an authenticated caller lacks required permission.
+type ForbiddenError struct {
+	TenantAccessDenied bool
+}
+
+// NewErrForbidden creates a generic permission denial.
+func NewErrForbidden() *ForbiddenError { return &ForbiddenError{} }
+
+// NewErrTenantAccessDenied creates a tenant-membership permission denial.
+func NewErrTenantAccessDenied() *ForbiddenError { return &ForbiddenError{TenantAccessDenied: true} }
+
+// Error implements the error interface.
+func (e *ForbiddenError) Error() string {
+	if e.TenantAccessDenied {
+		return "tenant access denied"
+	}
+	return "insufficient permission"
+}
+
+// IdempotencyConflictError identifies a retry with changed semantics.
+type IdempotencyConflictError struct{}
+
+// NewErrIdempotencyConflict creates an idempotency conflict.
+func NewErrIdempotencyConflict() *IdempotencyConflictError { return &IdempotencyConflictError{} }
+
+// Error implements the error interface.
+func (*IdempotencyConflictError) Error() string { return "idempotency conflict" }

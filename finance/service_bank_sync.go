@@ -182,6 +182,9 @@ func (s *BankSyncService) TriggerBankConnectionSync(
 	ctx context.Context,
 	params TriggerBankConnectionSyncParams,
 ) (BankConnectionSyncJobRef, error) {
+	if err := validateHTTPCommandRequesterSource(params.RequesterSource); err != nil {
+		return BankConnectionSyncJobRef{}, err
+	}
 	if err := validateBankConnectionSyncWindows(params.WindowStart, params.WindowEnd); err != nil {
 		return BankConnectionSyncJobRef{}, err
 	}
@@ -199,9 +202,9 @@ func (s *BankSyncService) TriggerBankConnectionSync(
 		WindowEnd:    params.WindowEnd,
 		Requester: CommandRequester{
 			UserID: strings.TrimSpace(params.ActorUserID),
-			Source: CommandRequesterSourceOperator,
+			Source: params.RequesterSource,
 		},
-	}, "")
+	}, params.IdempotencyKey)
 	if commandErr != nil { // coverage-ignore // JSON encoding of this concrete finance command cannot fail.
 		return BankConnectionSyncJobRef{}, commandErr
 	}

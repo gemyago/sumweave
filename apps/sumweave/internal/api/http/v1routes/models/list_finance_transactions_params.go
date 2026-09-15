@@ -79,6 +79,6 @@ type ListFinanceTransactionsParams struct {
 	EndDate time.Time `json:"endDate,omitempty"`
 	Sort ListFinanceTransactionsParamsSort `json:"sort,omitempty"`
 	IncludeHidden bool `json:"includeHidden,omitempty"`
-	Limit int64 `json:"limit"`
+	Limit int64 `json:"limit,omitempty"`
 	Offset int64 `json:"offset,omitempty"`
 }

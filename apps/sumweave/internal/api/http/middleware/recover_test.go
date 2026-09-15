@@ -61,7 +61,11 @@ func TestRecover(t *testing.T) {
 		handler.ServeHTTP(w, req)
 		assert.True(t, nextCalled)
 		assert.Equal(t, 500, w.Code)
-		assert.Empty(t, w.Body.Bytes())
+		assert.JSONEq(
+			t,
+			`{"code":"internal_error","message":"An internal error occurred.","correlationId":""}`,
+			w.Body.String(),
+		)
 	})
 
 	t.Run("ignore aborted request", func(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 var _ = BindingContext{}
 var _ = http.MethodGet
 var _ = time.Time{}
-type _ func() AuthLoginRequest
+type _ func() AccessTokenCreateRequest
 
 type paramsParserAuthAuthLogin struct {
 	bindPayload requestParamBinder[*http.Request, *AuthLoginRequest]
@@ -64,6 +64,92 @@ func newParamsParserAuthAuthRefresh(rootHandler *RootHandler) paramsParser[*Auth
 	}
 }
 
+type paramsParserAuthCreateAuthAccessToken struct {
+	bindPayload requestParamBinder[*http.Request, *AccessTokenCreateRequest]
+}
+
+func (p *paramsParserAuthCreateAuthAccessToken) parse(router httpRouter, req *http.Request) (*CreateAuthAccessTokenParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &CreateAuthAccessTokenParams{}
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserAuthCreateAuthAccessToken(rootHandler *RootHandler) paramsParser[*CreateAuthAccessTokenParams] {
+	return &paramsParserAuthCreateAuthAccessToken{
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *AccessTokenCreateRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*AccessTokenCreateRequest],
+			),
+			validateValue: NewAccessTokenCreateRequestValidator(),
+		}),
+	}
+}
+
+type paramsParserAuthRevokeAuthAccessToken struct {
+	bindTokenID requestParamBinder[string, string]
+}
+
+func (p *paramsParserAuthRevokeAuthAccessToken) parse(router httpRouter, req *http.Request) (*RevokeAuthAccessTokenParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &RevokeAuthAccessTokenParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTokenID(pathParamsCtx.Fork("tokenId"), readPathValue("tokenId", router, req), &reqParams.TokenID)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserAuthRevokeAuthAccessToken(rootHandler *RootHandler) paramsParser[*RevokeAuthAccessTokenParams] {
+	return &paramsParserAuthRevokeAuthAccessToken{
+		bindTokenID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+	}
+}
+
+type paramsParserAuthRotateAuthAccessToken struct {
+	bindTokenID requestParamBinder[string, string]
+	bindPayload requestParamBinder[*http.Request, *AccessTokenRotateRequest]
+}
+
+func (p *paramsParserAuthRotateAuthAccessToken) parse(router httpRouter, req *http.Request) (*RotateAuthAccessTokenParams, error) {
+	bindingCtx := BindingContext{}
+	reqParams := &RotateAuthAccessTokenParams{}
+	// path params
+	pathParamsCtx := bindingCtx.Fork("path")
+	p.bindTokenID(pathParamsCtx.Fork("tokenId"), readPathValue("tokenId", router, req), &reqParams.TokenID)
+	// body params
+	p.bindPayload(bindingCtx.Fork("body"), readRequestBodyValue(req), &reqParams.Payload)
+	return reqParams, bindingCtx.AggregatedError()
+}
+
+func newParamsParserAuthRotateAuthAccessToken(rootHandler *RootHandler) paramsParser[*RotateAuthAccessTokenParams] {
+	return &paramsParserAuthRotateAuthAccessToken{
+		bindTokenID: newRequestParamBinder(binderParams[string, string]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				rootHandler.knownParsers.stringParser,
+			),
+			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindPayload: newRequestParamBinder(binderParams[*http.Request, *AccessTokenRotateRequest]{
+			required: true,
+			parseValue: parseSoloValueParamAsSoloValue(
+				parseJSONPayload[*AccessTokenRotateRequest],
+			),
+			validateValue: NewAccessTokenRotateRequestValidator(),
+		}),
+	}
+}
+
 type authControllerBuilder struct {
 	// POST /api/v1/auth/login
 	//
@@ -99,6 +185,54 @@ type authControllerBuilder struct {
 		*AuthSessionResponse,
 		handlerActionFunc[*AuthRefreshParams, *AuthSessionResponse],
 		httpHandlerActionFunc[*AuthRefreshParams, *AuthSessionResponse],
+	]
+
+	// POST /api/v1/auth/access-tokens
+	//
+	// Request type: CreateAuthAccessTokenParams,
+	//
+	// Response type: AccessTokenIssuedResponse
+	CreateAuthAccessToken genericHandlerBuilder[
+		*CreateAuthAccessTokenParams,
+		*AccessTokenIssuedResponse,
+		handlerActionFunc[*CreateAuthAccessTokenParams, *AccessTokenIssuedResponse],
+		httpHandlerActionFunc[*CreateAuthAccessTokenParams, *AccessTokenIssuedResponse],
+	]
+
+	// GET /api/v1/auth/access-tokens
+	//
+	// Request type: none
+	//
+	// Response type: AccessTokenListResponse
+	ListAuthAccessTokens genericHandlerBuilder[
+		void,
+		*AccessTokenListResponse,
+		handlerActionFuncNoParams[void, *AccessTokenListResponse],
+		httpHandlerActionFuncNoParams[void, *AccessTokenListResponse],
+	]
+
+	// DELETE /api/v1/auth/access-tokens/{tokenId}
+	//
+	// Request type: RevokeAuthAccessTokenParams,
+	//
+	// Response type: none
+	RevokeAuthAccessToken genericHandlerBuilder[
+		*RevokeAuthAccessTokenParams,
+		void,
+		handlerActionFuncNoResponse[*RevokeAuthAccessTokenParams, void],
+		httpHandlerActionFuncNoResponse[*RevokeAuthAccessTokenParams, void],
+	]
+
+	// POST /api/v1/auth/access-tokens/{tokenId}/rotate
+	//
+	// Request type: RotateAuthAccessTokenParams,
+	//
+	// Response type: AccessTokenIssuedResponse
+	RotateAuthAccessToken genericHandlerBuilder[
+		*RotateAuthAccessTokenParams,
+		*AccessTokenIssuedResponse,
+		handlerActionFunc[*RotateAuthAccessTokenParams, *AccessTokenIssuedResponse],
+		httpHandlerActionFunc[*RotateAuthAccessTokenParams, *AccessTokenIssuedResponse],
 	]
 }
 
@@ -161,6 +295,87 @@ func newAuthControllerBuilder(app *RootHandler) *authControllerBuilder {
 			]{
 				defaultStatus: 200,
 				paramsParser:  newParamsParserAuthAuthRefresh(app),
+			},
+		),
+
+		// POST /api/v1/auth/access-tokens
+		CreateAuthAccessToken: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*CreateAuthAccessTokenParams,
+				*AccessTokenIssuedResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*CreateAuthAccessTokenParams,
+				*AccessTokenIssuedResponse,
+			](),
+			makeActionBuilderParams[
+				*CreateAuthAccessTokenParams,
+				*AccessTokenIssuedResponse,
+			]{
+				defaultStatus: 201,
+				paramsParser:  newParamsParserAuthCreateAuthAccessToken(app),
+			},
+		),
+
+		// GET /api/v1/auth/access-tokens
+		ListAuthAccessTokens: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoParams[
+				void,
+				*AccessTokenListResponse,
+			](),
+			newHTTPHandlerAdapterNoParams[
+				void,
+				*AccessTokenListResponse,
+			](),
+			makeActionBuilderParams[
+				void,
+				*AccessTokenListResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  makeVoidParamsParser(app),
+			},
+		),
+
+		// DELETE /api/v1/auth/access-tokens/{tokenId}
+		RevokeAuthAccessToken: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapterNoResponse[
+				*RevokeAuthAccessTokenParams,
+				void,
+			](),
+			newHTTPHandlerAdapterNoResponse[
+				*RevokeAuthAccessTokenParams,
+				void,
+			](),
+			makeActionBuilderParams[
+				*RevokeAuthAccessTokenParams,
+				void,
+			]{
+				defaultStatus: 204,
+				voidResult:    true,
+				paramsParser:  newParamsParserAuthRevokeAuthAccessToken(app),
+			},
+		),
+
+		// POST /api/v1/auth/access-tokens/{tokenId}/rotate
+		RotateAuthAccessToken: newGenericHandlerBuilder(
+			app,
+			newHandlerAdapter[
+				*RotateAuthAccessTokenParams,
+				*AccessTokenIssuedResponse,
+			](),
+			newHTTPHandlerAdapter[
+				*RotateAuthAccessTokenParams,
+				*AccessTokenIssuedResponse,
+			](),
+			makeActionBuilderParams[
+				*RotateAuthAccessTokenParams,
+				*AccessTokenIssuedResponse,
+			]{
+				defaultStatus: 200,
+				paramsParser:  newParamsParserAuthRotateAuthAccessToken(app),
 			},
 		),
 	}

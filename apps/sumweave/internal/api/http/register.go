@@ -22,7 +22,7 @@ type V1RoutesDeps struct {
 	RootHandler *handlers.RootHandler
 
 	HTTPRouter     *server.HTTPRouter
-	AuthMiddleware middleware.AuthMiddleware
+	CredentialAuth *middleware.CredentialMiddleware
 
 	RuntimeHandler        http.Handler
 	RootLogger            *slog.Logger
@@ -39,7 +39,12 @@ func SetupV1Routes(deps V1RoutesDeps) { // coverage-ignore // Little value in te
 	// Runtime routes — protected
 	deps.HTTPRouter.Handle(
 		"/api/v1/runtime/",
-		deps.AuthMiddleware(http.StripPrefix("/api/v1/runtime", deps.RuntimeHandler)),
+		deps.CredentialAuth.Require(
+			middleware.SessionOnly,
+			deps.CredentialAuth.RuntimeIdentity(
+				http.StripPrefix("/api/v1/runtime", deps.RuntimeHandler),
+			),
+		),
 	)
 	deps.HTTPRouter.HandleRoute(
 		http.MethodGet,

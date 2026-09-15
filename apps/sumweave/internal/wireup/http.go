@@ -2,10 +2,12 @@ package wireup
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
 	stdhttp "net/http"
+	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal"
 	apphttp "github.com/gemyago/sumweave/apps/sumweave/internal/api/http"
@@ -36,12 +38,13 @@ type HTTPOptions struct {
 // HTTPRoot owns the fully composed API application and no durable worker or
 // scheduler resources.
 type HTTPRoot struct {
-	Handler       stdhttp.Handler
-	Server        *server.HTTPServer
-	Runner        *agent.Runner
-	ToolsRegistry *agent.ToolsRegistry
-	rootLogger    *slog.Logger
-	shutdownHooks *lifecycle.ShutdownHooks
+	Handler            stdhttp.Handler
+	Server             *server.HTTPServer
+	Runner             *agent.Runner
+	ToolsRegistry      *agent.ToolsRegistry
+	accessTokenService *auth.AccessTokenService
+	rootLogger         *slog.Logger
+	shutdownHooks      *lifecycle.ShutdownHooks
 }
 
 // BuildHTTP loads typed configuration and eagerly constructs the API-only HTTP
@@ -201,6 +204,24 @@ func buildHTTP(
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP refresh token store: %w", err)
 	}
+	accessTokenStore, err := auth.NewAccessTokenStore(auth.AccessTokenStoreDeps{
+		SQLDB: database, DatabaseDSN: rootConfig.Application.Database.DSN,
+		TablePrefix: rootConfig.Application.Database.TablePrefix, Logger: rootLogger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP access token store: %w", err)
+	}
+	accessTokenService, err := auth.NewAccessTokenService(auth.AccessTokenServiceDeps{
+		Store:        accessTokenStore,
+		Users:        userStore,
+		IDGen:        ids,
+		Clock:        time.Now,
+		RandomReader: rand.Reader,
+		Logger:       rootLogger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP access token service: %w", err)
+	}
 	jwtService, err := auth.NewJWTService(auth.JWTServiceDeps{
 		SigningKey: rootConfig.Auth.JWTSigningKey, AccessTokenTTL: rootConfig.Auth.AccessTokenTTL, Logger: rootLogger,
 	})
@@ -269,10 +290,15 @@ func buildHTTP(
 		return nil, fmt.Errorf("build HTTP finance module: %w", err)
 	}
 
-	authMiddleware := middleware.NewAuthMiddleware(middleware.AuthMiddlewareDeps{
-		JWTValidator: jwtService,
-		Logger:       rootLogger,
+	credentialAuth, err := middleware.NewCredentialMiddleware(middleware.AuthMiddlewareDeps{
+		JWTValidator:         jwtService,
+		AccessTokenValidator: accessTokenService,
+		Logger:               rootLogger,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("create credential middleware: %w", err)
+	}
+	authMiddleware := credentialAuth.SessionOnly()
 	otelMiddleware := telemetry.NewOtelHTTPMiddleware(telemetry.OtelMiddlewareFactoryDeps{
 		MeterProvider:     meterProvider,
 		TracerProvider:    tracerProvider,
@@ -294,33 +320,45 @@ func buildHTTP(
 		AuthController: v1controllers.NewAuthController(v1controllers.AuthControllerDeps{
 			AuthService:    authService,
 			AuthMiddleware: authMiddleware,
+			TokenReadMiddleware: func(next stdhttp.Handler) stdhttp.Handler {
+				return credentialAuth.Require(middleware.TokenRead, next)
+			},
+			AccessTokens: accessTokenService,
 		}),
 		JobsController: v1controllers.NewJobsController(v1controllers.JobsControllerDeps{
-			JobsService:    jobsService,
-			AuthMiddleware: authMiddleware,
+			JobsService: jobsService,
+			TokenReadMiddleware: func(next stdhttp.Handler) stdhttp.Handler {
+				return credentialAuth.Require(middleware.TokenRead, next)
+			},
 		}),
 		FinanceController: v1controllers.NewFinanceController(v1controllers.FinanceControllerDeps{
-			TenantService:                financeModule.TenantService,
-			UserDirectory:                userDirectory,
-			CatalogService:               financeModule.CatalogService,
-			ClassificationRuleService:    financeModule.ClassificationRuleService,
-			ClassificationService:        financeModule.ClassificationService,
-			TransferMatchingService:      financeModule.TransferMatchingService,
-			LedgerService:                financeModule.LedgerService,
-			TransferDetailService:        financeModule.TransferDetailService,
-			BankSyncService:              financeModule.BankSyncService,
-			ReportingService:             financeModule.ReportingService,
-			FXService:                    financeModule.FXService,
-			ProviderSnapshotService:      financeModule.ProviderSnapshotService,
-			CSVImportService:             financeModule.CSVImportService,
-			BankConnectionService:        financeModule.BankConnectionService,
-			SyntheticLinkStateService:    financeModule.SyntheticLinkStateService,
-			AuthMiddleware:               authMiddleware,
+			TenantService:             financeModule.TenantService,
+			UserDirectory:             userDirectory,
+			CatalogService:            financeModule.CatalogService,
+			ClassificationRuleService: financeModule.ClassificationRuleService,
+			ClassificationService:     financeModule.ClassificationService,
+			TransferMatchingService:   financeModule.TransferMatchingService,
+			LedgerService:             financeModule.LedgerService,
+			TransferDetailService:     financeModule.TransferDetailService,
+			BankSyncService:           financeModule.BankSyncService,
+			ReportingService:          financeModule.ReportingService,
+			FXService:                 financeModule.FXService,
+			ProviderSnapshotService:   financeModule.ProviderSnapshotService,
+			CSVImportService:          financeModule.CSVImportService,
+			BankConnectionService:     financeModule.BankConnectionService,
+			SyntheticLinkStateService: financeModule.SyntheticLinkStateService,
+			AuthMiddleware:            authMiddleware,
+			TokenReadMiddleware: func(next stdhttp.Handler) stdhttp.Handler {
+				return credentialAuth.Require(middleware.TokenRead, next)
+			},
+			TokenWriteMiddleware: func(next stdhttp.Handler) stdhttp.Handler {
+				return credentialAuth.Require(middleware.TokenWrite, next)
+			},
 			EnableBankingCallbackBaseURL: rootConfig.Finance.Providers.EnableBanking.CallbackBaseURL,
 		}),
 		RootHandler:           rootHandler,
 		HTTPRouter:            router,
-		AuthMiddleware:        authMiddleware,
+		CredentialAuth:        credentialAuth,
 		RuntimeHandler:        runtime.HTTPHandler,
 		RootLogger:            rootLogger,
 		BankConnectionService: financeModule.BankConnectionService,
@@ -341,12 +379,13 @@ func buildHTTP(
 		OTELMiddleware:    otelMiddleware,
 	})
 	return &HTTPRoot{
-		Handler:       router,
-		Server:        httpServer,
-		Runner:        runtime.Runner,
-		ToolsRegistry: runtime.ToolsRegistry,
-		rootLogger:    rootLogger,
-		shutdownHooks: shutdownHooks,
+		Handler:            router,
+		Server:             httpServer,
+		Runner:             runtime.Runner,
+		ToolsRegistry:      runtime.ToolsRegistry,
+		accessTokenService: accessTokenService,
+		rootLogger:         rootLogger,
+		shutdownHooks:      shutdownHooks,
 	}, nil
 }
 

@@ -2,7 +2,10 @@ openapi: 3.0.3
 info:
   title: Sumweave API
   description: |
-    HTTP API for Sumweave application.
+    HTTP API for Sumweave application. Browser sessions access the existing
+    protected application surface. Personal access tokens use the same Bearer
+    header but are available only to operations whose descriptions say so; all
+    other protected operations remain browser-session only.
   version: 1.0.0
 
 servers:
@@ -81,6 +84,7 @@ paths:
   /api/v1/auth/me:
     get:
       summary: Current authenticated user
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: authMe
       tags:
         - auth
@@ -97,9 +101,93 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /api/v1/auth/access-tokens:
+    get:
+      summary: List the current user's personal access token metadata
+      description: Browser-session only. Returns metadata only; neither token values nor stored digests are returned.
+      operationId: listAuthAccessTokens
+      tags: [auth]
+      responses:
+        '200':
+          description: Personal access token metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessTokenListResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      summary: Create a personal access token for the current user
+      description: Browser-session only. The complete apiToken is returned only by this response.
+      operationId: createAuthAccessToken
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccessTokenCreateRequest" }
+      responses:
+        '201':
+          description: Issued personal access token; apiToken is returned only once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessTokenIssuedResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/auth/access-tokens/{tokenId}/rotate:
+    post:
+      summary: Rotate an active personal access token for the current user
+      description: Browser-session only. Rotation immediately invalidates the old value and returns one replacement apiToken.
+      operationId: rotateAuthAccessToken
+      tags: [auth]
+      parameters:
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccessTokenRotateRequest" }
+      responses:
+        '200':
+          description: Replacement personal access token; apiToken is returned only once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessTokenIssuedResponse" }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/auth/access-tokens/{tokenId}:
+    delete:
+      summary: Revoke a personal access token for the current user
+      description: Browser-session only. The token is rejected on its next authenticated request.
+      operationId: revokeAuthAccessToken
+      tags: [auth]
+      parameters:
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Personal access token revoked }
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /api/v1/jobs:
     get:
       summary: List durable registered jobs
+      description: Available to personal access tokens with read-only or read-write permission. Session callers see only their own operator or integration jobs; token callers see only their owner's integration jobs. Source filters can only narrow that scope.
       operationId: listJobs
       tags:
         - jobs
@@ -150,6 +238,7 @@ paths:
   /api/v1/jobs/{jobId}:
     get:
       summary: Get one durable registered job
+      description: Available to personal access tokens with read-only or read-write permission. Missing, inaccessible, and requester-source-disallowed jobs all return the same not-found response. A just-published known job can be 404 before first delivery materializes it.
       operationId: getJob
       tags:
         - jobs
@@ -175,6 +264,7 @@ paths:
   /api/v1/finance/tenants:
     get:
       summary: List finance tenants
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceTenants
       tags: [finance]
       responses:
@@ -380,6 +470,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/accounts:
     get:
       summary: List finance accounts
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceAccounts
       tags: [finance]
       parameters:
@@ -434,6 +525,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/accounts/{accountId}:
     get:
       summary: Get finance account detail
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getFinanceAccount
       tags: [finance]
       parameters:
@@ -489,6 +581,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots:
     get:
       summary: List current finance account provider snapshot metadata
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceAccountProviderSnapshots
       tags: [finance]
       parameters:
@@ -562,6 +655,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/accounts/{accountId}/provider-snapshots/{snapshotId}:
     get:
       summary: Get sanitized finance account provider snapshot
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getFinanceAccountProviderSnapshot
       tags: [finance]
       parameters:
@@ -784,6 +878,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions:
     get:
       summary: List finance transactions
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceTransactions
       tags: [finance]
       parameters:
@@ -820,11 +915,13 @@ paths:
           schema: { type: boolean }
         - in: query
           name: limit
-          required: true
+          description: Maximum results returned. Defaults to 100 and is bounded to 1–200.
           schema:
             type: integer
             format: int64
             minimum: 1
+            maximum: 200
+            default: 100
         - in: query
           name: offset
           schema:
@@ -884,6 +981,7 @@ paths:
         schema: { type: string }
     get:
       summary: Get finance transaction detail
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getFinanceTransaction
       tags: [finance]
       responses:
@@ -1088,6 +1186,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions/classify:
     post:
       summary: Submit explicit transaction classification
+      description: Available to read-write personal access tokens and browser sessions. Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation. An identical retry returns the original job ID; changed semantics under that key return `409 idempotency_conflict`.
       operationId: submitFinanceTransactionClassification
       tags: [finance]
       parameters:
@@ -1114,6 +1213,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions/match-transfers:
     post:
       summary: Submit explicit transfer matching
+      description: Available to read-write personal access tokens and browser sessions. Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation. An identical retry returns the original job ID; changed semantics under that key return `409 idempotency_conflict`.
       operationId: submitFinanceTransferMatching
       tags: [finance]
       parameters:
@@ -1216,6 +1316,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots:
     get:
       summary: List current finance transaction provider snapshot metadata
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceTransactionProviderSnapshots
       tags: [finance]
       parameters:
@@ -1243,6 +1344,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/transactions/{transactionId}/provider-snapshots/{snapshotId}:
     get:
       summary: Get sanitized finance transaction provider snapshot
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: getFinanceTransactionProviderSnapshot
       tags: [finance]
       parameters:
@@ -1274,6 +1376,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/connections:
     get:
       summary: List finance bank connections
+      description: Available to personal access tokens with read-only or read-write permission.
       operationId: listFinanceConnections
       tags: [finance]
       parameters:
@@ -1521,6 +1624,7 @@ paths:
   /api/v1/finance/tenants/{tenantId}/connections/{connectionId}/sync:
     post:
       summary: Trigger finance bank connection sync job
+      description: Available to read-write personal access tokens and browser sessions. Accepts an optional 1-128 character printable-ASCII `Idempotency-Key` header scoped to the authenticated credential and operation. An identical retry returns the original job ID; changed semantics under that key return `409 idempotency_conflict`.
       operationId: triggerFinanceConnectionSync
       tags: [finance]
       parameters:
@@ -1539,8 +1643,8 @@ paths:
             schema:
               $ref: "#/components/schemas/FinanceConnectionSyncRequest"
       responses:
-        '200':
-          description: Triggered finance sync job
+        '202':
+          description: Finance sync is queued. The returned job ID can initially return 404 until first delivery materializes the observed job.
           content:
             application/json:
               schema:
@@ -1890,6 +1994,46 @@ components:
           type: string
         username:
           type: string
+        accessToken:
+          $ref: "#/components/schemas/AccessTokenMetadata"
+    AccessTokenMetadata:
+      type: object
+      required: [id, name, hint, permission, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        hint: { type: string }
+        permission: { type: string, enum: [read-only, read-write] }
+        status: { type: string, enum: [active, expired, revoked] }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AccessTokenCreateRequest:
+      type: object
+      required: [name, permission]
+      properties:
+        name: { type: string }
+        permission: { type: string, enum: [read-only, read-write] }
+        expiresAt: { type: string, format: date-time, nullable: true }
+    AccessTokenRotateRequest:
+      type: object
+      required: [expiresAt]
+      properties:
+        expiresAt: { type: string, format: date-time, nullable: true }
+    AccessTokenIssuedResponse:
+      type: object
+      required: [token, apiToken]
+      properties:
+        token: { $ref: "#/components/schemas/AccessTokenMetadata" }
+        apiToken: { type: string }
+    AccessTokenListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AccessTokenMetadata" }
     AuthSessionResponse:
       type: object
       required:
@@ -1968,11 +2112,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/JobSummary"
         - type: object
-          required:
-            - workerId
           properties:
-            workerId:
-              type: string
             lastAttemptAt:
               type: string
               format: date-time
@@ -2744,12 +2884,13 @@ components:
           items: { type: string }
     Error:
       type: object
-      required:
-        - code
+      required: [code, message, correlationId]
       properties:
         code:
-          format: string
+          type: string
         message:
+          type: string
+        correlationId:
           type: string
   responses:
     ErrorResponse:

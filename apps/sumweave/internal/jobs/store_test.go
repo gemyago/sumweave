@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jaswdr/faker/v2"
 	"github.com/stretchr/testify/assert"
@@ -208,9 +209,82 @@ func TestStore(t *testing.T) {
 		))
 		require.Error(t, err)
 		_, err = store.List(t.Context(), ListParams{
+			RequesterUserID: fake.UUID().V4(), AllowedSources: []RequesterSource{RequesterSourceOperator},
 			Sources: []RequesterSource{RequesterSourceOperator}, Cursor: fake.UUID().V4(),
 		})
 		require.ErrorContains(t, err, "decode cursor")
+	})
+
+	t.Run("reads only requester-scoped jobs and intersects source filters", func(t *testing.T) {
+		store := makeStore(t)
+		now := time.Now().Truncate(time.Microsecond)
+		ownerID := fake.UUID().V4()
+		otherUserID := fake.UUID().V4()
+		makeJob := func(userID string, source RequesterSource, createdAt time.Time) Job {
+			job := makeQueuedJob(createdAt)
+			job.Requester = Requester{UserID: userID, Source: source}
+			return job
+		}
+		operator := makeJob(ownerID, RequesterSourceOperator, now)
+		integration := makeJob(ownerID, RequesterSourceIntegration, now.Add(time.Second))
+		system := makeJob(ownerID, RequesterSourceSystem, now.Add(2*time.Second))
+		otherUser := makeJob(otherUserID, RequesterSourceIntegration, now.Add(3*time.Second))
+		for _, job := range []Job{operator, integration, system, otherUser} {
+			_, err := store.MaterializeQueued(t.Context(), job)
+			require.NoError(t, err)
+		}
+
+		accessible, err := store.GetForRequester(t.Context(), GetParams{
+			JobID: integration.ID, RequesterUserID: ownerID,
+			AllowedSources: []RequesterSource{RequesterSourceIntegration},
+		})
+		require.NoError(t, err)
+		require.Equal(t, integration.ID, accessible.ID)
+		for _, job := range []Job{operator, system, otherUser} {
+			_, getErr := store.GetForRequester(t.Context(), GetParams{
+				JobID: job.ID, RequesterUserID: ownerID,
+				AllowedSources: []RequesterSource{RequesterSourceIntegration},
+			})
+			require.ErrorIs(t, getErr, ErrJobNotFound)
+		}
+
+		listed, err := store.List(t.Context(), ListParams{
+			RequesterUserID: ownerID,
+			AllowedSources:  []RequesterSource{RequesterSourceOperator, RequesterSourceIntegration},
+			Limit:           1,
+		})
+		require.NoError(t, err)
+		require.Len(t, listed.Items, 1)
+		require.Equal(t, integration.ID, listed.Items[0].ID)
+		require.NotEmpty(t, listed.NextCursor)
+
+		filtered, err := store.List(t.Context(), ListParams{
+			RequesterUserID: ownerID,
+			AllowedSources:  []RequesterSource{RequesterSourceOperator, RequesterSourceIntegration},
+			Sources:         []RequesterSource{RequesterSourceIntegration, RequesterSourceSystem},
+			Limit:           2,
+		})
+		require.NoError(t, err)
+		require.Equal(t, []Job{*accessible}, filtered.Items)
+
+		noAllowedSource, err := store.List(t.Context(), ListParams{
+			RequesterUserID: ownerID,
+			AllowedSources:  []RequesterSource{RequesterSourceIntegration},
+			Sources:         []RequesterSource{RequesterSourceOperator},
+		})
+		require.NoError(t, err)
+		require.Empty(t, noAllowedSource.Items)
+		_, err = store.GetForRequester(t.Context(), GetParams{JobID: integration.ID})
+		require.Error(t, err)
+		service, err := NewService(ServiceDeps{Store: store})
+		require.NoError(t, err)
+		_, err = service.Get(t.Context(), GetParams{
+			JobID: operator.ID, RequesterUserID: ownerID,
+			AllowedSources: []RequesterSource{RequesterSourceIntegration},
+		})
+		var notFound *app.NotFoundError
+		require.ErrorAs(t, err, &notFound)
+		require.Equal(t, operator.ID, notFound.ID)
 	})
 
 	t.Run("returns storage errors without treating them as lifecycle states", func(t *testing.T) {
@@ -231,9 +305,16 @@ func TestStore(t *testing.T) {
 		require.Error(t, createWithDB(t.Context(), store.db, store.tableName, job))
 		_, err = store.Get(t.Context(), job.ID)
 		require.Error(t, err)
+		_, err = store.GetForRequester(t.Context(), GetParams{
+			JobID: job.ID, RequesterUserID: job.Requester.UserID,
+			AllowedSources: []RequesterSource{RequesterSourceOperator},
+		})
+		require.Error(t, err)
 		_, err = store.MaterializeQueued(t.Context(), job)
 		require.Error(t, err)
-		_, err = store.List(t.Context(), ListParams{})
+		_, err = store.List(t.Context(), ListParams{
+			RequesterUserID: fake.UUID().V4(), AllowedSources: []RequesterSource{RequesterSourceOperator},
+		})
 		require.Error(t, err)
 		_, err = store.ClaimQueued(t.Context(), job.ID, fake.UUID().V4(), now)
 		require.Error(t, err)

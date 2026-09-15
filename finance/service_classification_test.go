@@ -73,6 +73,8 @@ func TestClassificationService(t *testing.T) {
 			TenantID:          "tenant-" + fake.UUID().V4(),
 			RangeStart:        start,
 			RangeEndExclusive: end,
+			RequesterSource:   CommandRequesterSourceIntegration,
+			IdempotencyKey:    "key-" + fake.UUID().V4(),
 		}
 		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
 		expected := DispatchReference{MessageID: fake.UUID().V4()}
@@ -88,8 +90,8 @@ func TestClassificationService(t *testing.T) {
 				payload.RangeEndExclusive.Equal(end) &&
 				payload.Requester == (CommandRequester{
 					UserID: params.ActorUserID,
-					Source: CommandRequesterSourceOperator,
-				})
+					Source: params.RequesterSource,
+				}) && command.IdempotencyKey == params.IdempotencyKey
 		})).Return(expected, nil).Once()
 		service, err := NewClassificationService(ClassificationServiceArgs{
 			Access:       access,
@@ -115,6 +117,7 @@ func TestClassificationService(t *testing.T) {
 			TenantID:          fake.UUID().V4(),
 			RangeStart:        now,
 			RangeEndExclusive: now,
+			RequesterSource:   CommandRequesterSourceOperator,
 		}
 		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
 		service, err := NewClassificationService(ClassificationServiceArgs{
@@ -131,7 +134,7 @@ func TestClassificationService(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalidTimestampRange)
 	})
 
-	t.Run("creates a new publication identity for each explicit submission", func(t *testing.T) {
+	t.Run("uses supplied idempotency keys and leaves omitted keys empty", func(t *testing.T) {
 		fake := faker.New()
 		access := newMockaccessGuardStore(t)
 		publisher := NewMockSemanticCommandPublisher(t)
@@ -141,6 +144,7 @@ func TestClassificationService(t *testing.T) {
 			TenantID:          "tenant-" + fake.UUID().V4(),
 			RangeStart:        start,
 			RangeEndExclusive: start.Add(time.Hour),
+			RequesterSource:   CommandRequesterSourceOperator,
 		}
 		access.EXPECT().IsTenantMember(mock.Anything, params.TenantID, params.ActorUserID).Return(true, nil).Twice()
 		commands := make([]SemanticCommand, 0, 2)
@@ -166,9 +170,31 @@ func TestClassificationService(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEqual(t, first, second)
 		require.Len(t, commands, 2)
-		assert.NotEmpty(t, commands[0].IdempotencyKey)
-		assert.NotEqual(t, commands[0].IdempotencyKey, commands[1].IdempotencyKey)
+		assert.Empty(t, commands[0].IdempotencyKey)
+		assert.Empty(t, commands[1].IdempotencyKey)
 		assert.Equal(t, commands[0].Payload, commands[1].Payload)
+	})
+
+	t.Run("rejects requester sources outside HTTP submission sources", func(t *testing.T) {
+		fake := faker.New()
+		service, err := NewClassificationService(ClassificationServiceArgs{
+			Access:       newMockaccessGuardStore(t),
+			Rules:        newMockclassificationRuleStore(t),
+			Transactions: newMockclassificationTransactionStore(t),
+			Categories:   newMockclassificationCategoryStore(t),
+			Tags:         newMockclassificationTagStore(t),
+			Logger:       slog.New(slog.DiscardHandler),
+			Now:          time.Now,
+		}, WithClassificationServiceCommandPublisher(NewMockSemanticCommandPublisher(t)))
+		require.NoError(t, err)
+		_, err = service.Submit(t.Context(), SubmitClassificationParams{
+			ActorUserID:       "user-" + fake.UUID().V4(),
+			TenantID:          "tenant-" + fake.UUID().V4(),
+			RangeStart:        time.Now(),
+			RangeEndExclusive: time.Now().Add(time.Hour),
+			RequesterSource:   CommandRequesterSourceSystem,
+		})
+		require.ErrorIs(t, err, ErrInvalidCommandRequesterSource)
 	})
 
 	t.Run("loads rules once, advances keyset batches, and counts committed assignments", func(t *testing.T) {

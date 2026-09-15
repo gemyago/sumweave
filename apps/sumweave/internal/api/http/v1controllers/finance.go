@@ -3,6 +3,8 @@ package v1controllers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,12 +19,19 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1routes/handlers"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1routes/models"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/domain"
-	"github.com/gemyago/sumweave/runtime/httpapi"
 )
 
 const providerRequestFailedMessage = "provider request failed"
+
+const (
+	bankSyncIdempotencyOperation         = "bank-sync"
+	classificationIdempotencyOperation   = "classification"
+	transferMatchingIdempotencyOperation = "transfer-matching"
+)
 
 type tenantService interface {
 	CreateTenant(context.Context, financepkg.CreateTenantParams) (domain.Tenant, error)
@@ -233,6 +242,8 @@ type FinanceControllerDeps struct {
 	BankConnectionService        bankConnectionService
 	SyntheticLinkStateService    syntheticLinkStateService
 	AuthMiddleware               middleware.AuthMiddleware
+	TokenReadMiddleware          middleware.AuthMiddleware
+	TokenWriteMiddleware         middleware.AuthMiddleware
 	EnableBankingCallbackBaseURL string
 }
 
@@ -650,53 +661,68 @@ func (c *FinanceController) MoveFinanceClassificationRule(
 	return c.deps.AuthMiddleware(inner)
 }
 
+//nolint:dupl // Generated operation types require separate response mappings.
 func (c *FinanceController) SubmitFinanceTransactionClassification(
 	builder handlers.HandlerBuilder[*models.SubmitFinanceTransactionClassificationParams, *models.FinanceClassificationJobResponse],
 ) http.Handler {
-	inner := builder.HandleWith(func(
-		ctx context.Context,
+	inner := builder.HandleWithHTTP(func(
+		_ http.ResponseWriter,
+		req *http.Request,
 		params *models.SubmitFinanceTransactionClassificationParams,
 	) (*models.FinanceClassificationJobResponse, error) {
-		userID, err := operatorUserIDFromContext(ctx)
+		userID, requesterSource, idempotencyKey, err := financeTriggerMetadata(
+			req.Context(),
+			classificationIdempotencyOperation,
+			req.Header.Get("Idempotency-Key"),
+		)
 		if err != nil {
 			return nil, err
 		}
-		job, err := c.deps.ClassificationService.Submit(ctx, financepkg.SubmitClassificationParams{
+		job, err := c.deps.ClassificationService.Submit(req.Context(), financepkg.SubmitClassificationParams{
 			ActorUserID:       userID,
 			TenantID:          params.TenantID,
 			RangeStart:        params.Payload.RangeStart,
 			RangeEndExclusive: params.Payload.RangeEndExclusive,
+			RequesterSource:   requesterSource,
+			IdempotencyKey:    idempotencyKey,
 		})
 		if err != nil {
-			return nil, mapFinanceRangeError(err)
+			return nil, mapFinanceSubmissionError(err)
 		}
 		return &models.FinanceClassificationJobResponse{JobID: job.ID}, nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenWriteMiddleware(inner)
 }
 
+//nolint:dupl // Generated operation types require separate response mappings.
 func (c *FinanceController) SubmitFinanceTransferMatching(
 	builder handlers.HandlerBuilder[*models.SubmitFinanceTransferMatchingParams, *models.FinanceTransferMatchingJobResponse],
 ) http.Handler {
-	inner := builder.HandleWith(
-		func(ctx context.Context, params *models.SubmitFinanceTransferMatchingParams) (*models.FinanceTransferMatchingJobResponse, error) {
-			userID, err := operatorUserIDFromContext(ctx)
+	inner := builder.HandleWithHTTP(
+		func(_ http.ResponseWriter, req *http.Request, params *models.SubmitFinanceTransferMatchingParams) (*models.FinanceTransferMatchingJobResponse, error) {
+			userID, requesterSource, idempotencyKey, err := financeTriggerMetadata(
+				req.Context(),
+				transferMatchingIdempotencyOperation,
+				req.Header.Get("Idempotency-Key"),
+			)
 			if err != nil {
 				return nil, err
 			}
-			job, err := c.deps.TransferMatchingService.Submit(ctx, financepkg.TransferMatchingSubmission{
+			job, err := c.deps.TransferMatchingService.Submit(req.Context(), financepkg.TransferMatchingSubmission{
 				ActorUserID:       userID,
 				TenantID:          params.TenantID,
 				RangeStart:        params.Payload.RangeStart,
 				RangeEndExclusive: params.Payload.RangeEndExclusive,
+				RequesterSource:   requesterSource,
+				IdempotencyKey:    idempotencyKey,
 			})
 			if err != nil {
-				return nil, mapFinanceRangeError(err)
+				return nil, mapFinanceSubmissionError(err)
 			}
 			return &models.FinanceTransferMatchingJobResponse{JobID: job.ID}, nil
 		},
 	)
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenWriteMiddleware(inner)
 }
 
 func (c *FinanceController) CreateFinanceTag(
@@ -953,7 +979,7 @@ func (c *FinanceController) GetFinanceTransaction(
 		return &mapped, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceTransferCandidates(
@@ -1100,7 +1126,7 @@ func (c *FinanceController) GetFinanceAccountProviderSnapshot(
 		}
 		return &mapped, nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) GetFinanceTransactionProviderSnapshot(
@@ -1135,7 +1161,7 @@ func (c *FinanceController) GetFinanceTransactionProviderSnapshot(
 		}
 		return &mapped, nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) GetFinanceCsvImportAudit(
@@ -1533,7 +1559,7 @@ func (c *FinanceController) ListFinanceAccounts(
 		return mapAccountsResponse(items)
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceAccountProviderSnapshots(
@@ -1563,7 +1589,7 @@ func (c *FinanceController) ListFinanceAccountProviderSnapshots(
 		}
 		return mapProviderSnapshotMetadataResponse(items), nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) GetFinanceAccount(
@@ -1597,7 +1623,7 @@ func (c *FinanceController) GetFinanceAccount(
 		return &mapped, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) StartFinanceConnectionRedirectLink(
@@ -1763,7 +1789,7 @@ func (c *FinanceController) ListFinanceConnections(
 		return &response, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceConnectionSyncedAccounts(
@@ -1983,7 +2009,7 @@ func (c *FinanceController) ListFinanceTenants(
 		},
 	)
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceTransactions(
@@ -2004,6 +2030,11 @@ func (c *FinanceController) ListFinanceTransactions(
 			return nil, app.NewErrInvalidInput("sort", "must be asc or desc")
 		}
 
+		limit, err := financepkg.NormalizeTransactionListLimit(params.Limit)
+		if err != nil {
+			return nil, app.NewErrInvalidInput("limit", err.Error())
+		}
+
 		items, err := c.deps.LedgerService.ListTransactions(
 			ctx,
 			financepkg.ListTransactionsParams{
@@ -2017,7 +2048,7 @@ func (c *FinanceController) ListFinanceTransactions(
 				EndDate:       params.EndDate,
 				SortAscending: params.Sort == "asc",
 				IncludeHidden: params.IncludeHidden,
-				Limit:         params.Limit,
+				Limit:         limit,
 				Offset:        params.Offset,
 			},
 		)
@@ -2036,7 +2067,7 @@ func (c *FinanceController) ListFinanceTransactions(
 		return &response, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) ListFinanceTransactionProviderSnapshots(
@@ -2066,7 +2097,7 @@ func (c *FinanceController) ListFinanceTransactionProviderSnapshots(
 		}
 		return mapProviderSnapshotMetadataResponse(items), nil
 	})
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenReadMiddleware(inner)
 }
 
 func (c *FinanceController) UpdateFinanceTransaction(
@@ -2189,11 +2220,16 @@ func (c *FinanceController) PreviewFinanceAccountCsvImport(
 func (c *FinanceController) TriggerFinanceConnectionSync(
 	builder handlers.HandlerBuilder[*models.TriggerFinanceConnectionSyncParams, *models.FinanceFxSyncResponse],
 ) http.Handler {
-	inner := builder.HandleWith(func(
-		ctx context.Context,
+	inner := builder.HandleWithHTTP(func(
+		_ http.ResponseWriter,
+		req *http.Request,
 		params *models.TriggerFinanceConnectionSyncParams,
 	) (*models.FinanceFxSyncResponse, error) {
-		userID, err := operatorUserIDFromContext(ctx)
+		userID, requesterSource, idempotencyKey, err := financeTriggerMetadata(
+			req.Context(),
+			bankSyncIdempotencyOperation,
+			req.Header.Get("Idempotency-Key"),
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -2210,24 +2246,26 @@ func (c *FinanceController) TriggerFinanceConnectionSync(
 		}
 
 		jobRef, err := c.deps.BankSyncService.TriggerBankConnectionSync(
-			ctx,
+			req.Context(),
 			financepkg.TriggerBankConnectionSyncParams{
-				ActorUserID:  userID,
-				TenantID:     params.TenantID,
-				ConnectionID: params.ConnectionID,
-				Reason:       params.Payload.Reason,
-				WindowStart:  params.Payload.WindowStart,
-				WindowEnd:    params.Payload.WindowEnd,
+				ActorUserID:     userID,
+				TenantID:        params.TenantID,
+				ConnectionID:    params.ConnectionID,
+				RequesterSource: requesterSource,
+				IdempotencyKey:  idempotencyKey,
+				Reason:          params.Payload.Reason,
+				WindowStart:     params.Payload.WindowStart,
+				WindowEnd:       params.Payload.WindowEnd,
 			},
 		)
 		if err != nil {
-			return nil, mapBankConnectionError(err, "bank connection sync failed")
+			return nil, mapFinanceSubmissionError(mapBankConnectionError(err, "bank connection sync failed"))
 		}
 
 		return &models.FinanceFxSyncResponse{JobID: jobRef.ID, JobType: jobRef.JobType}, nil
 	})
 
-	return c.deps.AuthMiddleware(inner)
+	return c.deps.TokenWriteMiddleware(inner)
 }
 
 func (c *FinanceController) TriggerFinanceFxRefresh(
@@ -2264,22 +2302,72 @@ func (c *FinanceController) TriggerFinanceFxRefresh(
 }
 
 func operatorUserIDFromContext(ctx context.Context) (string, error) {
-	identity := httpapi.CallerIdentityFromContext(ctx)
-	if identity == nil || strings.TrimSpace(identity.UserID()) == "" {
+	caller, ok := auth.CallerFromContext(ctx)
+	if !ok || strings.TrimSpace(caller.UserID) == "" {
 		return "", app.NewErrUnauthorized("unauthorized")
 	}
 
-	return identity.UserID(), nil
+	return caller.UserID, nil
+}
+
+func financeTriggerMetadata(ctx context.Context, operation string, clientKey string) (string, string, string, error) {
+	caller, ok := auth.CallerFromContext(ctx)
+	if !ok || caller.UserID == "" {
+		return "", "", "", app.NewErrUnauthorized("unauthorized")
+	}
+	if err := validateIdempotencyKey(clientKey); err != nil {
+		return "", "", "", err
+	}
+	if clientKey == "" {
+		if caller.Credential == auth.CredentialKindAccessToken {
+			return caller.UserID, financepkg.CommandRequesterSourceIntegration, "", nil
+		}
+		return caller.UserID, financepkg.CommandRequesterSourceOperator, "", nil
+	}
+
+	identity := "session-user:" + caller.UserID
+	source := financepkg.CommandRequesterSourceOperator
+	if caller.Credential == auth.CredentialKindAccessToken {
+		if caller.AccessToken == nil || caller.AccessToken.TokenID == "" {
+			return "", "", "", app.NewErrUnauthorized("unauthorized")
+		}
+		identity = "access-token:" + caller.AccessToken.TokenID
+		source = financepkg.CommandRequesterSourceIntegration
+	}
+	digest := sha256.Sum256([]byte(clientKey))
+	return caller.UserID, source, "api:" + identity + ":" + operation + ":" + hex.EncodeToString(digest[:]), nil
+}
+
+func validateIdempotencyKey(value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) > 128 {
+		return app.NewErrInvalidInput("Idempotency-Key", "must be 1-128 printable ASCII characters")
+	}
+	for index := range len(value) {
+		if value[index] < ' ' || value[index] > '~' {
+			return app.NewErrInvalidInput("Idempotency-Key", "must be 1-128 printable ASCII characters")
+		}
+	}
+	return nil
 }
 
 func mapFinanceRangeError(err error) error {
 	if errors.Is(err, financepkg.ErrTenantAccessDenied) {
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	}
 	if errors.Is(err, financepkg.ErrInvalidTimestampRange) {
 		return app.NewErrInvalidInput("dateRange", err.Error())
 	}
 	return err
+}
+
+func mapFinanceSubmissionError(err error) error {
+	if errors.Is(err, appdispatch.ErrPublicationConflict) {
+		return fmt.Errorf("%w: %w", app.NewErrIdempotencyConflict(), err)
+	}
+	return mapFinanceRangeError(err)
 }
 
 func mapTransactionTagError(err error) error {
@@ -2294,7 +2382,7 @@ func mapCatalogError(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrAccountNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("account", "requested resource"), err)
 	case errors.Is(err, financepkg.ErrCategoryNotFound):
@@ -2311,7 +2399,7 @@ func mapCatalogError(err error) error {
 func mapClassificationRuleError(err error) error {
 	switch {
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrClassificationRuleNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("classification rule", "requested resource"), err)
 	case errors.Is(err, financepkg.ErrInvalidClassificationRule):
@@ -2328,7 +2416,7 @@ func mapClassificationRuleError(err error) error {
 func mapProviderSnapshotError(err error) error {
 	switch {
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrAccountNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("account", "requested resource"), err)
 	case errors.Is(err, financepkg.ErrTransactionNotFound):
@@ -2373,7 +2461,7 @@ func validateFinanceTimestamp(field string, value time.Time) error {
 func mapCSVImportError(err error) error {
 	switch {
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized(err.Error()), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrInvalidTenantDisplayCurrency):
 		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("displayCurrency", err.Error()), err)
 	case errors.Is(err, financepkg.ErrCSVImportAlreadyConfirmed),
@@ -3062,7 +3150,7 @@ func mapBankConnectionError(err error, fallback string) error {
 		errors.As(err, &unauthorizedErr):
 		return err
 	case errors.Is(err, financepkg.ErrTenantAccessDenied):
-		return fmt.Errorf("%w: %w", app.NewErrUnauthorized("tenant access denied"), err)
+		return fmt.Errorf("%w: %w", app.NewErrTenantAccessDenied(), err)
 	case errors.Is(err, financepkg.ErrUnsupportedBankProvider):
 		return fmt.Errorf("%w: %w", app.NewErrInvalidInput("provider", "unsupported bank provider"), err)
 	case errors.Is(err, financepkg.ErrBankProviderNotConfigured):

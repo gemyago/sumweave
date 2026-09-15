@@ -15,6 +15,7 @@ Manual guides:
 - [synthetic-provider-ui-e2e.md](./synthetic-provider-ui-e2e.md) — sign in to the UI, configure a synthetic connection, and verify explicit classification range, job feedback, and ledger refresh behavior.
 - [finance-scheduled-sync-lifecycle-e2e.md](./finance-scheduled-sync-lifecycle-e2e.md) — isolated scheduled bank/FX publication with local Monobank and static FX fixtures, due-state checks, expected `404`s, bounded worker-once, terminal jobs, and repeat no-op assertions.
 - [finance-transfer-matching-e2e.md](./finance-transfer-matching-e2e.md) — isolated API-created matching fixtures, explicit and automatic delivery, correction/reporting assertions, supported retry/failure evidence, and headed ledger smoke.
+- [integration-layer-e2e.md](./integration-layer-e2e.md) — personal access-token lifecycle, `swmd` allowlist, retry-safe triggers, lazy observed jobs, requester isolation, revocation, and responsive Admin checks.
 
 For job-observation checks, stop the normal PM2 worker and use an API-only
 `start` process before publishing, then query the returned ID before starting

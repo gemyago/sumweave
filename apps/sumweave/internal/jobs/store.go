@@ -163,6 +163,31 @@ func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {
 	return &job, nil
 }
 
+// GetForRequester loads only a job that belongs to the requested user and is
+// visible through one of the caller's allowed requester sources.
+func (s *Store) GetForRequester(ctx context.Context, params GetParams) (*Job, error) {
+	if err := validateReadScope(params.RequesterUserID, params.AllowedSources); err != nil {
+		return nil, err
+	}
+	var model jobModel
+	query := s.db.WithContext(ctx).Table(s.tableName).
+		Where(
+			"id = ? AND requester_user_id = ? AND requester_source IN ?",
+			strings.TrimSpace(params.JobID),
+			strings.TrimSpace(params.RequesterUserID),
+			params.AllowedSources,
+		).
+		First(&model)
+	if err := query.Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrJobNotFound
+		}
+		return nil, fmt.Errorf("get requester-scoped job: %w", err)
+	}
+	job := jobFromModel(model)
+	return &job, nil
+}
+
 // MaterializeQueued creates the visibility projection for a delivery without
 // altering an existing projection for a duplicate delivery.
 func (s *Store) MaterializeQueued(ctx context.Context, job Job) (*Job, error) {
@@ -181,18 +206,22 @@ func (s *Store) MaterializeQueued(ctx context.Context, job Job) (*Job, error) {
 }
 
 func (s *Store) List(ctx context.Context, params ListParams) (ListResult, error) {
+	if err := validateReadScope(params.RequesterUserID, params.AllowedSources); err != nil {
+		return ListResult{}, err
+	}
 	params = normalizeListParams(params)
-	statement := s.db.WithContext(ctx).Table(s.tableName).Model(&jobModel{})
+	statement := s.db.WithContext(ctx).Table(s.tableName).Model(&jobModel{}).
+		Where("requester_user_id = ?", strings.TrimSpace(params.RequesterUserID))
+	sources := intersectRequesterSources(params.AllowedSources, params.Sources)
+	if len(sources) == 0 {
+		return ListResult{Items: []Job{}}, nil
+	}
+	statement = statement.Where("requester_source IN ?", sources)
 	if len(params.Statuses) > 0 {
 		statement = statement.Where("status IN ?", params.Statuses)
 	}
 	if len(params.JobTypes) > 0 {
 		statement = statement.Where("job_type IN ?", params.JobTypes)
-	}
-	if len(
-		params.Sources,
-	) > 0 {
-		statement = statement.Where("requester_source IN ?", params.Sources)
 	}
 	if params.Cursor != "" {
 		createdAt, id, err := decodeCursor(params.Cursor)

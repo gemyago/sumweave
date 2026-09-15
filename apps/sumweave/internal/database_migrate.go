@@ -8,7 +8,6 @@ import (
 	"log/slog"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
-	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	jobspkg "github.com/gemyago/sumweave/apps/sumweave/internal/jobs"
 	"github.com/gemyago/sumweave/finance/persistence"
 	"github.com/gemyago/sumweave/runtime/agent"
@@ -22,8 +21,13 @@ type DatabaseMigrationDeps struct {
 	ApplicationDatabaseDSN          string
 	ApplicationDatabaseTablePrefix  string
 	ApplicationSQLDB                *sql.DB
-	AuthUsers                       *auth.UserStore
-	AuthRefreshTokens               *auth.RefreshTokenStore
+	AuthUsers                       schemaMigrator
+	AuthRefreshTokens               schemaMigrator
+	AuthAccessTokens                schemaMigrator
+}
+
+type schemaMigrator interface {
+	AutoMigrate() error
 }
 
 // DatabaseMigrator runs the explicit schema setup flow for application subsystems.
@@ -35,8 +39,9 @@ type DatabaseMigrator struct {
 	applicationDatabaseDSN          string
 	applicationDatabaseTablePrefix  string
 	applicationSQLDB                *sql.DB
-	authUsers                       *auth.UserStore
-	authRefreshTokens               *auth.RefreshTokenStore
+	authUsers                       schemaMigrator
+	authRefreshTokens               schemaMigrator
+	authAccessTokens                schemaMigrator
 }
 
 // NewDatabaseMigrator constructs the migration runner from direct dependencies.
@@ -51,6 +56,7 @@ func NewDatabaseMigrator(deps DatabaseMigrationDeps) *DatabaseMigrator {
 		applicationSQLDB:                deps.ApplicationSQLDB,
 		authUsers:                       deps.AuthUsers,
 		authRefreshTokens:               deps.AuthRefreshTokens,
+		authAccessTokens:                deps.AuthAccessTokens,
 	}
 }
 
@@ -131,7 +137,7 @@ func (m *DatabaseMigrator) migrateAgentRuntime(_ context.Context) error {
 }
 
 func (m *DatabaseMigrator) migrateAuthentication(_ context.Context) error {
-	if m.authUsers == nil || m.authRefreshTokens == nil {
+	if m.authUsers == nil || m.authRefreshTokens == nil || m.authAccessTokens == nil {
 		return errors.New("auth stores are required")
 	}
 	if err := m.authUsers.AutoMigrate(); err != nil {
@@ -139,6 +145,9 @@ func (m *DatabaseMigrator) migrateAuthentication(_ context.Context) error {
 	}
 	if err := m.authRefreshTokens.AutoMigrate(); err != nil {
 		return fmt.Errorf("auto migrate auth refresh tokens: %w", err)
+	}
+	if err := m.authAccessTokens.AutoMigrate(); err != nil {
+		return fmt.Errorf("auto migrate auth access tokens: %w", err)
 	}
 	return nil
 }

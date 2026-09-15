@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,8 @@ const (
 	JobStatusSucceeded           JobStatus       = "succeeded"
 	JobStatusFailed              JobStatus       = "failed"
 	RequesterSourceOperator      RequesterSource = "operator"
+	RequesterSourceIntegration   RequesterSource = "integration"
+	RequesterSourceSystem        RequesterSource = "system"
 	defaultListLimit                             = 25
 	maxListLimit                                 = 100
 	defaultWorkerPollInterval                    = 2 * time.Second
@@ -68,11 +71,19 @@ type Job struct {
 }
 
 type ListParams struct {
-	Statuses []JobStatus
-	JobTypes []JobType
-	Sources  []RequesterSource
-	Limit    int
-	Cursor   string
+	RequesterUserID string
+	AllowedSources  []RequesterSource
+	Statuses        []JobStatus
+	JobTypes        []JobType
+	Sources         []RequesterSource
+	Limit           int
+	Cursor          string
+}
+
+type GetParams struct {
+	JobID           string
+	RequesterUserID string
+	AllowedSources  []RequesterSource
 }
 
 type ListResult struct {
@@ -107,6 +118,32 @@ func normalizeListParams(params ListParams) ListParams {
 		params.Limit = maxListLimit
 	}
 	return params
+}
+
+func validateReadScope(requesterUserID string, allowedSources []RequesterSource) error {
+	if strings.TrimSpace(requesterUserID) == "" {
+		return errors.New("requester user ID is required")
+	}
+	if len(allowedSources) == 0 {
+		return errors.New("allowed requester sources are required")
+	}
+	return nil
+}
+
+func intersectRequesterSources(allowed, requested []RequesterSource) []RequesterSource {
+	if len(requested) == 0 {
+		return allowed
+	}
+	result := make([]RequesterSource, 0, len(requested))
+	for _, requestedSource := range requested {
+		for _, allowedSource := range allowed {
+			if requestedSource == allowedSource {
+				result = append(result, requestedSource)
+				break
+			}
+		}
+	}
+	return result
 }
 
 func canonicalizeRequester(requester Requester) Requester {

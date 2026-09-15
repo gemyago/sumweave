@@ -78,6 +78,7 @@
 | `/finance/imports` | Finance CSV preview/confirm/import-audit route. Protected. |
 | `/finance/jobs/:jobId` | Finance-context durable job detail route. Protected. |
 | `/admin` | Admin diagnostics overview. Protected. |
+| `/admin/access-tokens` | Self-service personal access-token list and lifecycle page. Protected. It offers compact creation with read-only/read-write permission and optional expiry; active-token rotation/revocation confirmations; bounded loading, empty, error, active, expired, and revoked states; and an explicit-copy one-time secret result cleared on dismiss, navigation, reload, or unmount. It never implies an administrator role or renders a stored secret/digest. |
 | `/admin/jobs` | Finance job list with incremental pagination. Protected. Utilitarian filters and stacked summaries. |
 | `/admin/jobs/:jobId` | Generic admin job detail route. Protected. |
 | `/admin/finance/fx` | Admin FX diagnostics and manual sync route. Protected. |
@@ -338,7 +339,7 @@
 - Direct entry preserves the requested finance job route after tenant resolution.
 - If multiple tenants are joined and no active tenant is stored yet, the route shows a tenant selector and explicit active-tenant prompt before rendering job detail content.
 - Once the active tenant is resolved, the page renders Bootstrap summary,
-  lifecycle/timeline, requester/worker/attempt, schedule-occurrence where
+  lifecycle/timeline, requester/attempt, schedule-occurrence where
   present, and safe-error cards with finance-local back links and local
   date-time formatting. Job detail never exposes command input, generic
   progress, or generic result payloads.

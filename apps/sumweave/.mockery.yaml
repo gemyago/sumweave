@@ -25,12 +25,19 @@ packages:
       jwtService:
       refreshTokenStore:
       passwordHasher:
+      accessTokenStore:
+      accessTokenUserReader:
+  github.com/gemyago/sumweave/apps/sumweave/internal:
+    interfaces:
+      schemaMigrator:
   github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware:
     interfaces:
       jwtValidator:
+      accessTokenValidator:
   github.com/gemyago/sumweave/apps/sumweave/internal/api/http/v1controllers:
     interfaces:
       AuthenticatingService:
+      accessTokenLifecycleService:
       bankConnectionService:
       financeService:
       providerSnapshotService:

@@ -967,6 +967,7 @@ func TestTransferMatchingService(t *testing.T) {
 		params := TransferMatchingSubmission{
 			ActorUserID: "user-" + fake.UUID().V4(), TenantID: "tenant-" + fake.UUID().V4(),
 			RangeStart: now, RangeEndExclusive: now.Add(time.Hour),
+			RequesterSource: CommandRequesterSourceIntegration, IdempotencyKey: "key-" + fake.UUID().V4(),
 		}
 		access := newMockaccessGuardStore(t)
 		pairs := newMocktransferMatchingPairStore(t)
@@ -983,7 +984,9 @@ func TestTransferMatchingService(t *testing.T) {
 		reference := TransferMatchingJobRef{ID: "message-" + fake.UUID().V4()}
 		access.EXPECT().IsTenantMember(t.Context(), params.TenantID, params.ActorUserID).Return(true, nil).Once()
 		publisher.EXPECT().
-			PublishSemanticCommand(t.Context(), mock.Anything).
+			PublishSemanticCommand(t.Context(), mock.MatchedBy(func(command SemanticCommand) bool {
+				return command.IdempotencyKey == params.IdempotencyKey
+			})).
 			Return(DispatchReference{MessageID: reference.ID}, nil).
 			Once()
 		service, err = NewTransferMatchingService(TransferMatchingServiceArgs{

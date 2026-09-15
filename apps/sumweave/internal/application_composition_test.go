@@ -129,6 +129,52 @@ func TestApplicationComposition(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("migrates access tokens after users and refresh tokens", func(t *testing.T) {
+		users := newMockschemaMigrator(t)
+		refreshTokens := newMockschemaMigrator(t)
+		accessTokens := newMockschemaMigrator(t)
+		order := make([]string, 0, 3)
+		users.EXPECT().AutoMigrate().Run(func() { order = append(order, "users") }).Return(nil)
+		refreshTokens.EXPECT().AutoMigrate().Run(func() { order = append(order, "refreshTokens") }).Return(nil)
+		accessTokens.EXPECT().AutoMigrate().Run(func() { order = append(order, "accessTokens") }).Return(nil)
+		migrator := NewDatabaseMigrator(DatabaseMigrationDeps{
+			RootLogger:        telemetry.RootTestLogger(),
+			AuthUsers:         users,
+			AuthRefreshTokens: refreshTokens,
+			AuthAccessTokens:  accessTokens,
+		})
+		require.NoError(t, migrator.migrateAuthentication(t.Context()))
+		require.Equal(t, []string{"users", "refreshTokens", "accessTokens"}, order)
+	})
+
+	t.Run("returns the failing authentication migration component", func(t *testing.T) {
+		makeMigrator := func(t *testing.T) (*DatabaseMigrator, *mockschemaMigrator, *mockschemaMigrator, *mockschemaMigrator) {
+			t.Helper()
+			users := newMockschemaMigrator(t)
+			refreshTokens := newMockschemaMigrator(t)
+			accessTokens := newMockschemaMigrator(t)
+			return NewDatabaseMigrator(DatabaseMigrationDeps{
+				RootLogger:        telemetry.RootTestLogger(),
+				AuthUsers:         users,
+				AuthRefreshTokens: refreshTokens,
+				AuthAccessTokens:  accessTokens,
+			}), users, refreshTokens, accessTokens
+		}
+		migrationErr := errors.New(faker.New().Lorem().Sentence(2))
+		migrator, users, _, _ := makeMigrator(t)
+		users.EXPECT().AutoMigrate().Return(migrationErr)
+		require.ErrorIs(t, migrator.migrateAuthentication(t.Context()), migrationErr)
+		migrator, users, refreshTokens, _ := makeMigrator(t)
+		users.EXPECT().AutoMigrate().Return(nil)
+		refreshTokens.EXPECT().AutoMigrate().Return(migrationErr)
+		require.ErrorIs(t, migrator.migrateAuthentication(t.Context()), migrationErr)
+		migrator, users, refreshTokens, accessTokens := makeMigrator(t)
+		users.EXPECT().AutoMigrate().Return(nil)
+		refreshTokens.EXPECT().AutoMigrate().Return(nil)
+		accessTokens.EXPECT().AutoMigrate().Return(migrationErr)
+		require.ErrorIs(t, migrator.migrateAuthentication(t.Context()), migrationErr)
+	})
+
 	t.Run("application database opens the prepared runtime-role schema and runs migrations", func(t *testing.T) {
 		values, err := config.LoadValues(config.ValuesLoadInput{Environment: "test"})
 		require.NoError(t, err)
@@ -177,6 +223,11 @@ func TestApplicationComposition(t *testing.T) {
 			Logger:      telemetry.RootTestLogger(),
 		})
 		require.NoError(t, err)
+		accessTokens, err := auth.NewAccessTokenStore(auth.AccessTokenStoreDeps{
+			SQLDB: database, DatabaseDSN: migrationDSN,
+			TablePrefix: rootConfig.Application.Database.TablePrefix, Logger: telemetry.RootTestLogger(),
+		})
+		require.NoError(t, err)
 		migrator := NewDatabaseMigrator(DatabaseMigrationDeps{
 			RootLogger:                      telemetry.RootTestLogger(),
 			AgentRuntimeStorageType:         rootConfig.AgentRuntime.Storage.Type,
@@ -187,6 +238,7 @@ func TestApplicationComposition(t *testing.T) {
 			ApplicationSQLDB:                database,
 			AuthUsers:                       users,
 			AuthRefreshTokens:               refreshTokens,
+			AuthAccessTokens:                accessTokens,
 		})
 		require.NoError(t, migrator.Migrate(t.Context()))
 		canceledContext, cancel := context.WithCancel(t.Context())

@@ -1416,7 +1416,6 @@ func newParamsParserFinanceListFinanceTransactionProviderSnapshots(rootHandler *
 
 type paramsParserFinanceListFinanceTransactions struct {
 	bindTenantID requestParamBinder[string, string]
-	bindLimit requestParamBinder[[]string, int64]
 	bindAccountID requestParamBinder[[]string, string]
 	bindSource requestParamBinder[[]string, string]
 	bindStatus requestParamBinder[[]string, string]
@@ -1425,6 +1424,7 @@ type paramsParserFinanceListFinanceTransactions struct {
 	bindEndDate requestParamBinder[[]string, time.Time]
 	bindSort requestParamBinder[[]string, ListFinanceTransactionsParamsSort]
 	bindIncludeHidden requestParamBinder[[]string, bool]
+	bindLimit requestParamBinder[[]string, int64]
 	bindOffset requestParamBinder[[]string, int64]
 }
 
@@ -1458,15 +1458,6 @@ func newParamsParserFinanceListFinanceTransactions(rootHandler *RootHandler) par
 				rootHandler.knownParsers.stringParser,
 			),
 			validateValue: NewSimpleFieldValidator[string](
-			),
-		}),
-		bindLimit: newRequestParamBinder(binderParams[[]string, int64]{
-			required: true,
-			parseValue: parseMultiValueParamAsSoloValue(
-				rootHandler.knownParsers.int64Parser,
-			),
-			validateValue: NewSimpleFieldValidator[int64](
-				NewMinMaxValueValidator[int64](1, false, true),
 			),
 		}),
 		bindAccountID: newRequestParamBinder(binderParams[[]string, string]{
@@ -1531,6 +1522,16 @@ func newParamsParserFinanceListFinanceTransactions(rootHandler *RootHandler) par
 				rootHandler.knownParsers.boolParser,
 			),
 			validateValue: NewSimpleFieldValidator[bool](
+			),
+		}),
+		bindLimit: newRequestParamBinder(binderParams[[]string, int64]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				rootHandler.knownParsers.int64Parser,
+			),
+			validateValue: NewSimpleFieldValidator[int64](
+				NewMinMaxValueValidator[int64](1, false, true),
+				NewMinMaxValueValidator[int64](200, false, false),
 			),
 		}),
 		bindOffset: newRequestParamBinder(binderParams[[]string, int64]{
@@ -4169,7 +4170,7 @@ func newFinanceControllerBuilder(app *RootHandler) *financeControllerBuilder {
 				*TriggerFinanceConnectionSyncParams,
 				*FinanceFxSyncResponse,
 			]{
-				defaultStatus: 200,
+				defaultStatus: 202,
 				paramsParser:  newParamsParserFinanceTriggerFinanceConnectionSync(app),
 			},
 		),

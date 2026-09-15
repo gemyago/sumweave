@@ -11,6 +11,7 @@ import (
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/server"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/runtime/httpapi"
@@ -32,12 +33,15 @@ func TestFinanceProviderSnapshotController(t *testing.T) {
 					return
 				}
 				ctx := httpapi.ContextWithCallerIdentity(request.Context(), &testCallerIdentity{userID: userID})
+				ctx = auth.ContextWithCaller(ctx, auth.Caller{UserID: userID, Credential: auth.CredentialKindSession})
 				next.ServeHTTP(w, request.WithContext(ctx))
 			})
 		})
 		controller := NewFinanceController(FinanceControllerDeps{
 			ProviderSnapshotService: snapshots,
 			AuthMiddleware:          auth,
+			TokenReadMiddleware:     auth,
+			TokenWriteMiddleware:    auth,
 		})
 		return server.NewTestRootHandler().RegisterFinanceRoutes(controller)
 	}
@@ -173,7 +177,7 @@ func TestFinanceProviderSnapshotController(t *testing.T) {
 			target string
 			status int
 		}{
-			{target: "/api/v1/finance/tenants/" + tenantID + "/accounts/" + accountID + "/provider-snapshots", status: http.StatusUnauthorized},
+			{target: "/api/v1/finance/tenants/" + tenantID + "/accounts/" + accountID + "/provider-snapshots", status: http.StatusForbidden},
 			{target: "/api/v1/finance/tenants/" + tenantID + "/accounts/" + accountID + "/provider-snapshots/" + snapshotID, status: http.StatusNotFound},
 			{target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID + "/provider-snapshots", status: http.StatusNotFound},
 			{target: "/api/v1/finance/tenants/" + tenantID + "/transactions/" + transactionID + "/provider-snapshots/" + snapshotID, status: http.StatusInternalServerError},

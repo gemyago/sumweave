@@ -9,13 +9,29 @@ import (
 )
 
 var (
-	ErrTransactionNotFound = errors.New("transaction not found")
-	ErrHiddenAccount       = errors.New("account is hidden")
-	ErrDuplicateTagID      = errors.New("duplicate tag id")
-	ErrTagNotAssignable    = errors.New("tag is not assignable")
-	ErrInvalidTransferPair = errors.New("invalid transfer pair")
-	ErrTransferNotLinked   = errors.New("transfer pair is not linked")
+	ErrTransactionNotFound         = errors.New("transaction not found")
+	ErrHiddenAccount               = errors.New("account is hidden")
+	ErrDuplicateTagID              = errors.New("duplicate tag id")
+	ErrTagNotAssignable            = errors.New("tag is not assignable")
+	ErrInvalidTransferPair         = errors.New("invalid transfer pair")
+	ErrTransferNotLinked           = errors.New("transfer pair is not linked")
+	ErrInvalidTransactionListLimit = errors.New("invalid transaction list limit")
 )
+
+const (
+	DefaultTransactionListLimit int64 = 100
+	MaxTransactionListLimit     int64 = 200
+)
+
+func NormalizeTransactionListLimit(limit int64) (int64, error) {
+	if limit == 0 {
+		return DefaultTransactionListLimit, nil
+	}
+	if limit < 1 || limit > MaxTransactionListLimit {
+		return 0, ErrInvalidTransactionListLimit
+	}
+	return limit, nil
+}
 
 type RecordTransactionParams struct {
 	ActorUserID      string

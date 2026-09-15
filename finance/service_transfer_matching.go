@@ -49,6 +49,8 @@ type TransferMatchingSubmission struct {
 	TenantID          string
 	RangeStart        time.Time
 	RangeEndExclusive time.Time
+	RequesterSource   string
+	IdempotencyKey    string
 }
 
 type TransferMatchingJobRef struct {
@@ -116,6 +118,9 @@ func (s *TransferMatchingService) Submit(
 	ctx context.Context,
 	params TransferMatchingSubmission,
 ) (TransferMatchingJobRef, error) {
+	if err := validateHTTPCommandRequesterSource(params.RequesterSource); err != nil {
+		return TransferMatchingJobRef{}, err
+	}
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return TransferMatchingJobRef{}, err
 	}
@@ -131,9 +136,9 @@ func (s *TransferMatchingService) Submit(
 		TransferMatchingExplicitCommandTopic,
 		TransferMatchingExplicitCommand{
 			TenantID: params.TenantID, RangeStart: params.RangeStart, RangeEndExclusive: params.RangeEndExclusive,
-			Requester: CommandRequester{UserID: params.ActorUserID, Source: CommandRequesterSourceOperator},
+			Requester: CommandRequester{UserID: params.ActorUserID, Source: params.RequesterSource},
 		},
-		"finance.transfer-matching.explicit:"+s.newID(),
+		params.IdempotencyKey,
 	)
 	if err != nil {
 		return TransferMatchingJobRef{}, err

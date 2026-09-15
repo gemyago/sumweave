@@ -18,6 +18,8 @@ import (
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/server"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/app"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/appdispatch"
+	"github.com/gemyago/sumweave/apps/sumweave/internal/auth"
 	financepkg "github.com/gemyago/sumweave/finance"
 	"github.com/gemyago/sumweave/finance/domain"
 	"github.com/gemyago/sumweave/runtime/httpapi"
@@ -42,6 +44,7 @@ func TestFinanceController(t *testing.T) {
 					r.Context(),
 					&testCallerIdentity{userID: userID},
 				)
+				ctx = auth.ContextWithCaller(ctx, auth.Caller{UserID: userID, Credential: auth.CredentialKindSession})
 				next.ServeHTTP(w, r.WithContext(ctx))
 			})
 		}
@@ -83,6 +86,8 @@ func TestFinanceController(t *testing.T) {
 			CSVImportService:      service,
 			BankConnectionService: bankConnections,
 			AuthMiddleware:        auth,
+			TokenReadMiddleware:   auth,
+			TokenWriteMiddleware:  auth,
 		}
 		for _, option := range options {
 			option(&deps)
@@ -246,6 +251,129 @@ func TestFinanceController(t *testing.T) {
 		assert.NotEqual(t, jobIDs[0], jobIDs[1])
 	})
 
+	t.Run("derives credential-scoped idempotency metadata without exposing client keys", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		clientKey := "retry " + fake.UUID().V4()
+		start := time.Date(2026, time.September, 6, 9, 30, 0, 0, time.FixedZone("east", 3*60*60))
+		body := `{"rangeStart":"` + start.Format(time.RFC3339Nano) +
+			`","rangeEndExclusive":"` + start.Add(time.Hour).Format(time.RFC3339Nano) + `"}`
+		makeCallerAuth := func(caller auth.Caller) middleware.AuthMiddleware {
+			return func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					next.ServeHTTP(w, req.WithContext(auth.ContextWithCaller(req.Context(), caller)))
+				})
+			}
+		}
+		for _, testCase := range []struct {
+			name   string
+			caller auth.Caller
+			source string
+		}{
+			{
+				name: "session", caller: auth.Caller{UserID: userID, Credential: auth.CredentialKindSession},
+				source: financepkg.CommandRequesterSourceOperator,
+			},
+			{
+				name: "access token", caller: auth.Caller{
+					UserID: userID, Credential: auth.CredentialKindAccessToken,
+					AccessToken: &auth.AccessTokenCaller{TokenID: "token-" + fake.UUID().V4()},
+				},
+				source: financepkg.CommandRequesterSourceIntegration,
+			},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				service := newMockclassificationService(t)
+				service.EXPECT().
+					Submit(mock.Anything, mock.MatchedBy(func(params financepkg.SubmitClassificationParams) bool {
+						return params.ActorUserID == userID && params.TenantID == tenantID &&
+							params.RequesterSource == testCase.source && params.IdempotencyKey != "" &&
+							!strings.Contains(params.IdempotencyKey, clientKey)
+					})).
+					Return(financepkg.ClassificationJobRef{ID: "job-" + fake.UUID().V4()}, nil).
+					Once()
+				handler := newHandler(
+					newMockfinanceService(t), newMockbankConnectionService(t), makeCallerAuth(testCase.caller),
+					withClassificationService(service),
+				)
+				request := newRequest(
+					http.MethodPost,
+					"/api/v1/finance/tenants/"+tenantID+"/transactions/classify",
+					body,
+					false,
+				)
+				request.Header.Set("Idempotency-Key", clientKey)
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, request)
+				require.Equal(t, http.StatusAccepted, response.Code, response.Body.String())
+			})
+		}
+		sessionCaller := auth.ContextWithCaller(t.Context(), auth.Caller{
+			UserID: userID, Credential: auth.CredentialKindSession,
+		})
+		_, _, firstSessionKey, metadataErr := financeTriggerMetadata(
+			sessionCaller,
+			classificationIdempotencyOperation,
+			clientKey,
+		)
+		require.NoError(t, metadataErr)
+		_, _, secondSessionKey, metadataErr := financeTriggerMetadata(
+			sessionCaller,
+			classificationIdempotencyOperation,
+			clientKey,
+		)
+		require.NoError(t, metadataErr)
+		assert.Equal(t, firstSessionKey, secondSessionKey)
+		otherSessionCaller := auth.ContextWithCaller(t.Context(), auth.Caller{
+			UserID: "user-" + fake.UUID().V4(), Credential: auth.CredentialKindSession,
+		})
+		_, _, otherSessionKey, metadataErr := financeTriggerMetadata(
+			otherSessionCaller,
+			classificationIdempotencyOperation,
+			clientKey,
+		)
+		require.NoError(t, metadataErr)
+		assert.NotEqual(t, firstSessionKey, otherSessionKey)
+
+		invalidService := newMockclassificationService(t)
+		invalidHandler := newHandler(
+			newMockfinanceService(t), newMockbankConnectionService(t),
+			makeCallerAuth(auth.Caller{UserID: userID, Credential: auth.CredentialKindSession}),
+			withClassificationService(invalidService),
+		)
+		invalidRequest := newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/transactions/classify",
+			body,
+			false,
+		)
+		invalidRequest.Header.Set("Idempotency-Key", "\tinvalid")
+		invalidResponse := httptest.NewRecorder()
+		invalidHandler.ServeHTTP(invalidResponse, invalidRequest)
+		require.Equal(t, http.StatusBadRequest, invalidResponse.Code)
+
+		conflictService := newMockclassificationService(t)
+		conflictService.EXPECT().Submit(mock.Anything, mock.Anything).Return(
+			financepkg.ClassificationJobRef{}, fmt.Errorf("publish: %w", appdispatch.ErrPublicationConflict),
+		).Once()
+		conflictHandler := newHandler(
+			newMockfinanceService(t), newMockbankConnectionService(t),
+			makeCallerAuth(auth.Caller{UserID: userID, Credential: auth.CredentialKindSession}),
+			withClassificationService(conflictService),
+		)
+		conflictRequest := newRequest(
+			http.MethodPost,
+			"/api/v1/finance/tenants/"+tenantID+"/transactions/classify",
+			body,
+			false,
+		)
+		conflictRequest.Header.Set("Idempotency-Key", clientKey)
+		conflictResponse := httptest.NewRecorder()
+		conflictHandler.ServeHTTP(conflictResponse, conflictRequest)
+		require.Equal(t, http.StatusConflict, conflictResponse.Code)
+		assert.Equal(t, "idempotency_conflict", decode(t, conflictResponse)["code"])
+	})
+
 	t.Run("rejects an invalid explicit classification range", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()
@@ -275,7 +403,7 @@ func TestFinanceController(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, response.Code)
 	})
 
-	t.Run("returns an empty unauthorized response for explicit classification tenant denial", func(t *testing.T) {
+	t.Run("returns forbidden for explicit classification tenant denial", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()
 		service := newMockclassificationService(t)
@@ -298,8 +426,8 @@ func TestFinanceController(t *testing.T) {
 			body,
 			true,
 		))
-		assert.Equal(t, http.StatusUnauthorized, response.Code)
-		assert.Empty(t, response.Body.String())
+		assert.Equal(t, http.StatusForbidden, response.Code)
+		assert.NotEmpty(t, response.Body.String())
 	})
 
 	t.Run("manages ordered classification rules through registered routes", func(t *testing.T) {
@@ -426,7 +554,7 @@ func TestFinanceController(t *testing.T) {
 					http.MethodPost, "/api/v1/finance/tenants/"+tenantID+"/classification-rules", requestBody, true,
 				))
 				require.Equal(t, tc.want, response.Code)
-				assert.Empty(t, response.Body.String())
+				assert.NotEmpty(t, response.Body.String())
 			})
 		}
 
@@ -517,8 +645,8 @@ func TestFinanceController(t *testing.T) {
 			body,
 			true,
 		))
-		assert.Equal(t, http.StatusUnauthorized, response.Code)
-		assert.Empty(t, response.Body.String())
+		assert.Equal(t, http.StatusForbidden, response.Code)
+		assert.NotEmpty(t, response.Body.String())
 	})
 
 	t.Run("returns the documented category rule conflict body", func(t *testing.T) {
@@ -919,7 +1047,7 @@ func TestFinanceController(t *testing.T) {
 		require.Equal(t, http.StatusConflict, unlinkResponse.Code)
 	})
 
-	t.Run("transaction CSV preview returns 400 with an empty body for invalid input", func(t *testing.T) {
+	t.Run("transaction CSV preview returns safe 400 for invalid input", func(t *testing.T) {
 		userID := fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()
 		service := newMockfinanceService(t)
@@ -946,7 +1074,7 @@ func TestFinanceController(t *testing.T) {
 		)
 
 		require.Equal(t, http.StatusBadRequest, resp.Code)
-		assert.Empty(t, resp.Body.String())
+		assert.NotEmpty(t, resp.Body.String())
 	})
 
 	t.Run("tenant routes delegate into finance service", func(t *testing.T) {
@@ -1281,7 +1409,7 @@ func TestFinanceController(t *testing.T) {
 			assert.Empty(t, resp.Body.String())
 		})
 
-		t.Run("non member returns unauthorized", func(t *testing.T) {
+		t.Run("non member returns forbidden", func(t *testing.T) {
 			service := newMockfinanceService(t)
 			service.EXPECT().UpdateTenant(mock.Anything, mock.Anything).Return(
 				domain.Tenant{},
@@ -1303,7 +1431,7 @@ func TestFinanceController(t *testing.T) {
 				),
 			)
 
-			require.Equal(t, http.StatusUnauthorized, resp.Code)
+			require.Equal(t, http.StatusForbidden, resp.Code)
 		})
 
 		t.Run("invalid display currency returns bad request before controller logic", func(t *testing.T) {
@@ -2010,7 +2138,7 @@ func TestFinanceController(t *testing.T) {
 					body:   `{"reason":"manual","windowStart":"2026-06-20T09:00:00Z","windowEnd":"2026-06-21T09:00:00Z"}`,
 					field:  "jobId",
 					want:   "job-sync-1",
-					status: http.StatusOK,
+					status: http.StatusAccepted,
 				},
 				{
 					method: http.MethodGet,
@@ -2247,7 +2375,7 @@ func TestFinanceController(t *testing.T) {
 			err    error
 			status int
 		}{
-			{name: "tenant access denied", err: financepkg.ErrTenantAccessDenied, status: http.StatusUnauthorized},
+			{name: "tenant access denied", err: financepkg.ErrTenantAccessDenied, status: http.StatusForbidden},
 			{name: "connection not found", err: financepkg.ErrBankConnectionNotFound, status: http.StatusNotFound},
 			{name: "blank name", err: financepkg.ErrBankConnectionNameRequired, status: http.StatusBadRequest},
 		} {
@@ -2271,7 +2399,7 @@ func TestFinanceController(t *testing.T) {
 					makeAuthMiddleware(userID),
 				).ServeHTTP(resp, newRequest(http.MethodPatch, target, `{"name":`+fmt.Sprintf("%q", name)+`}`, true))
 				require.Equal(t, tc.status, resp.Code)
-				assert.Empty(t, resp.Body.String())
+				assert.NotEmpty(t, resp.Body.String())
 			})
 		}
 	})
@@ -2520,7 +2648,7 @@ func TestFinanceController(t *testing.T) {
 			response,
 			newRequest(http.MethodGet, target, "", true),
 		)
-		require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+		require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
 	})
 
 	t.Run("nullable finance responses omit absent state and preserve present state", func(t *testing.T) {
@@ -2974,14 +3102,14 @@ func TestFinanceController(t *testing.T) {
 			wantEnd    *time.Time
 			wantStatus int
 		}{
-			{name: "omitted", body: `{}`, wantStatus: http.StatusOK},
+			{name: "omitted", body: `{}`, wantStatus: http.StatusAccepted},
 			{
 				name: "fixed offsets",
 				body: `{"windowStart":"` + existingAt.Format(time.RFC3339Nano) +
 					`","windowEnd":"` + requestAt.Format(time.RFC3339Nano) + `"}`,
-				wantStart: &existingAt, wantEnd: &requestAt, wantStatus: http.StatusOK,
+				wantStart: &existingAt, wantEnd: &requestAt, wantStatus: http.StatusAccepted,
 			},
-			{name: "null", body: `{"windowStart":null}`, wantStatus: http.StatusOK},
+			{name: "null", body: `{"windowStart":null}`, wantStatus: http.StatusAccepted},
 			{name: "empty", body: `{"windowStart":""}`, wantStatus: http.StatusBadRequest},
 			{name: "malformed", body: `{"windowStart":"not-a-timestamp"}`, wantStatus: http.StatusBadRequest},
 			{name: "year one", body: `{"windowStart":"0001-01-01T00:00:00Z"}`, wantStatus: http.StatusBadRequest},
@@ -3015,7 +3143,7 @@ func TestFinanceController(t *testing.T) {
 							JobType: financepkg.BankConnectionSyncJobType,
 						}, nil
 					})
-				if testCase.wantStatus != http.StatusOK {
+				if testCase.wantStatus != http.StatusAccepted {
 					call.Maybe()
 				}
 				resp := httptest.NewRecorder()
@@ -3160,7 +3288,7 @@ func TestFinanceController(t *testing.T) {
 			require.Equal(t, http.StatusConflict, resp.Code)
 		})
 
-		t.Run("audit denial returns 401", func(t *testing.T) {
+		t.Run("audit denial returns forbidden", func(t *testing.T) {
 			service := newMockfinanceService(t)
 			service.EXPECT().
 				GetCSVImportAudit(mock.Anything, mock.Anything).
@@ -3171,7 +3299,7 @@ func TestFinanceController(t *testing.T) {
 				newMockbankConnectionService(t),
 				makeAuthMiddleware(userID),
 			).ServeHTTP(resp, newRequest(http.MethodGet, "/api/v1/finance/tenants/tenant-a/imports/import-a", "", true))
-			require.Equal(t, http.StatusUnauthorized, resp.Code)
+			require.Equal(t, http.StatusForbidden, resp.Code)
 		})
 
 		t.Run("preview invalid json returns 400", func(t *testing.T) {
@@ -3246,7 +3374,7 @@ func TestFinanceController(t *testing.T) {
 			assert.NotContains(t, resp.Body.String(), secret)
 		})
 
-		t.Run("provider client failures return an empty client error", func(t *testing.T) {
+		t.Run("provider client failures return a safe client error", func(t *testing.T) {
 			service := newMockfinanceService(t)
 			bankConnections := newMockbankConnectionService(t)
 			bankConnections.EXPECT().
@@ -3277,10 +3405,10 @@ func TestFinanceController(t *testing.T) {
 			)
 
 			require.Equal(t, http.StatusBadRequest, resp.Code)
-			assert.Empty(t, resp.Body.String())
+			assert.NotEmpty(t, resp.Body.String())
 		})
 
-		t.Run("redirect finish provider client failures return an empty client error", func(t *testing.T) {
+		t.Run("redirect finish provider client failures return a safe client error", func(t *testing.T) {
 			service := newMockfinanceService(t)
 			bankConnections := newMockbankConnectionService(t)
 			bankConnections.EXPECT().
@@ -3311,7 +3439,7 @@ func TestFinanceController(t *testing.T) {
 			)
 
 			require.Equal(t, http.StatusBadRequest, resp.Code)
-			assert.Empty(t, resp.Body.String())
+			assert.NotEmpty(t, resp.Body.String())
 		})
 
 		t.Run("unconfigured bank providers return sanitized client error", func(t *testing.T) {

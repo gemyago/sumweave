@@ -16,4 +16,5 @@ var _ = fmt.Sprint
 type UserInfo struct { 
 	ID string `json:"id"`
 	Username string `json:"username"`
+	AccessToken *AccessTokenMetadata `json:"accessToken,omitempty"`
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/middleware"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/server"
@@ -31,11 +32,16 @@ func TestAuthController(t *testing.T) {
 		return next
 	})
 
-	newController := func(svc AuthenticatingService) *AuthController {
+	newControllerWithTokens := func(svc AuthenticatingService, tokens accessTokenLifecycleService, authMiddleware middleware.AuthMiddleware) *AuthController {
 		return NewAuthController(AuthControllerDeps{
-			AuthService:    svc,
-			AuthMiddleware: passthroughAuthMiddleware,
+			AuthService:         svc,
+			AuthMiddleware:      authMiddleware,
+			TokenReadMiddleware: passthroughAuthMiddleware,
+			AccessTokens:        tokens,
 		})
+	}
+	newController := func(svc AuthenticatingService) *AuthController {
+		return newControllerWithTokens(svc, newMockaccessTokenLifecycleService(t), passthroughAuthMiddleware)
 	}
 
 	t.Run("Login", func(t *testing.T) {
@@ -93,7 +99,7 @@ func TestAuthController(t *testing.T) {
 			newAuthHTTPHandler(ctrl).ServeHTTP(w, req)
 
 			assert.Equal(t, http.StatusUnauthorized, w.Code)
-			assert.Empty(t, w.Body.String())
+			assert.NotEmpty(t, w.Body.String())
 		})
 
 		t.Run("missing username - 400", func(t *testing.T) {
@@ -217,7 +223,7 @@ func TestAuthController(t *testing.T) {
 			newAuthHTTPHandler(ctrl).ServeHTTP(w, req)
 
 			assert.Equal(t, http.StatusUnauthorized, w.Code)
-			assert.Empty(t, w.Body.String())
+			assert.NotEmpty(t, w.Body.String())
 		})
 
 		t.Run("missing refreshToken - 400", func(t *testing.T) {
@@ -271,6 +277,37 @@ func TestAuthController(t *testing.T) {
 	})
 
 	t.Run("Me", func(t *testing.T) {
+		t.Run("access token caller returns safe token metadata", func(t *testing.T) {
+			svc := NewMockAuthenticatingService(t)
+			userID := fake.UUID().V4()
+			tokenID := fake.UUID().V4()
+			now := time.Now()
+			svc.EXPECT().CurrentUser(mock.Anything, userID).Return(&auth.UserInfo{
+				ID: userID, Username: fake.Internet().User(),
+			}, nil)
+			ctrl := newController(svc)
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
+			request = request.WithContext(auth.ContextWithCaller(
+				t.Context(),
+				auth.Caller{
+					UserID: userID, Credential: auth.CredentialKindAccessToken,
+					AccessToken: &auth.AccessTokenCaller{
+						TokenID: tokenID, TokenName: fake.Lorem().Word(),
+						Permission: auth.AccessTokenPermissionReadOnly,
+						Status:     auth.AccessTokenStatusActive,
+						CreatedAt:  now,
+						UpdatedAt:  now,
+					},
+				},
+			))
+			response := httptest.NewRecorder()
+			newAuthHTTPHandler(ctrl).ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code)
+			var body models.UserInfo
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+			require.NotNil(t, body.AccessToken)
+			assert.Equal(t, "swat_"+tokenID[:8]+"...", body.AccessToken.Hint)
+		})
 		t.Run("with CallerIdentity - 200 with user info", func(t *testing.T) {
 			svc := NewMockAuthenticatingService(t)
 			ctrl := newController(svc)
@@ -283,7 +320,10 @@ func TestAuthController(t *testing.T) {
 				Username: username,
 			}, nil)
 
-			ctx := httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID})
+			ctx := auth.ContextWithCaller(
+				httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID}),
+				auth.Caller{UserID: userID, Credential: auth.CredentialKindSession},
+			)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
 			req = req.WithContext(ctx)
 			w := httptest.NewRecorder()
@@ -318,7 +358,10 @@ func TestAuthController(t *testing.T) {
 
 			svc.EXPECT().CurrentUser(mock.Anything, userID).Return(nil, auth.ErrUserNotFound)
 
-			ctx := httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID})
+			ctx := auth.ContextWithCaller(
+				httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID}),
+				auth.Caller{UserID: userID, Credential: auth.CredentialKindSession},
+			)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
 			req = req.WithContext(ctx)
 			w := httptest.NewRecorder()
@@ -336,7 +379,10 @@ func TestAuthController(t *testing.T) {
 
 			svc.EXPECT().CurrentUser(mock.Anything, userID).Return(nil, errors.New("unexpected error"))
 
-			ctx := httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID})
+			ctx := auth.ContextWithCaller(
+				httpapi.ContextWithCallerIdentity(t.Context(), &testCallerIdentity{userID: userID}),
+				auth.Caller{UserID: userID, Credential: auth.CredentialKindSession},
+			)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
 			req = req.WithContext(ctx)
 			w := httptest.NewRecorder()
@@ -345,6 +391,174 @@ func TestAuthController(t *testing.T) {
 
 			assert.Equal(t, http.StatusInternalServerError, w.Code)
 		})
+	})
+
+	t.Run("Access tokens", func(t *testing.T) {
+		makeMetadata := func() auth.AccessTokenMetadata {
+			return auth.AccessTokenMetadata{
+				ID: fake.UUID().V4(), Name: fake.Lorem().Word(), Hint: "swat_018f...",
+				Permission: auth.AccessTokenPermissionReadOnly, Status: auth.AccessTokenStatusActive,
+				CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			}
+		}
+		withSessionCaller := func(request *http.Request, userID string) *http.Request {
+			return request.WithContext(auth.ContextWithCaller(
+				t.Context(),
+				auth.Caller{UserID: userID, Credential: auth.CredentialKindSession},
+			))
+		}
+
+		t.Run("create returns 201 with camel case one-time value", func(t *testing.T) {
+			svc := NewMockAuthenticatingService(t)
+			tokens := newMockaccessTokenLifecycleService(t)
+			userID := fake.UUID().V4()
+			metadata := makeMetadata()
+			apiToken := fake.Internet().Password()
+			tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(params auth.CreateAccessTokenParams) bool {
+				return params.UserID == userID &&
+					params.Name == metadata.Name &&
+					params.Permission == metadata.Permission
+			})).Return(&auth.IssuedAccessToken{AccessTokenMetadata: metadata, APIToken: apiToken}, nil)
+			body, err := json.Marshal(map[string]string{
+				"name":       metadata.Name,
+				"permission": string(metadata.Permission),
+			})
+			require.NoError(t, err)
+			request := withSessionCaller(
+				httptest.NewRequest(http.MethodPost, "/api/v1/auth/access-tokens", bytes.NewReader(body)),
+				userID,
+			)
+			response := httptest.NewRecorder()
+			newAuthHTTPHandler(newControllerWithTokens(
+				svc, tokens, passthroughAuthMiddleware,
+			)).ServeHTTP(response, request)
+			require.Equal(t, http.StatusCreated, response.Code)
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+			assert.Equal(t, apiToken, payload["apiToken"])
+			assert.NotContains(t, payload, "userId")
+			tokenPayload := payload["token"].(map[string]any)
+			assert.Equal(t, metadata.Hint, tokenPayload["hint"])
+			assert.NotContains(t, tokenPayload, "secretHash")
+		})
+
+		t.Run("list returns metadata only", func(t *testing.T) {
+			svc := NewMockAuthenticatingService(t)
+			tokens := newMockaccessTokenLifecycleService(t)
+			userID := fake.UUID().V4()
+			metadata := makeMetadata()
+			tokens.EXPECT().List(mock.Anything, userID).Return([]auth.AccessTokenMetadata{metadata}, nil)
+			response := httptest.NewRecorder()
+			request := withSessionCaller(
+				httptest.NewRequest(http.MethodGet, "/api/v1/auth/access-tokens", http.NoBody),
+				userID,
+			)
+			newAuthHTTPHandler(newControllerWithTokens(
+				svc, tokens, passthroughAuthMiddleware,
+			)).ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code)
+			assert.NotContains(t, response.Body.String(), "apiToken")
+			assert.NotContains(t, response.Body.String(), "secretHash")
+		})
+
+		t.Run("missing caller and invalid create input return safe errors", func(t *testing.T) {
+			listResponse := httptest.NewRecorder()
+			newAuthHTTPHandler(newControllerWithTokens(
+				NewMockAuthenticatingService(t), newMockaccessTokenLifecycleService(t), passthroughAuthMiddleware,
+			)).ServeHTTP(
+				listResponse,
+				httptest.NewRequest(http.MethodGet, "/api/v1/auth/access-tokens", http.NoBody).WithContext(t.Context()),
+			)
+			require.Equal(t, http.StatusUnauthorized, listResponse.Code)
+
+			svc := NewMockAuthenticatingService(t)
+			tokens := newMockaccessTokenLifecycleService(t)
+			userID := fake.UUID().V4()
+			metadata := makeMetadata()
+			tokens.EXPECT().Create(mock.Anything, mock.Anything).Return(nil, auth.ErrInvalidAccessTokenInput)
+			body, err := json.Marshal(map[string]string{
+				"name":       metadata.Name,
+				"permission": string(metadata.Permission),
+			})
+			require.NoError(t, err)
+			createResponse := httptest.NewRecorder()
+			createRequest := withSessionCaller(
+				httptest.NewRequest(http.MethodPost, "/api/v1/auth/access-tokens", bytes.NewReader(body)),
+				userID,
+			)
+			newAuthHTTPHandler(newControllerWithTokens(
+				svc, tokens, passthroughAuthMiddleware,
+			)).ServeHTTP(createResponse, createRequest)
+			require.Equal(t, http.StatusBadRequest, createResponse.Code)
+		})
+
+		t.Run("rotate and revoke use exact statuses", func(t *testing.T) {
+			svc := NewMockAuthenticatingService(t)
+			tokens := newMockaccessTokenLifecycleService(t)
+			userID := fake.UUID().V4()
+			metadata := makeMetadata()
+			tokens.EXPECT().Rotate(mock.Anything, auth.RotateAccessTokenRequest{
+				UserID: userID, TokenID: metadata.ID, ExpiresAt: nil,
+			}).Return(&auth.IssuedAccessToken{
+				AccessTokenMetadata: metadata, APIToken: fake.Internet().Password(),
+			}, nil)
+			rotateResponse := httptest.NewRecorder()
+			rotatePath := "/api/v1/auth/access-tokens/" + metadata.ID + "/rotate"
+			rotateRequest := withSessionCaller(
+				httptest.NewRequest(http.MethodPost, rotatePath, bytes.NewBufferString(`{"expiresAt":null}`)),
+				userID,
+			)
+			newAuthHTTPHandler(newControllerWithTokens(
+				svc, tokens, passthroughAuthMiddleware,
+			)).ServeHTTP(rotateResponse, rotateRequest)
+			require.Equal(t, http.StatusOK, rotateResponse.Code)
+
+			tokens.EXPECT().Revoke(mock.Anything, userID, metadata.ID).Return(nil)
+			revokeResponse := httptest.NewRecorder()
+			revokeRequest := withSessionCaller(
+				httptest.NewRequest(http.MethodDelete, "/api/v1/auth/access-tokens/"+metadata.ID, http.NoBody),
+				userID,
+			)
+			newAuthHTTPHandler(newControllerWithTokens(
+				svc, tokens, passthroughAuthMiddleware,
+			)).ServeHTTP(revokeResponse, revokeRequest)
+			require.Equal(t, http.StatusNoContent, revokeResponse.Code)
+		})
+
+		t.Run("rotate rejects an omitted nullable expiry", func(t *testing.T) {
+			svc := NewMockAuthenticatingService(t)
+			tokens := newMockaccessTokenLifecycleService(t)
+			userID := fake.UUID().V4()
+			tokenID := fake.UUID().V4()
+			rotatePath := "/api/v1/auth/access-tokens/" + tokenID + "/rotate"
+			response := httptest.NewRecorder()
+			request := withSessionCaller(
+				httptest.NewRequest(http.MethodPost, rotatePath, bytes.NewBufferString(`{}`)),
+				userID,
+			)
+
+			newAuthHTTPHandler(newControllerWithTokens(
+				svc, tokens, passthroughAuthMiddleware,
+			)).ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusBadRequest, response.Code)
+			assert.JSONEq(
+				t,
+				`{"code":"invalid_request","message":"The request is invalid.","correlationId":""}`,
+				response.Body.String(),
+			)
+		})
+	})
+	t.Run("lifecycle error mapping", func(t *testing.T) {
+		for _, lifecycleErr := range []error{
+			auth.ErrInvalidAccessTokenInput,
+			auth.ErrAccessTokenNotFound,
+			auth.ErrAccessTokenConflict,
+			errors.New(fake.Lorem().Sentence(2)),
+		} {
+			require.Error(t, lifecycleError(lifecycleErr, fake.UUID().V4()))
+		}
+		assert.Equal(t, "swat_", accessTokenHint(fake.Letter()))
 	})
 }
 
