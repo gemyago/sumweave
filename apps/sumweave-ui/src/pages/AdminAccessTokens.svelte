@@ -67,7 +67,7 @@
         await load()
       } else {
         issued = await accessTokensApi.rotate(token.id, { expiresAt: token.expiresAt ?? null })
-        items = [issued.token, ...items.filter((item) => item.id !== token.id)]
+        await load()
       }
       confirming = null
     } catch (cause) {

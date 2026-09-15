@@ -18,7 +18,7 @@ historical and unchanged.
 
 ## 4. Rotated Token Metadata Refresh
 
-- [ ] 4.1 Refresh the Admin token metadata list after successful rotation without discarding the separately held one-time replacement secret; must follow the UI test-first flow by adding faker-backed page coverage that the server list shows both the revoked original and replacement after rotation, then implement the narrow list refresh and run focused UI checks, the required UI visual review/manual changed-flow smoke, and `make affected-lint-test`.
+- [x] 4.1 Refresh the Admin token metadata list after successful rotation without discarding the separately held one-time replacement secret; must follow the UI test-first flow by adding faker-backed page coverage that the server list shows both the revoked original and replacement after rotation, then implement the narrow list refresh and run focused UI checks, the required UI visual review/manual changed-flow smoke, and `make affected-lint-test`.
 
 ## 5. Required CI Dashboard-Test Stabilization
 
