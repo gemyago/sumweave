@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -572,4 +574,12 @@ func TestBuildProcessRoots(t *testing.T) {
 		_, err = values.WorkerRoot("production")
 		require.ErrorContains(t, err, "application database dsn")
 	})
+}
+
+func TestProcessRootsAccessTokenIsolation(t *testing.T) {
+	for _, rootType := range []reflect.Type{reflect.TypeFor[WorkerRoot](), reflect.TypeFor[SchedulerRoot]()} {
+		for index := range rootType.NumField() {
+			require.NotContains(t, strings.ToLower(rootType.Field(index).Name), "token")
+		}
+	}
 }

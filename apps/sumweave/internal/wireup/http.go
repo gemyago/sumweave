@@ -2,10 +2,12 @@ package wireup
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
 	stdhttp "net/http"
+	"time"
 
 	"github.com/gemyago/sumweave/apps/sumweave/internal"
 	apphttp "github.com/gemyago/sumweave/apps/sumweave/internal/api/http"
@@ -36,12 +38,13 @@ type HTTPOptions struct {
 // HTTPRoot owns the fully composed API application and no durable worker or
 // scheduler resources.
 type HTTPRoot struct {
-	Handler       stdhttp.Handler
-	Server        *server.HTTPServer
-	Runner        *agent.Runner
-	ToolsRegistry *agent.ToolsRegistry
-	rootLogger    *slog.Logger
-	shutdownHooks *lifecycle.ShutdownHooks
+	Handler            stdhttp.Handler
+	Server             *server.HTTPServer
+	Runner             *agent.Runner
+	ToolsRegistry      *agent.ToolsRegistry
+	accessTokenService *auth.AccessTokenService
+	rootLogger         *slog.Logger
+	shutdownHooks      *lifecycle.ShutdownHooks
 }
 
 // BuildHTTP loads typed configuration and eagerly constructs the API-only HTTP
@@ -201,6 +204,24 @@ func buildHTTP(
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP refresh token store: %w", err)
 	}
+	accessTokenStore, err := auth.NewAccessTokenStore(auth.AccessTokenStoreDeps{
+		SQLDB: database, DatabaseDSN: rootConfig.Application.Database.DSN,
+		TablePrefix: rootConfig.Application.Database.TablePrefix, Logger: rootLogger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP access token store: %w", err)
+	}
+	accessTokenService, err := auth.NewAccessTokenService(auth.AccessTokenServiceDeps{
+		Store:        accessTokenStore,
+		Users:        userStore,
+		IDGen:        ids,
+		Clock:        time.Now,
+		RandomReader: rand.Reader,
+		Logger:       rootLogger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP access token service: %w", err)
+	}
 	jwtService, err := auth.NewJWTService(auth.JWTServiceDeps{
 		SigningKey: rootConfig.Auth.JWTSigningKey, AccessTokenTTL: rootConfig.Auth.AccessTokenTTL, Logger: rootLogger,
 	})
@@ -341,12 +362,13 @@ func buildHTTP(
 		OTELMiddleware:    otelMiddleware,
 	})
 	return &HTTPRoot{
-		Handler:       router,
-		Server:        httpServer,
-		Runner:        runtime.Runner,
-		ToolsRegistry: runtime.ToolsRegistry,
-		rootLogger:    rootLogger,
-		shutdownHooks: shutdownHooks,
+		Handler:            router,
+		Server:             httpServer,
+		Runner:             runtime.Runner,
+		ToolsRegistry:      runtime.ToolsRegistry,
+		accessTokenService: accessTokenService,
+		rootLogger:         rootLogger,
+		shutdownHooks:      shutdownHooks,
 	}, nil
 }
 

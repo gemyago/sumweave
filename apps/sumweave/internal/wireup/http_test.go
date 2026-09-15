@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gemyago/sumweave/apps/sumweave/internal"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/api/http/server"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/config"
 	"github.com/gemyago/sumweave/apps/sumweave/internal/system/lifecycle"
@@ -55,6 +56,26 @@ func TestBuildHTTP(t *testing.T) {
 		root.Handler.ServeHTTP(response, request)
 		require.Equal(t, http.StatusOK, response.Code)
 		require.NotNil(t, root.Server)
+		require.NotNil(t, root.accessTokenService)
+	})
+
+	t.Run("constructs access tokens without implicitly migrating their schema", func(t *testing.T) {
+		values, err := config.LoadValues(config.ValuesLoadInput{Environment: "test"})
+		require.NoError(t, err)
+		rootConfig, err := values.HTTPRoot("test")
+		require.NoError(t, err)
+		database, err := internal.OpenApplicationSQLDB(rootConfig.Application.Database.DSN)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, database.Close()) })
+		prefix := "access_token_startup_" + fake.UUID().V4()[0:8] + "_"
+		t.Setenv("APP_APPLICATION_DATABASE_TABLEPREFIX", prefix)
+		t.Setenv("APP_DATADIR", t.TempDir())
+		root, err := BuildHTTP(t.Context(), HTTPOptions{Environment: "test"})
+		require.NoError(t, err)
+		require.NoError(t, root.Close(t.Context()))
+		var tableName *string
+		require.NoError(t, database.QueryRow("SELECT to_regclass($1)", prefix+"auth_access_tokens").Scan(&tableName))
+		require.Nil(t, tableName)
 	})
 
 	t.Run("closes the composed root when noop completes", func(t *testing.T) {

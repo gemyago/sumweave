@@ -204,6 +204,13 @@ func buildMigration(
 	if err != nil {
 		return nil, fmt.Errorf("create migration auth refresh token store: %w", err)
 	}
+	accessTokenStore, err := auth.NewAccessTokenStore(auth.AccessTokenStoreDeps{
+		SQLDB: database, DatabaseDSN: rootConfig.Application.Database.DSN,
+		TablePrefix: rootConfig.Application.Database.TablePrefix, Logger: rootLogger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create migration access token store: %w", err)
+	}
 
 	return &MigrationRoot{
 		migrator: internal.NewDatabaseMigrator(internal.DatabaseMigrationDeps{
@@ -216,6 +223,7 @@ func buildMigration(
 			ApplicationSQLDB:                database,
 			AuthUsers:                       userStore,
 			AuthRefreshTokens:               refreshTokenStore,
+			AuthAccessTokens:                accessTokenStore,
 		}),
 		shutdownHooks: shutdownHooks,
 	}, nil
