@@ -58,7 +58,12 @@ func setupCommands() *cobra.Command {
 func newRootCmd(deps commandDeps) *cobra.Command {
 	var configPath string
 	var baseURL string
-	cmd := &cobra.Command{Use: "swmd", Short: "Sumweave direct HTTP client", SilenceUsage: true}
+	cmd := &cobra.Command{
+		Use:          "swmd",
+		Short:        "Sumweave direct HTTP client",
+		Long:         "swmd is the HTTP-only command-line client for Sumweave finance data and jobs.",
+		SilenceUsage: true,
+	}
 	cmd.SetIn(deps.stdin)
 	cmd.SetOut(deps.stdout)
 	cmd.SetErr(deps.stderr)
@@ -80,6 +85,7 @@ func newRootCmd(deps commandDeps) *cobra.Command {
 		newClassificationCmd(loadClient),
 		newTransferCmd(loadClient),
 		newJobCmd(loadClient),
+		newSkillCmd(),
 	)
 	return cmd
 }
@@ -88,7 +94,11 @@ type clientLoader func() (*swmdclient.Client, error)
 
 //nolint:goconst,govet // Cobra command names remain readable beside their flag wiring.
 func newAuthCmd(deps commandDeps, configPath, baseURL *string, loadClient clientLoader) *cobra.Command {
-	cmd := &cobra.Command{Use: "auth", Short: "Manage local authentication configuration"}
+	cmd := &cobra.Command{
+		Use:         "auth",
+		Short:       "Manage local authentication configuration",
+		Annotations: map[string]string{commandExcludeFromSkillAnnotation: commandAnnotationEnabled},
+	}
 	configure := &cobra.Command{
 		Use:   "configure",
 		Short: "Persist a base URL and token read from stdin",
@@ -114,9 +124,11 @@ func newAuthCmd(deps commandDeps, configPath, baseURL *string, loadClient client
 
 	var offline bool
 	status := &cobra.Command{
-		Use:   "status",
-		Short: "Show redacted local authentication status",
-		Args:  cobra.NoArgs,
+		Use:         "status",
+		Short:       "Show redacted authentication and current-user status",
+		Example:     "swmd auth status\nswmd auth status --offline",
+		Args:        cobra.NoArgs,
+		Annotations: map[string]string{commandIncludeInSkillAnnotation: commandAnnotationEnabled},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			config, _, err := deps.resolver.Resolve(*baseURL, *configPath)
 			if err != nil {
@@ -162,9 +174,11 @@ func newAuthCmd(deps commandDeps, configPath, baseURL *string, loadClient client
 func newTenantCmd(loadClient clientLoader) *cobra.Command {
 	cmd := &cobra.Command{Use: "tenant", Short: "Read tenants"}
 	cmd.AddCommand(&cobra.Command{
-		Use:  "list",
-		Args: cobra.NoArgs,
-		RunE: getCommand(loadClient, "/api/v1/finance/tenants", nil, &models.FinanceTenantListResponse{}),
+		Use:     "list",
+		Short:   "List accessible finance tenants",
+		Example: "swmd tenant list",
+		Args:    cobra.NoArgs,
+		RunE:    getCommand(loadClient, "/api/v1/finance/tenants", nil, &models.FinanceTenantListResponse{}),
 	})
 	return cmd
 }
@@ -174,23 +188,41 @@ func newAccountCmd(loadClient clientLoader) *cobra.Command {
 	cmd := &cobra.Command{Use: "account", Short: "Read accounts and provider data"}
 	var tenant, account, snapshot string
 	var includeHidden bool
-	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		query := url.Values{}
-		if cmd.Flags().Changed("include-hidden") {
-			query.Set("includeHidden", strconv.FormatBool(includeHidden))
-		}
-		return getAndWrite(cmd, loadClient, financeRoute(tenant, "accounts"), query, &models.FinanceAccountsResponse{})
-	}}
+	list := &cobra.Command{
+		Use:     "list",
+		Short:   "List accounts for a tenant",
+		Example: `swmd account list --tenant "$TENANT_ID"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			query := url.Values{}
+			if cmd.Flags().Changed("include-hidden") {
+				query.Set("includeHidden", strconv.FormatBool(includeHidden))
+			}
+			return getAndWrite(
+				cmd, loadClient, financeRoute(tenant, "accounts"), query, &models.FinanceAccountsResponse{},
+			)
+		},
+	}
 	list.Flags().StringVar(&tenant, "tenant", "", "Tenant ID")
 	list.Flags().BoolVar(&includeHidden, "include-hidden", false, "Include hidden accounts")
 	_ = list.MarkFlagRequired("tenant")
-	get := &cobra.Command{Use: "get", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return getAndWrite(cmd, loadClient, financeRoute(tenant, "accounts", account), nil, &models.FinanceAccount{})
-	}}
+	get := &cobra.Command{
+		Use:     "get",
+		Short:   "Get an account",
+		Example: `swmd account get --tenant "$TENANT_ID" --account "$ACCOUNT_ID"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return getAndWrite(
+				cmd, loadClient, financeRoute(tenant, "accounts", account), nil, &models.FinanceAccount{},
+			)
+		},
+	}
 	addTenantAndIDFlags(get, &tenant, "account", &account)
 	providerList := &cobra.Command{
-		Use:  "provider-data-list",
-		Args: cobra.NoArgs,
+		Use:     "provider-data-list",
+		Short:   "List stored provider snapshots for an account",
+		Example: `swmd account provider-data-list --tenant "$TENANT_ID" --account "$ACCOUNT_ID"`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return getAndWrite(
 				cmd, loadClient, financeRoute(tenant, "accounts", account, "provider-snapshots"),
@@ -200,8 +232,10 @@ func newAccountCmd(loadClient clientLoader) *cobra.Command {
 	}
 	addTenantAndIDFlags(providerList, &tenant, "account", &account)
 	providerGet := &cobra.Command{
-		Use:  "provider-data-get",
-		Args: cobra.NoArgs,
+		Use:     "provider-data-get",
+		Short:   "Get a stored provider snapshot for an account",
+		Example: `swmd account provider-data-get --tenant "$TENANT_ID" --account "$ACCOUNT_ID" --snapshot "$SNAPSHOT_ID"`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return getAndWrite(
 				cmd, loadClient, financeRoute(tenant, "accounts", account, "provider-snapshots", snapshot),
@@ -216,54 +250,70 @@ func newAccountCmd(loadClient clientLoader) *cobra.Command {
 	return cmd
 }
 
-//nolint:gocognit,goconst,govet // The command owns its complete public filter surface.
+//nolint:funlen,gocognit,goconst,govet // The command owns its complete public filter surface.
 func newTransactionCmd(loadClient clientLoader) *cobra.Command {
 	cmd := &cobra.Command{Use: "transaction", Short: "Read transactions and provider data"}
 	var tenant, account, transaction, snapshot, source, status, kind, startDate, endDate, sort string
 	var includeHidden bool
 	var limit, offset int64
-	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		if limit < 1 || limit > 200 {
-			return errors.New("--limit must be between 1 and 200")
-		}
-		if offset < 0 {
-			return errors.New("--offset must not be negative")
-		}
-		for _, value := range []string{startDate, endDate} {
-			if value != "" {
-				if _, err := parseTimestamp(value); err != nil {
-					return err
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List transactions for a tenant",
+		Long: "List transactions beginning at the requested offset and continue through bounded API pages until all matching " +
+			"transactions are returned.",
+		Example: `swmd transaction list --tenant "$TENANT_ID" --limit 100 --offset 0`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if limit < 1 || limit > 200 {
+				return errors.New("--limit must be between 1 and 200")
+			}
+			if offset < 0 {
+				return errors.New("--offset must not be negative")
+			}
+			for _, value := range []string{startDate, endDate} {
+				if value != "" {
+					if _, err := parseTimestamp(value); err != nil {
+						return err
+					}
 				}
 			}
-		}
-		query := url.Values{"limit": {strconv.FormatInt(limit, 10)}, "offset": {strconv.FormatInt(offset, 10)}}
-		for key, value := range map[string]string{"accountId": account, "source": source, "status": status, "kind": kind, "startDate": startDate, "endDate": endDate, "sort": sort} {
-			if value != "" {
-				query.Set(key, value)
+			query := url.Values{"limit": {strconv.FormatInt(limit, 10)}, "offset": {strconv.FormatInt(offset, 10)}}
+			for key, value := range map[string]string{
+				"accountId": account,
+				"source":    source,
+				"status":    status,
+				"kind":      kind,
+				"startDate": startDate,
+				"endDate":   endDate,
+				"sort":      sort,
+			} {
+				if value != "" {
+					query.Set(key, value)
+				}
 			}
-		}
-		if cmd.Flags().Changed("include-hidden") {
-			query.Set("includeHidden", strconv.FormatBool(includeHidden))
-		}
-		client, err := loadClient()
-		if err != nil {
-			return err
-		}
-		all := &models.FinanceTransactionsResponse{Items: make([]*models.FinanceTransaction, 0)}
-		for {
-			page := &models.FinanceTransactionsResponse{}
-			if err := client.Get(cmd.Context(), financeRoute(tenant, "transactions"), query, page); err != nil {
+			if cmd.Flags().Changed("include-hidden") {
+				query.Set("includeHidden", strconv.FormatBool(includeHidden))
+			}
+			client, err := loadClient()
+			if err != nil {
 				return err
 			}
-			all.Items = append(all.Items, page.Items...)
-			if len(page.Items) < int(limit) {
-				break
+			all := &models.FinanceTransactionsResponse{Items: make([]*models.FinanceTransaction, 0)}
+			for {
+				page := &models.FinanceTransactionsResponse{}
+				if err := client.Get(cmd.Context(), financeRoute(tenant, "transactions"), query, page); err != nil {
+					return err
+				}
+				all.Items = append(all.Items, page.Items...)
+				if len(page.Items) < int(limit) {
+					break
+				}
+				offset += limit
+				query.Set("offset", strconv.FormatInt(offset, 10))
 			}
-			offset += limit
-			query.Set("offset", strconv.FormatInt(offset, 10))
-		}
-		return writeJSON(cmd.OutOrStdout(), all)
-	}}
+			return writeJSON(cmd.OutOrStdout(), all)
+		},
+	}
 	list.Flags().StringVar(&tenant, "tenant", "", "Tenant ID")
 	_ = list.MarkFlagRequired("tenant")
 	list.Flags().StringVar(&account, "account", "", "Account ID")
@@ -276,16 +326,24 @@ func newTransactionCmd(loadClient clientLoader) *cobra.Command {
 	list.Flags().BoolVar(&includeHidden, "include-hidden", false, "Include hidden transactions")
 	list.Flags().Int64Var(&limit, "limit", 100, "Page size (1-200)")
 	list.Flags().Int64Var(&offset, "offset", 0, "Initial page offset")
-	get := &cobra.Command{Use: "get", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return getAndWrite(
-			cmd, loadClient, financeRoute(tenant, "transactions", transaction),
-			nil, &models.FinanceTransaction{},
-		)
-	}}
+	get := &cobra.Command{
+		Use:     "get",
+		Short:   "Get a transaction",
+		Example: `swmd transaction get --tenant "$TENANT_ID" --transaction "$TRANSACTION_ID"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return getAndWrite(
+				cmd, loadClient, financeRoute(tenant, "transactions", transaction),
+				nil, &models.FinanceTransaction{},
+			)
+		},
+	}
 	addTenantAndIDFlags(get, &tenant, "transaction", &transaction)
 	providerList := &cobra.Command{
-		Use:  "provider-data-list",
-		Args: cobra.NoArgs,
+		Use:     "provider-data-list",
+		Short:   "List stored provider snapshots for a transaction",
+		Example: `swmd transaction provider-data-list --tenant "$TENANT_ID" --transaction "$TRANSACTION_ID"`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return getAndWrite(
 				cmd, loadClient, financeRoute(tenant, "transactions", transaction, "provider-snapshots"),
@@ -295,8 +353,10 @@ func newTransactionCmd(loadClient clientLoader) *cobra.Command {
 	}
 	addTenantAndIDFlags(providerList, &tenant, "transaction", &transaction)
 	providerGet := &cobra.Command{
-		Use:  "provider-data-get",
-		Args: cobra.NoArgs,
+		Use:     "provider-data-get",
+		Short:   "Get a stored provider snapshot for a transaction",
+		Example: `swmd transaction provider-data-get --tenant "$TENANT_ID" --transaction "$TRANSACTION_ID" --snapshot "$SNAPSHOT_ID"`,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return getAndWrite(
 				cmd, loadClient, financeRoute(tenant, "transactions", transaction, "provider-snapshots", snapshot),
@@ -315,35 +375,48 @@ func newTransactionCmd(loadClient clientLoader) *cobra.Command {
 func newConnectionCmd(loadClient clientLoader) *cobra.Command {
 	cmd := &cobra.Command{Use: "connection", Short: "Read connections and submit synchronization"}
 	var tenant, connection, reason, windowStart, windowEnd, idempotencyKey string
-	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return getAndWrite(
-			cmd, loadClient, financeRoute(tenant, "connections"), nil,
-			&models.FinanceConnectionsResponse{},
-		)
-	}}
+	list := &cobra.Command{
+		Use:     "list",
+		Short:   "List connections for a tenant",
+		Example: `swmd connection list --tenant "$TENANT_ID"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return getAndWrite(
+				cmd, loadClient, financeRoute(tenant, "connections"), nil,
+				&models.FinanceConnectionsResponse{},
+			)
+		},
+	}
 	list.Flags().StringVar(&tenant, "tenant", "", "Tenant ID")
 	_ = list.MarkFlagRequired("tenant")
-	sync := &cobra.Command{Use: "sync", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		request := models.FinanceConnectionSyncRequest{Reason: reason}
-		if windowStart != "" {
-			value, err := parseTimestamp(windowStart)
-			if err != nil {
-				return err
+	sync := &cobra.Command{
+		Use:     "sync",
+		Short:   "Submit connection synchronization",
+		Long:    "Submit connection synchronization and return its job reference. Reuse the same idempotency key when retrying the same request.",
+		Example: `swmd connection sync --tenant "$TENANT_ID" --connection "$CONNECTION_ID" --idempotency-key "$IDEMPOTENCY_KEY"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			request := models.FinanceConnectionSyncRequest{Reason: reason}
+			if windowStart != "" {
+				value, err := parseTimestamp(windowStart)
+				if err != nil {
+					return err
+				}
+				request.WindowStart = &value
 			}
-			request.WindowStart = &value
-		}
-		if windowEnd != "" {
-			value, err := parseTimestamp(windowEnd)
-			if err != nil {
-				return err
+			if windowEnd != "" {
+				value, err := parseTimestamp(windowEnd)
+				if err != nil {
+					return err
+				}
+				request.WindowEnd = &value
 			}
-			request.WindowEnd = &value
-		}
-		return postAndWrite(
-			cmd, loadClient, financeRoute(tenant, "connections", connection, "sync"),
-			request, &models.FinanceFxSyncResponse{}, idempotencyKey,
-		)
-	}}
+			return postAndWrite(
+				cmd, loadClient, financeRoute(tenant, "connections", connection, "sync"),
+				request, &models.FinanceFxSyncResponse{}, idempotencyKey,
+			)
+		},
+	}
 	addTenantAndIDFlags(sync, &tenant, "connection", &connection)
 	sync.Flags().StringVar(&reason, "reason", "", "Synchronization reason")
 	sync.Flags().StringVar(&windowStart, "window-start", "", "RFC 3339 window start")
@@ -357,21 +430,28 @@ func newConnectionCmd(loadClient clientLoader) *cobra.Command {
 func newClassificationCmd(loadClient clientLoader) *cobra.Command {
 	cmd := &cobra.Command{Use: "classification", Short: "Submit transaction classification"}
 	var tenant, rangeStart, rangeEnd, idempotencyKey string
-	run := &cobra.Command{Use: "run", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		start, err := parseTimestamp(rangeStart)
-		if err != nil {
-			return err
-		}
-		end, err := parseTimestamp(rangeEnd)
-		if err != nil {
-			return err
-		}
-		return postAndWrite(
-			cmd, loadClient, financeRoute(tenant, "transactions", "classify"),
-			models.FinanceTransactionClassificationRequest{RangeStart: start, RangeEndExclusive: end},
-			&models.FinanceClassificationJobResponse{}, idempotencyKey,
-		)
-	}}
+	run := &cobra.Command{
+		Use:     "run",
+		Short:   "Submit transaction classification for a time range",
+		Long:    "Submit classification for the exact RFC 3339 range and return its job reference.",
+		Example: `swmd classification run --tenant "$TENANT_ID" --range-start "2026-09-01T00:00:00+02:00" --range-end-exclusive "2026-10-01T00:00:00+02:00"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			start, err := parseTimestamp(rangeStart)
+			if err != nil {
+				return err
+			}
+			end, err := parseTimestamp(rangeEnd)
+			if err != nil {
+				return err
+			}
+			return postAndWrite(
+				cmd, loadClient, financeRoute(tenant, "transactions", "classify"),
+				models.FinanceTransactionClassificationRequest{RangeStart: start, RangeEndExclusive: end},
+				&models.FinanceClassificationJobResponse{}, idempotencyKey,
+			)
+		},
+	}
 	run.Flags().StringVar(&tenant, "tenant", "", "Tenant ID")
 	run.Flags().StringVar(&rangeStart, "range-start", "", "Inclusive RFC 3339 timestamp")
 	run.Flags().StringVar(&rangeEnd, "range-end-exclusive", "", "Exclusive RFC 3339 timestamp")
@@ -387,21 +467,28 @@ func newClassificationCmd(loadClient clientLoader) *cobra.Command {
 func newTransferCmd(loadClient clientLoader) *cobra.Command {
 	cmd := &cobra.Command{Use: "transfer", Short: "Submit transfer matching"}
 	var tenant, rangeStart, rangeEnd, idempotencyKey string
-	match := &cobra.Command{Use: "match", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		start, err := parseTimestamp(rangeStart)
-		if err != nil {
-			return err
-		}
-		end, err := parseTimestamp(rangeEnd)
-		if err != nil {
-			return err
-		}
-		return postAndWrite(
-			cmd, loadClient, financeRoute(tenant, "transactions", "match-transfers"),
-			models.FinanceTransferMatchingRequest{RangeStart: start, RangeEndExclusive: end},
-			&models.FinanceTransferMatchingJobResponse{}, idempotencyKey,
-		)
-	}}
+	match := &cobra.Command{
+		Use:     "match",
+		Short:   "Submit transfer matching for a time range",
+		Long:    "Submit transfer matching for the exact RFC 3339 range and return its job reference.",
+		Example: `swmd transfer match --tenant "$TENANT_ID" --range-start "2026-09-01T00:00:00+02:00" --range-end-exclusive "2026-10-01T00:00:00+02:00"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			start, err := parseTimestamp(rangeStart)
+			if err != nil {
+				return err
+			}
+			end, err := parseTimestamp(rangeEnd)
+			if err != nil {
+				return err
+			}
+			return postAndWrite(
+				cmd, loadClient, financeRoute(tenant, "transactions", "match-transfers"),
+				models.FinanceTransferMatchingRequest{RangeStart: start, RangeEndExclusive: end},
+				&models.FinanceTransferMatchingJobResponse{}, idempotencyKey,
+			)
+		},
+	}
 	match.Flags().StringVar(&tenant, "tenant", "", "Tenant ID")
 	match.Flags().StringVar(&rangeStart, "range-start", "", "Inclusive RFC 3339 timestamp")
 	match.Flags().StringVar(&rangeEnd, "range-end-exclusive", "", "Exclusive RFC 3339 timestamp")
@@ -419,48 +506,68 @@ func newJobCmd(loadClient clientLoader) *cobra.Command {
 	var job, cursor string
 	var statuses, types, sources []string
 	var limit int64
-	list := &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		if limit < 1 || limit > 100 {
-			return errors.New("--limit must be between 1 and 100")
-		}
-		query := url.Values{"limit": {strconv.FormatInt(limit, 10)}}
-		for key, values := range map[string][]string{"status": statuses, "jobType": types, "source": sources} {
-			for _, value := range values {
-				query.Add(key, value)
+	list := &cobra.Command{
+		Use:     "list",
+		Short:   "List requester-visible jobs",
+		Example: "swmd job list --status queued,running --limit 25",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if limit < 1 || limit > 100 {
+				return errors.New("--limit must be between 1 and 100")
 			}
-		}
-		if cursor != "" {
-			query.Set("cursor", cursor)
-		}
-		return getAndWrite(cmd, loadClient, "/api/v1/jobs", query, &models.JobListResponse{})
-	}}
+			query := url.Values{"limit": {strconv.FormatInt(limit, 10)}}
+			for key, values := range map[string][]string{"status": statuses, "jobType": types, "source": sources} {
+				for _, value := range values {
+					query.Add(key, value)
+				}
+			}
+			if cursor != "" {
+				query.Set("cursor", cursor)
+			}
+			return getAndWrite(cmd, loadClient, "/api/v1/jobs", query, &models.JobListResponse{})
+		},
+	}
 	list.Flags().StringSliceVar(&statuses, "status", nil, "Job statuses")
 	list.Flags().StringSliceVar(&types, "job-type", nil, "Job types")
 	list.Flags().StringSliceVar(&sources, "source", nil, "Requester sources")
 	list.Flags().Int64Var(&limit, "limit", 25, "Page size (1-100)")
 	list.Flags().StringVar(&cursor, "cursor", "", "Page cursor")
-	get := &cobra.Command{Use: "get", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		return getAndWrite(cmd, loadClient, jobRoute(job), nil, &models.JobDetailResponse{})
-	}}
+	get := &cobra.Command{
+		Use:     "get",
+		Short:   "Get a job",
+		Example: `swmd job get --job "$JOB_ID"`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return getAndWrite(cmd, loadClient, jobRoute(job), nil, &models.JobDetailResponse{})
+		},
+	}
 	get.Flags().StringVar(&job, "job", "", "Job ID")
 	_ = get.MarkFlagRequired("job")
 	var interval, timeout time.Duration
-	wait := &cobra.Command{Use: "wait", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := loadClient()
-		if err != nil {
-			return err
-		}
-		output, waitErr := client.WaitForJob(cmd.Context(), job, swmdclient.WaitOptions{
-			Interval: interval,
-			Timeout:  timeout,
-		})
-		if output != nil {
-			if err := writeJSON(cmd.OutOrStdout(), output); err != nil {
+	wait := &cobra.Command{
+		Use:   "wait",
+		Short: "Wait for a job to reach a terminal state",
+		Long: "Poll an expected job until success, failure, not-found after the materialization grace period, or timeout. " +
+			"Write terminal job JSON and exit nonzero for failure or timeout.",
+		Example: `swmd job wait --job "$JOB_ID" --interval 1s --timeout 1m`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			client, err := loadClient()
+			if err != nil {
 				return err
 			}
-		}
-		return waitErr
-	}}
+			output, waitErr := client.WaitForJob(cmd.Context(), job, swmdclient.WaitOptions{
+				Interval: interval,
+				Timeout:  timeout,
+			})
+			if output != nil {
+				if err := writeJSON(cmd.OutOrStdout(), output); err != nil {
+					return err
+				}
+			}
+			return waitErr
+		},
+	}
 	wait.Flags().StringVar(&job, "job", "", "Expected job ID")
 	wait.Flags().DurationVar(&interval, "interval", defaultJobWaitInterval, "Polling interval")
 	wait.Flags().DurationVar(&timeout, "timeout", defaultJobWaitTimeout, "Overall wait timeout")

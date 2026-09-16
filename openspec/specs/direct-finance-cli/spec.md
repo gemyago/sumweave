@@ -162,3 +162,38 @@ respecting lazy observed-job materialization.
 - **AND** it MUST return a nonzero timeout outcome without waiting for the
   independent HTTP-client request timeout.
 
+### Requirement: Direct Client Generates Agent Instructions
+
+The direct client SHALL provide `swmd skill`, an offline projection of its live
+Cobra command tree as one installable `SKILL.md` written to stdout.
+
+#### Scenario: Skill generation is offline and deterministic
+
+- **WHEN** a user invokes `swmd skill` with no arguments
+- **THEN** it MUST write one deterministic Markdown document with fixed `swmd`
+  frontmatter name and description to stdout
+- **AND** it MUST not resolve configuration or credentials, read stdin, write
+  files, or send HTTP requests
+- **AND** output write failures MUST return a nonzero result with the original
+  error context.
+
+#### Scenario: Skill projects the safe command surface
+
+- **WHEN** the skill document is generated
+- **THEN** it MUST render global flags once and included commands, local flags,
+  descriptions, usage, and examples from the live Cobra tree
+- **AND** it MUST separate required flags from optional flags using Cobra's
+  required-flag annotation
+- **AND** it MUST omit hidden flags, help flags, inherited flag repetition,
+  hidden/help/completion commands, excluded commands, and their descendants
+  unless a descendant is explicitly included
+- **AND** an explicit include MUST NOT override hidden or built-in filtering.
+
+#### Scenario: Skill protects credential configuration
+
+- **WHEN** an agent follows the generated skill document
+- **THEN** it MUST use JSON stdout and treat stderr or nonzero exits as failures
+- **AND** it MUST supply explicit tenant flags, preserve RFC 3339 offsets, reuse
+  idempotency keys for retries, and wait for trigger jobs when needed
+- **AND** it MUST use only `swmd auth status` for authentication inspection
+- **AND** it MUST NOT use `swmd auth configure` or `swmd auth clear`.
