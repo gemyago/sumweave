@@ -66,7 +66,7 @@ func writeSkillGuide(root *cobra.Command, out io.Writer) error {
 	guide.WriteString("## `" + root.CommandPath() + "`\n\n")
 	guide.WriteString(commandDescription(root) + "\n\n")
 	guide.WriteString(renderCommandUsage(root) + "\n")
-	renderSkillFlags(&guide, "Global Flags", root.PersistentFlags())
+	renderSkillFlags(&guide, "Global Flags", root.PersistentFlags(), skillRootSubcommandLevel+1)
 	renderSkillCommand(&guide, root, skillRootSubcommandLevel)
 
 	if _, err := out.Write([]byte(guide.String())); err != nil {
@@ -103,7 +103,7 @@ func renderSkillCommand(out *strings.Builder, cmd *cobra.Command, level int) {
 			out.WriteString(strings.Repeat("#", level+1) + " `" + child.CommandPath() + "`\n\n")
 			out.WriteString(commandDescription(child) + "\n\n")
 			out.WriteString(renderCommandUsage(child) + "\n\n")
-			renderSkillFlags(out, "Flags", child.NonInheritedFlags())
+			renderSkillFlags(out, "Flags", child.NonInheritedFlags(), level+2)
 			renderSkillExample(out, child)
 		}
 
@@ -123,14 +123,18 @@ func renderSkillExample(out *strings.Builder, cmd *cobra.Command) {
 	out.WriteString("Examples:\n\n```bash\n" + example + "\n```\n\n")
 }
 
-func renderSkillFlags(out *strings.Builder, heading string, flags *pflag.FlagSet) {
+func renderSkillFlags(out *strings.Builder, heading string, flags *pflag.FlagSet, levels ...int) {
 	if flags == nil || !containsRenderableFlags(flags) {
 		return
 	}
-	out.WriteString("### " + heading + "\n\n")
+	headingLevel := 3
+	if len(levels) > 0 {
+		headingLevel = levels[0]
+	}
+	out.WriteString(strings.Repeat("#", headingLevel) + " " + heading + "\n\n")
 	required, optional := splitRenderableFlags(flags)
-	renderFlagGroup(out, "Required Parameters", required)
-	renderFlagGroup(out, "Optional Parameters", optional)
+	renderFlagGroup(out, "Required Parameters", required, headingLevel+1)
+	renderFlagGroup(out, "Optional Parameters", optional, headingLevel+1)
 }
 
 func containsRenderableFlags(flags *pflag.FlagSet) bool {
@@ -174,11 +178,15 @@ func renderFlag(flag *pflag.Flag) string {
 	return name + ": " + strings.TrimSpace(flag.Usage)
 }
 
-func renderFlagGroup(out *strings.Builder, heading string, flags []*pflag.Flag) {
+func renderFlagGroup(out *strings.Builder, heading string, flags []*pflag.Flag, levels ...int) {
 	if len(flags) == 0 {
 		return
 	}
-	out.WriteString("#### " + heading + "\n\n")
+	headingLevel := 4
+	if len(levels) > 0 {
+		headingLevel = levels[0]
+	}
+	out.WriteString(strings.Repeat("#", headingLevel) + " " + heading + "\n\n")
 	for _, flag := range flags {
 		out.WriteString("- " + renderFlag(flag) + "\n")
 	}

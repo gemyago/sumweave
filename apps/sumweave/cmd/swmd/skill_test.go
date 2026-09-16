@@ -85,15 +85,33 @@ func TestSkillCommand(t *testing.T) {
 		require.NoError(t, makeRoot(&output).Execute())
 		guide := output.String()
 		section := strings.Split(strings.Split(guide, "#### `swmd classification run`\n\n")[1], "### `swmd connection`")[0]
-		require.Contains(t, section, "#### Required Parameters")
-		require.Contains(t, section, "#### Optional Parameters")
+		require.Contains(t, section, "###### Required Parameters")
+		require.Contains(t, section, "###### Optional Parameters")
 		require.Less(
 			t,
-			strings.Index(section, "#### Required Parameters"),
-			strings.Index(section, "#### Optional Parameters"),
+			strings.Index(section, "###### Required Parameters"),
+			strings.Index(section, "###### Optional Parameters"),
 		)
 		require.Less(t, strings.Index(section, "--range-end-exclusive"), strings.Index(section, "--range-start"))
 		require.Less(t, strings.Index(section, "--range-start"), strings.Index(section, "--tenant"))
+	})
+
+	t.Run("keeps nested command flags below their command heading", func(t *testing.T) {
+		var output bytes.Buffer
+		require.NoError(t, makeRoot(&output).Execute())
+		guide := output.String()
+		accountList := strings.SplitN(guide, "#### `swmd account list`\n\n", 2)
+		require.Len(t, accountList, 2)
+		section := strings.SplitN(accountList[1], "#### `swmd account get`\n\n", 2)[0]
+		require.Contains(t, section, "##### Flags\n\n")
+		require.Contains(t, section, "###### Required Parameters\n\n")
+		require.Contains(t, section, "###### Optional Parameters\n\n")
+		require.Less(t, strings.Index(section, "##### Flags"), strings.Index(section, "###### Required Parameters"))
+		require.Less(
+			t,
+			strings.Index(section, "###### Required Parameters"),
+			strings.Index(section, "###### Optional Parameters"),
+		)
 	})
 
 	t.Run("returns useful renderer errors", func(t *testing.T) {
