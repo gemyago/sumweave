@@ -185,6 +185,7 @@ The rules are:
 - Jobs and sync-window events use the same range classifier.
 - PM2 local apps are `api`, `worker`, and `ui`; backend operations target `backend`.
 - Use direct PM2 commands rather than root npm PM2 wrapper scripts.
+- Use `swmd` to interact with live system. Run `go run ./apps/sumweave/cmd/swmd skill` to learn how it works.
 
 Gopher skill must be used prior to **writing** any Go code, or **planning** go code changes.
 

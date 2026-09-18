@@ -113,6 +113,7 @@ The rules are:
 - Put required test defaults in test.yaml, not per-test env.
 - Keep files referenced by test.yaml as committed test fixtures, never use real secrets or ssh keys, generate fake random values instead.
 - Run local backend CLI commands with `apps/sumweave` as CWD.
+- `swmd skill` renders offline agent instructions and never resolves credentials or calls the API.
 - Error responses stay empty unless a documented endpoint contract justifies a safe body.
 - Only wireup should consume app config; components use native inputs.
 - Explicit roots stop message routers before the shared SQL database.

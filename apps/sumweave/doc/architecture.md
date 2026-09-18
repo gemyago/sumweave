@@ -8,6 +8,12 @@ HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`s
 not compose server, finance persistence, runtime, appdispatch, or jobs stores;
 it calls the existing app API with a personal access token.
 
+`swmd skill` is an offline, stdout-only projection of the live `swmd` Cobra
+tree. It writes an installable agent `SKILL.md` with the safe finance/jobs
+command surface, flags, usage, and examples without resolving credentials,
+reading stdin, writing files, or calling the API. Credential-mutating auth
+commands are excluded while the redacted auth-status command is included.
+
 ## Stack
 
 | Area | Choice |
@@ -148,6 +154,8 @@ it calls the existing app API with a personal access token.
 - `swmd auth configure --base-url <url> --token-stdin` is the persisted setup
   command. Its file is private (`0700` parent, atomic `0600` file); resource
   commands emit one JSON result on stdout and diagnostics on stderr.
+- `swmd skill` generates offline agent instructions from command metadata. It
+  never resolves credentials or calls the API.
 
 ## Decisions (why not X)
 
