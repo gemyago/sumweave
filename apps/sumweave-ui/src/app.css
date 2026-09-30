@@ -158,18 +158,47 @@ html:not([data-theme]) {
   }
 }
 
-@media (max-width: 575.98px) {
-  /* A11y: hide the Bootstrap-generated breadcrumb separator on mobile-hidden breadcrumbs. */
-  .finance-shell-breadcrumb {
-    --bs-breadcrumb-divider: '';
+@media (max-width: 575px) {
+  /* A11y: phone Finance navigation controls need 44px touch targets without widening desktop nav. */
+  .finance-primary-nav-target {
+    min-height: 44px;
+  }
+
+  #finance-primary-navigation .finance-primary-nav-target {
+    display: flex;
+    align-items: center;
   }
 }
 
-@media (min-width: 992px) {
-  /* Shell containment: the narrow xl rail must wrap its longest Bootstrap nav label. */
-  .finance-shell-nav-link {
-    width: 100%;
+/* Shell widget sizing: contain the dropdown on phones. */
+.finance-shell-user-menu {
+  /* Shell containment: anchor to the trigger without Bootstrap's Popper JS. */
+  top: 100%;
+  right: 0;
+  left: auto;
+  width: min(20rem, calc(100vw - 1rem));
+  max-height: calc(100dvh - 4rem);
+  overflow-y: auto;
+}
+
+/* A11y: the icon-only shell trigger retains a usable touch target. */
+[aria-controls='finance-user-menu'] {
+  /* A11y: theme-aware idle text; retain Bootstrap's contrasting hover/focus colors. */
+  --bs-btn-color: var(--bs-body-color);
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Dashboard containment: auto grid tracks must not grow to a populated select/chart's intrinsic width. */
+[aria-labelledby='finance-dashboard-heading'] .d-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 359px) {
+  /* Widget sizing: allow money/currency to wrap in the two-column KPI strip at stress widths. */
+  [aria-label='Period summary'] .text-nowrap {
     white-space: normal !important;
+    overflow-wrap: anywhere;
   }
 }
 

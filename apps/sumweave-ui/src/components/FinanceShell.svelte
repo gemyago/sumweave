@@ -2,8 +2,9 @@
   import Monitor from '@lucide/svelte/icons/monitor'
   import Moon from '@lucide/svelte/icons/moon'
   import Sun from '@lucide/svelte/icons/sun'
+  import UserRound from '@lucide/svelte/icons/user-round'
   import type { Snippet } from 'svelte'
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { link, replace } from 'svelte-spa-router'
   import { authStore } from '../lib/auth/auth-store.svelte'
   import {
@@ -19,6 +20,55 @@
   }>()
 
   const financeShell = provideFinanceShellState(createFinanceShellState())
+  let menuOpen = $state(false)
+  let navigationOpen = $state(false)
+  let navigationButton: HTMLButtonElement
+  let menuContainer: HTMLDivElement
+  let menuButton: HTMLButtonElement
+  const activeTenantName = $derived(
+    financeShell.tenants.find((tenant) => tenant.id === financeShell.selectedTenantId)?.name,
+  )
+
+  $effect(() => {
+    void currentPath
+    menuOpen = false
+    navigationOpen = false
+  })
+
+  async function toggleMenu(): Promise<void> {
+    menuOpen = !menuOpen
+    if (menuOpen) {
+      await tick()
+      menuContainer.querySelector<HTMLElement>('select, .dropdown-item')?.focus()
+    }
+  }
+
+  function dismissMenu(event: PointerEvent): void {
+    if (menuOpen && !menuContainer.contains(event.target as Node)) menuOpen = false
+  }
+
+  function onEscape(event: KeyboardEvent): void {
+    if (menuOpen && event.key === 'Escape') {
+      event.preventDefault()
+      menuOpen = false
+      menuButton.focus()
+    } else if (navigationOpen && event.key === 'Escape') {
+      event.preventDefault()
+      navigationOpen = false
+      navigationButton.focus()
+    }
+  }
+
+  function closeAfterNavigation(): void {
+    menuOpen = false
+    menuButton.focus()
+  }
+
+  function onMenuFocusOut(event: FocusEvent): void {
+    if (event.relatedTarget && !menuContainer.contains(event.relatedTarget as Node)) {
+      menuOpen = false
+    }
+  }
 
   const navLinks = [
     { href: '/finance', label: 'Dashboard' },
@@ -102,7 +152,9 @@
       return items.map((item, index) => ({ ...item, current: index === items.length - 1 }))
     }
 
-    const detailLabel = currentPathname.endsWith('/new')
+    const detailLabel = currentPathname === '/finance/connections/synthetic'
+      ? 'Synthetic setup'
+      : currentPathname.endsWith('/new')
       ? `Record ${currentSectionLabel.slice(0, -1).toLowerCase()}`
       : currentSectionLabel === 'Accounts'
         ? 'Account detail'
@@ -134,42 +186,88 @@
   }
 </script>
 
+<svelte:window onpointerdown={dismissMenu} onkeydown={onEscape} />
+
 <div
   class="container-fluid px-0"
   data-bootstrap-finance-shell="true"
   data-bs-theme={themeStore.effective}
 >
-  <div class="row g-0 min-vh-100">
-    <aside class="col-12 col-lg-3 col-xl-2 border-end bg-body-tertiary">
-      <div class="d-flex h-100 flex-column gap-2 p-2 p-lg-3">
-        <div>
-          <a class="navbar-brand fw-semibold" href="/finance" use:link>Sumweave</a>
-          <p class="d-none d-lg-block mb-0 small text-body-secondary">Finance</p>
-        </div>
-
-        <nav class="nav nav-pills flex-row flex-lg-column gap-2" aria-label="Finance navigation">
-          {#each navLinks as item (item.href)}
-            <a
-              class="finance-shell-nav-link nav-link flex-grow-1 flex-lg-grow-0 px-2 px-lg-3 py-2 text-nowrap"
-              class:active={activeNavHref === item.href}
-              href={item.href}
-              use:link
-              aria-current={activeNavHref === item.href ? 'page' : undefined}
+  <div class="min-vh-100">
+      <header class="navbar navbar-expand-sm border-bottom bg-body px-2 px-lg-4 py-2" aria-label="Finance utilities">
+          <a class="navbar-brand fw-semibold fs-6 me-2" href="/finance" use:link>Sumweave</a>
+          <button bind:this={navigationButton} type="button" class="navbar-toggler me-auto finance-primary-nav-target" aria-label="Toggle Finance navigation" aria-expanded={navigationOpen} aria-controls="finance-primary-navigation" onclick={() => { navigationOpen = !navigationOpen }}>
+            <span class="navbar-toggler-icon"></span>
+          </button>
+          <nav id="finance-primary-navigation" class="collapse navbar-collapse order-3 order-sm-0" class:show={navigationOpen} aria-label="Finance navigation">
+            <div class="navbar-nav flex-row small">
+              {#each navLinks.slice(0, 3) as item (item.href)}
+                <a class="nav-link px-2 py-2 text-nowrap finance-primary-nav-target" class:active={activeNavHref === item.href} href={item.href} use:link aria-current={activeNavHref === item.href ? 'page' : undefined} onclick={() => { navigationOpen = false }}>{item.label}</a>
+              {/each}
+            </div>
+          </nav>
+          <div class="dropdown ms-auto" bind:this={menuContainer} onfocusout={onMenuFocusOut}>
+            <button
+              bind:this={menuButton}
+              type="button"
+              class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-2"
+              aria-label="User menu"
+              aria-expanded={menuOpen}
+              aria-controls="finance-user-menu"
+              onclick={toggleMenu}
             >
-              {item.label}
-            </a>
-          {/each}
-        </nav>
-      </div>
-    </aside>
-
-    <section class="col-12 col-lg-9 col-xl-10">
-      <header class="border-bottom bg-body" aria-label="Finance utilities">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 p-2 p-lg-4">
-          <nav class="finance-shell-breadcrumb-nav d-none d-sm-block" aria-label="Breadcrumb">
+              <UserRound size={20} aria-hidden="true" />
+            </button>
+            {#if menuOpen}
+              <div id="finance-user-menu" class="finance-shell-user-menu dropdown-menu dropdown-menu-end show" aria-label="Workspace and preferences">
+                <div class="px-3 py-2">
+                  {#if showsTenantControl}
+                    <label for="finance-active-tenant" class="form-label small">Active tenant</label>
+                    <select id="finance-active-tenant" class="form-select form-select-sm" value={financeShell.selectedTenantId} onchange={onTenantChange} disabled={financeShell.loading}>
+                      <option value="">{financeShell.hasTenants ? 'Select tenant' : 'No tenants yet'}</option>
+                      {#each financeShell.tenants as tenant (tenant.id)}
+                        <option value={tenant.id}>{tenant.name} · {tenant.displayCurrency}</option>
+                      {/each}
+                    </select>
+                  {:else}
+                    <span class="small text-body-secondary">Active tenant</span>
+                    <div class="fw-semibold text-break">{activeTenantName ?? (financeShell.loading ? 'Loading tenants…' : 'No tenant selected')}</div>
+                  {/if}
+                </div>
+                <hr class="dropdown-divider" />
+                <h2 class="dropdown-header text-body-secondary">Finance setup</h2>
+                {#each navLinks.slice(3, 7) as item (item.href)}
+                  <a class="dropdown-item" class:active={activeNavHref === item.href} href={item.href} use:link aria-current={activeNavHref === item.href ? 'page' : undefined} onclick={closeAfterNavigation}>{item.label}</a>
+                {/each}
+                <hr class="dropdown-divider" />
+                <h2 class="dropdown-header text-body-secondary">Workspace</h2>
+                <a class="dropdown-item" class:active={activeNavHref === '/finance/tenants'} href="/finance/tenants" use:link aria-current={activeNavHref === '/finance/tenants' ? 'page' : undefined} onclick={closeAfterNavigation}>Tenants</a>
+                <hr class="dropdown-divider" />
+                <h2 class="dropdown-header text-body-secondary">Preferences</h2>
+                <div class="d-flex align-items-center justify-content-between gap-2 px-3 py-2">
+                  <span class="small">Theme</span>
+                  <div class="btn-group btn-group-sm" role="radiogroup" aria-label="Theme">
+                    {#each themeOptions as option (option.value)}
+                      {@const Icon = option.icon}
+                      {@const checked = themeStore.preference === option.value}
+                      <input id={`finance-theme-${option.value}`} class="btn-check" type="radio" name="finance-theme-preference" checked={checked} onchange={() => setThemePreference(option.value)} />
+                      <label class="btn btn-outline-secondary d-inline-flex align-items-center justify-content-center" class:active={checked} for={`finance-theme-${option.value}`} title={option.label}>
+                        <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
+                        <span class="visually-hidden">{option.label}</span>
+                      </label>
+                    {/each}
+                  </div>
+                </div>
+                <button type="button" class="dropdown-item" onclick={signOut}>Sign out</button>
+              </div>
+            {/if}
+          </div>
+      </header>
+    <section>
+          <nav class="finance-shell-breadcrumb-nav px-3 px-lg-4 pt-2" class:d-none={currentPathname === activeNavHref} class:d-sm-block={currentPathname === activeNavHref} aria-label="Breadcrumb">
             <ol class="finance-shell-breadcrumb breadcrumb mb-0">
               {#each breadcrumbItems as item (item.href || item.label)}
-                <li class="breadcrumb-item d-none d-sm-block" class:active={item.current} aria-current={item.current ? 'page' : undefined}>
+                 <li class="breadcrumb-item" class:active={item.current} aria-current={item.current ? 'page' : undefined}>
                   {#if item.current}
                     {item.label}
                   {:else}
@@ -179,60 +277,6 @@
               {/each}
             </ol>
           </nav>
-
-          <div class="d-flex flex-wrap align-items-center gap-2 gap-md-3">
-            {#if showsTenantControl}
-              <label class="input-group input-group-sm w-auto">
-                <span class="input-group-text">Tenant</span>
-                <select
-                  class="form-select form-select-sm"
-                  value={financeShell.selectedTenantId}
-                  onchange={onTenantChange}
-                  aria-label="Active tenant"
-                  disabled={financeShell.loading}
-                >
-                  <option value="">{financeShell.hasTenants ? 'Select tenant' : 'No tenants yet'}</option>
-                  {#each financeShell.tenants as tenant (tenant.id)}
-                    <option value={tenant.id}>{tenant.name} · {tenant.displayCurrency}</option>
-                  {/each}
-                </select>
-              </label>
-            {/if}
-
-            <div class="d-flex align-items-center gap-2">
-              <span class="small text-body-secondary">Theme</span>
-              <div class="btn-group btn-group-sm" role="radiogroup" aria-label="Theme">
-                {#each themeOptions as option (option.value)}
-                  {@const Icon = option.icon}
-                  {@const checked = themeStore.preference === option.value}
-                  <input
-                    id={`finance-theme-${option.value}`}
-                    class="btn-check"
-                    type="radio"
-                    name="finance-theme-preference"
-                    checked={checked}
-                    onchange={() => setThemePreference(option.value)}
-                  />
-                  <label
-                    class="btn btn-outline-secondary d-inline-flex align-items-center justify-content-center"
-                    class:active={checked}
-                    for={`finance-theme-${option.value}`}
-                    aria-label={option.label}
-                    title={option.label}
-                  >
-                    <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
-                    <span class="visually-hidden">{option.label}</span>
-                  </label>
-                {/each}
-              </div>
-            </div>
-
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick={signOut}>
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
 
       <div class="p-3 p-lg-4">
         {@render children?.()}
