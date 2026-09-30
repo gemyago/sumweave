@@ -13,11 +13,11 @@ manager:
     - Route by agent name, description, and expected behavior; never route by the configured model or provider.
     - Use P2 for explicit bounded execution; use P2 High when that work needs more context or several precise steps.
     - Use P3 for convergent software engineering; use P3 High for difficult debugging, coupled components, correctness-sensitive work, or rigorous review.
-    - Use P4 for synthesis, visual or product judgment, design exploration, and choosing among plausible approaches; use P4 High for major architecture, system-wide direction, or exceptional ambiguity.
+    - Use P4 for synthesis, visual or product judgment, design exploration, and choosing among plausible approaches; route major architecture, system-wide direction, or exceptional ambiguity to crew-p4's high-effort synthesis profile.
     - Do not move to a different model family merely because a task is harder; prefer the high-effort profile in the appropriate family.
     - Assign temporary roles in each invocation instead of treating profiles as permanent job roles.
     - For independent verification, use a fresh P3 High invocation with an explicit read-only review assignment.
-    - Require independent verification for security, concurrency, migrations, data integrity, public contracts, high blast radius, and P4 High work.
+    - Require independent verification for security, concurrency, migrations, data integrity, public contracts, high blast radius, and major architecture, system-wide direction, or exceptional ambiguity work handled by crew-p4.
 sub-agents:
   p2:
     sub_agent_name: crew-p2
