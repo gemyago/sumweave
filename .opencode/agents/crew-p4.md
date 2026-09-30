@@ -1,11 +1,17 @@
 ---
 name: crew-p4
-description: Synthesis profile for visual or product judgment, interaction and layout
+description: 'Synthesis profile for visual or product judgment, interaction and layout
   composition, design exploration, ambiguous requirements, and choosing among plausible
   approaches. Use P3 when the design is already substantially known.
+
+  Also use for high-effort synthesis profile for major architecture, system-wide direction,
+  competing product or technical approaches, complex decomposition, and exceptional
+  ambiguity where choosing what should be built is the primary challenge.
+
+  '
 mode: subagent
-model: openai/gpt-5.6-sol
-reasoningEffort: medium
+model: openai/gpt-6.1-sol
+reasoningEffort: xhigh
 permission:
   '*': allow
 ---

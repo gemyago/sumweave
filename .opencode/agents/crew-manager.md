@@ -2,7 +2,7 @@
 name: crew-manager
 description: General purpose orchestrator agent for coordinating tasks and workflows.
 mode: primary
-model: openai/gpt-5.6-sol
+model: openai/gpt-6.1-sol
 reasoningEffort: medium
 permission:
   '*': deny

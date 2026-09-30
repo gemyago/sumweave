@@ -4,7 +4,7 @@ description: High-effort execution profile for bounded, well-specified work that
   explicit but requires more context, several precise steps, or more careful verification
   than P2. Avoid ambiguous investigation, architecture, and cross-system design.
 mode: subagent
-model: openai/gpt-5.6-luna
+model: openai/gpt-6-luna
 reasoningEffort: high
 permission:
   '*': allow
