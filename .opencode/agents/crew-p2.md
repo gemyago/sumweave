@@ -4,7 +4,7 @@ description: Execution profile for narrow, well-specified work whose target, imp
   path, and verification method are explicit. Use for targeted edits, small fixes,
   focused tests, status checks, and precise information collection.
 mode: subagent
-model: openai/gpt-5.6-luna
+model: openai/gpt-6-luna
 reasoningEffort: medium
 permission:
   '*': allow

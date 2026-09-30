@@ -866,7 +866,7 @@
               {/if}
             {:else}
               <h2 class="h5 mb-1">Choose a tenant and period</h2>
-              <p class="text-body-secondary mb-2">Use the header tenant selector to load this dashboard.</p>
+              <p class="text-body-secondary mb-2">Open User menu and choose Active tenant to load this dashboard.</p>
             {/if}
           </div>
 

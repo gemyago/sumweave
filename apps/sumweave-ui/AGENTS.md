@@ -79,6 +79,7 @@ The rules are:
 - Update module rules when user corrects AI behavior.
 - Route pages own their document titles; do not centrally map paths in App.
 - Finance detail breadcrumbs link to section parents and use active non-links.
+- Use one Finance navbar; put active tenant first in the user menu.
 - Do not add header-only cards when Finance breadcrumbs already locate a detail route.
 - Follow [DESIGN.md](./DESIGN.md) for all UI styling changes.
 - Prefer interaction affordances and accessible descriptions over persistent instructional copy that consumes dashboard space.

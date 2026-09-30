@@ -185,7 +185,8 @@ The color system is deliberately minimal. The primary palette consists of just t
 - Max content width: approximately 800-900px (narrow, reading-optimized)
 - Single-column layout as the primary pattern
 - Centered content with generous horizontal margins
-- Canonical Finance is the accepted wider-layout exception: desktop rail + utility row + roomy content canvas, collapsing to a compact utility-first stack on narrow screens
+- Canonical Finance is the accepted wider-layout exception: one Bootstrap navbar with compact brand, left primary links, right user icon, and full-width content canvas. Active tenant identity/selection is first in the viewport-bounded user dropdown, never in the bar.
+- Finance uses `navbar-expand-sm`: brand, Dashboard/Transactions/Accounts, and user icon share one row from 576px upward. Below 576px a native Bootstrap toggler reveals the primary links only on demand; the resting shell remains one row without squeezing labels or overflowing phones.
 - Hero section: full-width dark terminal element
 - Feature sections: single-column text blocks
 - Footer: multi-column link grid
@@ -253,6 +254,7 @@ The color system is deliberately minimal. The primary palette consists of just t
 - Buttons with 4px 20px padding provide adequate horizontal touch area
 - Input fields with 20px padding ensure comfortable mobile typing
 - Tab items at 16px with tight line-height may need mobile adaptation
+- Phone Finance navbar toggler and expanded primary links have at least 44px hit areas; this shared a11y sizing exception applies only below the 576px expand breakpoint.
 
 ### Collapsing Strategy
 - Hero heading: 38px → 28px → 24px on smaller screens

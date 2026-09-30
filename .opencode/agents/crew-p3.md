@@ -4,7 +4,7 @@ description: Engineering profile for normal implementation in a substantially un
   problem space, including features, bug fixes, refactors, tests, endpoints, persistence,
   and precise UI implementation from an established design.
 mode: subagent
-model: openai/gpt-5.6-terra
+model: openai/gpt-6.1-sol
 reasoningEffort: medium
 permission:
   '*': allow

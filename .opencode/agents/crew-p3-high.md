@@ -5,7 +5,7 @@ description: High-effort engineering profile for difficult debugging, unfamiliar
   and rigorous independent review. The invocation defines whether to investigate,
   implement, or review.
 mode: subagent
-model: openai/gpt-5.6-terra
+model: openai/gpt-6.1-sol
 reasoningEffort: high
 permission:
   '*': allow
