@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { documentTitle } from '../lib/document-title'
   import DocumentTitle from '../components/DocumentTitle.svelte'
   import { link } from 'svelte-spa-router'
@@ -8,6 +8,7 @@
     createSignalFinanceApiForAuth,
     type FinanceAccount,
     type FinanceTransaction,
+    type FinanceCashFlowInclusion,
   } from '../lib/finance/api'
   import { useFinanceShellState } from '../lib/finance/shell-state.svelte'
   import {
@@ -23,6 +24,7 @@
   import type { JobDetail } from '../lib/jobs/api'
   import { dateQueryValue, financeRouteQuery, readDateQuery, readTimestampQuery, replaceFinanceRouteQuery, timestampQueryValue } from '../lib/finance/url-filters'
   import { dateInputValue } from '../lib/date-range'
+  import { formatFinanceDateTime } from '../lib/finance/format'
 
   const appBaseUrl = import.meta.env.VITE_APP_API_BASE_URL ?? '/api/v1'
   const transactionPageSize = 20
@@ -44,6 +46,9 @@
   let loadingList = $state(false)
   let reactiveReady = $state(false)
   let skipNextReactiveLoad = false
+  let transactionLoadRevision = 0
+  let destroyed = false
+  let includeCashFlow = $state<FinanceCashFlowInclusion>('both')
   const defaultMatchingRange = defaultMatchingDateRange()
   let matchingStartDate = $state(defaultMatchingRange.startDate)
   let matchingEndDate = $state(defaultMatchingRange.endDate)
@@ -59,7 +64,7 @@
   const hiddenAccountIds = $derived.by(() => new Set(accounts.filter((account) => account.hiddenAt).map((account) => account.id)))
   const visiblePendingCount = $derived(visibleTransactions.filter((item) => item.status === 'pending').length)
   const visibleHiddenCount = $derived(visibleTransactions.filter((item) => item.hiddenAt !== null).length)
-  const activeFilterCount = $derived([accountFilter, kindFilter, startDate, endDate].filter(Boolean).length)
+  const activeFilterCount = $derived([accountFilter, kindFilter, startDate, endDate, includeCashFlow !== 'both'].filter(Boolean).length)
   const pageNumber = $derived(Math.floor(transactionOffset / transactionPageSize) + 1)
   const hasPreviousPage = $derived(transactionOffset > 0)
   const hasNextPage = $derived(transactions.length === transactionPageSize)
@@ -67,17 +72,23 @@
   onMount(() => {
     restoreFiltersFromUrl()
     void loadPage()
-    return subscribeToFinanceLedgerRefresh((tenantId) => {
+    const unsubscribe = subscribeToFinanceLedgerRefresh((tenantId) => {
       if (financeShell.selectedTenantId !== tenantId) return
-      transactionOffset = 0
       void loadTenantData(0)
     })
+    return () => {
+      destroyed = true
+      transactionLoadRevision++
+      unsubscribe()
+    }
   })
 
   function restoreFiltersFromUrl() {
     const query = financeRouteQuery()
     accountFilter = query.get('accountId') ?? ''
     kindFilter = query.get('type') ?? ''
+    const inclusion = query.get('includeCashFlow')
+    includeCashFlow = inclusion === 'income' || inclusion === 'expense' || inclusion === 'none' ? inclusion : 'both'
     sortOrder = query.get('sort') === 'asc' ? 'asc' : 'desc'
     exactStartDate = readTimestampQuery(query, 'startAt')
     exactEndDate = readTimestampQuery(query, 'endAt')
@@ -89,6 +100,7 @@
     replaceFinanceRouteQuery({
       accountId: accountFilter || undefined,
       type: kindFilter || undefined,
+      includeCashFlow: includeCashFlow === 'both' ? undefined : includeCashFlow,
       sort: sortOrder === 'asc' ? 'asc' : undefined,
       startDate: exactStartDate ? undefined : dateQueryValue(startDate),
       endDate: exactEndDate ? undefined : dateQueryValue(endDate),
@@ -113,6 +125,7 @@
 
     try {
       await financeShell.initialize()
+      if (destroyed) return
       if (financeShell.selectedTenantId) {
         await loadTenantData()
       } else {
@@ -120,17 +133,23 @@
         transactions = []
       }
     } catch (loadError) {
+      if (destroyed) return
       error = loadError instanceof Error ? loadError.message : 'Failed to load transactions'
     } finally {
-      skipNextReactiveLoad = true
-      reactiveReady = true
-      loading = false
+      if (!destroyed) {
+        skipNextReactiveLoad = true
+        reactiveReady = true
+        loading = false
+      }
     }
   }
 
-  async function loadTenantData(offset = transactionOffset): Promise<boolean> {
+  async function loadTenantData(offset = transactionOffset, inclusion = includeCashFlow): Promise<boolean> {
+    if (destroyed) return false
+    const requestRevision = ++transactionLoadRevision
     const tenantId = financeShell.selectedTenantId
     if (!tenantId) {
+      loadingList = false
       accounts = []
       transactions = []
       return false
@@ -147,6 +166,7 @@
           tenantId,
           accountId: accountFilter,
           kind: kindFilter,
+          includeCashFlow: inclusion,
           startDate: exactStartDate ?? startDate,
           endDate: exactEndDate ?? exclusiveDateRangeEnd(endDate),
           sort: sortOrder === 'asc' ? 'asc' : undefined,
@@ -155,16 +175,20 @@
         }),
       ])
 
-      if (financeShell.selectedTenantId !== tenantId) return false
+      if (financeShell.selectedTenantId !== tenantId || transactionLoadRevision !== requestRevision) return false
       accounts = loadedAccounts
       transactions = loadedTransactions
+      transactionOffset = offset
+      includeCashFlow = inclusion
+      persistFilters()
       acknowledgeFinanceLedgerRefresh(tenantId, refreshRevision)
       return true
     } catch (loadError) {
+      if (financeShell.selectedTenantId !== tenantId || transactionLoadRevision !== requestRevision) return false
       error = loadError instanceof Error ? loadError.message : 'Failed to load transactions'
       return false
     } finally {
-      loadingList = false
+      if (transactionLoadRevision === requestRevision) loadingList = false
     }
   }
 
@@ -173,28 +197,26 @@
   }
 
   function reloadFirstPage() {
-    transactionOffset = 0
     persistFilters()
-    void loadTenantData()
+    void loadTenantData(0)
+  }
+
+  function clearCashFlowInclusion() {
+    void loadTenantData(0, 'both')
   }
 
   async function loadPreviousPage(): Promise<boolean> {
     const nextOffset = Math.max(0, transactionOffset - transactionPageSize)
-    if (!await loadTenantData(nextOffset)) return false
-    transactionOffset = nextOffset
-    return true
+    return loadTenantData(nextOffset)
   }
 
   async function loadNextPage(): Promise<boolean> {
     if (!hasNextPage) return false
     const nextOffset = transactionOffset + transactionPageSize
-    if (!await loadTenantData(nextOffset)) return false
-    transactionOffset = nextOffset
-    return true
+    return loadTenantData(nextOffset)
   }
 
   function selectTenant(tenantId: string) {
-    transactionOffset = 0
     financeShell.selectTenant(tenantId)
   }
 
@@ -244,7 +266,11 @@
       skipNextReactiveLoad = false
       return
     }
-    void loadTenantData()
+    untrack(() => {
+      includeCashFlow = 'both'
+      persistFilters()
+      void loadTenantData(0)
+    })
   })
 </script>
 
@@ -325,6 +351,15 @@
           </div>
 
           <div class="d-grid gap-3">
+            {#if includeCashFlow !== 'both'}
+              <div class="d-flex flex-wrap align-items-center gap-2" aria-label="Active cash-flow inclusion">
+                <span class="badge text-bg-secondary">{includeCashFlow === 'none' ? 'Neutral transactions only' : `${includeCashFlow === 'income' ? 'Income' : 'Expense'} and neutral transactions`}</span>
+                <button type="button" class="btn btn-outline-secondary btn-sm" disabled={loadingList} onclick={clearCashFlowInclusion}>Clear cash-flow inclusion</button>
+              </div>
+            {/if}
+            {#if exactStartDate || exactEndDate}
+              <p class="text-body-secondary small mb-0">Exact time window: {exactStartDate ? formatFinanceDateTime(exactStartDate) : 'Any start'} (inclusive) → {exactEndDate ? formatFinanceDateTime(exactEndDate) : 'Any end'} (exclusive).</p>
+            {/if}
             {#if !financeShell.embedded}
               <div class="row g-3 align-items-end">
                 <div class="col-12 col-md-6 col-xl-3">

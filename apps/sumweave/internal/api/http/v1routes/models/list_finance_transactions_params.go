@@ -12,6 +12,79 @@ import (
 var _ = time.Time{}
 var _ = json.Unmarshal
 var _ = fmt.Sprint
+type ListFinanceTransactionsParamsIncludeCashFlow string
+
+// List of ListFinanceTransactionsParamsIncludeCashFlow values.
+const (
+	ListFinanceTransactionsParamsIncludeCashFlowIncome ListFinanceTransactionsParamsIncludeCashFlow = "income"
+	ListFinanceTransactionsParamsIncludeCashFlowExpense ListFinanceTransactionsParamsIncludeCashFlow = "expense"
+	ListFinanceTransactionsParamsIncludeCashFlowBoth ListFinanceTransactionsParamsIncludeCashFlow = "both"
+	ListFinanceTransactionsParamsIncludeCashFlowNone ListFinanceTransactionsParamsIncludeCashFlow = "none"
+)
+
+func(v ListFinanceTransactionsParamsIncludeCashFlow) IsIncome() bool {
+  return v == ListFinanceTransactionsParamsIncludeCashFlowIncome
+}
+
+func(v ListFinanceTransactionsParamsIncludeCashFlow) IsExpense() bool {
+  return v == ListFinanceTransactionsParamsIncludeCashFlowExpense
+}
+
+func(v ListFinanceTransactionsParamsIncludeCashFlow) IsBoth() bool {
+  return v == ListFinanceTransactionsParamsIncludeCashFlowBoth
+}
+
+func(v ListFinanceTransactionsParamsIncludeCashFlow) IsNone() bool {
+  return v == ListFinanceTransactionsParamsIncludeCashFlowNone
+}
+
+func(v ListFinanceTransactionsParamsIncludeCashFlow) String() string {
+	return string(v)
+}
+
+type assignableListFinanceTransactionsParamsIncludeCashFlow interface {
+	IsIncome() bool
+	IsExpense() bool
+	IsBoth() bool
+	IsNone() bool
+	String() string
+}
+
+func AsListFinanceTransactionsParamsIncludeCashFlow(v assignableListFinanceTransactionsParamsIncludeCashFlow) (ListFinanceTransactionsParamsIncludeCashFlow) {
+	return ListFinanceTransactionsParamsIncludeCashFlow(v.String())
+}
+
+func ParseListFinanceTransactionsParamsIncludeCashFlow(str string, target *ListFinanceTransactionsParamsIncludeCashFlow) error {
+	switch str {
+	case "income":
+		*target = ListFinanceTransactionsParamsIncludeCashFlowIncome
+	case "expense":
+		*target = ListFinanceTransactionsParamsIncludeCashFlowExpense
+	case "both":
+		*target = ListFinanceTransactionsParamsIncludeCashFlowBoth
+	case "none":
+		*target = ListFinanceTransactionsParamsIncludeCashFlowNone
+	default:
+		return fmt.Errorf("unexpected ListFinanceTransactionsParamsIncludeCashFlow value: %s", str)
+	}
+	return nil
+}
+
+func (v *ListFinanceTransactionsParamsIncludeCashFlow) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	return ParseListFinanceTransactionsParamsIncludeCashFlow(str, v)
+}
+
+// All allowed values of ListFinanceTransactionsParamsIncludeCashFlow enum.
+var AllowableListFinanceTransactionsParamsIncludeCashFlowValues = []ListFinanceTransactionsParamsIncludeCashFlow{
+	ListFinanceTransactionsParamsIncludeCashFlowIncome,
+	ListFinanceTransactionsParamsIncludeCashFlowExpense,
+	ListFinanceTransactionsParamsIncludeCashFlowBoth,
+	ListFinanceTransactionsParamsIncludeCashFlowNone,
+}
 type ListFinanceTransactionsParamsSort string
 
 // List of ListFinanceTransactionsParamsSort values.
@@ -75,6 +148,7 @@ type ListFinanceTransactionsParams struct {
 	Source string `json:"source,omitempty"`
 	Status string `json:"status,omitempty"`
 	Kind string `json:"kind,omitempty"`
+	IncludeCashFlow ListFinanceTransactionsParamsIncludeCashFlow `json:"includeCashFlow,omitempty"`
 	StartDate time.Time `json:"startDate,omitempty"`
 	EndDate time.Time `json:"endDate,omitempty"`
 	Sort ListFinanceTransactionsParamsSort `json:"sort,omitempty"`

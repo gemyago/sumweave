@@ -117,6 +117,7 @@ func (s *TransactionTagStore) ListTransactions(
 		query = query.Where("hidden_at IS NULL")
 	}
 	if len(page) > 0 {
+		query = filterTransactionCashFlow(query, page[0].IncludeCashFlow)
 		if page[0].Limit > 0 {
 			query = query.Limit(dbPageInt(page[0].Limit))
 		}

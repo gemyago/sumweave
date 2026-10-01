@@ -23,6 +23,12 @@ func TestCashFlowSeriesContracts(t *testing.T) {
 			GroupBy:     CashFlowGroupByDay,
 		}
 	}
+	makeTenant := func(fake faker.Faker, params CashFlowSeriesParams) domain.Tenant {
+		return domain.Tenant{
+			ID: params.TenantID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "EUR",
+			CreatedAt: params.StartDate, UpdatedAt: params.StartDate,
+		}
+	}
 
 	t.Run("validates required increasing ranges and supported bounded groups", func(t *testing.T) {
 		fake := faker.New()
@@ -151,13 +157,9 @@ func TestCashFlowSeriesContracts(t *testing.T) {
 		seriesStore := persistence.NewCashFlowSeriesStore(database)
 		start := time.Date(2024, time.January, 31, 0, 30, 0, 0, time.FixedZone("submitted", 2*60*60))
 		acceptedEnd := cashFlowMonthBoundary(start, maxCashFlowBuckets)
-		tenant := domain.Tenant{
-			ID:              "tenant-" + fake.UUID().V4(),
-			Name:            "tenant-" + fake.Company().Name(),
-			DisplayCurrency: "EUR",
-			CreatedAt:       start,
-			UpdatedAt:       start,
-		}
+		params := makeParams(fake)
+		params.StartDate = start
+		tenant := makeTenant(fake, params)
 		_, err := store.SaveTenant(t.Context(), tenant)
 		require.NoError(t, err)
 
@@ -196,13 +198,14 @@ func TestCashFlowSeriesContracts(t *testing.T) {
 	t.Run("authorizes the tenant before delegating a valid request", func(t *testing.T) {
 		fake := faker.New()
 		params := makeParams(fake)
+		params.GroupBy = CashFlowGroupByMonth
 		access := newMockreportingServiceStore(t)
 		cashFlows := newMockcashFlowSeriesStore(t)
 		access.EXPECT().IsTenantMember(mock.Anything, params.TenantID, params.ActorUserID).Return(true, nil).Once()
 		expected := domain.CashFlowSeries{Complete: true}
 		cashFlows.EXPECT().GetCashFlowSeries(mock.Anything, persistence.CashFlowSeriesParams{
 			TenantID: params.TenantID, StartDate: params.StartDate, EndDate: params.EndDate,
-			GroupBy: CashFlowGroupByDay, FXProvider: FXProviderFrankfurter,
+			GroupBy: CashFlowGroupByMonth, FXProvider: FXProviderFrankfurter,
 		}).Return(expected, nil).Once()
 
 		actual, err := NewReportingService(

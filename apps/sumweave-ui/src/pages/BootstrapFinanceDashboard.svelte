@@ -10,6 +10,7 @@
     type FinanceCashFlowSeries,
     type FinanceCashFlowSeriesBucket,
     type FinanceCashFlowGroupBy,
+    type FinanceCashFlowInclusion,
     type FinanceTransaction,
   } from '../lib/finance/api'
   import {
@@ -82,6 +83,9 @@
   let selectedCashFlowBucket = $state<FinanceCashFlowSeriesBucket | undefined>(undefined)
   let cashFlowBucketFilterValue = $state('')
   let transactionLoadRevision = 0
+  let includeCashFlow = $state<FinanceCashFlowInclusion>('both')
+  const incomeIncluded = $derived(includeCashFlow === 'both' || includeCashFlow === 'income')
+  const expenseIncluded = $derived(includeCashFlow === 'both' || includeCashFlow === 'expense')
 
   const financeShell = useFinanceShellState()
 
@@ -158,14 +162,21 @@
   )
 
   const cashFlowChartOption = $derived.by<EChartsCoreOption | undefined>(() => {
-    if (!cashFlowSeries || !cashFlowHasActivity) return undefined
+    if (!cashFlowSeries) return undefined
 
     const series = cashFlowSeries
     const labelInterval = series.buckets.length > 12 ? Math.ceil(series.buckets.length / 6) - 1 : 0
 
     return {
+      // Native legend rollback must remove uncommitted bars without fade-out ghosts.
+      animation: false,
       grid: { left: 12, right: 12, top: 44, bottom: 56, containLabel: true },
-      legend: { top: 8, textStyle: { color: 'var(--bs-body-color)' } },
+      legend: {
+        show: true, top: 0, left: 'center', data: ['Income', 'Expense'],
+        textStyle: { color: 'var(--bs-body-color)' },
+        inactiveColor: 'var(--bs-secondary-color)',
+        selected: { Income: incomeIncluded, Expense: expenseIncluded },
+      },
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -174,7 +185,7 @@
           const dataIndex = (values[0] as { dataIndex?: number } | undefined)?.dataIndex
           const bucket = dataIndex === undefined ? undefined : series.buckets[dataIndex]
           if (!bucket) return ''
-          return `${cashFlowBucketRange(bucket.startDate, bucket.endDate)}<br/>Income: ${formatFinanceMoney(bucket.incomeMinor, series.displayCurrency)}<br/>Expense: ${formatFinanceMoney(bucket.expenseMinor, series.displayCurrency)}`
+          return `${cashFlowBucketRange(bucket.startDate, bucket.endDate)}${incomeIncluded ? `<br/>Income: ${formatFinanceMoney(bucket.incomeMinor, series.displayCurrency)}` : ''}${expenseIncluded ? `<br/>Expense: ${formatFinanceMoney(bucket.expenseMinor, series.displayCurrency)}` : ''}`
         },
       },
       xAxis: {
@@ -485,6 +496,7 @@
       transactionLoadRevision += 1
       selectedCashFlowBucket = undefined
       cashFlowBucketFilterValue = ''
+      includeCashFlow = 'both'
       loadingTransactions = false
       dashboard = null
       historyAccounts = []
@@ -501,6 +513,7 @@
     transactionLoadRevision += 1
     selectedCashFlowBucket = undefined
     cashFlowBucketFilterValue = ''
+    includeCashFlow = 'both'
     loadingTransactions = false
 
     loadingDashboard = true
@@ -709,15 +722,21 @@
     recentTransactions = recentTransactions.map((item) => item.id === updated.id ? updated : item)
   }
 
-  async function loadDashboardTransactionPage(offset: number, range = selectedCashFlowBucket ?? activeDashboardRange!): Promise<boolean> {
+  async function loadDashboardTransactionPage(
+    offset: number,
+    filter = { bucket: selectedCashFlowBucket, value: cashFlowBucketFilterValue, inclusion: includeCashFlow },
+  ): Promise<boolean> {
     const tenantId = financeShell.selectedTenantId!
+    const range = filter.bucket ?? activeDashboardRange!
     const requestRevision = ++transactionLoadRevision
 
     loadingTransactions = true
+    error = null
     try {
       const loadedTransactions = await financeApi.listTransactions({
         tenantId,
         includeHidden: true,
+        includeCashFlow: filter.inclusion,
         startDate: range.startDate,
         endDate: range.endDate,
         limit: TRANSACTION_SECTION_LIMIT + 1,
@@ -727,6 +746,9 @@
       recentTransactions = [...loadedTransactions]
         .sort((left, right) => right.effectiveAt.getTime() - left.effectiveAt.getTime())
       transactionOffset = offset
+      selectedCashFlowBucket = filter.bucket
+      cashFlowBucketFilterValue = filter.value
+      includeCashFlow = filter.inclusion
       return true
     } catch (loadError) {
       if (financeShell.selectedTenantId !== tenantId || transactionLoadRevision !== requestRevision) return false
@@ -737,11 +759,17 @@
     }
   }
 
-  async function applyCashFlowBucketFilter(bucket: FinanceCashFlowSeriesBucket | undefined, value: string) {
-    if (!activeDashboardRange || !await loadDashboardTransactionPage(0, bucket ?? activeDashboardRange)) return
+  function applyCashFlowBucketFilter(bucket: FinanceCashFlowSeriesBucket | undefined, value: string) {
+    if (!activeDashboardRange || loadingDashboard) return
+    void loadDashboardTransactionPage(0, { bucket, value, inclusion: includeCashFlow })
+  }
 
-    selectedCashFlowBucket = bucket
-    cashFlowBucketFilterValue = value
+  function toggleCashFlowInclusion(name: string) {
+    if (!activeDashboardRange || loadingDashboard || loadingTransactions || (name !== 'Income' && name !== 'Expense')) return
+    const income = name === 'Income' ? !incomeIncluded : incomeIncluded
+    const expense = name === 'Expense' ? !expenseIncluded : expenseIncluded
+    const inclusion = income ? (expense ? 'both' : 'income') : (expense ? 'expense' : 'none')
+    void loadDashboardTransactionPage(0, { bucket: selectedCashFlowBucket, value: cashFlowBucketFilterValue, inclusion })
   }
 
   function toggleCashFlowBucket(bucketIndex: number) {
@@ -756,14 +784,16 @@
   }
 
   function clearCashFlowBucketFilter() {
-    if (!selectedCashFlowBucket) return
-    void applyCashFlowBucketFilter(undefined, '')
+    void loadDashboardTransactionPage(0, { bucket: undefined, value: '', inclusion: 'both' })
   }
 
   function selectCashFlowBucketFilter(event: Event) {
-    const value = (event.currentTarget as HTMLSelectElement).value
+    const select = event.currentTarget as HTMLSelectElement
+    const value = select.value
+    // Native select changes immediately; keep the committed control until success.
+    select.value = cashFlowBucketFilterValue
     if (value === '') {
-      clearCashFlowBucketFilter()
+      applyCashFlowBucketFilter(undefined, '')
       return
     }
 
@@ -788,15 +818,11 @@
 
   function dashboardTransactionsHref(): string {
     const range = selectedCashFlowBucket ?? activeDashboardRange!
-    const query = selectedCashFlowBucket
-      ? new URLSearchParams({
-          startAt: timestampQueryValue(range.startDate)!,
-          endAt: timestampQueryValue(range.endDate)!,
-        })
-      : new URLSearchParams({
-          startDate: dateQueryValue(range.startDate)!,
-          endDate: dateQueryValue(inclusiveDashboardEndDate(range.endDate))!,
-        })
+    const query = new URLSearchParams({
+      startAt: timestampQueryValue(range.startDate)!,
+      endAt: timestampQueryValue(range.endDate)!,
+      includeCashFlow,
+    })
     return `/finance/transactions?${query.toString()}`
   }
 
@@ -1032,14 +1058,22 @@
                     <a class="alert-link" href="/admin/finance/fx" use:link>Open FX diagnostics</a>.
                   </div>
                 {/if}
+                <div class="d-grid gap-2">
+                  <p id="cash-flow-inclusion-description" class="visually-hidden">Select the Income or Expense legend label to include or exclude that cash-flow group. With the chart focused, press I to toggle Income or E to toggle Expense. Changes apply to the selected time window, or the whole reporting period. Neutral transactions remain included. Period summary values do not change. While transactions load, inclusion stays unchanged and further legend changes are ignored.</p>
+                  <p class="visually-hidden" role="status">Income is {incomeIncluded ? 'included' : 'excluded'}; Expense is {expenseIncluded ? 'included' : 'excluded'}.</p>
                 {#if !cashFlowHasActivity}
                   <div class="alert alert-light border mb-0" role="status">No settled cash flow to chart for this period.</div>
-                  {:else if cashFlowChartOption}
+                {/if}
+                  {#if cashFlowChartOption}
                     <EChartsSvgChart
                       ariaLabel="Cash flow chart"
-                      ariaDescription="cash-flow-chart-description"
+                      ariaDescription="cash-flow-inclusion-description cash-flow-chart-description"
                       option={cashFlowChartOption}
                       onDataClick={toggleCashFlowBucket}
+                      onLegendToggle={toggleCashFlowInclusion}
+                      legendSelection={{ Income: incomeIncluded, Expense: expenseIncluded }}
+                      legendShortcuts={{ Income: 'I', Expense: 'E' }}
+                      busy={loadingTransactions}
                     />
                     <div class="mt-2">
                       <label class="form-label small mb-1" for="cash-flow-bucket-filter">Filter transactions by cash-flow time window</label>
@@ -1047,6 +1081,7 @@
                         id="cash-flow-bucket-filter"
                         class="form-select form-select-sm"
                         value={cashFlowBucketFilterValue}
+                        disabled={loadingTransactions}
                         onchange={selectCashFlowBucketFilter}
                       >
                         <option value="">All reporting-period transactions</option>
@@ -1056,8 +1091,9 @@
                       </select>
                     </div>
                   {/if}
+                </div>
                   <div id="cash-flow-chart-description" class="visually-hidden">
-                    <p>Cash-flow values:</p>
+                    <p>Select a bar to filter transactions to its time window; select the same window again to clear only the time filter. Income is {incomeIncluded ? 'included' : 'excluded'}; Expense is {expenseIncluded ? 'included' : 'excluded'}. Full reporting-period cash-flow values:</p>
                     <ul>
                       {#each cashFlowSeries.buckets as bucket (bucket.startDate.getTime())}
                         <li>{cashFlowBucketRange(bucket.startDate, bucket.endDate)}: Income {formatFinanceMoney(bucket.incomeMinor, cashFlowSeries.displayCurrency)} · Expense {formatFinanceMoney(bucket.expenseMinor, cashFlowSeries.displayCurrency)}</li>
@@ -1081,19 +1117,25 @@
                   {:else}
                     <p class="text-body-secondary mb-0">Booked and pending activity in the reporting period.</p>
                   {/if}
+                  {#if includeCashFlow !== 'both'}
+                    <p class="text-body-secondary small mb-0">{includeCashFlow === 'none' ? 'Neutral transactions only.' : `${includeCashFlow === 'income' ? 'Income' : 'Expense'} and neutral transactions.`}</p>
+                  {/if}
                 </div>
                 <div class="d-flex flex-wrap gap-2">
-                  {#if selectedCashFlowBucket}
-                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick={clearCashFlowBucketFilter}>Clear chart filter</button>
+                  {#if selectedCashFlowBucket || includeCashFlow !== 'both'}
+                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled={loadingTransactions} onclick={clearCashFlowBucketFilter}>Clear chart filter</button>
                   {/if}
                   <a class="btn btn-outline-secondary btn-sm" href={dashboardTransactionsHref()} use:link>View all transactions</a>
                 </div>
               </div>
 
-              {#if visibleRecentTransactions.length === 0}
-                <div class="alert alert-light border mb-0" role="status">No transactions in this reporting period.</div>
-              {:else}
-                <div id="finance-dashboard-transactions">
+              {#if loadingTransactions}
+                <p class="text-body-secondary small mb-0" role="status">Refreshing dashboard transactions…</p>
+              {/if}
+              <div id="finance-dashboard-transactions" aria-busy={loadingTransactions}>
+                {#if visibleRecentTransactions.length === 0}
+                  <div class="alert alert-light border mb-0" role="status">{selectedCashFlowBucket || includeCashFlow !== 'both' ? 'No transactions matched the current chart filters.' : 'No transactions in this reporting period.'}</div>
+                {:else}
                   <FinanceTransactionList
                     tenantId={financeShell.selectedTenantId}
                     transactions={visibleRecentTransactions}
@@ -1102,18 +1144,18 @@
                     ariaLabel="Dashboard transactions"
                     onTransactionUpdated={applyTransactionUpdate}
                   />
-                </div>
-                <FinancePager
-                  label="Dashboard transaction pages"
-                  status={loadingTransactions ? 'Loading transaction page…' : `Page ${dashboardTransactionPage}`}
-                  controls="finance-dashboard-transactions"
-                  busy={loadingTransactions}
-                  hasPrevious={hasNewerDashboardTransactions}
-                  hasNext={hasOlderDashboardTransactions}
-                  onPrevious={loadNewerDashboardTransactions}
-                  onNext={loadOlderDashboardTransactions}
-                />
-              {/if}
+                  <FinancePager
+                    label="Dashboard transaction pages"
+                    status={loadingTransactions ? 'Loading transaction page…' : `Page ${dashboardTransactionPage}`}
+                    controls="finance-dashboard-transactions"
+                    busy={loadingTransactions}
+                    hasPrevious={hasNewerDashboardTransactions}
+                    hasNext={hasOlderDashboardTransactions}
+                    onPrevious={loadNewerDashboardTransactions}
+                    onNext={loadOlderDashboardTransactions}
+                  />
+                {/if}
+              </div>
             </div>
           </div>
         </div>

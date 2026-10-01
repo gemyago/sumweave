@@ -218,6 +218,12 @@ html:not([data-theme]) {
   height: 22rem;
 }
 
+/* A11y: the keyboard-operable chart needs a theme-aware visible focus ring. */
+.finance-chart-widget:focus-visible {
+  outline: 2px solid var(--bs-body-color);
+  outline-offset: 2px;
+}
+
 @media (max-width: 639px) {
   .finance-chart-widget {
     height: 18rem;

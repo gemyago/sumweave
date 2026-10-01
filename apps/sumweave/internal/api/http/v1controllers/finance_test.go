@@ -2596,6 +2596,32 @@ func TestFinanceController(t *testing.T) {
 		assert.InDelta(t, 2, payload["missingFx"].([]any)[0].(map[string]any)["affectedTransactionCount"], 0)
 	})
 
+	t.Run("registered monthly series route preserves exact ISO bounds without a timezone", func(t *testing.T) {
+		userID := "user-" + fake.UUID().V4()
+		tenantID := "tenant-" + fake.UUID().V4()
+		start, err := time.Parse(time.RFC3339, "2026-05-01T00:00:00+02:00")
+		require.NoError(t, err)
+		end, err := time.Parse(time.RFC3339, "2026-11-01T00:00:00+01:00")
+		require.NoError(t, err)
+		service := newMockfinanceService(t)
+		service.EXPECT().GetCashFlowSeries(mock.Anything, financepkg.CashFlowSeriesParams{
+			ActorUserID: userID, TenantID: tenantID, StartDate: start, EndDate: end,
+			GroupBy: financepkg.CashFlowGroupByMonth,
+		}).Return(financepkg.CashFlowSeries{
+			Period:  financepkg.CashFlowPeriod{StartDate: start, EndDate: end},
+			GroupBy: financepkg.CashFlowGroupByMonth, Complete: true,
+		}, nil).Once()
+		target := "/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?" + url.Values{
+			"startDate": {start.Format(time.RFC3339)}, "endDate": {end.Format(time.RFC3339)},
+			"groupBy": {"month"},
+		}.Encode()
+		response := httptest.NewRecorder()
+		newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
+			response, newRequest(http.MethodGet, target, "", true),
+		)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	})
+
 	t.Run("registered cash-flow series route rejects invalid parameters before its service", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()

@@ -236,6 +236,7 @@ export interface FinanceDashboard {
 }
 
 export type FinanceCashFlowGroupBy = 'day' | 'month'
+export type FinanceCashFlowInclusion = 'income' | 'expense' | 'both' | 'none'
 
 export interface FinanceCashFlowSeriesPeriod {
   startDate: Date
@@ -405,7 +406,8 @@ export interface SignalFinanceApi {
      startDate?: Date
      endDate?: Date
      sort?: 'asc'
-     includeHidden?: boolean
+      includeHidden?: boolean
+      includeCashFlow?: FinanceCashFlowInclusion
     offset?: number
   }): Promise<FinanceTransaction[]>
   getTransaction(params: { tenantId: string; transactionId: string }): Promise<FinanceTransaction>
@@ -754,7 +756,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         body: { name },
       })
     },
-    async listTransactions({ tenantId, accountId, kind, source, status, startDate, endDate, sort, includeHidden, limit, offset }) {
+    async listTransactions({ tenantId, accountId, kind, source, status, startDate, endDate, sort, includeHidden, includeCashFlow, limit, offset }) {
       const json = await request<{ items?: RawTransaction[] }>({
         method: 'GET',
         path: `/finance/tenants/${encodeURIComponent(tenantId)}/transactions`,
@@ -767,6 +769,7 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
             endDate: endDate && serializeRequestTimestamp(endDate),
             sort,
             includeHidden,
+            includeCashFlow,
             limit,
             offset,
           }),

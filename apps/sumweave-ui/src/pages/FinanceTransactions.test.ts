@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import { faker } from '@faker-js/faker'
 import { dateInputValue } from '../lib/date-range'
 import FinanceTransactions from './FinanceTransactions.svelte'
 import { isFinanceLedgerRefreshPending } from '../lib/finance/ledger-refresh'
+import type { FinanceTransaction } from '../lib/finance/api'
 
 const mocks = vi.hoisted(() => ({
   listTenants: vi.fn(),
@@ -631,6 +632,7 @@ describe('Finance transactions page', () => {
         tenantId: 'tenant-1',
         accountId: 'account-1',
         kind: 'expense',
+        includeCashFlow: 'both',
         startDate: undefined,
         endDate: undefined,
         limit: 20,
@@ -653,21 +655,157 @@ describe('Finance transactions page', () => {
     expect(dateInputValue(request.endDate)).toBe('2026-07-01')
   })
 
-  it('preserves exact dashboard bucket boundaries from a direct link', async () => {
+  it.each(['income', 'expense', 'both', 'none'])('preserves exact dashboard boundaries and %s inclusion independently of kind', async (inclusion) => {
     const user = userEvent.setup()
     const startAt = '2026-10-31T23:00:00+01:00'
     const endAt = '2026-11-30T23:00:00+01:00'
-    window.location.hash = `#/finance/transactions?startAt=${encodeURIComponent(startAt)}&endAt=${encodeURIComponent(endAt)}`
+    window.location.hash = `#/finance/transactions?startAt=${encodeURIComponent(startAt)}&endAt=${encodeURIComponent(endAt)}&includeCashFlow=${inclusion}`
 
     render(FinanceTransactions)
 
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Transaction type filter' }), 'expense')
     const request = mocks.listTransactions.mock.calls.at(-1)![0]
+    expect(request).toMatchObject({ includeCashFlow: inclusion, kind: 'expense' })
     expect(request.startDate.getTime()).toBe(new Date(startAt).getTime())
     expect(request.endDate.getTime()).toBe(new Date(endAt).getTime())
     const query = new URLSearchParams(window.location.hash.split('?')[1])
     expect(new Date(query.get('startAt')!).getTime()).toBe(new Date(startAt).getTime())
     expect(new Date(query.get('endAt')!).getTime()).toBe(new Date(endAt).getTime())
+    if (inclusion !== 'both') expect(query.get('includeCashFlow')).toBe(inclusion)
+  })
+
+  it('clears only inclusion atomically after success and returns to page one', async () => {
+    const user = userEvent.setup()
+    const description = faker.lorem.words(3)
+    const now = faker.date.recent()
+    const row: FinanceTransaction = {
+      id: faker.string.uuid(), tenantId: 'tenant-1', accountId: 'account-1', source: 'manual', status: 'booked', kind: 'reconciliation', amountMinor: 100,
+      currency: 'USD', description, effectiveAt: now, categoryId: null, tagIds: [], transferGroupId: null, transferMatchedAt: null, hiddenAt: null, createdAt: now, updatedAt: now,
+    }
+    window.location.hash = '#/finance/transactions?accountId=account-1&type=regular&startAt=2026-10-31T23%3A00%3A00%2B01%3A00&endAt=2026-11-30T23%3A00%3A00%2B01%3A00&includeCashFlow=none'
+    mocks.listTransactions.mockResolvedValue(Array.from({ length: 20 }, () => ({ ...row, id: faker.string.uuid(), description: faker.lorem.words(3) })))
+    render(FinanceTransactions)
+    await user.click(await screen.findByRole('button', { name: 'Transaction pages: older page' }))
+    expect(screen.getByText('Page 2')).toBeInTheDocument()
+    const oldQuery = window.location.hash
+    const oldRequest = mocks.listTransactions.mock.calls.at(-1)![0]
+    let resolveRequest!: (items: FinanceTransaction[]) => void
+    mocks.listTransactions.mockImplementationOnce(() => new Promise((resolve) => { resolveRequest = resolve }))
+    const clear = screen.getByRole('button', { name: 'Clear cash-flow inclusion' })
+    await user.click(clear)
+    expect(clear).toBeDisabled()
+    expect(screen.getByText('Neutral transactions only')).toBeInTheDocument()
+    expect(window.location.hash).toBe(oldQuery)
+    resolveRequest([row])
+    await screen.findByText(description)
+    expect(screen.queryByRole('button', { name: 'Clear cash-flow inclusion' })).not.toBeInTheDocument()
+    expect(screen.getByText('Page 1')).toBeInTheDocument()
+    expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({
+      accountId: 'account-1', kind: 'regular', includeCashFlow: 'both', offset: 0, startDate: oldRequest.startDate, endDate: oldRequest.endDate,
+    }))
+    expect(window.location.hash).not.toContain('includeCashFlow')
+    expect(screen.getByText(/Exact time window:.*\(inclusive\).*\(exclusive\)/)).toBeInTheDocument()
+  })
+
+  it('preserves the active inclusion, rows and URL after a failed clear', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/finance/transactions?includeCashFlow=expense'
+    render(FinanceTransactions)
+    const clear = await screen.findByRole('button', { name: 'Clear cash-flow inclusion' })
+    const oldQuery = window.location.hash
+    mocks.listTransactions.mockRejectedValueOnce(new Error('Clear unavailable'))
+    await user.click(clear)
+    await screen.findByText('Clear unavailable')
+    expect(screen.getByText('Expense and neutral transactions')).toBeInTheDocument()
+    expect(screen.getByText('Refund')).toBeInTheDocument()
+    expect(window.location.hash).toBe(oldQuery)
+    expect(clear).toBeEnabled()
+  })
+
+  it('does not overwrite the destination URL when an inclusion clear succeeds after unmount', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/finance/transactions?includeCashFlow=expense&startAt=2026-06-01T00%3A00%3A00%2B02%3A00&endAt=2026-07-01T00%3A00%3A00%2B02%3A00'
+    const { unmount } = render(FinanceTransactions)
+    const clear = await screen.findByRole('button', { name: 'Clear cash-flow inclusion' })
+    let resolveRequest!: (items: FinanceTransaction[]) => void
+    const request = new Promise<FinanceTransaction[]>((resolve) => { resolveRequest = resolve })
+    mocks.listTransactions.mockReturnValueOnce(request)
+    await user.click(clear)
+    expect(clear).toBeDisabled()
+
+    unmount()
+    const destination = '#/finance?startDate=2026-05-01&endDate=2026-05-31'
+    window.location.hash = destination
+    await act(async () => {
+      resolveRequest([])
+      await request
+    })
+
+    expect(window.location.hash).toBe(destination)
+  })
+
+  it('ignores an inclusion clear failure after unmount and preserves the destination URL', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/finance/transactions?includeCashFlow=expense'
+    const { unmount } = render(FinanceTransactions)
+    const clear = await screen.findByRole('button', { name: 'Clear cash-flow inclusion' })
+    let rejectRequest!: (reason: Error) => void
+    const request = new Promise<FinanceTransaction[]>((_, reject) => { rejectRequest = reject })
+    mocks.listTransactions.mockReturnValueOnce(request)
+    await user.click(clear)
+    expect(clear).toBeDisabled()
+
+    unmount()
+    const destination = '#/finance?startDate=2026-05-01&endDate=2026-05-31'
+    window.location.hash = destination
+    await act(async () => {
+      rejectRequest(new Error(faker.lorem.sentence()))
+      await request.catch(() => undefined)
+    })
+
+    expect(window.location.hash).toBe(destination)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('rejects a stale inclusion clear when a newer kind request succeeds', async () => {
+    const user = userEvent.setup()
+    window.location.hash = '#/finance/transactions?includeCashFlow=income'
+    render(FinanceTransactions)
+    const clear = await screen.findByRole('button', { name: 'Clear cash-flow inclusion' })
+    let resolveOld!: (items: FinanceTransaction[]) => void
+    mocks.listTransactions.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+    await user.click(clear)
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Transaction type filter' }), 'refund')
+    await waitFor(() => expect(clear).toBeEnabled())
+    resolveOld([])
+    await waitFor(() => expect(screen.getByText('Page 1')).toBeInTheDocument())
+    expect(screen.getByText('Income and neutral transactions')).toBeInTheDocument()
+    expect(screen.getByText('Refund')).toBeInTheDocument()
+    expect(window.location.hash).toContain('includeCashFlow=income')
+  })
+
+  it('resets inclusion on tenant changes and rejects an old clear response', async () => {
+    const user = userEvent.setup()
+    const now = faker.date.recent()
+    const tenantB = faker.string.uuid()
+    mocks.listTenants.mockResolvedValueOnce([
+      { id: 'tenant-1', name: 'Household', displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
+      { id: tenantB, name: faker.company.name(), displayCurrency: 'USD', joinedAt: now, createdAt: now, updatedAt: now },
+    ])
+    window.localStorage.setItem('sumweave-ui-finance-tenant-id', 'tenant-1')
+    window.location.hash = '#/finance/transactions?includeCashFlow=none'
+    render(FinanceTransactions)
+    const clear = await screen.findByRole('button', { name: 'Clear cash-flow inclusion' })
+    let resolveOld!: (items: FinanceTransaction[]) => void
+    mocks.listTransactions.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+    await user.click(clear)
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), tenantB)
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ tenantId: tenantB, includeCashFlow: 'both', offset: 0 })))
+    resolveOld([])
+    await waitFor(() => expect(screen.getByText('Page 1')).toBeInTheDocument())
+    expect(screen.getByText('Refund')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear cash-flow inclusion' })).not.toBeInTheDocument()
+    expect(window.location.hash).not.toContain('includeCashFlow')
   })
 
   it('keeps the visible inclusive end date in the URL while using its next local day only for the API', async () => {
@@ -743,7 +881,8 @@ describe('Finance transactions page', () => {
     expect(mocks.listTransactions).toHaveBeenLastCalledWith({
       tenantId: 'tenant-1',
       accountId: '',
-       kind: '',
+        kind: '',
+       includeCashFlow: 'both',
        startDate: undefined,
        endDate: undefined,
       limit: 20,
@@ -842,7 +981,7 @@ describe('Finance transactions page', () => {
     expect(await screen.findByText('Select an active tenant to continue on this finance route.')).toBeInTheDocument()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Tenant' }), 'tenant-2')
 
-    await waitFor(() => expect(mocks.listTransactions).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', accountId: '', kind: '', startDate: undefined, endDate: undefined, limit: 20, offset: 0 }))
+    await waitFor(() => expect(mocks.listTransactions).toHaveBeenLastCalledWith({ tenantId: 'tenant-2', accountId: '', kind: '', includeCashFlow: 'both', startDate: undefined, endDate: undefined, limit: 20, offset: 0 }))
     expect(await screen.findByText('Hotel')).toBeInTheDocument()
   })
 

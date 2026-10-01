@@ -1420,6 +1420,7 @@ type paramsParserFinanceListFinanceTransactions struct {
 	bindSource requestParamBinder[[]string, string]
 	bindStatus requestParamBinder[[]string, string]
 	bindKind requestParamBinder[[]string, string]
+	bindIncludeCashFlow requestParamBinder[[]string, ListFinanceTransactionsParamsIncludeCashFlow]
 	bindStartDate requestParamBinder[[]string, time.Time]
 	bindEndDate requestParamBinder[[]string, time.Time]
 	bindSort requestParamBinder[[]string, ListFinanceTransactionsParamsSort]
@@ -1441,6 +1442,7 @@ func (p *paramsParserFinanceListFinanceTransactions) parse(router httpRouter, re
 	p.bindSource(queryParamsCtx.Fork("source"), readQueryValue("source", query), &reqParams.Source)
 	p.bindStatus(queryParamsCtx.Fork("status"), readQueryValue("status", query), &reqParams.Status)
 	p.bindKind(queryParamsCtx.Fork("kind"), readQueryValue("kind", query), &reqParams.Kind)
+	p.bindIncludeCashFlow(queryParamsCtx.Fork("includeCashFlow"), readQueryValue("includeCashFlow", query), &reqParams.IncludeCashFlow)
 	p.bindStartDate(queryParamsCtx.Fork("startDate"), readQueryValue("startDate", query), &reqParams.StartDate)
 	p.bindEndDate(queryParamsCtx.Fork("endDate"), readQueryValue("endDate", query), &reqParams.EndDate)
 	p.bindSort(queryParamsCtx.Fork("sort"), readQueryValue("sort", query), &reqParams.Sort)
@@ -1490,6 +1492,14 @@ func newParamsParserFinanceListFinanceTransactions(rootHandler *RootHandler) par
 				rootHandler.knownParsers.stringParser,
 			),
 			validateValue: NewSimpleFieldValidator[string](
+			),
+		}),
+		bindIncludeCashFlow: newRequestParamBinder(binderParams[[]string, ListFinanceTransactionsParamsIncludeCashFlow]{
+			required: false,
+			parseValue: parseMultiValueParamAsSoloValue(
+				ParseListFinanceTransactionsParamsIncludeCashFlow,
+			),
+			validateValue: NewSimpleFieldValidator[ListFinanceTransactionsParamsIncludeCashFlow](
 			),
 		}),
 		bindStartDate: newRequestParamBinder(binderParams[[]string, time.Time]{

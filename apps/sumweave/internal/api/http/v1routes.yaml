@@ -899,6 +899,16 @@ paths:
           name: kind
           schema: { type: string }
         - in: query
+          name: includeCashFlow
+          description: >-
+            Reporting cash-flow groups to include, independently of transaction kind,
+            before pagination. Defaults to both. Regular, income, expense and unmatched
+            transfer amounts group by sign; refunds reduce expense. Neutral entries
+            (matched booked transfers, reconciliation, opening balances and zero regular
+            amounts) remain visible for every value. Status and hidden-history filters
+            remain independent.
+          schema: { type: string, enum: [income, expense, both, none], default: both }
+        - in: query
           name: startDate
           description: Inclusive transaction effective timestamp.
           schema: { type: string, format: date-time }
