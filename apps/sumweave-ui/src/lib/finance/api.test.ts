@@ -87,7 +87,6 @@ describe('finance api', () => {
     expect(requestUrl.pathname).toBe(`/api/v1/finance/tenants/${encodeURIComponent(tenantId)}/cash-flow-series`)
     expect(requestUrl.searchParams).toMatchObject(new URLSearchParams({
       startDate: '2026-03-01T07:00:00.000Z', endDate: '2026-04-01T07:00:00.000Z', groupBy: 'month',
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }))
     expect(series).toMatchObject({ groupBy: 'month', displayCurrency: 'EUR', complete: false })
     expect(series.period).toEqual({ startDate, endDate })
@@ -95,12 +94,10 @@ describe('finance api', () => {
     expect(series.missingFx).toEqual([{ provider: 'frankfurter', baseCurrency: 'USD', quoteCurrency: 'EUR', affectedTransactionCount: 2 }])
   })
 
-  it('sends the browser monthly calendar across local-offset and DST bounds without changing instants', async () => {
-    // Exact dates reproduce the six-month Warsaw range with a DST end offset.
+  it('sends exact ISO bounds without a timezone for monthly and daily cash-flow requests', async () => {
+    // Different input offsets must preserve both instants, not introduce a calendar contract.
     const startDate = new Date('2026-05-01T00:00:00+02:00')
     const endDate = new Date('2026-11-01T00:00:00+01:00')
-    const options = Intl.DateTimeFormat().resolvedOptions()
-    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ ...options, timeZone: 'Europe/Warsaw' })
     const requests: Array<RequestInfo | URL> = []
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
       requests.push(input)
@@ -114,13 +111,14 @@ describe('finance api', () => {
     })
     const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
     const tenantId = faker.string.uuid()
-    await api.getCashFlowSeries({ tenantId, startDate, endDate, groupBy: 'month' })
-    const monthlyQuery = new URL(String(requests[0])).searchParams
-    expect(monthlyQuery.get('timeZone')).toBe('Europe/Warsaw')
-    expect(new Date(monthlyQuery.get('startDate')!)).toEqual(startDate)
-    expect(new Date(monthlyQuery.get('endDate')!)).toEqual(endDate)
-    await api.getCashFlowSeries({ tenantId, startDate, endDate, groupBy: 'day' })
-    expect(new URL(String(requests[1])).searchParams.has('timeZone')).toBe(false)
+    for (const groupBy of ['month', 'day'] as const) {
+      await api.getCashFlowSeries({ tenantId, startDate, endDate, groupBy })
+      const query = new URL(String(requests.at(-1))).searchParams
+      expect(Object.fromEntries(query)).toEqual({
+        startDate: startDate.toISOString(), endDate: endDate.toISOString(), groupBy,
+      })
+      expect(query.has('timeZone')).toBe(false)
+    }
   })
 
   it('rejects a cash-flow series response missing required fields', async () => {

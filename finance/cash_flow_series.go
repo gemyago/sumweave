@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
-	"github.com/gemyago/sumweave/finance/internal/cashflowcalendar"
 	"github.com/gemyago/sumweave/finance/persistence"
 )
 
@@ -33,7 +32,6 @@ type CashFlowSeriesParams struct {
 	StartDate   time.Time
 	EndDate     time.Time
 	GroupBy     CashFlowGroupBy
-	TimeZone    string // Optional IANA calendar zone for monthly boundaries.
 }
 
 type cashFlowSeriesStore interface {
@@ -50,21 +48,7 @@ func ValidateCashFlowSeriesParams(params CashFlowSeriesParams) error {
 	if err := validateCashFlowGroupBy(params.GroupBy); err != nil {
 		return err
 	}
-	start := params.StartDate
-	if params.TimeZone != "" {
-		if params.GroupBy != CashFlowGroupByMonth || params.TimeZone == "Local" {
-			return errors.New("timeZone must be an IANA zone for monthly grouping")
-		}
-		location, err := time.LoadLocation(params.TimeZone)
-		if err != nil {
-			return fmt.Errorf("invalid monthly timeZone: %w", err)
-		}
-		start = start.In(location)
-	} else if params.GroupBy == CashFlowGroupByMonth {
-		_, offset := start.Zone()
-		start = start.In(time.FixedZone("", offset))
-	}
-	if cashFlowBucketCount(start, params.EndDate, params.GroupBy) > maxCashFlowBuckets {
+	if cashFlowBucketCount(params.StartDate, params.EndDate, params.GroupBy) > maxCashFlowBuckets {
 		return fmt.Errorf("cash-flow series may contain at most %d buckets", maxCashFlowBuckets)
 	}
 	return nil
@@ -99,5 +83,28 @@ func cashFlowBucketCount(startDate time.Time, endDate time.Time, groupBy CashFlo
 }
 
 func cashFlowMonthBoundary(startDate time.Time, monthIndex int) time.Time {
-	return cashflowcalendar.MonthBoundary(startDate, monthIndex)
+	_, offsetSeconds := startDate.Zone()
+	startDate = startDate.In(time.FixedZone("", offsetSeconds))
+	firstOfTargetMonth := time.Date(
+		startDate.Year(),
+		startDate.Month()+time.Month(monthIndex),
+		1,
+		startDate.Hour(),
+		startDate.Minute(),
+		startDate.Second(),
+		startDate.Nanosecond(),
+		startDate.Location(),
+	)
+	lastOfTargetMonth := firstOfTargetMonth.AddDate(0, 1, -1).Day()
+	day := min(startDate.Day(), lastOfTargetMonth)
+	return time.Date(
+		firstOfTargetMonth.Year(),
+		firstOfTargetMonth.Month(),
+		day,
+		startDate.Hour(),
+		startDate.Minute(),
+		startDate.Second(),
+		startDate.Nanosecond(),
+		startDate.Location(),
+	)
 }

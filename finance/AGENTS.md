@@ -31,8 +31,7 @@ Root Go module for the finance product slice.
 - Do not extend persistence/store.go with new methods, this is a legacy over-engineered "god object" that should be phased out. Instead create new dedicated stores for each responsibility.
 - Transaction CSV imports cap raw CSVs at 250,000 data rows and 64 MiB.
 - Shared clients retry safe 429s once using Retry-After or fallback delay.
-- Monthly reporting uses the supplied IANA calendar zone for DST bounds.
-- Share monthly anchors; preserve start, choose later folds, advance gaps.
+- Cash-flow uses supplied ISO bounds; DST calendar handling is deferred.
 
 ## Commands
 

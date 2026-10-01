@@ -1722,10 +1722,6 @@ paths:
           name: groupBy
           required: true
           schema: { type: string, enum: [day, month] }
-        - in: query
-          name: timeZone
-          description: Optional IANA time zone for monthly calendar boundaries, including DST. Only supported with groupBy=month. Without it, months use the startDate fixed offset. Boundaries remain anchored to the original start day/time, clamped to the target month's last day; the final bucket ends at endDate.
-          schema: { type: string }
       responses:
         '200':
           description: Tenant cash-flow series

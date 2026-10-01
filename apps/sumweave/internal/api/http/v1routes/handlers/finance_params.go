@@ -645,7 +645,6 @@ type paramsParserFinanceGetFinanceCashFlowSeries struct {
 	bindStartDate requestParamBinder[[]string, time.Time]
 	bindEndDate requestParamBinder[[]string, time.Time]
 	bindGroupBy requestParamBinder[[]string, GetFinanceCashFlowSeriesParamsGroupBy]
-	bindTimeZone requestParamBinder[[]string, string]
 }
 
 func (p *paramsParserFinanceGetFinanceCashFlowSeries) parse(router httpRouter, req *http.Request) (*GetFinanceCashFlowSeriesParams, error) {
@@ -660,7 +659,6 @@ func (p *paramsParserFinanceGetFinanceCashFlowSeries) parse(router httpRouter, r
 	p.bindStartDate(queryParamsCtx.Fork("startDate"), readQueryValue("startDate", query), &reqParams.StartDate)
 	p.bindEndDate(queryParamsCtx.Fork("endDate"), readQueryValue("endDate", query), &reqParams.EndDate)
 	p.bindGroupBy(queryParamsCtx.Fork("groupBy"), readQueryValue("groupBy", query), &reqParams.GroupBy)
-	p.bindTimeZone(queryParamsCtx.Fork("timeZone"), readQueryValue("timeZone", query), &reqParams.TimeZone)
 	return reqParams, bindingCtx.AggregatedError()
 }
 
@@ -696,14 +694,6 @@ func newParamsParserFinanceGetFinanceCashFlowSeries(rootHandler *RootHandler) pa
 				ParseGetFinanceCashFlowSeriesParamsGroupBy,
 			),
 			validateValue: NewSimpleFieldValidator[GetFinanceCashFlowSeriesParamsGroupBy](
-			),
-		}),
-		bindTimeZone: newRequestParamBinder(binderParams[[]string, string]{
-			required: false,
-			parseValue: parseMultiValueParamAsSoloValue(
-				rootHandler.knownParsers.stringParser,
-			),
-			validateValue: NewSimpleFieldValidator[string](
 			),
 		}),
 	}

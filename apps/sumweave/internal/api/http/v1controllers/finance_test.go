@@ -2596,7 +2596,7 @@ func TestFinanceController(t *testing.T) {
 		assert.InDelta(t, 2, payload["missingFx"].([]any)[0].(map[string]any)["affectedTransactionCount"], 0)
 	})
 
-	t.Run("registered monthly series route preserves exact bounds and named calendar", func(t *testing.T) {
+	t.Run("registered monthly series route preserves exact ISO bounds without a timezone", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()
 		tenantID := "tenant-" + fake.UUID().V4()
 		start, err := time.Parse(time.RFC3339, "2026-05-01T00:00:00+02:00")
@@ -2606,14 +2606,14 @@ func TestFinanceController(t *testing.T) {
 		service := newMockfinanceService(t)
 		service.EXPECT().GetCashFlowSeries(mock.Anything, financepkg.CashFlowSeriesParams{
 			ActorUserID: userID, TenantID: tenantID, StartDate: start, EndDate: end,
-			GroupBy: financepkg.CashFlowGroupByMonth, TimeZone: "Europe/Warsaw",
+			GroupBy: financepkg.CashFlowGroupByMonth,
 		}).Return(financepkg.CashFlowSeries{
 			Period:  financepkg.CashFlowPeriod{StartDate: start, EndDate: end},
 			GroupBy: financepkg.CashFlowGroupByMonth, Complete: true,
 		}, nil).Once()
 		target := "/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?" + url.Values{
 			"startDate": {start.Format(time.RFC3339)}, "endDate": {end.Format(time.RFC3339)},
-			"groupBy": {"month"}, "timeZone": {"Europe/Warsaw"},
+			"groupBy": {"month"},
 		}.Encode()
 		response := httptest.NewRecorder()
 		newHandler(service, newMockbankConnectionService(t), makeAuthMiddleware(userID)).ServeHTTP(
@@ -2627,9 +2627,6 @@ func TestFinanceController(t *testing.T) {
 		tenantID := "tenant-" + fake.UUID().V4()
 		handler := newHandler(newMockfinanceService(t), newMockbankConnectionService(t), makeAuthMiddleware(userID))
 		for _, target := range []string{
-			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-05-01T00:00:00Z&endDate=2026-11-01T00:00:00Z&groupBy=month&timeZone=invalid/" + fake.UUID().V4(),
-			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-05-01T00:00:00Z&endDate=2026-11-01T00:00:00Z&groupBy=month&timeZone=Local",
-			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-05-01T00:00:00Z&endDate=2026-05-02T00:00:00Z&groupBy=day&timeZone=Europe/Warsaw",
 			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-06-02T00:00:00Z&endDate=2026-06-01T00:00:00Z&groupBy=day",
 			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-06-01T00:00:00Z&endDate=2026-06-02T00:00:00Z&groupBy=year",
 			"/api/v1/finance/tenants/" + tenantID + "/cash-flow-series?startDate=2026-06-01T00:00:00Z&endDate=2026-06-02T00:00:00Z",

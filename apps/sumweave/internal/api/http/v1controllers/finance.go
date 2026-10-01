@@ -1319,7 +1319,6 @@ func (c *FinanceController) GetFinanceCashFlowSeries(
 			StartDate:   params.StartDate,
 			EndDate:     params.EndDate,
 			GroupBy:     financepkg.CashFlowGroupBy(params.GroupBy),
-			TimeZone:    params.TimeZone,
 		}
 		if validationErr := financepkg.ValidateCashFlowSeriesParams(seriesParams); validationErr != nil {
 			return nil, app.NewErrInvalidInput("dateRange", validationErr.Error())

@@ -977,8 +977,6 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
             startDate: serializeRequestTimestamp(startDate),
             endDate: serializeRequestTimestamp(endDate),
             groupBy,
-            // An instant or fixed offset cannot identify the browser's DST calendar.
-            timeZone: groupBy === 'month' ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
           }),
         }),
       )
