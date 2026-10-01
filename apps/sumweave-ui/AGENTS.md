@@ -82,6 +82,7 @@ The rules are:
 - Use one Finance navbar; put active tenant first in the user menu.
 - Do not add header-only cards when Finance breadcrumbs already locate a detail route.
 - Follow [DESIGN.md](./DESIGN.md) for all UI styling changes.
+- Cash-flow inclusion uses visible native ECharts legend labels, not buttons.
 - Prefer interaction affordances and accessible descriptions over persistent instructional copy that consumes dashboard space.
 - For canonical `#/login` and tenant-facing `#/finance*`, prefer vanilla Bootstrap classes and native HTML/Svelte markup over custom CSS.
 - Treat Bootstrap Finance/login as canonical; do not restore `restructure-finance-ui-shell` custom-shell styling as the default direction.

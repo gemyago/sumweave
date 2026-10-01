@@ -162,14 +162,21 @@
   )
 
   const cashFlowChartOption = $derived.by<EChartsCoreOption | undefined>(() => {
-    if (!cashFlowSeries || !cashFlowHasActivity) return undefined
+    if (!cashFlowSeries) return undefined
 
     const series = cashFlowSeries
     const labelInterval = series.buckets.length > 12 ? Math.ceil(series.buckets.length / 6) - 1 : 0
 
     return {
-      grid: { left: 12, right: 12, top: 12, bottom: 56, containLabel: true },
-      legend: { show: false, selected: { Income: incomeIncluded, Expense: expenseIncluded } },
+      // Native legend rollback must remove uncommitted bars without fade-out ghosts.
+      animation: false,
+      grid: { left: 12, right: 12, top: 44, bottom: 56, containLabel: true },
+      legend: {
+        show: true, top: 0, left: 'center', data: ['Income', 'Expense'],
+        textStyle: { color: 'var(--bs-body-color)' },
+        inactiveColor: 'var(--bs-secondary-color)',
+        selected: { Income: incomeIncluded, Expense: expenseIncluded },
+      },
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -757,9 +764,10 @@
     void loadDashboardTransactionPage(0, { bucket, value, inclusion: includeCashFlow })
   }
 
-  function toggleCashFlowInclusion(group: 'income' | 'expense') {
-    const income = group === 'income' ? !incomeIncluded : incomeIncluded
-    const expense = group === 'expense' ? !expenseIncluded : expenseIncluded
+  function toggleCashFlowInclusion(name: string) {
+    if (!activeDashboardRange || loadingDashboard || loadingTransactions || (name !== 'Income' && name !== 'Expense')) return
+    const income = name === 'Income' ? !incomeIncluded : incomeIncluded
+    const expense = name === 'Expense' ? !expenseIncluded : expenseIncluded
     const inclusion = income ? (expense ? 'both' : 'income') : (expense ? 'expense' : 'none')
     void loadDashboardTransactionPage(0, { bucket: selectedCashFlowBucket, value: cashFlowBucketFilterValue, inclusion })
   }
@@ -1051,37 +1059,21 @@
                   </div>
                 {/if}
                 <div class="d-grid gap-2">
-                  <div class="d-flex flex-wrap justify-content-center gap-2" role="group" aria-label="Cash-flow transaction inclusion">
-                    <button
-                      type="button"
-                      class="btn btn-outline-success btn-sm"
-                      class:active={incomeIncluded}
-                      aria-pressed={incomeIncluded}
-                      aria-controls="finance-dashboard-transactions"
-                      aria-describedby="cash-flow-inclusion-description"
-                      disabled={loadingTransactions}
-                      onclick={() => toggleCashFlowInclusion('income')}
-                    >Income</button>
-                    <button
-                      type="button"
-                      class="btn btn-outline-danger btn-sm"
-                      class:active={expenseIncluded}
-                      aria-pressed={expenseIncluded}
-                      aria-controls="finance-dashboard-transactions"
-                      aria-describedby="cash-flow-inclusion-description"
-                      disabled={loadingTransactions}
-                      onclick={() => toggleCashFlowInclusion('expense')}
-                    >Expense</button>
-                  </div>
-                  <p id="cash-flow-inclusion-description" class="visually-hidden">Include or exclude each cash-flow group from the transactions in the selected time window, or the whole reporting period. Neutral transactions remain included. Period summary values do not change.</p>
+                  <p id="cash-flow-inclusion-description" class="visually-hidden">Select the Income or Expense legend label to include or exclude that cash-flow group. With the chart focused, press I to toggle Income or E to toggle Expense. Changes apply to the selected time window, or the whole reporting period. Neutral transactions remain included. Period summary values do not change. While transactions load, inclusion stays unchanged and further legend changes are ignored.</p>
+                  <p class="visually-hidden" role="status">Income is {incomeIncluded ? 'included' : 'excluded'}; Expense is {expenseIncluded ? 'included' : 'excluded'}.</p>
                 {#if !cashFlowHasActivity}
                   <div class="alert alert-light border mb-0" role="status">No settled cash flow to chart for this period.</div>
-                  {:else if cashFlowChartOption}
+                {/if}
+                  {#if cashFlowChartOption}
                     <EChartsSvgChart
                       ariaLabel="Cash flow chart"
-                      ariaDescription="cash-flow-chart-description"
+                      ariaDescription="cash-flow-inclusion-description cash-flow-chart-description"
                       option={cashFlowChartOption}
                       onDataClick={toggleCashFlowBucket}
+                      onLegendToggle={toggleCashFlowInclusion}
+                      legendSelection={{ Income: incomeIncluded, Expense: expenseIncluded }}
+                      legendShortcuts={{ Income: 'I', Expense: 'E' }}
+                      busy={loadingTransactions}
                     />
                     <div class="mt-2">
                       <label class="form-label small mb-1" for="cash-flow-bucket-filter">Filter transactions by cash-flow time window</label>

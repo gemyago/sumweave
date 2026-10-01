@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
+import { tick } from 'svelte'
 import { faker } from '@faker-js/faker'
 import type { FinanceTransaction } from '../lib/finance/api'
 import Finance from './Finance.svelte'
@@ -17,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   listTransactions: vi.fn(),
   listConnections: vi.fn(),
   chartSetOption: vi.fn(),
+  chartDispatchAction: vi.fn(),
+  chartLegendHandler: undefined as ((params: { name: string; selected?: Record<string, boolean> }) => void) | undefined,
   chartClickHandler: undefined as ((params: { dataIndex?: number }) => void) | undefined,
   shellState: null as FinanceShellState | null,
 }))
@@ -76,6 +79,15 @@ function dashboardLedgerQuery() {
   return new URLSearchParams(screen.getByRole('link', { name: 'View all transactions' }).getAttribute('href')!.split('?')[1])
 }
 
+async function toggleLegend(name: string) {
+  mocks.chartLegendHandler?.({ name })
+  await tick()
+}
+
+function expectLegend(income: boolean, expense: boolean) {
+  expect(mocks.chartSetOption.mock.calls.at(-1)![0].legend).toMatchObject({ show: true, selected: { Income: income, Expense: expense } })
+}
+
 vi.mock('../lib/finance/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/finance/api')>()
   return {
@@ -102,9 +114,11 @@ vi.mock('echarts/core', () => ({
   init: vi.fn((element: HTMLElement) => ({
     dispose: vi.fn(),
     resize: vi.fn(),
-    on: (eventName: string, handler: (params: { dataIndex?: number }) => void) => {
+    on: (eventName: string, handler: (params: unknown) => void) => {
       if (eventName === 'click') mocks.chartClickHandler = handler
+      if (eventName === 'legendselectchanged') mocks.chartLegendHandler = handler
     },
+    dispatchAction: mocks.chartDispatchAction,
     off: vi.fn(),
     setOption: (option: { xAxis?: { data?: string[] } }) => {
       mocks.chartSetOption(option)
@@ -139,6 +153,8 @@ describe('Finance dashboard page', () => {
     mocks.listTransactions.mockReset()
     mocks.listConnections.mockReset()
     mocks.chartSetOption.mockReset()
+    mocks.chartDispatchAction.mockReset()
+    mocks.chartLegendHandler = undefined
     mocks.chartClickHandler = undefined
     mocks.shellState = new FinanceShellState()
     mocks.listTenants.mockResolvedValue([
@@ -268,9 +284,9 @@ describe('Finance dashboard page', () => {
       endDate: new Date(2026, 5, 21),
       groupBy: 'day',
     })
-    expect(screen.getByRole('img', { name: 'Cash flow chart' })).toHaveAttribute(
+    expect(screen.getByRole('group', { name: 'Cash flow chart' })).toHaveAttribute(
       'aria-describedby',
-      'cash-flow-chart-description',
+      'cash-flow-inclusion-description cash-flow-chart-description',
     )
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 1200.00 USD · Expense 450.00 USD').closest('div')).toHaveClass('visually-hidden')
   })
@@ -292,7 +308,7 @@ describe('Finance dashboard page', () => {
     })
 
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await screen.findByRole('group', { name: 'Cash flow chart' })
     await waitFor(() => expect(mocks.chartClickHandler).toBeTypeOf('function'))
 
     mocks.chartClickHandler?.({ dataIndex: 1 })
@@ -343,7 +359,7 @@ describe('Finance dashboard page', () => {
     })
 
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await screen.findByRole('group', { name: 'Cash flow chart' })
     await waitFor(() => expect(mocks.chartClickHandler).toBeTypeOf('function'))
 
     mocks.chartClickHandler?.({ dataIndex: 0 })
@@ -427,7 +443,7 @@ describe('Finance dashboard page', () => {
     })
 
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await screen.findByRole('group', { name: 'Cash flow chart' })
     await waitFor(() => expect(mocks.listTransactions).toHaveBeenCalledTimes(1))
     mocks.listTransactions.mockRejectedValueOnce(new Error('bucket transactions failed'))
 
@@ -552,6 +568,10 @@ describe('Finance dashboard page', () => {
     expect(warning.compareDocumentPosition(zeroActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(warning.parentElement).toHaveTextContent('EUR → USD (frankfurter, 2 transaction values)')
     expect(screen.getByText('Jun 20, 2026 → Jun 20, 2026: Income 0.00 USD · Expense 0.00 USD')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Cash flow chart' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' })).toBeEnabled()
+    await toggleLegend('Income')
+    expectLegend(false, true)
   })
 
   it('does not let a stale series response replace a newer reporting period', async () => {
@@ -1284,17 +1304,14 @@ describe('Finance dashboard page', () => {
     { clicks: ['Income', 'Expense', 'Income', 'Expense'], inclusion: 'both', income: true, expense: true },
   ])('independently commits $inclusion inclusion and synchronizes chart visibility', async ({ clicks, inclusion, income, expense }) => {
     const fixture = chartFilterFixture()
-    const user = userEvent.setup()
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
-    for (const name of clicks) await user.click(screen.getByRole('button', { name }))
+    await screen.findByRole('group', { name: 'Cash flow chart' })
+    for (const name of clicks) await toggleLegend(name)
 
     expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ includeCashFlow: inclusion, includeHidden: true, offset: 0, startDate: fixture.startDate, endDate: fixture.endDate }))
     expect(mocks.listTransactions.mock.calls.at(-1)![0]).not.toHaveProperty('kind')
     expect(mocks.listTransactions.mock.calls.at(-1)![0]).not.toHaveProperty('status')
-    expect(screen.getByRole('button', { name: 'Income' })).toHaveAttribute('aria-pressed', String(income))
-    expect(screen.getByRole('button', { name: 'Expense' })).toHaveAttribute('aria-pressed', String(expense))
-    expect(mocks.chartSetOption.mock.calls.at(-1)![0].legend).toEqual({ show: false, selected: { Income: income, Expense: expense } })
+    expectLegend(income, expense)
     expect(screen.getByText(fixture.transaction.description)).toBeInTheDocument()
     expect(dashboardLedgerQuery().get('includeCashFlow')).toBe(inclusion)
     expect(new Date(dashboardLedgerQuery().get('startAt')!)).toEqual(fixture.startDate)
@@ -1307,22 +1324,22 @@ describe('Finance dashboard page', () => {
     const fixture = chartFilterFixture(groupBy)
     const user = userEvent.setup()
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await screen.findByRole('group', { name: 'Cash flow chart' })
     mocks.chartClickHandler?.({ dataIndex: 1 })
     const selector = screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' })
     await waitFor(() => expect(selector).toHaveValue('1'))
-    await user.click(screen.getByRole('button', { name: 'Income' }))
+    await toggleLegend('Income')
     expect(selector).toHaveValue('1')
     expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ includeCashFlow: 'expense', startDate: fixture.buckets[1].startDate, endDate: fixture.buckets[1].endDate }))
     expect(new Date(dashboardLedgerQuery().get('startAt')!)).toEqual(fixture.buckets[1].startDate)
     mocks.chartClickHandler?.({ dataIndex: 1 })
     await waitFor(() => expect(selector).toHaveValue(''))
-    expect(screen.getByRole('button', { name: 'Income' })).toHaveAttribute('aria-pressed', 'false')
+    expectLegend(false, true)
     expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ includeCashFlow: 'expense', startDate: fixture.startDate, endDate: fixture.endDate }))
     await user.selectOptions(selector, '0')
     await user.click(screen.getByRole('button', { name: 'Clear chart filter' }))
     expect(selector).toHaveValue('')
-    expect(screen.getByRole('button', { name: 'Income' })).toHaveAttribute('aria-pressed', 'true')
+    expectLegend(true, true)
     expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ includeCashFlow: 'both', offset: 0, startDate: fixture.startDate, endDate: fixture.endDate }))
   })
 
@@ -1331,19 +1348,19 @@ describe('Finance dashboard page', () => {
     const user = userEvent.setup()
     let rejectRequest!: (error: Error) => void
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await screen.findByRole('group', { name: 'Cash flow chart' })
     await user.selectOptions(screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' }), '1')
     const oldQuery = dashboardLedgerQuery().toString()
     const oldOption = mocks.chartSetOption.mock.calls.at(-1)![0]
     mocks.listTransactions.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRequest = reject }))
-    await user.click(screen.getByRole('button', { name: 'Income' }))
-    expect(screen.getByRole('button', { name: 'Income' })).toHaveAttribute('aria-pressed', 'true')
+    await toggleLegend('Income')
+    expectLegend(true, true)
     expect(screen.getByText(fixture.transaction.description)).toBeInTheDocument()
     expect(dashboardLedgerQuery().toString()).toBe(oldQuery)
     expect(mocks.chartSetOption.mock.calls.at(-1)![0]).toBe(oldOption)
     rejectRequest(new Error('Inclusion unavailable'))
     await screen.findByText('Inclusion unavailable')
-    expect(screen.getByRole('button', { name: 'Income' })).toHaveAttribute('aria-pressed', 'true')
+    expectLegend(true, true)
     expect(screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' })).toHaveValue('1')
     expect(dashboardLedgerQuery().toString()).toBe(oldQuery)
     expect(screen.getByText(fixture.transaction.description)).toBeInTheDocument()
@@ -1366,87 +1383,143 @@ describe('Finance dashboard page', () => {
     const initial = Array.from({ length: 6 }, () => ({ ...fixture.transaction, id: faker.string.uuid(), description: faker.lorem.words(3) }))
     mocks.listTransactions.mockResolvedValue(initial)
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await screen.findByRole('group', { name: 'Cash flow chart' })
     await user.click(screen.getByRole('button', { name: 'Dashboard transaction pages: older page' }))
     expect(screen.getByText('Page 2')).toBeInTheDocument()
     let resolveRequest!: (items: FinanceTransaction[]) => void
     mocks.listTransactions.mockImplementationOnce(() => new Promise((resolve) => { resolveRequest = resolve }))
-    await user.click(screen.getByRole('button', { name: 'Expense' }))
-    expect(screen.getByRole('button', { name: 'Expense' })).toHaveAttribute('aria-pressed', 'true')
+    await toggleLegend('Expense')
+    expectLegend(true, true)
     expect(screen.getByText(initial[0].description)).toBeInTheDocument()
     resolveRequest([fixture.transaction])
     await screen.findByText(fixture.transaction.description)
     expect(screen.getByText('Page 1')).toBeInTheDocument()
     expect(screen.queryByText(initial[0].description)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Expense' })).toHaveAttribute('aria-pressed', 'false')
+    expectLegend(true, false)
     expect(mocks.listTransactions).toHaveBeenLastCalledWith(expect.objectContaining({ includeCashFlow: 'income', offset: 0 }))
   })
 
   it('rejects an old filter response when a later window request succeeds', async () => {
     const fixture = chartFilterFixture()
     let resolveOld!: (items: FinanceTransaction[]) => void
-    const user = userEvent.setup()
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
+    await screen.findByRole('group', { name: 'Cash flow chart' })
     mocks.listTransactions.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
-    await user.click(screen.getByRole('button', { name: 'Income' }))
+    await toggleLegend('Income')
     mocks.chartClickHandler?.({ dataIndex: 1 })
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' })).toHaveValue('1'))
     resolveOld([])
+    await tick()
     await waitFor(() => expect(screen.getByText('Page 1')).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: 'Income' })).toHaveAttribute('aria-pressed', 'true')
+    expectLegend(true, true)
     expect(screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' })).toHaveValue('1')
     expect(screen.getByText(fixture.transaction.description)).toBeInTheDocument()
   })
 
-  it.each(['tenant', 'period'] as const)('resets chart filters and rejects pending filter responses on %s changes', async (context) => {
+  it.each([
+    { context: 'tenant', outcome: 'success' }, { context: 'period', outcome: 'success' },
+    { context: 'tenant', outcome: 'failure' }, { context: 'period', outcome: 'failure' },
+  ])('resets chart filters and rejects pending legend $outcome on $context changes', async ({ context, outcome }) => {
     const fixture = chartFilterFixture()
     const user = userEvent.setup()
     let resolveOld!: (items: FinanceTransaction[]) => void
+    let rejectOld!: (error: Error) => void
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
-    await user.click(screen.getByRole('button', { name: 'Income' }))
+    await screen.findByRole('group', { name: 'Cash flow chart' })
+    await toggleLegend('Income')
     await user.selectOptions(screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' }), '1')
-    mocks.listTransactions.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
-    await user.click(screen.getByRole('button', { name: 'Expense' }))
+    mocks.listTransactions.mockImplementationOnce(() => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject }))
+    await toggleLegend('Expense')
     if (context === 'tenant') mocks.shellState!.selectTenant('tenant-2')
     else await user.click(screen.getByRole('button', { name: 'Next month' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Income' })).toHaveAttribute('aria-pressed', 'true'))
-    resolveOld([])
+    await waitFor(() => expectLegend(true, true))
+    if (outcome === 'success') resolveOld([])
+    else rejectOld(new Error('Stale context legend error'))
+    await tick()
     await waitFor(() => expect(screen.getByText('Page 1')).toBeInTheDocument())
     expect(screen.getByText(fixture.transaction.description)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Expense' })).toHaveAttribute('aria-pressed', 'true')
+    expectLegend(true, true)
     expect(screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' })).toHaveValue('')
     expect(screen.queryByRole('button', { name: 'Clear chart filter' })).not.toBeInTheDocument()
     expect(mocks.listTransactions.mock.calls.at(-1)![0].offset).toBe(0)
+    expect(screen.queryByText('Stale context legend error')).not.toBeInTheDocument()
   })
 
   it('renders an honest empty state when neither group nor neutral rows qualify', async () => {
     chartFilterFixture()
-    const user = userEvent.setup()
     render(Finance)
-    await screen.findByRole('img', { name: 'Cash flow chart' })
-    await user.click(screen.getByRole('button', { name: 'Income' }))
+    await screen.findByRole('group', { name: 'Cash flow chart' })
+    await toggleLegend('Income')
     mocks.listTransactions.mockResolvedValueOnce([])
-    await user.click(screen.getByRole('button', { name: 'Expense' }))
+    await toggleLegend('Expense')
     expect(screen.getByText('No transactions matched the current chart filters.')).toBeInTheDocument()
     expect(screen.getByText('Neutral transactions only.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Clear chart filter' })).toBeEnabled()
-    expect(screen.getByRole('img', { name: 'Cash flow chart' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Cash flow chart' })).toBeInTheDocument()
   })
 
-  it('uses native Bootstrap buttons with keyboard activation and inclusion descriptions', async () => {
+  it('restores native clicks and ignores repeated legend or keyboard intents while pending, then allows retry after failure', async () => {
+    chartFilterFixture()
+    const user = userEvent.setup()
+    let rejectRequest!: (error: Error) => void
+    render(Finance)
+    const chart = await screen.findByRole('group', { name: 'Cash flow chart' })
+    chart.focus()
+    const requestCount = mocks.listTransactions.mock.calls.length
+    mocks.listTransactions.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRequest = reject }))
+    await toggleLegend('Income')
+    expect(chart).toHaveAttribute('aria-busy', 'true')
+    expect(mocks.chartDispatchAction.mock.calls.slice(-2)).toEqual([
+      [{ type: 'legendSelect', name: 'Income' }, { silent: true }],
+      [{ type: 'legendSelect', name: 'Expense' }, { silent: true }],
+    ])
+    await toggleLegend('Expense')
+    await user.keyboard('e')
+    expect(mocks.listTransactions).toHaveBeenCalledTimes(requestCount + 1)
+    expectLegend(true, true)
+    rejectRequest(new Error('Retry inclusion'))
+    await screen.findByText('Retry inclusion')
+    expect(chart).toHaveAttribute('aria-busy', 'false')
+    expect(chart).toHaveFocus()
+    await user.keyboard('e')
+    expectLegend(true, false)
+  })
+
+  it('rejects a stale native legend failure after a newer window request commits', async () => {
+    const fixture = chartFilterFixture()
+    let rejectOld!: (error: Error) => void
+    render(Finance)
+    await screen.findByRole('group', { name: 'Cash flow chart' })
+    mocks.listTransactions.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject }))
+    await toggleLegend('Income')
+    mocks.chartClickHandler?.({ dataIndex: 1 })
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Filter transactions by cash-flow time window' })).toHaveValue('1'))
+    rejectOld(new Error('Stale legend error'))
+    await tick()
+    expect(screen.queryByText('Stale legend error')).not.toBeInTheDocument()
+    expectLegend(true, true)
+    expect(screen.getByText(fixture.transaction.description)).toBeInTheDocument()
+  })
+
+  it('uses a focusable chart with scoped keyboard shortcuts and announced committed inclusion, not duplicate buttons', async () => {
     chartFilterFixture()
     const user = userEvent.setup()
     render(Finance)
-    const income = await screen.findByRole('button', { name: 'Income' })
-    income.focus()
-    expect(income).toHaveClass('btn', 'btn-outline-success', 'btn-sm', 'active')
-    expect(income).toHaveAccessibleDescription(expect.stringContaining('Neutral transactions remain included'))
-    await user.keyboard('{Enter}')
-    expect(income).toHaveAttribute('aria-pressed', 'false')
-    await user.keyboard(' ')
-    expect(income).toHaveAttribute('aria-pressed', 'true')
+    const chart = await screen.findByRole('group', { name: 'Cash flow chart' })
+    chart.focus()
+    expect(chart).toHaveAttribute('tabindex', '0')
+    expect(chart).toHaveAttribute('aria-keyshortcuts', 'I E')
+    expect(chart).toHaveAccessibleDescription(expect.stringContaining('Neutral transactions remain included'))
+    expect(screen.queryByRole('button', { name: 'Income' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Expense' })).not.toBeInTheDocument()
+    await user.keyboard('i')
+    expectLegend(false, true)
+    expect(screen.getByText('Income is excluded; Expense is included.')).toHaveAttribute('role', 'status')
+    await user.keyboard('E')
+    expectLegend(false, false)
+    expect(chart).toHaveFocus()
+    await user.keyboard('iE')
+    expectLegend(true, true)
   })
 
 })

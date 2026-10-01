@@ -189,15 +189,6 @@ html:not([data-theme]) {
   min-height: 44px;
 }
 
-/* A11y: excluded legend text needs Dark contrast; keep native Bootstrap hover/focus/active colors. */
-[data-bs-theme='dark'] [aria-label='Cash-flow transaction inclusion'] .btn-outline-success {
-  --bs-btn-color: var(--bs-success-text-emphasis);
-}
-
-[data-bs-theme='dark'] [aria-label='Cash-flow transaction inclusion'] .btn-outline-danger {
-  --bs-btn-color: var(--bs-danger-text-emphasis);
-}
-
 /* Dashboard containment: auto grid tracks must not grow to a populated select/chart's intrinsic width. */
 [aria-labelledby='finance-dashboard-heading'] .d-grid {
   grid-template-columns: minmax(0, 1fr);
@@ -225,6 +216,12 @@ html:not([data-theme]) {
   width: 100%;
   min-width: 0;
   height: 22rem;
+}
+
+/* A11y: the keyboard-operable chart needs a theme-aware visible focus ring. */
+.finance-chart-widget:focus-visible {
+  outline: 2px solid var(--bs-body-color);
+  outline-offset: 2px;
 }
 
 @media (max-width: 639px) {
