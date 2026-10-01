@@ -64,7 +64,7 @@ func TestFinanceTransactionPagination(t *testing.T) {
 						mock.Anything,
 						mock.MatchedBy(func(params financepkg.ListTransactionsParams) bool {
 							if params.ActorUserID != userID || params.TenantID != tenantID ||
-								params.Limit != testCase.wantLimit {
+								params.Limit != testCase.wantLimit || params.IncludeCashFlow != domain.CashFlowInclusionBoth {
 								return false
 							}
 							if !testCase.wantPage {
@@ -99,5 +99,39 @@ func TestFinanceTransactionPagination(t *testing.T) {
 			nil,
 		))
 		require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	})
+
+	t.Run("validates cash-flow inclusion independently of kind and forwards exact boundaries", func(t *testing.T) {
+		parsedStart, err := time.Parse(time.RFC3339Nano, start.Format(time.RFC3339Nano))
+		require.NoError(t, err)
+		parsedEnd, err := time.Parse(time.RFC3339Nano, end.Format(time.RFC3339Nano))
+		require.NoError(t, err)
+		for _, inclusion := range []domain.CashFlowInclusion{domain.CashFlowInclusionIncome,
+			domain.CashFlowInclusionExpense, domain.CashFlowInclusionBoth, domain.CashFlowInclusionNone} {
+			t.Run(string(inclusion), func(t *testing.T) {
+				service := newMockfinanceService(t)
+				service.EXPECT().ListTransactions(mock.Anything, financepkg.ListTransactionsParams{
+					ActorUserID: userID, TenantID: tenantID, Kind: domain.TransactionKindRefund,
+					IncludeCashFlow: inclusion, StartDate: parsedStart, EndDate: parsedEnd,
+					Limit: 2, Offset: 1, IncludeHidden: true, Status: domain.TransactionStatusPending,
+				}).Return([]domain.Transaction{}, nil).Once()
+				response := httptest.NewRecorder()
+				makeHandler(service).ServeHTTP(response, httptest.NewRequest(
+					http.MethodGet,
+					"/api/v1/finance/tenants/"+tenantID+"/transactions?includeCashFlow="+string(inclusion)+
+						"&kind=refund&status=pending&includeHidden=true&limit=2&offset=1&startDate="+
+						url.QueryEscape(start.Format(time.RFC3339Nano))+"&endDate="+
+						url.QueryEscape(end.Format(time.RFC3339Nano)),
+					nil,
+				))
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			})
+		}
+		for _, invalid := range []string{"INCOME", "income,expense", "invalid-" + fake.UUID().V4()} {
+			response := httptest.NewRecorder()
+			makeHandler(newMockfinanceService(t)).ServeHTTP(response, httptest.NewRequest(http.MethodGet,
+				"/api/v1/finance/tenants/"+tenantID+"/transactions?includeCashFlow="+url.QueryEscape(invalid), nil))
+			require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+		}
 	})
 }

@@ -471,6 +471,10 @@ func (s *LedgerService) ListTransactions(
 	if err := s.access.requireTenantMember(ctx, params.TenantID, params.ActorUserID); err != nil {
 		return nil, err
 	}
+	inclusion, err := NormalizeCashFlowInclusion(params.IncludeCashFlow)
+	if err != nil {
+		return nil, fmt.Errorf("list transactions: %w", err)
+	}
 	items, err := s.transactions.ListTransactions(
 		ctx,
 		strings.TrimSpace(params.TenantID),
@@ -479,12 +483,13 @@ func (s *LedgerService) ListTransactions(
 		params.Status,
 		params.IncludeHidden,
 		persistence.ListTransactionsPage{
-			Limit:         params.Limit,
-			Offset:        params.Offset,
-			Kind:          params.Kind,
-			StartDate:     params.StartDate,
-			EndDate:       params.EndDate,
-			SortAscending: params.SortAscending,
+			Limit:           params.Limit,
+			Offset:          params.Offset,
+			Kind:            params.Kind,
+			IncludeCashFlow: inclusion,
+			StartDate:       params.StartDate,
+			EndDate:         params.EndDate,
+			SortAscending:   params.SortAscending,
 		},
 	)
 	if err != nil {

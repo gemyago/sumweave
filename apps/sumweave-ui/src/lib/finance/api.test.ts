@@ -87,11 +87,40 @@ describe('finance api', () => {
     expect(requestUrl.pathname).toBe(`/api/v1/finance/tenants/${encodeURIComponent(tenantId)}/cash-flow-series`)
     expect(requestUrl.searchParams).toMatchObject(new URLSearchParams({
       startDate: '2026-03-01T07:00:00.000Z', endDate: '2026-04-01T07:00:00.000Z', groupBy: 'month',
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }))
     expect(series).toMatchObject({ groupBy: 'month', displayCurrency: 'EUR', complete: false })
     expect(series.period).toEqual({ startDate, endDate })
     expect(series.buckets[0]).toEqual({ startDate, endDate, incomeMinor: 420000, expenseMinor: 175000 })
     expect(series.missingFx).toEqual([{ provider: 'frankfurter', baseCurrency: 'USD', quoteCurrency: 'EUR', affectedTransactionCount: 2 }])
+  })
+
+  it('sends the browser monthly calendar across local-offset and DST bounds without changing instants', async () => {
+    // Exact dates reproduce the six-month Warsaw range with a DST end offset.
+    const startDate = new Date('2026-05-01T00:00:00+02:00')
+    const endDate = new Date('2026-11-01T00:00:00+01:00')
+    const options = Intl.DateTimeFormat().resolvedOptions()
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ ...options, timeZone: 'Europe/Warsaw' })
+    const requests: Array<RequestInfo | URL> = []
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(input)
+      return {
+        ok: true, status: 200, statusText: 'OK',
+        json: async () => ({
+          period: { startDate: '2026-05-01T00:00:00+02:00', endDate: '2026-11-01T00:00:00+01:00' },
+          groupBy: 'month', displayCurrency: 'EUR', complete: true, missingFx: [], buckets: [],
+        }),
+      } as Response
+    })
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+    const tenantId = faker.string.uuid()
+    await api.getCashFlowSeries({ tenantId, startDate, endDate, groupBy: 'month' })
+    const monthlyQuery = new URL(String(requests[0])).searchParams
+    expect(monthlyQuery.get('timeZone')).toBe('Europe/Warsaw')
+    expect(new Date(monthlyQuery.get('startDate')!)).toEqual(startDate)
+    expect(new Date(monthlyQuery.get('endDate')!)).toEqual(endDate)
+    await api.getCashFlowSeries({ tenantId, startDate, endDate, groupBy: 'day' })
+    expect(new URL(String(requests[1])).searchParams.has('timeZone')).toBe(false)
   })
 
   it('rejects a cash-flow series response missing required fields', async () => {
@@ -1042,6 +1071,18 @@ describe('finance api', () => {
   it('builds an auth-backed finance api wrapper', async () => {
     const api = createSignalFinanceApiForAuth({ baseUrl: '/api/v1', authStore: { } as never })
     await expect(api.listTenants()).resolves.toEqual([])
+  })
+
+  it.each(['income', 'expense', 'both', 'none'] as const)('serializes %s cash-flow inclusion separately from kind and visibility', async (includeCashFlow) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => ({ ok: true, status: 200, statusText: 'OK', json: async () => ({ items: [] }) }) as Response)
+    const api = createSignalFinanceApi({ baseUrl: '/api/v1', fetch })
+    await api.listTransactions({ tenantId: 'tenant-1', includeCashFlow, kind: 'refund', status: 'pending', includeHidden: true, limit: 20, offset: 20 })
+    const url = new URL(String(fetch.mock.calls[0]![0]), window.location.origin)
+    expect(url.searchParams.get('includeCashFlow')).toBe(includeCashFlow)
+    expect(url.searchParams.get('kind')).toBe('refund')
+    expect(url.searchParams.get('status')).toBe('pending')
+    expect(url.searchParams.get('includeHidden')).toBe('true')
+    expect(url.searchParams.get('offset')).toBe('20')
   })
 
   it('rejects missing required csv preview collections', async () => {

@@ -16,6 +16,7 @@ var (
 	ErrInvalidTransferPair         = errors.New("invalid transfer pair")
 	ErrTransferNotLinked           = errors.New("transfer pair is not linked")
 	ErrInvalidTransactionListLimit = errors.New("invalid transaction list limit")
+	ErrInvalidCashFlowInclusion    = errors.New("invalid cash flow inclusion")
 )
 
 const (
@@ -31,6 +32,18 @@ func NormalizeTransactionListLimit(limit int64) (int64, error) {
 		return 0, ErrInvalidTransactionListLimit
 	}
 	return limit, nil
+}
+
+func NormalizeCashFlowInclusion(inclusion domain.CashFlowInclusion) (domain.CashFlowInclusion, error) {
+	switch inclusion {
+	case "":
+		return domain.CashFlowInclusionBoth, nil
+	case domain.CashFlowInclusionIncome, domain.CashFlowInclusionExpense,
+		domain.CashFlowInclusionBoth, domain.CashFlowInclusionNone:
+		return inclusion, nil
+	default:
+		return "", ErrInvalidCashFlowInclusion
+	}
 }
 
 type RecordTransactionParams struct {
@@ -89,18 +102,19 @@ type UnlinkTransfersParams struct {
 }
 
 type ListTransactionsParams struct {
-	ActorUserID   string
-	TenantID      string
-	AccountID     string
-	Source        domain.TransactionSource
-	Status        domain.TransactionStatus
-	Kind          domain.TransactionKind
-	StartDate     time.Time
-	EndDate       time.Time
-	SortAscending bool
-	IncludeHidden bool
-	Limit         int64
-	Offset        int64
+	ActorUserID     string
+	TenantID        string
+	AccountID       string
+	Source          domain.TransactionSource
+	Status          domain.TransactionStatus
+	Kind            domain.TransactionKind
+	IncludeCashFlow domain.CashFlowInclusion
+	StartDate       time.Time
+	EndDate         time.Time
+	SortAscending   bool
+	IncludeHidden   bool
+	Limit           int64
+	Offset          int64
 }
 
 type SummarizeTransactionsParams struct {

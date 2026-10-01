@@ -106,7 +106,7 @@ func (s *ReportingService) GetCashFlowSeries(
 	}
 	series, err := s.cashFlows.GetCashFlowSeries(ctx, persistence.CashFlowSeriesParams{
 		TenantID: params.TenantID, StartDate: params.StartDate, EndDate: params.EndDate,
-		GroupBy: params.GroupBy, FXProvider: s.defaultFXProvider,
+		GroupBy: params.GroupBy, FXProvider: s.defaultFXProvider, TimeZone: params.TimeZone,
 	})
 	if err != nil {
 		return CashFlowSeries{}, fmt.Errorf("get cash-flow series: %w", err)

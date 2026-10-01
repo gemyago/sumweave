@@ -2,10 +2,12 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/gemyago/sumweave/finance/domain"
+	"github.com/gemyago/sumweave/finance/internal/cashflowcalendar"
 )
 
 type CashFlowGroupBy = domain.CashFlowGroupBy
@@ -23,6 +25,7 @@ type CashFlowSeriesParams struct {
 	EndDate    time.Time
 	GroupBy    CashFlowGroupBy
 	FXProvider string
+	TimeZone   string
 }
 
 type CashFlowSeriesStore struct{ db *Database }
@@ -57,13 +60,20 @@ func (s *CashFlowSeriesStore) GetCashFlowSeries(
 		return domain.CashFlowSeries{}, err
 	}
 	rows := make([]cashFlowSeriesRow, 0)
+	monthBounds := "[]"
+	if params.GroupBy == CashFlowGroupByMonth {
+		monthBounds, err = cashFlowMonthBounds(params)
+		if err != nil {
+			return domain.CashFlowSeries{}, err
+		}
+	}
 	if queryErr := s.db.db.WithContext(ctx).Raw(
 		query,
 		params.StartDate,
 		params.EndDate,
 		params.TenantID,
 		params.FXProvider,
-		cashFlowPostgreSQLStartOffset(params.StartDate),
+		monthBounds,
 	).Scan(&rows).Error; queryErr != nil {
 		return domain.CashFlowSeries{}, fmt.Errorf("get cash-flow series: %w", queryErr)
 	}
@@ -93,55 +103,86 @@ func (s *CashFlowSeriesStore) GetCashFlowSeries(
 }
 
 func cashFlowSeriesQuery(groupBy CashFlowGroupBy) (string, error) {
-	var bucketStart, nextBucketStart string
+	var buckets string
 	switch groupBy {
 	case CashFlowGroupByDay:
-		bucketStart = "request.start_date + bucket_indices.bucket_index * interval '1 day'"
-		nextBucketStart = "request.start_date + (bucket_indices.bucket_index + 1) * interval '1 day'"
+		buckets = cashFlowDailyBuckets
 	case CashFlowGroupByMonth:
-		bucketStart = "timezone(request.start_offset, timezone(request.start_offset, request.start_date) + bucket_indices.bucket_index * interval '1 month')"
-		nextBucketStart = "timezone(request.start_offset, timezone(request.start_offset, request.start_date) + (bucket_indices.bucket_index + 1) * interval '1 month')"
+		buckets = cashFlowMonthlyBuckets
 	default:
 		return "", fmt.Errorf("unsupported cash-flow grouping %q", groupBy)
 	}
-	return fmt.Sprintf(cashFlowSeriesQueryTemplate, nextBucketStart, bucketStart, nextBucketStart), nil
+	return fmt.Sprintf(cashFlowSeriesQueryTemplate, buckets), nil
 }
 
-func cashFlowPostgreSQLStartOffset(startDate time.Time) string {
-	_, offsetSeconds := startDate.Zone()
-	sign := "-"
-	if offsetSeconds < 0 {
-		offsetSeconds = -offsetSeconds
-		sign = "+"
+func cashFlowMonthBounds(params CashFlowSeriesParams) (string, error) {
+	start := params.StartDate
+	_, offset := start.Zone()
+	location := time.FixedZone("", offset)
+	if params.TimeZone != "" {
+		var err error
+		location, err = time.LoadLocation(params.TimeZone)
+		if err != nil {
+			return "", fmt.Errorf("load monthly calendar: %w", err)
+		}
 	}
-	hour := offsetSeconds / int(time.Hour/time.Second)
-	minute := offsetSeconds % int(time.Hour/time.Second) / int(time.Minute/time.Second)
-	return fmt.Sprintf("%s%02d:%02d", sign, hour, minute)
+	anchor := start.In(location)
+	bounds := []time.Time{start}
+	for index := 1; ; index++ {
+		boundary := cashflowcalendar.MonthBoundary(anchor, index)
+		if !boundary.Before(params.EndDate) {
+			bounds = append(bounds, params.EndDate)
+			break
+		}
+		bounds = append(bounds, boundary)
+	}
+	encoded, err := json.Marshal(bounds)
+	if err != nil {
+		return "", fmt.Errorf("encode monthly boundaries: %w", err)
+	}
+	return string(encoded), nil
 }
 
-const cashFlowSeriesQueryTemplate = `
-WITH RECURSIVE request AS (
-    SELECT ?::timestamptz AS start_date, ?::timestamptz AS end_date,
-           ?::text AS tenant_id, ?::text AS fx_provider, ?::text AS start_offset
-), tenant AS (
-    SELECT item.id AS tenant_id, item.display_currency, request.fx_provider
-    FROM finance_tenants item
-    JOIN request ON request.tenant_id = item.id
-), bucket_indices AS (
+const cashFlowDailyBuckets = `bucket_indices AS (
     SELECT 0 AS bucket_index
     UNION ALL
     SELECT bucket_indices.bucket_index + 1
     FROM bucket_indices
     CROSS JOIN request
-    WHERE %s < request.end_date
+    WHERE request.start_date + (bucket_indices.bucket_index + 1) * interval '1 day' < request.end_date
 ), buckets AS (
     SELECT tenant.tenant_id, tenant.display_currency, tenant.fx_provider,
-           %s AS bucket_start,
-           LEAST(%s, request.end_date) AS bucket_end
+           request.start_date + bucket_indices.bucket_index * interval '1 day' AS bucket_start,
+           LEAST(request.start_date + (bucket_indices.bucket_index + 1) * interval '1 day', request.end_date) AS bucket_end
     FROM tenant
     CROSS JOIN request
     CROSS JOIN bucket_indices
-), qualifying AS (
+)`
+
+// Monthly instants come from the same calendar policy as the Go cap validator.
+// PostgreSQL aggregates them without re-resolving ambiguous local wall times.
+const cashFlowMonthlyBuckets = `bucket_bounds AS (
+    SELECT value::timestamptz AS bucket_start,
+           LEAD(value::timestamptz) OVER (ORDER BY ordinality) AS bucket_end
+    FROM request
+    CROSS JOIN LATERAL jsonb_array_elements_text(request.month_bounds) WITH ORDINALITY
+), buckets AS (
+    SELECT tenant.tenant_id, tenant.display_currency, tenant.fx_provider,
+           bucket_bounds.bucket_start, bucket_bounds.bucket_end
+    FROM tenant
+    CROSS JOIN bucket_bounds
+    WHERE bucket_bounds.bucket_end IS NOT NULL
+)`
+
+const cashFlowSeriesQueryTemplate = `
+WITH RECURSIVE request AS (
+    SELECT ?::timestamptz AS start_date, ?::timestamptz AS end_date,
+           ?::text AS tenant_id, ?::text AS fx_provider, ?::jsonb AS month_bounds
+), tenant AS (
+    SELECT item.id AS tenant_id, item.display_currency, request.fx_provider
+    FROM finance_tenants item
+    JOIN request ON request.tenant_id = item.id
+), %s, qualifying AS (
     SELECT buckets.tenant_id, buckets.display_currency, buckets.fx_provider,
            buckets.bucket_start, buckets.bucket_end,
            transaction_item.id AS transaction_id, transaction_item.currency,

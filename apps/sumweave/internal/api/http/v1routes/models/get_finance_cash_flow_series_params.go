@@ -74,4 +74,5 @@ type GetFinanceCashFlowSeriesParams struct {
 	StartDate time.Time `json:"startDate"`
 	EndDate time.Time `json:"endDate"`
 	GroupBy GetFinanceCashFlowSeriesParamsGroupBy `json:"groupBy"`
+	TimeZone string `json:"timeZone,omitempty"`
 }

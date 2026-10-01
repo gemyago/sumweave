@@ -1319,6 +1319,7 @@ func (c *FinanceController) GetFinanceCashFlowSeries(
 			StartDate:   params.StartDate,
 			EndDate:     params.EndDate,
 			GroupBy:     financepkg.CashFlowGroupBy(params.GroupBy),
+			TimeZone:    params.TimeZone,
 		}
 		if validationErr := financepkg.ValidateCashFlowSeriesParams(seriesParams); validationErr != nil {
 			return nil, app.NewErrInvalidInput("dateRange", validationErr.Error())
@@ -2034,22 +2035,27 @@ func (c *FinanceController) ListFinanceTransactions(
 		if err != nil {
 			return nil, app.NewErrInvalidInput("limit", err.Error())
 		}
+		inclusion, err := financepkg.NormalizeCashFlowInclusion(domain.CashFlowInclusion(params.IncludeCashFlow))
+		if err != nil {
+			return nil, app.NewErrInvalidInput("includeCashFlow", err.Error())
+		}
 
 		items, err := c.deps.LedgerService.ListTransactions(
 			ctx,
 			financepkg.ListTransactionsParams{
-				ActorUserID:   userID,
-				TenantID:      params.TenantID,
-				AccountID:     params.AccountID,
-				Source:        domain.TransactionSource(params.Source),
-				Status:        domain.TransactionStatus(params.Status),
-				Kind:          domain.TransactionKind(params.Kind),
-				StartDate:     params.StartDate,
-				EndDate:       params.EndDate,
-				SortAscending: params.Sort == "asc",
-				IncludeHidden: params.IncludeHidden,
-				Limit:         limit,
-				Offset:        params.Offset,
+				ActorUserID:     userID,
+				TenantID:        params.TenantID,
+				AccountID:       params.AccountID,
+				Source:          domain.TransactionSource(params.Source),
+				Status:          domain.TransactionStatus(params.Status),
+				Kind:            domain.TransactionKind(params.Kind),
+				IncludeCashFlow: inclusion,
+				StartDate:       params.StartDate,
+				EndDate:         params.EndDate,
+				SortAscending:   params.Sort == "asc",
+				IncludeHidden:   params.IncludeHidden,
+				Limit:           limit,
+				Offset:          params.Offset,
 			},
 		)
 		if err != nil {

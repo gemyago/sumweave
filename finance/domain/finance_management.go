@@ -142,6 +142,16 @@ const (
 	TransactionKindOpeningBalance TransactionKind = "opening_balance"
 )
 
+// CashFlowInclusion selects reporting groups without excluding neutral ledger entries.
+type CashFlowInclusion string
+
+const (
+	CashFlowInclusionIncome  CashFlowInclusion = "income"
+	CashFlowInclusionExpense CashFlowInclusion = "expense"
+	CashFlowInclusionBoth    CashFlowInclusion = "both"
+	CashFlowInclusionNone    CashFlowInclusion = "none"
+)
+
 type ProviderTransactionOriginal struct {
 	AmountMinor int64
 	Currency    string

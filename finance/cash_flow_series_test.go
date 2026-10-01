@@ -23,6 +23,12 @@ func TestCashFlowSeriesContracts(t *testing.T) {
 			GroupBy:     CashFlowGroupByDay,
 		}
 	}
+	makeTenant := func(fake faker.Faker, params CashFlowSeriesParams) domain.Tenant {
+		return domain.Tenant{
+			ID: params.TenantID, Name: "tenant-" + fake.Company().Name(), DisplayCurrency: "EUR",
+			CreatedAt: params.StartDate, UpdatedAt: params.StartDate,
+		}
+	}
 
 	t.Run("validates required increasing ranges and supported bounded groups", func(t *testing.T) {
 		fake := faker.New()
@@ -151,13 +157,9 @@ func TestCashFlowSeriesContracts(t *testing.T) {
 		seriesStore := persistence.NewCashFlowSeriesStore(database)
 		start := time.Date(2024, time.January, 31, 0, 30, 0, 0, time.FixedZone("submitted", 2*60*60))
 		acceptedEnd := cashFlowMonthBoundary(start, maxCashFlowBuckets)
-		tenant := domain.Tenant{
-			ID:              "tenant-" + fake.UUID().V4(),
-			Name:            "tenant-" + fake.Company().Name(),
-			DisplayCurrency: "EUR",
-			CreatedAt:       start,
-			UpdatedAt:       start,
-		}
+		params := makeParams(fake)
+		params.StartDate = start
+		tenant := makeTenant(fake, params)
 		_, err := store.SaveTenant(t.Context(), tenant)
 		require.NoError(t, err)
 
@@ -193,16 +195,102 @@ func TestCashFlowSeriesContracts(t *testing.T) {
 		require.Len(t, overCapSeries.Buckets, maxCashFlowBuckets+1)
 	})
 
+	t.Run("validates named monthly calendars and DST bucket limits", func(t *testing.T) {
+		fake := faker.New()
+		params := makeParams(fake)
+		params.GroupBy = CashFlowGroupByMonth
+		params.TimeZone = "Europe/Warsaw"
+		location, err := time.LoadLocation(params.TimeZone)
+		require.NoError(t, err)
+		// Calendar/DST boundaries are fixed regression inputs, not sample entity data.
+		start := time.Date(2026, time.May, 1, 0, 0, 0, 0, location)
+		end := time.Date(2026, time.November, 1, 0, 0, 0, 0, location)
+		params.StartDate = start.In(time.FixedZone("wire", 0))
+		params.EndDate = end.In(time.FixedZone("wire", 0))
+		require.NoError(t, ValidateCashFlowSeriesParams(params))
+		require.Equal(t, 6, cashFlowBucketCount(start, end, CashFlowGroupByMonth))
+		params.EndDate = time.Date(2056, time.November, 1, 0, 0, 0, 0, location)
+		require.NoError(t, ValidateCashFlowSeriesParams(params))
+		params.EndDate = params.EndDate.Add(time.Microsecond)
+		require.Error(t, ValidateCashFlowSeriesParams(params))
+		params.EndDate = end
+		for _, invalid := range []string{"Local", "invalid/" + fake.UUID().V4()} {
+			params.TimeZone = invalid
+			require.Error(t, ValidateCashFlowSeriesParams(params))
+		}
+		params.TimeZone = location.String()
+		params.GroupBy = CashFlowGroupByDay
+		require.Error(t, ValidateCashFlowSeriesParams(params))
+	})
+
+	t.Run("matches persistence at ambiguous and missing named-calendar cap anchors", func(t *testing.T) {
+		for _, tc := range []struct {
+			name        string
+			start       string
+			end         string
+			capBoundary string
+		}{
+			{"LA reviewed fold cap", "2026-05-05T01:30:00-07:00", "2056-11-05T01:15:00-08:00", "2056-11-05T01:30:00-08:00"},
+			{"LA missing cap anchor", "2025-09-12T02:30:00-07:00", "2056-03-12T03:15:00-07:00", "2056-03-12T03:30:00-07:00"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				fake := faker.New()
+				location, err := time.LoadLocation("America/Los_Angeles")
+				require.NoError(t, err)
+				parse := func(value string) time.Time {
+					at, parseErr := time.Parse(time.RFC3339, value)
+					require.NoError(t, parseErr)
+					return at.In(location)
+				}
+				params := makeParams(fake)
+				params.StartDate, params.EndDate = parse(tc.start), parse(tc.end)
+				params.GroupBy, params.TimeZone = CashFlowGroupByMonth, location.String()
+				capBoundary := parse(tc.capBoundary)
+				require.True(t, capBoundary.Equal(cashFlowMonthBoundary(params.StartDate, maxCashFlowBuckets)))
+				database := openTestDatabase(t)
+				store := persistence.NewStore(database)
+				_, err = store.SaveTenant(t.Context(), makeTenant(fake, params))
+				require.NoError(t, err)
+				seriesStore := persistence.NewCashFlowSeriesStore(database)
+				for _, end := range []time.Time{params.EndDate, capBoundary, capBoundary.Add(time.Microsecond)} {
+					params.EndDate = end
+					count := maxCashFlowBuckets
+					if end.After(capBoundary) {
+						count++
+						require.Error(t, ValidateCashFlowSeriesParams(params))
+					} else {
+						require.NoError(t, ValidateCashFlowSeriesParams(params))
+					}
+					actual, queryErr := seriesStore.GetCashFlowSeries(t.Context(), persistence.CashFlowSeriesParams{
+						TenantID: params.TenantID, StartDate: params.StartDate, EndDate: end,
+						GroupBy: params.GroupBy, TimeZone: params.TimeZone, FXProvider: "provider-" + fake.UUID().V4(),
+					})
+					require.NoError(t, queryErr)
+					require.Len(t, actual.Buckets, count)
+					boundary := params.StartDate
+					for _, bucket := range actual.Buckets {
+						require.True(t, boundary.Equal(bucket.StartDate))
+						require.True(t, bucket.StartDate.Before(bucket.EndDate))
+						boundary = bucket.EndDate
+					}
+					require.True(t, end.Equal(boundary))
+				}
+			})
+		}
+	})
+
 	t.Run("authorizes the tenant before delegating a valid request", func(t *testing.T) {
 		fake := faker.New()
 		params := makeParams(fake)
+		params.GroupBy = CashFlowGroupByMonth
+		params.TimeZone = "Europe/Warsaw"
 		access := newMockreportingServiceStore(t)
 		cashFlows := newMockcashFlowSeriesStore(t)
 		access.EXPECT().IsTenantMember(mock.Anything, params.TenantID, params.ActorUserID).Return(true, nil).Once()
 		expected := domain.CashFlowSeries{Complete: true}
 		cashFlows.EXPECT().GetCashFlowSeries(mock.Anything, persistence.CashFlowSeriesParams{
 			TenantID: params.TenantID, StartDate: params.StartDate, EndDate: params.EndDate,
-			GroupBy: CashFlowGroupByDay, FXProvider: FXProviderFrankfurter,
+			GroupBy: CashFlowGroupByMonth, FXProvider: FXProviderFrankfurter, TimeZone: params.TimeZone,
 		}).Return(expected, nil).Once()
 
 		actual, err := NewReportingService(
