@@ -25,3 +25,13 @@ minor/major latest tags, and `latest`; prereleases get only `git-tag-*` and the
 full prerelease tag. `cleanup-docker-images.yml` preserves stable/release tags
 and their multi-platform children while expiring branch and commit-only images
 after seven days.
+
+After a successful automatic `main` image push, the workflow runs
+`bash build/scripts/advance-docker-image-head.sh` in the checkout. Manual
+publications do not advance this Git tag. The script reads only environment
+inputs: required `SOURCE_SHA` (published commit), optional `TAG_NAME` (default
+`docker-image-head`), and optional `GIT_REMOTE` (default `origin`). It requires
+Git history and push credentials, leaves equal/older/divergent sources unchanged,
+and fails on a concurrent tag update rather than overwriting it. Empty optional
+values use their defaults. `make -C build test` exercises the real script in
+disposable local Git repositories, including compare-and-swap races.

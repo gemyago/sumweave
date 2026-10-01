@@ -53,22 +53,6 @@ jobs:
       - name: Advance published image head
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
-        run: |
-          set -euo pipefail
-          tag_ref=refs/tags/docker-image-head
-          current=$(git ls-remote --refs origin "$tag_ref")
-          current=${current%%$'\t'*}
-          if [[ -n "$current" ]]; then
-            git fetch --no-tags origin "$current"
-            if ! git merge-base --is-ancestor "$current^{commit}" "$SOURCE_SHA"; then
-              echo "Published source does not advance docker-image-head; leaving it unchanged."
-              exit 0
-            fi
-            if [[ "$(git rev-parse "$current^{commit}")" == "$SOURCE_SHA" ]]; then
-              echo "docker-image-head already points to the published source."
-              exit 0
-            fi
-          fi
-          # Compare-and-swap also protects initial creation (an empty expected ref).
-          # A concurrent update rejects this push rather than overwriting its tag.
-          git push --force-with-lease="$tag_ref:$current" origin "$SOURCE_SHA:$tag_ref"
+        run: bash build/scripts/advance-docker-image-head.sh
+        env:
+          SOURCE_SHA: ${{ env.SOURCE_SHA }}

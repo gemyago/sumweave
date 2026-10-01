@@ -46,6 +46,7 @@ Project-level rules in root `AGENTS.md` apply. For this module:
 - Keep removed package/release pipeline paths out unless explicitly requested.
 - For Makefile targets prefer Makefile philosophy: targets are files but not just commands.
 - Run `make -C build test` when changing release scripts.
+- Advance image-head via the env-driven script after automatic main pushes.
 
 ## Task Completion Protocol
 
