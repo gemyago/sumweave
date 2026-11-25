@@ -4,9 +4,20 @@ This module contains high level tests for the project, like e2e or integration t
 
 ## Template Origin And Boundary
 
-This folder is template-derived test harness material unless the user explicitly promotes a test flow into the real system.
+The Playwright tests under `api/` and `e2e/` cover the supported Finance product.
 
 Treat the current high-level agent harness, `integration-cli`, and scenario orchestration as reference-only examples and starting points, not as mandatory long-term product QA architecture.
+
+## Automated Finance smoke tests
+
+- Follow [README.md](./README.md) to provision the two dedicated users.
+- Run `npm ci --prefix tests` and `npm --prefix tests run typecheck` from root.
+- Bootstrap PostgreSQL before starting the standard PM2 dev stack.
+- Run `npm --prefix tests test` with the running stack. The API project only
+  needs the API process and has no browser dependency.
+- Use test-scoped sessions and unique descriptions in the shared test tenant.
+- Keep one worker so writes and balance assertions run in sequence.
+- Keep the Playwright report, traces, and screenshots under `tmp/playwright/`.
 
 ## Agent tests
 

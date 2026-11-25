@@ -25,6 +25,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             apps/sumweave-ui/package-lock.json
+            tests/package-lock.json
 
       - name: Install root dependencies
         run: npm ci
@@ -54,3 +55,54 @@ jobs:
         env:
           SUMWEAVE_POSTGRES_TEST_DSN: "postgres://sumweave_runtime:sumweave_runtime_local@127.0.0.1:55432/sumweave_test?sslmode=disable"
         run: npx nx affected --target=test --parallel=3
+
+      - name: Run Playwright smoke tests
+        id: playwright
+        shell: bash
+        timeout-minutes: 10
+        env:
+          PM2_HOME: ${{ github.workspace }}/.pm2
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/tmp/playwright/browser-cache
+          PLAYWRIGHT_OWNER_USERNAME: playwright-smoke-owner
+          PLAYWRIGHT_OWNER_PASSWORD: playwright-local-owner
+          PLAYWRIGHT_OUTSIDER_USERNAME: playwright-smoke-outsider
+          PLAYWRIGHT_OUTSIDER_PASSWORD: playwright-local-outsider
+        run: |
+          stage_started=$SECONDS
+          trap 'printf "Playwright stage: %ss\n" "$((SECONDS - stage_started))"' EXIT
+
+          npm ci --prefix tests
+          npm ci --prefix apps/sumweave-ui
+          npm --prefix tests run typecheck
+          npm exec --prefix tests -- playwright install --with-deps chromium
+          export PATH="$PWD/tests/node_modules/.bin:$PWD/node_modules/.bin:$PATH"
+
+          (
+            cd apps/sumweave
+            go run ./cmd/sumweave --env local user add --if-not-exists --username "$PLAYWRIGHT_OWNER_USERNAME" --password "$PLAYWRIGHT_OWNER_PASSWORD"
+            go run ./cmd/sumweave --env local user add --if-not-exists --username "$PLAYWRIGHT_OUTSIDER_USERNAME" --password "$PLAYWRIGHT_OUTSIDER_PASSWORD"
+          )
+
+          stack_started=$SECONDS
+          pm2 start ecosystem.config.js
+          while ! curl -fsS --max-time 2 http://127.0.0.1:4501/health >/dev/null ||
+                ! curl -fsS --max-time 2 http://127.0.0.1:5173/ >/dev/null; do
+            if (( SECONDS - stack_started >= 90 )); then
+              echo "::error::The Playwright dev stack did not become ready within 90 seconds."
+              exit 1
+            fi
+            sleep 1
+          done
+          printf 'Dev stack startup: %ss\n' "$((SECONDS - stack_started))"
+          time npm --prefix tests test
+
+      - name: Upload Playwright failure diagnostics
+        if: ${{ failure() && steps.playwright.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-diagnostics
+          include-hidden-files: true
+          path: |
+            tmp/playwright/report/
+            tmp/playwright/results/
+            .pm2/logs/
