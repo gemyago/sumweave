@@ -136,7 +136,7 @@ This repo does not maintain an npm/package distribution pipeline.
   [Local provenance](./.agents/skills/OKF-UPSTREAM.md) records the exact revision
   and license. Copy only skills and required resources, without plugins.
 - Follow [documentation maintenance](./docs/development/documentation.md) for
-  requirements, historical records, provenance, navigation, and validation.
+  requirements, provenance, navigation, lifecycle, and validation.
 
 ## Project Rules and Conventions
 
@@ -160,7 +160,8 @@ The rules are:
 - Treat generic agents, Chat, and model providers as experimental.
 - Keep npm distribution removed; retain adopted host release builds.
 - Keep acceptance scenarios under `docs/requirements/` with topic backlinks.
-- Keep retired change records historical under `docs/history/changes/`.
+- Use Git history for retired plans and superseded change records.
+- Use `.agents/skills` directly; do not create harness skill links.
 - Use the relevant local OKF skills for product and architecture docs.
 - Seed/reseed requests default to the first `.local-users` entry.
 - Reseed means replace local seeded data, then reopen the live DB.
@@ -232,11 +233,12 @@ When user is asking you to add a new skill, do this:
 - Define standard frontmatter for the skill (at least name and description)
 - Keep description short and to the point, avoid fluff. Make it minimalistic and include enough for LLM model to understand what the skill is about.
 - Define skill instruction as per user request.
-- Link the skill to the harnesses using `.agents/skills/link-vendor-harnesses.sh` script
+- Use `.agents/skills` directly for harness skill discovery.
 
 ## Harness Agent Skills
 
-Harness agnostic repo-local skills live under `.agents/skills`. After creating a new skill, make sure to link it using `.agents/skills/link-vendor-harnesses.sh`
+Harness agnostic repo-local skills live under `.agents/skills`. Harnesses use
+this directory directly; do not add vendor-specific skill symlinks or linking scripts.
 
 ## Platform Agent Skills
 

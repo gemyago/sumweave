@@ -15,5 +15,9 @@ sample bundles, or other upstream application dependencies are installed here.
 
 Refresh both directories from an explicitly recorded upstream revision, preserve
 the license and notices, inspect executable resources, run their validation and
-scan against docs/, and relink with link-vendor-harnesses.sh. Local bundle policy
-lives in ../../docs/development/documentation.md, not in modified upstream skills.
+scan against `docs/`. Harnesses use `.agents/skills` directly; no vendor skill
+links or linking script are required. Local bundle policy lives in
+[documentation maintenance](../../docs/development/documentation.md), not in
+modified upstream skills. The approved repository cleanup uses Git history for
+retired documents and removes superseded paths after preserving current guidance;
+this explicit policy overrides the upstream default of retaining deprecated redirects.

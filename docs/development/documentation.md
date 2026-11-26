@@ -10,9 +10,9 @@ sources:
     resource: "https://github.com/open-knowledge-format/open-knowledge-format/blob/527e81aff55992be21507e97004286789126f88c/skills/okf-generate/SKILL.md"
     title: "Official OKF generation skill"
   - id: repository-policy
-    resource: "repository documentation policy in AGENTS.md and CONTRIBUTING.md"
+    resource: "repository documentation policy in AGENTS.md and CONTRIBUTING.md; approved cleanup of 2026-11-26"
     title: "Sumweave documentation policy"
-generated: { by: "codex/gpt-6.1-sol", at: "2026-11-26T08:20:34+01:00" }
+generated: { by: "codex/gpt-6.1-sol", at: "2026-11-26T12:06:29+00:00" }
 ---
 
 # Maintaining the knowledge bundle
@@ -30,7 +30,10 @@ The [official skills source](https://github.com/open-knowledge-format/open-knowl
 and [local provenance](../../.agents/skills/OKF-UPSTREAM.md) identify the maintained
 upstream, exact copied revision, resources, and Apache-2.0 license. These repository
 links are outside the bundle; an OKF consumer must not traverse them from its local
-filesystem. A repository contributor can open them directly.[^repository-policy]
+filesystem. A repository contributor can open them directly. Harnesses discover
+repo skills directly in `.agents/skills`; do not create vendor symlinks or run a
+linking script. Keep copied upstream skill bytes unchanged; local policy lives
+here and in the provenance guide.[^repository-policy]
 
 ## Concepts and sources
 
@@ -85,18 +88,19 @@ concept descriptions, and use `* [Title](path) - description`. Only the root ind
 has frontmatter; preserve its existing bundle metadata. Add changes to
 [log.md](../log.md), with no frontmatter, newest `## YYYY-MM-DD` first.[^okf-generate]
 
-Retain granular requirements and scenarios in `docs/requirements/`, linked both
-from and to the relevant topic. Keep valuable retired proposals, deltas, task
-records, designs, and reviews in [history](../history/index.md). Their old commands,
-plans, and test claims describe past work only. Tooling metadata and workflow
-prompts are removed. Archived source snapshots remain available through provenance
-URLs; their recorded dates and original authorship are not regenerated.[^repository-policy]
+Keep granular requirements and scenarios in `docs/requirements/`, linked both
+from and to the relevant topic. Before removing a superseded source, check its
+contracts, limits, commands, operational advice, and verification guidance against
+current docs. Move only unique still-current guidance to the maintained topic,
+with its source citation. Preserve implementation gaps explicitly.[^repository-policy]
 
-Normally keep a deprecated redirect when moving a concept. The explicit removal
-of the former tooling tree requires removing its old paths entirely; update
-repository backlinks and use the pinned original URLs for historical provenance
-instead. For remaining retired concepts already in this bundle, keep their bodies
-and redirect metadata at the established paths.[^repository-policy]
+Use Git history for retired plans, proposals, deltas, task records, designs, and
+reviews. The approved cleanup removes obsolete planning, history, PRD, design,
+and redirect trees after that preservation check; do not create replacement
+archives. This explicit repository policy overrides the upstream skill's default
+retention and deprecated-redirect guidance. Repair incoming links and metadata;
+use pinned Git URLs for useful historical provenance. A pinned source documents
+its original revision, not a current local path or proof of delivery.[^repository-policy]
 
 ## Contracts and known gaps
 
@@ -105,8 +109,8 @@ and redirect metadata at the established paths.[^repository-policy]
 accepted safe JSON error contract, while documenting the two existing early
 create/replace empty-`400` paths. [Matching](../product/transfer-matching.md) and its
 [requirements](../requirements/transfer-matching.md) describe all four delivered
-rules. Reconcile current contracts and delivery explicitly; old archived deltas
-remain historical rather than redefining current behavior.[^repository-policy]
+rules. Reconcile current contracts and delivery explicitly; historical Git sources
+do not redefine current behavior.[^repository-policy]
 
 ## Validation
 
@@ -118,7 +122,7 @@ python3 .agents/skills/okf-consume/scripts/scan.py docs --json
 ```
 
 Fix every validator error. Fix warnings or disclose why they are kept. `W120` is
-expected only for deliberate non-concepts such as README redirects. Also check
+expected only for deliberate non-concepts such as the shared manual E2E README. Also check
 YAML 1.2 and duplicate keys, source IDs and footnotes, lifecycle and trust fields,
 path scope, case-sensitive targets, anchors, index reachability, source/content
 preservation, and representative reader journeys. The validator does not prove

@@ -22,8 +22,8 @@ it does not record a completed test run.[^current-topic]
 
 The canonical Bootstrap shell and dedicated transaction-detail flow supersede
 the earlier sidebar and contextual-inspector sketches. The scenarios below use
-the current screen contract; the original proposals remain in the
-[historical change archive](../history/changes/index.md).[^ui-contract]
+the current screen contract. Earlier proposals remain available through Git
+history.[^ui-contract]
 
 # finance-operator-ui Specification
 

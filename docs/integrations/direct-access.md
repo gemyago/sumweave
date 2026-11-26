@@ -3,6 +3,9 @@ type: Interface reference
 title: "Direct access"
 description: "Personal token lifecycle, exact route allowlist, idempotency, and HTTP-only CLI."
 sources:
+  - id: repository-policy
+    resource: "repository AGENTS.md distribution policy and build/README.md host release workflow"
+    title: "Current repository distribution and host-build policy"
   - id: integration-layer-design
     resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-design.md"
     title: "docs/integration-layer/integration-layer-design.md"
@@ -18,6 +21,7 @@ sources:
   - id: documentation-snapshot
     resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/integrations/direct-access.md"
     title: "Reviewed documentation checkpoint before this format migration"
+generated: { by: "codex/gpt-6.1-sol", at: "2026-11-26T12:06:29+00:00" }
 ---
 
 # Direct access: personal tokens and swmd
@@ -482,7 +486,8 @@ ID is an expected job reference. It treats `404` as pending only during a
 `404` is terminal not-found. It exits nonzero for a failed job or timeout.
 
 The CLI can be run with `go run ./cmd/swmd` or built directly from the
-`apps/sumweave` module. Release and npm distribution pipelines remain unchanged.
+`apps/sumweave` module. There is no npm distribution pipeline; the maintained host release build is
+described in [release and deployment](../operations/release-deployment.md).[^repository-policy]
 
 
 ## Security and verification references
@@ -497,8 +502,8 @@ The [PAT scenarios](../requirements/personal-access-tokens.md),
 [direct-client scenarios](../requirements/direct-finance-cli.md),
 [finance integration scenarios](../requirements/finance-management.md), and
 [job visibility scenarios](../requirements/durable-jobs.md) remain granular
-acceptance references. These and the following implementation links are external
-to the OKF bundle:
+acceptance references within this bundle. The following implementation links are
+repository sources outside the bundle:
 
 - [Authoritative OpenAPI](../../apps/sumweave/internal/api/http/v1routes.yaml)
 - [Token store](../../apps/sumweave/internal/auth/access_token_store.go) and
@@ -508,13 +513,11 @@ to the OKF bundle:
 - [Client configuration](../../apps/sumweave/internal/swmdclient/config.go) and
   [HTTP transport](../../apps/sumweave/internal/swmdclient/client.go)
 
-The [historical draft design](../integration-layer/integration-layer-design.md)
-preserves original package sketches and delivery/verification plans; its
-middleware injection sketch and three-column list index are not current facts.
-
 [^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
 
 [^integration-layer-design]: docs/integration-layer/integration-layer-design.md.
 [^access-token-store-go]: apps/sumweave/internal/auth/access_token_store.go.
 [^finance-token-allowlist-test-go]: apps/sumweave/internal/api/http/v1controllers/finance_token_allowlist_test.go.
 [^client-go]: apps/sumweave/internal/swmdclient/client.go.
+
+[^repository-policy]: Root instructions and maintained host-build runbook; npm distribution is removed.

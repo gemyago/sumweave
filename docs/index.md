@@ -31,19 +31,19 @@ experimental; their presence does not imply a finance capability.
   and provider synchronization.
 * [Finance provider sync](finance-provider-sync-architecture.md) - Link identity, bounded sync windows, conservative merge, and atomic progress.
 * [Operations](operations/index.md) - Local development, HTTPS, release, and deployment.
+* [Local HTTPS](local-https.md) - Optional backend and Vite TLS setup and return to standard HTTP.
 
 # Development and verification
 
 * [Development](development/index.md) - Go/testing conventions, Nx checks, and documentation.
+* [Go coding guide](golang-coding-guide.md) - Repository conventions for Go dependencies, errors, and tests.
+* [Testing best practices](testing-best-practices.md) - Behavior-focused testing with small fixtures and minimal scope.
 * [Manual E2E](manual-e2e/index.md) - Focused reproducible finance verification journeys.
 * [Maintaining the knowledge bundle](development/documentation.md) - OKF 0.3 authoring, sources, trust, lifecycle, navigation, and validation.
 
-# Experiments and history
-
-* [History](history/index.md) - Retained change records and retired requirements.
+# Experimental scope and bundle log
 * [Bundle change log](log.md) - Documentation changes by date.
 * [Experimental agent runtime](experiments/agent-runtime.md) - Scope and operational boundaries for retained agent, Chat, and model-provider functionality.
-* [Historical planning and proofs of concept](experiments/history.md) - Where retained plans and POCs fit relative to current finance direction.
 
 # Repository references outside the bundle
 

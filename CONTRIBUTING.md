@@ -20,13 +20,15 @@ Product and architecture documentation follows OKF 0.3 in `docs/`. Use the local
 and [okf-consume](.agents/skills/okf-consume/SKILL.md) to answer from it. The skills
 are copied from [official upstream](https://github.com/open-knowledge-format/open-knowledge-format/tree/main/skills);
 [provenance](.agents/skills/OKF-UPSTREAM.md) records the pinned revision and license.
+Harnesses use `.agents/skills` directly, without vendor symlinks or a linking step.
 
 Update the [knowledge bundle](docs/development/documentation.md) alongside behavior
 changes. Keep detailed acceptance scenarios in [requirements](docs/requirements/index.md),
 linked from their current topic reference. Record accepted behavior separately
-from implementation gaps and proposals. Retain useful old designs, decisions,
-and reviews as [historical records](docs/history/index.md), with clear lifecycle
-labels; an old task checklist does not establish current delivery.
+from implementation gaps and proposals. Before deleting superseded documents,
+retain their unique current guidance in the maintained topic. Use Git history
+for retired plans and change records; do not create replacement archives or
+redirect trees. An old task checklist does not establish current delivery.
 
 Follow the maintenance guide for sources, claim footnotes, trust metadata,
 indexes, the change log, and validation. Generic agent and Chat work is

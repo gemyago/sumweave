@@ -3,12 +3,16 @@ type: Architecture
 title: "Finance provider sync"
 description: "Link identity, bounded sync windows, conservative merge, and atomic progress."
 sources:
+  - id: bank-connection-service
+    resource: "https://github.com/gemyago/sumweave/blob/99bac4b630a02983551c0775de946f8749a9d3b1/finance/bank_connection_service.go"
+    title: "Current public bank-connection service boundary"
   - id: repository-policy
     resource: "repository docs/finance-provider-sync-architecture.md maintained procedures and conventions"
     title: "repository docs/finance-provider-sync-architecture.md maintained procedures and conventions"
   - id: documentation-snapshot
     resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/finance-provider-sync-architecture.md"
     title: "Reviewed documentation checkpoint before this format migration"
+generated: { by: "codex/gpt-6.1-sol", at: "2026-11-26T12:06:29+00:00" }
 ---
 
 # Finance Provider Sync Architecture
@@ -43,6 +47,13 @@ choose a connector from product-provider-specific sync branches. Connectors
 that need a credential resolve plaintext only through their bounded configured
 resolver. Credentialless connectors use their configured credentials and the
 durable provider reference.
+
+The public `finance.BankConnectionService` enforces tenant membership and
+maps public link requests to the internal coordinator. It receives the connector
+and provider-profile registries through construction and uses the dedicated
+`ProviderLinkPersistence` adapter. The public pending-start lookup supports the
+Enable Banking callback bridge. App composition uses the public finance surface;
+Go's `internal` boundary keeps coordinator types inside the finance module.[^bank-connection-service]
 
 ## Production Flow
 
@@ -126,3 +137,5 @@ Start a practical verification journey from the [manual guide index](manual-e2e/
 [^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
 
 [^repository-policy]: repository docs/finance-provider-sync-architecture.md maintained procedures and conventions.
+
+[^bank-connection-service]: Current service construction, tenant checks, coordinator delegation, and pending-start lookup at the pinned source revision.
