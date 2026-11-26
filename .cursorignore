@@ -1,5 +1,3 @@
 # Include for Cursor despite .gitignore (see root .gitignore)
 !.cursor/
 !.cursor/**
-!openspec/
-!openspec/**

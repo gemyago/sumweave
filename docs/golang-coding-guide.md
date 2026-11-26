@@ -1,3 +1,16 @@
+---
+type: Guide
+title: "Go coding guide"
+description: "Repository conventions for Go dependencies, errors, and tests."
+sources:
+  - id: repository-policy
+    resource: "repository docs/golang-coding-guide.md maintained procedures and conventions"
+    title: "repository docs/golang-coding-guide.md maintained procedures and conventions"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/golang-coding-guide.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 ## Use this guide when coding in golang
 
 ## Key considerations
@@ -23,4 +36,8 @@ More detailed testing best practices are in [testing-best-practices.md](./testin
 - Use require.Error or require.ErrorIs when asserting errors
 - Use `t.Context()` instead `context.Background()` OR `context.TODO()` in tests
 - Use factory functions to create reusable random data
-- Follow [mockery](../.context/mockery.md) for defining and generating mocks
+- Follow [mockery](../.context/mockery.md) for defining and generating mocks[^documentation-snapshot][^repository-policy]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^repository-policy]: repository docs/golang-coding-guide.md maintained procedures and conventions.

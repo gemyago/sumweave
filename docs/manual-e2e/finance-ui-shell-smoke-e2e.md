@@ -1,6 +1,19 @@
+---
+type: Runbook
+title: "Finance UI Shell Smoke Manual E2E"
+description: "Manual verification procedure for finance ui shell smoke e2e."
+sources:
+  - id: finance-ui-shell-smoke-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-ui-shell-smoke-e2e.md"
+    title: "docs/manual-e2e/finance-ui-shell-smoke-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-ui-shell-smoke-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Finance UI Shell Smoke Manual E2E
 
-Follow preparation steps in [README.md](./README.md) first.
+Follow preparation steps in [README.md](./README.md) first.[^documentation-snapshot][^finance-ui-shell-smoke-e2e]
 
 Use this guide after `adopt-finance-bootstrap-default`. It is the canonical smoke runbook for Bootstrap `#/login`, default authenticated landing on `#/finance`, the shared Finance shell, dashboard and route groups, responsive behavior, and a quick non-finance regression pass. This change supersedes `restructure-finance-ui-shell` for Finance/login styling; keep only the older behavior lessons such as tenant continuity and route preservation.
 
@@ -18,7 +31,7 @@ Use this guide after `adopt-finance-bootstrap-default`. It is the canonical smok
 4. Confirm successful sign-in lands on `#/finance` by default.
 5. Open `#/` while still authenticated and confirm the app resolves back to `#/finance`.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - no pilot or parallel-product naming appears on canonical login
 - login succeeds without console or network failures
@@ -36,7 +49,7 @@ Expected:
    - at most one **Active tenant** selector while the menu is open on multi-tenant tenant-scoped routes; Tenants owns its selection on-page instead
    - compact section breadcrumbs on wider screens; linked parent breadcrumbs and a non-link current leaf on detail routes, including phones
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the selected tenant stays in shared shell state while the requested route resolves
 - sole-tenant users do not see a redundant tenant switcher on tenant-scoped routes
@@ -64,7 +77,7 @@ Expected:
     - compact needs-attention or follow-up states
 3. Click **Previous month** twice and **Next month** twice, waiting for each dashboard load to complete because all period actions disable during loading. Confirm every completed click advances exactly one browser-local calendar month. In browser network tools, confirm each request contains only explicit `startDate` and `endDate` timestamps and that the response period returns those same half-open `[startDate, endDate)` bounds: a month request ends at the next local month start. Inclusive end labels show the previous local calendar day for an exclusive end at local midnight; otherwise they show the exclusive end instant's local calendar date. If the shell offers another tenant, switch it and confirm the active client range reloads for that tenant with the same displayed bounds; then confirm the first following previous/next click advances one additional month without a stale cross-tenant response. Click **Current month** and confirm its request and response period use that browser-local month's explicit bounds. Use **Custom range** separately; for custom date-only values, confirm the selected start is reported from local start-of-day and the selected end at the following local day's start, including any imported row recorded at local midnight on the first day.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the page reads as the canonical Finance dashboard, not the older custom-shell/subnav layout
 - shell chrome stays visually secondary to the money summary
@@ -88,7 +101,7 @@ Expected:
 7. In **Rules**, confirm an existing tagged rule names its target tags as compact badges. Add or edit a rule, select an optional existing tag, save, and confirm the list refreshes with that tag. If the tag catalog is unavailable, confirm the draft stays visible with a retry action and cannot silently drop a selected tag.
 8. In **Transactions**, assign or change a category on one record. Confirm only the compact **Create rule from this transaction** / **Dismiss** action appears without moving focus or scrolling. Save a description or tag change first, then open the action and confirm the editable rule defaults use those latest saved values. Dismiss/cancel or fail a rule save and confirm the transaction edit remains saved and the rule interaction stays recoverable.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - supported Finance routes stay on real product paths under `#/finance*`
 - tenant-aware deep links preserve the requested destination instead of bouncing to another Finance page
@@ -114,7 +127,7 @@ Expected:
     - at optional 320px stress width, populated Dashboard stays contained; KPI money/currency may wrap, without clipping values or horizontal document scrolling
     - the navbar, dashboard controls, and chart reflow in both resize directions; check 575px/576px collapse boundary explicitly; after resize animation settles, chart SVG width matches its host
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - desktop and narrow layouts remain readable and operable
 - primary navbar links/toggler and user disclosure remain usable without overlap, clipping, or a missing navigation state
@@ -128,7 +141,7 @@ Expected:
 5. Confirm those routes still use the existing generic app nav and non-finance styling stack.
 6. Use the Finance link from the generic nav and confirm the app switches back to the Finance shell at `#/finance`.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - default authenticated landing is Finance only when no remembered protected route exists
 - non-finance routes remain on their existing shell/styling stack
@@ -136,7 +149,7 @@ Expected:
 
 ## 7. If anything is wrong, report it
 
-Capture:
+Capture:[^documentation-snapshot]
 
 - the signed-in username and selected tenant name
 - the exact route and viewport size
@@ -144,3 +157,7 @@ Capture:
 - console errors or warnings
 - failed network requests and response details
 - which login, shell, dashboard, route-group, responsive, or non-finance-regression expectation did not match
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-ui-shell-smoke-e2e]: docs/manual-e2e/finance-ui-shell-smoke-e2e.md.

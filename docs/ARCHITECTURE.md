@@ -1,9 +1,26 @@
+---
+type: Architecture
+title: "Product architecture"
+description: "Product direction, module ownership, and required supporting infrastructure."
+sources:
+  - id: local-lifecycle
+    resource: "/operations/local-development.md"
+    title: "Current local development and explicit migration requirements"
+  - id: repository-policy
+    resource: "repository product clarification of 2026-11-26 and current app composition"
+    title: "repository product clarification of 2026-11-26 and current app composition"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/ARCHITECTURE.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+generated: { by: "codex/gpt-6.1-sol", at: "2026-11-26T08:28:13+01:00" }
+---
+
 # Architecture
 
 Sumweave is a finance-only system. Its product domain is tenant-aware
 financial management: members, accounts, categories and tags, ledger
 transactions and transfers, CSV imports, bank connections and sync, current
-provider snapshots, balances, reports, and FX.
+provider snapshots, balances, reports, and FX.[^documentation-snapshot][^repository-policy]
 
 ## Boundaries
 
@@ -30,8 +47,8 @@ provider snapshots, balances, reports, and FX.
 - Its application config is app-internal at `internal/config`; `internal/wireup`
   owns explicit command roots. Command and Engine entrypoints pass typed startup
   options, while components receive native values or constructed collaborators.
-- `apps/sumweave-ui/` is finance-first, with retained Admin, Chat, and Providers
-  surfaces.
+- `apps/sumweave-ui/` is the personal finance UI. Admin diagnostics and access-token
+  management support the app; Chat and model-provider settings are experimental.
 - Personal access tokens are app-owned, digest-only credentials for the exact
   documented finance and jobs allowlist. They authenticate as their owner but
   do not copy tenant grants; every finance read and trigger retains current
@@ -40,111 +57,52 @@ provider snapshots, balances, reports, and FX.
 - `apps/sumweave/cmd/swmd` is the separate HTTP-only direct client for that
   allowlist. It calls the existing API rather than a second integration route
   tree and persists credentials only through its private local configuration.
-- `runtime/` is generic agent infrastructure only: sessions, profiles,
+- `runtime/` is experimental generic agent infrastructure: sessions, profiles,
   providers, agent execution, and HTTP APIs.
 - `.platform-agents/skills/` is an intentionally empty stageable root until
   finance-specific platform skills are introduced.
 
-## Operations
 
-The application database is configured at `application.database` (environment
-override `APP_APPLICATION_DATABASE_DSN`) and PostgreSQL is the only supported
-database. Local configuration uses the `sumweave_runtime` role against Compose's
-`sumweave_local` database; agent runtime has its separate configuration key but
-uses that same database with the `sumweave_runtime_` prefix. Run
-`make postgres-bootstrap` before backend processes: it provisions the
-`sumweave_owner`, `sumweave_migrator`, and `sumweave_runtime` roles; prepares
-`sumweave_local` and `sumweave_test`; runs `sumweave db-migrate` once for each;
-and grants the runtime role access to the migrated tables and sequences. After
-that setup, local PM2 runs the API-only `start` and `jobs worker` commands as
-separate processes; `jobs enqueue-due` remains a separate scheduler tick. The
-combined `sumweave start-all` command is available for diagnostics. API-only
-`start` can publish dispatch messages but does not start a message router or
-execute background work.
+## Product direction
 
-The retained process modes are `start` for API-only serving, `jobs worker` for
-the durable appdispatch consumer, and `jobs enqueue-due` for one scheduler tick.
-`start-all` explicitly combines those three capabilities for diagnostics; the
-worker and scheduler remain separate deployment processes.
+Sumweave's product direction is personal budgeting and finance tracking. Current
+delivery provides the tracking capabilities described here; budget planning is
+not yet implemented. Trading tools, forecasting, and financial advice are not
+current capabilities or promised additions.
+Generic agent execution, sessions, profiles, Chat, model-provider settings,
+and unused inherited functionality are experimental or potential extensions.
+Their presence in the executable does not promote them into product scope.
+Operational dependencies remain required even where they also serve experiments.[^documentation-snapshot]
 
-The scheduler first repairs any active bank connection missing a schedule by
-inserting an enabled daily schedule without changing existing schedule state. It
-then reads finance-owned bank-connection schedules and the finance-owned daily FX
-refresh schedule. It publishes one semantic command per due occurrence, advances
-the schedule, and stores the returned message ID as the future reference in one
-application-database transaction. It does not use a generic schedule registry,
-execute provider work, or create a job row.
+## Process and schema lifecycle
 
-Message delivery is at least once. Consumer handlers must tolerate duplicate
-delivery. Routers recover panics, retry failures with the configured bounded
-dispatch policy, and then publish the original message to
-`app.dispatch.dead-letter.v1` with failure and source-topic metadata. A failed
-dead-letter publication leaves the original message unacknowledged.
+`sumweave db-migrate` explicitly prepares the retained schemas before backend
+processes run. Local `make postgres-bootstrap` provisions PostgreSQL, runs that
+migration for the local and test environments, and grants runtime access.
+Standard local PM2 runs `sumweave start` and `sumweave jobs worker` separately;
+`sumweave start-all` combines HTTP, worker, and scheduler for startup diagnostics.
+Startup does not replace schema preparation. Follow
+[local development](operations/local-development.md) for the commands and
+working directories.[^local-lifecycle]
 
-Dispatch retention is operational transport maintenance, not job retention.
-Normal message rows are eligible for deletion after 7 days only when every
-existing consumer-group offset for that topic has advanced beyond the row;
-unacknowledged rows remain available for retry and are surfaced for operator
-attention. Idempotency claims are retained for at least the same window so a
-retry within the window returns the original message identity. Dead-letter
-rows are retained for 30 days for diagnostics, then may be removed by the same
-offset-safe maintenance process. This policy is internal to appdispatch: no
-raw message or dead-letter entity is exposed through the jobs API, and it does
-not define completed-job retention. No runtime cleanup is performed until an
-operator maintenance command is required; workers never delete dispatch data
-as part of delivery.
+## Detailed references
 
-Each message may have at most one job-observed consumer registration. Other
-consumers are ordinary appdispatch consumers; an event reaction that needs an
-independent visible execution publishes a distinct semantic command. A job
-projection is materialized lazily on first delivery, before the handler runs,
-and uses the message ID as its job ID. Until that delivery, a request for the
-known future job ID may return `404`; the UI treats that response as pending
-only for an ID it just received from a dispatching workflow. Unknown or deep
-linked IDs remain ordinary `404` errors.
+- [Finance capabilities](product/overview.md) describes current workflows and limits.
+- [Background processing](architecture/background-processing.md) defines dispatch,
+  jobs, schedules, delivery, and recovery.
+- [Provider sync](finance-provider-sync-architecture.md) defines bank identity,
+  requested windows, conservative merges, and atomic commits.
+- [Persistence](architecture/persistence.md) defines state ownership, secrets,
+  migration, and filesystem boundaries.
+- [Local development](operations/local-development.md) is the canonical setup guide.
+- [Release and deployment](operations/release-deployment.md) links the maintained runbooks.
+- [Experiments](experiments/agent-runtime.md) explains the retained generic runtime.
 
-An accepted browser trigger is requested as `operator`; an accepted access-token
-trigger is requested as `integration`. Session job reads are limited to that
-user's operator and integration jobs, while an access token can read only its
-owner's integration jobs. Revoking a token blocks its next request but does not
-cancel a command already accepted by appdispatch. The three token-writable
-finance triggers accept an optional caller- and operation-scoped idempotency
-key: an identical retry returns the original dispatch/job ID, while a changed
-payload with that key returns `409`.
+[Acceptance requirements](requirements/index.md)
+retain granular acceptance scenarios. This page remains the product-direction
+authority; the [bundle index](index.md) is the navigation entry.[^documentation-snapshot]
 
-Transport failure and job failure are separate concerns. A finance service must
-explicitly return a finance-owned terminal failure for a terminal domain or
-provider outcome. Only the finance adapter maps that typed outcome to a handled
-failure, preserving its sanitized code, summary, and details for a failed
-observed job before acknowledgement. Unclassified service, malformed payload,
-materialization/claim, handler-panic, and terminal-state persistence failures
-follow the `appdispatch` retry/dead-letter policy; terminal-state persistence is
-retried with backoff while the delivery context remains alive, and shutdown leaves
-the message unacknowledged. Ordinary consumers log explicit terminal failures and
-create no job state.
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+[^local-lifecycle]: Current local development and explicit migration requirements.
 
-Only running projections whose durable claim timestamp is at least the
-worker-level `staleRunningAge` old are requeued or terminally failed (the
-default age is 30 minutes). Recovery conditionally matches the claim owner
-and timestamp, so it cannot overwrite a newer claim or terminal transition.
-Active handlers renew their claims before recovery. A canceled handler
-conditionally releases its own claim while leaving the source message
-unacknowledged, so a replacement worker can retry promptly. The uniform attempt
-policy defaults to three attempts; handlers and individual rows do not define
-competing retry limits.
-
-The topic-aware dispatch schema intentionally replaces the earlier alpha
-single-topic schema. Recreate the local Compose PostgreSQL volume if a clean
-environment is required; there is no SQLite data migration. Explicit jobs and
-HTTP roots stop their message routers before closing the shared application
-database. The migration root creates no publisher or router.
-
-Run `make postgres-bootstrap` before ordinary module or Nx backend tests. Each
-core module's `make test` selects tagged PostgreSQL tests with the prepared
-`sumweave_test` schema; there is no separate verification lane or workflow.
-
-Release builds run on the host with `make -C build dist`; Docker packages the
-prepared binary and staged platform-agent root. The Helm chart deploys app,
-singleton worker, scheduler, and migration processes because finance uses all
-of them. It can also run an optional post-migration initial-user bootstrap Job
-from credentials held in a consumer-managed Kubernetes Secret.
+[^repository-policy]: repository product clarification of 2026-11-26 and current app composition.

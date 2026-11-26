@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Finance-first browser SPA for Sumweave with retained generic agent Chat and Providers routes.
+Personal finance browser SPA. Retained generic Chat, agent profiles, and model-provider settings are experimental. Admin token management and finance diagnostics support the product.
 
 ## Template Origin And Boundary
 
@@ -35,6 +35,9 @@ Bootstrapped from the official Vite + Svelte TypeScript template (toolchain/boot
 ```
 
 ## Run
+
+Canonical full-stack setup: [local development](../../docs/operations/local-development.md).
+Create PM2 apps with the ecosystem file before using the existing-process commands below.
 
 From the repo root:
 
@@ -68,7 +71,7 @@ Read before changing UI; update docs in the same change when behavior shifts.
 | Doc | Use for |
 | --- | --- |
 | [DESIGN.md](./DESIGN.md) | Styling, tokens, `ds-*` classes — **always follow** for visual changes |
-| [ui-wireframe.md](./ui-wireframe.md) | Layout, routing, screen states, behavior (not styling) |
+| [ui-wireframe.md](./ui-wireframe.md) | Finance and supporting screens; experimental sections are labeled |
 | [doc/architecture.md](./doc/architecture.md) | Stack, env, API integration, repo wiring |
 
 ## Module Rules and Conventions

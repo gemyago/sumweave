@@ -6,11 +6,12 @@ Language: Go (1.26.x)
 
 ## Status In Product Direction
 
-This module is part of the intended long-term product path. Treat `runtime/` as the current foundation for the real system's core Go package/module, even if the final naming changes later.
-
-Some structure here may have started from foundation work, but this module is not reference-only template code. It is allowed to evolve directly into product code.
-
-High-level target shape for this module is tracked in [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md): generic agent execution, sessions, profiles, providers, and HTTP APIs only.
+This module contains experimental or unused generic agent functionality for
+potential future extensions: execution, sessions, profiles, model providers,
+and HTTP APIs. It is not a promised personal-finance product capability.
+Current app composition and migrations still depend on it; experimental scope
+alone does not authorize removing operational dependencies. See the
+[experimental scope reference](../docs/experiments/agent-runtime.md).
 
 Key architectural decisions:
 - ADK/genkit related components are ONLY used internally and NOT exposed via public contract.
@@ -71,7 +72,7 @@ This section defines module-specific rules and conventions. Project-level rules 
 The rules are:
 - Update module rules and conventions when user corrects the behavior of AI.
 - OpenAPI JSON uses camelCase for property names or any other identifiers or keys; regenerate after spec edits.
-- Tests: Mock for [ProvidersConfigService](./agent/) is generated in [agent/mocks_providers_config.go](./agent/mocks_providers_config.go) (`//go:build !release`) so packages outside `agent` (e.g. `httpapi` tests) can use `agent.NewMockProvidersConfigService`; regenerate with `go run github.com/vektra/mockery/v3` from the `runtime/` module root.
+- Tests: The shared [ProvidersConfigService mock](./internal/llmproviders/mocks_shared.go) has `//go:build !release`. Tests within the runtime module (for example `httpapi`) import `github.com/gemyago/sumweave/runtime/internal/llmproviders` and call `llmproviders.NewMockProvidersConfigService(t)`; regenerate with `go run github.com/vektra/mockery/v3` from the `runtime/` module root.
 - Tests: Gorm models should always have explicit column names; we do not relay on gorm conventions.
 - Accept cross-replica active-run and SSE reconnect races for now.
 

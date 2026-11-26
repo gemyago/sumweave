@@ -8,13 +8,13 @@
 
 This repository was created from template and foundation code. Treat inherited template structure, copied boilerplate, and generic support modules as reference material unless this file or a module `AGENTS.md` explicitly says they are part of the intended product path.
 
-The intended product is a finance-only system with:
+The intended product is a personal budgeting and finance tracking system.
+Current delivery covers tracking; budget planning is not yet implemented. It has:
 - `finance/` as the finance domain module
-- `runtime/` as generic agent infrastructure
 - one Go API/jobs application (`apps/sumweave/`)
 - one UI (`apps/sumweave-ui/`)
 
-Unless explicitly promoted by the user, everything outside that core package, Go app, and UI should be treated as template-origin reference code and not as a product requirement.
+Generic agent execution, sessions, profiles, Chat, model-provider settings, and unused inherited functionality are experimental or potential extensions. `runtime/` contains that experimental infrastructure. Keep operational dependencies needed by finance, including auth, appdispatch, jobs, PostgreSQL, release, and deployment. Other template-origin code is reference unless explicitly adopted.
 
 ## ⚠️ IMPORTANT: Read Module-Specific AGENTS.md Files First
 
@@ -27,7 +27,9 @@ Unless explicitly promoted by the user, everything outside that core package, Go
 │   └── skills/                   # bundled platform-internal agent skills
 ├── .agents/
 │   └── skills/                   # generic repo-local agent skills
-├── runtime/                      # core runtime and related infrastructure (go)
+├── finance/                      # personal finance domain (go)
+│   └── AGENTS.md
+├── runtime/                      # experimental generic agent infrastructure (go)
 │   └── AGENTS.md
 ├── apps/
 │   ├── sumweave-ui/                 # Svelte/Vite SPA (js)
@@ -37,7 +39,7 @@ Unless explicitly promoted by the user, everything outside that core package, Go
 ├── build/
 │   ├── AGENTS.md
 │   ├── make/                     # shared make fragments (repo-root pinned golangci-lint, etc.)
-│   └── npm/                      # pipeline sources — details in build/AGENTS.md
+│   └── scripts/                  # host release support; see build/AGENTS.md
 ├── tests/                        # high-level integration/e2e tests — [tests/AGENTS.md](./tests/AGENTS.md)
 │   └── AGENTS.md
 └── tools/
@@ -123,9 +125,18 @@ This repo does not maintain an npm/package distribution pipeline.
 
 ## Product Docs
 
-- Active docs index: [docs/README.md](./docs/README.md)
+- Active docs index: [docs/index.md](./docs/index.md)
 - Canonical domain vocabulary: [docs/domain-terminology.md](./docs/domain-terminology.md)
-- High-level product and runtime shape: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- Product direction and module boundaries: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- Product and architecture docs must follow OKF 0.3 in `docs/`.
+- Use [okf-generate](./.agents/skills/okf-generate/SKILL.md) to write, update,
+  migrate, repair, or validate the bundle; use
+  [okf-consume](./.agents/skills/okf-consume/SKILL.md) when answering from it.
+- Skills come from the [official upstream skills](https://github.com/open-knowledge-format/open-knowledge-format/tree/main/skills).
+  [Local provenance](./.agents/skills/OKF-UPSTREAM.md) records the exact revision
+  and license. Copy only skills and required resources, without plugins.
+- Follow [documentation maintenance](./docs/development/documentation.md) for
+  requirements, provenance, navigation, lifecycle, and validation.
 
 ## Project Rules and Conventions
 
@@ -145,9 +156,13 @@ The rules are:
 - Keep harness agnostic repo-local skills under `.agents/skills`.
 - Platform runtime loads only `.platform-agents/skills`.
 - Treat template-derived code as reference unless adopted.
-- Prefer core Go, Go app, and UI as real product scope.
-- Keep package/release pipeline code removed unless explicitly revived.
-- Natural-language approval completes OpenSpec review by default.
+- Keep personal finance tracking as the implemented product scope.
+- Treat generic agents, Chat, and model providers as experimental.
+- Keep npm distribution removed; retain adopted host release builds.
+- Keep acceptance scenarios under `docs/requirements/` with topic backlinks.
+- Use Git history for retired plans and superseded change records.
+- Use `.agents/skills` directly; do not create harness skill links.
+- Use the relevant local OKF skills for product and architecture docs.
 - Seed/reseed requests default to the first `.local-users` entry.
 - Reseed means replace local seeded data, then reopen the live DB.
 - Launch local backend CLI commands from `apps/sumweave`.
@@ -218,11 +233,12 @@ When user is asking you to add a new skill, do this:
 - Define standard frontmatter for the skill (at least name and description)
 - Keep description short and to the point, avoid fluff. Make it minimalistic and include enough for LLM model to understand what the skill is about.
 - Define skill instruction as per user request.
-- Link the skill to the harnesses using `.agents/skills/link-vendor-harnesses.sh` script
+- Use `.agents/skills` directly for harness skill discovery.
 
 ## Harness Agent Skills
 
-Harness agnostic repo-local skills live under `.agents/skills`. After creating a new skill, make sure to link it using `.agents/skills/link-vendor-harnesses.sh`
+Harness agnostic repo-local skills live under `.agents/skills`. Harnesses use
+this directory directly; do not add vendor-specific skill symlinks or linking scripts.
 
 ## Platform Agent Skills
 

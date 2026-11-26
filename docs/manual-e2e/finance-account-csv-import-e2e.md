@@ -1,14 +1,27 @@
+---
+type: Runbook
+title: "Finance account CSV import E2E"
+description: "Manual verification procedure for finance account csv import e2e."
+sources:
+  - id: finance-account-csv-import-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-account-csv-import-e2e.md"
+    title: "docs/manual-e2e/finance-account-csv-import-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-account-csv-import-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Finance account CSV import E2E
 
 This is the deterministic API-only gate for `finance.account_import`. It uses
 the prepared local PostgreSQL database with fresh scoped data. Do not use the
 normal PM2 worker process for this gate: it would consume the message before
-the expected pre-materialization `404` check.
+the expected pre-materialization `404` check.[^documentation-snapshot][^finance-account-csv-import-e2e]
 
 ## Isolated setup
 
 Run from the repository root. The first `.local-users` entry is used for the
-isolated database.
+isolated database.[^documentation-snapshot]
 
 ```bash
 set -euo pipefail
@@ -79,7 +92,7 @@ test "$JOB_STATUS" = 404
 ```
 
 The confirmation response is the appdispatch message ID. No job row exists
-until delivery, so `404` here is required and is not an error in this gate.
+until delivery, so `404` here is required and is not an error in this gate.[^documentation-snapshot]
 
 ## Worker, terminal state, and repeat safety
 
@@ -120,7 +133,7 @@ PY
 ```
 
 The job detail may contain lifecycle, requester, worker, attempt, and sanitized
-error fields only. It must not contain stored input, progress, or result data.
+error fields only. It must not contain stored input, progress, or result data.[^documentation-snapshot]
 
 ## Controlled invalid fixture
 
@@ -128,7 +141,7 @@ For the supported business-validation branch, preview a second CSV containing
 one row with a missing `currency`. Expect a `200` preview with the deterministic
 missing-fields diagnostic and no accounts to create; do not confirm it. This
 exercises a rejected-row outcome without making a transport failure look like a
-business failure.
+business failure.[^documentation-snapshot]
 
 ```bash
 cat >"$E2E_ROOT/accounts-invalid.csv" <<'CSV'
@@ -161,4 +174,8 @@ cd "$REPO_ROOT"
 pm2 start ecosystem.config.js
 ```
 
-This guide owns restoring the normal PM2 backend after its API-only run.
+This guide owns restoring the normal PM2 backend after its API-only run.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-account-csv-import-e2e]: docs/manual-e2e/finance-account-csv-import-e2e.md.

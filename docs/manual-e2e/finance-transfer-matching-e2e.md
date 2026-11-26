@@ -1,10 +1,23 @@
+---
+type: Runbook
+title: "Finance transfer matching E2E"
+description: "Manual verification procedure for finance transfer matching e2e."
+sources:
+  - id: finance-transfer-matching-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-transfer-matching-e2e.md"
+    title: "docs/manual-e2e/finance-transfer-matching-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-transfer-matching-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Finance transfer matching E2E
 
 This is the deterministic verification runbook for Phase 0 transfer matching.
 It is deliberately API-first: it creates isolated PostgreSQL data through the
 supported Finance API, proves the API-only job-observation window, then uses a
 bounded worker. Use the synthetic provider only once to emit a real committed
-bank-sync-window event; it is not the source of the matching fixtures.
+bank-sync-window event; it is not the source of the matching fixtures.[^documentation-snapshot][^finance-transfer-matching-e2e]
 
 Do not run this destructive guide while another developer needs the local
 database. Keep every captured response, command log, and screenshot under the
@@ -14,7 +27,7 @@ run directory below.
 
 Follow the shared setup in [README.md](./README.md), then run from the
 repository root. This keeps the normal worker stopped until the guide says to
-run it. The first `.local-users` entry is the default local identity.
+run it. The first `.local-users` entry is the default local identity.[^documentation-snapshot]
 
 ```bash
 set -euo pipefail
@@ -101,7 +114,7 @@ ACCOUNT_EUR=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <"
 
 The API has no fixture endpoint for a transfer-matching run. Use normal manual
 ledger records. All times below include explicit offsets so the submitted range
-and the 72-hour elapsed boundary are inspectable without assuming UTC.
+and the 72-hour elapsed boundary are inspectable without assuming UTC.[^documentation-snapshot]
 
 PKO cross-currency evidence is intentionally not created by this guide: it
 requires stored Enable Banking transaction snapshots and connection-provider-
@@ -350,7 +363,7 @@ create_fixture "$TENANT_ID" "$ACCOUNT_B" 2500 'page-filter-in' '2026-06-02T19:00
 
 Before matching, classify the `classify-before` pair through the supported
 explicit classification route. This is deliberately a separate bounded delivery
-before the matching submission.
+before the matching submission.[^documentation-snapshot]
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/classification-rules" \
@@ -401,7 +414,7 @@ Capture a deliberately filtered and offset ledger page before matching. It does
 not drive the match request; it proves later that an account/page filter cannot
 turn an ambiguous or off-page candidate into a unique one. Then submit the
 narrow original range. It includes the in-range starting legs but not the
-outside partners, and is half-open even though the UI displays inclusive dates.
+outside partners, and is half-open even though the UI displays inclusive dates.[^documentation-snapshot]
 
 ```bash
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/transactions?accountId=$ACCOUNT_A&status=booked&source=manual&limit=1&offset=100" \
@@ -569,7 +582,7 @@ request. A copied, arbitrary job URL must retain normal not-found behavior.
 ## 4. Classification after matching, rerun, and manual correction
 
 Now classify the already matched `classify-after` pair. Classification must skip
-transfer kinds, so the rule must not add a category or remove the transfer link.
+transfer kinds, so the rule must not add a category or remove the transfer link.[^documentation-snapshot]
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/classification-rules" \
@@ -621,7 +634,7 @@ check must remain equally silent.
 Use [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md) only to
 create a local synthetic connection and publish one real committed window over
 the prepared matching date range. Keep the classification rule created above and
-the `classified` fixture unpaired.
+the `classified` fixture unpaired.[^documentation-snapshot]
 
 With API-only still running, publish the synthetic sync, record its initial
 bank-job `404`, then run `jobs worker --once`. Save the bank job, ledger, and
@@ -665,7 +678,7 @@ dispatch tables manually to manufacture that condition.
 
 After the API checks, restore the documented PM2 API/worker/UI setup. Run this
 headed check at `1280x900` and `390x844`; store screenshots and any Playwright
-trace under `$E2E_ROOT/browser/`.
+trace under `$E2E_ROOT/browser/`.[^documentation-snapshot]
 
 1. Sign in, choose the fixture tenant, and open `#/finance/transactions`.
 2. Confirm **Match transfers** is Bootstrap-first, shows today and the prior 29
@@ -696,4 +709,8 @@ trap - EXIT
 
 Report the run directory, tenant/job IDs, selected ranges, terminal jobs,
 fixture assertions, viewport screenshots, and any failed API/worker/browser
-step. Keep evidence in `tmp/`; do not commit it.
+step. Keep evidence in `tmp/`; do not commit it.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-transfer-matching-e2e]: docs/manual-e2e/finance-transfer-matching-e2e.md.

@@ -1,3 +1,7 @@
+> Template-derived reference. Apply only when relevant to the assigned work.
+> Current [repository rules](../AGENTS.md), module instructions, and
+> [documentation conventions](../docs/development/documentation.md) take precedence.
+
 # Instruction to finalize task
 
 Your job is to **verify** if codebase is in compilable state and commit all changes if so. You should **NOT** be updating any files or do any other modifications.

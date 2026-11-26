@@ -1,5 +1,10 @@
 # Sumweave UI — wireframe (composition, states, behavior)
 
+> Scope: Finance, login, self-service access tokens, and finance diagnostics describe
+> the current product/support UI. Chat, agent profiles, model-provider settings, and
+> their generic navigation are experimental extensions. See
+> [product direction](../../docs/ARCHITECTURE.md).
+
 > **Editing this doc:** Prefer **bullet lists** (and **tables** for state matrices) over long unbroken prose—keep the same detail, but make it scannable and easy to diff.
 
 **Stack**
@@ -88,7 +93,7 @@
 
 ---
 
-## Chat (`/chat/:sessionId?`)
+## Experimental Chat (`/chat/:sessionId?`)
 
 **Layout**
 

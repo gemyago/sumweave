@@ -1,3 +1,7 @@
+> Template-derived reference. Apply only when relevant to the assigned work.
+> Current [repository rules](../AGENTS.md), module instructions, and
+> [documentation conventions](../docs/development/documentation.md) take precedence.
+
 # Creating HTTP API Clients
 
 ## Overview
@@ -163,7 +167,7 @@ type Resource struct {
 
 ## Testing Patterns
 
-Follow [testing-best-practices](./doc/testing-best-practices.md) when writing tests.
+Follow [testing-best-practices](../docs/testing-best-practices.md) when writing tests.
 Always include these 3 test cases for each operation:
 
 1. **Success with all parameters/fields** - Test with complete request and response

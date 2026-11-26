@@ -1,14 +1,27 @@
+---
+type: Runbook
+title: "Finance FX refresh E2E"
+description: "Manual verification procedure for finance fx refresh e2e."
+sources:
+  - id: finance-fx-refresh-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-fx-refresh-e2e.md"
+    title: "docs/manual-e2e/finance-fx-refresh-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-fx-refresh-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Finance FX refresh E2E
 
 This is the deterministic API-only gate for
 `finance.fx_rates_refresh`. It uses the existing Frankfurter provider pointed
 at a local static HTTP fixture, plus the realistic fixture generator's existing
 `NewStaticFXProvider` setup. It never calls a public FX endpoint. State and
-evidence stay under `tmp/jobs-system-simplification-028-e2e/fx-refresh`.
+evidence stay under `tmp/jobs-system-simplification-028-e2e/fx-refresh`.[^documentation-snapshot][^finance-fx-refresh-e2e]
 
 ## 1. Isolated API and local providers
 
-Run from the repository root and use the first `.local-users` entry.
+Run from the repository root and use the first `.local-users` entry.[^documentation-snapshot]
 
 ```bash
 set -euo pipefail
@@ -94,7 +107,7 @@ PY
 
 The fixture generator's finance module uses deterministic static rates and
 persists the EUR/USD pair. This makes the required-pair discovery independent
-of the current date or public network.
+of the current date or public network.[^documentation-snapshot]
 
 ## 3. Manual success: publish, `404`, worker, terminal state
 
@@ -124,7 +137,7 @@ PY
 
 `nbp` is an existing deterministic stub provider. It returns the supported
 `fx_provider_not_supported` terminal business failure without making a network
-request. Verify that boundary separately:
+request. Verify that boundary separately:[^documentation-snapshot]
 
 ```bash
 curl -sS -X POST http://127.0.0.1:4501/api/v1/finance/fx/sync \
@@ -153,7 +166,7 @@ errors are not substitutes for this fixture.
 ## 5. Scheduled FX due state, observation, and repeat
 
 The scheduler command also publishes the due fixture bank command; the local
-Monobank fixture above keeps that extra observed workload deterministic.
+Monobank fixture above keeps that extra observed workload deterministic.[^documentation-snapshot]
 
 ```bash
 # Keep the local Frankfurter fixture above running through enqueue-due and the
@@ -199,4 +212,8 @@ cd "$REPO_ROOT"
 pm2 start ecosystem.config.js
 ```
 
-This guide owns restoring the normal PM2 backend after its API-only run.
+This guide owns restoring the normal PM2 backend after its API-only run.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-fx-refresh-e2e]: docs/manual-e2e/finance-fx-refresh-e2e.md.

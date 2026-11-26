@@ -1,138 +1,35 @@
 # Contributing to Sumweave
 
-## Project Setup
+Sumweave is a personal finance tracking app. Start with the
+[documentation index](docs/index.md), [product direction](docs/ARCHITECTURE.md),
+and [domain vocabulary](docs/domain-terminology.md).
 
-Please have the following tools installed:
-- [direnv](https://github.com/direnv/direnv)
-- [nvm](https://github.com/nvm-sh/nvm)
-- Go 1.26.x tooling compatible with the repo setup
+- [Local development](docs/operations/local-development.md) owns installation,
+  PostgreSQL bootstrap, PM2, process modes, and startup troubleshooting.
+- [Development and verification](docs/development/verification.md) covers Nx,
+  module checks, finance smoke tests, and manual journeys.
+- [Go coding guide](docs/golang-coding-guide.md) and the nearest `AGENTS.md`
+  define implementation conventions; load the gopher skill before Go work.
+- [Release and deployment](docs/operations/release-deployment.md) links the
+  maintained host-build and Helm runbooks.
 
-## Product Docs
+## Documentation workflow
 
-Read these first:
+Product and architecture documentation follows OKF 0.3 in `docs/`. Use the local
+[okf-generate skill](.agents/skills/okf-generate/SKILL.md) to author or validate it
+and [okf-consume](.agents/skills/okf-consume/SKILL.md) to answer from it. The skills
+are copied from [official upstream](https://github.com/open-knowledge-format/open-knowledge-format/tree/main/skills);
+[provenance](.agents/skills/OKF-UPSTREAM.md) records the pinned revision and license.
+Harnesses use `.agents/skills` directly, without vendor symlinks or a linking step.
 
-- Product direction: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
-- Retained docs index: [docs/README.md](./docs/README.md)
-- Domain vocabulary: [docs/domain-terminology.md](./docs/domain-terminology.md)
+Update the [knowledge bundle](docs/development/documentation.md) alongside behavior
+changes. Keep detailed acceptance scenarios in [requirements](docs/requirements/index.md),
+linked from their current topic reference. Record accepted behavior separately
+from implementation gaps and proposals. Before deleting superseded documents,
+retain their unique current guidance in the maintained topic. Use Git history
+for retired plans and change records; do not create replacement archives or
+redirect trees. An old task checklist does not establish current delivery.
 
-##  AI Frameworks
-
-**Openspec**
-```bash
-npm install -D @fission-ai/openspec@latest
-openspec init
-```
-
-## Typical Monorepo Tasks
-
-If not using direnv and nvm, make sure to have go and node of a correct version as per [.nvmrc](.nvmrc) and [go.work](go.work) files.
-
-Make sure to install deps from root of the monorepo:
-```bash
-# Install root deps first
-npm i
-
-# Then use nx to setup per module deps
-npx nx run-many -t install-deps
-```
-
-This project uses Nx, some quick cheat-sheet:
-```bash
-# Run tests of specific module:
-npx nx test sumweave
-
-# Run tests bypassing cache:
-npx nx test sumweave --skipNxCache
-
-# Run all tests
-npx nx run-many -t test
-
-# Run all lint
-npx nx run-many -t lint
-
-# Run affected tasks (e.g lint):
-npx nx affected --target=lint
-
-# To see all available tasks for a specific module, use:
-nx show project sumweave --json
-```
-
-To run all affected lint and tests, use `make affected-lint-test`
-
-## Go modules specific instructions
-
-If you want more control over deps management in go modules.
-
-Install/Update dependencies (run from go modules): 
-```sh
-# Install
-go mod download
-go get -u tool
-go install tool
-
-# Update:
-go get -u ./... && go mod tidy
-```
-
-## Run locally
-
-The normal local workflow uses Compose PostgreSQL and PM2 from the repository
-root. Bootstrap starts Compose, prepares the local and test databases, runs both
-explicit migrations, and grants the runtime role before PM2 starts the backend:
-
-```bash
-make postgres-bootstrap
-pm2 start ecosystem.config.js
-```
-
-Backend CLI paths, including the explicit `db-migrate` command, are relative to
-`apps/sumweave`. Nx and PM2 set that working directory for the backend process;
-PM2 commands themselves remain repo-root commands because `PM2_HOME` is
-repo-scoped. Do not use direct `db-migrate` as a replacement for local bootstrap.
-
-Frontend host/port: http://localhost:5173
-Backend host/port: http://localhost:4501
-
-PM2 process names:
-- `api` and `worker` in the `backend` namespace
-- `ui` in PM2's default namespace
-
-Useful PM2 commands from the repo root:
-```bash
-pm2 status
-pm2 restart backend
-pm2 restart ui
-pm2 stop backend
-pm2 stop ui
-pm2 delete backend
-pm2 delete ui
-```
-
-Use `pm2 logs backend` for combined backend output and `pm2 logs` for all
-output. PM2 accepts `backend` as the positional namespace target for start,
-stop, restart, delete, and logs. If the backend ecosystem command or arguments
-change, recreate it rather than restarting it:
-
-```bash
-pm2 delete backend
-pm2 start ecosystem.config.js
-```
-
-For the optional HTTPS variant of this PM2 workflow, see
-[Local HTTPS](./docs/local-https.md).
-
-### Direct-start diagnostics only
-
-Use direct commands only to isolate a local startup problem; they are not the
-normal development workflow. From separate terminals, run the backend from
-`apps/sumweave` with `go run ./cmd/sumweave start-all --env local`
-and the UI from `apps/sumweave-ui` with `npm run dev`.
-
-If the data screen still shows a browse-first availability `404` after a PM2 restart, check `pm2 status`: the UI proxies `/api/v1/*` to port `4501`, and a stale non-PM2 `sumweave start` process on that port can keep PM2's backend stopped. The PM2 API entry now attempts to replace a stale `sumweave start` listener automatically on startup.
-
-### Combined local mode
-
-The old package-oriented combined local mode was removed. Run the backend and frontend separately, or use:
-```bash
-nx run-many -t dev
-```
+Follow the maintenance guide for sources, claim footnotes, trust metadata,
+indexes, the change log, and validation. Generic agent and Chat work is
+[experimental](docs/experiments/agent-runtime.md), not the product roadmap.

@@ -2,7 +2,14 @@
 
 This file describes the current UI implementation conventions. For product direction and scope, use the repository-level [../../../docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) as the source of truth.
 
-Browser SPA for Sumweave under `apps/sumweave-ui`: static **`dist/`** from Vite, no SSR in this iteration. Final goal is to have the UI embeddable in a backend app and deployed as a single unit.
+Browser SPA for Sumweave under `apps/sumweave-ui`: static **`dist/`** from Vite, no SSR in this iteration. Release builds embed the UI in the backend binary for same-origin deployment.
+
+Finance/login and supporting token/finance-diagnostics screens are product scope.
+Generic Chat, profiles, and model-provider configuration are
+[experimental](../../../docs/experiments/agent-runtime.md).
+[Local development](../../../docs/operations/local-development.md) owns full-stack
+setup; [release/deployment](../../../docs/operations/release-deployment.md) links
+the maintained build and chart runbooks.
 
 ## Stack
 
@@ -10,7 +17,7 @@ Browser SPA for Sumweave under `apps/sumweave-ui`: static **`dist/`** from Vite,
 | --- | --- |
 | UI | **Svelte 5** + **TypeScript** |
 | Build | **Vite** (`vite build` → `dist/`, or backend embed outDir for backend-serving builds) |
-| Routing | **`svelte-spa-router` v5** — **hash** URLs (`#/chat`, `#/providers`) so a plain static host works without server rewrites |
+| Routing | **`svelte-spa-router` v5** — **hash** URLs (`#/finance`, `#/finance/accounts`) so a plain static host works without server rewrites |
 | Unit / component tests | **Vitest** + **`@testing-library/svelte`** + **`svelteTesting()`** (Vite plugin), **jsdom**, optional **jest-dom** matchers |
 | Lint | **ESLint** (TS + Svelte) + **`svelte-check`** / **tsc** via `npm run check` |
 
@@ -48,7 +55,7 @@ secret only from a create or rotate response, keeps that value in page memory,
 and removes it on dismiss, navigation, or reload. The page is not an
 administrator or cross-user credential surface.
 
-## Decisions (why not X)
+## Implementation choices
 
 - **Plain Vite + Svelte, not SvelteKit:** smaller surface; deliberate third-party router; static export only.
 - **Hash routing:** fits static hosting without rewrite rules.
@@ -62,4 +69,4 @@ One-line reminders (80–100 characters); see upstream Vite/Svelte docs for deta
 - Triple-slash `global.d.ts` avoids listing `compilerOptions.types`, hiding other workspace types.
 - `allowJs` stays on: `.svelte` scripts can still be JS even if plain `.js` files were forbidden.
 - HMR skips in-component state by default; use stores for values you need across hot reloads.
-- Folders echo SvelteKit-like layout so a future SvelteKit migration stays less painful.
+- Keep route-level pages, shared components, and API libraries separate.

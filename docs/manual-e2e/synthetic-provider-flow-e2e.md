@@ -1,3 +1,16 @@
+---
+type: Runbook
+title: "Synthetic provider bank-sync and classification E2E"
+description: "Manual verification procedure for synthetic provider flow e2e."
+sources:
+  - id: synthetic-provider-flow-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/synthetic-provider-flow-e2e.md"
+    title: "docs/manual-e2e/synthetic-provider-flow-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/synthetic-provider-flow-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Synthetic provider bank-sync and classification E2E
 
 This is the deterministic API-only gate for a manual
@@ -9,11 +22,11 @@ The terminal success and pending-state key-preservation checks below are the
 required assertions for this flow; the synthetic transaction generator does not
 promise manual-sync transaction-count idempotency. The fixed synthetic window
 and `Synthetic debit` rule make automatic and explicit classification
-assertions deterministic without changing provider behavior.
+assertions deterministic without changing provider behavior.[^documentation-snapshot][^synthetic-provider-flow-e2e]
 
 ## Isolated setup
 
-Run from the repository root and use the first `.local-users` entry.
+Run from the repository root and use the first `.local-users` entry.[^documentation-snapshot]
 
 ```bash
 set -euo pipefail
@@ -50,7 +63,7 @@ TENANT_ID=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/finance/tenants \
 Create the categories, a manual account, a pre-categorized transaction, and the
 automatic rule before the synthetic sync. The synthetic connector's local
 fixture uses a zero offset and debit value for the fixed window below, so every
-provider transaction description begins with `Synthetic debit`.
+provider transaction description begins with `Synthetic debit`.[^documentation-snapshot]
 
 ```bash
 AUTO_CATEGORY_ID=$(curl -sS -X POST \
@@ -161,7 +174,7 @@ PY
 
 Verify the connection list has one active synthetic connection with the new
 ID, then publish a fixed-window sync while the API-only process is still the
-only consumer:
+only consumer:[^documentation-snapshot]
 
 ```bash
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/$TENANT_ID/connections" \
@@ -219,13 +232,13 @@ PY
 The required results are: terminal observed job, non-null
 `lastSuccessfulSyncAt`, two distinct synthetic provider accounts, and non-empty
 provider transactions. The rule-triggered automatic delivery must classify each
-synthetic provider transaction with `Synthetic automatic`.
+synthetic provider transaction with `Synthetic automatic`.[^documentation-snapshot]
 
 ## Explicit classification and category-preservation checks
 
 Create one matching uncategorized manual transaction, add its rule, then submit
 the inclusive visible dates as an offset-preserving, half-open range. The `404`
-before delivery is valid only for this initiating classification request.
+before delivery is valid only for this initiating classification request.[^documentation-snapshot]
 
 ```bash
 curl -sS -X POST \
@@ -303,4 +316,8 @@ cd "$REPO_ROOT"
 pm2 start ecosystem.config.js
 ```
 
-This guide owns restoring the normal PM2 backend after its API-only run.
+This guide owns restoring the normal PM2 backend after its API-only run.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^synthetic-provider-flow-e2e]: docs/manual-e2e/synthetic-provider-flow-e2e.md.

@@ -1,3 +1,7 @@
+> Template-derived reference. Apply only when relevant to the assigned work.
+> Current [repository rules](../AGENTS.md), module instructions, and
+> [documentation conventions](../docs/development/documentation.md) take precedence.
+
 # Instruction to orchestrate plan implementation
 
 **Pre Condition**: This instruction is for AI agents with mode switching/running sub-agents capabilities only. If you don't have access to mode switching/running sub-agents, please report the limitation and do not proceed.
@@ -17,17 +21,17 @@ As a first step please identify `atomic` tasks and build a TODO for for yourself
 For each task start a sub-agent with the exact instruction enclosed in `<sub-agent-instruction>` tags. **Note:** do not include enclosing tags, just contents. Do not include any additional text or context:
 1. Start a coding agent with implementation instruction as follows:
   <sub-agent-instruction>
-  Follow [.context/implement-plan-task.md](.context/implement-plan-task.md) to implement the following task: Task XX: <task description> from <plan reference>
+  Follow [.context/implement-plan-task.md](implement-plan-task.md) to implement the following task: Task XX: <task description> from <plan reference>
   </sub-agent-instruction>
   Note: Include a full reference to the `implement-plan-task.md` file in the instruction, do not cite it's contents. Sub-agent will read it.
 2. Once results received, finalize the task by starting debugging subagent as follows:
   <sub-agent-instruction>
-  Please verify the implementation of Task XX: <task description> by following [.context/finalize-plan-task.md](.context/finalize-plan-task.md)
+  Please verify the implementation of Task XX: <task description> by following [.context/finalize-plan-task.md](finalize-plan-task.md)
   </sub-agent-instruction>
   Note: Include a full reference to the `finalize-plan-task.md` file in the instruction, do not cite it's contents. Sub-agent will read it.
 3. If the task finalization fails, start a coding subagent to fix the codebase as follows:
   <sub-agent-instruction>
-  Please fix the codebase to make it "green" by following [.context/fix-broken-codebase.md](.context/fix-broken-codebase.md)
+  Please fix the codebase to make it "green" by following [.context/fix-broken-codebase.md](fix-broken-codebase.md)
   </sub-agent-instruction>
   Note: Include a full reference to the `fix-broken-codebase.md` file in the instruction, do not cite it's contents. Sub-agent will read it.
 4. Repeat step 2 to finalize the task again.

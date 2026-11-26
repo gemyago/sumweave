@@ -1,14 +1,27 @@
+---
+type: Runbook
+title: "Finance transaction CSV import E2E"
+description: "Manual verification procedure for finance transaction csv import e2e."
+sources:
+  - id: finance-transaction-csv-import-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-transaction-csv-import-e2e.md"
+    title: "docs/manual-e2e/finance-transaction-csv-import-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-transaction-csv-import-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Finance transaction CSV import E2E
 
 This is the deterministic API-only gate for `finance.csv_import`. It verifies
 the fixed seven-column contract, confirmation publication, lazy job observation,
 audit completion, and repeat safety. Use the prepared local PostgreSQL database
 with fresh scoped data; do not use the normal PM2 worker for this gate because it can
-consume the message before the expected `404`.
+consume the message before the expected `404`.[^documentation-snapshot][^finance-transaction-csv-import-e2e]
 
 ## Isolated setup
 
-Run from the repository root and use the first `.local-users` entry.
+Run from the repository root and use the first `.local-users` entry.[^documentation-snapshot]
 
 ```bash
 set -euo pipefail
@@ -44,7 +57,7 @@ TENANT_ID=$(curl -sS -X POST http://127.0.0.1:4501/api/v1/finance/tenants \
 
 The seven required headers are `Date,Account,Category,Tags,Expense amount,
 Income amount,Currency`; `Description` is optional. Dates are strict
-`dd.MM.yy`, and amounts may use the documented localized quoted format.
+`dd.MM.yy`, and amounts may use the documented localized quoted format.[^documentation-snapshot]
 
 ```bash
 cat >"$E2E_ROOT/transactions.csv" <<'CSV'
@@ -85,7 +98,7 @@ test "$JOB_STATUS" = 404
 ```
 
 The returned ID is the appdispatch message ID and future observed job ID. The
-pre-worker `404` is required: publication does not create a job row.
+pre-worker `404` is required: publication does not create a job row.[^documentation-snapshot]
 
 ## Worker, terminal state, and repeat safety
 
@@ -127,7 +140,7 @@ PY
 
 Inspect the audit row outcomes and verify the imported PLN transactions, account,
 category, tags, and optional descriptions. Job detail is lifecycle/requester/
-worker/attempt metadata plus sanitized error fields only.
+worker/attempt metadata plus sanitized error fields only.[^documentation-snapshot]
 
 ## Controlled validation fixture
 
@@ -135,7 +148,7 @@ Preview a second CSV containing an invalid date, both amount columns populated,
 and an unsupported currency. Expect a `200` preview with deterministic row
 number/reason diagnostics and `importableCount=0`; do not confirm it. This is the
 supported business-validation branch and must not be reported as a transport
-failure.
+failure.[^documentation-snapshot]
 
 ```bash
 cat >"$E2E_ROOT/transactions-invalid.csv" <<'CSV'
@@ -164,7 +177,7 @@ PY
 After the API gate, the same tenant/import may be opened at `390×844` in
 `#/finance/imports` to verify readable preview diagnostics, audit outcomes, and
 the job link. This is optional for the API-only gate and must use the normal UI
-manual-E2E setup, not the isolated API process.
+manual-E2E setup, not the isolated API process.[^documentation-snapshot]
 
 ## Cleanup
 
@@ -175,4 +188,8 @@ cd "$REPO_ROOT"
 pm2 start ecosystem.config.js
 ```
 
-This guide owns restoring the normal PM2 backend after its API-only run.
+This guide owns restoring the normal PM2 backend after its API-only run.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-transaction-csv-import-e2e]: docs/manual-e2e/finance-transaction-csv-import-e2e.md.

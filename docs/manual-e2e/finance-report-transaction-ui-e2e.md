@@ -1,6 +1,19 @@
+---
+type: Runbook
+title: "Report Finance Transaction Through UI Manual E2E"
+description: "Manual verification procedure for finance report transaction ui e2e."
+sources:
+  - id: finance-report-transaction-ui-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-report-transaction-ui-e2e.md"
+    title: "docs/manual-e2e/finance-report-transaction-ui-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-report-transaction-ui-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Report Finance Transaction Through UI Manual E2E
 
-Follow the preparation steps in [README.md](./README.md) first. This guide uses the browser UI; use the first local user from repo-root `.local-users`.
+Follow the preparation steps in [README.md](./README.md) first. This guide uses the browser UI; use the first local user from repo-root `.local-users`.[^documentation-snapshot][^finance-report-transaction-ui-e2e]
 
 Use a unique run tag such as `YYYYMMDD-HHMMSS` in the tenant, account, and transaction descriptions. This keeps the created records easy to identify without deleting existing local data.
 
@@ -10,7 +23,7 @@ Use a unique run tag such as `YYYYMMDD-HHMMSS` in the tenant, account, and trans
 2. Sign in with the first `username:password` entry from repo-root `.local-users`.
 3. Confirm the app opens `#/finance` and no login request fails.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - sign-in succeeds
 - the authenticated Finance shell is visible
@@ -25,7 +38,7 @@ Expected:
 5. Choose the new run-tagged tenant from **Selected tenant**.
 6. Confirm the new tenant is selected in the Finance shell.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the create-tenant request succeeds
 - the selected tenant shows the unique run-tagged name
@@ -40,7 +53,7 @@ Expected:
 5. Select **Create account**.
 6. Confirm the account appears in **Account list**.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the create-account request succeeds
 - the new account is visible under the selected tenant
@@ -67,7 +80,7 @@ Expected:
    - **Effective at**: a valid local date and time
 6. Select **Save transaction** once. Confirm the success status appears immediately below the save/cancel row without jumping the document, and focus moves to that status without scrolling.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - one `POST /api/v1/finance/tenants/<tenant-id>/transactions` request is sent
 - its request body contains both selected `tagIds`
@@ -88,7 +101,7 @@ Expected:
 8. Clear both tag selections and select **Save transaction**. Reload the edit route and confirm no tags are selected.
 9. Return to the ledger and confirm the row no longer shows either tag label.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the created transaction appears exactly once
 - the amount, account, status, source, and description match the submitted form
@@ -108,7 +121,7 @@ Expected:
 6. In **Recent activity**, find exactly one entry whose description is `Transaction UI e2e <run-tag>`.
 7. Confirm that entry is a booked expense for `-12.34 USD` and shows the same effective local date and time submitted in the editor.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the account list API returns `bookedBalanceMinor=-1234` and `pendingBalanceMinor=0` for the run-tagged account
 - the current-month dashboard API returns settled `expenseMinor=1234`, `netMinor=-1234`, and `transactionCount=1`
@@ -119,7 +132,7 @@ Expected:
 
 ## 7. If anything is wrong, report it
 
-Stop at the first product failure and capture:
+Stop at the first product failure and capture:[^documentation-snapshot]
 
 - signed-in username and selected tenant/account names
 - exact route and browser viewport
@@ -132,3 +145,7 @@ Stop at the first product failure and capture:
 - the current-month dashboard's displayed settled expense, settled net, and booked transaction count
 - the dashboard API period, settled and pending totals, and run-tagged account balance payload
 - the displayed recent-activity entry and its corresponding API record, including description, status, kind, amount, and effective time
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-report-transaction-ui-e2e]: docs/manual-e2e/finance-report-transaction-ui-e2e.md.

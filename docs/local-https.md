@@ -1,13 +1,26 @@
+---
+type: Runbook
+title: "Local HTTPS"
+description: "Optional backend and Vite TLS setup and return to standard HTTP."
+sources:
+  - id: repository-policy
+    resource: "repository docs/local-https.md maintained procedures and conventions"
+    title: "repository docs/local-https.md maintained procedures and conventions"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/local-https.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Local HTTPS
 
 Use this optional workflow when the backend and Vite development server must both
 run on HTTPS. It uses a locally trusted `mkcert` certificate; no certificate or
-private key is stored in the repository.
+private key is stored in the repository.[^documentation-snapshot][^repository-policy]
 
 ## One-time certificate setup
 
 From the repository root, install `mkcert` using your system package manager,
-then run:
+then run:[^documentation-snapshot]
 
 ```bash
 mkcert -install
@@ -20,7 +33,7 @@ mkcert -cert-file .local-https/localhost.pem -key-file .local-https/localhost-ke
 ## Configure local TLS paths
 
 Create or update the ignored root `.envrc.local` with paths that are valid from
-both PM2 application working directories:
+both PM2 application working directories:[^documentation-snapshot]
 
 ```dotenv
 export APP_HTTPSERVER_TLS_CERTFILE=../../.local-https/localhost.pem
@@ -33,7 +46,7 @@ certificate-path fallback, but Vite HTTPS remains separately opt-in below.
 ## Start with PM2
 
 Prepare the required local PostgreSQL schemas from the repository root, then
-create or start the PM2 applications:
+create or start the PM2 applications:[^documentation-snapshot]
 
 ```bash
 make postgres-bootstrap
@@ -68,7 +81,7 @@ remove the two `APP_HTTPSERVER_TLS_*` exports from the ignored root
 `.envrc.local` and remove `VITE_LOCAL_HTTPS` plus its optional certificate-path
 variables from the ignored `apps/sumweave-ui/.env.local`. Keep
 `VITE_AGENT_API_BASE_URL=/api/v1/runtime/` so Vite continues to proxy the
-same-origin API calls.
+same-origin API calls.[^documentation-snapshot]
 
 Then prepare the PostgreSQL schemas and recreate both PM2 applications from the
 repository root so neither process retains an old TLS environment:
@@ -97,4 +110,8 @@ local test is in progress.
 Direct startup is only for isolating a local problem, not normal development.
 With the same environment loaded, run `go run ./cmd/sumweave start-all
 --env local` from `apps/sumweave` and `npm run dev -- --host localhost
---port 5173` from `apps/sumweave-ui` in separate terminals.
+--port 5173` from `apps/sumweave-ui` in separate terminals.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^repository-policy]: repository docs/local-https.md maintained procedures and conventions.

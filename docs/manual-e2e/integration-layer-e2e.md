@@ -1,15 +1,28 @@
+---
+type: Runbook
+title: "Integration Layer Typical-Scenario Manual E2E"
+description: "Manual verification procedure for integration layer e2e."
+sources:
+  - id: integration-layer-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/integration-layer-e2e.md"
+    title: "docs/manual-e2e/integration-layer-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/integration-layer-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+---
+
 # Integration Layer Typical-Scenario Manual E2E
 
 Follow [README.md](./README.md) first. This is the Phase 1 completion smoke for
 personal access tokens and the direct `swmd` client. It uses real local
 PostgreSQL, the split API/worker process model, the browser UI, and a locally
-built client. It does not use a second integration API or a mock HTTP server.
+built client. It does not use a second integration API or a mock HTTP server.[^documentation-snapshot][^integration-layer-e2e]
 
 ## 1. Prepare the local system and fixture data
 
 Run from the repository root. Keep all evidence in the temporary run directory;
 issued token values stay only in shell variables and must not be written to JSON
-artifacts or screenshots.
+artifacts or screenshots.[^documentation-snapshot]
 
 ```bash
 set -euo pipefail
@@ -65,13 +78,13 @@ pm2 stop worker
 
 The page is self-service, not an administrator surface. Dismiss, navigation, or
 reload must remove an issued secret from the page. Do not place either token in
-screenshots, shell history, or retained JSON.
+screenshots, shell history, or retained JSON.[^documentation-snapshot]
 
 ## 3. Configure the built client and verify the read allowlist
 
 Persist configuration only through the exact stdin contract. `auth status` must
 redact the token; `swmd auth configure --token` must be rejected because no
-secret-bearing flag exists.
+secret-bearing flag exists.[^documentation-snapshot]
 
 ```bash
 printf '%s\n' "$READ_TOKEN" | "$E2E_ROOT/swmd" --config "$SWMD_CONFIG" auth configure \
@@ -102,7 +115,7 @@ return `403 insufficient_permission`; none may publish work.
 
 Replace the temporary config with the read-write one-time token. Submit the
 three approved triggers with offset-preserving timestamp ranges and record only
-the returned IDs.
+the returned IDs.[^documentation-snapshot]
 
 ```bash
 rm -f "$SWMD_CONFIG"
@@ -176,4 +189,8 @@ pm2 status
 ```
 
 Record scenario names, IDs, statuses, response codes, screenshot paths, and
-cleanup result in the handoff. Never record a complete token or other secret.
+cleanup result in the handoff. Never record a complete token or other secret.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^integration-layer-e2e]: docs/manual-e2e/integration-layer-e2e.md.

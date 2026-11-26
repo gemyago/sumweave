@@ -1,3 +1,7 @@
+> Template-derived reference. Apply only when relevant to the assigned work.
+> Current [repository rules](../AGENTS.md), module instructions, and
+> [documentation conventions](../docs/development/documentation.md) take precedence.
+
 # Instruction to compress implementation summaries
 
 Your job is to produce a single compressed `implementation-summary.md` from per-task summary files, then remove the originals.
