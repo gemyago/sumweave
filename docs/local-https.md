@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Local HTTPS"
+description: "Optional backend and Vite TLS setup and return to standard HTTP."
+status: stable
+sources:
+  - resource: "repository docs/local-https.md maintained procedures and conventions"
+---
+
 # Local HTTPS
 
 Use this optional workflow when the backend and Vite development server must both

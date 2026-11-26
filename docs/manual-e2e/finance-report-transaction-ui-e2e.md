@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Report Finance Transaction Through UI Manual E2E"
+description: "Manual verification procedure for finance report transaction ui e2e."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-report-transaction-ui-e2e.md"
+---
+
 # Report Finance Transaction Through UI Manual E2E
 
 Follow the preparation steps in [README.md](./README.md) first. This guide uses the browser UI; use the first local user from repo-root `.local-users`.

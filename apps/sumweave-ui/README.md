@@ -1,6 +1,9 @@
 # Sumweave UI
 
-Web front end for Sumweave: a **Svelte 5** + **TypeScript** single-page app built with **Vite**. You edit sources here; `vite build` produces a static **`dist/`** you can host anywhere.
+Personal finance UI for Sumweave: a **Svelte 5** + **TypeScript** single-page app built with **Vite**. You edit sources here; `vite build` produces a static **`dist/`** you can host anywhere.
+
+Full-stack setup and backend prerequisites: [Local development](../../docs/operations/local-development.md).
+Chat and model-provider settings are [experimental](../../docs/experiments/agent-runtime.md).
 
 ## Prerequisites
 
@@ -16,7 +19,7 @@ npm ci
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`). The app uses **hash** routes (for example `#/chat`, `#/providers`) so it works on a static host without server rewrites.
+Open the URL Vite prints (usually `http://localhost:5173`). The app uses **hash** routes (for example `#/finance`, `#/finance/accounts`) so it works on a static host without server rewrites.
 
 Copy **`.env.example`** to **`.env`** if you need local overrides (only variables prefixed with **`VITE_`** are exposed to the client).
 

@@ -1,3 +1,8 @@
+> Historical/experimental bank POC. These CLI and sandbox notes are not the
+> supported finance workflow or verified current provider guidance. Start with
+> [current linking guides](../../../../docs/manual-e2e/README.md) and
+> [provider sync architecture](../../../../docs/finance-provider-sync-architecture.md).
+
 # Enable Banking PKO proof of concept
 
 Run these commands from `apps/sumweave` with `go run ./cmd/sumweave ...`.

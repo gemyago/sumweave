@@ -1,3 +1,17 @@
+---
+type: Historical design
+title: "External integration PRD"
+description: "Historical source retained; use the linked current reference."
+status: deprecated
+superseded_by: /integrations/direct-access.md
+tags: [history]
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-prd.md"
+---
+
+> Historical source. This pre-implementation requirements narrative is retained as history. Phase 1 is implemented; the replacement documents the current allowlist and contracts.
+> Current reference: [External integration PRD replacement](../integrations/direct-access.md).
+
 # External integration access — product requirements
 
 Status: draft for discussion. The [system design](integration-layer-design.md)

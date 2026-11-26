@@ -1,3 +1,7 @@
+> Historical agent-harness planning. This is not the current product roadmap.
+> [Current finance direction](../docs/ARCHITECTURE.md) supersedes it;
+> phase records below are retained as historical evidence.
+
 # Requirements: Sumweave
 
 **Defined:** 2026-04-21

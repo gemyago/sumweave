@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Finance transaction CSV import E2E"
+description: "Manual verification procedure for finance transaction csv import e2e."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-transaction-csv-import-e2e.md"
+---
+
 # Finance transaction CSV import E2E
 
 This is the deterministic API-only gate for `finance.csv_import`. It verifies

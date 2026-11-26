@@ -1,3 +1,12 @@
+---
+type: Guide
+title: "Go coding guide"
+description: "Repository conventions for Go dependencies, errors, and tests."
+status: stable
+sources:
+  - resource: "repository docs/golang-coding-guide.md maintained procedures and conventions"
+---
+
 ## Use this guide when coding in golang
 
 ## Key considerations

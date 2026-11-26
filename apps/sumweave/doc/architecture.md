@@ -2,7 +2,7 @@
 
 This file describes the current backend foundation in this repository. For product direction and naming, use the repository-level [../../../docs/ARCHITECTURE.md](../../../docs/ARCHITECTURE.md) as the source of truth.
 
-HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`sumweave`** binary built from `cmd/sumweave`. Local commands run with `apps/sumweave` as CWD (`go run ./cmd/sumweave db-migrate --env local`, `go run ./cmd/sumweave start-all --env local`, or `go run ./cmd/sumweave start --env local`). The app wires configuration, logging, OpenTelemetry, health, finance APIs, auth, durable jobs, and the generic **runtime** agent HTTP API. The long-term shape is a deployable backend that can serve or embed **`apps/sumweave-ui`** as one unit.
+HTTP server and CLI entrypoint for Sumweave under `apps/sumweave`: a single **`sumweave`** binary built from `cmd/sumweave`. Local commands run with `apps/sumweave` as CWD (`go run ./cmd/sumweave db-migrate --env local`, `go run ./cmd/sumweave start-all --env local`, or `go run ./cmd/sumweave start --env local`). The app wires configuration, logging, OpenTelemetry, health, finance APIs, auth, durable jobs, and experimental generic agent HTTP routes. Release builds already embed the SPA for same-origin delivery.
 
 `cmd/swmd` is a separate HTTP-only client binary in the same Go module. It does
 not compose server, finance persistence, runtime, appdispatch, or jobs stores;
@@ -46,75 +46,28 @@ commands are excluded while the redacted auth-status command is included.
 - **`start`** — API-only HTTP server mode used by local PM2 and production-like environments.
 - **`sumweave jobs worker`** / **`sumweave jobs enqueue-due`** — dedicated split-environment appdispatch consumer and one-shot scheduler commands. The worker registers ordinary and job-observed finance consumers; the scheduler reads finance-owned bank and FX schedules, publishes due semantic commands, advances schedule state atomically with the publication, and does not run finance work or create job rows. Neither builds HTTP routes or a server.
 - **`internal/wireup/`** — command-specific eager roots and explicit application wiring. HTTP, `start-all`, `db-migrate`, split jobs, user administration, and finance fixtures use direct construction.
-- **`internal/agent_runtime.go`** — constructs **`agent.Runner`** (LLM provider, **`workspacefs`** tools, filesystem storage under configurable data dir, and a required persisted agent profile service for runner-owned profile execution) and exposes **`httpapi`** as **`HTTPHandler`**.
+- **`internal/agent_runtime.go`** — constructs **`agent.Runner`** (LLM provider, **`workspacefs`** tools, database-backed state in the configured app environments, with data dir for execution artifacts, and a required persisted agent profile service for runner-owned profile execution) and exposes **`httpapi`** as **`HTTPHandler`**.
 - **`internal/api/http/`** — HTTP composition: **`server/`** (router, HTTPServer, middleware chain), **`v1routes/`** (generated routes + handlers, e.g. health), **`v1controllers/`**, **`middleware/`**, plus embedded UI staging under **`embeddedui/`** (tracked placeholder + generated ignored `dist/`).
 - **`internal/config/`** — typed app config loader with **`default.yaml`** plus per-env **`local.yaml`**, **`test.yaml`**, **`production.yaml`**; optional **`*-user.yaml`** overrides. It is intentionally visible to app-internal packages, but only wireup should consume it; components receive native inputs or collaborators.
 - **`internal/telemetry/`** — slog, OTEL resource, HTTP middleware, pprof helper.
 - **`internal/infrastructure/`** — outbound HTTP client factory and middleware (correlation, logging).
 
-## Messaging model
+## Shared architecture and operating contracts
 
-- **`internal/appdispatch/`** is a low-level, multi-topic SQL transport. One
-  message table stores topic, immutable unique identity, opaque payload, and
-  metadata; one offsets table is keyed by topic and consumer group. PostgreSQL
-  provides the delivery contract. Semantic packages publish
-  commands and events through it and receive the message ID before consumption.
-  It is the only durable publication, scheduling, and delivery path for
-  background work; the transport does not create a user-facing execution model.
-- **`internal/appevents/`** publishes typed facts and creates typed handlers.
-  A named router can react to several event topics, and separate groups each
-  receive the same event independently. This adapter remains intentionally
-  retained while jobs are simplified.
-- **`internal/jobs/`** adds opt-in product visibility to selected background
-  commands through an observed-consumer lifecycle decorator, durable identity,
-  attempts, sanitized outcomes, and list/detail APIs. A job row is created
-  lazily on first delivery, before domain work, and its ID equals the message
-  ID. Direct appdispatch consumers have no jobs dependency or row.
-- The jobs package has no generic schedule registry or `job_schedules` table in
-  the active path. Bank schedule rows and the daily FX due state are owned by
-  `finance/`; `jobs enqueue-due` is retained as the operational command name.
-- At most one observed consumer may own job visibility for a message. An event
-  reaction that needs separate visible execution publishes a distinct semantic
-  command rather than creating competing job projections.
-- Delivery is **at least once**. A router acknowledges only after successful
-  handling or successful publication to `app.dispatch.dead-letter.v1`.
-  Handlers therefore own idempotency. A duplicate delivery for a terminal
-  observed job is acknowledged without another execution; an already-running
-  projection remains subject to the worker recovery policy.
-- Handler errors and panics receive the configured bounded dispatch retries. Exhausted deliveries
-  preserve the original message identity, topic, payload, and diagnostic
-  metadata in the dead-letter topic. A dead-letter publication failure leaves
-  the source offset unchanged.
-- Dispatch retention is separate from completed-job retention. Normal message
-  rows become eligible after 7 days only after every existing consumer-group
-  offset for the topic has advanced beyond the row; unacknowledged rows stay
-  available for retry and operator attention. Idempotency claims use at least
-  the same retention window. Dead-letter rows are retained for 30 days for
-  diagnostics and then may be removed by offset-safe internal maintenance.
-  Workers do not perform cleanup, and raw transport rows are never exposed by
-  jobs APIs.
-- Transient transport, infrastructure, and unclassified finance-service failures
-  follow the dispatch retry and dead-letter policy. Only a finance-owned typed
-  terminal outcome is mapped by the finance adapter to a handled business failure;
-  observable work persists its sanitized code, summary, and details as failed job
-  state before acknowledging the command. Non-observable work records no job
-  outcome and relies on dispatch diagnostics and logs.
-- Failure to materialize, claim, or persist the terminal observed-job state
-  leaves the source message unacknowledged. Only claims whose durable
-  `started_at` is at least the worker `staleRunningAge` old are requeued or
-  terminally failed. Recovery conditionally retains that claim's owner and
-  timestamp, and one worker-level attempt policy applies; handlers and rows do
-  not override it.
-- A known future observed-job ID may return `404` until first delivery. Only a
-  client that recently received that ID may treat the response as pending;
-  unknown or deep-linked IDs remain errors.
-- Publishers and routers never create tables implicitly. **`db-migrate`**
-  creates the topic-aware schema. Existing early-alpha local databases using
-  the old single-topic layout must be recreated or reseeded first.
-- Router construction does not start consumption. The split jobs command or
-  `start-all` explicitly runs the worker router; API-only `start` only publishes
-  dispatch messages. HTTP and jobs roots stop messaging before closing their shared
-  SQL database, while the migration root constructs no runtime messaging.
+Use the maintained repository references for cross-module behavior:
+
+- [Product architecture](../../../docs/ARCHITECTURE.md) owns boundaries and scope.
+- [Background processing](../../../docs/architecture/background-processing.md)
+  owns appdispatch, typed events, job visibility, schedules, attempts, stale
+  claims, retention policy, lazy job `404`, and shutdown ordering.
+- [Persistence](../../../docs/architecture/persistence.md) owns DSNs, roles,
+  explicit migrations, fixed prefixes, secrets, and volume boundaries.
+- [Direct access](../../../docs/integrations/direct-access.md) owns personal
+  tokens, route policies, requester scoping, idempotency, and `swmd` contracts.
+- [Local development](../../../docs/operations/local-development.md) owns
+  bootstrap, PM2, process commands, logs, and startup troubleshooting.
+- [Release/deployment](../../../docs/operations/release-deployment.md) links
+  host-build and chart runbooks.
 
 ## Configuration and env
 
@@ -139,25 +92,7 @@ commands are excluded while the redacted auth-status command is included.
 - **Runtime agent API:** authoritative OpenAPI for the agent HTTP surface lives under **`runtime/`** (e.g. **`runtime/internal/agentapi/openapi.yaml`**). This process **strips** the prefix and forwards **`/api/v1/runtime/*`** to the runtime **`httpapi`** handler (see **`internal/api/http/register.go`** **`SetupV1Routes`**). Standard run endpoints are profile-based (`profileName`), agent profiles carry mode-specific **`executionSettings`** (`regular` by default or `acp-stdio` for ACP subprocess execution), regular profile execution stays runner-owned, and the public runtime surface no longer exposes `/opencode-*` endpoints. The **`apps/sumweave-ui`** client generates TypeScript types from that runtime spec.
 - **Browser SPA delivery:** backend builds can embed **`apps/sumweave-ui`** output into the same binary via Go embed. The same-origin deployment shape serves the SPA from `/` and backend routes under `/api/*`; the root UI handler serves real files first, falls back to **`index.html`** for SPA routes, and keeps `/api/*` plus `/enable-banking/*` misses as backend 404s instead of masking them with the SPA shell.
 
-## Credential and direct-client boundary
-
-- App auth accepts browser-session JWTs and `swat_` personal access tokens as
-  distinct credential kinds with no validator fallback. Token secrets are
-  issued only on create or rotate and are stored as SHA-256 digests.
-- Each protected app route has an explicit policy. Tokens can use only the
-  documented current-user, finance read, jobs read, and three finance-trigger
-  operations; runtime and token lifecycle management are browser-session only.
-- The three token-writable triggers derive the `integration` requester source
-  and a credential-scoped internal idempotency key. They publish through
-  appdispatch, return `202`, and may return a known job ID that is still `404`
-  before the worker first delivers it.
-- `swmd auth configure --base-url <url> --token-stdin` is the persisted setup
-  command. Its file is private (`0700` parent, atomic `0600` file); resource
-  commands emit one JSON result on stdout and diagnostics on stderr.
-- `swmd skill` generates offline agent instructions from command metadata. It
-  never resolves credentials or calls the API.
-
-## Decisions (why not X)
+## Composition choices
 
 - **Explicit composition:** the HTTP root builds runtime before handing its `net/http.Handler` to app route composition, and constructs jobs and finance before routes are exposed. `start` remains API-only; every command root is direct and command-appropriate.
 - **`net/http` + `ServeMux` instead of Chi/Echo:** standard library, route patterns with method prefix; middleware wrapped per route in **`HTTPRouter`**.
@@ -165,8 +100,10 @@ commands are excluded while the redacted auth-status command is included.
 
 ## Technical notes (one-liners)
 
-- **Local persistence:** app-root launches use **`data`** only for filesystem-backed agent state. Auth, finance, multi-topic durable transport, jobs, and agent runtime persistence use Compose PostgreSQL `sumweave_local` through the runtime role, with the fixed `sumweave_`, `sumweave_runtime_`, and `finance_` table prefixes.
+- **Local artifacts:** `data` holds experimental execution files, not durable auth, finance, job, or runtime state; those use configured PostgreSQL persistence.
 - **LLM HTTP client timeout** in **`internal/agent_runtime.go`** should stay consistent with **`httpServer.writeTimeout`** for streaming runs.
-- **Health** and **auth** routes use the generated v1 stack (**`RegisterHealthRoutes`**, **`RegisterAuthRoutes`**); **`GET /api/v1/auth/me`** is wrapped with **`AuthMiddleware`** in controller. **Agent** traffic is a separate subtree under **`/api/v1/runtime/`**.
+- **Health** and **auth** routes use the generated v1 stack (**`RegisterHealthRoutes`**, **`RegisterAuthRoutes`**); **`GET /api/v1/auth/me`** uses the token-read policy in controller. **Agent** traffic is a separate subtree under **`/api/v1/runtime/`**.
 
-For the browser client stack and env (**`VITE_*`**), see **`apps/sumweave-ui/doc/architecture.md`**.
+For the browser client stack and env (`VITE_*`), see the
+[UI architecture](../../sumweave-ui/doc/architecture.md). Experimental runtime
+contracts remain in [runtime instructions](../../../runtime/AGENTS.md).

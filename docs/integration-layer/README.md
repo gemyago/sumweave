@@ -1,9 +1,8 @@
 # External integration access
 
-- [Product requirements](integration-layer-prd.md)
-- [System design](integration-layer-design.md)
+Phase 1 is implemented. Use [Direct access](../integrations/direct-access.md)
+for current personal access-token, route allowlist, idempotency, and `swmd` contracts.
 
-The product requirements define the initial supported integration experience.
-The system design maps personal access tokens and the direct client onto the
-existing Sumweave API, UI, finance, authentication, appdispatch, and jobs
-foundations.
+The [PRD](integration-layer-prd.md) and [draft design](integration-layer-design.md)
+are retained historical sources. They do not supersede the delivered API or
+formal OpenSpec scenarios.

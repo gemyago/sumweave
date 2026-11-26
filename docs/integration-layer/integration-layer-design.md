@@ -1,3 +1,17 @@
+---
+type: Historical design
+title: "External integration draft design"
+description: "Historical source retained; use the linked current reference."
+status: deprecated
+superseded_by: /integrations/direct-access.md
+tags: [history]
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-design.md"
+---
+
+> Historical source. This pre-implementation design is historical. Some package and middleware shapes and indexes differ from the delivered implementation. Use the current reference for actual contracts.
+> Current reference: [External integration draft design replacement](../integrations/direct-access.md).
+
 # External integration access — system design
 
 Status: draft for discussion. The [product requirements](integration-layer-prd.md)

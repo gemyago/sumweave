@@ -1,14 +1,16 @@
 # transfer-matching Specification
 
 ## Purpose
-TBD - created by archiving change add-phase0-transfer-matching. Update Purpose after archive.
+Describe the four fixed candidate rules, complete range evidence, mutual
+uniqueness, atomic pair state, manual correction, and independent durable execution.
+
 ## Requirements
 ### Requirement: Shared Automatic Transfer Eligibility
 Automatic and explicit transfer matching SHALL use one finance-owned range service and SHALL consider only loaded tenant transactions that satisfy the Phase 0 eligibility rule.
 
 #### Scenario: Eligible transaction is loaded
 - **WHEN** a visible booked transaction belongs to a visible account in the selected tenant, has kind `regular`, `expense`, `income`, or `transfer`, has a nonzero amount, has neither transfer group nor matching timestamp, and is not excluded from automatic matching
-- **THEN** the matching load MUST include its ID, account ID, currency, signed minor amount, effective timestamp, current ledger description, optional unambiguous bank-connection and connector provenance, provider-original amount/currency, and optional scoped transaction snapshot JSON regardless of manual, CSV, or provider source and regardless of category.
+- **THEN** the matching load MUST include its ID, account ID, currency, signed minor amount, effective timestamp, current ledger description, optional unambiguous bank-connection, provider, and connector provenance, the optional tracked-account IBAN from the scoped connection/account mapping, provider-original amount/currency, and optional scoped transaction snapshot JSON regardless of manual, CSV, or provider source and regardless of category.
 
 #### Scenario: Ineligible transaction is excluded
 - **WHEN** a transaction or account is missing, hidden, deleted, or outside the tenant, or the transaction is pending, zero amount, excluded, already paired, a refund, reconciliation, opening balance, or system kind
@@ -25,10 +27,10 @@ Automatic and explicit transfer matching SHALL use one finance-owned range servi
 - **AND** the row MUST remain eligible for the same-currency rule but MUST NOT form an FX candidate.
 
 ### Requirement: Fixed Mutual-Uniqueness Matching Rule
-The transfer matcher SHALL combine candidates from the equal-and-opposite same-currency rule, the scoped description-derived FX rule, and the scoped Monobank snapshot FX rule, and SHALL accept a pair only when different-account rows lie no more than 72 elapsed hours apart and are each other's only eligible counterpart across the combined candidate set.
+The transfer matcher SHALL combine candidates from the equal-and-opposite same-currency rule, the scoped description-derived FX rule, the scoped Monobank snapshot FX rule, and the scoped PKO Enable Banking snapshot exchange rule, and SHALL accept a pair only when different-account rows lie no more than 72 elapsed hours apart and are each other's only eligible counterpart across the combined candidate set.
 
 #### Scenario: Unique equal-and-opposite pair qualifies
-- **WHEN** two eligible same-tenant transactions are on different visible accounts, use the same currency, have exact opposite nonzero minor amounts, are no more than 72 elapsed hours apart inclusive, and neither has another eligible counterpart under either rule
+- **WHEN** two eligible same-tenant transactions are on different visible accounts, use the same currency, have exact opposite nonzero minor amounts, are no more than 72 elapsed hours apart inclusive, and neither has another eligible counterpart under any of the four rules
 - **THEN** the matcher MUST accept that pair regardless of descriptions, categories, sources, provider data, or which signed leg appears first.
 
 #### Scenario: Same-currency rule rejects a candidate
@@ -36,7 +38,7 @@ The transfer matcher SHALL combine candidates from the equal-and-opposite same-c
 - **THEN** they MUST NOT be same-currency counterparts.
 
 #### Scenario: Ambiguity is mutual across rules
-- **WHEN** either proposed leg has more than one eligible counterpart across the same-currency and FX rules in its full 72-hour window
+- **WHEN** either proposed leg has more than one eligible counterpart across all four rules in its full 72-hour window
 - **THEN** the matcher MUST leave the proposal unchanged rather than selecting by rule, input order, first occurrence, or proximity
 - **AND** one-to-many and many-to-one cases MUST be rejected symmetrically.
 
@@ -225,8 +227,9 @@ The transfer matcher SHALL recognize a cross-currency candidate only from matchi
 
 ### Requirement: Scoped Monobank Snapshot FX Candidate Rule
 The transfer matcher SHALL use stored Monobank transaction snapshots only as a
-third fixed candidate rule and SHALL merge its candidates with same-currency and
-description-derived FX candidates before mutual uniqueness. It SHALL use no rate,
+third fixed candidate rule and SHALL merge its candidates with same-currency,
+description-derived FX, and PKO snapshot exchange candidates before mutual
+uniqueness. It SHALL use no rate,
 tolerance, description, name, receipt, provider transaction ID, or external
 lookup for this rule.
 
@@ -250,7 +253,7 @@ lookup for this rule.
   provider-original amount, and current ledger amount/currency equal to the
   provider-original values
 - **THEN** the snapshot rule MUST produce no evidence and MUST NOT disable the
-  other two candidate rules.
+  other candidate rules.
 
 #### Scenario: Existing storage is reused
 - **WHEN** this rule loads matching evidence
@@ -258,3 +261,48 @@ lookup for this rule.
   with one row per transaction
 - **AND** it MUST add no schema, migration, backfill, resync, API, UI, job,
   scheduling, reporting, provider-call, or separate evidence-persistence change.
+
+### Requirement: Scoped PKO Enable Banking Snapshot Exchange Candidate Rule
+The transfer matcher SHALL use stored PKO Enable Banking transaction snapshots as the fourth fixed candidate rule, with evidence scoped to the same unambiguous bank connection and tracked-account route. It SHALL merge and deduplicate candidates from all four rules before checking mutual uniqueness, without inferring rates or amount correspondence for the PKO rule.
+
+#### Scenario: Scoped provider and tracked-account evidence is projected
+- **WHEN** an eligible ledger transaction's provider evidence is loaded
+- **THEN** the load MUST project connection ID, provider ID, and connector ID only when provider transaction mappings resolve to exactly one distinct tenant-owned connection
+- **AND** it MUST project the tracked-account IBAN only when exactly one tenant-owned provider-account mapping exists for that connection and finance account
+- **AND** it MUST project snapshot JSON only when exactly one tenant-owned transaction-subject, transaction-kind snapshot exists for that transaction and connection
+- **AND** grouped projections MUST retain one row per eligible ledger transaction without creating duplicate candidates or changing eligibility for the same-currency rule.
+
+#### Scenario: PKO debit evidence identifies the internal route
+- **WHEN** a row has provider `pko`, connector `enable-banking`, a nonempty tracked-account IBAN, and one applicable snapshot
+- **THEN** usable debit evidence MUST require `credit_debit_indicator = DBIT`, exact `remittance_information = ["EXCHANGE", "TRANSFER"]`, `debtor_account.iban` equal to its tracked-account IBAN, and a nonempty `creditor_account.iban`
+- **AND** the snapshot's `transaction_amount` currency and direction-signed minor amount MUST agree exactly with both current ledger and provider-original amount/currency
+- **AND** the debit amount MUST be nonzero and negative after applying DBIT direction, and its route MUST be `debtor_account.iban -> creditor_account.iban`.
+
+#### Scenario: PKO credit evidence identifies the internal route
+- **WHEN** a row has provider `pko`, connector `enable-banking`, a nonempty tracked-account IBAN, and one applicable snapshot
+- **THEN** usable credit evidence MUST require `credit_debit_indicator = CRDT`, exact `remittance_information = ["EXCHANGE", "TRANSFER-IN"]`, and a nonempty `debtor_account.iban`
+- **AND** the snapshot's `transaction_amount` currency and positive nonzero minor amount MUST agree exactly with both current ledger and provider-original amount/currency
+- **AND** its route MUST be `debtor_account.iban -> tracked-account IBAN`, without requiring a snapshot creditor IBAN.
+
+#### Scenario: Unique scoped internal exchange qualifies
+- **WHEN** usable PKO debit and credit evidence share the same unambiguous connection, their source and destination IBAN routes are exactly equal, their ledger accounts and currencies differ, and their effective timestamps are within 72 elapsed hours inclusive
+- **THEN** the matcher MUST add the opposite-sign rows as PKO candidates
+- **AND** it MUST accept the pair only when each leg has exactly one counterpart across the deduplicated union of all four rules
+- **AND** it MUST NOT require equal amounts, a derived exchange rate, or a rate/amount tolerance, and MUST NOT use names, balances, provider transaction IDs, unrelated description text, or external lookups as evidence.
+
+#### Scenario: PKO evidence fails closed
+- **WHEN** provider/connector identity, tenant or connection provenance, the tracked-account mapping/IBAN, snapshot count/JSON, amount/currency agreement, direction, or exact remittance markers are missing, ambiguous, malformed, unsupported, or edited
+- **THEN** the PKO extractor MUST produce no usable evidence without failing the whole matching attempt
+- **AND** different connections, unequal routes, same-account rows, same currencies, same directions, or a gap beyond 72 hours MUST NOT form a PKO candidate
+- **AND** rejection by the PKO rule MUST NOT disable the other candidate rules for an otherwise eligible transaction.
+
+#### Scenario: PKO and other rules share ambiguity and deduplication
+- **WHEN** either proposed leg has a second distinct counterpart under the PKO rule or any other candidate rule in its complete matching window
+- **THEN** the matcher MUST leave the proposal unchanged, including when the competing row lies outside the requested processing range
+- **AND** a counterpart found by more than one rule MUST count once by transaction ID, with no rule priority or nearest-candidate tie-breaker.
+
+#### Scenario: PKO evidence reuses existing storage and execution
+- **WHEN** the PKO rule loads evidence and creates a pair
+- **THEN** it MUST reuse existing provider transaction matches, bank connections, connection/provider-account mappings, and current transaction snapshots
+- **AND** it MUST add no schema, migration, backfill, resync, API, UI, job, schedule, provider-call, reporting, or separate evidence-persistence requirement
+- **AND** the existing complete-load, pair-scope, atomic-write, accepted concurrency-risk, manual-correction, and independent job/event contracts MUST continue to apply.

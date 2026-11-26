@@ -24,14 +24,11 @@ credentials, and externally correct callback URLs. PostgreSQL is the sole
 supported product database.
 
 For a new PostgreSQL application database, the pre-install migration Job runs
-`db-migrate` and creates the topic-aware app dispatch tables. Before upgrading an
-existing database from the pre-PR #5 single-topic dispatch schema, stop all
-workloads, take a verified backup, and run the one-time
-[PostgreSQL dispatch upgrade](../docs/appdispatch-postgres-topic-upgrade.sql).
-Run it before this chart's pre-upgrade migration hook; it has explicit legacy
-schema and consumer-group preconditions, requires an operator-confirmed
-historical IANA timezone for legacy timestamps, and keeps its DDL in one
-transaction.
+`db-migrate` and creates the topic-aware appdispatch tables. The earlier alpha
+single-topic schema is superseded; this repository supplies no in-place upgrade
+script. Provision a fresh PostgreSQL environment through the normal migration
+flow when a clean cutover is required. Local volume recreation and the current
+state boundary are documented in [Persistence and migration](../docs/architecture/persistence.md).
 
 Set `initialUser.enabled` and reference a pre-existing credential Secret through
 `initialUser.secret`. The Job runs after migrations with the runtime DML database

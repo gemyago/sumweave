@@ -1,3 +1,17 @@
+---
+type: Historical design
+title: "Bank connection boundary analysis"
+description: "Historical source retained; use the linked current reference."
+status: deprecated
+superseded_by: /finance-provider-sync-architecture.md
+tags: [history]
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/untangling-bank-connection-service-v2-boundary.md"
+---
+
+> Historical source. This is historical refactoring analysis, not an active cleanup plan or a product requirement. Its observations and proposed directions should be rechecked before use.
+> Current reference: [Bank connection boundary analysis replacement](finance-provider-sync-architecture.md).
+
 # Untangling BankConnectionService V2 Boundary
 
 This note captures what the current `finance.BankConnectionService` actually does through provider sync v2, and which older finance-layer pieces it still depends on.

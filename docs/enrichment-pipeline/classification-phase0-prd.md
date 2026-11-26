@@ -1,3 +1,17 @@
+---
+type: Historical design
+title: "Classification Phase 0 PRD"
+description: "Historical source retained; use the linked current reference."
+status: deprecated
+superseded_by: /product/classification.md
+tags: [history]
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/classification-phase0-prd.md"
+---
+
+> Historical source. This requirements narrative is retained for history. Current behavior, tags, contracts, and limits are maintained in the replacement; granular acceptance scenarios remain in OpenSpec.
+> Current reference: [Classification Phase 0 PRD replacement](../product/classification.md).
+
 # Classification Phase 0
 
 ## Goal

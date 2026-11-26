@@ -1,16 +1,13 @@
-# Implementation Status
+---
+type: Redirect
+title: "Implementation snapshot (retired)"
+description: "Current capabilities are maintained by topic."
+status: deprecated
+superseded_by: /product/overview.md
+---
 
-Sumweave contains an implemented finance foundation: tenancy, catalog,
-ledger, transfers, imports, bank connections, provider snapshots, reporting,
-balances, FX, and finance durable jobs. The Go app supplies auth, migrations,
-dispatch, jobs, admin diagnostics, and HTTP delivery. The UI supplies finance,
-admin, Chat, and provider configuration routes.
+# Implementation snapshot (retired)
 
-Phase 1 external integration access is implemented through self-service
-personal access tokens, the explicit existing-route allowlist, caller-scoped
-observed jobs, retry-safe finance triggers, and the separate `swmd` HTTP client.
-See [External integrations](integration-layer/README.md) and the
-[integration-layer E2E guide](manual-e2e/integration-layer-e2e.md).
-
-Generic agent infrastructure remains intentionally, while the product surface
-is limited to finance and its supporting application services.
+Use [Finance capabilities](product/overview.md), [Direct access](integrations/direct-access.md),
+and [Architecture](ARCHITECTURE.md). Generic agent infrastructure, Chat, and
+model-provider configuration are [experimental](experiments/agent-runtime.md).

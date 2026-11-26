@@ -1,3 +1,12 @@
+---
+type: Glossary
+title: "Domain terminology"
+description: "Canonical finance, credential, command, event, and job vocabulary."
+status: stable
+sources:
+  - resource: "repository docs/domain-terminology.md maintained procedures and conventions"
+---
+
 # Domain Terminology
 
 - **Finance tenant**: a financial workspace with members and invitations.
@@ -49,4 +58,5 @@
 - **Transport failure**: a delivery, infrastructure, panic, or unclassified
   service failure retried and eventually dead-lettered by appdispatch rather than
   finalized as a business job outcome.
-- **Agent runtime**: generic sessions, profiles, providers, and workspace tooling.
+- **Agent runtime**: experimental generic sessions, profiles, model providers,
+  execution, and workspace tooling; not a committed finance capability.

@@ -107,6 +107,9 @@ Run that file with
 
 ## Running agent integration tests
 
+This retained agent harness is experimental and is not the finance product QA
+path. See [experimental scope](../docs/experiments/agent-runtime.md).
+
 Agent integration tests require a local providers config file with real LLM credentials. This file is gitignored and must be created manually.
 
 ### Manual Setup

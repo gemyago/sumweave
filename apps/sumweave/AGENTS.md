@@ -2,7 +2,7 @@
 
 ## Status
 
-**Finance application.** This process exposes finance APIs, auth, durable jobs, generic agent HTTP routes, and operational infrastructure. Product direction is governed by [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
+**Finance application.** This process exposes finance APIs, auth, durable jobs, and operational infrastructure. Generic agent HTTP routes and model-provider configuration are experimental extensions, not finance product commitments. Product direction is governed by [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
 ## Template Origin And Boundary
 
@@ -49,22 +49,14 @@ Key rules:
 
 ## Run
 
-Invoke repo-scoped PM2 commands from the repo root:
+Follow [local development](../../docs/operations/local-development.md) for
+installation, PostgreSQL bootstrap, PM2, logs, HTTPS, and startup diagnostics.
+Run PM2 at the repository root; backend CLI paths are relative to this module.
+Standard startup is root `make postgres-bootstrap`, then `pm2 start ecosystem.config.js`.
+The API and worker are `api` and `worker` in namespace `backend`; UI is `ui`.
 
-`pm2 start ecosystem.config.js` creates the API, worker, and UI development processes.
-
-Before starting or restarting backend processes that rely on persisted tables, run `make postgres-bootstrap` from the repository root.
-
-The standard local workflow runs `make postgres-bootstrap`, then `pm2 start ecosystem.config.js` from the repository root. Use direct `go run ./cmd/sumweave start-all --env local` only to diagnose a local startup problem. Local filesystem paths are app-root-relative; arbitrary working directories are unsupported.
-
-For the optional HTTPS backend and Vite development workflow, follow [../../docs/local-https.md](../../docs/local-https.md). It uses ignored local certificate files and `APP_HTTPSERVER_TLS_CERTFILE` / `APP_HTTPSERVER_TLS_KEYFILE`.
-
-Release build workflow is `make -C build dist` from the repository root. It builds the SPA once, embeds it before CGO-disabled Linux amd64/arm64 Go cross-compilation, and stages platform-agent skills. Runtime UI serving is embedded-only: if embedded `dist/index.html` is absent, the backend stays API-only.
-
-PM2 starts the API-only `start` command on port 4501 and the separate `jobs worker` command. Both processes use the `backend` namespace as `api` and `worker`; `ui` remains in PM2's default namespace.
-PM2 remains repo-scoped, but `ecosystem.config.js` sets both backend process working directories to `apps/sumweave`.
-
-PM2 accepts a namespace as the positional lifecycle/log target: use `pm2 start|stop|restart|delete backend` or `pm2 logs backend` for the existing backend group. If the PM2 command shape changed or you need to guarantee the current ecosystem config is applied, recreate it with `pm2 delete backend && pm2 start ecosystem.config.js` from the repo root; PM2 can otherwise keep an older command definition.
+Follow [release and deployment](../../docs/operations/release-deployment.md) for
+the host build, embedded UI, and container/Helm runbooks.
 
 Durable jobs workflow:
 - `make postgres-bootstrap` is the standard schema setup path for local/dev and PM2-backed environments.

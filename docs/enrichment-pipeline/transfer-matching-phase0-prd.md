@@ -1,3 +1,17 @@
+---
+type: Historical design
+title: "Transfer matching Phase 0 PRD"
+description: "Historical source retained; use the linked current reference."
+status: deprecated
+superseded_by: /product/transfer-matching.md
+tags: [history]
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/transfer-matching-phase0-prd.md"
+---
+
+> Historical source. This approved narrative records the original requirements and follow-ons. Use the replacement for current implementation and OpenSpec for granular acceptance scenarios. Historical completion-gate statements below are not a new verification record.
+> Current reference: [Transfer matching Phase 0 PRD replacement](../product/transfer-matching.md).
+
 # Transfer Matching Phase 0
 
 Status: implemented. The same-currency Phase 0 matcher was delivered on

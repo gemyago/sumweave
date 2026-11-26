@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Finance UI Shell Smoke Manual E2E"
+description: "Manual verification procedure for finance ui shell smoke e2e."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-ui-shell-smoke-e2e.md"
+---
+
 # Finance UI Shell Smoke Manual E2E
 
 Follow preparation steps in [README.md](./README.md) first.

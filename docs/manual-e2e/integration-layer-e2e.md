@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Integration Layer Typical-Scenario Manual E2E"
+description: "Manual verification procedure for integration layer e2e."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/integration-layer-e2e.md"
+---
+
 # Integration Layer Typical-Scenario Manual E2E
 
 Follow [README.md](./README.md) first. This is the Phase 1 completion smoke for

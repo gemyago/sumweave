@@ -1,8 +1,13 @@
+> Historical/experimental bank POC. These CLI and sandbox notes are not the
+> supported finance workflow or verified current provider guidance. Start with
+> [current linking guides](../../../../docs/manual-e2e/README.md) and
+> [provider sync architecture](../../../../docs/finance-provider-sync-architecture.md).
+
 # Enable Banking / PKO sandbox operator notes
 
 Use this as the short operator runbook for sandbox work. It complements
 [`enable-banking-pko.md`](./enable-banking-pko.md) and
-[`docs/manual-e2e.md`](../../../../docs/manual-e2e.md).
+[`docs/manual-e2e.md`](../../../../docs/manual-e2e/README.md).
 
 ## Setup
 

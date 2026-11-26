@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Finance scheduled bank-sync lifecycle E2E"
+description: "Manual verification procedure for finance scheduled sync lifecycle e2e."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-scheduled-sync-lifecycle-e2e.md"
+---
+
 # Finance scheduled bank-sync lifecycle E2E
 
 This is the deterministic API-only gate for a scheduled

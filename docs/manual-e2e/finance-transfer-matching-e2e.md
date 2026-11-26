@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Finance transfer matching E2E"
+description: "Manual verification procedure for finance transfer matching e2e."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-transfer-matching-e2e.md"
+---
+
 # Finance transfer matching E2E
 
 This is the deterministic verification runbook for Phase 0 transfer matching.

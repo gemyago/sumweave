@@ -1,3 +1,12 @@
+---
+type: Guide
+title: "Testing best practices"
+description: "Behavior-focused testing with small fixtures and minimal scope."
+status: stable
+sources:
+  - resource: "repository docs/testing-best-practices.md maintained procedures and conventions"
+---
+
 # Testing Best Practices
 
 ## Core Principles
@@ -18,7 +27,8 @@
 - **Test behavior, not implementation** - Focus on what the code does, not how it does it
 
 ### Keep It Simple
-- **Pragmatic mocks** - Use simple mock implementations, avoid over-engineering
+- **Dependency mocks** - Use generated Mockery mocks; hand-written stubs, fakes,
+  and spies require user approval. Keep mock setup focused on business behavior.
 - **Minimal test setup** - Only setup what's necessary for the specific test case
 - **Clear test names** - Use descriptive names that explain what behavior is being tested
 

@@ -1,3 +1,12 @@
+---
+type: Architecture
+title: "Finance provider sync"
+description: "Link identity, bounded sync windows, conservative merge, and atomic progress."
+status: stable
+sources:
+  - resource: "repository docs/finance-provider-sync-architecture.md maintained procedures and conventions"
+---
+
 # Finance Provider Sync Architecture
 
 Provider sync imports normalized bank observations into finance records without
@@ -69,8 +78,11 @@ connection, preserves member-edited account and transaction fields under the
 merge rules, writes balances, matches, transactions, and typed provider
 snapshots, and records created-account statistics accurately across chunks.
 
-On success, all finance writes and the successful sync-state journal row commit
-in the same transaction. The row records the requested window, attempt and
+On success, all finance writes, the successful sync-state journal row, and the
+`finance.bank-sync-window-completed.v1` event commit in the same transaction.
+Classification and transfer-matching subscribers receive that window independently
+and create no automatic job projection. Event-publication failure rolls back
+that window alongside a ledger or journal failure. The row records the requested window, attempt and
 success time, run/job identity, and aggregate statistics. A journal-write or
 finance-write failure rolls back that requested window.
 
@@ -93,3 +105,15 @@ cleanup transaction, together with connection-owned provider data.
 - Preserve member edits under the existing merge rules.
 - Treat journal rows as durable per-window progress and connection fields as
   whole-job operational projections.
+
+## Related contracts
+
+See [classification](product/classification.md), [transfer matching](product/transfer-matching.md),
+and [background processing](architecture/background-processing.md) for downstream
+reactions. Repository evidence outside this bundle:
+
+- [Finance sync scenarios](../openspec/specs/finance-management/spec.md)
+- [Window transaction implementation](../finance/internal/providers/window_sync_store.go)
+- [Completion event adapter](../apps/sumweave/internal/financeapp/bank_sync_window_event.go)
+
+Start a practical verification journey from the [manual guide index](manual-e2e/index.md).

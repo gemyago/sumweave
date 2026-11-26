@@ -1,21 +1,12 @@
-# Enrichment Pipeline
+# Transaction enrichment
 
-This folder contains product requirements and system designs for transaction enrichment.
+Current references:
 
-The enrichment pipeline is intended to cover two major parts:
-1. Transactions classification (categories and maybe tags)
-2. Transfer transactions matching
+- [Classification](../product/classification.md) assigns categories and additive tags.
+- [Transfer matching](../product/transfer-matching.md) links qualifying ledger pairs.
+- [Background processing](../architecture/background-processing.md) defines independent
+  sync-window subscribers and explicit observed jobs.
 
-## Design documents
-
-- [Classification Phase 0 PRD](classification-phase0-prd.md)
-- [Classification Phase 0 system design](classification-phase0-design.md) — draft
-  API contracts, database schema, execution model, and decisions for discussion.
-- [Transfer Matching Phase 0 PRD](transfer-matching-phase0-prd.md) — implemented
-  through automated chunks; automatic pairing rules, sync and explicit-run
-  behavior, and manual correction.
-- [Transfer Matching Phase 0 system design](transfer-matching-phase0-design.md) —
-  implemented design; one bulk load, in-memory matching, atomic pair writes,
-  exact schema change, API, and independent sync-event execution. The isolated
-  [manual E2E guide](../manual-e2e/finance-transfer-matching-e2e.md) records the
-  remaining manual verification gates.
+The [classification PRD](classification-phase0-prd.md) and
+[matching PRD](transfer-matching-phase0-prd.md) are historical narratives.
+Their old design paths redirect to the maintained references above.

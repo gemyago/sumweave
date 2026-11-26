@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Enable Banking Mock ASPSP UI Manual E2E"
+description: "Manual verification procedure for enable banking mock aspsp ui e2e."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md"
+---
+
 # Enable Banking Mock ASPSP UI Manual E2E
 
 Follow preparation steps in [README.md](./README.md) first.

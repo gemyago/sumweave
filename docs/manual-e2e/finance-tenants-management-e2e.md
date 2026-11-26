@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Finance Tenants Management Manual E2E"
+description: "Manual verification procedure for finance tenants management e2e."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-tenants-management-e2e.md"
+---
+
 # Finance Tenants Management Manual E2E
 
 Follow preparation steps in [README.md](./README.md). Get the API token before starting.

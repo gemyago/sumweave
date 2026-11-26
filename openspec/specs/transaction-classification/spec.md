@@ -1,7 +1,12 @@
 # transaction-classification Specification
 
 ## Purpose
-TBD - created by archiving change add-phase0-transaction-classification. Update Purpose after archive.
+Describe tenant-owned ordered rules, safe category and additive-tag assignment,
+and shared explicit/automatic classification. HTTP failures follow the later
+[shared application error contract](../personal-access-tokens/spec.md#requirement-application-api-errors-are-stable-and-safe),
+with the documented category-reference conflict retained as a specialized response.
+The implementation gap for early create/replace rejections is recorded below.
+
 ## Requirements
 ### Requirement: Tenant-Owned Ordered Classification Rules
 The finance module SHALL provide one active ordered classification-rule list per finance tenant and SHALL expose authenticated tenant-member operations to list, create, replace, delete, and move those rules.
@@ -41,12 +46,48 @@ The finance module SHALL provide one active ordered classification-rule list per
 #### Scenario: Invalid rule tags are rejected
 - **WHEN** a rule request contains duplicate or blank tag IDs, explicit null `tagIds`, or tags that are missing, hidden, or owned by another tenant
 - **THEN** the system MUST reject the request without changing the rule or its associations
-- **AND** invalid/duplicate/unassignable values MUST use the standard empty `400` response and missing/cross-tenant tags MUST use the standard empty `404` response.
+- **AND** duplicate or blank tag IDs MUST return `400` with code `invalid_request`
+- **AND** missing, hidden, or cross-tenant tags MUST return `404` with code `not_found`
+- **AND** both responses MUST use the shared safe JSON envelope containing `code`, `message`, and `correlationId`, with correlation context retained in the response header.
 
 #### Scenario: Rule ordering and filtering retain tags
 - **WHEN** a tagged rule is moved or returned through category-filtered listing
 - **THEN** its complete tag set MUST remain attached to the same rule
 - **AND** category filtering MUST NOT change rule position or tag assignments.
+
+#### Scenario: Explicit null rule tags are rejected
+- **WHEN** a create or replacement request supplies `tagIds: null`
+- **THEN** the system MUST reject the request with `400` without changing the rule or its associations
+- **AND** the accepted shared error contract requires the safe `invalid_request` JSON envelope and correlation context.
+
+Implementation gap: the current create/replace wrapper writes an empty `400`
+for explicit null before generated binding. It also writes an empty `400` when
+reading the request body fails for a reason other than the body-size limit.
+These early responses do not yet satisfy the accepted shared envelope contract;
+they do not call the rule service or publish work. Authentication remains in
+front of the wrapper, and normal tenant checks remain in the service. A body-size
+limit failure follows the separate `413` path. This observation does not change
+the required error contract or permit mutation.
+
+### Requirement: Classification HTTP Errors Preserve The Shared Contract
+Classification HTTP operations SHALL use the shared application error envelope and status mappings while preserving tenant isolation and the documented specialized category-reference conflict.
+
+#### Scenario: Classification request is unauthenticated or forbidden
+- **WHEN** classification HTTP authentication fails or a valid credential is not permitted to call the operation
+- **THEN** authentication failure MUST return `401` with code `unauthorized`, and credential-policy denial MUST return `403` with code `insufficient_permission`
+- **AND** the response MUST contain only safe `code`, `message`, and `correlationId` fields and retain correlation context in the response header
+- **AND** the request MUST NOT mutate rules or ledger data or publish classification work.
+
+#### Scenario: Rule management tenant access is denied
+- **WHEN** an authenticated caller attempts rule management in a tenant they have not joined
+- **THEN** the API MUST return `403` with code `tenant_access_denied` in the shared safe JSON envelope
+- **AND** it MUST NOT reveal that tenant's rules, mutate rules or associations, or publish classification work.
+
+#### Scenario: Category removal is blocked by live rules
+- **WHEN** a tenant member tries to remove a category referenced by a live classification rule
+- **THEN** removal MUST return the specialized `409` JSON body containing code `category_referenced_by_classification_rules` and the referencing `ruleIds`
+- **AND** this documented body MUST remain distinct from the common error envelope
+- **AND** the category, rules, existing transaction categories, and tag assignments MUST remain unchanged.
 
 ### Requirement: Deterministic Description Matching
 The classifier SHALL evaluate the loaded ordered rules from first to last and SHALL apply at most the first matching rule to each transaction.
@@ -165,11 +206,12 @@ The backend application SHALL let a tenant member submit a valid classification 
 
 #### Scenario: Explicit range is invalid
 - **WHEN** either range value is not a full RFC 3339 timestamp with an offset or the start is not before the exclusive end
-- **THEN** the API MUST reject the request without publishing a command.
+- **THEN** the API MUST return `400` with code `invalid_request` in the shared safe JSON envelope, without publishing a command or mutating ledger data.
 
 #### Scenario: Explicit tenant access is denied
 - **WHEN** an authenticated caller submits classification for a tenant they have not joined
-- **THEN** the API MUST return the standard empty `401 Unauthorized` finance response
+- **THEN** the API MUST return `403` with code `tenant_access_denied` in the shared safe JSON envelope containing `code`, `message`, and `correlationId`
+- **AND** it MUST retain correlation context in the response header and leave ledger data unchanged
 - **AND** it MUST NOT publish a classification command.
 
 #### Scenario: Explicit command is delivered

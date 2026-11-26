@@ -1,3 +1,12 @@
+---
+type: Runbook
+title: "Local PostgreSQL verification"
+description: "Manual verification procedure for postgres local verification."
+status: stable
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/postgres-local-verification.md"
+---
+
 # Local PostgreSQL verification
 
 PostgreSQL is the mandatory local backend database. The repository Compose

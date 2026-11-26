@@ -1,3 +1,17 @@
+---
+type: Historical design
+title: "Initial finance design"
+description: "Historical source retained; use the linked current reference."
+status: deprecated
+superseded_by: /product/overview.md
+tags: [history]
+sources:
+  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/finances-management/design.md"
+---
+
+> Historical source. This early implementation target contains planned routes, historical FX assumptions, and superseded CSV mapping ideas. It is not a current feature inventory.
+> Current reference: [Initial finance design replacement](../product/overview.md).
+
 # Finance Management
 
 The finance management slice extends Sumweave with personal finance
