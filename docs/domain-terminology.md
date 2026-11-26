@@ -2,14 +2,18 @@
 type: Glossary
 title: "Domain terminology"
 description: "Canonical finance, credential, command, event, and job vocabulary."
-status: stable
 sources:
-  - resource: "repository docs/domain-terminology.md maintained procedures and conventions"
+  - id: repository-policy
+    resource: "repository docs/domain-terminology.md maintained procedures and conventions"
+    title: "repository docs/domain-terminology.md maintained procedures and conventions"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/domain-terminology.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Domain Terminology
 
-- **Finance tenant**: a financial workspace with members and invitations.
+- **Finance tenant**: a financial workspace with members and invitations.[^documentation-snapshot]
 - **Account**: a financial account tracked within one tenant.
 - **Ledger transaction**: a recorded financial movement, including transfers.
 - **Bank connection**: an authenticated external provider connection.
@@ -18,7 +22,7 @@ sources:
 - **Provider source data**: the operator-facing label for current provider
   snapshots.
 - **Personal access token**: a long-lived, self-service credential owned by one
-  auth user. Its complete value is issued once; PostgreSQL stores only a digest.
+  auth user. Its complete value is issued once; PostgreSQL stores only a digest.[^repository-policy]
 - **Token allowlist**: the explicit existing API operations available to a
   personal access token. Protected routes are session-only unless deliberately
   included; a token still uses its owner's current tenant membership.
@@ -60,3 +64,7 @@ sources:
   finalized as a business job outcome.
 - **Agent runtime**: experimental generic sessions, profiles, model providers,
   execution, and workspace tooling; not a committed finance capability.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^repository-policy]: repository docs/domain-terminology.md maintained procedures and conventions.

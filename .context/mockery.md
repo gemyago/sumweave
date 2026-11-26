@@ -1,3 +1,7 @@
+> Template-derived reference. Apply only when relevant to the assigned work.
+> Current [repository rules](../AGENTS.md), module instructions, and
+> [documentation conventions](../docs/development/documentation.md) take precedence.
+
 # Rules here specify how to use mockery
 
 * Mockery v3 is used, see https://vektra.github.io/mockery/latest/ for more details

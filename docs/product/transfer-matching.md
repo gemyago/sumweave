@@ -2,12 +2,22 @@
 type: Reference
 title: "Transfer matching"
 description: "Four deterministic pair rules, mutual uniqueness, persistence, and manual correction."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/transfer-matching-phase0-design.md"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/service_transfer_matching.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/persistence/transfer_pair_store.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/internal/pko/transfer_matching_evidence.go"
+  - id: transfer-matching-phase0-design
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/transfer-matching-phase0-design.md"
+    title: "docs/enrichment-pipeline/transfer-matching-phase0-design.md"
+  - id: service-transfer-matching-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/service_transfer_matching.go"
+    title: "finance/service_transfer_matching.go"
+  - id: transfer-pair-store-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/persistence/transfer_pair_store.go"
+    title: "finance/persistence/transfer_pair_store.go"
+  - id: transfer-matching-evidence-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/internal/pko/transfer_matching_evidence.go"
+    title: "finance/internal/pko/transfer_matching_evidence.go"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/product/transfer-matching.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Transfer matching
@@ -15,7 +25,7 @@ sources:
 Phase 0 is implemented, including description FX, Monobank snapshot FX, and
 PKO Enable Banking snapshot exchange matching. It recognizes movements between
 tracked accounts; it never initiates money movement or creates missing legs.
-[Architecture](../ARCHITECTURE.md) defines product direction.
+[Architecture](../ARCHITECTURE.md) defines product direction.[^documentation-snapshot][^transfer-matching-phase0-design][^service-transfer-matching-go][^transfer-pair-store-go][^transfer-matching-evidence-go]
 
 Equal amounts and nearby dates are a heuristic, not proof of a transfer. An
 unrelated payment and receipt can form a unique pair, and later arrivals can
@@ -32,7 +42,7 @@ the same service. It automatically pairs booked transactions within 72 hours whe
 each leg has exactly one eligible partner across equal-and-opposite
 same-currency candidates, scoped description-derived FX candidates, scoped
 Monobank snapshot FX candidates, and PKO Enable Banking snapshot exchange
-candidates.
+candidates.[^documentation-snapshot]
 
 It reuses the existing transfer group, matching timestamp, reporting behavior,
 and partner inspection UI. The implementation has one exclusion flag, a dedicated pair
@@ -68,7 +78,7 @@ Classification: separate subscriber and separate explicit command
 
 ## Finance service and ownership
 
-`finance.Finance` exposes `TransferMatchingService` with two operations:
+`finance.Finance` exposes `TransferMatchingService` with two operations:[^documentation-snapshot]
 
 - `Submit`: accepts authenticated actor, tenant, `rangeStart`, and
   `rangeEndExclusive`; checks tenant membership and range validity, publishes
@@ -99,7 +109,7 @@ No runtime-module changes are needed.
 
 ## API and ledger interaction
 
-`POST /api/v1/finance/tenants/{tenantId}/transactions/match-transfers` accepts:
+`POST /api/v1/finance/tenants/{tenantId}/transactions/match-transfers` accepts:[^documentation-snapshot]
 
 ```json
 {
@@ -157,7 +167,7 @@ expose the exclusion flag in transaction API requests or responses.
 
 ## Database schema
 
-Phase 0 added one column on `finance_transactions`:
+Phase 0 added one column on `finance_transactions`:[^documentation-snapshot]
 
 - Name: `transfer_matching_excluded`.
 - PostgreSQL type: `boolean`.
@@ -191,7 +201,7 @@ provider-snapshot, and resync contracts are unchanged by these rules.
 
 ## Pair writes and exclusion state
 
-An automatic pair updates only these fields on both existing rows:
+An automatic pair updates only these fields on both existing rows:[^documentation-snapshot]
 
 - `kind = transfer`.
 - One newly generated, shared `transfer_group_id`.
@@ -252,7 +262,7 @@ it; no concurrency-control framework is part of this design.
 
 ### Load the eligible ledger slice once
 
-Run one tenant-scoped query for all eligible transactions in:
+Run one tenant-scoped query for all eligible transactions in:[^documentation-snapshot]
 
 ```text
 loadStart        = rangeStart - 144 hours
@@ -408,7 +418,7 @@ already assigned does not prevent matching, and pairing never removes it.
 Classification's conditional update skips transfer kinds and changes only
 category/modification fields. A category assigned before matching is retained;
 classification after matching skips the transfer. No ordering dependency or
-combined enrichment job is introduced.
+combined enrichment job is introduced.[^documentation-snapshot]
 
 Reporting continues to use booked matched-transfer behavior: both ledger rows
 affect account balances, while the matched internal transfer is excluded from
@@ -421,7 +431,7 @@ The command `finance.transfer-matching.explicit.v1` is published with `tenantId`
 handler uses job type `finance.transfer-matching`. It calls `Match` and uses
 existing finance failure mapping. Without a caller idempotency key, an explicit retry is a new submission.
 A retry with the same key and payload returns the existing identity; transport
-redelivery always retains its dispatch identity. See [direct access](../integrations/direct-access.md#durable-execution-and-idempotency).
+redelivery always retains its dispatch identity. See [direct access](../integrations/direct-access.md#durable-execution-and-idempotency).[^documentation-snapshot]
 
 An ordinary subscriber receives the existing
 `finance.bank-sync-window-completed.v1` topic in consumer group
@@ -458,7 +468,7 @@ existing distinction between finance terminal failures and transport failures.
 
 ## Attempt counts and diagnostics
 
-Keep counts in memory and log them on completion or failure:
+Keep counts in memory and log them on completion or failure:[^documentation-snapshot]
 
 - `matchedPairs`: newly committed pairs, counted once per pair.
 - `unmatched`: eligible starting rows with no counterpart in the loaded data.
@@ -478,13 +488,13 @@ they are not stored as job results. Retries load fresh data and restart counts.
 
 ## Verification and formal contracts
 
-See the [transfer-matching scenarios](../../openspec/specs/transfer-matching/spec.md),
-[ledger/operator scenarios](../../openspec/specs/finance-operator-ui/spec.md), and
+See the [transfer-matching scenarios](../requirements/transfer-matching.md),
+[ledger/operator scenarios](../requirements/finance-operator-ui.md), and
 [manual E2E guide](../manual-e2e/finance-transfer-matching-e2e.md).
 The formal matching scenarios cover all four candidate rules, including scoped
 PKO snapshot/IBAN evidence, fail-closed handling, and shared ambiguity. These links
 are not a claim that manual E2E or independent visual verification has just been
-performed.
+performed.[^documentation-snapshot]
 
 The delivered FX follow-ons keep triggers, persistence writes, and worker paths
 unchanged. Their acceptance coverage includes description USD/PLN matching and
@@ -523,7 +533,7 @@ Cover these acceptance boundaries:
 
 ## Existing implementation references
 
-These are repository files outside the OKF bundle.
+Requirements below are in this bundle; repository implementation and test references are external.[^documentation-snapshot]
 
 - [Transfer matcher](../../finance/service_transfer_matching.go)
 - [Dedicated pair store](../../finance/persistence/transfer_pair_store.go)
@@ -548,3 +558,10 @@ These are repository files outside the OKF bundle.
 - [Tenant ledger](../../apps/sumweave-ui/src/pages/FinanceTransactions.svelte)
 - [Classification job feedback](../../apps/sumweave-ui/src/pages/FinanceRules.svelte)
 - [Local-date boundaries](../../apps/sumweave-ui/src/lib/finance/classification-range.ts)
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^transfer-matching-phase0-design]: docs/enrichment-pipeline/transfer-matching-phase0-design.md.
+[^service-transfer-matching-go]: finance/service_transfer_matching.go.
+[^transfer-pair-store-go]: finance/persistence/transfer_pair_store.go.
+[^transfer-matching-evidence-go]: finance/internal/pko/transfer_matching_evidence.go.

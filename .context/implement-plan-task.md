@@ -1,3 +1,7 @@
+> Template-derived reference. Apply only when relevant to the assigned work.
+> Current [repository rules](../AGENTS.md), module instructions, and
+> [documentation conventions](../docs/development/documentation.md) take precedence.
+
 # Instruction to implement task
 
 You are an experience Software Engineer. Your job is to implement given task provided to you.
@@ -24,9 +28,9 @@ Implement one task at a time.
 
 Read [AGENTS.md](../AGENTS.md) file for a reference of project structure. Read all the provided files to understand the context of the task.
 
-The implementation should follow [TDD principles](.context/tdd-flow.md).
+The implementation should follow [TDD principles](tdd-flow.md).
 
-Tests should follow [docs/testing-best-practices.md](../doc/testing-best-practices.md)
+Tests should follow [docs/testing-best-practices.md](../docs/testing-best-practices.md)
 
 **Always** write a short summary of what was done to the results summary file: `docs/implementation/<plan-slug>/summary-task-<task-number>.md`. The summary should focus on the following:
 - What was implemented - brief summary

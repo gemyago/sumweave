@@ -2,16 +2,20 @@
 type: Runbook
 title: "Local PostgreSQL verification"
 description: "Manual verification procedure for postgres local verification."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/postgres-local-verification.md"
+  - id: postgres-local-verification
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/postgres-local-verification.md"
+    title: "docs/manual-e2e/postgres-local-verification.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/postgres-local-verification.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Local PostgreSQL verification
 
 PostgreSQL is the mandatory local backend database. The repository Compose
 environment and `make postgres-bootstrap` are the supported setup path; this
-guide explains its concrete contract for backend processes and ordinary tests.
+guide explains its concrete contract for backend processes and ordinary tests.[^documentation-snapshot][^postgres-local-verification]
 
 ## What this covers
 
@@ -24,7 +28,7 @@ guide explains its concrete contract for backend processes and ordinary tests.
 
 ## Local roles, passwords, and DSNs
 
-Fixed local-only credentials used by `compose.yaml` and the bootstrap target:
+Fixed local-only credentials used by `compose.yaml` and the bootstrap target:[^documentation-snapshot]
 
 - owner role: `sumweave_owner`
 - owner password: `sumweave_owner_local`
@@ -37,7 +41,7 @@ Fixed local-only credentials used by `compose.yaml` and the bootstrap target:
 
 ## Start local Postgres
 
-Run from the repo root:
+Run from the repo root:[^documentation-snapshot]
 
 ```bash
 make postgres-bootstrap
@@ -50,7 +54,7 @@ applies runtime grants. Cluster bootstrap never defines application tables.
 
 ## Run the backend with the runtime role
 
-From `apps/sumweave`:
+From `apps/sumweave`:[^documentation-snapshot]
 
 ```bash
 go run ./cmd/sumweave start-all --env local
@@ -63,7 +67,7 @@ when a scheduler tick is needed.
 
 ## Create or rotate the local app user
 
-From `apps/sumweave`:
+From `apps/sumweave`:[^documentation-snapshot]
 
 ```bash
 go run ./cmd/sumweave --log-level WARN --env local user add \
@@ -75,7 +79,7 @@ If that user already exists after a partial run, use `user change-password` with
 
 ## Verification flows for the next step
 
-After the backend is up, reuse the existing guides:
+After the backend is up, reuse the existing guides:[^documentation-snapshot]
 
 - API flow: [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md)
 - UI flow: [synthetic-provider-ui-e2e.md](./synthetic-provider-ui-e2e.md)
@@ -108,4 +112,8 @@ docker compose down -v
 
 Run `make postgres-bootstrap` later to recreate the two databases and schemas.
 Run ordinary backend `make test` or `make affected-lint-test` commands after
-bootstrap; they select tagged PostgreSQL tests where applicable.
+bootstrap; they select tagged PostgreSQL tests where applicable.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^postgres-local-verification]: docs/manual-e2e/postgres-local-verification.md.

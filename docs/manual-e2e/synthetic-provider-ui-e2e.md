@@ -2,14 +2,18 @@
 type: Runbook
 title: "Synthetic Provider UI Manual E2E"
 description: "Manual verification procedure for synthetic provider ui e2e."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/synthetic-provider-ui-e2e.md"
+  - id: synthetic-provider-ui-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/synthetic-provider-ui-e2e.md"
+    title: "docs/manual-e2e/synthetic-provider-ui-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/synthetic-provider-ui-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Synthetic Provider UI Manual E2E
 
-Follow preparation steps in [README.md](./README.md) first.
+Follow preparation steps in [README.md](./README.md) first.[^documentation-snapshot][^synthetic-provider-ui-e2e]
 
 This guide covers the browser flow only: sign in, create or reuse an active finance tenant, start synthetic setup from Finance connections, save pending configuration, reload it, finish the link, and confirm the new synthetic connection card appears. It also prepares the explicit classification panel for the API-only deterministic delivery checks.
 
@@ -19,14 +23,14 @@ This guide covers the browser flow only: sign in, create or reuse an active fina
 2. Sign in with the first local user from repo-root `.local-users` unless you intentionally prepared another user.
 3. Confirm the app redirects to a protected route instead of staying on `#/login`.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the login succeeds
 - you land inside the authenticated UI shell
 
 ## 2. Prepare an active finance tenant
 
-If you already have a clean tenant for this run, reuse it. Otherwise create one:
+If you already have a clean tenant for this run, reuse it. Otherwise create one:[^documentation-snapshot]
 
 1. Open `#/finance/tenants`.
 2. In **Create tenant**, enter a unique name such as `synthetic-ui-e2e-<yyyymmdd-hhmmss>`.
@@ -45,7 +49,7 @@ Expected:
 2. Confirm the correct tenant is selected in the **Tenant** picker.
 3. In **Configure synthetic provider**, click **Start synthetic setup**.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the browser stays in the app and navigates to `#/finance/connections/synthetic?state=...`
 - the **Synthetic setup** page shows a non-empty pending setup state
@@ -62,7 +66,7 @@ Expected:
    - **Account currency 2** = `USD`
 4. Click **Save configuration**.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the page shows `Configuration saved.`
 - the page changes from `Save at least one configured account before finishing.` to `Pending setup can be finished.`
@@ -73,7 +77,7 @@ Expected:
 1. Click **Reload pending setup**.
 2. Confirm both configured rows are still present.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the page stays on the same `state`
 - both duplicate rows survive reload as separate rows
@@ -83,7 +87,7 @@ Expected:
 
 1. Click **Finish link**.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the browser returns to `#/finance/connections`
 - the selected tenant stays the same
@@ -100,7 +104,7 @@ Expected:
 5. To deterministically observe the initiating-request `404`, use the API-only worker stop/start window in [synthetic-provider-flow-e2e.md](./synthetic-provider-flow-e2e.md#explicit-classification-and-category-preservation-checks). Its isolated setup stops PM2 backend processes, starts only the API, asserts the `404` after submission, then runs the bounded worker.
 6. Start or wait for the local worker, then confirm the panel shows terminal success or an actionable failure message. On success, open `#/finance/transactions` and confirm the matching ledger row shows its category without a manual reload. Manually change that category if needed: the row should show a compact **Create rule from this transaction** action, not an expanded rule form. Open it only after any desired tag/description save and verify its default tags and description match the latest saved row.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - date inputs use local calendar dates and include the selected final date
 - the job link is limited to the classification request just submitted
@@ -116,7 +120,7 @@ the local database.
 
 ## 8. Optional follow-up checks
 
-If you want to continue beyond the browser setup smoke test:
+If you want to continue beyond the browser setup smoke test:[^documentation-snapshot]
 
 1. Click **Sync now** on the new Synthetic card.
 2. Open **Synced accounts** on that card and confirm only account name, currency, last successful sync, and in-app account links are shown; close/reopen to confirm it uses the per-card cache until a new sync invalidates it.
@@ -124,10 +128,14 @@ If you want to continue beyond the browser setup smoke test:
 
 ## 9. If anything is wrong, report it
 
-Capture:
+Capture:[^documentation-snapshot]
 
 - the selected tenant name
 - the synthetic setup `state` from the URL
 - screenshots or snapshots of save/reload/finish failures
 - any inline alert text shown on the setup or connections page
 - the classification start/end dates, job link, visible job state, and ledger category
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^synthetic-provider-ui-e2e]: docs/manual-e2e/synthetic-provider-ui-e2e.md.

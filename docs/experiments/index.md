@@ -1,4 +1,4 @@
 # Experiments
 
-- [Experimental agent runtime](agent-runtime.md) - Retained agent, Chat, model-provider functionality and dependencies.
-- [Historical planning and POCs](history.md) - Superseded targets, harness plans, and bank experiments.
+* [Experimental agent runtime](agent-runtime.md) - Scope and operational boundaries for retained agent, Chat, and model-provider functionality.
+* [Historical planning and proofs of concept](history.md) - Where retained plans and POCs fit relative to current finance direction.

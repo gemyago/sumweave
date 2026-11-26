@@ -2,12 +2,22 @@
 type: Interface reference
 title: "Direct access"
 description: "Personal token lifecycle, exact route allowlist, idempotency, and HTTP-only CLI."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-design.md"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/auth/access_token_store.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/api/http/v1controllers/finance_token_allowlist_test.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/swmdclient/client.go"
+  - id: integration-layer-design
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-design.md"
+    title: "docs/integration-layer/integration-layer-design.md"
+  - id: access-token-store-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/auth/access_token_store.go"
+    title: "apps/sumweave/internal/auth/access_token_store.go"
+  - id: finance-token-allowlist-test-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/api/http/v1controllers/finance_token_allowlist_test.go"
+    title: "apps/sumweave/internal/api/http/v1controllers/finance_token_allowlist_test.go"
+  - id: client-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/swmdclient/client.go"
+    title: "apps/sumweave/internal/swmdclient/client.go"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/integrations/direct-access.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Direct access: personal tokens and swmd
@@ -18,13 +28,13 @@ current membership; a token copies no tenant grants. `read-only` permits allowed
 reads and `read-write` also permits exactly three asynchronous triggers. Other
 protected operations remain browser-session only. Token management and finance
 operational diagnostics support the product even though generic Admin/Chat/model
-provider experiments also exist in the executable.
+provider experiments also exist in the executable.[^documentation-snapshot][^integration-layer-design][^access-token-store-go][^finance-token-allowlist-test-go][^client-go]
 
 ## Start here
 
 Sign in through the browser and open `#/admin/access-tokens`. Create a token for
 your own user, copy the one-time secret, and from `apps/sumweave` configure the
-HTTP-only client using explicit stdin:
+HTTP-only client using explicit stdin:[^documentation-snapshot]
 
 ```sh
 go run ./cmd/swmd auth configure --base-url http://127.0.0.1:4501 --token-stdin
@@ -41,7 +51,7 @@ lifecycle and permission-check journey.
 
 ## Token format and validation
 
-The issued token format is:
+The issued token format is:[^documentation-snapshot]
 
 ```text
 swat_<token-id>_<base64url-secret>
@@ -71,7 +81,7 @@ a human password. Existing Argon2id password hashing remains unchanged.
 The reserved `swat_` prefix selects PAT validation; all other bearer values use
 session JWT validation. Neither validator falls back after failure. Invalid
 credentials receive a safe `401`; valid tokens on session-only operations or
-read-only tokens on token-write operations receive `403`.
+read-only tokens on token-write operations receive `403`.[^documentation-snapshot]
 
 One app-owned `CredentialMiddleware` authenticates and enforces `SessionOnly`,
 `TokenRead`, or `TokenWrite`. Wireup passes policy-bound middleware functions to
@@ -84,7 +94,7 @@ user-identity adapter and remains session only.
 
 The app-owned authentication table is prepared through explicit `db-migrate`.
 No finance, appdispatch, jobs, or runtime table is added or changed for token
-storage.
+storage.[^documentation-snapshot]
 
 The logical table is `auth_access_tokens`; with the default application prefix
 it is `sumweave_auth_access_tokens`.
@@ -143,7 +153,7 @@ and logger through explicit wireup.
 ## Token lifecycle
 
 `AccessTokenService` owns create, list, rotate, revoke, and validate behavior.
-The store owns persistence only.
+The store owns persistence only.[^documentation-snapshot]
 
 - Create uses the caller's user ID, inserts one active row, and returns metadata
   plus the one-time token.
@@ -167,7 +177,7 @@ another replacement.
 
 ### Management API
 
-The four browser-session-only operations are to the existing `auth` controller:
+The four browser-session-only operations are to the existing `auth` controller:[^documentation-snapshot]
 
 - `GET /api/v1/auth/access-tokens` lists the signed-in user's token metadata;
 - `POST /api/v1/auth/access-tokens` creates a token and returns `201`;
@@ -214,7 +224,7 @@ analytics, or the clipboard without an explicit copy action.
 
 Credential policies apply to the authoritative
 `apps/sumweave/internal/api/http/v1routes.yaml` operations and their existing
-controller methods. No route below is duplicated.
+controller methods. No route below is duplicated.[^documentation-snapshot]
 
 ### Current user and tenant discovery
 
@@ -292,7 +302,7 @@ complete token allowlist so accidental exposure fails verification.
 
 ## Requester-scoped jobs
 
-Token read is allowed on the existing routes:
+Token read is allowed on the existing routes:[^documentation-snapshot]
 
 - `GET /api/v1/jobs`;
 - `GET /api/v1/jobs/{jobId}`.
@@ -317,7 +327,7 @@ messages, provider credentials, and dead-letter data remain absent.
 
 ## Shared errors
 
-The accepted application error contract uses a safe JSON envelope:
+The accepted application error contract uses a safe JSON envelope:[^documentation-snapshot]
 
 ```json
 {
@@ -354,7 +364,7 @@ for the accepted contract and current behavior.
 ## Durable execution and idempotency
 
 `integration` is a valid `CommandRequester` source. Existing finance
-controllers derive requester source from `Caller`:
+controllers derive requester source from `Caller`:[^documentation-snapshot]
 
 - browser session becomes `operator`;
 - access token becomes `integration`;
@@ -392,7 +402,7 @@ unchanged apart from accepting the new source string.
 ## Provider source data boundary
 
 No new provider ingestion or persistence is required. The existing finance
-controller calls `ProviderSnapshotService`, which already:
+controller calls `ProviderSnapshotService`, which already:[^documentation-snapshot]
 
 - verifies tenant membership;
 - checks account or transaction attachment within that tenant;
@@ -406,7 +416,7 @@ headers, connection secrets, or literal HTTP bodies.
 ## Direct CLI
 
 `apps/sumweave/cmd/swmd` is a separate HTTP client. It does not import finance persistence, server wireup, runtime, appdispatch, or job
-stores.
+stores.[^documentation-snapshot]
 
 Its client package owns:
 
@@ -481,12 +491,12 @@ Never log bearer values, digests, issued responses, provider-snapshot documents,
 or connection credentials. The original wrapped operational error belongs in
 logs; user-facing errors carry safe fields and correlation IDs. Token revocation
 is checked from PostgreSQL on every request. Revocation blocks the next request
-but does not cancel commands already accepted by appdispatch.
+but does not cancel commands already accepted by appdispatch.[^documentation-snapshot]
 
-The [PAT scenarios](../../openspec/specs/personal-access-tokens/spec.md),
-[direct-client scenarios](../../openspec/specs/direct-finance-cli/spec.md),
-[finance integration scenarios](../../openspec/specs/finance-management/spec.md), and
-[job visibility scenarios](../../openspec/specs/durable-jobs/spec.md) remain granular
+The [PAT scenarios](../requirements/personal-access-tokens.md),
+[direct-client scenarios](../requirements/direct-finance-cli.md),
+[finance integration scenarios](../requirements/finance-management.md), and
+[job visibility scenarios](../requirements/durable-jobs.md) remain granular
 acceptance references. These and the following implementation links are external
 to the OKF bundle:
 
@@ -501,3 +511,10 @@ to the OKF bundle:
 The [historical draft design](../integration-layer/integration-layer-design.md)
 preserves original package sketches and delivery/verification plans; its
 middleware injection sketch and three-column list index are not current facts.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^integration-layer-design]: docs/integration-layer/integration-layer-design.md.
+[^access-token-store-go]: apps/sumweave/internal/auth/access_token_store.go.
+[^finance-token-allowlist-test-go]: apps/sumweave/internal/api/http/v1controllers/finance_token_allowlist_test.go.
+[^client-go]: apps/sumweave/internal/swmdclient/client.go.

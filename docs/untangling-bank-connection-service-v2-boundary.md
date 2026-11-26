@@ -6,7 +6,12 @@ status: deprecated
 superseded_by: /finance-provider-sync-architecture.md
 tags: [history]
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/untangling-bank-connection-service-v2-boundary.md"
+  - id: untangling-bank-connection-service-v2-boundary
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/untangling-bank-connection-service-v2-boundary.md"
+    title: "docs/untangling-bank-connection-service-v2-boundary.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/untangling-bank-connection-service-v2-boundary.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 > Historical source. This is historical refactoring analysis, not an active cleanup plan or a product requirement. Its observations and proposed directions should be rechecked before use.
@@ -14,17 +19,17 @@ sources:
 
 # Untangling BankConnectionService V2 Boundary
 
-This note captures what the current `finance.BankConnectionService` actually does through provider sync v2, and which older finance-layer pieces it still depends on.
+This note captures what the current `finance.BankConnectionService` actually does through provider sync v2, and which older finance-layer pieces it still depends on.[^documentation-snapshot][^untangling-bank-connection-service-v2-boundary]
 
 ## Short Verdict
 
-The service is v2 in its execution path, but not a pure v2 pass-through.
+The service is v2 in its execution path, but not a pure v2 pass-through.[^documentation-snapshot]
 
 The actual bank-link operations delegate to `finance/internal/providers.LinkCoordinator`, but the public compatibility surface, config inputs, secret wiring, static profile assembly, and some persistence seams still come from older `finance` package structures that predate the v2 coordinator split.
 
 ## What Is Actually V2
 
-The core link flow is v2-backed:
+The core link flow is v2-backed:[^documentation-snapshot]
 
 - `NewBankConnectionService` builds `internal/providers.LinkCoordinator`
 - `LinkTokenBankConnection` delegates to `LinkCoordinator.LinkToken`
@@ -39,7 +44,7 @@ This matches the OpenSpec intent that the public service in `finance` should exp
 
 ### 1. Public request and response DTOs
 
-The new service still exposes older public `finance` DTOs from `finance/dto.go`, including:
+The new service still exposes older public `finance` DTOs from `finance/dto.go`, including:[^documentation-snapshot]
 
 - `LinkTokenBankConnectionParams`
 - `StartBankConnectionLinkParams`
@@ -158,7 +163,7 @@ Why this exists:
 
 ## Why The Service Is Not “Tiny”
 
-The service ended up doing more than direct delegation because it also owns:
+The service ended up doing more than direct delegation because it also owns:[^documentation-snapshot]
 
 - tenant authorization checks
 - public API compatibility
@@ -172,6 +177,10 @@ That shape is consistent with the OpenSpec. The spec did not ask for a raw publi
 
 ## Practical Bottom Line
 
-If the expectation was “a very small wrapper around `LinkCoordinator` and almost nothing else”, the current implementation is larger than that expectation.
+If the expectation was “a very small wrapper around `LinkCoordinator` and almost nothing else”, the current implementation is larger than that expectation.[^documentation-snapshot]
 
 If the expectation was “a focused `finance` boundary that keeps old API semantics stable while routing actual linking through v2”, the current implementation is broadly aligned, but it still carries several older finance-layer seams to do that job, especially around constructor wiring and a few public compatibility checks.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^untangling-bank-connection-service-v2-boundary]: docs/untangling-bank-connection-service-v2-boundary.md.

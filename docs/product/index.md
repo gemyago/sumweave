@@ -1,5 +1,5 @@
 # Product
 
-- [Personal finance capabilities](overview.md) - Current workflows, reporting semantics, and limits.
-- [Classification](classification.md) - Ordered category and additive-tag rules, schema, and execution.
-- [Transfer matching](transfer-matching.md) - Four fixed rules, pair persistence, and correction.
+* [Transaction classification](classification.md) - Ordered category and additive-tag rules, timestamp ranges, and accepted limits.
+* [Personal finance capabilities](overview.md) - Current finance workflows, reporting semantics, and product limits.
+* [Transfer matching](transfer-matching.md) - Four deterministic pair rules, mutual uniqueness, persistence, and manual correction.

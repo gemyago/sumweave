@@ -6,7 +6,12 @@ status: deprecated
 superseded_by: /product/overview.md
 tags: [history]
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/finances-management/design.md"
+  - id: design
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/finances-management/design.md"
+    title: "docs/finances-management/design.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/finances-management/design.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 > Historical source. This early implementation target contains planned routes, historical FX assumptions, and superseded CSV mapping ideas. It is not a current feature inventory.
@@ -18,7 +23,7 @@ The finance management slice extends Sumweave with personal finance
 tracking for one or more user-owned tenants. The initial proof of concept proved
 that we can fetch account and transaction data from Enable Banking / PKO and
 monobank. The next step is to turn that POC into a productized module that can
-be implemented safely and evolved independently.
+be implemented safely and evolved independently.[^documentation-snapshot][^design]
 
 Relevant POC notes:
 
@@ -40,7 +45,7 @@ shape can change as needed while implementing this slice.
 
 This project is early alpha. Breaking API changes, destructive migrations, data
 loss during incompatible migration changes, and other breaking changes are
-acceptable while the design is still settling.
+acceptable while the design is still settling.[^documentation-snapshot]
 
 Implementation should optimize for the clean target architecture, not backward
 compatibility. Do not add compatibility layers, legacy migrations, dual-write
@@ -73,7 +78,7 @@ paths, or transition mechanisms unless the user explicitly asks for them.
 
 ### Module Boundary
 
-Create a new root Go module named `finance/`.
+Create a new root Go module named `finance/`.[^documentation-snapshot]
 
 `finance/` is independent from `runtime/`. It owns the finance domain, business
 services, connector interfaces, persistence models, migrations, and sync logic.
@@ -305,7 +310,7 @@ Required rules:
 ## Development And Test Data
 
 Create a CLI command that generates realistic finance fixture data for local
-development, manual UI testing, and automated smoke tests.
+development, manual UI testing, and automated smoke tests.[^documentation-snapshot]
 
 Recommended command location:
 
@@ -358,7 +363,7 @@ domain model.
 ### User
 
 A person authenticated in the system. A user may belong to one or more finance
-tenants.
+tenants.[^documentation-snapshot]
 
 ### Tenant
 
@@ -539,7 +544,7 @@ Requirements:
 ## Reporting And Currency Conversion
 
 Each tenant has a display currency. All high-level reports must be shown in that
-currency.
+currency.[^documentation-snapshot]
 
 Store both original transaction amounts and display-currency reporting amounts.
 Reporting conversion must be reproducible, so use persisted FX-rate records
@@ -578,7 +583,7 @@ display-currency summaries when that improves clarity.
 
 ## Dashboard Requirements
 
-The tenant dashboard must support:
+The tenant dashboard must support:[^documentation-snapshot]
 
 - current month as the default reporting period
 - month-based navigation with the current month selected by default
@@ -638,7 +643,7 @@ The transaction list must support:
 
 ## Bank Sync
 
-Bank linking and synchronization are required from day one.
+Bank linking and synchronization are required from day one.[^documentation-snapshot]
 
 Required sync modes:
 
@@ -667,7 +672,7 @@ production connector.
 
 ## CSV Import
 
-CSV import must support historical migration from other systems.
+CSV import must support historical migration from other systems.[^documentation-snapshot]
 
 Required behavior:
 
@@ -707,7 +712,7 @@ migrating an existing account list before importing historical ledger data.
 ## Suggested API Areas
 
 Exact route names can be finalized during implementation, but the API should
-cover these areas:
+cover these areas:[^documentation-snapshot]
 
 - tenants: create, list joined tenants, update tenant metadata
 - tenant members: list members, create invite, accept invite
@@ -728,7 +733,7 @@ cover these areas:
 
 ## Implementation Slices
 
-Recommended implementation order:
+Recommended implementation order:[^documentation-snapshot]
 
 1. Publish finance semantic commands through appdispatch and register ordinary
    or job-observed finance handlers against the transport.
@@ -785,3 +790,7 @@ Recommended implementation order:
   account names so one import can cover multiple accounts.
 - Finance fixture generation is an app CLI command backed by `finance/` domain
   services, not direct database writes.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^design]: docs/finances-management/design.md.

@@ -1,0 +1,35 @@
+---
+type: Historical record
+title: "2026-07-05-adopt-bootstrap-ui-rails: tasks"
+description: "Historical tasks record for 2026-07-05-adopt-bootstrap-ui-rails."
+status: deprecated
+generated: { by: "codex/gpt-6.1-sol", at: "2026-11-26T08:20:34+01:00" }
+sources:
+  - id: original-record
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/openspec/changes/archive/2026-07-05-adopt-bootstrap-ui-rails/tasks.md"
+    title: "Original openspec/changes/archive/2026-07-05-adopt-bootstrap-ui-rails/tasks.md"
+---
+
+> Historical source, retained for context. This record is deprecated and is
+> not a current plan or workflow. Old commands, paths, task states, and reported
+> test outcomes describe the original work; they were not re-executed by this
+> documentation migration. Use [current requirements](../../../requirements/index.md) and their topic
+> references for accepted contracts and delivered behavior.[^original-record]
+
+## 1. Bootstrap Rails Foundation
+
+- [x] 1.1 Add Bootstrap as the pilot styling dependency and global CSS import, and must follow TDD flow by first adding or updating focused smoke coverage that proves the app still boots with authenticated and unauthenticated route rendering before installing `bootstrap`, importing its CSS, and verifying no wrapper library or second utility CSS framework was introduced.
+- [x] 1.2 Add the V2 route boundary and Bootstrap pilot documentation contract, and must follow TDD flow by first updating route tests plus `apps/signal-ui/AGENTS.md`, `apps/signal-ui/DESIGN.md`, `apps/signal-ui/ui-wireframe.md`, `docs/manual-e2e/README.md`, and `docs/manual-e2e/finance-ui-shell-smoke-e2e.md` to define `#/v2/login` and `#/v2/finance`, the “pilot stays parallel / no promotion in this change” rule, allowed custom CSS exceptions, no route-local pilot styling, and the explicit `#/v2/finance` shell boundary: a Bootstrap-specific protected shell that reuses finance auth and tenant-state behavior but not `FinanceShell.svelte` or generic `Nav` chrome, with shell-owned tenant selection, sign-out/theme controls, and finance-local handoff links before applying page changes that depend on those rules.
+
+## 2. V2 Login Pilot
+
+- [x] 2.1 Add `#/v2/login` with vanilla Bootstrap markup, and must follow TDD flow by first adding V2 login route tests for the expected labels, error alert, loading or disabled submit state, remembered-destination behavior, unchanged canonical `#/login`, and absence of route-local styling before implementing the V2 page with Bootstrap form, alert, button, container, and spacing classes.
+- [x] 2.2 Visually harden the V2 login pilot, and must follow visual verification flow by checking desktop and mobile browser renders of `#/v2/login` for text wrapping, overflow, focus visibility, error visibility, and console failures, then fixing any layout issues inside the Bootstrap class contract or documented shared CSS exceptions.
+
+## 3. V2 Finance Dashboard Pilot
+
+- [x] 3.1 Add `#/v2/finance` dashboard sections with Bootstrap composition, and must follow TDD flow by first adding V2 finance dashboard tests for the Bootstrap-specific shell presence, compact header, shell-level tenant control behavior, shell utility actions, period context, balance/income/expense/pending summaries, cash-flow visual region, category or spending section, account snapshot, recent transactions, attention states, unchanged canonical `#/finance`, and existing loading/empty/error behavior before implementing the V2 page with Bootstrap grid, nav, card, form, badge, list, table, button, and spacing classes.
+- [x] 3.2 Keep the V2 finance dashboard inside existing data and shell-state contracts, and must follow TDD flow by first proving the route still composes from existing finance dashboard, account, transaction, category, and connection data sources plus shared finance tenant-workspace state without OpenAPI or backend changes, and proving the V2 route does not import `FinanceShell.svelte` or other V1 visual shell components before completing the Bootstrap dashboard implementation.
+- [x] 3.3 Visually harden the V2 finance dashboard pilot, and must follow visual verification flow by checking desktop and mobile browser renders of `#/v2/finance` for first-viewport hierarchy, clipped values, table/list overflow, chart containment, tenant/period control alignment, and console/network failures, then fixing any issues inside the Bootstrap class contract or documented shared CSS exceptions.
+
+[^original-record]: Original historical source snapshot; migration metadata describes this retained copy.

@@ -5,4 +5,4 @@ for current personal access-token, route allowlist, idempotency, and `swmd` cont
 
 The [PRD](integration-layer-prd.md) and [draft design](integration-layer-design.md)
 are retained historical sources. They do not supersede the delivered API or
-formal OpenSpec scenarios.
+detailed [acceptance requirements](../requirements/index.md).

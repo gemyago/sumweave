@@ -6,7 +6,12 @@ status: deprecated
 superseded_by: /integrations/direct-access.md
 tags: [history]
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-prd.md"
+  - id: integration-layer-prd
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-prd.md"
+    title: "docs/integration-layer/integration-layer-prd.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/integration-layer/integration-layer-prd.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 > Historical source. This pre-implementation requirements narrative is retained as history. Phase 1 is implemented; the replacement documents the current allowlist and contracts.
@@ -16,13 +21,13 @@ sources:
 
 Status: draft for discussion. The [system design](integration-layer-design.md)
 defines the implementation shape, and [Architecture](../ARCHITECTURE.md) remains
-authoritative for product boundaries.
+authoritative for product boundaries.[^documentation-snapshot][^integration-layer-prd]
 
 ## Goal
 
 Let a person or automation use a long-lived personal access token to read core
 Sumweave finance data and start a small set of finance operations without a
-browser session.
+browser session.[^documentation-snapshot]
 
 The first release adds personal access tokens as an alternative credential for
 an explicit allowlist of existing HTTP API operations. It also provides a
@@ -32,7 +37,7 @@ route.
 
 ## Users and primary workflows
 
-The initial users are:
+The initial users are:[^documentation-snapshot]
 
 - a signed-in member creating and managing their own access tokens in Sumweave;
 - a member exporting transactions and accounts into another system;
@@ -69,7 +74,7 @@ membership flow and manages its own tokens through the same signed-in UI.
 
 There is no privileged cross-user token administrator in Phase 1. The existing
 application has no administrator role model, so allowing one signed-in user to
-mint credentials for another would create an undefined privilege boundary.
+mint credentials for another would create an undefined privilege boundary.[^documentation-snapshot]
 
 ### 2. Reuse of the application API
 
@@ -314,3 +319,7 @@ CLI from the repository.
 - token access to runtime agents, reports, imports, categories, tags, rules
   management, tenant administration, or connection management
 - client SDKs, shell completion, installers, package publication, or MCP
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^integration-layer-prd]: docs/integration-layer/integration-layer-prd.md.

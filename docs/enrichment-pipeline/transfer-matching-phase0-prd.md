@@ -6,10 +6,15 @@ status: deprecated
 superseded_by: /product/transfer-matching.md
 tags: [history]
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/transfer-matching-phase0-prd.md"
+  - id: transfer-matching-phase0-prd
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/transfer-matching-phase0-prd.md"
+    title: "docs/enrichment-pipeline/transfer-matching-phase0-prd.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/enrichment-pipeline/transfer-matching-phase0-prd.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
-> Historical source. This approved narrative records the original requirements and follow-ons. Use the replacement for current implementation and OpenSpec for granular acceptance scenarios. Historical completion-gate statements below are not a new verification record.
+> Historical source. This approved narrative records the original requirements and follow-ons. Use the replacement for current implementation and [requirements](../requirements/transfer-matching.md) for granular acceptance scenarios. Historical completion-gate statements below are not a new verification record.
 > Current reference: [Transfer matching Phase 0 PRD replacement](../product/transfer-matching.md).
 
 # Transfer Matching Phase 0
@@ -23,12 +28,12 @@ remain to be run. Product requirements were approved on 2026-09-06; concurrency
 requirements were revised on 2026-09-07 following design review: match against
 data loaded at attempt start and accept concurrent-update races in Phase 0.
 System design, API contracts, and storage changes are outside this PRD.
-[Architecture](../ARCHITECTURE.md) remains the source of truth for product direction.
+[Architecture](../ARCHITECTURE.md) remains the source of truth for product direction.[^documentation-snapshot][^transfer-matching-phase0-prd]
 
 ## Goal
 
 Automatically recognize simple movements between accounts tracked in the same
-finance tenant, so those movements do not inflate reported income and expenses.
+finance tenant, so those movements do not inflate reported income and expenses.[^documentation-snapshot]
 
 Phase 0 links two existing ledger transactions using four fixed, deterministic
 candidate rules. It leaves uncertain cases unchanged and retains manual linking
@@ -56,13 +61,13 @@ Source references: [ledger pairing](../../finance/service_ledger.go),
 [pair persistence](../../finance/persistence/core_store.go),
 [candidate reads](../../finance/persistence/transfer_candidate_store.go),
 [reporting](../../finance/reporting.go), and
-[sync-window reaction](../../apps/sumweave/internal/financeapp/bank_sync_window_event.go).
+[sync-window reaction](../../apps/sumweave/internal/financeapp/bank_sync_window_event.go).[^documentation-snapshot]
 
 ## Product requirements
 
 ### 1. Eligible transactions
 
-Both legs must:
+Both legs must:[^documentation-snapshot]
 
 - Belong to the same tenant and different, visible tracked accounts.
 - Be booked/settled, visible, and not deleted.
@@ -322,7 +327,7 @@ regardless of category. Both legs must be booked; pending transactions are
 excluded even when all other matching conditions hold. This keeps Phase 0
 aligned with existing booked-transfer reporting and avoids a pending-pair
 settlement lifecycle. Explicit unlinking is respected silently by excluding
-both legs from subsequent matching.
+both legs from subsequent matching.[^documentation-snapshot]
 
 Matching loads its inputs once per attempt and decides pairs in memory. Pair
 writes remain atomic, while concurrent-update protection is deferred. A pass
@@ -353,3 +358,7 @@ Not required in Phase 0:
 
 Any future tuning of the matching heuristic or tolerance requires a deliberate
 change to this approved PRD.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^transfer-matching-phase0-prd]: docs/enrichment-pipeline/transfer-matching-phase0-prd.md.

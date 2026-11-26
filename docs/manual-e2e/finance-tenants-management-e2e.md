@@ -2,21 +2,25 @@
 type: Runbook
 title: "Finance Tenants Management Manual E2E"
 description: "Manual verification procedure for finance tenants management e2e."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-tenants-management-e2e.md"
+  - id: finance-tenants-management-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-tenants-management-e2e.md"
+    title: "docs/manual-e2e/finance-tenants-management-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-tenants-management-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Finance Tenants Management Manual E2E
 
 Follow preparation steps in [README.md](./README.md). Get the API token before starting.
-Run `mkdir -p tmp/manual-e2e` from the repository root before using the commands.
+Run `mkdir -p tmp/manual-e2e` from the repository root before using the commands.[^documentation-snapshot][^finance-tenants-management-e2e]
 
 This guide is API-only. Do not use the UI for this check.
 
 ## 1. Create a fresh tenant
 
-Use a unique tenant name on each run because archived tenants stay persisted even after they stop appearing in active tenant lists.
+Use a unique tenant name on each run because archived tenants stay persisted even after they stop appearing in active tenant lists.[^documentation-snapshot]
 
 ```bash
 RUN_TAG=$(date +%Y%m%d-%H%M%S) && TENANT_NAME="tenant-e2e-${RUN_TAG}" && CREATE_STATUS=$(curl -sS -o tmp/manual-e2e/finance-tenants-create.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data "{\"name\":\"${TENANT_NAME}\",\"displayCurrency\":\"USD\",\"seedDefaults\":false}") && test "$CREATE_STATUS" = "200" && TENANT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-tenants-create.json"))["id"])') && printf 'tenantId=%s\n' "$TENANT_ID"
@@ -33,7 +37,7 @@ Expected:
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" | TENANT_ID="$TENANT_ID" python3 -c 'import json,os,sys; items=json.load(sys.stdin)["items"]; tenant_id=os.environ["TENANT_ID"]; assert any(item["id"] == tenant_id for item in items), "tenant missing from active list"; print("tenant present in active list")'
 ```
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - list call returns `200`
 - the new tenant is present in `items`
@@ -44,7 +48,7 @@ Expected:
 GET_STATUS=$(curl -sS -o tmp/manual-e2e/finance-tenants-get-before.json -w "%{http_code}" "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}" -H "Authorization: Bearer ${ACCESS_TOKEN}") && test "$GET_STATUS" = "200" && TENANT_ID="$TENANT_ID" python3 -c 'import json,os; item=json.load(open("tmp/manual-e2e/finance-tenants-get-before.json")); assert item["id"] == os.environ["TENANT_ID"], "unexpected tenant returned"; print("tenant returned by get-by-id")'
 ```
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - get-by-id call returns `200`
 - response tenant `id` matches the created tenant
@@ -55,7 +59,7 @@ Expected:
 ARCHIVE_STATUS=$(curl -sS -o tmp/manual-e2e/finance-tenants-archive.txt -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/archive" -H "Authorization: Bearer ${ACCESS_TOKEN}") && test "$ARCHIVE_STATUS" = "204" && test ! -s tmp/manual-e2e/finance-tenants-archive.txt && printf 'archive returned %s with empty body\n' "$ARCHIVE_STATUS"
 ```
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - archive call returns `204`
 - response body is empty
@@ -66,7 +70,7 @@ Expected:
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" | TENANT_ID="$TENANT_ID" python3 -c 'import json,os,sys; items=json.load(sys.stdin)["items"]; tenant_id=os.environ["TENANT_ID"]; assert all(item["id"] != tenant_id for item in items), "archived tenant still present in active list"; print("archived tenant removed from active list")'
 ```
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - list call returns `200`
 - the archived tenant no longer appears in `items`
@@ -77,7 +81,11 @@ Expected:
 GET_STATUS=$(curl -sS -o tmp/manual-e2e/finance-tenants-get-after.json -w "%{http_code}" "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}" -H "Authorization: Bearer ${ACCESS_TOKEN}") && test "$GET_STATUS" = "404" && printf 'tenant get-by-id returned %s after archival\n' "$GET_STATUS"
 ```
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - get-by-id call returns `404`
 - the archived tenant is no longer available from the active get-by-id route
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-tenants-management-e2e]: docs/manual-e2e/finance-tenants-management-e2e.md.

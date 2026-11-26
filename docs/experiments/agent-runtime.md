@@ -2,9 +2,13 @@
 type: Reference
 title: "Experimental agent runtime"
 description: "Scope and operational boundaries for retained agent, Chat, and model-provider functionality."
-status: stable
 sources:
-  - resource: "repository product clarification of 2026-11-26, runtime module instructions, and app/UI composition"
+  - id: repository-policy
+    resource: "repository product clarification of 2026-11-26, runtime module instructions, and app/UI composition"
+    title: "repository product clarification of 2026-11-26, runtime module instructions, and app/UI composition"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/experiments/agent-runtime.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Experimental agent runtime
@@ -13,7 +17,7 @@ Generic agent execution, sessions, profiles, model providers, Chat, workspace
 tools, and unused inherited features are experimental or unused functionality
 for possible future extensions. Sumweave's product is personal finance tracking.
 Running code and historical harness plans do not make agents or trading tools
-product commitments.
+product commitments.[^documentation-snapshot][^repository-policy]
 
 The executable currently composes `runtime/` with the app and exposes protected
 `/api/v1/runtime/*` routes; the UI retains Chat and model-provider settings.
@@ -47,3 +51,7 @@ Repository references outside this bundle:
 
 [Historical material](history.md) retains harness plans and bank POCs without
 promoting them into an active roadmap.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^repository-policy]: repository product clarification of 2026-11-26, runtime module instructions, and app/UI composition.

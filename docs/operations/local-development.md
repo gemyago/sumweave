@@ -2,10 +2,16 @@
 type: Runbook
 title: "Local development"
 description: "Install dependencies, bootstrap PostgreSQL, and run the API, worker, and UI."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/CONTRIBUTING.md"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/ecosystem.config.js"
+  - id: contributing
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/CONTRIBUTING.md"
+    title: "CONTRIBUTING.md"
+  - id: ecosystem-config-js
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/ecosystem.config.js"
+    title: "ecosystem.config.js"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/operations/local-development.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Local development
@@ -16,7 +22,7 @@ Use direnv, nvm, Go 1.26.x, Node.js 24.x (the repository `.nvmrc`), and Docker
 Compose. In an interactive shell, run `direnv allow` at the repository root;
 agents with ephemeral shells use `direnv exec <working_dir> <command>`.
 The latter loads the environment without changing the command's working directory.
-Documented commands assume the environment is already loaded.
+Documented commands assume the environment is already loaded.[^documentation-snapshot][^contributing][^ecosystem-config-js]
 
 From the repository root:
 
@@ -34,7 +40,7 @@ All temporary files and artifacts belong under repository `tmp/`.
 
 The normal local workflow uses Compose PostgreSQL and PM2 from the repository
 root. Bootstrap starts Compose, prepares the local and test databases, runs both
-explicit migrations, and grants the runtime role before PM2 starts the backend:
+explicit migrations, and grants the runtime role before PM2 starts the backend:[^documentation-snapshot]
 
 ```bash
 make postgres-bootstrap
@@ -84,7 +90,7 @@ For the optional HTTPS variant of this PM2 workflow, see
 Use direct commands only to isolate a local startup problem; they are not the
 normal development workflow. From separate terminals, run the backend from
 `apps/sumweave` with `go run ./cmd/sumweave start-all --env local`
-and the UI from `apps/sumweave-ui` with `npm run dev`.
+and the UI from `apps/sumweave-ui` with `npm run dev`.[^documentation-snapshot]
 
 If the data screen still shows a browse-first availability `404` after a PM2 restart, check `pm2 status`: the UI proxies `/api/v1/*` to port `4501`, and a stale non-PM2 `sumweave start` process on that port can keep PM2's backend stopped. Stop the stray listener before starting the PM2 API again.
 
@@ -94,7 +100,7 @@ If the data screen still shows a browse-first availability `404` after a PM2 res
 PM2 does not run a scheduler loop. From `apps/sumweave`, use
 `go run ./cmd/sumweave jobs enqueue-due --env local` when a scheduler tick is
 needed. The worker executes published commands; [background processing](../architecture/background-processing.md)
-explains `--once` and lazy job observation.
+explains `--once` and lazy job observation.[^documentation-snapshot]
 
 Startup never substitutes for schema migration. `make postgres-bootstrap` starts
 and waits for Compose, provisions owner/migrator/runtime roles and the local/test
@@ -120,3 +126,8 @@ For code changes, bootstrap PostgreSQL before ordinary backend tests, then run
 `make affected-lint-test` from the root. Module instructions may define a narrower
 completion scope. Nx examples and testing journeys are in
 [development and verification](../development/verification.md).
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^contributing]: CONTRIBUTING.md.
+[^ecosystem-config-js]: ecosystem.config.js.

@@ -1,6 +1,6 @@
 # Development
 
-- [Development and verification](verification.md) - Nx, module checks, and finance test journeys.
-- [Go coding guide](../golang-coding-guide.md) - Implementation and testing conventions.
-- [Testing best practices](../testing-best-practices.md) - Small, behavior-focused tests.
-- [Maintaining documentation](documentation.md) - OKF lifecycle, provenance, paths, and OpenSpec workflow.
+* [Maintaining the knowledge bundle](documentation.md) - OKF 0.3 authoring, sources, trust, lifecycle, navigation, and validation.
+* [Development and verification](verification.md) - Module checks, Nx tasks, and reproducible finance verification journeys.
+* [Go coding guide](../golang-coding-guide.md) - Repository conventions for Go dependencies, errors, and tests.
+* [Testing best practices](../testing-best-practices.md) - Behavior-focused testing with small fixtures and minimal scope.

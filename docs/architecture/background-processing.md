@@ -2,11 +2,19 @@
 type: Architecture
 title: "Background processing"
 description: "Durable commands, independent events, optional jobs, and recovery."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/ARCHITECTURE.md"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/wireup/jobs.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/jobs/worker.go"
+  - id: architecture
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/ARCHITECTURE.md"
+    title: "docs/ARCHITECTURE.md"
+  - id: jobs-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/wireup/jobs.go"
+    title: "apps/sumweave/internal/wireup/jobs.go"
+  - id: worker-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/apps/sumweave/internal/jobs/worker.go"
+    title: "apps/sumweave/internal/jobs/worker.go"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/architecture/background-processing.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Background processing
@@ -14,7 +22,7 @@ sources:
 Appdispatch owns durable transport. Jobs add optional product visibility to a
 selected consumer; they are not another execution queue. See [architecture](../ARCHITECTURE.md)
 for package ownership and [local development](../operations/local-development.md)
-for process commands.
+for process commands.[^documentation-snapshot][^architecture][^jobs-go][^worker-go]
 
 ## Process responsibilities
 
@@ -29,7 +37,7 @@ its configured subscription attempts and two idle polls. This bounded diagnostic
 mode is not a broker-wide completion barrier; use an isolated or reseeded DB.
 Normal execution cancels and joins all routers on shutdown or router failure,
 then closes the shared publisher/database. Router construction alone does not
-start consumption; the migration root constructs neither publisher nor router.
+start consumption; the migration root constructs neither publisher nor router.[^documentation-snapshot]
 
 ## Scheduling, delivery, and observed lifecycle
 
@@ -39,7 +47,7 @@ then reads finance-owned bank-connection schedules and the finance-owned daily F
 refresh schedule. It publishes one semantic command per due occurrence, advances
 the schedule, and stores the returned message ID as the future reference in one
 application-database transaction. It does not use a generic schedule registry,
-execute provider work, or create a job row.
+execute provider work, or create a job row.[^documentation-snapshot]
 
 Message delivery is at least once. Consumer handlers must tolerate duplicate
 delivery. Routers recover panics, retry failures with the configured bounded
@@ -110,15 +118,21 @@ matching consume it independently in groups `finance.classification.v1` and
 `finance.transfer-matching.v1`. They create no job projections and do not change
 the bank-sync job outcome. Earlier windows remain actionable after a later
 window fails. See [classification](../product/classification.md),
-[transfer matching](../product/transfer-matching.md), and [provider sync](../finance-provider-sync-architecture.md).
+[transfer matching](../product/transfer-matching.md), and [provider sync](../finance-provider-sync-architecture.md).[^documentation-snapshot]
 
 ## Contracts and implementation
 
-Repository references below are outside this OKF bundle:
+Requirements below are in this bundle; implementation references are external:[^documentation-snapshot]
 
-- [Durable jobs scenarios](../../openspec/specs/durable-jobs/spec.md)
-- [Domain event scenarios](../../openspec/specs/domain-event-pubsub/spec.md)
-- [Process-mode scenarios](../../openspec/specs/backend-process-modes/spec.md)
+- [Durable jobs scenarios](../requirements/durable-jobs.md)
+- [Domain event scenarios](../requirements/domain-event-pubsub.md)
+- [Process-mode scenarios](../requirements/backend-process-modes.md)
 - [Transport](../../apps/sumweave/internal/appdispatch/),
   [jobs](../../apps/sumweave/internal/jobs/), and
   [worker composition](../../apps/sumweave/internal/wireup/jobs.go)
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^architecture]: docs/ARCHITECTURE.md.
+[^jobs-go]: apps/sumweave/internal/wireup/jobs.go.
+[^worker-go]: apps/sumweave/internal/jobs/worker.go.

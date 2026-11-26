@@ -2,12 +2,22 @@
 type: Reference
 title: "Transaction classification"
 description: "Ordered category and additive-tag rules, timestamp ranges, and accepted limits."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/classification-phase0-design.md"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/service_classification.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/persistence/classification_transaction_store.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/persistence/models.go"
+  - id: classification-phase0-design
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/classification-phase0-design.md"
+    title: "docs/enrichment-pipeline/classification-phase0-design.md"
+  - id: service-classification-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/service_classification.go"
+    title: "finance/service_classification.go"
+  - id: classification-transaction-store-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/persistence/classification_transaction_store.go"
+    title: "finance/persistence/classification_transaction_store.go"
+  - id: models-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/persistence/models.go"
+    title: "finance/persistence/models.go"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/product/classification.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Transaction classification
@@ -15,7 +25,7 @@ sources:
 Phase 0 is implemented. Rules assign a category and optional additive tags to
 eligible uncategorized transactions. The same range classifier serves explicit
 runs and committed bank-sync windows. [Architecture](../ARCHITECTURE.md) defines
-product direction; [transfer matching](transfer-matching.md) is a separate operation.
+product direction; [transfer matching](transfer-matching.md) is a separate operation.[^documentation-snapshot][^classification-phase0-design][^service-classification-go][^classification-transaction-store-go][^models-go]
 
 Use the Rules screen to create, edit, delete, and move rules. A manual category
 assignment can offer optional rule creation from the saved description/category
@@ -27,7 +37,7 @@ makes a row eligible for later classification; there is no protected
 
 Classification is a finance service that fetches the tenant's ordered rules
 when execution starts, keeps them in memory, and applies the first matching
-rule to eligible transactions.
+rule to eligible transactions.[^documentation-snapshot]
 
 - Finance owns classification rules and their tag association table.
 - Appdispatch and the worker execute background classification.
@@ -40,7 +50,7 @@ rule to eligible transactions.
 
 Finance paths below are relative to `/api/v1/finance/tenants/{tenantId}`. Apply
 existing authentication and tenant-membership checks. Validate rule and category
-ownership within that tenant; requester identity comes from authentication.
+ownership within that tenant; requester identity comes from authentication.[^documentation-snapshot]
 
 ### Rules management
 
@@ -150,7 +160,7 @@ already categorized transactions are skipped.
 ## Database schema shape
 
 Classification uses `finance_classification_rules` and its finance-owned
-`finance_classification_rule_tags` association:
+`finance_classification_rule_tags` association:[^documentation-snapshot]
 
 - `id`: primary key, using the existing string-ID convention.
 - `tenant_id`: required tenant reference.
@@ -178,7 +188,7 @@ never clears existing transaction tags or saves a stale whole transaction.
 
 Commands and events use existing appdispatch storage. Jobs retain
 their existing lifecycle metadata. Finance persists rules and ledger category
-changes.
+changes.[^documentation-snapshot]
 
 ## Execution model
 
@@ -346,12 +356,12 @@ eligibility, and category changes can also race between reads and writes.
 
 ## Verification and formal contracts
 
-The [classification scenarios](../../openspec/specs/transaction-classification/spec.md)
-and [operator UI scenarios](../../openspec/specs/finance-operator-ui/spec.md)
-are external repository acceptance references. The
+The [classification scenarios](../requirements/transaction-classification.md)
+and [operator UI scenarios](../requirements/finance-operator-ui.md)
+are acceptance requirements within this bundle. The
 [synthetic API flow](../manual-e2e/synthetic-provider-flow-e2e.md) and
 [UI flow](../manual-e2e/synthetic-provider-ui-e2e.md) are reproducible runbooks,
-not proof that a run has completed.
+not proof that a run has completed.[^documentation-snapshot]
 
 The accepted [shared safe error contract](../integrations/direct-access.md#shared-errors)
 requires a JSON envelope. Ordinary blank or duplicate rule-tag validation returns
@@ -365,7 +375,7 @@ than the required envelope. A non-size-limit request-body read failure in the
 same wrapper also returns an empty `400`; body-size-limit failures take the
 separate `413` path. These early rejections do not call the rule service or
 publish work. Authentication precedes the wrapper; normal tenant checks remain
-in the service. The [classification spec](../../openspec/specs/transaction-classification/spec.md)
+in the service. The [classification spec](../requirements/transaction-classification.md)
 keeps the accepted error contract and records the gap.
 
 Verify matching order, eligibility, tenant isolation, date boundaries, rule
@@ -393,7 +403,7 @@ code changes.
 
 ## Existing implementation references
 
-These are repository files outside the OKF bundle.
+Requirements below are in this bundle; repository implementation and test references are external.[^documentation-snapshot]
 
 - [Classifier](../../finance/service_classification.go)
 - [Conditional category and additive-tag write](../../finance/persistence/classification_transaction_store.go)
@@ -410,3 +420,10 @@ These are repository files outside the OKF bundle.
 - [Finance dispatch/job adapter](../../apps/sumweave/internal/financeapp/register.go)
 - [Worker composition](../../apps/sumweave/internal/wireup/jobs.go)
 - [Jobs HTTP API](../../apps/sumweave/internal/api/http/v1controllers/jobs.go)
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^classification-phase0-design]: docs/enrichment-pipeline/classification-phase0-design.md.
+[^service-classification-go]: finance/service_classification.go.
+[^classification-transaction-store-go]: finance/persistence/classification_transaction_store.go.
+[^models-go]: finance/persistence/models.go.

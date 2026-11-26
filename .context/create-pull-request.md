@@ -1,3 +1,7 @@
+> Template-derived reference. Apply only when relevant to the assigned work.
+> Current [repository rules](../AGENTS.md), module instructions, and
+> [documentation conventions](../docs/development/documentation.md) take precedence.
+
 # Instruction to create pull request
 
 This is an instruction to follow when user is referencing it. Only use this instruction when explicitly requested by the user.

@@ -2,19 +2,29 @@
 type: Product reference
 title: "Personal finance capabilities"
 description: "Current finance workflows, reporting semantics, and product limits."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/openspec/specs/finance-management/spec.md"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/reporting.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/fx.go"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/AGENTS.md"
+  - id: spec
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/openspec/specs/finance-management/spec.md"
+    title: "openspec/specs/finance-management/spec.md"
+  - id: reporting-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/reporting.go"
+    title: "finance/reporting.go"
+  - id: fx-go
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/fx.go"
+    title: "finance/fx.go"
+  - id: agents
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/finance/AGENTS.md"
+    title: "finance/AGENTS.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/product/overview.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Personal finance capabilities
 
 Sumweave's product direction is personal budgeting and finance tracking. The
 current implementation covers finance tracking; budget planning is not yet
-implemented.
+implemented.[^documentation-snapshot][^spec][^reporting-go][^fx-go][^agents]
 
 Sumweave tracks personal finances for one or more tenants. A tenant is a shared
 financial workspace, such as a household, with a name, display currency,
@@ -34,7 +44,7 @@ An account belongs to exactly one tenant and has its own currency. Manual,
 imported, and linked-bank workflows share the same ledger. Linking can attach a
 provider account to an existing manual account. Balances are derived from
 transactions; adjustments use visible reconciliation or opening-balance rows.
-Provider balance snapshots are observations, not direct balance mutations.
+Provider balance snapshots are observations, not direct balance mutations.[^documentation-snapshot]
 
 Transactions retain source, kind, status, signed minor-unit amount, currency,
 effective timestamp, description, optional category, and tags. Members can edit
@@ -67,7 +77,7 @@ On-demand and scheduled sync share the same
 [requested-window pipeline](../finance-provider-sync-architecture.md).
 A newly active connection receives an enabled daily schedule with its first run
 24 hours after linking. Scheduler ticks repair missing schedules without changing
-existing state. Linking alone does not execute the scheduled occurrence.
+existing state. Linking alone does not execute the scheduled occurrence.[^documentation-snapshot]
 
 Current provider source data is a sanitized, schema-derived snapshot for the
 connection, account, balance, or transaction. Distinct document kinds have
@@ -82,7 +92,7 @@ logs, and user-facing job data.
 Account import and transaction import have preview/validation, explicit
 confirmation, durable execution, and finance-owned audit/result views. Accounts
 are resolved from tenant-local names so a transaction file can span accounts.
-Repeat imports use the existing deduplication behavior.
+Repeat imports use the existing deduplication behavior.[^documentation-snapshot]
 
 Transaction CSV input has seven fixed required headers:
 `Date`, `Account`, `Category`, `Tags`, `Expense amount`, `Income amount`, and
@@ -103,7 +113,7 @@ display currency. Historical transaction-date FX reconstruction is not promised;
 the initial design's historical-rate target is superseded by current-rate behavior.
 Frankfurter is the implemented configured provider; NBP/ECB constructors remain
 stubs that return `ErrFXProviderNotImplemented`, not working fallback integrations. FX refresh is explicit or driven by finance-owned daily
-schedule state. Missing conversions remain visible as incomplete totals.
+schedule state. Missing conversions remain visible as incomplete totals.[^documentation-snapshot]
 
 - Booked visible ordinary transactions contribute by amount sign.
 - Refunds reduce expense in their category rather than becoming ordinary income.
@@ -133,7 +143,7 @@ tokens and the HTTP-only `swmd` client expose a deliberately narrow existing-rou
 allowlist; see [direct access](../integrations/direct-access.md). Admin access-token
 management and finance diagnostics are supporting app functions. Generic Chat,
 agent profiles/execution, and model-provider configuration are
-[experimental](../experiments/agent-runtime.md).
+[experimental](../experiments/agent-runtime.md).[^documentation-snapshot]
 
 Asynchronous triggers return a dispatch message ID, materialized as a job on
 first worker delivery. Only a flow holding an expected new ID treats its early
@@ -151,12 +161,12 @@ during alpha.
 
 ## Contracts and verification
 
-These repository references are outside the OKF bundle:
+Requirements below are in this bundle; repository implementation and UI references are external:[^documentation-snapshot]
 
-- [Finance requirements](../../openspec/specs/finance-management/spec.md)
-- [Operator UI requirements](../../openspec/specs/finance-operator-ui/spec.md)
-- [Fixture requirements](../../openspec/specs/finance-fixtures/spec.md)
-- [Canonical login and Finance shell](../../openspec/specs/sumweave-ui-bootstrap-rails/spec.md)
+- [Finance requirements](../requirements/finance-management.md)
+- [Operator UI requirements](../requirements/finance-operator-ui.md)
+- [Fixture requirements](../requirements/finance-fixtures.md)
+- [Canonical login and Finance shell](../requirements/sumweave-ui-bootstrap-rails.md)
 - [HTTP/OpenAPI contract](../../apps/sumweave/internal/api/http/v1routes.yaml)
 - [Ledger/reporting implementation](../../finance/reporting.go)
 - [UI design system](../../apps/sumweave-ui/DESIGN.md) and [screen reference](../../apps/sumweave-ui/ui-wireframe.md)
@@ -166,3 +176,10 @@ balances, entry, linking, import, FX, scheduling, and shell journeys each have
 focused runbooks. [Development verification](../development/verification.md)
 links the automated finance smoke suite. These are procedures, not a record of
 new E2E results.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^spec]: openspec/specs/finance-management/spec.md.
+[^reporting-go]: finance/reporting.go.
+[^fx-go]: finance/fx.go.
+[^agents]: finance/AGENTS.md.

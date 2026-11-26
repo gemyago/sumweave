@@ -6,7 +6,12 @@ status: deprecated
 superseded_by: /integrations/direct-access.md
 tags: [history]
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-design.md"
+  - id: integration-layer-design
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/integration-layer/integration-layer-design.md"
+    title: "docs/integration-layer/integration-layer-design.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/integration-layer/integration-layer-design.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 > Historical source. This pre-implementation design is historical. Some package and middleware shapes and indexes differ from the delivered implementation. Use the current reference for actual contracts.
@@ -16,11 +21,11 @@ sources:
 
 Status: draft for discussion. The [product requirements](integration-layer-prd.md)
 define expected behavior, and [Architecture](../ARCHITECTURE.md) remains
-authoritative.
+authoritative.[^documentation-snapshot][^integration-layer-design]
 
 ## Design decisions
 
-Phase 1 uses one application API and one set of finance contracts.
+Phase 1 uses one application API and one set of finance contracts.[^documentation-snapshot]
 
 - Personal access tokens are an alternative credential on an explicit allowlist
   of existing routes.
@@ -36,7 +41,7 @@ Phase 1 uses one application API and one set of finance contracts.
 
 ## Repository findings
 
-The requested operations already have application and finance support:
+The requested operations already have application and finance support:[^documentation-snapshot]
 
 - app-owned routes are OpenAPI-first in
   `apps/sumweave/internal/api/http/v1routes.yaml` and generated with apigen;
@@ -91,7 +96,7 @@ Admin > Access tokens                 swmd or HTTPS
 ```
 
 Browser JWTs retain access to the current application surface. Access tokens
-are accepted only for explicitly marked operations in the same surface.
+are accepted only for explicitly marked operations in the same surface.[^documentation-snapshot]
 
 ## Credential model
 
@@ -99,7 +104,7 @@ are accepted only for explicitly marked operations in the same surface.
 
 An access token belongs to exactly one existing auth user. The token does not
 copy tenant grants. Once authenticated, its user ID goes through the existing
-finance service membership checks.
+finance service membership checks.[^documentation-snapshot]
 
 Permissions remain a small closed enum:
 
@@ -241,7 +246,7 @@ availability, while registered-route tests verify the executable policy.
 
 Add one app-owned authentication table through the explicit `db-migrate` path.
 No finance, appdispatch, jobs, or runtime table is added or changed for token
-storage.
+storage.[^documentation-snapshot]
 
 The logical table is `auth_access_tokens`; with the default application prefix
 it is `sumweave_auth_access_tokens`.
@@ -299,7 +304,7 @@ and logger through explicit wireup.
 ## Token lifecycle
 
 `AccessTokenService` owns create, list, rotate, revoke, and validate behavior.
-The store owns persistence only.
+The store owns persistence only.[^documentation-snapshot]
 
 - Create uses the caller's user ID, inserts one active row, and returns metadata
   plus the one-time token.
@@ -323,7 +328,7 @@ another replacement.
 
 ### Existing API additions
 
-Add four browser-session-only operations to the existing `auth` controller:
+Add four browser-session-only operations to the existing `auth` controller:[^documentation-snapshot]
 
 - `GET /api/v1/auth/access-tokens` lists the signed-in user's token metadata;
 - `POST /api/v1/auth/access-tokens` creates a token and returns `201`;
@@ -370,7 +375,7 @@ analytics, or the clipboard without an explicit copy action.
 
 Add credential policy to the authoritative
 `apps/sumweave/internal/api/http/v1routes.yaml` operations and their existing
-controller methods. No route below is duplicated.
+controller methods. No route below is duplicated.[^documentation-snapshot]
 
 ### Current user and tenant discovery
 
@@ -449,7 +454,7 @@ complete token allowlist so accidental exposure fails verification.
 
 ## Requester-scoped jobs
 
-Token read is allowed on the existing routes:
+Token read is allowed on the existing routes:[^documentation-snapshot]
 
 - `GET /api/v1/jobs`;
 - `GET /api/v1/jobs/{jobId}`.
@@ -477,7 +482,7 @@ messages, provider credentials, and dead-letter data remain absent.
 ## Shared errors
 
 Use one error contract and mapper for existing application routes. Extend the
-shared `Error` schema to require:
+shared `Error` schema to require:[^documentation-snapshot]
 
 ```json
 {
@@ -507,7 +512,7 @@ membership denial becomes `403` rather than the current unauthorized mapping.
 ## Durable execution and idempotency
 
 Add `integration` as a valid `CommandRequester` source. Existing finance
-controllers derive requester source from `Caller`:
+controllers derive requester source from `Caller`:[^documentation-snapshot]
 
 - browser session becomes `operator`;
 - access token becomes `integration`;
@@ -546,7 +551,7 @@ unchanged apart from accepting the new source string.
 ## Provider source data boundary
 
 No new provider ingestion or persistence is required. The existing finance
-controller calls `ProviderSnapshotService`, which already:
+controller calls `ProviderSnapshotService`, which already:[^documentation-snapshot]
 
 - verifies tenant membership;
 - checks account or transaction attachment within that tenant;
@@ -561,7 +566,7 @@ headers, connection secrets, or literal HTTP bodies.
 
 Add a second Go entrypoint at `apps/sumweave/cmd/swmd`. It is an HTTP client and
 must not import finance persistence, server wireup, runtime, appdispatch, or job
-stores.
+stores.[^documentation-snapshot]
 
 Its client package owns:
 
@@ -627,7 +632,7 @@ The CLI can be run with `go run ./cmd/swmd` or built directly from the
 
 ## Package and composition changes
 
-Implementation responsibilities are:
+Implementation responsibilities are:[^documentation-snapshot]
 
 - `internal/auth/access_token_store.go`: access-token persistence only;
 - `internal/auth/access_token_service.go`: lifecycle and validation behavior;
@@ -697,7 +702,7 @@ components. No dedicated access-token command root is added.
 - Shared API errors contain only documented fields and correlation ID.
 
 Use Mockery for dependency mocks and registered routes for controller tests, in
-line with module rules.
+line with module rules.[^documentation-snapshot]
 
 ### UI and direct client
 
@@ -737,3 +742,7 @@ line with module rules.
 6. Add idempotency and token-write policy to the existing finance triggers.
 7. Add `swmd` over the shared API contracts.
 8. Complete registered-route, module, affected, UI, and manual end-to-end checks.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^integration-layer-design]: docs/integration-layer/integration-layer-design.md.

@@ -2,21 +2,25 @@
 type: Runbook
 title: "Finance Account Balances Manual E2E"
 description: "Manual verification procedure for finance account balances e2e."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-account-balances-e2e.md"
+  - id: finance-account-balances-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-account-balances-e2e.md"
+    title: "docs/manual-e2e/finance-account-balances-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-account-balances-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Finance Account Balances Manual E2E
 
 Follow preparation steps in [README.md](./README.md) and get the API token before starting.
-Run `mkdir -p tmp/manual-e2e` from the repository root before using the commands.
+Run `mkdir -p tmp/manual-e2e` from the repository root before using the commands.[^documentation-snapshot][^finance-account-balances-e2e]
 
 This guide is API-only. Do not use the UI for this check.
 
 ## 1. Create a fresh tenant using a unique tenant name
 
-Use a unique tenant name on each run so the test data is easy to identify.
+Use a unique tenant name on each run so the test data is easy to identify.[^documentation-snapshot]
 
 ```bash
 RUN_TAG=$(date +%Y%m%d-%H%M%S) && TENANT_NAME="finance-balances-e2e-${RUN_TAG}" && CREATE_STATUS=$(curl -sS -o tmp/manual-e2e/finance-balances-tenant-create.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data "{\"name\":\"${TENANT_NAME}\",\"displayCurrency\":\"USD\",\"seedDefaults\":false}") && test "$CREATE_STATUS" = "200" && TENANT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-balances-tenant-create.json"))["id"])') && printf 'tenantId=%s\n' "$TENANT_ID"
@@ -29,7 +33,7 @@ Expected:
 
 ## 2. Create 2-3 accounts with the account create endpoint
 
-Create checking, savings, and cash accounts:
+Create checking, savings, and cash accounts:[^documentation-snapshot]
 
 ```bash
 CHECKING_STATUS=$(curl -sS -o tmp/manual-e2e/finance-balances-account-checking.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Checking","kind":"manual","currency":"USD"}') && test "$CHECKING_STATUS" = "200" && CHECKING_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-balances-account-checking.json"))["id"])') && SAVINGS_STATUS=$(curl -sS -o tmp/manual-e2e/finance-balances-account-savings.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Savings","kind":"manual","currency":"USD"}') && test "$SAVINGS_STATUS" = "200" && SAVINGS_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-balances-account-savings.json"))["id"])') && CASH_STATUS=$(curl -sS -o tmp/manual-e2e/finance-balances-account-cash.json -w "%{http_code}" -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data '{"name":"Cash","kind":"manual","currency":"USD"}') && test "$CASH_STATUS" = "200" && CASH_ACCOUNT_ID=$(python3 -c 'import json; print(json.load(open("tmp/manual-e2e/finance-balances-account-cash.json"))["id"])') && printf 'checking=%s\nsavings=%s\ncash=%s\n' "$CHECKING_ACCOUNT_ID" "$SAVINGS_ACCOUNT_ID" "$CASH_ACCOUNT_ID"
@@ -53,14 +57,14 @@ curl -sS -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/tran
 curl -sS -X POST "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/transactions" -H "Authorization: Bearer ${ACCESS_TOKEN}" -H "Content-Type: application/json" --data "{\"accountId\":\"${CHECKING_ACCOUNT_ID}\",\"source\":\"manual\",\"kind\":\"regular\",\"status\":\"pending\",\"amountMinor\":-12000,\"currency\":\"USD\",\"description\":\"Pending card charge\",\"effectiveAt\":\"2026-01-07T09:00:00Z\"}" && printf 'transaction set created\n'
 ```
 
-Expected booked and pending math:
+Expected booked and pending math:[^documentation-snapshot]
 
 - checking booked `290000`, pending `-12000`
 - savings booked `35000`, pending `0`
 
 ## 4. Verify account list and detail balances
 
-Verify the account list:
+Verify the account list:[^documentation-snapshot]
 
 ```bash
 curl -sS "http://127.0.0.1:4501/api/v1/finance/tenants/${TENANT_ID}/accounts" -H "Authorization: Bearer ${ACCESS_TOKEN}"
@@ -80,9 +84,13 @@ Expected:
 
 ## 5. If anything is wrong, report it
 
-If any balance is incorrect, report:
+If any balance is incorrect, report:[^documentation-snapshot]
 
 - request payloads
 - actual response
 - expected response
 - suspected mismatch
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-account-balances-e2e]: docs/manual-e2e/finance-account-balances-e2e.md.

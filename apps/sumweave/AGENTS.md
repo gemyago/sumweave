@@ -53,7 +53,9 @@ Follow [local development](../../docs/operations/local-development.md) for
 installation, PostgreSQL bootstrap, PM2, logs, HTTPS, and startup diagnostics.
 Run PM2 at the repository root; backend CLI paths are relative to this module.
 Standard startup is root `make postgres-bootstrap`, then `pm2 start ecosystem.config.js`.
-The API and worker are `api` and `worker` in namespace `backend`; UI is `ui`.
+PM2 runs the backend processes in the `backend` namespace as `api` and `worker`;
+UI is `ui`. Use `pm2 start|stop|restart|delete backend` for backend lifecycle
+and `pm2 logs backend` for combined backend logs.
 
 Follow [release and deployment](../../docs/operations/release-deployment.md) for
 the host build, embedded UI, and container/Helm runbooks.

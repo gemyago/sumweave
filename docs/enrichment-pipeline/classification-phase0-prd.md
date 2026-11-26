@@ -6,17 +6,22 @@ status: deprecated
 superseded_by: /product/classification.md
 tags: [history]
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/classification-phase0-prd.md"
+  - id: classification-phase0-prd
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/enrichment-pipeline/classification-phase0-prd.md"
+    title: "docs/enrichment-pipeline/classification-phase0-prd.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/enrichment-pipeline/classification-phase0-prd.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
-> Historical source. This requirements narrative is retained for history. Current behavior, tags, contracts, and limits are maintained in the replacement; granular acceptance scenarios remain in OpenSpec.
+> Historical source. This requirements narrative is retained for history. Current behavior, tags, contracts, and limits are maintained in the replacement; granular acceptance scenarios are maintained in [requirements](../requirements/transaction-classification.md).
 > Current reference: [Classification Phase 0 PRD replacement](../product/classification.md).
 
 # Classification Phase 0
 
 ## Goal
 
-Provide a simple, deterministic foundation for transaction classification before introducing more advanced classification strategies.
+Provide a simple, deterministic foundation for transaction classification before introducing more advanced classification strategies.[^documentation-snapshot][^classification-phase0-prd]
 
 Phase 0 focuses on user-manageable rules and predictable classification behavior. System design and implementation details are intentionally out of scope for this document for now.
 
@@ -39,7 +44,7 @@ The governing rule is simple: a transaction with a category is already classifie
 
 ### 3. Transaction eligibility
 
-The following eligibility requirements apply to both automatic and explicit classification:
+The following eligibility requirements apply to both automatic and explicit classification:[^documentation-snapshot]
 
 - The transaction has no category.
 - The transaction is booked/settled and has kind `regular`, `expense`, `income`, or `refund`; all four represent ordinary transactions and refunds for classification.
@@ -160,7 +165,7 @@ Classification skips categories present when checked, including categories assig
 
 ## Classification ownership / provenance
 
-Phase 0 does not require category-assignment provenance to decide eligibility: the presence of a category is sufficient to protect it. Distinguishing manual and automatic assignments for future reclassification is deferred.
+Phase 0 does not require category-assignment provenance to decide eligibility: the presence of a category is sufficient to protect it. Distinguishing manual and automatic assignments for future reclassification is deferred.[^documentation-snapshot]
 
 If a user manually clears a category, the transaction becomes uncategorized and may be classified by a subsequent applicable operation. Phase 0 has no separate protected "keep uncategorized" state.
 
@@ -183,7 +188,7 @@ If a user manually clears a category, the transaction becomes uncategorized and 
 
 ## Phase 0 non-goals
 
-The following are not required for Phase 0:
+The following are not required for Phase 0:[^documentation-snapshot]
 
 - LLM-based classification
 - embeddings or semantic similarity
@@ -198,4 +203,8 @@ The following are not required for Phase 0:
 
 ## Potential future extension
 
-Transaction enrichment may later include transfer matching across tracked accounts. It may share classification orchestration and explicit-run workflows, while remaining separate from category classification. Reclassification of already categorized transactions may be considered in a later phase.
+Transaction enrichment may later include transfer matching across tracked accounts. It may share classification orchestration and explicit-run workflows, while remaining separate from category classification. Reclassification of already categorized transactions may be considered in a later phase.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^classification-phase0-prd]: docs/enrichment-pipeline/classification-phase0-prd.md.

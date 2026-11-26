@@ -83,7 +83,7 @@ Use the maintained repository references for cross-module behavior:
 ## Repository integration
 
 - **Module:** `github.com/gemyago/sumweave/apps/sumweave` with **`replace github.com/gemyago/sumweave/runtime => ../../runtime`** for local **`runtime/`** development.
-- **`apps/sumweave/Makefile`:** after root **`make postgres-bootstrap`**, **`make lint`** and ordinary tagged **`make test`** (the single **`.cover/profile.out`** checked by **`.testcoverage.yaml`**), plus **`make dist/bin`** (rebuilds UI embed assets, validates `embeddedui/dist/index.html`, then `go build`).
+- **`apps/sumweave/Makefile`:** after root **`make postgres-bootstrap`**, **`make lint`** and ordinary **`make test`** (the single **`.cover/profile.out`** checked by **`.testcoverage.yaml`**), plus **`make dist/bin`** (rebuilds UI embed assets, validates `embeddedui/dist/index.html`, then `go build`).
 - **Root `Makefile`** runs module targets before **`apps/sumweave-ui`**; Go coverage from this module's `.cover/profile.out` is merged into the root HTML report.
 
 ## API integration

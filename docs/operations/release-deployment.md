@@ -2,10 +2,16 @@
 type: Runbook
 title: "Release and deployment"
 description: "Host-built artifacts, container packaging, and deployment entry points."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/build/README.md"
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/deploy/README.md"
+  - id: readme
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/build/README.md"
+    title: "build/README.md"
+  - id: readme-2
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/deploy/README.md"
+    title: "deploy/README.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/operations/release-deployment.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Release and deployment
@@ -15,7 +21,7 @@ once, embeds it into CGO-disabled Linux amd64/arm64 Go binaries, and stages the
 platform-agent skill root. Docker only packages those outputs. Embedded UI
 serving is used at runtime; an absent embedded `dist/index.html` leaves the
 backend API-only. The skill root is intentionally empty until finance-specific
-skills are requested; packaging it does not make generic agents product scope.
+skills are requested; packaging it does not make generic agents product scope.[^documentation-snapshot][^readme][^readme-2]
 
 The following repository runbooks are authoritative and external to this bundle:
 
@@ -38,3 +44,8 @@ process health, not database readiness. Optional file TLS/private-key integratio
 need explicit secret/volume decisions. See [persistence](../architecture/persistence.md)
 for migration ownership and [background processing](../architecture/background-processing.md)
 for retries, worker recovery, retention policy, and shutdown ordering.
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^readme]: build/README.md.
+[^readme-2]: deploy/README.md.

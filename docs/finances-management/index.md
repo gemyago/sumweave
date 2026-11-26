@@ -1,4 +1,3 @@
 # Finances management
 
-- [Current finance capabilities](../product/overview.md) - Implemented workflows and limits.
-- [Historical initial finance design](design.md) - Original implementation target and proposals.
+* [Initial finance design](design.md) - Historical source retained; use the linked current reference.

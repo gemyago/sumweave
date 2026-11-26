@@ -2,9 +2,17 @@
 type: Architecture
 title: "Product architecture"
 description: "Product direction, module ownership, and required supporting infrastructure."
-status: stable
 sources:
-  - resource: "repository product clarification of 2026-11-26 and current app composition"
+  - id: local-lifecycle
+    resource: "/operations/local-development.md"
+    title: "Current local development and explicit migration requirements"
+  - id: repository-policy
+    resource: "repository product clarification of 2026-11-26 and current app composition"
+    title: "repository product clarification of 2026-11-26 and current app composition"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/ARCHITECTURE.md"
+    title: "Reviewed documentation checkpoint before this format migration"
+generated: { by: "codex/gpt-6.1-sol", at: "2026-11-26T08:28:13+01:00" }
 ---
 
 # Architecture
@@ -12,7 +20,7 @@ sources:
 Sumweave is a finance-only system. Its product domain is tenant-aware
 financial management: members, accounts, categories and tags, ledger
 transactions and transfers, CSV imports, bank connections and sync, current
-provider snapshots, balances, reports, and FX.
+provider snapshots, balances, reports, and FX.[^documentation-snapshot][^repository-policy]
 
 ## Boundaries
 
@@ -64,7 +72,18 @@ current capabilities or promised additions.
 Generic agent execution, sessions, profiles, Chat, model-provider settings,
 and unused inherited functionality are experimental or potential extensions.
 Their presence in the executable does not promote them into product scope.
-Operational dependencies remain required even where they also serve experiments.
+Operational dependencies remain required even where they also serve experiments.[^documentation-snapshot]
+
+## Process and schema lifecycle
+
+`sumweave db-migrate` explicitly prepares the retained schemas before backend
+processes run. Local `make postgres-bootstrap` provisions PostgreSQL, runs that
+migration for the local and test environments, and grants runtime access.
+Standard local PM2 runs `sumweave start` and `sumweave jobs worker` separately;
+`sumweave start-all` combines HTTP, worker, and scheduler for startup diagnostics.
+Startup does not replace schema preparation. Follow
+[local development](operations/local-development.md) for the commands and
+working directories.[^local-lifecycle]
 
 ## Detailed references
 
@@ -79,6 +98,11 @@ Operational dependencies remain required even where they also serve experiments.
 - [Release and deployment](operations/release-deployment.md) links the maintained runbooks.
 - [Experiments](experiments/agent-runtime.md) explains the retained generic runtime.
 
-[OpenSpec requirements](development/documentation.md#openspec-and-current-knowledge)
+[Acceptance requirements](requirements/index.md)
 retain granular acceptance scenarios. This page remains the product-direction
-authority; the [bundle index](index.md) is the navigation entry.
+authority; the [bundle index](index.md) is the navigation entry.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+[^local-lifecycle]: Current local development and explicit migration requirements.
+
+[^repository-policy]: repository product clarification of 2026-11-26 and current app composition.

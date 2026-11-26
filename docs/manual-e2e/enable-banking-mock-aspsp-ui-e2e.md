@@ -2,14 +2,18 @@
 type: Runbook
 title: "Enable Banking Mock ASPSP UI Manual E2E"
 description: "Manual verification procedure for enable banking mock aspsp ui e2e."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md"
+  - id: enable-banking-mock-aspsp-ui-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md"
+    title: "docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Enable Banking Mock ASPSP UI Manual E2E
 
-Follow preparation steps in [README.md](./README.md) first.
+Follow preparation steps in [README.md](./README.md) first.[^documentation-snapshot][^enable-banking-mock-aspsp-ui-e2e]
 
 This guide covers the browser flow for PKO linking through Enable Banking sandbox when the configured sandbox ASPSP is `Mock ASPSP`. It also covers how to prepare mock accounts and transactions before authorizing access.
 
@@ -21,11 +25,11 @@ environment with `docker compose down -v && make postgres-bootstrap`, then
 reseed the first `.local-users` entry if needed. Recreate the PM2 services from
 the repository root and confirm both health endpoints before continuing. This
 early-alpha workflow intentionally performs no SQLite data migration or
-compatibility copy.
+compatibility copy.[^documentation-snapshot]
 
 ## 1. Open the browser
 
-Use the default browser mode unless one of these is true:
+Use the default browser mode unless one of these is true:[^documentation-snapshot]
 
 - the user explicitly asked for headed mode
 - the agent hit a problem that needs human intervention and the visible browser helps the user fix it
@@ -53,7 +57,7 @@ Expected:
 2. Open `http://127.0.0.1:5173/#/finance/connections`.
 3. Select or create the tenant you want to use for the run.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the Finance connections page shows the selected tenant
 - **Connect PKO with bank login** is enabled
@@ -65,14 +69,14 @@ Expected:
 3. If Enable Banking asks for email sign-in, use the primary AgentMail inbox from repo-root `.agentmail`.
 4. Read the Enable Banking email with AgentMail and open the one-time sign-in link in the same browser session.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - Enable Banking signs in as the primary AgentMail email
 - the browser reaches the Mock ASPSP authorization route
 
 ## 4. Prepare mock ASPSP accounts
 
-If the authorization page reports `No Account`, or if the run requires adding new accounts, click **Create Account** or open `https://enablebanking.com/cp/mock-aspsp` in the same signed-in browser session to manage accounts.
+If the authorization page reports `No Account`, or if the run requires adding new accounts, click **Create Account** or open `https://enablebanking.com/cp/mock-aspsp` in the same signed-in browser session to manage accounts.[^documentation-snapshot]
 
 To add an account:
 
@@ -88,7 +92,7 @@ Expected:
 
 ## 5. Add mock ASPSP transactions
 
-Mock transactions are managed per mock account.
+Mock transactions are managed per mock account.[^documentation-snapshot]
 
 1. On `https://enablebanking.com/cp/mock-aspsp`, click **Balances & Transactions** for the account you want to seed.
 2. In **Balances**, keep or edit the generated balance JSON template, then click the **Add** button in the Balances section.
@@ -124,7 +128,7 @@ Expected:
 
 ## 6. Authorize all required accounts
 
-Return to the active authorization URL. If you navigated away, use the URL from the current run, for example:
+Return to the active authorization URL. If you navigated away, use the URL from the current run, for example:[^documentation-snapshot]
 
 ```text
 https://enablebanking.com/cp/mock-aspsp/auth?redirect_url=...&valid_until=...&state=...
@@ -146,14 +150,14 @@ Expected:
 2. Click **Open latest finance job**.
 3. Confirm the job status.
 
-Expected:
+Expected:[^documentation-snapshot]
 
 - the job type is `finance.bank_connection_sync`
 - the job reaches `succeeded`
 
 ## 8. Verify provider source data and retired routes
 
-After a successful sync, inspect the tenant data in the app:
+After a successful sync, inspect the tenant data in the app:[^documentation-snapshot]
 
 1. Open a linked account detail and expand **Provider source data**. Confirm
    distinct `account` and `account_balance` rows, then reveal both documents.
@@ -169,7 +173,7 @@ After a successful sync, inspect the tenant data in the app:
 
 ## 9. If anything is wrong, report it
 
-Capture:
+Capture:[^documentation-snapshot]
 
 - selected Sumweave tenant name
 - Enable Banking signed-in email
@@ -177,3 +181,7 @@ Capture:
 - returned connection provider reference
 - sync job id and status
 - any inline alert text shown by Sumweave or Enable Banking
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^enable-banking-mock-aspsp-ui-e2e]: docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md.

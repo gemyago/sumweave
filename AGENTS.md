@@ -128,6 +128,15 @@ This repo does not maintain an npm/package distribution pipeline.
 - Active docs index: [docs/index.md](./docs/index.md)
 - Canonical domain vocabulary: [docs/domain-terminology.md](./docs/domain-terminology.md)
 - Product direction and module boundaries: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- Product and architecture docs must follow OKF 0.3 in `docs/`.
+- Use [okf-generate](./.agents/skills/okf-generate/SKILL.md) to write, update,
+  migrate, repair, or validate the bundle; use
+  [okf-consume](./.agents/skills/okf-consume/SKILL.md) when answering from it.
+- Skills come from the [official upstream skills](https://github.com/open-knowledge-format/open-knowledge-format/tree/main/skills).
+  [Local provenance](./.agents/skills/OKF-UPSTREAM.md) records the exact revision
+  and license. Copy only skills and required resources, without plugins.
+- Follow [documentation maintenance](./docs/development/documentation.md) for
+  requirements, historical records, provenance, navigation, and validation.
 
 ## Project Rules and Conventions
 
@@ -150,7 +159,9 @@ The rules are:
 - Keep personal finance tracking as the implemented product scope.
 - Treat generic agents, Chat, and model providers as experimental.
 - Keep npm distribution removed; retain adopted host release builds.
-- Natural-language approval completes OpenSpec review by default.
+- Keep acceptance scenarios under `docs/requirements/` with topic backlinks.
+- Keep retired change records historical under `docs/history/changes/`.
+- Use the relevant local OKF skills for product and architecture docs.
 - Seed/reseed requests default to the first `.local-users` entry.
 - Reseed means replace local seeded data, then reopen the live DB.
 - Launch local backend CLI commands from `apps/sumweave`.

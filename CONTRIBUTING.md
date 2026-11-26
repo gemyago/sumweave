@@ -13,23 +13,21 @@ and [domain vocabulary](docs/domain-terminology.md).
 - [Release and deployment](docs/operations/release-deployment.md) links the
   maintained host-build and Helm runbooks.
 
-## OpenSpec workflow
+## Documentation workflow
 
-Keep the existing OpenSpec workflow for proposed behavior changes and granular
-acceptance scenarios. Initialization, when setting up the tooling, remains:
+Product and architecture documentation follows OKF 0.3 in `docs/`. Use the local
+[okf-generate skill](.agents/skills/okf-generate/SKILL.md) to author or validate it
+and [okf-consume](.agents/skills/okf-consume/SKILL.md) to answer from it. The skills
+are copied from [official upstream](https://github.com/open-knowledge-format/open-knowledge-format/tree/main/skills);
+[provenance](.agents/skills/OKF-UPSTREAM.md) records the pinned revision and license.
 
-```sh
-npm install -D @fission-ai/openspec@latest
-openspec init
-```
+Update the [knowledge bundle](docs/development/documentation.md) alongside behavior
+changes. Keep detailed acceptance scenarios in [requirements](docs/requirements/index.md),
+linked from their current topic reference. Record accepted behavior separately
+from implementation gaps and proposals. Retain useful old designs, decisions,
+and reviews as [historical records](docs/history/index.md), with clear lifecycle
+labels; an old task checklist does not establish current delivery.
 
-Use `openspec propose` and `openspec apply` with the repository's manager prompts
-and standard artifact locations. Natural-language approval completes review by
-default. Current capability scenarios live in `openspec/specs/`; active changes
-live in `openspec/changes/`, and completed changes remain in its `archive/`.
-Do not replace scenarios with prose summaries or rewrite archived change records.
-
-Update the [OKF knowledge bundle](docs/development/documentation.md) alongside
-behavior changes. It explains current behavior and connects each topic to formal
-requirements, implementation, and verification. Generic agent and Chat work is
+Follow the maintenance guide for sources, claim footnotes, trust metadata,
+indexes, the change log, and validation. Generic agent and Chat work is
 [experimental](docs/experiments/agent-runtime.md), not the product roadmap.

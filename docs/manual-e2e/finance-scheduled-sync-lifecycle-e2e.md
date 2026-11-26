@@ -2,9 +2,13 @@
 type: Runbook
 title: "Finance scheduled bank-sync lifecycle E2E"
 description: "Manual verification procedure for finance scheduled sync lifecycle e2e."
-status: stable
 sources:
-  - resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-scheduled-sync-lifecycle-e2e.md"
+  - id: finance-scheduled-sync-lifecycle-e2e
+    resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/finance-scheduled-sync-lifecycle-e2e.md"
+    title: "docs/manual-e2e/finance-scheduled-sync-lifecycle-e2e.md"
+  - id: documentation-snapshot
+    resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/finance-scheduled-sync-lifecycle-e2e.md"
+    title: "Reviewed documentation checkpoint before this format migration"
 ---
 
 # Finance scheduled bank-sync lifecycle E2E
@@ -14,11 +18,11 @@ This is the deterministic API-only gate for a scheduled
 local Monobank HTTP fixture, and the local static Frankfurter-compatible FX
 fixture. All state and evidence live under
 `tmp/jobs-system-simplification-028-e2e/scheduled-bank`; no public provider
-network is used.
+network is used.[^documentation-snapshot][^finance-scheduled-sync-lifecycle-e2e]
 
 ## 1. Isolated API, bank fixture, and static FX fixture
 
-Run from the repository root. The first `.local-users` entry is used.
+Run from the repository root. The first `.local-users` entry is used.[^documentation-snapshot]
 
 ```bash
 set -euo pipefail
@@ -120,7 +124,7 @@ PY
 
 The fixture generator itself uses `NewStaticFXProvider` and writes deterministic
 seed rates. The worker refresh below additionally proves the configured local
-HTTP provider path.
+HTTP provider path.[^documentation-snapshot]
 
 ## 3. Publish due bank and FX commands, then prove both pending IDs
 
@@ -146,7 +150,7 @@ done
 
 `enqueue-due` publishes semantic finance commands and advances finance-owned
 bank/FX due state; it does not execute either workload or create job rows. The
-two `404` responses are the required API-only publication window.
+two `404` responses are the required API-only publication window.[^documentation-snapshot]
 
 ## 4. Run one bounded worker pass and verify terminal outcomes
 
@@ -178,7 +182,7 @@ should be `succeeded`; a sanitized `failed` result is only acceptable when the
 fixture or local provider was intentionally changed to a supported terminal
 business failure. Provider/network, payload, materialization, or terminal
 state-write failures are transport failures and are not a passing business
-failure result.
+failure result.[^documentation-snapshot]
 
 ## 5. Verify due-state advancement and repeat/idempotency
 
@@ -208,7 +212,7 @@ test "$FX_REPEAT_JOB_ID" = "$FX_JOB_ID"
 
 The second scheduler tick is a no-op because both finance-owned schedules are
 no longer due. It must not publish a second occurrence, change either future
-reference, or create a `job_schedules` row.
+reference, or create a `job_schedules` row.[^documentation-snapshot]
 
 ## Cleanup
 
@@ -219,4 +223,8 @@ cd "$REPO_ROOT"
 pm2 start ecosystem.config.js
 ```
 
-This guide owns restoring the normal PM2 backend after its API-only run.
+This guide owns restoring the normal PM2 backend after its API-only run.[^documentation-snapshot]
+
+[^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
+
+[^finance-scheduled-sync-lifecycle-e2e]: docs/manual-e2e/finance-scheduled-sync-lifecycle-e2e.md.

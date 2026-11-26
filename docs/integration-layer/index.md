@@ -1,5 +1,5 @@
 # Integration layer
 
-- [Direct access](../integrations/direct-access.md) - Implemented Phase 1 contracts.
-- [Historical PRD](integration-layer-prd.md) - Original requirements narrative.
-- [Historical draft design](integration-layer-design.md) - Original schema and package sketches, superseded where noted.
+* [External integration draft design](integration-layer-design.md) - Historical source retained; use the linked current reference.
+* [External integration PRD](integration-layer-prd.md) - Historical source retained; use the linked current reference.
+* [README](README.md) - Human entry point and context.

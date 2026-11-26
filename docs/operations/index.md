@@ -1,5 +1,4 @@
 # Operations
 
-- [Local development](local-development.md) - Dependencies, PostgreSQL, PM2, and diagnostics.
-- [Local HTTPS](../local-https.md) - Optional TLS setup and return to HTTP.
-- [Release and deployment](release-deployment.md) - Host artifacts, packaging, and chart runbooks.
+* [Local development](local-development.md) - Install dependencies, bootstrap PostgreSQL, and run the API, worker, and UI.
+* [Release and deployment](release-deployment.md) - Host-built artifacts, container packaging, and deployment entry points.
