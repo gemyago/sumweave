@@ -226,6 +226,8 @@ Gopher skill must be used prior to **writing** any Go code, or **planning** go c
 
 When user asks to e2e test something, usually this means following the steps in the relevant [manual e2e testing guide](./docs/manual-e2e/README.md).
 
+- Follow the Enable Banking guide for sign-in recovery and browser mode.
+
 Also if user is asking you to run browser in headed mode, usually this means adding `--headed` flag if you're using playwright cli.
 
 When user is asking you to add a new skill, do this:

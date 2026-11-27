@@ -1,5 +1,9 @@
 # Bundle history
 
+## 2026-11-27
+
+* **Update**: Clarified Enable Banking sign-in recovery: retry headed before asking for help, then preserve browser state and resume headless promptly.
+
 ## 2026-11-26
 
 * **Cleanup**: Removed obsolete planning, change archives, superseded PRDs/designs, redirect trees, and bank POC notes after checking current guidance. Git retains the earlier sources.
