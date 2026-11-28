@@ -2,6 +2,10 @@
 
 ## 2026-11-27
 
+* **Update**: Documented committed-window replay progress, worker-scoped durable delivery and immediate automatic-job feedback. Hosted completion remains separate.
+
+* **Update**: Documented targeted bank-link replacement, retained account identity/selection and shared history replay, atomic enqueue and session fences; added recovery acceptance scenarios. Hosted verification is separate.
+
 * **Update**: Clarified Enable Banking sign-in recovery: retry headed before asking for help, then preserve browser state and resume headless promptly.
 
 ## 2026-11-26

@@ -159,6 +159,11 @@ html:not([data-theme]) {
 }
 
 @media (max-width: 575px) {
+  /* A11y: connection card actions need 44px phone targets; keep desktop compact. */
+  .finance-connection-action {
+    min-height: 44px;
+  }
+
   /* A11y: phone Finance navigation controls need 44px touch targets without widening desktop nav. */
   .finance-primary-nav-target {
     min-height: 44px;
@@ -187,6 +192,11 @@ html:not([data-theme]) {
   --bs-btn-color: var(--bs-body-color);
   min-width: 44px;
   min-height: 44px;
+}
+
+/* A11y bridge: theme-aware recovery action text retains Bootstrap hover/focus colors. */
+.finance-connection-update.btn-outline-primary {
+  --bs-btn-color: var(--bs-link-color);
 }
 
 /* Dashboard containment: auto grid tracks must not grow to a populated select/chart's intrinsic width. */

@@ -39,12 +39,15 @@ type WindowExecutor interface {
 }
 
 type SyncOrchestrationRequest struct {
-	Connection  domain.ProviderConnectionRef
-	Secret      domain.ConnectionSecret
-	JobID       string
-	Reason      string
-	WindowStart *time.Time
-	WindowEnd   *time.Time
+	// OnWindowCommitted runs after ledger writes and their checkpoint commit.
+	OnWindowCommitted func(context.Context, domain.ProviderSyncWindow) error
+	ReplayFrom        *time.Time
+	Connection        domain.ProviderConnectionRef
+	Secret            domain.ConnectionSecret
+	JobID             string
+	Reason            string
+	WindowStart       *time.Time
+	WindowEnd         *time.Time
 }
 
 type SyncOrchestrationResult struct {
@@ -157,6 +160,10 @@ func (o *SyncOrchestrator) Orchestrate(
 		return SyncOrchestrationResult{}, fmt.Errorf("determine target window: %w", err)
 	}
 
+	if request.WindowStart == nil && request.WindowEnd == nil && request.ReplayFrom != nil &&
+		request.ReplayFrom.Before(targetWindow.Start) {
+		targetWindow.Start = *request.ReplayFrom
+	}
 	requestedWindows, err := o.planRequestedWindows(
 		ctx,
 		request.Connection,
@@ -179,6 +186,12 @@ func (o *SyncOrchestrator) Orchestrate(
 		)
 		if executeErr != nil {
 			return SyncOrchestrationResult{}, executeErr
+		}
+
+		if request.OnWindowCommitted != nil {
+			if progressErr := request.OnWindowCommitted(ctx, requestedWindow); progressErr != nil {
+				return SyncOrchestrationResult{}, fmt.Errorf("save committed replay progress: %w", progressErr)
+			}
 		}
 
 		result.ExecutedWindows = append(result.ExecutedWindows, requestedWindow)

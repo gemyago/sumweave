@@ -17,9 +17,12 @@ func NewFinanceConnectionLinkRedirectStartRequestValidator() FieldValidator[*Fin
 	validateCallbackUrl := NewSimpleFieldValidator[string](
 		EnsureNonDefault[string],
 	)
+	validateConnectionID := NewSimpleFieldValidator[string](
+	)
 	
 	return func(bindingCtx *BindingContext, value *FinanceConnectionLinkRedirectStartRequest) {
 		validateProvider(bindingCtx.Fork("provider"), value.Provider)
 		validateCallbackUrl(bindingCtx.Fork("callbackUrl"), value.CallbackUrl)
+		validateConnectionID(bindingCtx.Fork("connectionId"), value.ConnectionID)
 	}
 }

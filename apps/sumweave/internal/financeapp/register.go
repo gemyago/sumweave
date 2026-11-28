@@ -124,6 +124,7 @@ func NewModule(deps ModuleDeps) (*financepkg.Finance, error) {
 		publisher := appdispatchSemanticCommandPublisher{publisher: deps.CommandPublisher}
 		financeConfig.CommandPublisher = publisher
 		financeConfig.ScheduledCommandPublisher = publisher
+		financeConfig.TransactionalCommandPublisher = publisher
 		eventPublisher, publisherErr := appevents.NewPublisher(deps.CommandPublisher)
 		if publisherErr != nil {
 			return nil, fmt.Errorf("create finance event publisher: %w", publisherErr)
@@ -503,6 +504,26 @@ func (p appdispatchSemanticCommandPublisher) PublishScheduledSemanticCommand(
 	})
 	if err != nil {
 		return financepkg.DispatchReference{}, fmt.Errorf("publish scheduled finance semantic command: %w", err)
+	}
+	return financepkg.DispatchReference{MessageID: reference.MessageID}, nil
+}
+
+func (p appdispatchSemanticCommandPublisher) PublishSemanticCommandInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	command financepkg.SemanticCommand,
+) (financepkg.DispatchReference, error) {
+	reference, err := p.publisher.PublishRequestInTx(
+		ctx,
+		tx,
+		appdispatch.PublicationRequest{
+			Topic:          command.Topic,
+			Payload:        command.Payload,
+			IdempotencyKey: command.IdempotencyKey,
+		},
+	)
+	if err != nil {
+		return financepkg.DispatchReference{}, fmt.Errorf("publish transactional finance command: %w", err)
 	}
 	return financepkg.DispatchReference{MessageID: reference.MessageID}, nil
 }

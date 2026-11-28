@@ -378,6 +378,46 @@ func TestAppDispatch(t *testing.T) {
 		assert.Equal(t, int32(1), handled.Load())
 	})
 
+	t.Run("delivery retains worker context through progress retries and exhaustion", func(t *testing.T) {
+		config := makeConfig(t)
+		db := openPrepared(t, config)
+		publisher := makePublisher(t, config, db)
+		factory, err := NewRouterFactory(config, db, publisher, logger)
+		require.NoError(t, err)
+		router, err := factory.NewRouter("group." + fake.UUID().V4())
+		require.NoError(t, err)
+		topic := "topic." + fake.UUID().V4()
+		var calls atomic.Int32
+		deadlineSeen := make(chan bool, routerMaxRetries+1)
+		handler, err := NewHandler(topic, func(ctx context.Context, _ Message) error {
+			_, hasDeadline := ctx.Deadline()
+			deadlineSeen <- hasDeadline
+			calls.Add(1)
+			attemptCtx, cancelAttempt := context.WithDeadline(ctx, time.Now().Add(-time.Millisecond))
+			defer cancelAttempt()
+			return attemptCtx.Err()
+		})
+		require.NoError(t, err)
+		require.NoError(t, router.Handle(handler))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go func() { _ = router.Run(ctx) }()
+		<-router.router.Running()
+		t.Cleanup(func() { require.NoError(t, router.Close()) })
+		message := NewMessage(topic, []byte(fake.UUID().V4()))
+		require.NoError(t, publisher.Publish(t.Context(), message))
+		awaitAcknowledgement(t, db, config, topic, router.consumerGroup, message.ID)
+		require.EqualValues(t, routerMaxRetries+1, calls.Load())
+		for range routerMaxRetries + 1 {
+			require.False(t, <-deadlineSeen, "transport must not impose the library 30-second deadline")
+		}
+		var count int
+		require.NoError(t, db.QueryRowContext(t.Context(),
+			`SELECT COUNT(*) FROM `+quoteIdentifier(config.MessagesTable())+` WHERE topic=$1 AND metadata->>$2=$3`,
+			DeadLetterTopic, originalMessageIDMetadataKey, message.ID).Scan(&count))
+		require.Equal(t, 1, count)
+	})
+
 	t.Run("routes topics with bounded retry panic recovery and dead letters", func(t *testing.T) {
 		config := makeConfig(t)
 		db := openPrepared(t, config)

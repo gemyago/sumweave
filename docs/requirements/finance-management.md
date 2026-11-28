@@ -2,8 +2,11 @@
 type: Requirements
 title: "Finance management requirements"
 description: "Tenant-owned ledger, imports, reporting, provider sync, and finance API contracts."
-generated: { by: "codex/gpt-6.1-sol", at: "2026-11-26T08:28:13+01:00" }
+generated: { by: "codex/gpt-6", at: "2026-11-27T15:32:32+00:00" }
 sources:
+  - id: session-recovery
+    resource: "repository finance/bank_authorization_service.go and finance/domain/bank_authorization.go"
+    title: "Existing-schema bank link replacement and replay implementation"
   - id: accepted-contract
     resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/openspec/specs/finance-management/spec.md"
     title: "Accepted finance-management scenarios at the documentation checkpoint"
@@ -388,15 +391,15 @@ The finance module SHALL coordinate provider sync v2 bank-link workflows through
 - **AND** successful finish MUST encrypt the returned connector secret through the finance connection-secret path and persist a bank connection with product provider, technical connector, provider reference, external ID, display name, state, and secret ID
 - **AND** the same consumed state MUST NOT create duplicate bank connections
 
-#### Scenario: PKO re-link preserves existing durable connection identity
-- **WHEN** a tenant already has a linked `pko` bank connection and the tenant member successfully completes another `pko` redirect/SCA link
-- **THEN** the system MUST update and return the existing tenant `pko` connection instead of creating a second `pko` connection
-- **AND** the reused connection MUST keep its existing connection identity while refreshing mutable link metadata from the new successful finish
+#### Scenario: Targeted PKO update preserves durable identity
+- **WHEN** a member starts an update for an existing PKO connection and finishes its valid pending flow
+- **THEN** the system MUST replace authorization on that same connection, preserving its name, finance account and transaction identities, imported history and schedule preferences
+- **AND** the pending flow MUST bind the target and expected session to its tenant, actor, provider and connector
 
-#### Scenario: Redirect finish failure remains retryable
-- **WHEN** connector finish-link behavior or encrypted connection persistence fails after a pending redirect start is consumed
-- **THEN** the system MUST restore or preserve the pending start so the tenant member can retry until the pending start expires
-- **AND** failure handling MUST NOT persist plaintext connector credentials or secret-bearing provider snapshots
+#### Scenario: Update failure requires a fresh start
+- **WHEN** an update exchange or replacement fails after consuming pending state
+- **THEN** the installed link MUST remain unchanged and the consumed state MUST NOT be restored
+- **AND** a member MUST be able to start a new update without reusing a provider code
 
 #### Scenario: Token link creates a durable v2 connection
 - **WHEN** a tenant member token-links product provider `monobank`
@@ -901,3 +904,40 @@ idempotency.
 [^accepted-contract]: Preserved accepted scenario source; current delivery is described separately in the linked topic.
 
 [^current-topic]: Current topic reference and implementation limits.
+
+### Requirement: Bank Link Update And Session Recovery
+
+Enable Banking updates SHALL retain account identity and interrupted history
+using the existing pending JSON and encrypted secret payload. See the
+[provider sync architecture](../finance-provider-sync-architecture.md#updating-enable-banking-authorization)
+for the shared replay behavior and provider limits.[^session-recovery]
+
+#### Scenario: Confirmed closure stops background retries
+- **WHEN** a sync observes CLOSED or EXPIRED, or a structured CLOSED_SESSION or EXPIRED_SESSION code
+- **THEN** it MUST persist reauth_required feedback and fail the observed job terminally
+- **AND** reload MUST retain the warning and Update bank link action
+- **AND** blocked manual sync MUST return an empty 409, queued work MUST stop before provider calls, and scheduler claims MUST leave enabled due schedules untouched
+- **AND** an unrelated plain 401 MUST NOT be classified as closed consent
+
+#### Scenario: Selected identities survive repeated authorization
+- **WHEN** remote UIDs change on repeated updates, including before the first sync
+- **THEN** unique primary-hash matches MUST retain original canonical account and transaction namespaces
+- **AND** provider raw snapshots MUST retain remote UIDs without application binding metadata
+- **AND** duplicate identities, bank changes, currency conflicts and canonical key reuse MUST fail without replacing the link
+
+#### Scenario: Added and reselected accounts receive history
+- **WHEN** an update adds or reselects accounts
+- **THEN** replacement and one durable unbounded sync publication MUST commit atomically
+- **AND** new accounts MUST request the existing three-year initial range using the shared connection window
+- **AND** deselected accounts MUST retain ledger history, original keys and their earliest unfinished or catch-up replay floor while other selected accounts advance
+- **AND** re-addition MUST preserve the original finance account and import missing history through the retained floor
+- **AND** partial failure, one successful chunk, bounded sync or success while inactive MUST NOT clear that floor
+
+#### Scenario: Overlapping and cancelled updates are safe
+- **WHEN** callbacks overlap, expire, are replayed, belong to another actor/tenant, or the browser cancels
+- **THEN** the system MUST enforce pending ownership, TTL and single use and retain the installed link on failure
+- **AND** after one successful replacement another flow bound to the prior session MUST fail
+- **AND** late old-session ledger, checkpoint, success, error and reauth writes MUST NOT alter the replacement
+- **AND** worker timing writes MUST NOT rewind schedule due time or overwrite enabled/interval preferences
+
+[^session-recovery]: Approved existing-schema session recovery behavior implemented in `finance/bank_authorization_service.go`, `finance/domain/bank_authorization.go`, sync persistence and the connection API/UI; scenarios describe the contract, not hosted verification results.

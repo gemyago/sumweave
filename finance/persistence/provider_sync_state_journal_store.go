@@ -11,15 +11,29 @@ import (
 )
 
 type ProviderSyncStateJournalStore struct {
-	db  *gorm.DB
-	now func() time.Time
+	fence bool
+	db    *gorm.DB
+	now   func() time.Time
 }
 
-func NewProviderSyncStateJournalStore(store *Store) *ProviderSyncStateJournalStore {
-	return &ProviderSyncStateJournalStore{
+type ProviderSyncStateJournalOption func(*ProviderSyncStateJournalStore)
+
+func WithSyncStateAuthorizationFence() ProviderSyncStateJournalOption {
+	return func(s *ProviderSyncStateJournalStore) { s.fence = true }
+}
+
+func NewProviderSyncStateJournalStore(
+	store *Store,
+	opts ...ProviderSyncStateJournalOption,
+) *ProviderSyncStateJournalStore {
+	s := &ProviderSyncStateJournalStore{
 		db:  store.db,
 		now: store.now,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *ProviderSyncStateJournalStore) LoadLastState(
@@ -47,12 +61,22 @@ func (s *ProviderSyncStateJournalStore) AppendSyncState(
 	ctx context.Context,
 	state domain.ProviderSyncState,
 ) error {
-	model := newProviderSyncStateJournalModel(state, s.now())
-	if err := s.db.WithContext(ctx).Table(model.TableName()).Create(&model).Error; err != nil {
-		return fmt.Errorf("append provider sync state journal: %w", err)
+	if !s.fence {
+		return s.appendState(ctx, s.db, state)
 	}
-
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		connection, err := lockBankConnection(ctx, tx, state.Connection.ConnectionID)
+		if err != nil {
+			return err
+		}
+		if connection.ProviderReference != state.Connection.ProviderReference {
+			return domain.ErrBankAuthorizationStale
+		}
+		if connection.State != domain.BankConnectionStateActive {
+			return domain.ErrBankReauthRequired
+		}
+		return s.appendState(ctx, tx, state)
+	})
 }
 
 func (s *ProviderSyncStateJournalStore) DeleteSyncStatesByConnection(
@@ -65,6 +89,18 @@ func (s *ProviderSyncStateJournalStore) DeleteSyncStatesByConnection(
 		Where("connection_id = ?", connectionID).
 		Delete(&model).Error; err != nil {
 		return fmt.Errorf("delete provider sync state journal: %w", err)
+	}
+	return nil
+}
+
+func (s *ProviderSyncStateJournalStore) appendState(
+	ctx context.Context,
+	tx *gorm.DB,
+	state domain.ProviderSyncState,
+) error {
+	model := newProviderSyncStateJournalModel(state, s.now())
+	if err := tx.WithContext(ctx).Table(model.TableName()).Create(&model).Error; err != nil {
+		return fmt.Errorf("append provider sync state journal: %w", err)
 	}
 	return nil
 }

@@ -14,6 +14,13 @@ import (
 )
 
 func TestProviderWindowSyncStore(t *testing.T) {
+	references := map[string]string{}
+	makeConnectionRef := func(fake faker.Faker, provider domain.ProviderID, connector domain.ProviderConnectorID) domain.ProviderConnectionRef {
+		ref := makeRandomProviderConnectionRef(fake, provider, connector)
+		references[ref.ConnectionID] = ref.ProviderReference
+		return ref
+	}
+
 	type persistenceFixture struct {
 		accounts        []domain.ConnectionProviderAccount
 		bankConnection  *domain.BankConnection
@@ -185,11 +192,15 @@ func TestProviderWindowSyncStore(t *testing.T) {
 				}
 				if fixture.bankConnection == nil {
 					return &domain.BankConnection{
-						ID:       connectionID,
-						TenantID: "tenant-" + connectionID,
+						ProviderReference: references[connectionID],
+						State:             domain.BankConnectionStateActive,
+						ID:                connectionID,
+						TenantID:          "tenant-" + connectionID,
 					}, nil
 				}
 				copyConnection := *fixture.bankConnection
+				copyConnection.ProviderReference = references[connectionID]
+				copyConnection.State = domain.BankConnectionStateActive
 				return &copyConnection, nil
 			}).Maybe()
 
@@ -344,7 +355,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("loads existing window by composing provider-owned snapshot queries", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake,
 			domain.ProviderIDMonobank,
 			domain.ProviderConnectorIDMonobank,
@@ -419,7 +430,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("adds provider identity matches outside the window to the snapshot", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake,
 			domain.ProviderIDMonobank,
 			domain.ProviderConnectorIDMonobank,
@@ -481,7 +492,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		assert.Nil(t, store)
 
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake,
 			domain.ProviderIDMonobank,
 			domain.ProviderConnectorIDMonobank,
@@ -525,7 +536,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("applies sync inside one transaction using canonical save primitives", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake,
 			domain.ProviderIDPKO,
 			domain.ProviderConnectorIDEnableBanking,
@@ -771,7 +782,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("preserves custom linked finance account name during provider metadata refresh", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake,
 			domain.ProviderIDPKO,
 			domain.ProviderConnectorIDEnableBanking,
@@ -823,7 +834,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("keeps an immutable mapping winner across stale first-sync snapshots", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake,
 			domain.ProviderIDPKO,
 			domain.ProviderConnectorIDEnableBanking,
@@ -883,7 +894,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("returns apply errors when mappings or canonical writes fail", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake,
 			domain.ProviderIDPKO,
 			domain.ProviderConnectorIDEnableBanking,
@@ -1162,7 +1173,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 		"attaches connection account balance and fingerprint-identified transaction snapshots in the apply transaction",
 		func(t *testing.T) {
 			fake := faker.New()
-			connection := makeRandomProviderConnectionRef(
+			connection := makeConnectionRef(
 				fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
 			)
 			now := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
@@ -1269,7 +1280,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("returns connection snapshot lookup failures from the apply transaction", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
 		)
 		observation := domain.ProviderSnapshotObservation{
@@ -1304,7 +1315,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("fails the atomic apply when writing a provider snapshot fails", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
 		)
 		providerAccount := makeProviderAccount(fake, connection.ConnectionID)
@@ -1340,7 +1351,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("rejects account snapshots without a mapped provider account", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
 		)
 		providerAccountID := "provider-account-" + fake.UUID().V4()
@@ -1365,7 +1376,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("appends successful state after window writes with aggregate statistics", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
 		)
 		attemptedAt := time.Now().Add(-time.Minute)
@@ -1408,7 +1419,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("publishes each successful requested window using the apply transaction", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
 		)
 		state := domain.ProviderSyncState{
@@ -1441,7 +1452,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("does not publish when loading or checkpointing the requested window fails", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
 		)
 		state := domain.ProviderSyncState{
@@ -1467,7 +1478,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("returns journal failures after applying window writes", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake, domain.ProviderIDMonobank, domain.ProviderConnectorIDMonobank,
 		)
 		expectedErr := errors.New("append-state-" + fake.UUID().V4())
@@ -1486,7 +1497,7 @@ func TestProviderWindowSyncStore(t *testing.T) {
 
 	t.Run("rejects account snapshots whose finance account no longer exists", func(t *testing.T) {
 		fake := faker.New()
-		connection := makeRandomProviderConnectionRef(
+		connection := makeConnectionRef(
 			fake, domain.ProviderIDPKO, domain.ProviderConnectorIDEnableBanking,
 		)
 		providerAccount := makeProviderAccount(fake, connection.ConnectionID)

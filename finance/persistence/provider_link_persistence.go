@@ -315,7 +315,7 @@ func findProviderLinkConnectionWithLock(
 	var model bankConnectionModel
 	query := db.Table((bankConnectionModel{}).TableName())
 	if forUpdate {
-		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		query = query.Clauses(clause.Locking{Strength: bankConnectionUpdateLock})
 	}
 	if err := query.
 		Where(

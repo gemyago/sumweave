@@ -19,8 +19,11 @@ import (
 
 func TestBankConnectionScheduleService(t *testing.T) {
 	fake := faker.New()
-	saveSchedule := func(t *testing.T, store *persistence.BankConnectionScheduleStore, schedule domain.BankConnectionSchedule) {
+	saveSchedule := func(t *testing.T, database *persistence.Database, store *persistence.BankConnectionScheduleStore, schedule domain.BankConnectionSchedule) {
 		t.Helper()
+		_, saveConnectionErr := persistence.NewStore(database).
+			SaveBankConnection(t.Context(), domain.BankConnection{ID: schedule.ConnectionID, TenantID: fake.UUID().V4(), Provider: fake.Lorem().Word(), SecretID: fake.UUID().V4(), State: domain.BankConnectionStateActive, CreatedAt: schedule.CreatedAt, UpdatedAt: schedule.UpdatedAt})
+		require.NoError(t, saveConnectionErr)
 		require.NoError(t, store.Save(t.Context(), schedule))
 		t.Cleanup(func() {
 			actual, err := store.Get(context.WithoutCancel(t.Context()), schedule.ConnectionID)
@@ -54,7 +57,7 @@ func TestBankConnectionScheduleService(t *testing.T) {
 		now := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 		dueAt := now.Add(-time.Hour)
 		schedule := makeSchedule(now, dueAt)
-		saveSchedule(t, store, schedule)
+		saveSchedule(t, database, store, schedule)
 		publisher := NewMockScheduledSemanticCommandPublisher(t)
 		messageID := fake.UUID().V4()
 		publisher.EXPECT().
@@ -96,7 +99,7 @@ func TestBankConnectionScheduleService(t *testing.T) {
 		now := time.Date(2000, time.January, 2, 0, 0, 0, 0, time.UTC)
 		dueAt := now.Add(-time.Hour)
 		firstSchedule := makeSchedule(now, dueAt)
-		saveSchedule(t, store, firstSchedule)
+		saveSchedule(t, database, store, firstSchedule)
 		service := NewBankConnectionScheduleService(store)
 		_, err := service.EnqueueDue(t.Context())
 		require.ErrorContains(t, err, "publisher is required")
@@ -105,7 +108,7 @@ func TestBankConnectionScheduleService(t *testing.T) {
 
 		invalid := makeSchedule(now, dueAt)
 		invalid.Interval = 0
-		saveSchedule(t, store, invalid)
+		saveSchedule(t, database, store, invalid)
 		publisher := NewMockScheduledSemanticCommandPublisher(t)
 		service = NewBankConnectionScheduleService(
 			store,
@@ -200,7 +203,7 @@ func TestBankConnectionScheduleService(t *testing.T) {
 			store := persistence.NewBankConnectionScheduleStore(database)
 			now := time.Date(2000, time.January, 3, 0, 0, 0, 0, time.UTC)
 			schedule := makeSchedule(now, now.Add(-time.Hour))
-			saveSchedule(t, store, schedule)
+			saveSchedule(t, database, store, schedule)
 			publisher := NewMockScheduledSemanticCommandPublisher(t)
 			publisher.EXPECT().PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.Anything).
 				Return(reference, publishErr).Once()
@@ -242,7 +245,7 @@ func TestBankConnectionScheduleService(t *testing.T) {
 			store := persistence.NewBankConnectionScheduleStore(database)
 			now := time.Date(2000, time.January, 4, 0, 0, 0, 0, time.UTC)
 			schedule := makeSchedule(now, now.Add(-time.Hour))
-			saveSchedule(t, store, schedule)
+			saveSchedule(t, database, store, schedule)
 			publisher := NewMockScheduledSemanticCommandPublisher(t)
 			publisher.EXPECT().PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.Anything).
 				Return(DispatchReference{MessageID: fake.UUID().V4()}, nil).Maybe()
@@ -315,7 +318,7 @@ func TestBankConnectionScheduleService(t *testing.T) {
 		store := persistence.NewBankConnectionScheduleStore(database)
 		now := time.Date(2000, time.January, 5, 0, 0, 0, 0, time.UTC)
 		schedule := makeSchedule(now, now.Add(-time.Hour))
-		saveSchedule(t, store, schedule)
+		saveSchedule(t, database, store, schedule)
 		publisher := NewMockScheduledSemanticCommandPublisher(t)
 		var published atomic.Int32
 		publisher.EXPECT().PublishScheduledSemanticCommand(mock.Anything, mock.Anything, mock.Anything).
@@ -357,5 +360,30 @@ func TestBankConnectionScheduleService(t *testing.T) {
 			require.NoError(t, err)
 		}
 		assert.Equal(t, int32(1), published.Load())
+	})
+	t.Run("blocked link remains enabled and due without publication", func(t *testing.T) {
+		database := openTestDatabase(t)
+		store := persistence.NewBankConnectionScheduleStore(database)
+		now := time.Date(1999, time.January, 1, 0, 0, 0, 0, time.Local)
+		schedule := makeSchedule(now, now.Add(-time.Hour))
+		saveSchedule(t, database, store, schedule)
+		connections := persistence.NewStore(database)
+		connection, err := connections.GetBankConnection(t.Context(), schedule.ConnectionID)
+		require.NoError(t, err)
+		connection.State = domain.BankConnectionStateReauthRequired
+		_, err = connections.SaveBankConnection(t.Context(), *connection)
+		require.NoError(t, err)
+		publisher := NewMockScheduledSemanticCommandPublisher(t)
+		service := NewBankConnectionScheduleService(
+			store,
+			WithBankConnectionScheduleServiceNow(func() time.Time { return now }),
+			WithBankConnectionScheduleServicePublisher(publisher),
+		)
+		claimed, err := service.enqueueOccurrence(t.Context(), schedule, now)
+		require.NoError(t, err)
+		require.False(t, claimed)
+		after, err := store.Get(t.Context(), connection.ID)
+		require.NoError(t, err)
+		require.Equal(t, schedule, *after)
 	})
 }

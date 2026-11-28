@@ -62,6 +62,7 @@ type LinkTokenRequest struct {
 }
 
 type LinkResult struct {
+	Authorization      *domain.BankAuthorization
 	DisplayName        string
 	ProviderReference  string
 	Secret             string

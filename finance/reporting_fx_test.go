@@ -40,7 +40,7 @@ func TestReportingAndFX(t *testing.T) {
 				WithNow(func() time.Time { return now }),
 				WithIDGenerator(func() string {
 					idSequence++
-					return fmt.Sprintf("id-%02d-%s", idSequence, fake.Lorem().Word())
+					return fmt.Sprintf("id-%02d-%s", idSequence, fake.UUID().V4())
 				}),
 				WithDefaultFXProvider(providerName),
 			)

@@ -13,3 +13,5 @@
 * [Finance UI styling requirements](sumweave-ui-bootstrap-rails.md) - Canonical Bootstrap login and Finance styling, layout, and landing behavior.
 * [Transaction classification requirements](transaction-classification.md) - Ordered category and additive-tag rules with shared explicit and automatic execution.
 * [Transfer matching requirements](transfer-matching.md) - Four deterministic pair rules, complete evidence, uniqueness, and correction.
+
+Bank-link update and session recovery scenarios are included in [Finance management requirements](finance-management.md#requirement-bank-link-update-and-session-recovery).

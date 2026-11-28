@@ -871,6 +871,27 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		publisher := newPublisher(t, config, db)
 		adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
 		store := persistence.NewBankConnectionScheduleStore(database)
+		connections := persistence.NewStore(database)
+		saveSchedule := func(schedule domain.BankConnectionSchedule) {
+			_, saveErr := connections.SaveBankConnection(t.Context(), domain.BankConnection{
+				ID:          schedule.ConnectionID,
+				TenantID:    fake.UUID().V4(),
+				Provider:    string(domain.ProviderIDPKO),
+				ConnectorID: domain.ProviderConnectorIDEnableBanking,
+				SecretID:    fake.UUID().V4(),
+				State:       domain.BankConnectionStateActive,
+				CreatedAt:   schedule.CreatedAt,
+				UpdatedAt:   schedule.UpdatedAt,
+			})
+			require.NoError(t, saveErr)
+			t.Cleanup(func() {
+				require.NoError(t, connections.DeleteBankConnection(
+					context.WithoutCancel(t.Context()), schedule.ConnectionID,
+				))
+			})
+			require.NoError(t, store.Save(t.Context(), schedule))
+		}
+
 		newService := func(now time.Time) *financepkg.BankConnectionScheduleService {
 			return financepkg.NewBankConnectionScheduleService(
 				store,
@@ -886,7 +907,7 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 			Enabled: true, CreatedAt: now, UpdatedAt: now,
 		}
 		cleanupBankSchedule(t, db, schedule.ConnectionID)
-		require.NoError(t, store.Save(t.Context(), schedule))
+		saveSchedule(schedule)
 		first, err := newService(now).EnqueueDue(t.Context())
 		require.NoError(t, err)
 		assert.Positive(t, first)
@@ -910,7 +931,7 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 			UpdatedAt:    conflictNow,
 		}
 		cleanupBankSchedule(t, db, conflict.ConnectionID)
-		require.NoError(t, store.Save(t.Context(), conflict))
+		saveSchedule(conflict)
 		persistedConflict, err := store.Get(t.Context(), conflict.ConnectionID)
 		require.NoError(t, err)
 		_, err = adapter.PublishSemanticCommand(t.Context(), financepkg.SemanticCommand{
@@ -998,4 +1019,53 @@ func TestFinanceRegistrationPostgres(t *testing.T) {
 		assert.Nil(t, conflictActual.LastScheduledAt)
 		assert.Empty(t, conflictActual.LastJobID)
 	})
+}
+
+func TestFinanceTransactionalPublisher(t *testing.T) {
+	fake := faker.New()
+	dsn := os.Getenv("SUMWEAVE_POSTGRES_TEST_DSN")
+	require.NotEmpty(t, dsn)
+	db, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	config := appdispatch.Config{DatabaseDSN: dsn, TablePrefix: "sumweave_", PollInterval: time.Millisecond}
+	publisher, err := appdispatch.NewPublisher(config, db, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, publisher.Close()) })
+	adapter := appdispatchSemanticCommandPublisher{publisher: publisher}
+	for _, commit := range []bool{false, true} {
+		transaction, beginErr := db.BeginTx(t.Context(), nil)
+		require.NoError(t, beginErr)
+		command := financepkg.SemanticCommand{
+			Topic:          financepkg.BankConnectionSyncCommandTopic,
+			Payload:        []byte(`{"connectionId":"` + fake.UUID().V4() + `","reason":"bank_link_updated"}`),
+			IdempotencyKey: "bank-link-update:" + fake.UUID().V4(),
+		}
+		reference, publishErr := adapter.PublishSemanticCommandInTx(t.Context(), transaction, command)
+		require.NoError(t, publishErr)
+		if commit {
+			require.NoError(t, transaction.Commit())
+		} else {
+			require.NoError(t, transaction.Rollback())
+		}
+		var count int
+		require.NoError(
+			t,
+			db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM "`+config.MessagesTable()+`" WHERE uuid=$1`, reference.MessageID).
+				Scan(&count),
+		)
+		if commit {
+			require.Equal(t, 1, count)
+		} else {
+			require.Zero(t, count)
+		}
+		_, err = adapter.PublishSemanticCommandInTx(t.Context(), transaction, command)
+		require.Error(t, err)
+		_, err = db.ExecContext(
+			t.Context(),
+			`DELETE FROM "`+config.MessagesTable()+`" WHERE uuid=$1`,
+			reference.MessageID,
+		)
+		require.NoError(t, err)
+	}
 }

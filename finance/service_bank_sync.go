@@ -37,6 +37,8 @@ type bankSyncOrchestrator interface {
 }
 
 type BankSyncService struct {
+	projections             *persistence.BankAuthorizationStore
+	authorization           *bankAuthorizationService
 	store                   bankSyncFocusedStore
 	access                  *accessGuard
 	now                     func() time.Time
@@ -78,7 +80,7 @@ func WithBankSyncServiceSyncStateJournalDeleter(
 }
 
 func NewBankSyncService(
-	store bankSyncFocusedStore,
+	store *persistence.Store,
 	syncOrchestrator bankSyncOrchestrator,
 	opts ...BankSyncServiceOption,
 ) *BankSyncService {
@@ -86,6 +88,7 @@ func NewBankSyncService(
 		panic("bank sync orchestrator is required")
 	}
 	service := &BankSyncService{
+		projections:      persistence.NewBankAuthorizationStore(store),
 		store:            store,
 		access:           newAccessGuard(store),
 		now:              time.Now,
@@ -195,6 +198,9 @@ func (s *BankSyncService) TriggerBankConnectionSync(
 	if err != nil {
 		return BankConnectionSyncJobRef{}, err
 	}
+	if connection.State != domain.BankConnectionStateActive {
+		return BankConnectionSyncJobRef{}, domain.ErrBankReauthRequired
+	}
 	command, commandErr := newSemanticCommand(BankConnectionSyncCommandTopic, BankConnectionSyncCommand{
 		ConnectionID: connection.ID,
 		Reason:       strings.TrimSpace(params.Reason),
@@ -267,6 +273,9 @@ func (s *BankSyncService) RunBankConnectionSync(
 	if err != nil { // coverage-ignore // Connection lookup errors are covered by persistence tests.
 		return BankConnectionSyncResult{}, terminalBankConnectionSyncFailure(err)
 	}
+	if connection.State != domain.BankConnectionStateActive {
+		return BankConnectionSyncResult{}, terminalBankConnectionSyncFailure(domain.ErrBankReauthRequired)
+	}
 	secret, err := s.store.GetConnectionSecret(ctx, connection.SecretID)
 	if err != nil { // coverage-ignore // Secret-store errors are covered by persistence tests.
 		return BankConnectionSyncResult{}, terminalBankConnectionSyncFailure(
@@ -282,13 +291,25 @@ func (s *BankSyncService) RunBankConnectionSync(
 	if markErr != nil { // coverage-ignore // Projection-store errors are covered by persistence tests.
 		return BankConnectionSyncResult{}, markErr
 	}
+	var replayFrom *time.Time
+	if s.authorization != nil && connection.ConnectorID == domain.ProviderConnectorIDEnableBanking {
+		authorization, decodeErr := decodeBankAuthorization(s.authorization.cipher, *secret)
+		if decodeErr != nil {
+			return BankConnectionSyncResult{}, decodeErr
+		}
+		if authorization != nil {
+			replayFrom = authorization.ReplayStart()
+		}
+	}
 	result, err := s.syncOrchestrator.Orchestrate(ctx, internalproviders.SyncOrchestrationRequest{
+		OnWindowCommitted: s.replayProgressRecorder(*connection, params, replayFrom),
 		Connection: domain.ProviderConnectionRef{
 			ConnectionID:      connection.ID,
 			ProviderID:        domain.ProviderID(connection.Provider),
 			ConnectorID:       connection.ConnectorID,
 			ProviderReference: connection.ProviderReference,
 		},
+		ReplayFrom:  replayFrom,
 		Secret:      *secret,
 		JobID:       params.JobID,
 		Reason:      params.Reason,
@@ -309,7 +330,12 @@ func (s *BankSyncService) RunBankConnectionSync(
 	if !hasScheduledRun {
 		scheduledRun = nil
 	}
-	err = s.completeBankConnectionSync(ctx, connection, params.JobID, scheduledRun, now)
+	if s.authorization != nil && params.WindowStart == nil && params.WindowEnd == nil && replayFrom != nil {
+		if clearErr := s.authorization.ClearReplay(ctx, *connection, result.TargetWindow); clearErr != nil {
+			return BankConnectionSyncResult{}, terminalBankConnectionSyncFailure(clearErr)
+		}
+	}
+	err = s.completeBankConnectionSync(ctx, connection, params.JobID, scheduledRun, s.now())
 	if err != nil { // coverage-ignore // Completion projection errors are covered by persistence tests.
 		failureErr := s.recordBankConnectionSyncFailure(
 			ctx,
@@ -328,7 +354,44 @@ func (s *BankSyncService) RunBankConnectionSync(
 	}, nil
 }
 
+func (s *BankSyncService) replayProgressRecorder(
+	connection domain.BankConnection,
+	params RunBankConnectionSyncParams,
+	replayFrom *time.Time,
+) func(context.Context, domain.ProviderSyncWindow) error {
+	if replayFrom == nil || params.WindowStart != nil || params.WindowEnd != nil {
+		return nil
+	}
+	return func(ctx context.Context, window domain.ProviderSyncWindow) error {
+		return s.authorization.AdvanceReplay(ctx, connection, window)
+	}
+}
+
 func terminalBankConnectionSyncFailure(err error) error {
+	if errors.Is(err, domain.ErrBankReauthRequired) {
+		return NewTerminalFailure(
+			err,
+			"bank_reauth_required",
+			"Update bank link",
+			"The bank session is closed or expired. Update the bank link to continue syncing.",
+		)
+	}
+	if errors.Is(err, domain.ErrBankAuthorizationStale) {
+		return NewTerminalFailure(
+			err,
+			"bank_authorization_changed",
+			"Bank link changed",
+			"This sync used an older bank link. Start a new sync.",
+		)
+	}
+	if errors.Is(err, domain.ErrBankAuthorizationInvalid) {
+		return NewTerminalFailure(
+			err,
+			"bank_identity_invalid",
+			"Bank account identity is unavailable",
+			"Update the bank link to verify account identity.",
+		)
+	}
 	if errors.Is(err, persistence.ErrBankConnectionNotFound) {
 		return NewTerminalFailure(
 			fmt.Errorf("%w: %w", ErrBankConnectionNotFound, err),
@@ -474,7 +537,17 @@ func (s *BankSyncService) deleteBankConnectionOwnedMetadata(
 	// Delete the connection first to take the parent-row lock before owned
 	// state. Link persistence takes this same lock before saving a snapshot or
 	// schedule, preventing an orphaned write after deletion.
-	if err := s.store.DeleteBankConnection(ctx, connection.ID); err != nil {
+	if store, ok := s.store.(*persistence.Store); ok {
+		deleted, deleteErr := persistence.NewBankAuthorizationStore(store).DeleteConnection(ctx, connection.ID)
+		if errors.Is(deleteErr, persistence.ErrBankConnectionNotFound) {
+			// A competing authorized deletion already removed the row and owns cleanup.
+			return nil
+		}
+		if deleteErr != nil {
+			return fmt.Errorf("delete bank connection: %w", deleteErr)
+		}
+		connection = *deleted
+	} else if err := s.store.DeleteBankConnection(ctx, connection.ID); err != nil { // coverage-ignore // Production persistence uses the returning delete in its transaction.
 		return fmt.Errorf("delete bank connection: %w", err)
 	}
 	if s.syncStateJournalDeleter != nil {
@@ -547,71 +620,46 @@ func (s *BankSyncService) markBankConnectionSyncStarted(
 	connection *domain.BankConnection,
 	params RunBankConnectionSyncParams,
 	now time.Time,
-	scheduledRun *ProviderScheduledRunMetadata,
+	_ *ProviderScheduledRunMetadata,
 ) error {
-	connection.LastSyncJobID = strings.TrimSpace(params.JobID)
-	connection.LastSyncStartedAt = &now
-	connection.LastSyncError = ""
-	connection.UpdatedAt = now
-	_, saveConnectionErr := s.store.SaveBankConnection(ctx, *connection)
-	if saveConnectionErr != nil { // coverage-ignore // Store errors are covered by persistence tests.
-		return fmt.Errorf("save bank connection: %w", saveConnectionErr)
-	}
-	schedule, err := s.store.GetBankConnectionSchedule(ctx, connection.ID)
-	if errors.Is(err, persistence.ErrBankConnectionScheduleNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("save bank connection schedule: %w", err)
-	}
-	schedule.LastStartedAt = &now
-	schedule.LastJobID = strings.TrimSpace(params.JobID)
-	if scheduledRun != nil {
-		schedule.LastScheduledAt = &scheduledRun.ScheduledAt
-		schedule.NextRunAt = scheduledRun.NextRunAt
-	}
-	schedule.UpdatedAt = now
-	_, saveErr := s.store.SaveBankConnectionSchedule(ctx, *schedule)
-	if saveErr != nil {
-		return fmt.Errorf("save bank connection schedule: %w", saveErr)
-	}
-	return nil
+	return terminalBankConnectionSyncFailure(
+		s.projections.ProjectSync(
+			ctx,
+			persistence.BankSyncProjection{
+				Connection: bankConnectionRef(*connection),
+				JobID:      params.JobID,
+				At:         now,
+				Phase:      "started",
+			},
+		),
+	)
 }
 
 func (s *BankSyncService) recordBankConnectionSyncFailure(
 	ctx context.Context,
 	connection *domain.BankConnection,
 	params RunBankConnectionSyncParams,
-	startedAt time.Time,
-	scheduledRun *ProviderScheduledRunMetadata,
+	_ time.Time,
+	_ *ProviderScheduledRunMetadata,
 	syncErr error,
 ) error {
-	connection.LastSyncJobID = strings.TrimSpace(params.JobID)
-	connection.LastSyncStartedAt = &startedAt
-	connection.LastSyncError = strings.TrimSpace(syncErr.Error())
-	connection.UpdatedAt = s.now()
-	if _, err := s.store.SaveBankConnection(ctx, *connection); err != nil {
-		return fmt.Errorf("save bank connection: %w", err)
+	feedback := syncErr.Error()
+	reauth := errors.Is(syncErr, domain.ErrBankReauthRequired)
+	if reauth {
+		feedback = "The bank session is closed or expired. Update the bank link to continue syncing."
 	}
-	schedule, err := s.store.GetBankConnectionSchedule(ctx, connection.ID)
-	if errors.Is(err, persistence.ErrBankConnectionScheduleNotFound) {
-		return fmt.Errorf("run bank connection sync: %w", syncErr)
-	}
-	if err != nil {
-		return fmt.Errorf("save bank connection schedule: %w", err)
-	}
-	schedule.LastStartedAt = &startedAt
-	completedAt := s.now()
-	schedule.LastCompletedAt = &completedAt
-	schedule.LastJobID = strings.TrimSpace(params.JobID)
-	if scheduledRun != nil {
-		schedule.LastScheduledAt = &scheduledRun.ScheduledAt
-		schedule.NextRunAt = scheduledRun.NextRunAt
-	}
-	schedule.UpdatedAt = completedAt
-	_, saveErr := s.store.SaveBankConnectionSchedule(ctx, *schedule)
-	if saveErr != nil {
-		return fmt.Errorf("save bank connection schedule: %w", saveErr)
+	if err := s.projections.ProjectSync(
+		ctx,
+		persistence.BankSyncProjection{
+			Connection: bankConnectionRef(*connection),
+			JobID:      params.JobID,
+			At:         s.now(),
+			Phase:      "failed",
+			Error:      feedback,
+			Reauth:     reauth,
+		},
+	); err != nil {
+		return err
 	}
 	return fmt.Errorf("run bank connection sync: %w", syncErr)
 }
@@ -620,42 +668,16 @@ func (s *BankSyncService) completeBankConnectionSync(
 	ctx context.Context,
 	connection *domain.BankConnection,
 	jobID string,
-	scheduledRun *ProviderScheduledRunMetadata,
+	_ *ProviderScheduledRunMetadata,
 	now time.Time,
 ) error {
-	connection.LastSyncJobID = strings.TrimSpace(jobID)
-	if connection.LastSyncStartedAt == nil {
-		connection.LastSyncStartedAt = &now
-	}
-	connection.LastSuccessfulSyncAt = &now
-	connection.LastSyncError = ""
-	connection.State = domain.BankConnectionStateActive
-	connection.Reauth = nil
-	connection.UpdatedAt = now
-	if _, err := s.store.SaveBankConnection(ctx, *connection); err != nil {
-		return fmt.Errorf("save bank connection: %w", err)
-	}
-	schedule, err := s.store.GetBankConnectionSchedule(ctx, connection.ID)
-	if errors.Is(err, persistence.ErrBankConnectionScheduleNotFound) {
-		err = nil
-	}
-	if err != nil {
-		return fmt.Errorf("get bank connection schedule: %w", err)
-	}
-	if schedule != nil {
-		if schedule.LastStartedAt == nil {
-			schedule.LastStartedAt = &now
-		}
-		schedule.LastCompletedAt = &now
-		schedule.LastJobID = strings.TrimSpace(jobID)
-		if scheduledRun != nil {
-			schedule.LastScheduledAt = &scheduledRun.ScheduledAt
-			schedule.NextRunAt = scheduledRun.NextRunAt
-		}
-		schedule.UpdatedAt = now
-		if _, saveErr := s.store.SaveBankConnectionSchedule(ctx, *schedule); saveErr != nil {
-			return fmt.Errorf("save bank connection schedule: %w", saveErr)
-		}
-	}
-	return nil
+	return s.projections.ProjectSync(
+		ctx,
+		persistence.BankSyncProjection{
+			Connection: bankConnectionRef(*connection),
+			JobID:      jobID,
+			At:         now,
+			Phase:      "succeeded",
+		},
+	)
 }

@@ -16,4 +16,6 @@ var _ = fmt.Sprint
 type FinanceConnectionLinkRedirectStartRequest struct { 
 	Provider FinanceBankLinkRedirectProvider `json:"provider"`
 	CallbackUrl string `json:"callbackUrl"`
+	// Existing connection to update; omitted for a new link.
+	ConnectionID string `json:"connectionId,omitempty"`
 }

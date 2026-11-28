@@ -1913,6 +1913,7 @@ func TestFinanceController(t *testing.T) {
 					require.Equal(t, "pko", params.Provider)
 					require.Equal(t, "http://example.com/enable-banking/callback", params.RedirectURL)
 					require.Equal(t, "https://app.example.test/#/finance/connections", params.BrowserCallbackURL)
+					require.Equal(t, connectionID, params.ConnectionID)
 					return financepkg.ProviderLinkStart{
 						State:            startState,
 						AuthorizationURL: startAuthorizationURL,
@@ -2119,7 +2120,7 @@ func TestFinanceController(t *testing.T) {
 				{
 					method: http.MethodPost,
 					target: "/api/v1/finance/tenants/" + tenantID + "/connections/link-redirect/start",
-					body:   `{"provider":"pko","callbackUrl":"https://app.example.test/#/finance/connections"}`,
+					body:   `{"provider":"pko","callbackUrl":"https://app.example.test/#/finance/connections","connectionId":"` + connectionID + `"}`,
 					field:  "authorizationUrl",
 					want:   startAuthorizationURL,
 					status: http.StatusOK,
@@ -2363,6 +2364,23 @@ func TestFinanceController(t *testing.T) {
 			})
 		},
 	)
+
+	t.Run("blocked bank sync returns empty conflict through the registered route", func(t *testing.T) {
+		userID, tenantID, connectionID := fake.UUID().V4(), fake.UUID().V4(), fake.UUID().V4()
+		service := newMockfinanceService(t)
+		service.EXPECT().
+			TriggerBankConnectionSync(mock.Anything, mock.Anything).
+			Return(financepkg.BankConnectionSyncJobRef{}, domain.ErrBankReauthRequired).
+			Once()
+		response := httptest.NewRecorder()
+		newHandler(
+			service,
+			newMockbankConnectionService(t),
+			makeAuthMiddleware(userID),
+		).ServeHTTP(response, newRequest(http.MethodPost, "/api/v1/finance/tenants/"+tenantID+"/connections/"+connectionID+"/sync", `{}`, true))
+		require.Equal(t, http.StatusConflict, response.Code)
+		require.Empty(t, response.Body.String())
+	})
 
 	t.Run("registered connection rename route maps access not found and invalid names", func(t *testing.T) {
 		userID := "user-" + fake.UUID().V4()

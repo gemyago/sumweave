@@ -8,9 +8,11 @@ packages:
   github.com/gemyago/sumweave/finance:
     interfaces:
       accessGuardStore:
+      bankConnectionLinkCoordinator:
       bankConnectionMetadataStore:
       providerSnapshotConnectionDeleter:
       bankSyncOrchestrator:
+      TransactionalSemanticCommandPublisher:
       SemanticCommandPublisher:
       ScheduledSemanticCommandPublisher:
       FXRatesProvider:
@@ -28,6 +30,7 @@ packages:
       accountBalanceReadStore:
   github.com/gemyago/sumweave/finance/internal/providers:
     interfaces:
+      RedirectLinkReplacement:
       ConnectionSecretWriter:
       ConnectionStore:
       Connector:
@@ -39,3 +42,4 @@ packages:
       WindowSyncPersistence:
       WindowChunkPolicy:
       WindowExecutor:
+      WindowSyncStore:

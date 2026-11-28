@@ -167,6 +167,7 @@ func TestConnector(t *testing.T) {
 		sessionID := "session-" + fake.UUID().V4()
 		secretValue := "secret-" + fake.UUID().V4()
 		privateKeyPath := makeSignedKeyPath(t)
+		accountID, primaryHash := fake.UUID().V4(), fake.UUID().V4()
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 			assert.Equal(t, http.MethodPost, request.Method)
@@ -177,7 +178,7 @@ func TestConnector(t *testing.T) {
 			assert.Equal(t, map[string]any{"code": code}, payload)
 
 			_, _ = w.Write([]byte(
-				`{"session_id":"` + sessionID + `","accounts":[],"aspsp":{"name":"PKO official","country":"PL"},"psu_type":"personal","access":{"valid_until":"2026-08-14T00:00:00Z"},"secret":"` + secretValue + `"}`,
+				`{"session_id":"` + sessionID + `","accounts":[{"uid":"` + accountID + `","identification_hash":"` + primaryHash + `","identification_hashes":null,"currency":"PLN","cash_account_type":""}],"aspsp":{"name":"PKO official","country":"PL"},"psu_type":"personal","access":{"valid_until":"2026-08-14T00:00:00Z"},"secret":"` + secretValue + `"}`,
 			))
 		}))
 		defer server.Close()
@@ -203,14 +204,16 @@ func TestConnector(t *testing.T) {
 
 		assert.Equal(t, "PKO official", result.DisplayName)
 		assert.Equal(t, sessionID, result.ProviderReference)
-		assert.Empty(t, result.Secret)
+		var installed domain.BankAuthorization
+		require.NoError(t, json.Unmarshal([]byte(result.Secret), &installed))
+		require.NoError(t, installed.Validate())
 		assert.Equal(t, domain.BankConnectionStateActive, result.State)
 		require.NotNil(t, result.ConnectionSnapshot)
 		assert.NotContains(t, string(result.ConnectionSnapshot.DocumentJSON), secretValue)
 		assertPayloadJSON(
 			t,
 			result.ConnectionSnapshot.DocumentJSON,
-			`{"session_id":"`+sessionID+`","accounts":[],"aspsp":{"name":"PKO official","country":"PL"},"psu_type":"personal","access":{"valid_until":"2026-08-14T00:00:00Z"}}`,
+			`{"session_id":"`+sessionID+`","accounts":[{"uid":"`+accountID+`","identification_hash":"`+primaryHash+`","identification_hashes":null,"currency":"PLN","cash_account_type":""}],"aspsp":{"name":"PKO official","country":"PL"},"psu_type":"personal","access":{"valid_until":"2026-08-14T00:00:00Z"}}`,
 		)
 	})
 

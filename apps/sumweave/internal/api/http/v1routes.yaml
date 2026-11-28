@@ -1659,6 +1659,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FinanceFxSyncResponse"
+        '409':
+          description: Bank authorization must be updated; empty response body.
         default:
           description: unexpected error
           content:
@@ -2494,6 +2496,7 @@ components:
       properties:
         provider: { $ref: "#/components/schemas/FinanceBankLinkRedirectProvider" }
         callbackUrl: { type: string }
+        connectionId: { type: string, description: "Existing connection to update; omitted for a new link." }
     FinanceConnectionLinkRedirectStartResponse:
       type: object
       required: [provider, authorizationUrl, state]

@@ -97,7 +97,7 @@
     }
   }
 
-  async function startPkoRedirect() {
+  async function startPkoRedirect(connectionId?: string) {
     if (!financeShell.selectedTenantId) return
     error = null
 
@@ -105,6 +105,7 @@
       const started = await financeApi.startRedirectConnection({
         tenantId: financeShell.selectedTenantId,
         provider: pkoProvider,
+        connectionId,
         callbackUrl: `${window.location.origin}/#/finance/connections`,
       })
       navigateToAuthorizationUrl(started.authorizationUrl)
@@ -137,6 +138,11 @@
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
     const state = params.get('state')
+    if (params.get('error')) {
+      error = 'Bank authorization was cancelled or could not be completed. You can try updating the bank link again.'
+      clearConsumedRedirectQuery()
+      return
+    }
 
     if (!code || !state) {
       return
@@ -144,14 +150,19 @@
 
     finishingRedirect = true
     try {
-      await financeApi.finishRedirectConnection({
+      const finished = await financeApi.finishRedirectConnection({
         tenantId: financeShell.selectedTenantId,
         provider: pkoProvider,
         code,
         state,
       })
+      const previous = connections.find((connection) => connection.id === finished.id)
+      if (finished.lastSyncJobId && finished.lastSyncJobId !== previous?.lastSyncJobId) {
+        jobIdsByConnection = { ...jobIdsByConnection, [finished.id]: finished.lastSyncJobId }
+      }
       clearConsumedRedirectQuery()
     } catch (finishError) {
+      clearConsumedRedirectQuery()
       error = finishError instanceof Error ? finishError.message : 'Failed to finish PKO connection'
       return
     } finally {
@@ -608,11 +619,16 @@
                       </div>
 
                       <div class="d-flex flex-wrap gap-2">
-                        <button class="btn btn-primary btn-sm" type="button" onclick={() => void triggerSync(connection.id)} disabled={deletingConnectionId === connection.id}>
+                        <button class="btn btn-primary btn-sm finance-connection-action" type="button" onclick={() => void triggerSync(connection.id)} disabled={deletingConnectionId === connection.id || connection.state !== 'active'}>
                           Sync now
                         </button>
+                        {#if connection.provider === pkoProvider && (connection.state === 'active' || connection.state === 'reauth_required')}
+                          <button class="btn btn-outline-primary btn-sm finance-connection-action finance-connection-update" type="button" onclick={() => void startPkoRedirect(connection.id)} disabled={deletingConnectionId === connection.id}>
+                            Update bank link
+                          </button>
+                        {/if}
                         <button
-                          class="btn btn-outline-danger btn-sm"
+                          class="btn btn-outline-danger btn-sm finance-connection-action"
                           type="button"
                           onclick={() => requestDeleteConnection(connection.id)}
                           disabled={deletingConnectionId === connection.id || confirmDeleteConnectionId === connection.id}
@@ -622,6 +638,12 @@
                       </div>
                     </div>
 
+                    {#if connection.state === 'reauth_required'}
+                      <div class="alert alert-warning mb-0" role="status">The bank session is closed or expired. Update the bank link to continue syncing. Your imported history is retained.</div>
+                    {:else if connection.lastSyncError}
+                      <div class="alert alert-danger mb-0" role="status">{connection.lastSyncError}</div>
+                    {/if}
+
                     <div class="row g-3 small text-body-secondary">
                       <div class="col-12 col-md-4">Last started: {formatFinanceDateTime(connection.lastSyncStartedAt)}</div>
                       <div class="col-12 col-md-4">Last success: {formatFinanceDateTime(connection.lastSuccessfulSyncAt)}</div>
@@ -630,16 +652,16 @@
 
                     {#if connection.schedule}
                       <div class="d-flex flex-wrap gap-2">
-                        <span class="badge text-bg-light border text-body">
+                        <span class="badge bg-body-tertiary border text-body">
                           Schedule {connection.schedule.enabled ? 'enabled' : 'disabled'}
                         </span>
-                        <span class="badge text-bg-light border text-body">
+                        <span class="badge bg-body-tertiary border text-body">
                           Interval {connection.schedule.intervalSeconds}s
                         </span>
                       </div>
                     {/if}
 
-                    {#if connection.lastSyncJobId}
+                    {#if connection.lastSyncJobId && !jobIdsByConnection[connection.id]}
                       <div>
                         <a href={`/finance/jobs/${encodeURIComponent(connection.lastSyncJobId)}`} use:link>Open last sync job</a>
                       </div>

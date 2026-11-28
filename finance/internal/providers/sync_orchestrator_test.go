@@ -685,4 +685,164 @@ func TestSyncOrchestrator(t *testing.T) {
 			assert.Equal(t, failedState, *determineState)
 		})
 	})
+	t.Run("interrupted replay resumes from committed progress and failed progress stops execution", func(t *testing.T) {
+		fake := faker.New()
+		anchor := time.Now().Truncate(time.Second)
+		floor := anchor.AddDate(-3, 0, 0)
+		request := makeRequest(fake)
+		request.ReplayFrom = &floor
+		journal := NewMockSyncStateJournal(t)
+		recent := makeRandomProviderSyncState(fake, request.Connection)
+		recent.Window = domain.ProviderSyncWindow{Start: anchor.AddDate(0, 0, -10), End: anchor}
+		recent.SucceededAt = &anchor
+		journal.EXPECT().LoadLastState(mock.Anything, request.Connection).Return(&recent, nil)
+		journal.EXPECT().AppendSyncState(mock.Anything, mock.Anything).Return(nil).Once()
+		executor := NewMockWindowExecutor(t)
+		var fetched, committed []domain.ProviderSyncWindow
+		interrupted := false
+		executor.EXPECT().
+			Execute(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, r WindowSyncRequest) (WindowSyncResult, error) {
+				fetched = append(fetched, r.RequestedWindow)
+				if len(committed) == 2 && !interrupted {
+					interrupted = true
+					return WindowSyncResult{}, context.DeadlineExceeded
+				}
+				return WindowSyncResult{}, nil
+			})
+		request.OnWindowCommitted = func(_ context.Context, window domain.ProviderSyncWindow) error {
+			committed = append(committed, window)
+			floor = window.End
+			return nil
+		}
+		orchestrator, err := NewSyncOrchestrator(SyncOrchestratorParams{
+			SyncStateJournal: journal, TargetWindowPolicy: NewCheckpointTargetWindowPolicy(),
+			WindowChunkPolicy: NewOldestFirstWindowChunkPolicy(), WindowExecutor: executor,
+			Logger: slog.New(slog.DiscardHandler),
+		}, WithNow(func() time.Time { return anchor }))
+		require.NoError(t, err)
+		_, err = orchestrator.Orchestrate(t.Context(), request)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Len(t, committed, 2)
+		require.Equal(t, committed[1].End, floor)
+		failedWindow := fetched[2]
+		result, err := orchestrator.Orchestrate(t.Context(), request)
+		require.NoError(t, err)
+		require.Equal(t, failedWindow, fetched[3])
+		require.Equal(t, committed[1].End, result.TargetWindow.Start)
+		require.Equal(t, anchor, result.ExecutedWindows[len(result.ExecutedWindows)-1].End)
+		for i := 1; i < len(committed); i++ {
+			require.Equal(t, committed[i-1].End, committed[i].Start)
+		}
+		progressErr := errors.New(fake.UUID().V4())
+		request.OnWindowCommitted = func(context.Context, domain.ProviderSyncWindow) error { return progressErr }
+		request.ReplayFrom = nil
+		before := len(fetched)
+		_, err = orchestrator.Orchestrate(t.Context(), request)
+		require.ErrorIs(t, err, progressErr)
+		require.Len(t, fetched, before+1, "failed progress persistence must stop subsequent chunks")
+	})
+	t.Run("real planning and execution honor replay floors only for unbounded runs", func(t *testing.T) {
+		fake := faker.New()
+		anchor := time.Now().AddDate(0, -fake.IntBetween(1, 6), 0).Truncate(time.Second)
+		replayFrom := anchor.AddDate(-3, 0, 0)
+		boundedStart, boundedEnd := anchor.AddDate(0, 0, -7), anchor.AddDate(0, 0, -1)
+		window := func(start, end time.Time) domain.ProviderSyncWindow {
+			return domain.ProviderSyncWindow{Start: start, End: end}
+		}
+		for _, testCase := range []struct {
+			name        string
+			start, end  *time.Time
+			expected    domain.ProviderSyncWindow
+			singleChunk bool
+		}{
+			{name: "unbounded", expected: window(replayFrom, anchor)},
+			{name: "explicit range", start: &boundedStart, end: &boundedEnd, expected: window(boundedStart, boundedEnd), singleChunk: true},
+			{name: "explicit start", start: &boundedStart, expected: window(boundedStart, anchor), singleChunk: true},
+			{name: "explicit end", end: &boundedEnd, expected: window(boundedEnd.AddDate(0, 0, -30), boundedEnd), singleChunk: true},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				request := makeRequest(fake)
+				request.ReplayFrom, request.WindowStart, request.WindowEnd = &replayFrom, testCase.start, testCase.end
+				lastState := makeRandomProviderSyncState(fake, request.Connection)
+				succeededAt := anchor.AddDate(0, 0, -2)
+				lastState.SucceededAt = &succeededAt
+				lastState.Window = window(anchor.AddDate(0, 0, -15), succeededAt)
+				journal := NewMockSyncStateJournal(t)
+				if testCase.start == nil {
+					journal.EXPECT().LoadLastState(mock.Anything, request.Connection).Return(&lastState, nil).Once()
+				}
+				connector := NewMockConnector(t)
+				connector.EXPECT().ConnectorID().Return(request.Connection.ConnectorID).Once()
+				var fetched, applied, committed []domain.ProviderSyncWindow
+				connector.EXPECT().
+					Fetch(mock.Anything, mock.Anything).
+					RunAndReturn(func(_ context.Context, fetch FetchRequest) (domain.ProviderSyncBatch, error) {
+						require.Equal(t, request.Connection, fetch.Connection)
+						require.Equal(t, request.Secret, fetch.Secret)
+						fetched = append(fetched, fetch.RequestedWindow)
+						return domain.ProviderSyncBatch{
+							Connection:      fetch.Connection,
+							RequestedWindow: fetch.RequestedWindow,
+						}, nil
+					})
+				request.OnWindowCommitted = func(_ context.Context, window domain.ProviderSyncWindow) error {
+					require.Equal(t, window, applied[len(applied)-1], "progress follows committed apply")
+					committed = append(committed, window)
+					return nil
+				}
+				store := NewMockWindowSyncStore(t)
+				store.EXPECT().
+					LoadExistingWindow(mock.Anything, request.Connection, mock.Anything, mock.Anything).
+					RunAndReturn(func(_ context.Context, connection domain.ProviderConnectionRef, rangeWindow domain.ProviderSyncWindow, _ []ProviderTransactionIdentity) (ExistingWindowSnapshot, error) {
+						return ExistingWindowSnapshot{Connection: connection, SnapshotWindow: rangeWindow}, nil
+					})
+				store.EXPECT().
+					ApplySync(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					RunAndReturn(func(_ context.Context, _ ProviderDiffPlan, _ ApplyPlan, states ...domain.ProviderSyncState) (domain.ProviderSyncStats, error) {
+						require.Len(t, states, 1)
+						require.NotNil(t, states[0].SucceededAt)
+						applied = append(applied, states[0].Window)
+						return domain.ProviderSyncStats{}, nil
+					})
+				executor, err := NewWindowSyncExecutor(
+					WithConnectors(connector),
+					WithWindowSyncStore(store),
+					WithWindowSyncExecutorNow(func() time.Time { return anchor }),
+				)
+				require.NoError(t, err)
+				orchestrator, err := NewSyncOrchestrator(
+					SyncOrchestratorParams{
+						SyncStateJournal:   journal,
+						TargetWindowPolicy: NewCheckpointTargetWindowPolicy(),
+						WindowChunkPolicy:  NewOldestFirstWindowChunkPolicy(),
+						WindowExecutor:     executor,
+						Logger:             slog.New(slog.DiscardHandler),
+					},
+					WithNow(func() time.Time { return anchor }),
+				)
+				require.NoError(t, err)
+				result, err := orchestrator.Orchestrate(t.Context(), request)
+				require.NoError(t, err)
+				require.NotEmpty(t, fetched)
+				require.Equal(t, testCase.expected, result.TargetWindow)
+				require.Equal(t, testCase.expected.Start, fetched[0].Start)
+				require.Equal(t, testCase.expected.End, fetched[len(fetched)-1].End)
+				require.Equal(t, fetched, applied)
+				require.Equal(t, applied, committed)
+				require.Equal(t, fetched, result.ExecutedWindows)
+				for i, executed := range fetched {
+					require.False(t, executed.End.After(executed.Start.AddDate(0, 0, 30)))
+					if i > 0 {
+						require.Equal(t, fetched[i-1].End, executed.Start)
+					}
+				}
+				if testCase.singleChunk {
+					require.Len(t, fetched, 1)
+				} else {
+					require.Greater(t, len(fetched), 30)
+				}
+			})
+		}
+	})
 }
