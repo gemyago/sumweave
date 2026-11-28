@@ -145,13 +145,11 @@ func (s *ProviderWindowSyncStore) ApplySync(
 	now := s.now()
 	stats := applyPlan.Stats
 	err = s.persistence.WithTransaction(ctx, func(store WindowSyncApplyStore) error {
-		bankConnection, loadErr := store.GetBankConnection(ctx, diffPlan.Connection.ConnectionID)
+		bankConnection, loadErr := loadSyncConnection(ctx, store, diffPlan.Connection)
 		if loadErr != nil {
-			return fmt.Errorf("get bank connection for sync apply: %w", loadErr)
+			return loadErr
 		}
-		if bankConnection == nil {
-			return fmt.Errorf("bank connection not found for sync apply: %s", diffPlan.Connection.ConnectionID)
-		}
+
 		providerAccounts := providerAccountsByProviderID(snapshot.Accounts)
 		if saveErr := s.saveConnectionSnapshots(
 			ctx,
@@ -896,4 +894,25 @@ func timePointerOrNil(value time.Time) *time.Time {
 		return nil
 	}
 	return &value
+}
+
+func loadSyncConnection(
+	ctx context.Context,
+	store WindowSyncApplyStore,
+	expected domain.ProviderConnectionRef,
+) (*domain.BankConnection, error) {
+	connection, err := store.GetBankConnection(ctx, expected.ConnectionID)
+	if err != nil {
+		return nil, fmt.Errorf("get bank connection for sync apply: %w", err)
+	}
+	if connection == nil {
+		return nil, fmt.Errorf("bank connection not found for sync apply: %s", expected.ConnectionID)
+	}
+	if connection.ProviderReference != expected.ProviderReference {
+		return nil, domain.ErrBankAuthorizationStale
+	}
+	if connection.State != domain.BankConnectionStateActive {
+		return nil, domain.ErrBankReauthRequired
+	}
+	return connection, nil
 }

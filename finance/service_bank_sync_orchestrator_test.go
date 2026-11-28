@@ -204,11 +204,13 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 		scheduledAt := now.Add(-15 * time.Minute)
 		nextRunAt := now.Add(15 * time.Minute)
 		_, err := store.SaveBankConnectionSchedule(t.Context(), domain.BankConnectionSchedule{
-			ConnectionID: connection.ID,
-			Interval:     time.Hour,
-			Enabled:      true,
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			ConnectionID:    connection.ID,
+			LastScheduledAt: &scheduledAt,
+			NextRunAt:       &nextRunAt,
+			Interval:        time.Hour,
+			Enabled:         true,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		})
 		require.NoError(t, err)
 		orchestrationErr := errors.New("failed-middle-window-" + fake.UUID().V4())
@@ -617,5 +619,95 @@ func TestBankSyncServiceOrchestration(t *testing.T) {
 			ActorUserID: "outsider-" + fake.UUID().V4(), TenantID: connection.TenantID, ConnectionID: connection.ID,
 		})
 		require.ErrorIs(t, err, ErrTenantAccessDenied)
+	})
+	t.Run(
+		"confirmed closed session blocks further work terminally without changing schedule preference",
+		func(t *testing.T) {
+			store, service, orchestrator, connection, _, now := makeFixture(t, domain.ProviderConnectorIDEnableBanking)
+			due := now.Add(time.Hour)
+			before, err := store.SaveBankConnectionSchedule(
+				t.Context(),
+				domain.BankConnectionSchedule{
+					ConnectionID: connection.ID,
+					Interval:     time.Hour,
+					NextRunAt:    &due,
+					Enabled:      true,
+					CreatedAt:    now,
+					UpdatedAt:    now,
+				},
+			)
+			require.NoError(t, err)
+			orchestrator.EXPECT().
+				Orchestrate(mock.Anything, mock.Anything).
+				Return(internalproviders.SyncOrchestrationResult{}, domain.ErrBankReauthRequired).
+				Once()
+			_, err = service.RunBankConnectionSync(
+				t.Context(),
+				RunBankConnectionSyncParams{ConnectionID: connection.ID, JobID: fake.UUID().V4()},
+			)
+			require.ErrorIs(t, err, domain.ErrBankReauthRequired)
+			var terminal *TerminalFailureError
+			require.ErrorAs(t, err, &terminal)
+			require.Equal(t, "bank_reauth_required", terminal.Code)
+			blocked, err := store.GetBankConnection(t.Context(), connection.ID)
+			require.NoError(t, err)
+			require.Equal(t, domain.BankConnectionStateReauthRequired, blocked.State)
+			require.NotNil(t, blocked.Reauth)
+			_, err = service.RunBankConnectionSync(
+				t.Context(),
+				RunBankConnectionSyncParams{ConnectionID: connection.ID},
+			)
+			require.ErrorIs(t, err, domain.ErrBankReauthRequired)
+			after, err := store.GetBankConnectionSchedule(t.Context(), connection.ID)
+			require.NoError(t, err)
+			require.True(t, before.NextRunAt.Equal(*after.NextRunAt))
+			require.Equal(t, before.Enabled, after.Enabled)
+			require.Equal(t, before.Interval, after.Interval)
+		},
+	)
+
+	t.Run("late old success failure and checkpoint cannot overwrite replacement", func(t *testing.T) {
+		store, service, _, old, _, now := makeFixture(t, domain.ProviderConnectorIDEnableBanking)
+		installed := old
+		installed.ProviderReference = fake.UUID().V4()
+		installed.SecretID = fake.UUID().V4()
+		installed.DisplayName = fake.Company().Name()
+		_, err := store.SaveBankConnection(t.Context(), installed)
+		require.NoError(t, err)
+		persisted, err := store.GetBankConnection(t.Context(), installed.ID)
+		require.NoError(t, err)
+		installed = *persisted
+		require.ErrorIs(
+			t,
+			service.completeBankConnectionSync(t.Context(), &old, fake.UUID().V4(), nil, now),
+			domain.ErrBankAuthorizationStale,
+		)
+		require.ErrorIs(
+			t,
+			service.recordBankConnectionSyncFailure(
+				t.Context(),
+				&old,
+				RunBankConnectionSyncParams{},
+				now,
+				nil,
+				domain.ErrBankReauthRequired,
+			),
+			domain.ErrBankAuthorizationStale,
+		)
+		journal := persistence.NewProviderSyncStateJournalStore(store, persistence.WithSyncStateAuthorizationFence())
+		err = journal.AppendSyncState(
+			t.Context(),
+			domain.ProviderSyncState{
+				Connection: bankConnectionRef(old),
+				Window:     domain.ProviderSyncWindow{Start: now.Add(-time.Hour), End: now},
+			},
+		)
+		require.ErrorIs(t, err, domain.ErrBankAuthorizationStale)
+		after, err := store.GetBankConnection(t.Context(), old.ID)
+		require.NoError(t, err)
+		require.Equal(t, installed, *after)
+		state, err := journal.LoadLastState(t.Context(), bankConnectionRef(installed))
+		require.NoError(t, err)
+		require.Nil(t, state)
 	})
 }

@@ -16,6 +16,7 @@ import (
 )
 
 type BankConnectionService struct {
+	authorization      *bankAuthorizationService
 	access             *accessGuard
 	pendingStartLookup bankConnectionPendingStartLookup
 	connectionStore    bankConnectionMetadataStore
@@ -25,6 +26,7 @@ type BankConnectionService struct {
 }
 
 type bankConnectionServiceArgs struct {
+	TransactionalPublisher  TransactionalSemanticCommandPublisher
 	Store                   *persistence.Store
 	Logger                  *slog.Logger
 	ConnectionSecretCipher  connectionSecretCipher
@@ -75,7 +77,17 @@ type bankConnectionLinkCoordinator interface {
 
 func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionService, error) {
 	linkPersistence := persistence.NewProviderLinkPersistence(args.Store)
+	authorization := &bankAuthorizationService{
+		store:       args.Store,
+		persistence: persistence.NewBankAuthorizationStore(args.Store),
+		cipher:      args.ConnectionSecretCipher,
+		writer:      newBankConnectionSecretWriter(args.Store, args.ConnectionSecretCipher, args.Now, args.NewID),
+		publisher:   args.TransactionalPublisher,
+		now:         args.Now,
+		newID:       args.NewID,
+	}
 	coordinator, err := internalproviders.NewLinkCoordinator(internalproviders.LinkCoordinatorArgs{
+		Replacement:             authorization,
 		ProviderProfileRegistry: args.ProviderProfileRegistry,
 		ConnectorRegistry:       args.ConnectorRegistry,
 		PendingStartStore:       linkPersistence,
@@ -96,6 +108,7 @@ func newBankConnectionService(args bankConnectionServiceArgs) (*BankConnectionSe
 		return nil, fmt.Errorf("create bank connection link coordinator: %w", err)
 	}
 	return &BankConnectionService{
+		authorization:      authorization,
 		access:             newAccessGuard(args.Store),
 		pendingStartLookup: linkPersistence,
 		connectionStore:    linkPersistence,
@@ -153,9 +166,15 @@ func (s *BankConnectionService) StartBankConnectionLink(
 		slog.String("operation", "redirectStart"), slog.String("tenantId", params.TenantID),
 		slog.String("actorUserId", params.ActorUserID), slog.String("provider", params.Provider))
 
+	target, targetErr := s.updateTarget(ctx, params)
+	if targetErr != nil {
+		return ProviderLinkStart{}, targetErr
+	}
+
 	result, err := s.linkCoordinator.StartRedirectLink(
 		ctx,
 		internalproviders.RedirectLinkStartRequest{
+			UpdateTarget:       target,
 			TenantID:           params.TenantID,
 			ActorUserID:        params.ActorUserID,
 			ProviderID:         domain.ProviderID(params.Provider),
@@ -333,6 +352,9 @@ func (s *BankConnectionService) GetPendingBankConnectionLinkStartByState(
 			err,
 		)
 	}
+	if pendingStart.ConsumedAt != nil || !pendingStart.ExpiresAt.After(s.now()) {
+		return domain.PendingBankConnectionLinkStart{}, ErrPendingBankConnectionLinkStartNotFound
+	}
 	return *pendingStart, nil
 }
 
@@ -406,4 +428,29 @@ func (w *bankConnectionSecretWriter) PrepareConnectionSecret(
 		CreatedAt: now,
 		UpdatedAt: now,
 	}, nil
+}
+
+func (s *BankConnectionService) updateTarget(
+	ctx context.Context,
+	params StartBankConnectionLinkParams,
+) (*domain.BankLinkUpdateTarget, error) {
+	var target *domain.BankLinkUpdateTarget
+	if params.ConnectionID != "" {
+		connection, err := s.authorization.store.GetBankConnection(ctx, params.ConnectionID)
+		if err != nil {
+			return nil, ErrBankConnectionNotFound
+		}
+		if connection.TenantID != params.TenantID || connection.Provider != params.Provider {
+			return nil, ErrBankConnectionNotFound
+		}
+		if connection.ConnectorID != domain.ProviderConnectorIDEnableBanking ||
+			(connection.State != domain.BankConnectionStateActive && connection.State != domain.BankConnectionStateReauthRequired) {
+			return nil, domain.ErrBankAuthorizationStale
+		}
+		target = &domain.BankLinkUpdateTarget{
+			ConnectionID:    connection.ID,
+			ExpectedSession: connection.ProviderReference,
+		}
+	}
+	return target, nil
 }

@@ -1650,6 +1650,7 @@ func (c *FinanceController) StartFinanceConnectionRedirectLink(
 		item, err := c.deps.BankConnectionService.StartBankConnectionLink(
 			req.Context(),
 			financepkg.StartBankConnectionLinkParams{
+				ConnectionID:       params.Payload.ConnectionID,
 				ActorUserID:        userID,
 				TenantID:           params.TenantID,
 				Provider:           string(params.Payload.Provider),
@@ -2226,7 +2227,7 @@ func (c *FinanceController) TriggerFinanceConnectionSync(
 	builder handlers.HandlerBuilder[*models.TriggerFinanceConnectionSyncParams, *models.FinanceFxSyncResponse],
 ) http.Handler {
 	inner := builder.HandleWithHTTP(func(
-		_ http.ResponseWriter,
+		w http.ResponseWriter,
 		req *http.Request,
 		params *models.TriggerFinanceConnectionSyncParams,
 	) (*models.FinanceFxSyncResponse, error) {
@@ -2263,6 +2264,11 @@ func (c *FinanceController) TriggerFinanceConnectionSync(
 				WindowEnd:       params.Payload.WindowEnd,
 			},
 		)
+		if errors.Is(err, domain.ErrBankReauthRequired) {
+			w.WriteHeader(http.StatusConflict)
+			_, writeErr := w.Write(nil)
+			return nil, writeErr
+		}
 		if err != nil {
 			return nil, mapFinanceSubmissionError(mapBankConnectionError(err, "bank connection sync failed"))
 		}
@@ -3168,6 +3174,10 @@ func mapBankConnectionError(err error, fallback string) error {
 			app.NewErrInvalidInput("state", "pending bank link start not found or expired"),
 			err,
 		)
+	case errors.Is(err, domain.ErrBankReauthRequired),
+		errors.Is(err, domain.ErrBankAuthorizationStale),
+		errors.Is(err, domain.ErrBankAuthorizationInvalid):
+		return fmt.Errorf("%w: %w", app.NewErrConflict("bank connection", "update bank link"), err)
 	case errors.Is(err, financepkg.ErrBankConnectionNotFound):
 		return fmt.Errorf("%w: %w", app.NewErrNotFound("bank connection", "requested resource"), err)
 	case errors.Is(err, financepkg.ErrBankConnectionNameRequired):

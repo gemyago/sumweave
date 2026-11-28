@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { faker } from '@faker-js/faker'
 import { render, screen, waitFor } from '@testing-library/svelte'
 import userEvent from '@testing-library/user-event'
 import FinanceConnections from './FinanceConnections.svelte'
@@ -68,6 +69,32 @@ function renderPage() {
 }
 
 describe('Finance connections page', () => {
+  it.each(['active', 'reauth_required'])('updates an existing PKO link while %s', async (state) => {
+    const user = userEvent.setup()
+    const connection = createConnectionFixture({ provider: 'pko', state })
+    mocks.listConnections.mockResolvedValue([connection])
+    mocks.startRedirectConnection.mockRejectedValue(new Error('Return to bank login'))
+    renderPage()
+    const update = await screen.findByRole('button', { name: 'Update bank link' })
+    expect(screen.getByRole('button', { name: 'Sync now' }).hasAttribute('disabled')).toBe(state !== 'active')
+    if (state === 'reauth_required') expect(screen.getByText(/The bank session is closed or expired/)).toBeTruthy()
+    await user.click(update)
+    await waitFor(() => expect(mocks.startRedirectConnection).toHaveBeenCalledWith({
+      tenantId: connection.tenantId, provider: 'pko', connectionId: connection.id,
+      callbackUrl: `${window.location.origin}/#/finance/connections`,
+    }))
+  })
+
+  it('clears a cancelled bank callback without exchanging a code or changing the installed link', async () => {
+    mocks.listConnections.mockResolvedValue([createConnectionFixture({ provider: 'pko' })])
+    window.history.replaceState({}, '', `/?error=access_denied&state=${faker.string.uuid()}#/finance/connections`)
+    renderPage()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Bank authorization was cancelled')
+    expect(mocks.finishRedirectConnection).not.toHaveBeenCalled()
+    expect(window.location.search).toBe('')
+    expect(await screen.findByRole('button', { name: 'Update bank link' })).toBeEnabled()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     window.history.replaceState({}, '', '/#/finance/connections')
@@ -397,7 +424,22 @@ describe('Finance connections page', () => {
     expect(window.location.hash).toBe('#/finance/connections')
   })
 
-  it('keeps PKO return params after a transient finish failure so the operator can retry on reopen', async () => {
+  it('tracks the actual automatically published replay job immediately after updating the link', async () => {
+    const jobId = faker.string.uuid()
+    const previous = createConnectionFixture({ provider: 'pko' })
+    const finished = { ...previous, lastSyncJobId: jobId }
+    mocks.listConnections.mockResolvedValueOnce([previous]).mockResolvedValue([finished])
+    mocks.finishRedirectConnection.mockResolvedValueOnce(finished)
+    mocks.getJob.mockResolvedValue({ id: jobId, status: 'running', attemptCount: 1 })
+    window.history.replaceState({}, '', `/?code=${faker.string.uuid()}&state=${faker.string.uuid()}#/finance/connections`)
+    renderPage()
+    expect(await screen.findByText('Running now.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open job' })).toHaveAttribute('href', `#/finance/jobs/${jobId}`)
+    expect(screen.queryByRole('link', { name: 'Open last sync job' })).not.toBeInTheDocument()
+    await waitFor(() => expect(mocks.getJob).toHaveBeenCalledWith({ jobId }))
+  })
+
+  it('clears used PKO return params after failure so reopening cannot replay a code', async () => {
     window.history.replaceState({}, '', '/?code=code-1&state=state-1#/finance/connections')
     mocks.finishRedirectConnection
       .mockRejectedValueOnce(new Error('PKO finish failed'))
@@ -407,14 +449,15 @@ describe('Finance connections page', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('PKO finish failed')
     expect(await screen.findByRole('button', { name: 'Connect PKO with bank login' })).toBeEnabled()
-    expect(window.location.search).toBe('?code=code-1&state=state-1')
+    expect(window.location.search).toBe('')
     expect(window.location.hash).toBe('#/finance/connections')
     expect(mocks.finishRedirectConnection).toHaveBeenCalledTimes(1)
 
     firstPage.unmount()
     renderPage()
 
-    await waitFor(() => expect(mocks.finishRedirectConnection).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mocks.listConnections).toHaveBeenCalled())
+    expect(mocks.finishRedirectConnection).toHaveBeenCalledTimes(1)
     expect(window.location.search).toBe('')
     expect(window.location.hash).toBe('#/finance/connections')
   })

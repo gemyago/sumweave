@@ -15,6 +15,19 @@ func TestBankConnectionScheduleStore(t *testing.T) {
 	fake := faker.New()
 	saveSchedule := func(t *testing.T, store *BankConnectionScheduleStore, schedule domain.BankConnectionSchedule) {
 		t.Helper()
+		_, saveConnectionErr := (&Store{db: store.db}).SaveBankConnection(
+			t.Context(),
+			domain.BankConnection{
+				ID:        schedule.ConnectionID,
+				TenantID:  fake.UUID().V4(),
+				Provider:  fake.Lorem().Word(),
+				SecretID:  fake.UUID().V4(),
+				State:     domain.BankConnectionStateActive,
+				CreatedAt: schedule.CreatedAt,
+				UpdatedAt: schedule.UpdatedAt,
+			},
+		)
+		require.NoError(t, saveConnectionErr)
 		require.NoError(t, store.Save(t.Context(), schedule))
 		t.Cleanup(func() {
 			actual, err := store.Get(context.WithoutCancel(t.Context()), schedule.ConnectionID)

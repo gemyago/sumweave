@@ -1,7 +1,7 @@
 # Manual E2E verification
 
 * [Bank Linking Manual E2E](bank-linking-e2e.md) - Manual verification procedure for bank linking e2e.
-* [Enable Banking Mock ASPSP UI Manual E2E](enable-banking-mock-aspsp-ui-e2e.md) - Manual verification procedure for enable banking mock aspsp ui e2e.
+* [Enable Banking Mock ASPSP UI Manual E2E](enable-banking-mock-aspsp-ui-e2e.md) - PKO sandbox linking, sync verification, and sign-in browser recovery.
 * [Finance Account Balances Manual E2E](finance-account-balances-e2e.md) - Manual verification procedure for finance account balances e2e.
 * [Finance account CSV import E2E](finance-account-csv-import-e2e.md) - Manual verification procedure for finance account csv import e2e.
 * [Finance FX refresh E2E](finance-fx-refresh-e2e.md) - Manual verification procedure for finance fx refresh e2e.

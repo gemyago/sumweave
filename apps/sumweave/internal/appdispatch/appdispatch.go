@@ -403,8 +403,13 @@ func newMessageSubscriber(
 		return nil, errors.New("consumer group is required")
 	}
 	wmLogger := watermill.NewSlogLogger(logger)
+	// A delivery includes the full durable handler and router retries. Individual
+	// operations own their timeouts; worker cancellation releases the delivery.
+	// The library default of 30s cancels long bank replays and dead-letter writes.
+	ackDeadline := time.Duration(0)
 	return wmsql.NewSubscriber(wmsql.BeginnerFromStdSQL(db), wmsql.SubscriberConfig{
 		ConsumerGroup:    consumerGroup,
+		AckDeadline:      &ackDeadline,
 		PollInterval:     config.PollInterval,
 		SchemaAdapter:    postgresSchema(config),
 		OffsetsAdapter:   postgresOffsets(config),

@@ -14,6 +14,7 @@ type LinkTokenBankConnectionParams struct {
 }
 
 type StartBankConnectionLinkParams struct {
+	ConnectionID       string
 	ActorUserID        string
 	TenantID           string
 	Provider           string

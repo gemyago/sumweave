@@ -1,7 +1,7 @@
 ---
 type: Runbook
 title: "Enable Banking Mock ASPSP UI Manual E2E"
-description: "Manual verification procedure for enable banking mock aspsp ui e2e."
+description: "PKO sandbox linking, sync verification, and sign-in browser recovery."
 sources:
   - id: enable-banking-mock-aspsp-ui-e2e
     resource: "https://github.com/gemyago/sumweave/blob/bc51bc8a59aed011589fbb6c32edfa3afc2511d7/docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md"
@@ -9,6 +9,10 @@ sources:
   - id: documentation-snapshot
     resource: "https://github.com/gemyago/sumweave/blob/3694d916ce230a3e3e0f6b98cb014b04abef5eec/docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md"
     title: "Reviewed documentation checkpoint before this format migration"
+  - id: browser-recovery-policy
+    resource: "User instruction and local sandbox browser recovery trials of 2026-11-27: retry sign-in headed, preserve authentication, then return to headless promptly"
+    title: "Enable Banking browser recovery policy"
+generated: { by: "codex/gpt-6", at: "2026-11-27T10:18:18Z" }
 ---
 
 # Enable Banking Mock ASPSP UI Manual E2E
@@ -33,6 +37,12 @@ Use the default browser mode unless one of these is true:[^documentation-snapsho
 
 - the user explicitly asked for headed mode
 - the agent hit a problem that needs human intervention and the visible browser helps the user fix it
+
+If Enable Banking sign-in stalls or shows CAPTCHA, retry in headed mode before
+asking for help. Once signed in, save browser state including IndexedDB under
+`tmp/`, close the headed browser, and immediately resume headless with that state
+and the current flow URL. Ask for manual help only if the headed retry stays blocked.
+Keep saved authentication state out of Git.[^browser-recovery-policy]
 
 Default command:
 
@@ -185,3 +195,5 @@ Capture:[^documentation-snapshot]
 [^documentation-snapshot]: Reviewed documentation checkpoint, preserved as the source of this section; format and navigation changes do not establish execution results.
 
 [^enable-banking-mock-aspsp-ui-e2e]: docs/manual-e2e/enable-banking-mock-aspsp-ui-e2e.md.
+
+[^browser-recovery-policy]: User-approved browser recovery instruction and local sandbox trials of 2026-11-27.

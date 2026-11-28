@@ -63,7 +63,8 @@ func buildEnableBankingBrowserHandoffURL(callbackURL string, values url.Values) 
 		return "", err
 	}
 	query := parsed.Query()
-	for key, items := range values {
+	for _, key := range []string{"state", "code", "error", "error_description"} {
+		items := values[key]
 		query.Del(key)
 		for _, item := range items {
 			query.Add(key, item)

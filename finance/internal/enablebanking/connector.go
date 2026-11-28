@@ -16,6 +16,7 @@ import (
 	"github.com/gemyago/sumweave/finance/domain"
 	enablebankingclient "github.com/gemyago/sumweave/finance/internal/enablebanking/client"
 	"github.com/gemyago/sumweave/finance/internal/providers"
+	"github.com/google/uuid"
 )
 
 const (
@@ -83,16 +84,23 @@ type Args struct {
 type Option func(*Connector)
 
 type Connector struct {
-	api            connectorClient
-	logger         *slog.Logger
-	stateProvider  func() (string, error)
-	appID          string
-	privateKeyPath string
-	aspspName      string
-	country        string
-	psuType        string
-	validDays      int
-	now            func() time.Time
+	authorizationResolver func(context.Context, domain.ConnectionSecret) (*domain.BankAuthorization, error)
+	api                   connectorClient
+	logger                *slog.Logger
+	stateProvider         func() (string, error)
+	appID                 string
+	privateKeyPath        string
+	aspspName             string
+	country               string
+	psuType               string
+	validDays             int
+	now                   func() time.Time
+}
+
+func WithAuthorizationResolver(
+	resolver func(context.Context, domain.ConnectionSecret) (*domain.BankAuthorization, error),
+) Option {
+	return func(c *Connector) { c.authorizationResolver = resolver }
 }
 
 func WithNow(now func() time.Time) Option {
@@ -119,7 +127,7 @@ func NewConnector(args Args, opts ...Option) *Connector {
 	stateProvider := args.StateProvider
 	if stateProvider == nil {
 		stateProvider = func() (string, error) {
-			return fmt.Sprintf("state-%d", time.Now().UnixNano()), nil
+			return uuid.NewString(), nil
 		}
 	}
 	now := args.Now
@@ -237,8 +245,31 @@ func (c *Connector) FinishLink(
 			"enable banking session response missing session ID",
 		)
 	}
+	authorization := domain.BankAuthorization{
+		Version:      1,
+		ASPSPName:    response.ASPSP.Name,
+		ASPSPCountry: response.ASPSP.Country,
+	}
+	for _, account := range response.Accounts {
+		uid := optionalString(account.UID)
+		authorization.Accounts = append(
+			authorization.Accounts,
+			domain.BankAccountBinding{
+				CanonicalID: uid,
+				RemoteID:    uid,
+				PrimaryHash: account.IdentificationHash,
+				Currency:    account.Currency,
+				Selected:    true,
+			},
+		)
+	}
+	if validateErr := authorization.Validate(); validateErr != nil {
+		return providers.LinkResult{}, validateErr
+	}
 	providerObjectID := firstNonEmpty(providerReference, "session")
 	return providers.LinkResult{
+		Authorization:     &authorization,
+		Secret:            string(mustJSON(authorization)),
 		DisplayName:       firstNonEmpty(aspspName(response.ASPSP), c.aspspName, "Enable Banking"),
 		ProviderReference: providerReference,
 		State:             domain.BankConnectionStateActive,
@@ -265,7 +296,12 @@ func (c *Connector) Fetch(
 	if !c.hasOfficialCredentials() {
 		return domain.ProviderSyncBatch{}, ErrConnectorUnsupportedFetchBranch
 	}
-	return c.fetchOfficial(ctx, request)
+	batch, err := c.fetchOfficial(ctx, request)
+	var responseErr *enablebankingclient.ResponseError
+	if errors.As(err, &responseErr) && (responseErr.Code == "CLOSED_SESSION" || responseErr.Code == "EXPIRED_SESSION") {
+		return domain.ProviderSyncBatch{}, fmt.Errorf("%w: %w", domain.ErrBankReauthRequired, err)
+	}
+	return batch, err
 }
 
 func (c *Connector) fetchOfficial(
@@ -280,6 +316,9 @@ func (c *Connector) fetchOfficial(
 	})
 	if err != nil {
 		return domain.ProviderSyncBatch{}, fmt.Errorf("enable banking get session: %w", err)
+	}
+	if session.Status == "CLOSED" || session.Status == "EXPIRED" {
+		return domain.ProviderSyncBatch{}, domain.ErrBankReauthRequired
 	}
 	c.logger.InfoContext(
 		ctx,
@@ -302,10 +341,19 @@ func (c *Connector) mapBatch(
 	capturedAt := c.now()
 	accountItems := sessionAccounts(session)
 	batch := newSyncBatch(request, session, capturedAt, len(accountItems))
+	bindings, bindingErr := c.selectedBindings(ctx, request.Secret, accountItems)
+	if bindingErr != nil {
+		return domain.ProviderSyncBatch{}, bindingErr
+	}
+
 	for _, typedAccount := range accountItems {
 		accountID := optionalString(typedAccount.UID)
 		if accountID == "" {
 			continue
+		}
+		canonicalID := accountID
+		if binding, exists := bindings[accountID]; exists {
+			canonicalID = binding.CanonicalID
 		}
 		c.logger.InfoContext(
 			ctx,
@@ -330,11 +378,14 @@ func (c *Connector) mapBatch(
 		batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
 			Kind:              domain.ProviderSnapshotKindAccount,
 			ProviderObjectID:  accountID,
-			ProviderAccountID: accountID,
+			ProviderAccountID: canonicalID,
 			DocumentJSON:      accountDocument,
 			CapturedAt:        capturedAt,
 		})
-		account := normalizeAccount(request.Connection, accountID, typedAccount)
+		if binding, exists := bindings[accountID]; exists && binding.Currency != typedAccount.Currency {
+			return domain.ProviderSyncBatch{}, domain.ErrBankAuthorizationInvalid
+		}
+		account := normalizeAccount(request.Connection, canonicalID, typedAccount)
 		batch.Accounts = append(batch.Accounts, account)
 
 		balancesResponse, err := c.api.GetAccountBalances(
@@ -359,7 +410,7 @@ func (c *Connector) mapBatch(
 		batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
 			Kind:              domain.ProviderSnapshotKindAccountBalance,
 			ProviderObjectID:  accountID,
-			ProviderAccountID: accountID,
+			ProviderAccountID: canonicalID,
 			DocumentJSON:      mustJSON(balancesResponse),
 			CapturedAt:        capturedAt,
 		})
@@ -377,7 +428,7 @@ func (c *Connector) mapBatch(
 			slog.Int("transactionCount", len(transactions)),
 		)
 		for _, transaction := range transactions {
-			normalized := normalizeTransaction(request.Connection, accountID, transaction)
+			normalized := normalizeTransaction(request.Connection, canonicalID, transaction)
 			batch.Transactions = append(
 				batch.Transactions,
 				normalized,
@@ -385,7 +436,7 @@ func (c *Connector) mapBatch(
 			batch.Snapshots = append(batch.Snapshots, domain.ProviderSnapshotObservation{
 				Kind:                  domain.ProviderSnapshotKindTransaction,
 				ProviderObjectID:      normalized.ProviderTransactionID,
-				ProviderAccountID:     accountID,
+				ProviderAccountID:     canonicalID,
 				ProviderTransactionID: normalized.ProviderTransactionID,
 				DocumentJSON:          mustJSON(&transaction),
 				CapturedAt:            capturedAt,
@@ -868,4 +919,40 @@ func providerFingerprint(parts ...any) string {
 		_, _ = io.WriteString(hasher, fmt.Sprint(part, "|"))
 	}
 	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+func (c *Connector) selectedBindings(
+	ctx context.Context,
+	secret domain.ConnectionSecret,
+	accounts []enablebankingclient.Account,
+) (map[string]domain.BankAccountBinding, error) {
+	bindings := map[string]domain.BankAccountBinding{}
+	if c.authorizationResolver == nil {
+		return bindings, nil
+	}
+	authorization, err := c.authorizationResolver(ctx, secret)
+	if err != nil {
+		return nil, err
+	}
+	if authorization == nil {
+		return bindings, nil
+	}
+	for _, binding := range authorization.Accounts {
+		if binding.Selected {
+			bindings[binding.RemoteID] = binding
+		}
+	}
+	if len(bindings) != len(accounts) {
+		return nil, domain.ErrBankAuthorizationInvalid
+	}
+	seen := map[string]bool{}
+	for _, account := range accounts {
+		uid := optionalString(account.UID)
+		binding, exists := bindings[uid]
+		if !exists || seen[uid] || binding.PrimaryHash != account.IdentificationHash {
+			return nil, domain.ErrBankAuthorizationInvalid
+		}
+		seen[uid] = true
+	}
+	return bindings, nil
 }

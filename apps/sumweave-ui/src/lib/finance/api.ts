@@ -450,7 +450,7 @@ export interface SignalFinanceApi {
   listConnectionSyncedAccounts(params: { tenantId: string; connectionId: string }): Promise<FinanceConnectionSyncedAccount[]>
   renameConnection(params: { tenantId: string; connectionId: string; name: string }): Promise<void>
   linkTokenConnection(params: { tenantId: string; provider: string; token: string }): Promise<FinanceBankConnection>
-  startRedirectConnection(params: { tenantId: string; provider: string; callbackUrl: string }): Promise<FinanceConnectionRedirectStart>
+  startRedirectConnection(params: { tenantId: string; provider: string; callbackUrl: string; connectionId?: string }): Promise<FinanceConnectionRedirectStart>
   finishRedirectConnection(params: { tenantId: string; provider: string; code?: string; state: string }): Promise<FinanceBankConnection>
   getSyntheticLinkState(params: { tenantId: string; state: string }): Promise<FinanceSyntheticLinkState>
   saveSyntheticLinkState(params: {
@@ -896,12 +896,12 @@ export function createSignalFinanceApi(params: { baseUrl: string; fetch: FetchLi
         }),
       )
     },
-    async startRedirectConnection({ tenantId, provider, callbackUrl }) {
+    async startRedirectConnection({ tenantId, provider, callbackUrl, connectionId }) {
       return mapConnectionRedirectStart(
         await request<RawConnectionRedirectStart>({
           method: 'POST',
           path: `/finance/tenants/${encodeURIComponent(tenantId)}/connections/link-redirect/start`,
-          body: { provider, callbackUrl },
+          body: { provider, callbackUrl, ...(connectionId ? { connectionId } : {}) },
         }),
       )
     },

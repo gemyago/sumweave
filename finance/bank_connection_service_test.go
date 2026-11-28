@@ -396,6 +396,7 @@ func TestBankConnectionService(t *testing.T) {
 		"composes real v2 connectors persistence secret writing and pending lookup",
 		func(t *testing.T) {
 			fake := faker.New()
+			state := "state-" + faker.New().UUID().V4()
 			now := time.Date(2026, time.June, 30, 13, 0, 0, 0, time.UTC)
 			database := openTestDatabase(t)
 			store := persistence.NewStore(database)
@@ -476,7 +477,11 @@ func TestBankConnectionService(t *testing.T) {
 							"session_id": "session-" + fake.UUID().V4(),
 							"status":     string(domain.BankConnectionStateActive),
 							"aspsp": map[string]any{
-								"name": fake.Company().Name(),
+								"name":    fake.Company().Name(),
+								"country": "PL",
+							},
+							"accounts": []map[string]any{
+								{"uid": fake.UUID().V4(), "identification_hash": fake.UUID().V4(), "currency": "PLN"},
 							},
 						})
 					default:
@@ -500,7 +505,7 @@ func TestBankConnectionService(t *testing.T) {
 							Logger:         slog.New(slog.DiscardHandler),
 							AppID:          "app-" + fake.UUID().V4(),
 							PrivateKeyPath: privateKeyPath,
-							StateProvider:  func() (string, error) { return "pko-state", nil },
+							StateProvider:  func() (string, error) { return state, nil },
 							Now:            func() time.Time { return now },
 						},
 					),
@@ -555,13 +560,13 @@ func TestBankConnectionService(t *testing.T) {
 				},
 			)
 			require.NoError(t, err)
-			assert.Equal(t, "pko-state", startResult.State)
+			assert.Equal(t, state, startResult.State)
 
 			pendingStart, err := service.GetPendingBankConnectionLinkStartByState(
 				t.Context(),
 				GetPendingBankConnectionLinkStartByStateParams{
 					Provider: bankProviderPKO,
-					State:    "pko-state",
+					State:    state,
 				},
 			)
 			require.NoError(t, err)
@@ -576,7 +581,7 @@ func TestBankConnectionService(t *testing.T) {
 					ActorUserID: actorUserID,
 					TenantID:    tenantID,
 					Provider:    bankProviderPKO,
-					State:       "pko-state",
+					State:       state,
 					Code:        "finish-code",
 				},
 			)
@@ -587,7 +592,9 @@ func TestBankConnectionService(t *testing.T) {
 			require.NoError(t, err)
 			decryptedPKOSecret, err := cipher.OpenString(pkoSecret.Envelope)
 			require.NoError(t, err)
-			assert.Empty(t, decryptedPKOSecret)
+			var authorization domain.BankAuthorization
+			require.NoError(t, json.Unmarshal([]byte(decryptedPKOSecret), &authorization))
+			require.NoError(t, authorization.Validate())
 		},
 	)
 
@@ -656,6 +663,10 @@ func TestBankConnectionService(t *testing.T) {
 				if !ok {
 					t.Errorf("unexpected session code %q", request.Code)
 					return
+				}
+				response["aspsp"] = map[string]any{"name": "PKO Bank Polski", "country": "PL"}
+				response["accounts"] = []map[string]any{
+					{"uid": fake.UUID().V4(), "identification_hash": fake.UUID().V4(), "currency": "PLN"},
 				}
 				writeJSON(t, w, response)
 			default:

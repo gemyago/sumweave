@@ -41,7 +41,7 @@ func TestEnableBankingCallbackHandler(t *testing.T) {
 			resp,
 			httptest.NewRequest(
 				http.MethodGet,
-				"/enable-banking/callback?code=code-1&state=state-1",
+				"/enable-banking/callback?code=code-1&state=state-1&untrusted=discard",
 				http.NoBody,
 			),
 		)

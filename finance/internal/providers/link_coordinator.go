@@ -76,7 +76,13 @@ type ConnectionStore interface {
 	) (domain.BankConnection, error)
 }
 
+type RedirectLinkReplacement interface {
+	ValidateUpdate(context.Context, domain.PendingBankConnectionLinkStart) error
+	ReplaceLink(context.Context, domain.PendingBankConnectionLinkStart, LinkResult) (domain.BankConnection, error)
+}
+
 type LinkCoordinatorArgs struct {
+	Replacement             RedirectLinkReplacement
 	ProviderProfileRegistry ProviderProfileRegistry
 	ConnectorRegistry       ConnectorRegistry
 	PendingStartStore       PendingStartStore
@@ -90,6 +96,7 @@ type LinkCoordinatorArgs struct {
 }
 
 type LinkCoordinator struct {
+	replacement             RedirectLinkReplacement
 	providerProfileRegistry ProviderProfileRegistry
 	connectorRegistry       ConnectorRegistry
 	pendingStartStore       PendingStartStore
@@ -103,6 +110,7 @@ type LinkCoordinator struct {
 }
 
 type RedirectLinkStartRequest struct {
+	UpdateTarget       *domain.BankLinkUpdateTarget
 	TenantID           string
 	ActorUserID        string
 	ProviderID         domain.ProviderID
@@ -154,6 +162,7 @@ func NewLinkCoordinator(args LinkCoordinatorArgs) (*LinkCoordinator, error) {
 		args.Logger = slog.New(slog.DiscardHandler)
 	}
 	return &LinkCoordinator{
+		replacement:             args.Replacement,
 		providerProfileRegistry: args.ProviderProfileRegistry,
 		connectorRegistry:       args.ConnectorRegistry,
 		pendingStartStore:       args.PendingStartStore,
@@ -257,6 +266,7 @@ func (c *LinkCoordinator) StartRedirectLink(
 		AuthorizationURL:  strings.TrimSpace(result.AuthorizationURL),
 		ProviderReference: strings.TrimSpace(result.ProviderReference),
 		StartResult: domain.PendingBankConnectionLinkStartResult{
+			UpdateTarget:     request.UpdateTarget,
 			State:            strings.TrimSpace(result.State),
 			AuthorizationURL: strings.TrimSpace(result.AuthorizationURL),
 			DocumentJSON:     pendingDocument,
@@ -382,6 +392,11 @@ func (c *LinkCoordinator) FinishRedirectLink(
 		slog.String("pendingStartId", pendingStart.ID),
 	)
 
+	if pendingStart.StartResult.UpdateTarget != nil {
+		if validateErr := c.replacement.ValidateUpdate(ctx, *pendingStart); validateErr != nil {
+			return domain.BankConnection{}, validateErr
+		}
+	}
 	result, err := connector.FinishLink(ctx, FinishLinkRequest{
 		Profile: profile,
 		State:   strings.TrimSpace(request.State),
@@ -393,6 +408,9 @@ func (c *LinkCoordinator) FinishRedirectLink(
 		},
 	})
 	if err != nil {
+		if pendingStart.StartResult.UpdateTarget != nil {
+			return domain.BankConnection{}, fmt.Errorf("finish bank link update: %w", err)
+		}
 		c.logger.WarnContext(
 			ctx,
 			"bank link coordinator failed",
@@ -410,6 +428,9 @@ func (c *LinkCoordinator) FinishRedirectLink(
 			err,
 			"finish redirect link",
 		)
+	}
+	if pendingStart.StartResult.UpdateTarget != nil {
+		return c.replacement.ReplaceLink(ctx, *pendingStart, result)
 	}
 	connection, err := c.saveLinkedConnection(
 		ctx,

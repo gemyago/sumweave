@@ -29,7 +29,7 @@ experimental; their presence does not imply a finance capability.
 * [Product architecture](ARCHITECTURE.md) - Product direction, module ownership, and required supporting infrastructure.
 * [Architecture topics](architecture/index.md) - Dispatch/jobs, persistence,
   and provider synchronization.
-* [Finance provider sync](finance-provider-sync-architecture.md) - Link identity, bounded sync windows, conservative merge, and atomic progress.
+* [Finance provider sync](finance-provider-sync-architecture.md) - Bank authorization, retained identity and history, bounded sync windows, and atomic progress.
 * [Operations](operations/index.md) - Local development, HTTPS, release, and deployment.
 * [Local HTTPS](local-https.md) - Optional backend and Vite TLS setup and return to standard HTTP.
 

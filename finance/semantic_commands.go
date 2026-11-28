@@ -2,6 +2,7 @@ package finance
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,8 +27,13 @@ const (
 	CommandRequesterSourceSystem = "system"
 )
 
-// SemanticCommandPublisher publishes finance-owned commands without coupling
-// finance services to a particular durable transport or job projection.
+// TransactionalSemanticCommandPublisher publishes an explicit command atomically
+// with finance state changes.
+type TransactionalSemanticCommandPublisher interface {
+	PublishSemanticCommandInTx(context.Context, *sql.Tx, SemanticCommand) (DispatchReference, error)
+}
+
+// SemanticCommandPublisher publishes finance commands through durable transport.
 type SemanticCommandPublisher interface {
 	PublishSemanticCommand(context.Context, SemanticCommand) (DispatchReference, error)
 }

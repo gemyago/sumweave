@@ -51,7 +51,13 @@ type PendingBankConnectionLinkStart struct {
 	UpdatedAt         time.Time
 }
 
+type BankLinkUpdateTarget struct {
+	ConnectionID    string
+	ExpectedSession string
+}
+
 type PendingBankConnectionLinkStartResult struct {
+	UpdateTarget     *BankLinkUpdateTarget `json:",omitempty"`
 	State            string
 	AuthorizationURL string
 	DocumentJSON     []byte

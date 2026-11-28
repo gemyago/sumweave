@@ -157,6 +157,13 @@ func (s *ProviderWindowSyncPersistence) WithTransaction(
 
 var _ providers.WindowSyncApplyStore = (*providerWindowSyncApplyStore)(nil)
 
+func (s *providerWindowSyncApplyStore) GetBankConnection(
+	ctx context.Context,
+	id string,
+) (*domain.BankConnection, error) {
+	return lockBankConnection(ctx, s.Store.db, id)
+}
+
 type providerWindowSyncApplyStore struct {
 	*Store
 }

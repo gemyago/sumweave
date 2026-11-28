@@ -33,6 +33,7 @@ type Finance struct {
 	TransferMatchingService       *TransferMatchingService
 }
 
+//nolint:funlen // Explicit finance composition keeps service ownership visible.
 func New(cfg *Config) (*Finance, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -75,7 +76,10 @@ func New(cfg *Config) (*Finance, error) {
 		return nil, fmt.Errorf("create provider window sync executor: %w", err)
 	}
 	syncOrchestrator, err := internalproviders.NewSyncOrchestrator(internalproviders.SyncOrchestratorParams{
-		SyncStateJournal:   persistence.NewProviderSyncStateJournalStore(store),
+		SyncStateJournal: persistence.NewProviderSyncStateJournalStore(
+			store,
+			persistence.WithSyncStateAuthorizationFence(),
+		),
 		TargetWindowPolicy: internalproviders.NewCheckpointTargetWindowPolicy(),
 		WindowChunkPolicy:  internalproviders.NewOldestFirstWindowChunkPolicy(),
 		WindowExecutor:     windowExecutor,
@@ -95,6 +99,7 @@ func New(cfg *Config) (*Finance, error) {
 	)
 
 	bankConnectionService, err := newBankConnectionService(bankConnectionServiceArgs{
+		TransactionalPublisher:  cfg.TransactionalCommandPublisher,
 		Store:                   store,
 		Logger:                  cfg.Logger,
 		ConnectionSecretCipher:  cfg.ConnectionSecretCipher,
@@ -108,6 +113,7 @@ func New(cfg *Config) (*Finance, error) {
 		return nil, fmt.Errorf("create bank connection service: %w", err)
 	}
 
+	services.BankSyncService.authorization = bankConnectionService.authorization
 	return &Finance{
 		TenantService:         services.TenantService,
 		CatalogService:        services.CatalogService,
@@ -187,8 +193,11 @@ func newConnectors(
 		Country:        enableBankingASPSP.Country,
 		PSUType:        enableBankingASPSP.PSUType,
 		ValidDays:      enableBankingASPSP.ValidDays,
+		StateProvider:  func() (string, error) { return cfg.NewID(), nil },
 		Now:            cfg.Now,
-	}))
+	}, internalenablebanking.WithAuthorizationResolver(func(_ context.Context, secret domain.ConnectionSecret) (*domain.BankAuthorization, error) {
+		return decodeBankAuthorization(cfg.ConnectionSecretCipher, secret)
+	})))
 	return connectors
 }
 

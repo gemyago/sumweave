@@ -55,7 +55,7 @@ func (s *BankConnectionScheduleStore) EnsureActiveDailySchedules(
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var connections []bankConnectionModel
 		if err := tx.Table((bankConnectionModel{}).TableName()).
-			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Clauses(clause.Locking{Strength: bankConnectionUpdateLock}).
 			Where(columnState+" = ?", string(domain.BankConnectionStateActive)).
 			Order("id ASC").
 			Find(&connections).Error; err != nil {
@@ -153,6 +153,16 @@ func (t *BankConnectionScheduleTransaction) ClaimDue(
 	nextRunAt time.Time,
 	now time.Time,
 ) (bool, error) {
+	connection, err := lockBankConnection(ctx, t.db, connectionID)
+	if errors.Is(err, ErrBankConnectionNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if connection.State != domain.BankConnectionStateActive {
+		return false, nil
+	}
 	result := t.db.WithContext(ctx).
 		Table((bankConnectionScheduleModel{}).TableName()).
 		Where(columnConnectionID+" = ? AND "+columnEnabled+" = ? AND "+columnNextRunAt+" = ? AND "+columnNextRunAt+" <= ?", connectionID, true, dueAt, now).
